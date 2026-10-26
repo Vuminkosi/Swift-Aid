@@ -30,9 +30,32 @@ public sealed class CaseAccessPolicy : ICaseAccessPolicy
             return Deny(actor, caseId, null, operation, AccessDecisionCode.OperationNotGranted, actor.AccessEpoch);
         }
 
+        return await AuthorizeAllAsync(actor, caseId, [operation], cancellationToken).ConfigureAwait(false);
+    }
+
+    public async ValueTask<AccessDecision> AuthorizeAllAsync(
+        ActorContext actor,
+        Guid caseId,
+        IReadOnlyCollection<CaseOperation> requiredOperations,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+        ArgumentNullException.ThrowIfNull(requiredOperations);
+
+        var operations = requiredOperations
+            .Distinct()
+            .OrderBy(operation => (int)operation)
+            .ToArray();
+        if (operations.Length == 0 || operations.Any(operation => !Enum.IsDefined(operation)))
+        {
+            throw new ArgumentException("At least one defined case operation is required.", nameof(requiredOperations));
+        }
+
+        var auditedOperation = operations[0];
+
         if (caseId == Guid.Empty)
         {
-            return Deny(actor, caseId, null, operation, AccessDecisionCode.InvalidResourceId, actor.AccessEpoch);
+            return Deny(actor, caseId, null, auditedOperation, AccessDecisionCode.InvalidResourceId, actor.AccessEpoch);
         }
 
         CurrentAccessGrant? grant;
@@ -46,32 +69,32 @@ public sealed class CaseAccessPolicy : ICaseAccessPolicy
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            return Deny(actor, caseId, null, operation, AccessDecisionCode.GrantSourceUnavailable, actor.AccessEpoch);
+            return Deny(actor, caseId, null, auditedOperation, AccessDecisionCode.GrantSourceUnavailable, actor.AccessEpoch);
         }
 
         if (grant is null)
         {
-            return Deny(actor, caseId, null, operation, AccessDecisionCode.GrantMissing, actor.AccessEpoch);
+            return Deny(actor, caseId, null, auditedOperation, AccessDecisionCode.GrantMissing, actor.AccessEpoch);
         }
 
         if (!string.Equals(grant.ActorId, actor.ActorId, StringComparison.Ordinal))
         {
-            return Deny(actor, caseId, null, operation, AccessDecisionCode.GrantActorMismatch, grant.AccessEpoch);
+            return Deny(actor, caseId, null, auditedOperation, AccessDecisionCode.GrantActorMismatch, grant.AccessEpoch);
         }
 
         if (grant.AccessEpoch != actor.AccessEpoch)
         {
-            return Deny(actor, caseId, null, operation, AccessDecisionCode.AccessEpochMismatch, grant.AccessEpoch);
+            return Deny(actor, caseId, null, auditedOperation, AccessDecisionCode.AccessEpochMismatch, grant.AccessEpoch);
         }
 
         if (grant.Status != AccessGrantStatus.Active)
         {
-            return Deny(actor, caseId, null, operation, AccessDecisionCode.GrantMissing, grant.AccessEpoch);
+            return Deny(actor, caseId, null, auditedOperation, AccessDecisionCode.GrantMissing, grant.AccessEpoch);
         }
 
         if (grant.ExpiresAtUtc <= _timeProvider.GetUtcNow())
         {
-            return Deny(actor, caseId, null, operation, AccessDecisionCode.GrantExpired, grant.AccessEpoch);
+            return Deny(actor, caseId, null, auditedOperation, AccessDecisionCode.GrantExpired, grant.AccessEpoch);
         }
 
         CaseAccessDescriptor? resource;
@@ -85,23 +108,23 @@ public sealed class CaseAccessPolicy : ICaseAccessPolicy
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            return Deny(actor, caseId, null, operation, AccessDecisionCode.ResourceSourceUnavailable, grant.AccessEpoch);
+            return Deny(actor, caseId, null, auditedOperation, AccessDecisionCode.ResourceSourceUnavailable, grant.AccessEpoch);
         }
 
         if (resource is null)
         {
-            return Deny(actor, caseId, null, operation, AccessDecisionCode.ResourceMissing, grant.AccessEpoch);
+            return Deny(actor, caseId, null, auditedOperation, AccessDecisionCode.ResourceMissing, grant.AccessEpoch);
         }
 
         if (resource.CaseId != caseId)
         {
-            return Deny(actor, caseId, null, operation, AccessDecisionCode.ResourceIdMismatch, grant.AccessEpoch);
+            return Deny(actor, caseId, null, auditedOperation, AccessDecisionCode.ResourceIdMismatch, grant.AccessEpoch);
         }
 
         var now = _timeProvider.GetUtcNow();
         if (grant.ExpiresAtUtc <= now)
         {
-            return Deny(actor, caseId, resource.ResourceVersion, operation, AccessDecisionCode.GrantExpired, grant.AccessEpoch);
+            return Deny(actor, caseId, resource.ResourceVersion, auditedOperation, AccessDecisionCode.GrantExpired, grant.AccessEpoch);
         }
 
         var validGroups = grant.Grants
@@ -114,17 +137,20 @@ public sealed class CaseAccessPolicy : ICaseAccessPolicy
             var code = grant.Grants.Count == 0
                 ? AccessDecisionCode.GrantMissing
                 : AccessDecisionCode.GrantExpired;
-            return Deny(actor, caseId, resource.ResourceVersion, operation, code, grant.AccessEpoch);
+            return Deny(actor, caseId, resource.ResourceVersion, auditedOperation, code, grant.AccessEpoch);
         }
 
         AccessDecisionCode? closestDenial = null;
         var closestMatchedDimensions = -1;
         foreach (var group in validGroups)
         {
-            var (denial, matchedDimensions) = EvaluateGroup(group, resource, operation);
+            var (denial, matchedDimensions) = EvaluateGroup(group, resource, operations);
             if (denial is null)
             {
-                return new AccessDecision(true, AccessDecisionCode.Allowed, null);
+                return new AccessDecision(true, AccessDecisionCode.Allowed, null)
+                {
+                    MatchedGrantGroupId = group.GroupId
+                };
             }
 
             if (matchedDimensions > closestMatchedDimensions)
@@ -134,14 +160,14 @@ public sealed class CaseAccessPolicy : ICaseAccessPolicy
             }
         }
 
-        return Deny(actor, caseId, resource.ResourceVersion, operation,
+        return Deny(actor, caseId, resource.ResourceVersion, auditedOperation,
             closestDenial ?? AccessDecisionCode.GrantMissing, grant.AccessEpoch);
     }
 
     private static (AccessDecisionCode? Denial, int MatchedDimensions) EvaluateGroup(
         ScopedAccessGrant group,
         CaseAccessDescriptor resource,
-        CaseOperation operation)
+        IReadOnlyCollection<CaseOperation> operations)
     {
         var matched = 0;
         if (!group.OrganizationIds.Contains(resource.OrganizationId))
@@ -174,7 +200,7 @@ public sealed class CaseAccessPolicy : ICaseAccessPolicy
         }
 
         matched++;
-        if (!group.Operations.Contains(operation))
+        if (operations.Any(operation => !group.Operations.Contains(operation)))
         {
             return (AccessDecisionCode.OperationNotGranted, matched);
         }

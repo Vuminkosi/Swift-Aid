@@ -54,6 +54,88 @@ public sealed class AuthorizationPolicyTests
     }
 
     [Fact]
+    public async Task Multi_operation_authorization_requires_every_operation_in_one_matching_group()
+    {
+        var actor = CreateActor("worker-opaque-1");
+        var splitGrant = CreateGrant(actor.ActorId, grants:
+        [
+            CreateScopedGrant("group-a", assignedCaseIds: [CaseId], operations: [CaseOperation.ReadCase]),
+            CreateScopedGrant("group-b", assignedCaseIds: [CaseId], operations: [CaseOperation.Export], organizationIds: ["org-other"])
+        ]);
+        var policy = CreatePolicy(new TestGrantStore(_ => splitGrant));
+
+        var denied = await policy.AuthorizeAllAsync(
+            actor, CaseId, [CaseOperation.ReadCase, CaseOperation.Export], CancellationToken.None);
+        var validGroup = CreateScopedGrant(
+            "group-valid", assignedCaseIds: [CaseId], operations: [CaseOperation.ReadCase, CaseOperation.Export]);
+        var validAlongsideUnrelated = CreateScopedGrant(
+            "group-unrelated", assignedCaseIds: [CaseId], operations: [CaseOperation.ExecuteProtectedAction], organizationIds: ["org-other"]);
+        var validPolicy = CreatePolicy(new TestGrantStore(_ => CreateGrant(actor.ActorId, grants: [validAlongsideUnrelated, validGroup])));
+
+        var allowed = await validPolicy.AuthorizeAllAsync(
+            actor, CaseId, [CaseOperation.ReadCase, CaseOperation.Export], CancellationToken.None);
+
+        Assert.False(denied.IsAllowed);
+        Assert.Equal(AccessDecisionCode.OperationNotGranted, denied.Code);
+        Assert.Null(denied.MatchedGrantGroupId);
+        Assert.True(allowed.IsAllowed);
+        Assert.Equal("group-valid", allowed.MatchedGrantGroupId);
+    }
+
+    [Fact]
+    public async Task Empty_or_undefined_multi_operation_sets_fail_before_store_access()
+    {
+        var actor = CreateActor("worker-opaque-1");
+        var grantStore = new TestGrantStore(_ => CreateGrant(actor.ActorId, assignedCaseIds: [CaseId]));
+        var descriptorStore = CreateResourceStore();
+        var policy = CreatePolicy(grantStore, descriptorStore);
+
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await policy.AuthorizeAllAsync(actor, CaseId, [], CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await policy.AuthorizeAllAsync(actor, CaseId, [(CaseOperation)999], CancellationToken.None));
+
+        Assert.Equal(0, grantStore.LookupCount);
+        Assert.Equal(0, descriptorStore.LookupCount);
+    }
+
+    [Fact]
+    public async Task Single_operation_invalid_enum_remains_audited_denial_without_store_access()
+    {
+        var actor = CreateActor("worker-opaque-1");
+        var grantStore = new TestGrantStore(_ => CreateGrant(actor.ActorId, assignedCaseIds: [CaseId]));
+        var descriptorStore = CreateResourceStore();
+        var policy = CreatePolicy(grantStore, descriptorStore);
+
+        var decision = await policy.AuthorizeAsync(actor, CaseId, (CaseOperation)999, CancellationToken.None);
+
+        Assert.False(decision.IsAllowed);
+        Assert.Equal(AccessDecisionCode.OperationNotGranted, decision.Code);
+        Assert.NotNull(decision.AuditRecord);
+        Assert.Equal(0, grantStore.LookupCount);
+        Assert.Equal(0, descriptorStore.LookupCount);
+    }
+
+    [Fact]
+    public void Case_operation_values_preserve_existing_ordinals_and_append_narrow_mutation_operations()
+    {
+        Assert.Equal(0, (int)CaseOperation.ReadCase);
+        Assert.Equal(1, (int)CaseOperation.ReadAttachment);
+        Assert.Equal(2, (int)CaseOperation.Synchronize);
+        Assert.Equal(3, (int)CaseOperation.Search);
+        Assert.Equal(4, (int)CaseOperation.Export);
+        Assert.Equal(5, (int)CaseOperation.Count);
+        Assert.Equal(6, (int)CaseOperation.RequestProtectedAction);
+        Assert.Equal(7, (int)CaseOperation.ExecuteProtectedAction);
+        Assert.Equal(8, (int)CaseOperation.ReadLinkedSignalEvidence);
+        Assert.Equal(9, (int)CaseOperation.CorrectReport);
+        Assert.Equal(10, (int)CaseOperation.ReviewProtectedAction);
+        Assert.Equal(11, (int)CaseOperation.AssignCase);
+        Assert.Equal(12, (int)CaseOperation.ResolveCase);
+        Assert.Equal(13, (int)CaseOperation.ReopenCase);
+    }
+
+    [Fact]
     public async Task Operation_permission_cannot_be_borrowed_from_another_scope_group()
     {
         var actor = CreateActor("worker-opaque-1");

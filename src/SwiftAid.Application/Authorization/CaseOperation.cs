@@ -11,5 +11,10 @@ public enum CaseOperation
     Count,
     RequestProtectedAction,
     ExecuteProtectedAction,
-    ReadLinkedSignalEvidence
+    ReadLinkedSignalEvidence,
+    CorrectReport = 9,
+    ReviewProtectedAction = 10,
+    AssignCase = 11,
+    ResolveCase = 12,
+    ReopenCase = 13
 }

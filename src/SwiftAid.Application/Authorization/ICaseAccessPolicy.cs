@@ -7,6 +7,12 @@ public interface ICaseAccessPolicy
         Guid caseId,
         CaseOperation operation,
         CancellationToken cancellationToken);
+
+    ValueTask<AccessDecision> AuthorizeAllAsync(
+        ActorContext actor,
+        Guid caseId,
+        IReadOnlyCollection<CaseOperation> requiredOperations,
+        CancellationToken cancellationToken);
 }
 
 public enum AccessDecisionCode
@@ -34,4 +40,8 @@ public enum AccessDecisionCode
 public sealed record AccessDecision(
     bool IsAllowed,
     AccessDecisionCode Code,
-    AccessAuditRecord? AuditRecord);
+    AccessAuditRecord? AuditRecord)
+{
+    /// <summary>The opaque group that authorized the complete decision, if allowed.</summary>
+    public string? MatchedGrantGroupId { get; init; }
+}
