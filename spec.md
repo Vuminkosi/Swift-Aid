@@ -7,7 +7,7 @@
 | Document control | Value |
 |---|---|
 | File | `spec.md` |
-| Version | 1.3 — Product access, federation, Qdrant memory and cache |
+| Version | 1.4 — Multi-turn reasoning loops, product access, federation, Qdrant memory and cache |
 | Prepared | 26 October 2026 |
 | Product | SwiftAid 2.0 |
 | Target communities | Initial organizational service focus: Zimbabwe and Eswatini; account-free reporting from any country |
@@ -22,7 +22,7 @@
 
 This document defines **what SwiftAid must do, who can do it, what people must see, and how acceptance is demonstrated**. `implementation.md` defines the implementation tasks, interfaces, packages, repository layout, and execution sequence. Read both; do not replace either with the interface illustrations.
 
-**Source basis.** This revision starts from product spec v1.2 and implementation plan v2.2 and applies the owner's subsequent product-first execution instruction and explicit Qdrant, federation/SSO, and account-free global-reporting requirements. The inherited Participant Guide [C01] and bonus slide [C02] remain relevant only to a separately chosen event submission. It preserves the historical origin of the earlier requirements from the complete 1,836-line original `implementation.md`. That plan is dated 25 October 2026. Its SHA-256 at preparation was `274e7226d48cc5489a2cd071e06a76c8e9143ebe99a7cf577e7a02fd6daf4849`. References such as **[I §8; P3.2]** refer to that plan's section and task IDs. The medical and event source register is inherited, not independently re-verified. Newly consulted technical documentation is listed separately in `docs/TECHNICAL-SOURCES.md`; it does not establish live account permissions, tested package compatibility, model/encoder access, prices, or clinical approval.
+**Source basis.** This revision builds on product spec v1.3 and implementation plan v2.3, which in turn started from product spec v1.2 and implementation plan v2.2, and applies the owner's subsequent product-first execution instruction and explicit Qdrant, federation/SSO, and account-free global-reporting requirements. The inherited Participant Guide [C01] and bonus slide [C02] remain relevant only to a separately chosen event submission. It preserves the historical origin of the earlier requirements from the complete 1,836-line original `implementation.md`. That plan is dated 25 October 2026. Its SHA-256 at preparation was `274e7226d48cc5489a2cd071e06a76c8e9143ebe99a7cf577e7a02fd6daf4849`. References such as **[I §8; P3.2]** refer to that plan's section and task IDs. The medical and event source register is inherited, not independently re-verified. Newly consulted technical documentation is listed separately in `docs/TECHNICAL-SOURCES.md`; it does not establish live account permissions, tested package compatibility, model/encoder access, prices, or clinical approval.
 
 **Requirement language.** **MUST/MUST NOT** are acceptance obligations within the stated release scope. **SHOULD** is a preferred behavior that may be deferred with an explicit recorded reason. **MAY** is optional. A requirement is not complete merely because its screen exists. Each requirement has a stable `SA-…` identifier.
 
@@ -838,6 +838,32 @@ An administrative review task is not a scheduled patient/animal visit. It is wor
 
 **Encoding constraint:** Qdrant is storage/retrieval infrastructure, not an embedding model. The chosen encoder must be separately evidenced; no Meta embedding API or included embedding credit is assumed. The exact/payload path is useful while that gate is unresolved but must be labelled as nonsemantic. See implementation §14.8 and [technical sources](docs/TECHNICAL-SOURCES.md).
 
+### 15.8 Multi-turn reasoning loops and resumable agent investigations — product addition
+
+**Scope:** A multi-turn reasoning loop is a controlled sequence of separate, contextual **model turns and tool-result observations**, potentially interrupted by worker input, human review, or a later case revision. It is more than repeated RAG retrieval or a single model completion. The application stores **structured state and evidence references, never purported private chain-of-thought text**. It does not authorize autonomous clinical judgments. One reasoning cycle stays within the existing **maximum three model/tool iterations and four tool calls**; longer tasks continue only through a **new, explicitly authorized cycle** with a fresh budget and scope check. These are application-side controls, not provider guarantees.
+
+| ID | Priority | Product requirement |
+|---|---|---|
+| SA-LOOP-01 | P0 | Define an explicit `AgentInvestigation` aggregate identified by run ID, objective, actor/tenant/case scope, allowed capabilities, case and source versions, status, current cycle/turn counters and budget reservation. Distinguish it from case-event authority. |
+| SA-LOOP-02 | P0 | Implement a finite state machine `Created → GatheringEvidence → Reasoning → NeedsInput/AwaitingApproval → Resuming → Verifying → Completed`, with terminal `NoAction`, `Cancelled`, `Expired`, `Failed`, and recoverable `Stale` states. Persist only allowed state transitions. |
+| SA-LOOP-03 | P0 | Each turn uses a versioned `TurnInput` containing the latest user statement or authorized tool result, a concise factual summary of prior observations, unresolved questions, and provenance. Never persist or expose hidden chain-of-thought reasoning. |
+| SA-LOOP-04 | P0 | Use strictly typed read-only MCP tools with per-turn authorization and evidence IDs. Limit reasoning to administrative continuity, contradiction checking, record clarification, and assistance verification; clinical diagnosis/triage/advice remain prohibited in every turn. |
+| SA-LOOP-05 | P0 | When new worker input or corrected case facts arrive, validate current identity, authorization, scope epoch, consent, source version, and case version before resuming. If mismatched, mark stale and restart from current permitted evidence rather than silently rebase an approved action. |
+| SA-LOOP-06 | P0 | An investigation may ask up to three specific factual/administrative questions per turn, preserve unknowns, and pause for an authorized human reply. It must not invent answers, clinical follow-up intervals, or a medical examination request. |
+| SA-LOOP-07 | P0 | Approval is separate from reasoning; bind exact plan hash, action IDs, current case/input versions, actor and expiry. Each approved action is reauthorized and verified using receipts; no model turn can execute a protected action without valid approval. |
+| SA-LOOP-08 | P0 | Persist an opaque checkpoint after each accepted turn and tool result; durable resume after API/worker restart or network interruption must not repeat accepted commands, duplicate reminders or lose original user/audio evidence. |
+| SA-LOOP-09 | P0 | Require a per-cycle maximum of three reasoning iterations, four tool calls, one schema-repair retry and configured wall-clock/token/credit caps. Additional cycles require current authorization and a new reserved budget; enforce global cumulative limits and explicit stop reasons. |
+| SA-LOOP-10 | P0 | Qdrant may provide scope-filtered evidence IDs and exact cached factual results, but PostgreSQL remains authoritative for investigation state and consent/authorization. No unverified semantic encoder, stale cached authority, cross-user memory, or guest-personal long-term memory. |
+| SA-LOOP-11 | P0 | Correlate asynchronous responses by run ID, turn ID, input snapshot hash, source versions and fencing token; reject or mark stale delayed/duplicate worker and provider responses. Never allow an old response to replace a newer reviewed result. |
+| SA-LOOP-12 | P0 | Support `NeedsInput`, `NoAction`, `Partial`, `BudgetExhausted`, `CapabilityUnavailable`, `Cancelled` and `Stale` as honest UI states. A completed reasoning cycle is not a completed assistance task or verified clinical outcome. |
+| SA-LOOP-13 | P0 | Guest reporters can respond only via scoped submission/receipt proof for their own intake clarification, without accessing organizational agent tools or case evidence. Guest inputs cannot poison organization-wide memory. |
+| SA-LOOP-14 | P0 | Audit each turn's model/route/version, input and evidence references, tool names/results status, approval and action receipts, policy/budget consumption and current status without logging private raw narrative, patient identifiers, original audio or hidden reasoning text. |
+| SA-LOOP-15 | P0 | Evaluate multi-turn loops on fixed synthetic scenarios: clarification after unknown facts, interruption/resume, stale corrections, role revocation, duplicate tool responses, partial action results, exhaustion, Qdrant outage and cross-tenant isolation. No claim of clinical or epidemiological correctness follows. |
+
+**Illustrative nonclinical journey:** The worker reports an animal group concern → Meta extraction preserves the original narrative → the agent notices the *administrative* affected-animal count is missing → asks the worker one factual question → the worker answers later → the agent refreshes case-version and permission checks → it proposes an assignment-review request → an authorized officer approves the exact plan → the gateway issues the idempotent command → the agent verifies its receipt and reports what remains pending. No disease is diagnosed and the assistant does not prescribe intervention.
+
+**Acceptance:** AT-73–AT-76, with explicit evidence of real separate turns, persisted checkpoints, correct stop conditions, no approval bypass, and no unauthorized Qdrant recall. The UI may show a concise *evidence and decision summary*, not hidden model reasoning.
+
 ## 16. Surveillance and One Health investigation
 
 ### 16.1 Competition gate and retained operational views
@@ -1434,6 +1460,10 @@ These scenarios complement, not replace, the implementation plan's named unit/in
 | AT-70 — Embedding unavailable | No verified Meta encoder or non-Meta default attempted | Exact Qdrant lookup still works; no fake vectors/semantic claim and non-Meta encoder rejected | SA-MEM-13, SA-MEM-14 |
 | AT-71 — Qdrant outage and guest isolation | Qdrant down or unrelated guest asks similar question | Core report works; budgeted current-context fallback or explicit unavailable; no cross-report personal memory | SA-MEM-12, SA-MEM-15 |
 | AT-72 — Erasure versus replay/restore | Source deleted then old indexing job/backup is replayed | No resurrection of usable derived memory; registry invalidation governs restore/reindex | SA-MEM-07, SA-MEM-08 |
+| AT-73 — Multi-turn factual clarification | Case intake has unknown event details; agent asks; worker answers later | Separate authorized model turns, original evidence retained, no guessed diagnosis, confirmed factual update only by normal command | SA-LOOP-01–SA-LOOP-06, SA-LOOP-13 |
+| AT-74 — Interruption, restart and stale context | Worker disconnects, worker process restarts, then an external case correction arrives | Persisted checkpoint resumes without duplicate effect; stale input invalidates old proposal; changed scope or consent denies next step | SA-LOOP-05, SA-LOOP-08, SA-LOOP-11 |
+| AT-75 — Approval/receipt and loop budget | Agent plans three operational actions; one fails; user requests another iteration | No protected action without valid approval, partial receipt truthful, bounded cycles/tool calls and credits, no repeated accepted effects | SA-LOOP-07, SA-LOOP-09, SA-LOOP-12 |
+| AT-76 — Memory and tenant isolation across turns | Two organizations share similar narratives; Qdrant is unavailable or returns stale scope | No cross-scope evidence; fallback/current evidence or unavailable; audit shows factual provenance without chain-of-thought or sensitive payloads | SA-LOOP-04, SA-LOOP-10, SA-LOOP-14, SA-LOOP-15 |
 
 ### 26.1 Acceptance evidence record
 
@@ -1605,7 +1635,7 @@ The original 37 task IDs preserve prior progress references, and six additional 
 
 ### 29.1a Additive implementation tasks
 
-All original task IDs remain valid; these six tasks implement the new owner decisions without replacing the existing coordinator. They extend the plan to 43 tasks.
+All original task IDs remain valid; these six tasks implement the new owner decisions without replacing the existing coordinator. They extend the plan to 44 tasks.
 
 | Task | Product requirements | Principal scenarios |
 |---|---|---|
@@ -1614,6 +1644,7 @@ All original task IDs remain valid; these six tasks implement the new owner deci
 | P3.4 — Implement guest offline capture and receipt continuity | SA-PUB-13, SA-PUB-14, SA-PUB-15 | AT-57, AT-58 |
 | P7.4 — Implement Qdrant memory and cache index infrastructure | SA-MEM-01, SA-MEM-02, SA-MEM-03, SA-MEM-04, SA-MEM-05, SA-MEM-06, SA-MEM-07, SA-MEM-08, SA-MEM-14, SA-MEM-16 | AT-66, AT-67, AT-69, AT-72 |
 | P8.5 — Integrate authorized AI recall and context-safe cache reuse | SA-MEM-09, SA-MEM-10, SA-MEM-11, SA-MEM-12, SA-MEM-13, SA-MEM-15 | AT-68, AT-70, AT-71 |
+| P8.6 — Durable multi-turn reasoning and clarification | SA-LOOP-01–SA-LOOP-15; §15.8 | AT-73–AT-76 |
 | P10.3 — Implement authenticated event subscriptions and account preferences | SA-SUB-01, SA-SUB-02, SA-SUB-03, SA-SUB-04, SA-SUB-05, SA-SUB-06, SA-SUB-07 | AT-64, AT-65 |
 
 ### 29.2 Requirements-family index
@@ -1658,6 +1689,7 @@ All original task IDs remain valid; these six tasks implement the new owner deci
 | SA-PUB | Public private-intake and guest continuity | P2.4, P3.4 |
 | SA-GEO | Global location/date/time and honest coverage | P2.4 |
 | SA-MEM | Qdrant memory/cache lifecycle and authority | P7.4, P8.5 |
+| SA-LOOP | Multi-turn investigation, checkpoints, evidence, human approval and stop conditions | P8.6 |
 | SA-SUB | Login-required subscriptions and organization actions | P10.3 |
 
 ## 30. How to use this specification with the implementation plan
@@ -1751,11 +1783,11 @@ The following is copied by identifier/link from `implementation.md` §24 for imp
 
 ## Appendix B. Document provenance and review record
 
-**Primary basis:** the agreed conversation and `implementation.md`, version/date and content hash recorded at the start of this document. The original 37 task definitions and the product revision's six additions were reconciled against the requirements, privacy/failure tests, source register, capability gates and deferred work.
+**Primary basis:** the agreed conversation and `implementation.md`, version/date and content hash recorded at the start of this document. The original 37 task definitions and the product revision's seven additions were reconciled against the requirements, privacy/failure tests, source register, capability gates and deferred work.
 
 **Visual basis:** previously generated web/mobile concepts are illustrative. They do not authorize self-selected staff roles, offline cloud inference, unapproved disease classification, real-location synthetic outbreaks, unsupported numerical disease confidence, or unverified message delivery. Screen contracts in §20 are the functional reference.
 
-**New content in this companion:** stable requirement IDs; product behavior and edge-case wording; screen contracts; operational success-measure definitions; 72 end-to-end acceptance scenarios; task traceability; and PC-01 through PC-08, explicitly identified rather than presented as previously approved decisions.
+**New content in this companion:** stable requirement IDs; product behavior and edge-case wording; screen contracts; operational success-measure definitions; 76 end-to-end acceptance scenarios; task traceability; and PC-01 through PC-08, explicitly identified rather than presented as previously approved decisions.
 
 **Not performed by preparation of this document:** application implementation, package restore/compatibility tests, device execution, model/account provisioning, source-rights adjudication, professional clinical/veterinary review, real health-data collection, or social-message sending. Acceptance checklists and scenarios describe work to verify, not completed tests.
 

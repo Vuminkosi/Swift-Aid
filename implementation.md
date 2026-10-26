@@ -8,9 +8,9 @@
 
 **Architecture:** A .NET modular application owns authentication, authorization, case commands, immutable history, projections, and approval. A native .NET MAUI Blazor Hybrid Android client uses SQLite and Datasync Community Toolkit for offline read-model synchronization. One Python worker service consumes gateway-issued NATS JetStream jobs. Microsoft AI/MCP tooling orchestrates constrained access to Meta inference and permitted tools. PostgreSQL/PostGIS and private object storage hold authoritative records and originals. Qdrant stores scoped memory/cache indexes. Facebook/Google and organization OIDC establish identity; a dedicated anonymous intake boundary accepts reports worldwide without granting staff authority.
 
-**Product authority:** [`spec.md`](spec.md), version **1.3**, owns user-visible behavior, scope, requirement IDs (`SA-…`), acceptance scenarios (`AT-…`), and the proposed clarifications (`PC-01`–`PC-08`). This plan owns tasks, repository/interfaces, dependency ordering and implementation verification. Genuine conflicts must be recorded and resolved explicitly; neither document authorizes silently weakening safety/privacy or changing an established contract.
+**Product authority:** [`spec.md`](spec.md), version **1.4**, owns user-visible behavior, scope, requirement IDs (`SA-…`), acceptance scenarios (`AT-…`), and the proposed clarifications (`PC-01`–`PC-08`). This plan owns tasks, repository/interfaces, dependency ordering and implementation verification. Genuine conflicts must be recorded and resolved explicitly; neither document authorizes silently weakening safety/privacy or changing an established contract.
 
-**Plan revision:** **2.3 — Product access, federation, Qdrant memory and cache**, prepared **26 October 2026**. All original **37 task IDs** are retained; **six additive tasks** extend the plan to **43 tasks**, still in phases **0–12** and numbered sections **1–25**. This is a source-grounded plan revision, not a new package/provider/medical review.
+**Plan revision:** **2.4 — Durable multi-turn reasoning, product access, federation, Qdrant memory and cache**, prepared **26 October 2026**. All original **37 task IDs** are retained; **seven additive tasks** extend the plan to **44 tasks**, still in phases **0–12** and numbered sections **1–25**. This is a source-grounded plan revision, not a new package/provider/medical review.
 
 **Companion integrity:** Current companion `spec.md` SHA-256 is recorded in `docs/DOCUMENT-INTEGRITY.md` after pairing these files. Its references to the original plan hash `274e7226d48cc5489a2cd071e06a76c8e9143ebe99a7cf577e7a02fd6daf4849` describe the historical baseline from which the specification was prepared. This revision supersedes the baseline plan's single-document authority and execution handoff; it does not rewrite that provenance or mark proposed defaults approved.
 
@@ -20,15 +20,16 @@
 
 **Status:** Implementation specification only. No application has been built as part of this document revision, package set restored, device test run, clinical protocol approved, or social-media integration provisioned as part of preparing this file.
 
-### Revision 2.3 change summary
+### Revision 2.4 change summary
 
-- Pair with `spec.md` v1.3; keep the owner's existing multi-agent execution system and all original 37 task IDs plus the six additive product tasks.
+- Pair with `spec.md` v1.4; keep the owner's existing multi-agent execution system and all original 37 task IDs plus seven additive product tasks, including P8.6.
 - Exclude generated medical/veterinary advice, AI clinical triage, health-advice RAG, and AI-generated health-education explanations; retire their capability routes rather than merely add disclaimers.
 - Make factual intake, report-quality auditing, and bounded administrative case continuity the primary AI path. Add explicit plan approval, idempotent execution and result verification.
 - Keep both human/animal operational journeys, source-linked static education, original voice, privacy, immutable history and Datasync.
 - Default health-pattern/cross-sector AI inference OFF pending product approval and validation; organizer clarification additionally applies only to an event submission. Core product work proceeds independently.
 - Add public repository, new-event-work provenance, rights checks, the three-minute video, official build-window and deadline gates.
 - Carry forward the Meta-only $150 envelope; distinguish API spend, partner/GPU costs and the slide's separate open-weight bonus evidence.
+- Add durable multi-turn reasoning cycles, permission/version-bound factual clarification, checkpoint resumption and guardrails through P8.6, SA-LOOP-01–15 and AT-73–76.
 - Map every current requirement and acceptance scenario to a task. Previous documentation test claims are historical, not proof of this revision or an application build.
 
 **Historical submission context:** The supplied guide/slide informed the earlier event-specific revision. They are retained in §1.3 and the [source register](docs/RULES-SOURCE-REGISTER.md) for an optional submission, not as a prerequisite to product development. This update is driven by the owner's product instructions. Nonclinical boundaries remain unconditional product requirements; no eligibility or clinical approval is asserted.
@@ -1168,6 +1169,22 @@ Each payload includes opaque `record_id`, `organization_id` or explicit public s
 
 **MCP:** expose only `memory_recall_case_context` and `memory_recall_org_procedure` through trusted job/actor context, with bounded input and server filters. Models cannot write trusted memory or submit arbitrary Qdrant filters. Explicit opt-in account preferences are recorded through user APIs, not inferred from a medical narration. No memory feature weakens the existing prohibited-advice boundary.
 
+### 14.9 Multi-turn reasoning execution and checkpoints — product addition
+
+**Contrast with existing loops:** §14.2 bounds one inference call; §14.6 approves and verifies administrative actions; §14.8 provides scoped Qdrant context. A **multi-turn investigation** adds a durable conversation between these components: different model/tool turns, human clarification between turns, and safe re-entry after a restart, all bound to a specific case/scope/evidence snapshot. No hidden chain-of-thought is stored or surfaced; only short evidence-grounded decision summaries and structured state.
+
+**Owned by P8.6.** Define `InvestigationRun`, `InvestigationTurn`, `InvestigationCheckpoint`, `InvestigationQuestion`, `InvestigationResumeRequest`, `InvestigationResult` wire contracts. Persist runs, per-turn status, evidence refs, exact model/route/version, policy/source versions, approval refs and budget/usage records in PostgreSQL; Qdrant remains an optional authorized lookup index, not the run journal. Use the existing transactional outbox/NATS job and fencing protocol, not a second orchestrator or message bus.
+
+**Finite states:** `Created`, `GatheringEvidence`, `Reasoning`, `NeedsInput`, `AwaitingApproval`, `Resuming`, `Verifying`, `Completed`, `NoAction`, `Partial`, `Cancelled`, `Expired`, `Failed`, `Stale`, `BudgetExhausted`, `CapabilityUnavailable`. A state transition validates actor and version. Every user response becomes a new immutable turn; append structured source refs, not free-form model reasoning. A pending question never becomes a completed follow-up automatically.
+
+**Iteration rules:** Maximum 3 reasoning iterations / 4 MCP tool calls / one structured-repair retry **per cycle**; prohibit unlimited recursion, nested autonomous loops, arbitrary tool construction or implicit extra inference calls. New cycles require renewed authorization, fresh input/permission/source snapshot, a new reserved budget and an explicit permitted continuation reason. Bound the **entire run** by configurable max cycles (demo default **3**), max cumulative tool calls (**12**), wall-clock limits, and credit reservations; upon hitting any cap, return `NeedsInput`, `NoAction` or `BudgetExhausted` without fabricated progress. No automatic retry that duplicates approved commands.
+
+**Resume protocol:** Check run ID and expected turn, gate permissions/country/organization/sector/sensitivity, check access epoch and source hashes, verify latest aggregate versions, compare checkpoint hash/fencing token, then append next turn. A changed source or role invalidates pending plan approval and makes old proposals stale. Durable deduplication keys bind run/turn/message/action. Late worker results can be audited but cannot overwrite a newer run state. If Qdrant is offline, use current authorized PostgreSQL data and budgeted Meta inference or show unavailable; do not bypass scope.
+
+**User experience:** On Android/web show run progress, evidence sources, one-to-three short factual clarification questions, continue/cancel/review, approval summary and action-receipt states. Offline worker replies are queued as draft input, not accepted or model-processed until acknowledged by gateway. Anonymous guest replies only use the proof-bound intake channel and cannot access staff MCP tools. Protect transcription/original audio independently.
+
+**Observability and correctness:** Capture input IDs/hashes, citations, status, token/tool/credit usage, model identity, safe error code and decision summary, not hidden chain-of-thought or full private health narratives. Synthetic tests prove a real two-plus-turn exchange, restart, stale correction, revocation, partial receipt, budget stop and tenant isolation. No new medical/tracing capability is unlocked.
+
 ## 15. Deterministic surveillance and One Health investigation
 
 **Product scope gate:** §15 is an **optional P1/Gate design**, not core functionality. `CrossSectorInferenceEnabled=false` and no surveillance job dispatch, model tool or inferred-health UI by default. P9.1–P9.3 first implement/test the gate. Positive functionality requires an explicit product decision and applicable privacy/source/evaluation validation. Event mode additionally requires its written organizer record. No approval means OFF; core guest intake, casework and memory implementation continue. Descriptive authorized record counts/manual filters are separate and do not claim a disease inference. Clinical advice remains excluded regardless of this gate.
@@ -1453,6 +1470,10 @@ Record actual build/device/source/plan versions, identity scope, verification co
 | AT-70 | [Spec scenario](spec.md#260a-product-access-identity-and-memory-acceptance-additions) | [P8.5](#task-p8-5) | NotRun; requires actual product evidence |
 | AT-71 | [Spec scenario](spec.md#260a-product-access-identity-and-memory-acceptance-additions) | [P8.5](#task-p8-5) | NotRun; requires actual product evidence |
 | AT-72 | [Spec scenario](spec.md#260a-product-access-identity-and-memory-acceptance-additions) | [P7.4](#task-p7-4) | NotRun; requires actual product evidence |
+| AT-73 | [Spec §26](spec.md#26-end-to-end-acceptance-scenarios) | [P8.6](#task-p8-6) | NotRun; separate turn/clarification evidence |
+| AT-74 | [Spec §26](spec.md#26-end-to-end-acceptance-scenarios) | [P8.6](#task-p8-6) | NotRun; checkpoint/resume/staleness evidence |
+| AT-75 | [Spec §26](spec.md#26-end-to-end-acceptance-scenarios) | [P8.6](#task-p8-6) | NotRun; approval/receipt and budget evidence |
+| AT-76 | [Spec §26](spec.md#26-end-to-end-acceptance-scenarios) | [P8.6](#task-p8-6) | NotRun; tenant/memory/trace evidence |
 
 ### 18.5 Proposed quality measurement record — spec §24 / PC-05
 
@@ -1538,7 +1559,7 @@ bash scripts/smoke.sh
 **Interfaces:** Produces the project graph in §4, reproducible restore/build commands, and service endpoints used by every later task.
 
 - [ ] **RED:** Write `test_required_projects_and_no_secret_defaults`: required project/config paths exist, no real credentials are present, no dependency uses a floating wildcard. A clean restore uses committed lockfiles. Run the targeted checks and confirm an expected failure before implementing the behavior.
-- [ ] **SPEC RED:** Add `test_spec_plan_ids_and_scope_preserved`: both root documents exist; all 350 `SA-…` IDs and 72 `AT-…` records resolve; all 43 tasks have ownership/evidence fields; no P1/P2 capability is silently promoted; the handoff uses the existing coordinator. Assert all PC records initially remain proposed unless an actual decision is recorded.
+- [ ] **SPEC RED:** Add `test_spec_plan_ids_and_scope_preserved`: both root documents exist; all 350 `SA-…` IDs and 72 `AT-…` records resolve; all 44 tasks have ownership/evidence fields; no P1/P2 capability is silently promoted; the handoff uses the existing coordinator. Assert all PC records initially remain proposed unless an actual decision is recorded.
 - [ ] **IMPLEMENT:** Create the solution/projects and empty test projects; configure net10.0 and the actual installed SDK; resolve the dependency matrix from §5; add Compose health checks and explicit image tags/digests. Establish repository-safe development secrets and scoped config validation.
 - [ ] **SPEC IMPLEMENT:** Seed document-status ledgers from §§18 and 22 with NotRun/not_started, preserving scope labels. Record source hashes and this revision; create AGENTS.md from §25 without requiring any new development framework. Protect earlier SwiftAid and shared contract/lockfile ownership. Treat missing clinical/source/provider evidence as gates, not scaffold defaults.
 - [ ] **GREEN:** Run `python -m unittest discover -s tests/bootstrap` plus clean `dotnet restore --locked-mode` and `docker compose -f infra/compose.yml config`. Required result: all named assertions pass; record actual output, not an assumed result.
@@ -2418,6 +2439,24 @@ bash scripts/smoke.sh
 - [ ] **REVIEW:** One real Meta result is cached and reused only in its valid exact context; revoked/stale/cross-tenant paths fail; semantic path explicitly evidenced or disabled.
 - [ ] **COMMIT:** Record applicable requirements and the scenarios in §18.4, document capability/decisions/remaining risks, obtain the existing coordinator's review, and make a scoped commit. No new orchestration framework is required.
 
+<a id="task-p8-6"></a>
+
+#### P8.6 — Implement durable multi-turn reasoning and clarification
+
+**Priority:** P0 bounded operational capability. **Dependencies:** P8.3, P8.5, P6.2, P1.2. This builds on existing provider/MCP orchestration; optional transcription and health-pattern analysis are not prerequisites.
+
+**Spec contract:** `spec.md` §15.8; `SA-LOOP-01`–`SA-LOOP-15`; `AT-73`–`AT-76`. Preserve §14.2/§14.6 limits and approval rules.
+
+**Files:** `src/SwiftAid.Contracts/AI/{InvestigationRun,InvestigationTurn,InvestigationCheckpoint,InvestigationResumeRequest}.cs`; `src/SwiftAid.Application/Investigations/{InvestigationService,InvestigationStateMachine,InvestigationCheckpointStore}.cs`; `src/SwiftAid.Intelligence/Capabilities/MultiTurnInvestigator.cs`; `src/SwiftAid.Gateway/Endpoints/InvestigationEndpoints.cs`; `src/SwiftAid.Gateway/Components/Operations/InvestigationReview.razor`; `tests/SwiftAid.Application.Tests/MultiTurnInvestigationTests.cs`; `tests/SwiftAid.Integration.Tests/MultiTurnResumeTests.cs`; `workers/tests/integration/test_multiturn_delivery.py`.
+
+**Interfaces:** `IInvestigationService.StartAsync(InvestigationStart, ActorContext, CancellationToken) -> InvestigationRunResult`; `ContinueAsync(InvestigationResumeRequest, ActorContext, CancellationToken) -> InvestigationRunResult`; `CancelAsync(Guid runId, ActorContext, CancellationToken) -> InvestigationRunResult`. Checkpoint journal in PostgreSQL; Qdrant is only a scoped retrieval index. An agent-generated plan uses the P8.3 approval executor without alternate write APIs.
+
+- [ ] **RED:** Write tests for two separate Meta turns with a worker clarification between them, checkpoint persistence after process restart, expired actor grants, changed case version invalidating action approval, late/duplicate results, consent/scope revocation, cross-tenant memory denial, guest-proof limited intake replies, Qdrant outage, three-cycle/twelve-tool cumulative caps, and budget exhaustion. Verify failures before implementing.
+- [ ] **IMPLEMENT:** Add strict run/turn schemas and transactional run-state transition/checkpoint persistence, latest-version and grant checks on every turn, NATS fencing/idempotency, bounded Meta/MCP cycle orchestrator, typed factual questions, structured decision summaries, and user-controlled continuation. Reuse existing per-cycle three-iteration/four-tool controls and P8.3 approval/receipt validation. Never save model chain-of-thought or enable medical-advice routes.
+- [ ] **GREEN:** Run `dotnet test tests/SwiftAid.Application.Tests --filter MultiTurnInvestigationTests`, `dotnet test tests/SwiftAid.Integration.Tests --filter MultiTurnResumeTests`, and `uv run pytest tests/integration/test_multiturn_delivery.py -q`; perform one real supported Meta multi-turn smoke test with synthetic case data. Report real provider/model calls distinctly from simulated tests.
+- [ ] **REVIEW:** Both Android/web clients show transparent pause/resume, unknowns, stale and partial states. Approved administrative effects are never duplicated, evidence remains scoped, and completed reasoning is not falsely called completed casework.
+- [ ] **TRACE/COMMIT:** Record AT-73–AT-76, SA-LOOP-01–15, exact test results, limits, provider costs and disabled branches in progress/traceability; obtain existing coordinator review and commit scoped changes.
+
 ### Phase 9 — Surveillance and One Health evidence
 
 <a id="task-p9-1"></a>
@@ -2664,7 +2703,7 @@ bash scripts/smoke.sh
 
 #### P12.1 — Run cross-stack privacy and failure-injection tests
 
-**Priority:** P0. **Dependencies:** P7.4, P8.5, P10.3, P4.3 (original/no-ASR path always), P8.4, P10.2, P11.1, P11.2; P9.3 only when the optional product-approved and validated feature is enabled.
+**Priority:** P0. **Dependencies:** P7.4, P8.5, P8.6, P10.3, P4.3 (original/no-ASR path always), P8.4, P10.2, P11.1, P11.2; P9.3 only when the optional product-approved and validated feature is enabled.
 
 **Spec contract:** Read `spec.md` §29 task row `P12.1` plus its referenced product sections. Shared coverage: SA-SEC-01–SA-SEC-13, SA-QLT-01–SA-QLT-10; §§22, 24, 26.
 
@@ -2801,11 +2840,11 @@ iOS/desktop/store releases, SMS/USSD, real ministry/clinical integrations, autom
 | C | P1.2 then P1.3, P2.1 and P2.2 | Establish resource policies; federation can proceed alongside immutable case implementation |
 | D | P2.3, P2.4, P3.1–P3.4, P4.1–P4.2, P5.1–P5.3, P6.1–P6.3, P7.1 | Follow exact task dependencies; prove guest intake, staff commands, original audio and routing without requiring AI |
 | E | P7.2–P7.4, P8.1–P8.4, P4.3 | Static sources, Qdrant index and real factual/administrative AI; text and original playback do not wait for optional ASR |
-| F | P8.5, P10.1–P10.3, P11.1–P11.2 | Scoped runtime recall/cache, member subscriptions and complete guest/member/staff surfaces |
+| F | P8.5–P8.6, P10.1–P10.3, P11.1–P11.2 | Scoped runtime recall/cache, member subscriptions and complete guest/member/staff surfaces |
 | G | P12.1–P12.3 | Cross-stack verification, release/recovery and product runbook; submission/promotional artifacts separately conditional |
 | Optional | P9.1–P9.3 positive branches; verified semantic cache; SAML bridge; additional open-weight route | OFF-gate tests are required, but no optional provider/organizer/encoder may block core authorized operations |
 
-Batches group work, not permission to skip the declared task graph. Six added tasks are P1.3, P2.4, P3.4, P7.4, P8.5 and P10.3. Continue unrelated dependency-ready work when a device/provider is unavailable, but do not call its capability verified. Required federation paths and Qdrant exact integration need their actual tests before claiming the full product increment complete.
+Batches group work, not permission to skip the declared task graph. Six previously added tasks are P1.3, P2.4, P3.4, P7.4, P8.5 and P10.3. The seventh product addition is P8.6 for durable multi-turn reasoning. Continue unrelated dependency-ready work when a device/provider is unavailable, but do not call its capability verified. Required federation paths and Qdrant exact integration need their actual tests before claiming the full product increment complete.
 
 ### 20.4 Three-minute submission artifact
 
@@ -3364,6 +3403,13 @@ References link to the product chapter containing the authoritative requirement 
 All PC-01–PC-08 references remain proposed defaults unless actual acceptance is recorded. Neither this mapping nor a successful unit test supplies clinical, source-rights, professional-language or legal approval.
 
 ---
+
+
+### 22.1 Multi-turn loop traceability addition
+
+| Product requirements | Task owner | Test evidence |
+|---|---|---|
+| SA-LOOP-01–SA-LOOP-15 | [P8.6](#task-p8-6) | AT-73–AT-76 plus targeted .NET/Python tests and one actual Meta two-turn smoke test |
 
 ## 23. Risks, decisions, and release acceptance
 
