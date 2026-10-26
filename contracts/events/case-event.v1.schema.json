@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://swiftaid.invalid/contracts/events/case-event.v1.schema.json",
+  "title": "SwiftAid managed case event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "eventId", "eventType", "caseId", "aggregateVersion", "reportRevision", "commandId", "actorId", "recordedAtUtc", "payload"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "eventId": { "type": "string", "format": "uuid" },
+    "eventType": { "enum": ["CaseReported", "CaseAssigned", "CaseReportCorrected", "CaseActionRequested", "CaseActionRequestReviewed", "CaseResolved", "CaseReopened"] },
+    "caseId": { "type": "string", "format": "uuid" },
+    "aggregateVersion": { "type": "integer", "minimum": 1 },
+    "reportRevision": { "type": "integer", "minimum": 1 },
+    "commandId": { "type": "string", "format": "uuid" },
+    "actorId": { "type": "string", "minLength": 1 },
+    "occurredAtUtc": { "type": ["string", "null"], "format": "date-time" },
+    "recordedAtUtc": { "type": "string", "format": "date-time" },
+    "payload": {
+      "oneOf": [
+        { "$ref": "#/$defs/report" },
+        { "$ref": "#/$defs/assignment" },
+        { "$ref": "#/$defs/correction" },
+        { "$ref": "#/$defs/actionRequest" },
+        { "$ref": "#/$defs/actionReview" },
+        { "$ref": "#/$defs/resolution" },
+        { "$ref": "#/$defs/reopening" }
+      ]
+    }
+  },
+  "allOf": [
+    { "if": { "properties": { "eventType": { "const": "CaseReported" } }, "required": ["eventType"] }, "then": { "properties": { "aggregateVersion": { "const": 1 }, "reportRevision": { "const": 1 }, "payload": { "$ref": "#/$defs/report" } } } },
+    { "if": { "properties": { "eventType": { "const": "CaseAssigned" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/assignment" } } } },
+    { "if": { "properties": { "eventType": { "const": "CaseReportCorrected" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/correction" } } } },
+    { "if": { "properties": { "eventType": { "const": "CaseActionRequested" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/actionRequest" } } } },
+    { "if": { "properties": { "eventType": { "const": "CaseActionRequestReviewed" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/actionReview" } } } },
+    { "if": { "properties": { "eventType": { "const": "CaseResolved" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/resolution" } } } },
+    { "if": { "properties": { "eventType": { "const": "CaseReopened" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/reopening" } } } }
+  ],
+  "$defs": {
+    "report": {
+      "type": "object", "additionalProperties": false,
+      "required": ["workspaceId", "report"],
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "report": { "$ref": "../commands/case-command.v1.schema.json#/$defs/reportFacts" }
+      }
+    },
+    "assignment": { "type": "object", "additionalProperties": false, "required": ["accountableOwnerId"], "properties": { "accountableOwnerId": { "type": "string", "minLength": 1 } } },
+    "correction": {
+      "type": "object", "additionalProperties": false,
+      "required": ["report", "reason", "previousReportRevision"],
+      "properties": {
+        "report": { "$ref": "../commands/case-command.v1.schema.json#/$defs/reportFacts" },
+        "reason": { "type": "string", "minLength": 1 },
+        "previousReportRevision": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "actionRequest": {
+      "type": "object", "additionalProperties": false,
+      "required": ["requestId", "requestedOperation", "reason", "evidenceEventIds"],
+      "properties": {
+        "requestId": { "type": "string", "format": "uuid" },
+        "requestedOperation": { "enum": ["Reassign", "Resolve", "Reopen"] },
+        "reason": { "type": "string", "minLength": 1 },
+        "evidenceEventIds": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "proposedOwnerId": { "type": ["string", "null"] }
+      }
+    },
+    "actionReview": {
+      "type": "object", "additionalProperties": false,
+      "required": ["requestId", "outcome", "linkedAcceptedEventId", "reason"],
+      "properties": {
+        "requestId": { "type": "string", "format": "uuid" },
+        "outcome": { "enum": ["Pending", "Denied", "Approved"] },
+        "linkedAcceptedEventId": {
+          "type": ["string", "null"],
+          "format": "uuid",
+          "description": "Approved reviews must identify the immediately preceding accepted operation in the same command; replay validates that the operation matches this request."
+        },
+        "reason": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "outcome": { "const": "Approved" } }, "required": ["outcome"] },
+          "then": { "properties": { "linkedAcceptedEventId": { "type": "string", "format": "uuid" } } }
+        },
+        {
+          "if": { "properties": { "outcome": { "enum": ["Pending", "Denied"] } }, "required": ["outcome"] },
+          "then": { "properties": { "linkedAcceptedEventId": { "type": "null" } } }
+        }
+      ]
+    },
+    "resolution": { "type": "object", "additionalProperties": false, "required": ["reason"], "properties": { "reason": { "type": "string", "minLength": 1 } } },
+    "reopening": {
+      "type": "object", "additionalProperties": false,
+      "required": ["reason", "accountableOwnerId"],
+      "properties": { "reason": { "type": "string", "minLength": 1 }, "accountableOwnerId": { "type": "string", "minLength": 1 } }
+    }
+  }
+}

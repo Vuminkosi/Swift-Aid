@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://swiftaid.invalid/contracts/commands/case-command.v1.schema.json",
+  "title": "SwiftAid managed case command envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "commandId", "caseId", "expectedVersion", "commandType", "payload"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "commandId": { "type": "string", "format": "uuid" },
+    "caseId": { "type": "string", "format": "uuid" },
+    "expectedVersion": { "type": "integer", "minimum": 0 },
+    "commandType": {
+      "enum": ["CaseReported", "CaseReportCorrected", "CaseActionRequested", "CaseActionRequestReviewed", "CaseResolved", "CaseReopened"]
+    },
+    "occurredAtUtc": { "type": ["string", "null"], "format": "date-time" },
+    "reason": { "type": ["string", "null"], "minLength": 1 },
+    "payload": {
+      "oneOf": [
+        { "$ref": "#/$defs/report" },
+        { "$ref": "#/$defs/correction" },
+        { "$ref": "#/$defs/actionRequest" },
+        { "$ref": "#/$defs/actionReview" },
+        { "$ref": "#/$defs/resolution" },
+        { "$ref": "#/$defs/reopening" }
+      ]
+    }
+  },
+  "allOf": [
+    { "if": { "properties": { "commandType": { "const": "CaseReported" } }, "required": ["commandType"] }, "then": { "properties": { "expectedVersion": { "const": 0 }, "payload": { "$ref": "#/$defs/report" } } } },
+    { "if": { "properties": { "commandType": { "const": "CaseReportCorrected" } }, "required": ["commandType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/correction" } } } },
+    { "if": { "properties": { "commandType": { "const": "CaseActionRequested" } }, "required": ["commandType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/actionRequest" } } } },
+    { "if": { "properties": { "commandType": { "const": "CaseActionRequestReviewed" } }, "required": ["commandType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/actionReview" } } } },
+    { "if": { "properties": { "commandType": { "const": "CaseResolved" } }, "required": ["commandType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/resolution" } } } },
+    { "if": { "properties": { "commandType": { "const": "CaseReopened" } }, "required": ["commandType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/reopening" } } } }
+  ],
+  "$defs": {
+    "observation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["narrative"],
+      "properties": { "narrative": { "type": "string", "minLength": 1 } }
+    },
+    "reportFacts": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "sector", "narrative", "observations"],
+      "properties": {
+        "kind": { "enum": ["Human", "Animal"] },
+        "sector": { "enum": ["HumanHealth", "AnimalHealth"] },
+        "narrative": { "type": "string" },
+        "observations": { "type": "array", "items": { "$ref": "#/$defs/observation" } }
+      }
+    },
+    "report": {
+      "type": "object", "additionalProperties": false,
+      "required": ["workspaceId", "accountableOwnerId", "report"],
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "accountableOwnerId": { "type": "string", "minLength": 1 },
+        "report": { "$ref": "#/$defs/reportFacts" }
+      }
+    },
+    "correction": {
+      "type": "object", "additionalProperties": false,
+      "required": ["correctedNarrative", "reason"],
+      "properties": { "correctedNarrative": { "type": "string", "minLength": 1 }, "reason": { "type": "string", "minLength": 1 } }
+    },
+    "actionRequest": {
+      "type": "object", "additionalProperties": false,
+      "required": ["requestId", "requestedOperation", "reason", "evidenceEventIds"],
+      "properties": {
+        "requestId": { "type": "string", "format": "uuid" },
+        "requestedOperation": { "enum": ["Reassign", "Resolve", "Reopen"] },
+        "reason": { "type": "string", "minLength": 1 },
+        "proposedOwnerId": { "type": ["string", "null"] },
+        "evidenceEventIds": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "actionReview": {
+      "type": "object", "additionalProperties": false,
+      "required": ["requestId", "outcome", "reason"],
+      "properties": {
+        "requestId": { "type": "string", "format": "uuid" },
+        "outcome": { "enum": ["Pending", "Denied", "Approved"] },
+        "acceptedOwnerId": { "type": ["string", "null"] },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "resolution": { "type": "object", "additionalProperties": false, "required": ["reason"], "properties": { "reason": { "type": "string", "minLength": 1 } } },
+    "reopening": {
+      "type": "object", "additionalProperties": false,
+      "required": ["reason", "accountableOwnerId"],
+      "properties": { "reason": { "type": "string", "minLength": 1 }, "accountableOwnerId": { "type": "string", "minLength": 1 } }
+    }
+  }
+}

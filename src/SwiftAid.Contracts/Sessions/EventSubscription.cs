@@ -1,0 +1,16 @@
+namespace SwiftAid.Contracts.Sessions;
+
+public enum EventSubscriptionStatus
+{
+    Active,
+    Unsubscribed
+}
+
+/// <summary>Member's private session subscription; consent is distinct from login or attendance.</summary>
+public sealed record EventSubscription(
+    Guid SessionId,
+    string AccountId,
+    EventSubscriptionStatus Status,
+    IReadOnlyList<string> Channels,
+    string? ConsentReference,
+    long Version);

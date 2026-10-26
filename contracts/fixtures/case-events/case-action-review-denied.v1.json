@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "eventId": "9a5274aa-11ca-4582-32d5-0c2f593bafd6",
+  "eventType": "CaseActionRequestReviewed",
+  "caseId": "10000000-0000-0000-0000-000000000001",
+  "aggregateVersion": 4,
+  "reportRevision": 1,
+  "commandId": "20000000-0000-0000-0000-000000000005",
+  "actorId": "officer-1",
+  "occurredAtUtc": null,
+  "recordedAtUtc": "2026-10-26T08:01:00+00:00",
+  "payload": {
+    "requestId": "30000000-0000-0000-0000-000000000001",
+    "outcome": "Denied",
+    "linkedAcceptedEventId": null,
+    "reason": "request declined"
+  }
+}

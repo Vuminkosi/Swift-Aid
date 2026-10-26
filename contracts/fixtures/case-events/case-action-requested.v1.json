@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "eventId": "09ab6025-dcd9-fdb4-6863-c2626900ad96",
+  "eventType": "CaseActionRequested",
+  "caseId": "10000000-0000-0000-0000-000000000001",
+  "aggregateVersion": 3,
+  "reportRevision": 1,
+  "commandId": "20000000-0000-0000-0000-000000000002",
+  "actorId": "worker-1",
+  "occurredAtUtc": null,
+  "recordedAtUtc": "2026-10-26T08:01:00+00:00",
+  "payload": {
+    "requestId": "30000000-0000-0000-0000-000000000001",
+    "requestedOperation": "Reassign",
+    "reason": "request transfer",
+    "evidenceEventIds": [
+      "evidence-1"
+    ],
+    "proposedOwnerId": "worker-2"
+  }
+}

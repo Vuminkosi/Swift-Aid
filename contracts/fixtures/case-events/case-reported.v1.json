@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "eventId": "6f2bc8da-c76e-36b9-42a2-3b329a20b774",
+  "eventType": "CaseReported",
+  "caseId": "10000000-0000-0000-0000-000000000001",
+  "aggregateVersion": 1,
+  "reportRevision": 1,
+  "commandId": "20000000-0000-0000-0000-000000000001",
+  "actorId": "officer-1",
+  "occurredAtUtc": "2026-10-26T08:00:00+00:00",
+  "recordedAtUtc": "2026-10-26T08:01:00+00:00",
+  "payload": {
+    "workspaceId": "workspace-1",
+    "report": {
+      "kind": "Human",
+      "sector": "HumanHealth",
+      "narrative": "reported details",
+      "observations": [
+        {
+          "narrative": "reported observation"
+        }
+      ]
+    }
+  }
+}
