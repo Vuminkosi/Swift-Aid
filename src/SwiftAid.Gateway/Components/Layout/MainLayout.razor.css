@@ -1,6 +1,6 @@
 .app-bar {
-    border-bottom: 1px solid #e4ebe7;
-    color: #17332d;
+    border-bottom: 1px solid var(--sa-border);
+    color: var(--sa-text-primary);
 }
 
 .brand-mark {
@@ -20,13 +20,13 @@
     display: block;
     max-width: 15rem;
     padding: 1rem 1.5rem;
-    color: #536660;
+    color: var(--sa-text-muted);
     line-height: 1.5;
 }
 
 .main-content {
     min-height: calc(100vh - 4rem);
-    background: #f5f7f4;
+    background: var(--sa-canvas);
 }
 
 #main-content {

@@ -1,0 +1,62 @@
+:root {
+    color-scheme: light;
+    --sa-brand-blue: #126fe1;
+    --sa-brand-teal: #0b8b84;
+    --sa-brand-green: #23ae70;
+    --sa-canvas: #f5faf8;
+    --sa-surface: #ffffff;
+    --sa-surface-elevated: #ffffff;
+    --sa-surface-subtle: #e8f5f2;
+    --sa-text-primary: #123b39;
+    --sa-text-secondary: #3e5e5a;
+    --sa-text-muted: #536e69;
+    --sa-border: #718e87;
+    --sa-action-primary: #00695c;
+    --sa-action-hover: #005549;
+    --sa-action-active: #00453c;
+    --sa-action-foreground: #ffffff;
+    --sa-focus: #005eb8;
+    --sa-link: #075cb5;
+    --sa-success: #176b43;
+    --sa-success-foreground: #ffffff;
+    --sa-danger: #b4233a;
+    --sa-danger-foreground: #ffffff;
+    --sa-overlay: rgb(7 27 25 / 48%);
+}
+
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --sa-canvas: #071b19;
+    --sa-surface: #102b29;
+    --sa-surface-elevated: #163a35;
+    --sa-surface-subtle: #1f4640;
+    --sa-text-primary: #f4fbf8;
+    --sa-text-secondary: #c6ddd6;
+    --sa-text-muted: #a7c3bc;
+    --sa-border: #5b7b74;
+    --sa-action-primary: #55d5b7;
+    --sa-action-hover: #74e5cb;
+    --sa-action-active: #95f0d8;
+    --sa-action-foreground: #062d29;
+    --sa-focus: #7dd3fc;
+    --sa-link: #80bfff;
+    --sa-success: #23ae70;
+    --sa-success-foreground: #062d29;
+    --sa-danger: #fb7185;
+    --sa-danger-foreground: #40131e;
+    --sa-overlay: rgb(0 0 0 / 64%);
+}
+
+html,
+body {
+    color-scheme: inherit;
+    color: var(--sa-text-primary);
+    background: var(--sa-canvas);
+}
+
+a:focus-visible,
+button:focus-visible,
+[tabindex]:focus-visible {
+    outline: 3px solid var(--sa-focus);
+    outline-offset: 3px;
+}

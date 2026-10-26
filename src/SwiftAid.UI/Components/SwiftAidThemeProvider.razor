@@ -1,0 +1,62 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JSRuntime
+
+<MudThemeProvider Theme="_theme" IsDarkMode="_isDarkMode" />
+
+@code {
+    private readonly MudTheme _theme = SwiftAidBrandTheme.Create();
+    private IJSObjectReference? _themeModule;
+    private DotNetObjectReference<SwiftAidThemeProvider>? _dotNetReference;
+    private bool _isDarkMode;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            _themeModule = await JSRuntime.InvokeAsync<IJSObjectReference>(
+                "import",
+                "./_content/SwiftAid.UI/Components/SwiftAidThemeProvider.razor.js");
+            _dotNetReference = DotNetObjectReference.Create(this);
+            _isDarkMode = await _themeModule.InvokeAsync<bool>("watchSystemTheme", _dotNetReference);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (JSException)
+        {
+            // Keep the accessible light palette when system theme detection is unavailable.
+        }
+        catch (InvalidOperationException)
+        {
+            // Static prerendering does not provide a JavaScript runtime.
+        }
+    }
+
+    [JSInvokable]
+    public Task SetSystemTheme(bool isDarkMode) => InvokeAsync(() =>
+    {
+        _isDarkMode = isDarkMode;
+        StateHasChanged();
+    });
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_themeModule is not null)
+        {
+            try
+            {
+                await _themeModule.InvokeVoidAsync("stopWatchingSystemTheme");
+                await _themeModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // The browser circuit or native WebView is already closing.
+            }
+        }
+
+        _dotNetReference?.Dispose();
+    }
+}

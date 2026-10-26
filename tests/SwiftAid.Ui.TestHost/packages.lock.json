@@ -1,0 +1,32 @@
+{
+  "version": 2,
+  "dependencies": {
+    "net10.0": {
+      "Microsoft.AspNetCore.App.Internal.Assets": {
+        "type": "Direct",
+        "requested": "[10.0.14, )",
+        "resolved": "10.0.14",
+        "contentHash": "T1IOYbID1msKjQEh684HebnN+Xnq/pocMXDukOMZtzzPTf9c4/30+/JndM/1txrqwuSYqWvLiAQWzu4U93cshw=="
+      },
+      "swiftaid.ui": {
+        "type": "Project",
+        "dependencies": {
+          "Blazor.Lottie.Player": "[1.0.6, )",
+          "MudBlazor": "[9.11.0, )"
+        }
+      },
+      "Blazor.Lottie.Player": {
+        "type": "CentralTransitive",
+        "requested": "[1.0.6, )",
+        "resolved": "1.0.6",
+        "contentHash": "gJ5vAiVYo29ZOe7UvIxLSCCR6jXkaBFmcE2ZROby9Md/KjrCqMyoLDmC4W67mxFF17PooYdDei50UIH1cIFUVQ=="
+      },
+      "MudBlazor": {
+        "type": "CentralTransitive",
+        "requested": "[9.11.0, )",
+        "resolved": "9.11.0",
+        "contentHash": "hboxF5cQuMYjB0w6+tScmNt0ACuoCu35TGPsCmCq8OeQgvtPtzQ1s9auAOrINj/J6I/ZyBB1rmUzrcMKj14RFA=="
+      }
+    }
+  }
+}

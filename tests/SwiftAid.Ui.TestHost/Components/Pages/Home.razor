@@ -1,0 +1,35 @@
+@page "/"
+
+<PageTitle>SwiftAid shared component test fixture</PageTitle>
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<main class="fixture" aria-labelledby="fixture-heading">
+    <h1 id="fixture-heading">Shared component verification fixture</h1>
+    <p>This test-only page uses synthetic status text and contains no report or provider data.</p>
+
+    <section aria-label="Loader controls" class="controls">
+        <button type="button" data-testid="toggle-loading" @onclick="ToggleLoading">
+            @(_isLoading ? "Hide loading status" : "Show loading status")
+        </button>
+        <button type="button" data-testid="toggle-lottie" @onclick="ToggleLottie">
+            @(_useLottie ? "Use GIF fallback" : "Try local Lottie")
+        </button>
+    </section>
+
+    <SwiftAidLoader IsLoading="_isLoading"
+                    UseLottie="_useLottie"
+                    StatusText="Synthetic fixture loading status" />
+    <SwiftAidServiceBoundaryNotice />
+</main>
+
+@code {
+    private bool _isLoading;
+    private bool _useLottie;
+    private void ToggleLoading() => _isLoading = !_isLoading;
+
+    private void ToggleLottie() => _useLottie = !_useLottie;
+}

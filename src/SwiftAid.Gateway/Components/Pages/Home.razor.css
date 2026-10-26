@@ -6,32 +6,13 @@
     margin: clamp(1.25rem, 4vw, 3rem) auto 1.5rem;
     max-width: 72rem;
     padding: clamp(1.5rem, 5vw, 4rem);
-    border: 1px solid #e1e9e4;
+    border: 1px solid var(--sa-border);
     border-radius: 1.5rem;
-    background: linear-gradient(120deg, #fff 15%, #edf6f1 100%);
+    background: linear-gradient(120deg, var(--sa-surface) 15%, var(--sa-surface-subtle) 100%);
 }
 
 .welcome-copy {
     max-width: 42rem;
-}
-
-.eyebrow {
-    color: #176b5b;
-    font-weight: 700;
-}
-
-.welcome-heading {
-    max-width: 14ch;
-    margin: 0.5rem 0 1rem;
-    font-weight: 700;
-    letter-spacing: -0.04em;
-    line-height: 1.05;
-}
-
-.welcome-description {
-    max-width: 55ch;
-    color: #536660;
-    line-height: 1.65;
 }
 
 .welcome-actions {
@@ -47,8 +28,8 @@
     justify-content: center;
     gap: 1rem;
     border-radius: 1.25rem;
-    background: #176b5b;
-    color: #fff;
+    background: var(--sa-action-primary);
+    color: var(--sa-action-foreground);
     font-size: 1.125rem;
     font-weight: 600;
     text-align: center;
@@ -68,9 +49,9 @@
     gap: 0.75rem;
     min-height: 13rem;
     padding: 1.5rem;
-    border: 1px solid #e1e9e4;
+    border: 1px solid var(--sa-border);
     border-radius: 1rem;
-    background: #fff;
+    background: var(--sa-surface);
 }
 
 .service-boundary {

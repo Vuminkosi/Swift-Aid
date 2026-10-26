@@ -48,7 +48,7 @@
 
     <ItemGroup>
         <!-- App Icon -->
-        <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#512BD4" />
+        <MauiIcon Include="Resources\AppIcon\appicon.png" BaseSize="128,128" />
 
         <!-- Splash Screen -->
         <MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#512BD4" BaseSize="128,128" />
@@ -74,6 +74,7 @@
     <ItemGroup>
         <ProjectReference Include="..\SwiftAid.Client\SwiftAid.Client.csproj" />
         <ProjectReference Include="..\SwiftAid.Contracts\SwiftAid.Contracts.csproj" />
+        <ProjectReference Include="..\SwiftAid.UI\SwiftAid.UI.csproj" />
     </ItemGroup>
 
 </Project>

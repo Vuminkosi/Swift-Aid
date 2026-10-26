@@ -1,0 +1,3 @@
+.swiftaid-body-text ::deep .swiftaid-body-text__content {
+    color: var(--sa-text-secondary);
+}

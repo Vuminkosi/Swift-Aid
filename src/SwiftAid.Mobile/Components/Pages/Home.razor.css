@@ -5,30 +5,12 @@
     padding-block: clamp(2rem, 8vw, 4rem);
 }
 
-.eyebrow {
-    color: #176b5b;
-    font-weight: 700;
-}
-
-.start-heading {
-    max-width: 14ch;
-    font-weight: 700;
-    letter-spacing: -0.04em;
-    line-height: 1.05;
-}
-
-.start-description {
-    max-width: 52ch;
-    color: #536660;
-    line-height: 1.6;
-}
-
 .status-card {
     display: grid;
     gap: 0.75rem;
     width: 100%;
     padding: 1.25rem;
-    border: 1px solid #e1e9e4;
+    border: 1px solid var(--sa-border);
     border-radius: 1rem;
-    background: #fff;
+    background: var(--sa-surface);
 }

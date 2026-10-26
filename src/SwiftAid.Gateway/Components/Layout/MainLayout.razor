@@ -1,6 +1,6 @@
 @inherits LayoutComponentBase
 
-<MudThemeProvider Theme="_theme" IsDarkMode="false" />
+<SwiftAidThemeProvider />
 <MudPopoverProvider />
 <MudDialogProvider />
 <MudSnackbarProvider />
@@ -8,7 +8,10 @@
 <MudLayout>
     <MudAppBar Elevation="0" Color="Color.Surface" Class="app-bar">
         <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
-                       OnClick="ToggleDrawer" aria-label="Toggle navigation" />
+                       OnClick="ToggleDrawer"
+                       aria-label="Toggle navigation"
+                       aria-controls="primary-navigation"
+                       aria-expanded="@(_drawerOpen ? "true" : "false")" />
         <MudText Typo="Typo.h6" Class="brand-mark">SwiftAid</MudText>
         <MudSpacer />
         <MudChip T="string" Color="Color.Default" Variant="Variant.Outlined" Size="Size.Small">
@@ -16,7 +19,8 @@
         </MudChip>
     </MudAppBar>
 
-    <MudDrawer @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="0">
+    <MudDrawer id="primary-navigation" @bind-Open="_drawerOpen"
+               ClipMode="DrawerClipMode.Always" Elevation="0">
         <MudNavMenu Class="navigation-menu">
             <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Home">Home</MudNavLink>
             <MudNavLink Href="/report" Icon="@Icons.Material.Filled.EditNote">Report a concern</MudNavLink>
@@ -38,28 +42,6 @@
 
 @code {
     private bool _drawerOpen = true;
-
-    private readonly MudTheme _theme = new()
-    {
-        PaletteLight = new PaletteLight
-        {
-            Primary = "#176B5B",
-            Secondary = "#C46C3B",
-            Background = "#F5F7F4",
-            Surface = "#FFFFFF",
-            AppbarBackground = "#FFFFFF",
-            AppbarText = "#17332D",
-            TextPrimary = "#18332D",
-            TextSecondary = "#536660"
-        },
-        Typography = new Typography
-        {
-            Default = new DefaultTypography
-            {
-                FontFamily = ["Segoe UI", "sans-serif"]
-            }
-        }
-    };
 
     private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
 }

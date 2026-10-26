@@ -5,6 +5,7 @@
     <ProjectReference Include="..\SwiftAid.Application\SwiftAid.Application.csproj" />
     <ProjectReference Include="..\SwiftAid.Infrastructure\SwiftAid.Infrastructure.csproj" />
     <ProjectReference Include="..\SwiftAid.Intelligence\SwiftAid.Intelligence.csproj" />
+    <ProjectReference Include="..\SwiftAid.UI\SwiftAid.UI.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,11 +1,16 @@
 ﻿<script type="module" src="@Assets["Components/Layout/ReconnectModal.razor.js"]"></script>
 
-<dialog id="components-reconnect-modal" data-nosnippet>
+<dialog id="components-reconnect-modal" aria-label="Connection status" aria-busy="false" data-nosnippet>
     <div class="components-reconnect-container">
-        <div class="components-rejoining-animation" aria-hidden="true">
-            <div></div>
-            <div></div>
+        <div id="components-reconnect-loader"
+             class="components-rejoining-animation"
+             data-gif-src="@Assets["_content/SwiftAid.UI/assets/loading/swiftaid-loader.gif"]"
+             data-still-src="@Assets["_content/SwiftAid.UI/assets/loading/swiftaid-loader-still.png"]"
+             aria-hidden="true"
+             hidden>
         </div>
+        <p id="components-reconnect-live-status" class="components-visually-hidden" role="status" aria-live="polite" aria-atomic="true"></p>
+        <p id="components-reconnect-active-text" class="components-reconnect-active-text" aria-hidden="true"></p>
         <p class="components-reconnect-first-attempt-visible">
             Rejoining the server...
         </p>
