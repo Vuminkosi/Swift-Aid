@@ -67,18 +67,42 @@ public sealed class ScopeService : IScopeService
             throw new ScopeUnavailableException(ScopeFailureCode.AccessEpochMismatch);
         }
 
+        if (grant.Status != AccessGrantStatus.Active)
+        {
+            throw new ScopeUnavailableException(ScopeFailureCode.GrantMissing);
+        }
+
         if (grant.ExpiresAtUtc <= _timeProvider.GetUtcNow())
         {
             throw new ScopeUnavailableException(ScopeFailureCode.GrantExpired);
         }
 
-        return new ScopeManifest(
-            grant.OrganizationIds,
-            grant.WorkspaceIds,
-            grant.AssignedCaseIds.Concat(grant.SharedCaseIds),
-            grant.CountryCodes,
-            grant.RegionIds,
-            grant.AccessEpoch,
-            grant.ExpiresAtUtc);
+        var now = _timeProvider.GetUtcNow();
+        var validGroups = grant.Grants
+            .Where(group => group.ValidFromUtc <= now && now < group.ExpiresAtUtc)
+            .OrderBy(group => group.GroupId, StringComparer.Ordinal)
+            .Select(group => new ScopeGrantManifest(
+                group.GroupId,
+                group.ValidFromUtc,
+                group.ExpiresAtUtc < grant.ExpiresAtUtc ? group.ExpiresAtUtc : grant.ExpiresAtUtc,
+                group.OrganizationIds,
+                group.WorkspaceIds,
+                group.AssignedCaseIds.Concat(group.SharedCaseIds),
+                group.CountryCodes,
+                group.RegionIds,
+                group.SensitivityCodes,
+                group.Sectors.Select(sector => sector.ToString()),
+                group.Operations.Select(operation => operation.ToString()),
+                group.CanAccessJurisdictionalCases))
+            .ToArray();
+
+        if (validGroups.Length == 0)
+        {
+            throw new ScopeUnavailableException(grant.Grants.Count == 0
+                ? ScopeFailureCode.GrantMissing
+                : ScopeFailureCode.GrantExpired);
+        }
+
+        return new ScopeManifest(validGroups, grant.AccessEpoch, grant.ExpiresAtUtc);
     }
 }

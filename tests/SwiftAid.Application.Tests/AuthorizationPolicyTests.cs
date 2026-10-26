@@ -35,6 +35,103 @@ public sealed class AuthorizationPolicyTests
     }
 
     [Fact]
+    public async Task Separate_grants_cannot_combine_organization_workspace_or_operation()
+    {
+        var actor = CreateActor("worker-opaque-1");
+        var organizationGroup = CreateScopedGrant(
+            "group-a", organizationIds: ["org-a"], workspaceIds: ["workspace-other"],
+            operations: [CaseOperation.ReadCase]);
+        var workspaceGroup = CreateScopedGrant(
+            "group-b", organizationIds: ["org-other"], workspaceIds: ["workspace-a"],
+            operations: [CaseOperation.Export]);
+        var grant = CreateGrant(actor.ActorId, grants: [organizationGroup, workspaceGroup]);
+        var policy = CreatePolicy(new TestGrantStore(_ => grant));
+
+        var decision = await policy.AuthorizeAsync(actor, CaseId, CaseOperation.ReadCase, CancellationToken.None);
+
+        Assert.False(decision.IsAllowed);
+        Assert.Equal(AccessDecisionCode.WorkspaceOutsideGrant, decision.Code);
+    }
+
+    [Fact]
+    public async Task Operation_permission_cannot_be_borrowed_from_another_scope_group()
+    {
+        var actor = CreateActor("worker-opaque-1");
+        var scopeOnly = CreateScopedGrant("group-a", operations: [CaseOperation.Export]);
+        var operationOnly = CreateScopedGrant(
+            "group-b", organizationIds: ["org-other"], operations: [CaseOperation.ReadCase]);
+        var policy = CreatePolicy(new TestGrantStore(_ => CreateGrant(actor.ActorId, grants: [scopeOnly, operationOnly])));
+
+        var decision = await policy.AuthorizeAsync(actor, CaseId, CaseOperation.ReadCase, CancellationToken.None);
+
+        Assert.False(decision.IsAllowed);
+        Assert.Equal(AccessDecisionCode.OperationNotGranted, decision.Code);
+    }
+
+    [Fact]
+    public async Task Region_sets_are_not_combined_across_groups()
+    {
+        var actor = CreateActor("worker-opaque-1");
+        var firstRegion = CreateScopedGrant(
+            "group-a", canAccessJurisdictionalCases: true, regionIds: ["ZW-MW"]);
+        var secondRegion = CreateScopedGrant(
+            "group-b", canAccessJurisdictionalCases: true, regionIds: ["ZW-MA"]);
+        var descriptorStore = CreateResourceStore(CreateDescriptor(regionIds: ["ZW-MW", "ZW-MA"]));
+        var policy = CreatePolicy(
+            new TestGrantStore(_ => CreateGrant(actor.ActorId, grants: [firstRegion, secondRegion])), descriptorStore);
+
+        var decision = await policy.AuthorizeAsync(actor, CaseId, CaseOperation.ReadCase, CancellationToken.None);
+
+        Assert.False(decision.IsAllowed);
+        Assert.Equal(AccessDecisionCode.RegionOutsideGrant, decision.Code);
+    }
+
+    [Fact]
+    public async Task Assignment_cannot_borrow_resource_dimensions_from_another_group()
+    {
+        var actor = CreateActor("worker-opaque-1");
+        var assignmentOnly = CreateScopedGrant(
+            "group-a", assignedCaseIds: [CaseId], organizationIds: ["org-other"]);
+        var dimensionsOnly = CreateScopedGrant("group-b", canAccessJurisdictionalCases: false);
+        var policy = CreatePolicy(new TestGrantStore(_ => CreateGrant(actor.ActorId, grants: [assignmentOnly, dimensionsOnly])));
+
+        var decision = await policy.AuthorizeAsync(actor, CaseId, CaseOperation.ReadCase, CancellationToken.None);
+
+        Assert.False(decision.IsAllowed);
+        Assert.Equal(AccessDecisionCode.CaseNotAssignedOrShared, decision.Code);
+    }
+
+    [Fact]
+    public async Task Valid_group_allows_access_even_when_an_unrelated_group_is_empty()
+    {
+        var actor = CreateActor("worker-opaque-1");
+        var valid = CreateScopedGrant("group-valid", assignedCaseIds: [CaseId]);
+        var empty = CreateScopedGrant(
+            "group-empty", organizationIds: [], workspaceIds: [], countryCodes: [], regionIds: [],
+            sectors: [], sensitivityCodes: [], operations: []);
+        var policy = CreatePolicy(new TestGrantStore(_ => CreateGrant(actor.ActorId, grants: [empty, valid])));
+
+        var decision = await policy.AuthorizeAsync(actor, CaseId, CaseOperation.ReadCase, CancellationToken.None);
+
+        Assert.True(decision.IsAllowed);
+    }
+
+    [Fact]
+    public async Task Empty_or_inactive_grants_deny_by_default()
+    {
+        var actor = CreateActor("worker-opaque-1");
+        var noGroups = CreatePolicy(new TestGrantStore(_ => CreateGrant(actor.ActorId, grants: [])));
+        var inactive = CreatePolicy(new TestGrantStore(_ => CreateGrant(
+            actor.ActorId, status: AccessGrantStatus.Suspended, grants: [CreateScopedGrant("group-suspended")])));
+
+        var emptyDecision = await noGroups.AuthorizeAsync(actor, CaseId, CaseOperation.ReadCase, CancellationToken.None);
+        var inactiveDecision = await inactive.AuthorizeAsync(actor, CaseId, CaseOperation.ReadCase, CancellationToken.None);
+
+        Assert.Equal(AccessDecisionCode.GrantMissing, emptyDecision.Code);
+        Assert.Equal(AccessDecisionCode.GrantMissing, inactiveDecision.Code);
+    }
+
+    [Fact]
     public async Task Worker_without_assignment_or_explicit_share_is_denied_even_inside_a_matching_region()
     {
         var actor = CreateActor("worker-opaque-1");
@@ -195,6 +292,32 @@ public sealed class AuthorizationPolicyTests
     }
 
     [Fact]
+    public async Task Grant_expiring_during_descriptor_lookup_is_rechecked_before_authorization()
+    {
+        var actor = CreateActor("worker-opaque-1");
+        var timeProvider = new AdvanceableTimeProvider(Now);
+        var grant = CreateGrant(
+            actor.ActorId,
+            expiresAtUtc: Now.AddSeconds(1),
+            grants: [CreateScopedGrant(
+                "longer-lived-group",
+                expiresAtUtc: Now.AddHours(1),
+                assignedCaseIds: [CaseId])]);
+        var policy = new CaseAccessPolicy(
+            new TestGrantStore(_ => grant),
+            new AdvancingResourceStore(timeProvider, CreateDescriptor(), TimeSpan.FromSeconds(1)),
+            timeProvider);
+
+        var decision = await policy.AuthorizeAsync(actor, CaseId, CaseOperation.ReadCase, CancellationToken.None);
+
+        Assert.False(decision.IsAllowed);
+        Assert.Equal(AccessDecisionCode.GrantExpired, decision.Code);
+        Assert.Equal(CaseId, decision.AuditRecord!.ResourceId);
+        Assert.Equal(12, decision.AuditRecord.ResourceVersion);
+        Assert.Equal(Now.AddSeconds(1), decision.AuditRecord.RecordedAtUtc);
+    }
+
+    [Fact]
     public async Task Each_sensitive_decision_rechecks_current_grant_and_records_minimized_denial_audit()
     {
         var actor = CreateActor("worker-opaque-1");
@@ -261,16 +384,53 @@ public sealed class AuthorizationPolicyTests
 
         var manifest = await service.GetAsync(actor, CancellationToken.None);
 
-        Assert.Equal(new[] { "org-a", "org-z" }, manifest.OrganizationIds);
-        Assert.Equal(new[] { "workspace-a", "workspace-z" }, manifest.WorkspaceIds);
-        Assert.Equal(new[] { "SZ", "ZW" }, manifest.CountryCodes);
-        Assert.Equal(new[] { "ZW-MA", "ZW-MW" }, manifest.RegionIds);
-        Assert.Equal(3, manifest.CaseIds.Count);
+        Assert.Equal(ScopeManifest.CurrentSchemaVersion, manifest.SchemaVersion);
+        Assert.Single(manifest.Grants);
+        Assert.Equal(new[] { "org-a", "org-z" }, manifest.Grants[0].OrganizationIds);
+        Assert.Equal(new[] { "workspace-a", "workspace-z" }, manifest.Grants[0].WorkspaceIds);
+        Assert.Equal(new[] { "SZ", "ZW" }, manifest.Grants[0].CountryCodes);
+        Assert.Equal(new[] { "ZW-MA", "ZW-MW" }, manifest.Grants[0].RegionIds);
+        Assert.Equal(3, manifest.Grants[0].CaseIds.Count);
         Assert.Equal(7, manifest.AccessEpoch);
         Assert.Equal(Now.AddHours(1), manifest.ExpiresAtUtc);
-        Assert.DoesNotContain("STANDARD", JsonSerializer.Serialize(manifest), StringComparison.Ordinal);
+        Assert.Contains("STANDARD", JsonSerializer.Serialize(manifest), StringComparison.Ordinal);
         Assert.DoesNotContain("HealthOfficer", JsonSerializer.Serialize(manifest), StringComparison.Ordinal);
         Assert.Equal(1, store.LookupCount);
+    }
+
+    [Fact]
+    public async Task Scope_manifest_serialization_preserves_group_boundaries_without_flattened_fields()
+    {
+        var actor = CreateActor("officer-opaque-1");
+        var groups = new[]
+        {
+            CreateScopedGrant(
+                "scope-a", organizationIds: ["org-a"], workspaceIds: ["workspace-a"],
+                sensitivityCodes: ["sens-A", "SENS-A"]),
+            CreateScopedGrant(
+                "scope-b", organizationIds: ["org-b"], workspaceIds: ["workspace-b"], sensitivityCodes: ["sens-b"])
+        };
+        var service = new ScopeService(
+            new TestGrantStore(_ => CreateGrant(actor.ActorId, grants: groups)), new FixedTimeProvider(Now));
+
+        var manifest = await service.GetAsync(actor, CancellationToken.None);
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(manifest));
+        var root = json.RootElement;
+
+        Assert.Equal(2, root.GetProperty("SchemaVersion").GetInt32());
+        Assert.False(root.TryGetProperty("OrganizationIds", out _));
+        var entries = root.GetProperty("Grants").EnumerateArray().ToArray();
+        Assert.Equal(2, entries.Length);
+        Assert.Equal("scope-a", entries[0].GetProperty("GroupId").GetString());
+        Assert.Equal(new[] { "org-a" }, entries[0].GetProperty("OrganizationIds").EnumerateArray().Select(value => value.GetString()));
+        Assert.Equal(new[] { "workspace-a" }, entries[0].GetProperty("WorkspaceIds").EnumerateArray().Select(value => value.GetString()));
+        Assert.Equal(new[] { "SENS-A", "sens-A" }, entries[0].GetProperty("SensitivityCodes").EnumerateArray().Select(value => value.GetString()));
+        Assert.Equal("scope-b", entries[1].GetProperty("GroupId").GetString());
+        Assert.Equal(new[] { "org-b" }, entries[1].GetProperty("OrganizationIds").EnumerateArray().Select(value => value.GetString()));
+        Assert.Equal(new[] { "workspace-b" }, entries[1].GetProperty("WorkspaceIds").EnumerateArray().Select(value => value.GetString()));
+        Assert.Equal(new[] { "sens-b" }, entries[1].GetProperty("SensitivityCodes").EnumerateArray().Select(value => value.GetString()));
+        Assert.DoesNotContain("SENS-B", entries[0].GetProperty("SensitivityCodes").EnumerateArray().Select(value => value.GetString()));
+        Assert.DoesNotContain("SENS-A", entries[1].GetProperty("SensitivityCodes").EnumerateArray().Select(value => value.GetString()));
     }
 
     [Fact]
@@ -358,6 +518,44 @@ public sealed class AuthorizationPolicyTests
         string actorId,
         long accessEpoch = 7,
         DateTimeOffset? expiresAtUtc = null,
+        AccessGrantStatus status = AccessGrantStatus.Active,
+        IEnumerable<Guid>? assignedCaseIds = null,
+        IEnumerable<Guid>? sharedCaseIds = null,
+        bool canAccessJurisdictionalCases = false,
+        IEnumerable<string>? organizationIds = null,
+        IEnumerable<string>? workspaceIds = null,
+        IEnumerable<string>? countryCodes = null,
+        IEnumerable<string>? regionIds = null,
+        IEnumerable<Sector>? sectors = null,
+        IEnumerable<string>? sensitivityCodes = null,
+        IEnumerable<CaseOperation>? operations = null,
+        IEnumerable<ScopedAccessGrant>? grants = null)
+    {
+        var expires = expiresAtUtc ?? Now.AddHours(1);
+        var scopeGroups = grants ??
+        [
+            CreateScopedGrant(
+                "default-group",
+                expiresAtUtc: expires,
+                assignedCaseIds: assignedCaseIds,
+                sharedCaseIds: sharedCaseIds,
+                canAccessJurisdictionalCases: canAccessJurisdictionalCases,
+                organizationIds: organizationIds,
+                workspaceIds: workspaceIds,
+                countryCodes: countryCodes,
+                regionIds: regionIds,
+                sectors: sectors,
+                sensitivityCodes: sensitivityCodes,
+                operations: operations)
+        ];
+
+        return new CurrentAccessGrant(actorId, accessEpoch, expires, status, scopeGroups);
+    }
+
+    private static ScopedAccessGrant CreateScopedGrant(
+        string groupId,
+        DateTimeOffset? validFromUtc = null,
+        DateTimeOffset? expiresAtUtc = null,
         IEnumerable<Guid>? assignedCaseIds = null,
         IEnumerable<Guid>? sharedCaseIds = null,
         bool canAccessJurisdictionalCases = false,
@@ -368,8 +566,8 @@ public sealed class AuthorizationPolicyTests
         IEnumerable<Sector>? sectors = null,
         IEnumerable<string>? sensitivityCodes = null,
         IEnumerable<CaseOperation>? operations = null) => new(
-        actorId,
-        accessEpoch,
+        groupId,
+        validFromUtc ?? Now.AddDays(-1),
         expiresAtUtc ?? Now.AddHours(1),
         assignedCaseIds ?? [],
         sharedCaseIds ?? [],
@@ -404,6 +602,28 @@ public sealed class AuthorizationPolicyTests
             LookupCount++;
             return ValueTask.FromResult(getDescriptor(caseId));
         }
+    }
+
+    private sealed class AdvancingResourceStore(
+        AdvanceableTimeProvider timeProvider,
+        CaseAccessDescriptor descriptor,
+        TimeSpan elapsedDuringLookup) : ICaseAccessDescriptorStore
+    {
+        public ValueTask<CaseAccessDescriptor?> GetCurrentDescriptorAsync(Guid caseId, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            timeProvider.Advance(elapsedDuringLookup);
+            return ValueTask.FromResult<CaseAccessDescriptor?>(descriptor);
+        }
+    }
+
+    private sealed class AdvanceableTimeProvider(DateTimeOffset currentUtc) : TimeProvider
+    {
+        private DateTimeOffset _currentUtc = currentUtc;
+
+        public override DateTimeOffset GetUtcNow() => _currentUtc;
+
+        public void Advance(TimeSpan elapsed) => _currentUtc = _currentUtc.Add(elapsed);
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider

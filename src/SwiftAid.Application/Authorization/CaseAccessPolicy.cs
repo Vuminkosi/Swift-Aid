@@ -64,6 +64,11 @@ public sealed class CaseAccessPolicy : ICaseAccessPolicy
             return Deny(actor, caseId, null, operation, AccessDecisionCode.AccessEpochMismatch, grant.AccessEpoch);
         }
 
+        if (grant.Status != AccessGrantStatus.Active)
+        {
+            return Deny(actor, caseId, null, operation, AccessDecisionCode.GrantMissing, grant.AccessEpoch);
+        }
+
         if (grant.ExpiresAtUtc <= _timeProvider.GetUtcNow())
         {
             return Deny(actor, caseId, null, operation, AccessDecisionCode.GrantExpired, grant.AccessEpoch);
@@ -93,56 +98,108 @@ public sealed class CaseAccessPolicy : ICaseAccessPolicy
             return Deny(actor, caseId, null, operation, AccessDecisionCode.ResourceIdMismatch, grant.AccessEpoch);
         }
 
-        if (!grant.OrganizationIds.Contains(resource.OrganizationId))
+        var now = _timeProvider.GetUtcNow();
+        if (grant.ExpiresAtUtc <= now)
         {
-            return Deny(actor, caseId, resource.ResourceVersion, operation, AccessDecisionCode.OrganizationOutsideGrant, grant.AccessEpoch);
+            return Deny(actor, caseId, resource.ResourceVersion, operation, AccessDecisionCode.GrantExpired, grant.AccessEpoch);
         }
 
-        if (!grant.WorkspaceIds.Contains(resource.WorkspaceId))
+        var validGroups = grant.Grants
+            .Where(group => group.ValidFromUtc <= now && now < group.ExpiresAtUtc)
+            .OrderBy(group => group.GroupId, StringComparer.Ordinal)
+            .ToArray();
+
+        if (validGroups.Length == 0)
         {
-            return Deny(actor, caseId, resource.ResourceVersion, operation, AccessDecisionCode.WorkspaceOutsideGrant, grant.AccessEpoch);
+            var code = grant.Grants.Count == 0
+                ? AccessDecisionCode.GrantMissing
+                : AccessDecisionCode.GrantExpired;
+            return Deny(actor, caseId, resource.ResourceVersion, operation, code, grant.AccessEpoch);
         }
 
-        if (!grant.CountryCodes.Contains(resource.CountryCode))
+        AccessDecisionCode? closestDenial = null;
+        var closestMatchedDimensions = -1;
+        foreach (var group in validGroups)
         {
-            return Deny(actor, caseId, resource.ResourceVersion, operation, AccessDecisionCode.CountryOutsideGrant, grant.AccessEpoch);
+            var (denial, matchedDimensions) = EvaluateGroup(group, resource, operation);
+            if (denial is null)
+            {
+                return new AccessDecision(true, AccessDecisionCode.Allowed, null);
+            }
+
+            if (matchedDimensions > closestMatchedDimensions)
+            {
+                closestMatchedDimensions = matchedDimensions;
+                closestDenial = denial;
+            }
         }
 
-        if (!grant.Sectors.Contains(resource.Sector))
+        return Deny(actor, caseId, resource.ResourceVersion, operation,
+            closestDenial ?? AccessDecisionCode.GrantMissing, grant.AccessEpoch);
+    }
+
+    private static (AccessDecisionCode? Denial, int MatchedDimensions) EvaluateGroup(
+        ScopedAccessGrant group,
+        CaseAccessDescriptor resource,
+        CaseOperation operation)
+    {
+        var matched = 0;
+        if (!group.OrganizationIds.Contains(resource.OrganizationId))
         {
-            return Deny(actor, caseId, resource.ResourceVersion, operation, AccessDecisionCode.SectorOutsideGrant, grant.AccessEpoch);
+            return (AccessDecisionCode.OrganizationOutsideGrant, matched);
         }
 
-        if (!grant.SensitivityCodes.Contains(resource.SensitivityCode))
+        matched++;
+        if (!group.WorkspaceIds.Contains(resource.WorkspaceId))
         {
-            return Deny(actor, caseId, resource.ResourceVersion, operation, AccessDecisionCode.SensitivityOutsideGrant, grant.AccessEpoch);
+            return (AccessDecisionCode.WorkspaceOutsideGrant, matched);
         }
 
-        if (!grant.Operations.Contains(operation))
+        matched++;
+        if (!group.CountryCodes.Contains(resource.CountryCode))
         {
-            return Deny(actor, caseId, resource.ResourceVersion, operation, AccessDecisionCode.OperationNotGranted, grant.AccessEpoch);
+            return (AccessDecisionCode.CountryOutsideGrant, matched);
         }
 
+        matched++;
+        if (!group.Sectors.Contains(resource.Sector))
+        {
+            return (AccessDecisionCode.SectorOutsideGrant, matched);
+        }
+
+        matched++;
+        if (!group.SensitivityCodes.Contains(resource.SensitivityCode))
+        {
+            return (AccessDecisionCode.SensitivityOutsideGrant, matched);
+        }
+
+        matched++;
+        if (!group.Operations.Contains(operation))
+        {
+            return (AccessDecisionCode.OperationNotGranted, matched);
+        }
+
+        matched++;
         var explicitlyAssignedOrShared =
-            grant.AssignedCaseIds.Contains(resource.CaseId) || grant.SharedCaseIds.Contains(resource.CaseId);
-
-        if (!explicitlyAssignedOrShared)
+            group.AssignedCaseIds.Contains(resource.CaseId) || group.SharedCaseIds.Contains(resource.CaseId);
+        if (explicitlyAssignedOrShared)
         {
-            var coversEveryRegion = resource.RegionIds.Count > 0 &&
-                resource.RegionIds.All(grant.RegionIds.Contains);
-
-            if (!grant.CanAccessJurisdictionalCases)
-            {
-                return Deny(actor, caseId, resource.ResourceVersion, operation, AccessDecisionCode.CaseNotAssignedOrShared, grant.AccessEpoch);
-            }
-
-            if (!coversEveryRegion)
-            {
-                return Deny(actor, caseId, resource.ResourceVersion, operation, AccessDecisionCode.RegionOutsideGrant, grant.AccessEpoch);
-            }
+            return (null, matched + 1);
         }
 
-        return new AccessDecision(true, AccessDecisionCode.Allowed, null);
+        if (!group.CanAccessJurisdictionalCases)
+        {
+            return (AccessDecisionCode.CaseNotAssignedOrShared, matched);
+        }
+
+        var coversEveryRegion = resource.RegionIds.Count > 0 &&
+            resource.RegionIds.All(group.RegionIds.Contains);
+        if (!coversEveryRegion)
+        {
+            return (AccessDecisionCode.RegionOutsideGrant, matched + 1);
+        }
+
+        return (null, matched + 2);
     }
 
     private AccessDecision Deny(

@@ -1,17 +1,16 @@
 namespace SwiftAid.Contracts.Sync;
 
-/// <summary>Minimized, versioned synchronization scope for the current authenticated session.</summary>
+/// <summary>Version 2 minimized sync scope preserving authoritative grant correlation.</summary>
 public sealed record ScopeManifest
 {
+    public const int CurrentSchemaVersion = 2;
+
     public ScopeManifest(
-        IEnumerable<string> organizationIds,
-        IEnumerable<string> workspaceIds,
-        IEnumerable<Guid> caseIds,
-        IEnumerable<string> countryCodes,
-        IEnumerable<string> regionIds,
+        IEnumerable<ScopeGrantManifest> grants,
         long accessEpoch,
         DateTimeOffset expiresAtUtc)
     {
+        ArgumentNullException.ThrowIfNull(grants);
         if (accessEpoch < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(accessEpoch));
@@ -22,44 +21,28 @@ public sealed record ScopeManifest
             throw new ArgumentException("Scope expiry must use UTC.", nameof(expiresAtUtc));
         }
 
-        OrganizationIds = SnapshotIdentifiers(organizationIds, nameof(organizationIds));
-        WorkspaceIds = SnapshotIdentifiers(workspaceIds, nameof(workspaceIds));
-        CaseIds = Snapshot(caseIds, nameof(caseIds));
-        CountryCodes = SnapshotIdentifiers(countryCodes, nameof(countryCodes));
-        RegionIds = SnapshotIdentifiers(regionIds, nameof(regionIds));
+        var snapshot = grants.ToArray();
+        if (snapshot.Any(grant => grant is null))
+        {
+            throw new ArgumentException("Scope grant groups cannot contain null entries.", nameof(grants));
+        }
+
+        if (snapshot.Select(grant => grant.GroupId).Distinct(StringComparer.Ordinal).Count() != snapshot.Length)
+        {
+            throw new ArgumentException("Scope grant group identifiers must be unique.", nameof(grants));
+        }
+
+        SchemaVersion = CurrentSchemaVersion;
+        Grants = Array.AsReadOnly(snapshot);
         AccessEpoch = accessEpoch;
         ExpiresAtUtc = expiresAtUtc;
     }
 
-    public IReadOnlyList<string> OrganizationIds { get; }
+    public int SchemaVersion { get; }
 
-    public IReadOnlyList<string> WorkspaceIds { get; }
-
-    public IReadOnlyList<Guid> CaseIds { get; }
-
-    public IReadOnlyList<string> CountryCodes { get; }
-
-    public IReadOnlyList<string> RegionIds { get; }
+    public IReadOnlyList<ScopeGrantManifest> Grants { get; }
 
     public long AccessEpoch { get; }
 
     public DateTimeOffset ExpiresAtUtc { get; }
-
-    private static IReadOnlyList<T> Snapshot<T>(IEnumerable<T> values, string parameterName)
-    {
-        ArgumentNullException.ThrowIfNull(values, parameterName);
-        return Array.AsReadOnly(values.Distinct().OrderBy(value => value).ToArray());
-    }
-
-    private static IReadOnlyList<string> SnapshotIdentifiers(IEnumerable<string> values, string parameterName)
-    {
-        ArgumentNullException.ThrowIfNull(values, parameterName);
-        var snapshot = values.ToArray();
-        if (snapshot.Any(value => string.IsNullOrWhiteSpace(value) || !string.Equals(value, value.Trim(), StringComparison.Ordinal)))
-        {
-            throw new ArgumentException("Scope contains an empty or non-canonical identifier.", parameterName);
-        }
-
-        return Array.AsReadOnly(snapshot.Distinct(StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal).ToArray());
-    }
 }

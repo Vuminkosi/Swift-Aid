@@ -1,6 +1,3 @@
-using System.Collections.Frozen;
-using SwiftAid.Contracts.Commands;
-
 namespace SwiftAid.Application.Authorization;
 
 /// <summary>
@@ -14,23 +11,22 @@ public interface ICurrentAccessGrantStore
         CancellationToken cancellationToken);
 }
 
-/// <summary>A point-in-time grant snapshot returned by the trusted grant store.</summary>
+public enum AccessGrantStatus
+{
+    Active,
+    Suspended,
+    Revoked
+}
+
+/// <summary>A point-in-time actor grant snapshot returned by the trusted grant store.</summary>
 public sealed class CurrentAccessGrant
 {
     public CurrentAccessGrant(
         string actorId,
         long accessEpoch,
         DateTimeOffset expiresAtUtc,
-        IEnumerable<Guid> assignedCaseIds,
-        IEnumerable<Guid> sharedCaseIds,
-        bool canAccessJurisdictionalCases,
-        IEnumerable<string> organizationIds,
-        IEnumerable<string> workspaceIds,
-        IEnumerable<string> countryCodes,
-        IEnumerable<string> regionIds,
-        IEnumerable<Sector> sectors,
-        IEnumerable<string> sensitivityCodes,
-        IEnumerable<CaseOperation> operations)
+        AccessGrantStatus status,
+        IEnumerable<ScopedAccessGrant> grants)
     {
         ActorId = RequireIdentifier(actorId, nameof(actorId));
         if (accessEpoch < 0)
@@ -43,28 +39,27 @@ public sealed class CurrentAccessGrant
             throw new ArgumentException("Grant expiry must use UTC.", nameof(expiresAtUtc));
         }
 
+        if (!Enum.IsDefined(status))
+        {
+            throw new ArgumentOutOfRangeException(nameof(status));
+        }
+
+        ArgumentNullException.ThrowIfNull(grants);
+        var snapshot = grants.ToArray();
+        if (snapshot.Any(grant => grant is null))
+        {
+            throw new ArgumentException("Grant groups cannot contain null entries.", nameof(grants));
+        }
+
+        if (snapshot.Select(grant => grant.GroupId).Distinct(StringComparer.Ordinal).Count() != snapshot.Length)
+        {
+            throw new ArgumentException("Grant group identifiers must be unique.", nameof(grants));
+        }
+
         AccessEpoch = accessEpoch;
         ExpiresAtUtc = expiresAtUtc;
-        AssignedCaseIds = Freeze(assignedCaseIds, nameof(assignedCaseIds));
-        SharedCaseIds = Freeze(sharedCaseIds, nameof(sharedCaseIds));
-        CanAccessJurisdictionalCases = canAccessJurisdictionalCases;
-        OrganizationIds = FreezeIdentifiers(organizationIds, nameof(organizationIds));
-        WorkspaceIds = FreezeIdentifiers(workspaceIds, nameof(workspaceIds));
-        CountryCodes = FreezeIdentifiers(countryCodes, nameof(countryCodes), StringComparer.OrdinalIgnoreCase);
-        RegionIds = FreezeIdentifiers(regionIds, nameof(regionIds));
-        Sectors = Freeze(sectors, nameof(sectors));
-        SensitivityCodes = FreezeIdentifiers(sensitivityCodes, nameof(sensitivityCodes));
-        Operations = Freeze(operations, nameof(operations));
-
-        if (Sectors.Any(sector => !Enum.IsDefined(sector)))
-        {
-            throw new ArgumentException("Grant contains an unknown sector.", nameof(sectors));
-        }
-
-        if (Operations.Any(operation => !Enum.IsDefined(operation)))
-        {
-            throw new ArgumentException("Grant contains an unknown operation.", nameof(operations));
-        }
+        Status = status;
+        Grants = Array.AsReadOnly(snapshot);
     }
 
     public string ActorId { get; }
@@ -73,46 +68,9 @@ public sealed class CurrentAccessGrant
 
     public DateTimeOffset ExpiresAtUtc { get; }
 
-    public IReadOnlySet<Guid> AssignedCaseIds { get; }
+    public AccessGrantStatus Status { get; }
 
-    public IReadOnlySet<Guid> SharedCaseIds { get; }
-
-    public bool CanAccessJurisdictionalCases { get; }
-
-    public IReadOnlySet<string> OrganizationIds { get; }
-
-    public IReadOnlySet<string> WorkspaceIds { get; }
-
-    public IReadOnlySet<string> CountryCodes { get; }
-
-    public IReadOnlySet<string> RegionIds { get; }
-
-    public IReadOnlySet<Sector> Sectors { get; }
-
-    public IReadOnlySet<string> SensitivityCodes { get; }
-
-    public IReadOnlySet<CaseOperation> Operations { get; }
-
-    private static IReadOnlySet<T> Freeze<T>(IEnumerable<T> values, string parameterName) where T : notnull
-    {
-        ArgumentNullException.ThrowIfNull(values, parameterName);
-        return values.ToFrozenSet();
-    }
-
-    private static IReadOnlySet<string> FreezeIdentifiers(
-        IEnumerable<string> values,
-        string parameterName,
-        StringComparer? comparer = null)
-    {
-        ArgumentNullException.ThrowIfNull(values);
-        var snapshot = values.ToArray();
-        if (snapshot.Any(value => string.IsNullOrWhiteSpace(value) || !string.Equals(value, value.Trim(), StringComparison.Ordinal)))
-        {
-            throw new ArgumentException("Grant scope contains an empty or non-canonical identifier.", parameterName);
-        }
-
-        return snapshot.ToFrozenSet(comparer ?? StringComparer.Ordinal);
-    }
+    public IReadOnlyList<ScopedAccessGrant> Grants { get; }
 
     private static string RequireIdentifier(string value, string parameterName)
     {
