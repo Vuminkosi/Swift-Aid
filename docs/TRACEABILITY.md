@@ -1,10 +1,12 @@
 # Requirement and scenario traceability snapshot
 
-Source of truth: [spec.md](../spec.md) v1.3 and [implementation.md](../implementation.md) v2.3. The plan reports 350 unique SA-* requirements and 72 AT-* scenarios; this snapshot has not executed those scenarios. See the source's §22 crosswalk for all existing families and owners.
+Source of truth: [spec.md](../spec.md) v1.4 and [implementation.md](../implementation.md) v2.4. The current pair contains 365 unique SA-* requirements, 76 AT-* scenarios, and 44 implementation tasks. This ledger has not executed those scenarios. See the source §22 crosswalk for all existing families and owners.
+
+Operative current-pair labels have been aligned to v1.4/v2.4; historical source-basis references remain identified as historical. The metadata-only correction is recorded in [SPEC-ALIGNMENT.md](SPEC-ALIGNMENT.md) and did not change the requirement crosswalk.
 
 ## Added requirement-family ownership
 
-The following rows are copied from implementation.md §22.2a. Status is not verified because no task-level evidence is recorded here.
+The following rows follow the requirement-family and scenario crosswalks in implementation.md §22.2a and §22.4. Status is NOT VERIFIED because no requirement-level completion evidence is recorded here.
 
 | Requirement | Priority | Owning task | Status |
 |---|---|---|---|
@@ -69,6 +71,21 @@ The following rows are copied from implementation.md §22.2a. Status is not veri
 | SA-SUB-05 | P0 | P10.3 | NOT VERIFIED |
 | SA-SUB-06 | P0 | P10.3 | NOT VERIFIED |
 | SA-SUB-07 | P0 | P10.3 | NOT VERIFIED |
+| SA-LOOP-01 | P0 | P8.6 | NOT VERIFIED |
+| SA-LOOP-02 | P0 | P8.6 | NOT VERIFIED |
+| SA-LOOP-03 | P0 | P8.6 | NOT VERIFIED |
+| SA-LOOP-04 | P0 | P8.6 | NOT VERIFIED |
+| SA-LOOP-05 | P0 | P8.6 | NOT VERIFIED |
+| SA-LOOP-06 | P0 | P8.6 | NOT VERIFIED |
+| SA-LOOP-07 | P0 | P8.6 | NOT VERIFIED |
+| SA-LOOP-08 | P0 | P8.6 | NOT VERIFIED |
+| SA-LOOP-09 | P0 | P8.6 | NOT VERIFIED |
+| SA-LOOP-10 | P0 | P8.6 | NOT VERIFIED |
+| SA-LOOP-11 | P0 | P8.6 | NOT VERIFIED |
+| SA-LOOP-12 | P0 | P8.6 | NOT VERIFIED |
+| SA-LOOP-13 | P0 | P8.6 | NOT VERIFIED |
+| SA-LOOP-14 | P0 | P8.6 | NOT VERIFIED |
+| SA-LOOP-15 | P0 | P8.6 | NOT VERIFIED |
 
 ## Acceptance evidence status
 

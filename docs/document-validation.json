@@ -1,57 +1,104 @@
 {
-  "implementationVersion": "2.3",
   "snapshotDate": "2026-10-26",
+  "sourceRevisionBeforeMetadataCorrection": "ef8a8cd7d6a24897310bdf6490227082d675499a",
+  "specVersion": "1.4",
+  "implementationVersion": "2.4",
+  "specSha256": "8900b57ea08c9db0704d26b19ab6289d4e4d7891d2609cc253caf1d3a66b4aee",
+  "specBytes": 217666,
+  "implementationSha256": "09f9eb36683d8860d2904cb1604c6a5c65e7ec9c51a9380e3bfef46a4a1f2023",
+  "implementationBytes": 430468,
+  "sourceReportedRequirementCount": 365,
+  "sourceReportedAcceptanceScenarioCount": 76,
+  "extractedTaskCount": 44,
+  "historicalPair": {
+    "documentationBaseline": "0bf4cf45abce753011803a80f029b45c8f8748dc",
+    "specVersion": "1.3",
+    "implementationVersion": "2.3",
+    "specSha256": "4317a3348a9571dac115d5cd41429a2535f246fc9d3f059a8b4cb2e37a1ee4a7",
+    "implementationSha256": "d720d77df550c5b3141c759ac5addfc809d98a1df85a131637202884320b1062"
+  },
+  "preMetadataCorrectionPair": {
+    "sourceRevision": "ef8a8cd7d6a24897310bdf6490227082d675499a",
+    "specBytes": 217604,
+    "specSha256": "8bdf616323a0d92149965b99d999f1ef235a2793812c6c87c4d203cf412ad60c",
+    "implementationBytes": 430273,
+    "implementationSha256": "2d98fd6ec3d9c019b87a4a9a4981485727b02cf695c88dbd028c1c0c13f7f76f"
+  },
   "checks": [
     {
-      "check": "paired source files and revisions",
-      "evidence": "Root document metadata shows spec v1.3 and plan v2.3",
+      "check": "paired source metadata",
+      "evidence": "Operative paired-revision text, current handoffs, and current inventory counts align to spec v1.4 / implementation v2.4 and 365 requirements / 76 scenarios / seven additions. Historical source-basis references to v1.3/v2.3 are explicitly retained as historical.",
       "result": "PASS"
     },
     {
-      "check": "source hashes",
-      "evidence": "4317a3348a9571dac115d5cd41429a2535f246fc9d3f059a8b4cb2e37a1ee4a7; d720d77df550c5b3141c759ac5addfc809d98a1df85a131637202884320b1062",
+      "check": "current source hashes and byte lengths",
+      "evidence": "Recomputed from root files after metadata-only correction: spec 217666 bytes / 8900b57ea08c9db0704d26b19ab6289d4e4d7891d2609cc253caf1d3a66b4aee; implementation 430468 bytes / 09f9eb36683d8860d2904cb1604c6a5c65e7ec9c51a9380e3bfef46a4a1f2023.",
       "result": "PASS"
     },
     {
-      "check": "task inventory extraction",
-      "evidence": "43 task headings extracted from implementation.md",
+      "check": "source requirement/scenario/task extraction",
+      "evidence": "365 unique SA identifiers, 76 distinct AT identifiers, 44 task headings; ledgers contain 15 SA-LOOP rows, 76 AT rows, and 44 task rows.",
       "result": "PASS"
     },
     {
-      "check": "acceptance scenario extraction",
-      "evidence": "72 scenario headings extracted from spec.md",
+      "check": "documentation JSON, local Markdown links and control characters",
+      "evidence": "Current document-validation.json parsed as JSON; relative file links in docs Markdown resolve; no invalid control characters were found in docs Markdown.",
       "result": "PASS"
     },
     {
-      "check": "product build and tests",
-      "evidence": "Documentation task was not authorized to run tests/build",
-      "result": "NOT RUN"
-    },
-    {
-      "check": "Android/provider/license/browser proof",
-      "evidence": "No corresponding evidence supplied",
-      "result": "NOT VERIFIED"
-    },
-    {
-      "check": "documentation local file links",
-      "evidence": "All relative Markdown file targets in docs/*.md exist",
+      "check": "source-pair bootstrap assertion",
+      "evidence": "Independent documentation reviewer PASS. `tests/bootstrap/test_scaffold.py` SHA-256 25732429C450F1DE526A033DE574E095F830372944B40C45A46536DD52A4FBF7 parses actual `#### Pn.n —` headings, checks duplicates/reference equality, P8.6, and MudBlazor-primary/Syncfusion-specialized/gate/fallback semantics. `python -m unittest discover -s tests/bootstrap -v` PASS 4/4 and configured Ruff PASS against final source hashes.",
       "result": "PASS"
     },
     {
-      "check": "ledger table counts",
-      "evidence": "43 plan task headings; 72 spec acceptance scenario headings; 43 task rows and 72 scenario rows verified in ledgers",
-      "result": "PASS"
+      "check": "focused P1.1 evidence reported by implementation lane",
+      "evidence": "P1.1 implementation assignment COMPLETE; independent API-contract and code reviews passed. Serializer extension tests 12/12. `dotnet restore SwiftAid.sln --locked-mode -m:1 -nr:false` and `dotnet build SwiftAid.sln --no-restore -m:1 -nr:false` passed (0 warnings/errors). `dotnet test SwiftAid.sln --no-build --no-restore -m:1 -nr:false` passed Domain 15 + Application 35; three other assemblies reported no tests. Snapshot at HEAD ef8a8cd7d6a24897310bdf6490227082d675499a predates P1.2A. FormatChecker validated all eight schema fixtures. Broader P1.1/AT acceptance remains NOT VERIFIED.",
+      "result": "PASS_LIMITED_SCOPE"
     },
     {
-      "check": "PC/additive requirement rows",
-      "evidence": "8 PC rows and 61 added-family rows (PUB/GEO/IDN/MEM/SUB) verified",
-      "result": "PASS"
+      "check": "P1.2A authorization policy verification",
+      "evidence": "Two prior S2 findings and the wrong-CaseId-result to ResourceIdMismatch regression were resolved. Focused AuthorizationPolicyTests passed 14/14. The earlier unfiltered Application.Tests result of 48/48 predates the added regression; current 49-test suite is NOT VERIFIED. Production authorization wiring, runtime staff access, and AT-02/09/10 remain NOT VERIFIED.",
+      "result": "PASS_LIMITED_SCOPE"
+    },
+    {
+      "check": "focused P0.3 evidence reported by implementation lane",
+      "evidence": "Focused 15/15 and Application.Tests 23/23 after a test-only fix. Real Meta route/call/store/DI and provider capability remain NOT VERIFIED.",
+      "result": "PASS_LIMITED_SCOPE"
+    },
+    {
+      "check": "Python worker suite and lint",
+      "evidence": "With UV_PROJECT_ENVIRONMENT=%LOCALAPPDATA%\\Temp\\swiftaid-p1-schema-worker-venv, `uv run --project workers --locked pytest workers/tests -q` reported 4 passed / 2 skipped optional live NATS checks on Python 3.12.15/uv 0.13.5; `uv run --project workers --locked ruff check workers/src workers/tests` passed; FormatChecker validated all eight fixtures.",
+      "result": "PASS_LIMITED_SCOPE"
+    },
+    {
+      "check": "Android UI source review and device attempt",
+      "evidence": "Independent source/zoom review passed for MudBlazor registration and Mud component usage. Android Release build passed. AVD boot failed before APK install; device render/install/restart/offline/Datasync remains NOT VERIFIED. Retained artifact path is C:\\Users\\VUMINK~1\\AppData\\Local\\Temp\\swiftaid-p02-0c953f6b.",
+      "result": "PASS_SOURCE_ONLY_DEVICE_NOT_VERIFIED"
+    },
+    {
+      "check": "isolated NATS ACL integration reported by implementation lane",
+      "evidence": "Against disposable NATS Server 2.15.1, `uv run --project workers --python \"%LOCALAPPDATA%\\Temp\\swiftaid-p01-python\\cpython-3.12.15-windows-x86_64-none\\python.exe\" --locked pytest workers/tests/test_nats_acl.py -q` reported 2 passed / 0.15s. uv 0.13.5 executable: %LOCALAPPDATA%\\Temp\\swiftaid-p01-tooling\\bin\\uv.exe. Process-only ACL URL/password arguments are not retained, so this exact setup is not fully repeatable from docs alone. Full Compose startup and integrated authorization remain NOT VERIFIED.",
+      "result": "PASS_LIMITED_SCOPE"
+    },
+    {
+      "check": "bounded Chrome journey reported by verification lane",
+      "evidence": "Home/navigation, /sessions to /report, truthful unavailable states, Mud shell and 320px passed. Remaining 390/768/1280, keyboard/drawer/contrast/console, submission/staff/cases and Android are NOT VERIFIED.",
+      "result": "PASS_LIMITED_SCOPE"
+    },
+    {
+      "check": "P8.6 implementation and acceptance",
+      "evidence": "New P0 contract task, SA-LOOP-01..15, AT-73..76 crosswalked. No implementation, restart integration, Python delivery or real supported Meta multi-turn smoke evidence recorded.",
+      "result": "NOT_VERIFIED"
+    },
+    {
+      "check": "full product acceptance, release rehearsal and device/provider proof",
+      "evidence": "P0.1/AT-36, Android device acceptance, live provider capability and complete release acceptance are not established by the supplied evidence.",
+      "result": "NOT_VERIFIED"
+    },
+    {
+      "check": "documentation task product build/test execution",
+      "evidence": "This documentation task did not run product builds or tests.",
+      "result": "NOT_RUN"
     }
-  ],
-  "sourceReportedRequirementCount": 350,
-  "specSha256": "4317a3348a9571dac115d5cd41429a2535f246fc9d3f059a8b4cb2e37a1ee4a7",
-  "implementationSha256": "d720d77df550c5b3141c759ac5addfc809d98a1df85a131637202884320b1062",
-  "sourceReportedAcceptanceScenarioCount": 72,
-  "specVersion": "1.3",
-  "extractedTaskCount": 43
+  ]
 }

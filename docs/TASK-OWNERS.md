@@ -1,16 +1,16 @@
 # Task ownership snapshot
 
-Source contract: [implementation.md](../implementation.md) v2.3; product criteria: [spec.md](../spec.md) v1.3. Snapshot: 26 October 2026. The master orchestrator retains global task, contract, and integration authority. Assignment rows below are a status snapshot, not exclusive path reservations; implementation lane must maintain active path ownership in its handoffs. No ownership is inferred for future work.
+Source contract: [implementation.md](../implementation.md) v2.4; product criteria: [spec.md](../spec.md) v1.4. Snapshot: 26 October 2026. The master orchestrator retains global task, contract, and integration authority. Assignment rows below are a status snapshot, not exclusive path reservations; implementation lane must maintain active path ownership in its handoffs. No ownership is inferred for future work.
 
-P0.1 has an observed implementation-orchestrator assignment. Other source tasks have no observed implementation owner in this snapshot. Update when native assignment and exact paths are confirmed. The documentation lane owns docs/ records for this task; it does not own code or the source documents.
+P0.1, P0.3, P1.1, and P1.2/P1.2A have observed implementation assignments or results in the current snapshot. Other source tasks have no observed implementation owner recorded here. This table is not an exclusive path reservation; update exact paths from current lane handoffs. The documentation lane owns docs/ records for this task; it does not own code or the source documents.
 
 | Task | Source task name | Observed status / owner |
 |---|---|---|
-| P0.1 | Create the fresh repository and locked build baseline | IN PROGRESS — implementation-orchestrator `/root/implementation_orchestrator_swiftaid_foundation`; scaffold observed, required checks pending |
-| P0.2 | Prove native MAUI + Datasync on Android before UI investment | NOT STARTED — no implementation evidence recorded |
-| P0.3 | Verify Meta access and define capability/budget controls | NOT STARTED — no implementation evidence recorded |
-| P1.1 | Define schemas, aggregate invariants, and event replay | NOT STARTED — no implementation evidence recorded |
-| P1.2 | Implement first-party identity and resource policies | NOT STARTED — no implementation evidence recorded |
+| P0.1 | Create the fresh repository and locked build baseline | PARTIAL / IN PROGRESS — locked restore, integrated solution build, and Domain/Application test snapshot PASS. Android MudBlazor host wiring and zoom source review PASS; P0.1 acceptance and AT-36 remain NOT VERIFIED. |
+| P0.2 | Prove native MAUI + Datasync on Android before UI investment | PARTIAL / IN PROGRESS — Android Release build PASS; AVD boot attempt failed before APK install. Device install/render/restart/offline/Datasync acceptance NOT VERIFIED. |
+| P0.3 | Verify Meta access and define capability/budget controls | IMPLEMENTER ASSIGNMENT COMPLETE, partial guard slice — `/root/implementation_orchestrator_swiftaid_foundation/backend_implementer_swiftaid_meta_budget_guards`; focused tests 15/15 and Application.Tests 23/23 reported PASS after a test-only fix. Production provider route/call/store/DI and real Meta capability remain NOT VERIFIED. |
+| P1.1 | Define schemas, aggregate invariants, and event replay | IMPLEMENTATION ASSIGNMENT COMPLETE — implementer `/root/implementation_orchestrator_swiftaid_foundation/backend_implementer_swiftaid_case_aggregate`; independent API-contract/code reviews PASS; serializer extension 12/12; full-solution test snapshot passed Domain 15 + Application 35; FormatChecker validated all eight fixtures. Broader P1.1/AT acceptance remains NOT VERIFIED. |
+| P1.2 | Implement first-party identity and resource policies | PARTIAL / IN REVIEW — P1.2A implementer `/root/implementation_orchestrator_swiftaid_foundation/backend_implementer_swiftaid_p12a_access_policy` delivered fixes; focused `AuthorizationPolicyTests` 14/14 PASS. The earlier Application.Tests 48/48 result predates this test; current 49-test suite NOT VERIFIED. The wrong-CaseId-result → ResourceIdMismatch regression is resolved. Production auth/store/DI/endpoint enforcement and runtime AT-02/09/10 acceptance NOT VERIFIED. |
 | P1.3 | Implement Facebook, Google and organizational SSO | NOT STARTED — no implementation evidence recorded |
 | P2.1 | Implement atomic command processing, receipts, and persistence | NOT STARTED — no implementation evidence recorded |
 | P2.2 | Implement human and animal report registration/correction | NOT STARTED — no implementation evidence recorded |
@@ -38,6 +38,7 @@ P0.1 has an observed implementation-orchestrator assignment. Other source tasks 
 | P8.3 | Implement factual continuity and approved administrative execution | NOT STARTED — no implementation evidence recorded |
 | P8.4 | Evaluate AI behavior and enforce cost limits | NOT STARTED — no implementation evidence recorded |
 | P8.5 | Integrate authorized AI recall and context-safe cache reuse | NOT STARTED — no implementation evidence recorded |
+| P8.6 | Implement durable multi-turn reasoning and clarification | NOT STARTED — no implementation owner or implementation result observed. P0 bounded scope; depends on P8.3, P8.5, P6.2, and P1.2. AT-73–AT-76, SA-LOOP-01–15, focused/integration/Python tests, and real supported Meta multi-turn smoke remain NOT VERIFIED. |
 | P9.1 | Implement deterministic pattern detection | NOT STARTED — no implementation evidence recorded |
 | P9.2 | Generate restricted investigation briefs and human decisions | NOT STARTED — no implementation evidence recorded |
 | P9.3 | Test corrections, false signals, and cross-sector negative controls | NOT STARTED — no implementation evidence recorded |

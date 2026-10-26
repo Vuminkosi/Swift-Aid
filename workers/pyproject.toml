@@ -1,0 +1,39 @@
+[project]
+name = "swiftaid-workers"
+version = "0.1.0"
+description = "Gateway-scoped SwiftAid background job consumers"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "httpx>=0.27,<1",
+    "nats-py>=2.9,<3",
+    "pydantic>=2.8,<3",
+    "pydantic-settings>=2.4,<3",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.11,<2",
+    "jsonschema==4.26.0",
+    "pytest==9.0.3",
+    "pytest-asyncio==1.3.0",
+    "ruff>=0.6,<1",
+]
+
+[build-system]
+requires = ["hatchling>=1.25,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/swiftaid_workers"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true

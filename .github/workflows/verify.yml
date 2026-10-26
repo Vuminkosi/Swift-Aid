@@ -1,0 +1,91 @@
+name: Verify
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dotnet-and-bootstrap:
+    name: .NET solution and repository checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12 for bootstrap checks
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up .NET SDK from global.json
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: global.json
+
+      - name: Run repository bootstrap checks
+        run: python3 -m unittest discover -s tests/bootstrap -v
+
+      - name: Validate Compose configuration without starting services
+        env:
+          POSTGRES_DB: swiftaid_config_check
+          POSTGRES_USER: config_check
+          POSTGRES_PASSWORD: local-validation-placeholder
+          QDRANT_API_KEY: local-validation-placeholder
+          NATS_GATEWAY_USER: gateway_check
+          NATS_GATEWAY_PASSWORD: local-validation-placeholder
+          NATS_WORKER_USER: worker_check
+          NATS_WORKER_PASSWORD: local-validation-placeholder
+        run: docker compose -f infra/compose.yml config --quiet
+
+      - name: Restore locked solution dependencies
+        run: dotnet restore SwiftAid.sln --locked-mode
+
+      - name: Build the solution
+        run: dotnet build SwiftAid.sln --configuration Release --no-restore
+
+      - name: Run solution tests
+        run: dotnet test SwiftAid.sln --configuration Release --no-build --no-restore
+
+  python-worker:
+    name: Python worker checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: 0.13.5
+          enable-cache: true
+
+      - name: Check lockfile
+        run: uv lock --project workers --check --python 3.12
+
+      - name: Install locked worker dependencies
+        run: uv sync --project workers --locked --all-groups
+
+      - name: Lint worker source and tests
+        run: uv run --project workers --locked ruff check workers/src workers/tests
+
+      - name: Run worker tests
+        run: uv run --project workers --locked pytest workers/tests -q

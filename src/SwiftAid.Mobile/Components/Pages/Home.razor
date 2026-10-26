@@ -1,0 +1,27 @@
+@page "/"
+
+<PageTitle>SwiftAid | Community support</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="mobile-start">
+    <MudText Typo="Typo.overline" Class="eyebrow">Community health support</MudText>
+    <MudText Typo="Typo.h3" HtmlTag="h1" Class="start-heading">
+        Support that follows through.
+    </MudText>
+    <MudText Typo="Typo.body1" Class="start-description">
+        SwiftAid is being prepared for private human and animal concern reporting and accountable follow-through.
+    </MudText>
+
+    <MudPaper Class="status-card" Elevation="0">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudIcon Icon="@Icons.Material.Filled.Info" Color="Color.Primary" Size="Size.Medium" />
+            <MudText Typo="Typo.h6" HtmlTag="h2">Current availability</MudText>
+        </MudStack>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Public intake and offline capture are not available in this build. This app cannot submit or save a report.
+        </MudText>
+    </MudPaper>
+
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+        SwiftAid does not provide medical or veterinary diagnosis, treatment, or emergency dispatch.
+    </MudAlert>
+</MudContainer>

@@ -1,0 +1,91 @@
+name: swiftaid
+
+services:
+  gateway:
+    build:
+      context: ..
+      dockerfile: src/SwiftAid.Gateway/Dockerfile
+    environment:
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=${POSTGRES_DB:?Set POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      Qdrant__Endpoint: http://qdrant:6333
+      Qdrant__ApiKey: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
+      Nats__Url: nats://nats:4222
+      Nats__Username: ${NATS_GATEWAY_USER:?Set NATS_GATEWAY_USER in .env}
+      Nats__Password: ${NATS_GATEWAY_PASSWORD:?Set NATS_GATEWAY_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${GATEWAY_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    networks:
+      - application
+    restart: unless-stopped
+
+  postgres:
+    image: postgis/postgis:17-3.6-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - application
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.19.0@sha256:6c0652f8d6925b22f2f6f0e0a5365a6c9dbc8768bd6e70ccc1cdc14847e452a0
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
+      QDRANT__TELEMETRY_DISABLED: "true"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    # Intentionally no host port: only application-network services can reach it.
+    networks:
+      - application
+    restart: unless-stopped
+
+  nats:
+    image: nats:2.15.1-alpine3.22
+    command: ["--config", "/etc/nats/nats.conf"]
+    environment:
+      NATS_GATEWAY_USER: ${NATS_GATEWAY_USER:?Set NATS_GATEWAY_USER in .env}
+      NATS_GATEWAY_PASSWORD: ${NATS_GATEWAY_PASSWORD:?Set NATS_GATEWAY_PASSWORD in .env}
+      NATS_WORKER_USER: ${NATS_WORKER_USER:?Set NATS_WORKER_USER in .env}
+      NATS_WORKER_PASSWORD: ${NATS_WORKER_PASSWORD:?Set NATS_WORKER_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${NATS_CLIENT_PORT:-4222}:4222"
+    volumes:
+      - ./nats.conf:/etc/nats/nats.conf:ro
+      - nats-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8222/healthz >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - application
+    restart: unless-stopped
+
+networks:
+  application:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  qdrant-data:
+  nats-data:

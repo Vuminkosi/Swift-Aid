@@ -1,0 +1,34 @@
+.app-bar {
+    border-bottom: 1px solid #e4ebe7;
+    color: #17332d;
+}
+
+.brand-mark {
+    font-weight: 700;
+    letter-spacing: -0.03em;
+}
+
+.navigation-menu {
+    padding: 1rem 0.75rem;
+}
+
+.drawer-divider {
+    margin: 0 1.25rem;
+}
+
+.drawer-note {
+    display: block;
+    max-width: 15rem;
+    padding: 1rem 1.5rem;
+    color: #536660;
+    line-height: 1.5;
+}
+
+.main-content {
+    min-height: calc(100vh - 4rem);
+    background: #f5f7f4;
+}
+
+#main-content {
+    outline: none;
+}

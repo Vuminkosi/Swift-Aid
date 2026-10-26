@@ -1,0 +1,58 @@
+@page "/"
+
+<PageTitle>SwiftAid | Community support</PageTitle>
+
+<section class="welcome-panel" aria-labelledby="welcome-heading">
+    <div class="welcome-copy">
+        <MudText Typo="Typo.overline" Class="eyebrow">Community health support</MudText>
+        <MudText Typo="Typo.h3" HtmlTag="h1" id="welcome-heading" Class="welcome-heading">
+            A concern deserves a clear next step.
+        </MudText>
+        <MudText Typo="Typo.body1" Class="welcome-description">
+            Share a human or animal health concern privately. You can start without an account;
+            an organization reviews reports before they become managed cases.
+        </MudText>
+        <MudStack Row="true" Spacing="2" Class="welcome-actions">
+            <MudButton Href="/report" Variant="Variant.Filled" Color="Color.Primary"
+                       EndIcon="@Icons.Material.Filled.ArrowForward">
+                Report a concern
+            </MudButton>
+            <MudButton Href="/education" Variant="Variant.Text" Color="Color.Primary">
+                Explore education
+            </MudButton>
+        </MudStack>
+    </div>
+    <div class="welcome-mark" aria-hidden="true">
+        <MudIcon Icon="@Icons.Material.Filled.VolunteerActivism" Size="Size.Large" />
+        <span>Care, with follow-through</span>
+    </div>
+</section>
+
+<section class="information-grid" aria-label="How SwiftAid works">
+    <MudPaper Class="information-card" Elevation="0">
+        <MudIcon Icon="@Icons.Material.Filled.Lock" Color="Color.Primary" Size="Size.Medium" />
+        <MudText Typo="Typo.h6" HtmlTag="h2">Private by default</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Your report is private. A receipt shows its review status without exposing staff case details.
+        </MudText>
+    </MudPaper>
+    <MudPaper Class="information-card" Elevation="0">
+        <MudIcon Icon="@Icons.Material.Filled.Pets" Color="Color.Primary" Size="Size.Medium" />
+        <MudText Typo="Typo.h6" HtmlTag="h2">People and animals</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Record a concern for a person, an individual animal, or a herd or flock.
+        </MudText>
+    </MudPaper>
+    <MudPaper Class="information-card" Elevation="0">
+        <MudIcon Icon="@Icons.Material.Filled.FactCheck" Color="Color.Primary" Size="Size.Medium" />
+        <MudText Typo="Typo.h6" HtmlTag="h2">Clear review states</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Submission means received for review. It does not mean verified, assigned, or treated.
+        </MudText>
+    </MudPaper>
+</section>
+
+<MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="service-boundary">
+    Community information only. SwiftAid does not provide medical or veterinary diagnosis, treatment,
+    or emergency dispatch.
+</MudAlert>

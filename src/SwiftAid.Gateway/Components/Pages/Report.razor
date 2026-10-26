@@ -1,0 +1,19 @@
+@page "/report"
+
+<PageTitle>Report a concern | SwiftAid</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="status-page">
+    <MudIcon Icon="@Icons.Material.Filled.EditNote" Color="Color.Primary" Size="Size.Large" />
+    <MudText Typo="Typo.h4" HtmlTag="h1">Report a concern</MudText>
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
+        Public intake is not connected yet. No report has been submitted.
+    </MudAlert>
+    <MudText Typo="Typo.body1">
+        This service will allow a private report about a person or animal without an account.
+        Until the intake service is available, this page does not collect or save report details.
+    </MudText>
+    <MudButton Href="/" Variant="Variant.Outlined" Color="Color.Primary"
+               StartIcon="@Icons.Material.Filled.ArrowBack">
+        Return home
+    </MudButton>
+</MudContainer>

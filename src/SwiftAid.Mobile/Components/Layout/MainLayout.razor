@@ -1,0 +1,36 @@
+@inherits LayoutComponentBase
+
+<MudThemeProvider Theme="_theme" IsDarkMode="false" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudMainContent>
+        <main id="main-content" tabindex="-1">
+            @Body
+        </main>
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private readonly MudTheme _theme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#176B5B",
+            Secondary = "#C46C3B",
+            Background = "#F5F7F4",
+            Surface = "#FFFFFF",
+            TextPrimary = "#18332D",
+            TextSecondary = "#536660"
+        },
+        Typography = new Typography
+        {
+            Default = new DefaultTypography
+            {
+                FontFamily = ["Segoe UI", "sans-serif"]
+            }
+        }
+    };
+}

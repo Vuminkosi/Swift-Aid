@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\SwiftAid.Contracts\SwiftAid.Contracts.csproj" />
+    <ProjectReference Include="..\SwiftAid.Application\SwiftAid.Application.csproj" />
+    <ProjectReference Include="..\SwiftAid.Infrastructure\SwiftAid.Infrastructure.csproj" />
+    <ProjectReference Include="..\SwiftAid.Intelligence\SwiftAid.Intelligence.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MudBlazor" />
+    <PackageReference Include="CommunityToolkit.Datasync.Server" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+  </PropertyGroup>
+
+</Project>

@@ -1,6 +1,8 @@
 # Product acceptance register
 
-Source of truth: spec.md v1.3, §§26–27; implementation.md v2.3, §18.4 and task contracts. Snapshot: 26 October 2026. The 72 scenarios below are defined in the product specification; this ledger records no execution evidence yet.
+Source of truth: spec.md v1.4, §§26–27; implementation.md v2.4, §18.4 and task contracts. Snapshot: 26 October 2026. The 76 scenarios below are defined in the product specification; this ledger records no execution evidence yet.
+
+Operative current-pair labels have been aligned to v1.4/v2.4; historical source-basis references remain identified as historical. The metadata-only correction is recorded in [SPEC-ALIGNMENT.md](SPEC-ALIGNMENT.md) and did not change product acceptance scope.
 
 **Evidence rule:** each result must name the test/device/provider, command or procedure, source revision, output/evidence path, and verdict. A mock or OFF-gate result cannot stand in for live provider, Android, licensing, rights, professional, or positive optional-feature evidence.
 
@@ -78,7 +80,12 @@ Source of truth: spec.md v1.3, §§26–27; implementation.md v2.3, §18.4 and t
 | AT-70 | Embedding unavailable | NOT RUN |
 | AT-71 | Qdrant outage and guest isolation | NOT RUN |
 | AT-72 | Erasure versus replay/restore | NOT RUN |
+| AT-73 | Multi-turn factual clarification | NOT RUN |
+| AT-74 | Interruption, restart and stale context | NOT RUN |
+| AT-75 | Approval/receipt and loop budget | NOT RUN |
+| AT-76 | Memory and tenant isolation across turns | NOT RUN |
 
+P8.6 evidence remains NOT VERIFIED for AT-73–AT-76. The source requires separate model turns, durable checkpoint/restart behavior, stale/version and permission checks, approval/receipt idempotency, tenant-scoped memory, bounded cycles, and one real supported Meta multi-turn smoke with synthetic case data. Simulated calls and real provider calls must be identified separately. No P8.6 smoke or behavioral test result is recorded here.
 ## Mandatory release boundaries
 
 - P0 release acceptance is not achieved by scaffolding or by a passing build alone.
