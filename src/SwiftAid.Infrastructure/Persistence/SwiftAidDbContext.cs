@@ -1,0 +1,411 @@
+using Microsoft.EntityFrameworkCore;
+using SwiftAid.Domain.Cases;
+
+namespace SwiftAid.Infrastructure.Persistence;
+
+/// <summary>
+/// The sole PostgreSQL persistence context for identity references, access grants,
+/// managed-case projections, event metadata, receipts, audit, and outbox records.
+/// </summary>
+public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> options) : DbContext(options)
+{
+    public DbSet<ActorEntity> Actors => Set<ActorEntity>();
+    public DbSet<ActorAccessStateEntity> ActorAccessStates => Set<ActorAccessStateEntity>();
+    public DbSet<OrganizationEntity> Organizations => Set<OrganizationEntity>();
+    public DbSet<WorkspaceEntity> Workspaces => Set<WorkspaceEntity>();
+    public DbSet<OrganizationMembershipEntity> OrganizationMemberships => Set<OrganizationMembershipEntity>();
+    public DbSet<AccessGrantGroupEntity> AccessGrantGroups => Set<AccessGrantGroupEntity>();
+    public DbSet<AccessGrantRegionEntity> AccessGrantRegions => Set<AccessGrantRegionEntity>();
+    public DbSet<AccessGrantOperationEntity> AccessGrantOperations => Set<AccessGrantOperationEntity>();
+    public DbSet<ManagedCaseEntity> ManagedCases => Set<ManagedCaseEntity>();
+    public DbSet<ManagedCaseRegionEntity> ManagedCaseRegions => Set<ManagedCaseRegionEntity>();
+    public DbSet<CaseShareEntity> CaseShares => Set<CaseShareEntity>();
+    public DbSet<ProtectedEventPayloadEntity> ProtectedEventPayloads => Set<ProtectedEventPayloadEntity>();
+    public DbSet<CaseEventEntity> CaseEvents => Set<CaseEventEntity>();
+    public DbSet<CommandReceiptEntity> CommandReceipts => Set<CommandReceiptEntity>();
+    public DbSet<DomainOutboxEntity> DomainOutbox => Set<DomainOutboxEntity>();
+    public DbSet<SecurityAuditEntryEntity> SecurityAuditEntries => Set<SecurityAuditEntryEntity>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+        ConfigureActors(modelBuilder);
+        ConfigureOrganizationsAndAccess(modelBuilder);
+        ConfigureCases(modelBuilder);
+        ConfigureEventsAndCommands(modelBuilder);
+        ConfigureAudit(modelBuilder);
+    }
+
+    private static void ConfigureActors(ModelBuilder modelBuilder)
+    {
+        var actor = modelBuilder.Entity<ActorEntity>();
+        actor.ToTable("actors", table =>
+        {
+            table.HasCheckConstraint("ck_actors_status", "status IN ('Active', 'Suspended', 'Revoked')");
+            table.HasCheckConstraint("ck_actors_id_nonempty", "length(btrim(actor_id)) > 0");
+            table.HasCheckConstraint("ck_actors_expiry", "expires_at_utc IS NULL OR expires_at_utc > created_at_utc");
+        });
+        actor.HasKey(entity => entity.ActorId).HasName("pk_actors");
+        actor.Property(entity => entity.ActorId).HasColumnName("actor_id").HasColumnType("text");
+        actor.Property(entity => entity.Status).HasColumnName("status").HasConversion<string>().HasColumnType("text");
+        actor.Property(entity => entity.ExpiresAtUtc).HasColumnName("expires_at_utc").HasColumnType("timestamp with time zone");
+        actor.Property(entity => entity.CreatedAtUtc).HasColumnName("created_at_utc").HasColumnType("timestamp with time zone");
+        actor.Property(entity => entity.UpdatedAtUtc).HasColumnName("updated_at_utc").HasColumnType("timestamp with time zone");
+        var accessState = modelBuilder.Entity<ActorAccessStateEntity>();
+        accessState.ToTable("actor_access_states", table =>
+        {
+            table.HasCheckConstraint("ck_actor_access_states_epoch", "access_epoch >= 0");
+            table.HasCheckConstraint("ck_actor_access_states_version", "version > 0");
+        });
+        accessState.HasKey(entity => entity.ActorId).HasName("pk_actor_access_states");
+        accessState.Property(entity => entity.ActorId).HasColumnName("actor_id").HasColumnType("text");
+        accessState.Property(entity => entity.AccessEpoch).HasColumnName("access_epoch");
+        accessState.Property(entity => entity.Version).HasColumnName("version").IsConcurrencyToken();
+        accessState.Property(entity => entity.UpdatedAtUtc).HasColumnName("updated_at_utc").HasColumnType("timestamp with time zone");
+        accessState.HasOne<ActorEntity>().WithOne().HasForeignKey<ActorAccessStateEntity>(entity => entity.ActorId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_actor_access_states_actor");
+
+        var organizations = modelBuilder.Entity<OrganizationEntity>();
+        organizations.ToTable("organizations", table =>
+        {
+            table.HasCheckConstraint("ck_organizations_status", "status IN ('Active', 'Suspended', 'Revoked')");
+            table.HasCheckConstraint("ck_organizations_id_nonempty", "length(btrim(organization_id)) > 0");
+        });
+        organizations.HasKey(entity => entity.OrganizationId).HasName("pk_organizations");
+        organizations.Property(entity => entity.OrganizationId).HasColumnName("organization_id").HasColumnType("text");
+        organizations.Property(entity => entity.Status).HasColumnName("status").HasConversion<string>().HasColumnType("text");
+        organizations.Property(entity => entity.CreatedAtUtc).HasColumnName("created_at_utc").HasColumnType("timestamp with time zone");
+        organizations.Property(entity => entity.UpdatedAtUtc).HasColumnName("updated_at_utc").HasColumnType("timestamp with time zone");
+        var workspaces = modelBuilder.Entity<WorkspaceEntity>();
+        workspaces.ToTable("workspaces", table =>
+        {
+            table.HasCheckConstraint("ck_workspaces_status", "status IN ('Active', 'Suspended', 'Revoked')");
+            table.HasCheckConstraint("ck_workspaces_ids_nonempty", "length(btrim(workspace_id)) > 0 AND length(btrim(organization_id)) > 0");
+        });
+        workspaces.HasKey(entity => entity.WorkspaceId).HasName("pk_workspaces");
+        workspaces.HasAlternateKey(entity => new { entity.WorkspaceId, entity.OrganizationId })
+            .HasName("ak_workspaces_workspace_organization");
+        workspaces.Property(entity => entity.WorkspaceId).HasColumnName("workspace_id").HasColumnType("text");
+        workspaces.Property(entity => entity.OrganizationId).HasColumnName("organization_id").HasColumnType("text");
+        workspaces.Property(entity => entity.Status).HasColumnName("status").HasConversion<string>().HasColumnType("text");
+        workspaces.HasOne<OrganizationEntity>().WithMany().HasForeignKey(entity => entity.OrganizationId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_workspaces_organization");
+    }
+
+    private static void ConfigureOrganizationsAndAccess(ModelBuilder modelBuilder)
+    {
+        var membership = modelBuilder.Entity<OrganizationMembershipEntity>();
+        membership.ToTable("organization_memberships", table =>
+        {
+            table.HasCheckConstraint("ck_memberships_status", "status IN ('Active', 'Suspended', 'Revoked')");
+            table.HasCheckConstraint("ck_memberships_validity", "expires_at_utc IS NULL OR expires_at_utc > valid_from_utc");
+            table.HasCheckConstraint("ck_memberships_version", "version > 0");
+            table.HasCheckConstraint("ck_memberships_ids_nonempty", "length(btrim(actor_id)) > 0 AND length(btrim(organization_id)) > 0 AND length(btrim(granted_by_actor_id)) > 0");
+        });
+        membership.HasKey(entity => entity.MembershipId).HasName("pk_organization_memberships");
+        membership.HasAlternateKey(entity => new { entity.MembershipId, entity.ActorId, entity.OrganizationId })
+            .HasName("ak_memberships_id_actor_organization");
+        membership.HasIndex(entity => new { entity.ActorId, entity.OrganizationId }).IsUnique()
+            .HasDatabaseName("ux_memberships_actor_organization");
+        membership.HasIndex(entity => new { entity.ActorId, entity.Status, entity.ExpiresAtUtc })
+            .HasDatabaseName("ix_memberships_actor_status_expiry");
+        membership.Property(entity => entity.MembershipId).HasColumnName("membership_id");
+        membership.Property(entity => entity.ActorId).HasColumnName("actor_id").HasColumnType("text");
+        membership.Property(entity => entity.OrganizationId).HasColumnName("organization_id").HasColumnType("text");
+        membership.Property(entity => entity.Status).HasColumnName("status").HasConversion<string>().HasColumnType("text");
+        membership.Property(entity => entity.ValidFromUtc).HasColumnName("valid_from_utc").HasColumnType("timestamp with time zone");
+        membership.Property(entity => entity.ExpiresAtUtc).HasColumnName("expires_at_utc").HasColumnType("timestamp with time zone");
+        membership.Property(entity => entity.GrantedByActorId).HasColumnName("granted_by_actor_id").HasColumnType("text");
+        membership.Property(entity => entity.RevokedByActorId).HasColumnName("revoked_by_actor_id").HasColumnType("text");
+        membership.Property(entity => entity.ChangeReason).HasColumnName("change_reason").HasColumnType("text");
+        membership.Property(entity => entity.Version).HasColumnName("version").IsConcurrencyToken();
+        membership.HasOne<ActorEntity>().WithMany().HasForeignKey(entity => entity.ActorId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_memberships_actor");
+        membership.HasOne<OrganizationEntity>().WithMany().HasForeignKey(entity => entity.OrganizationId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_memberships_organization");
+        membership.HasOne<ActorEntity>().WithMany().HasForeignKey(entity => entity.GrantedByActorId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_memberships_grantor");
+        membership.HasOne<ActorEntity>().WithMany().HasForeignKey(entity => entity.RevokedByActorId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_memberships_revoker");
+
+        var grant = modelBuilder.Entity<AccessGrantGroupEntity>();
+        grant.ToTable("access_grant_groups", table =>
+        {
+            table.HasCheckConstraint("ck_access_grant_groups_status", "status IN ('Active', 'Suspended', 'Revoked')");
+            table.HasCheckConstraint("ck_access_grant_groups_sector", "sector IN ('HumanHealth', 'AnimalHealth')");
+            table.HasCheckConstraint("ck_access_grant_groups_validity", "expires_at_utc > valid_from_utc");
+            table.HasCheckConstraint("ck_access_grant_groups_version", "version > 0");
+            table.HasCheckConstraint("ck_access_grant_groups_ids_nonempty", "length(btrim(grant_group_id)) > 0 AND length(btrim(actor_id)) > 0 AND length(btrim(organization_id)) > 0 AND length(btrim(workspace_id)) > 0 AND length(btrim(country_code)) > 0 AND length(btrim(sensitivity_code)) > 0 AND length(btrim(granted_by_actor_id)) > 0");
+        });
+        grant.HasKey(entity => entity.GrantGroupId).HasName("pk_access_grant_groups");
+        grant.HasIndex(entity => new { entity.ActorId, entity.Status, entity.ExpiresAtUtc })
+            .HasDatabaseName("ix_access_grant_groups_actor_status_expiry");
+        grant.HasIndex(entity => new { entity.MembershipId, entity.OrganizationId, entity.WorkspaceId })
+            .HasDatabaseName("ix_access_grant_groups_membership_scope");
+        grant.Property(entity => entity.GrantGroupId).HasColumnName("grant_group_id").HasColumnType("text");
+        grant.Property(entity => entity.MembershipId).HasColumnName("membership_id");
+        grant.Property(entity => entity.ActorId).HasColumnName("actor_id").HasColumnType("text");
+        grant.Property(entity => entity.OrganizationId).HasColumnName("organization_id").HasColumnType("text");
+        grant.Property(entity => entity.WorkspaceId).HasColumnName("workspace_id").HasColumnType("text");
+        grant.Property(entity => entity.CountryCode).HasColumnName("country_code").HasColumnType("text");
+        grant.Property(entity => entity.Sector).HasColumnName("sector").HasConversion<string>().HasColumnType("text");
+        grant.Property(entity => entity.SensitivityCode).HasColumnName("sensitivity_code").HasColumnType("text");
+        grant.Property(entity => entity.CanAccessJurisdictionalCases).HasColumnName("can_access_jurisdictional_cases");
+        grant.Property(entity => entity.Status).HasColumnName("status").HasConversion<string>().HasColumnType("text");
+        grant.Property(entity => entity.ValidFromUtc).HasColumnName("valid_from_utc").HasColumnType("timestamp with time zone");
+        grant.Property(entity => entity.ExpiresAtUtc).HasColumnName("expires_at_utc").HasColumnType("timestamp with time zone");
+        grant.Property(entity => entity.GrantedByActorId).HasColumnName("granted_by_actor_id").HasColumnType("text");
+        grant.Property(entity => entity.RevokedByActorId).HasColumnName("revoked_by_actor_id").HasColumnType("text");
+        grant.Property(entity => entity.ChangeReason).HasColumnName("change_reason").HasColumnType("text");
+        grant.Property(entity => entity.Version).HasColumnName("version").IsConcurrencyToken();
+        grant.HasOne<OrganizationMembershipEntity>().WithMany()
+            .HasForeignKey(entity => new { entity.MembershipId, entity.ActorId, entity.OrganizationId })
+            .HasPrincipalKey(entity => new { entity.MembershipId, entity.ActorId, entity.OrganizationId })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_access_grant_groups_membership_scope");
+        grant.HasOne<WorkspaceEntity>().WithMany()
+            .HasForeignKey(entity => new { entity.WorkspaceId, entity.OrganizationId })
+            .HasPrincipalKey(entity => new { entity.WorkspaceId, entity.OrganizationId })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_access_grant_groups_workspace_scope");
+        grant.HasOne<ActorEntity>().WithMany().HasForeignKey(entity => entity.ActorId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_access_grant_groups_actor");
+        grant.HasOne<ActorEntity>().WithMany().HasForeignKey(entity => entity.GrantedByActorId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_access_grant_groups_grantor");
+        grant.HasOne<ActorEntity>().WithMany().HasForeignKey(entity => entity.RevokedByActorId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_access_grant_groups_revoker");
+
+        var grantRegion = modelBuilder.Entity<AccessGrantRegionEntity>();
+        grantRegion.ToTable("access_grant_group_regions", table =>
+            table.HasCheckConstraint("ck_access_grant_group_regions_id_nonempty", "length(btrim(region_id)) > 0"));
+        grantRegion.HasKey(entity => new { entity.GrantGroupId, entity.RegionId }).HasName("pk_access_grant_group_regions");
+        grantRegion.HasIndex(entity => new { entity.RegionId, entity.GrantGroupId }).HasDatabaseName("ix_access_grant_group_regions_region");
+        grantRegion.Property(entity => entity.GrantGroupId).HasColumnName("grant_group_id").HasColumnType("text");
+        grantRegion.Property(entity => entity.RegionId).HasColumnName("region_id").HasColumnType("text");
+        grantRegion.HasOne<AccessGrantGroupEntity>().WithMany().HasForeignKey(entity => entity.GrantGroupId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_access_grant_group_regions_group");
+
+        var grantOperation = modelBuilder.Entity<AccessGrantOperationEntity>();
+        grantOperation.ToTable("access_grant_group_operations", table =>
+            table.HasCheckConstraint("ck_grant_group_operations_value", "operation IN ('ReadCase', 'ReadAttachment', 'Synchronize', 'Search', 'Export', 'Count', 'RequestProtectedAction', 'ExecuteProtectedAction', 'ReadLinkedSignalEvidence')"));
+        grantOperation.HasKey(entity => new { entity.GrantGroupId, entity.Operation }).HasName("pk_access_grant_group_operations");
+        grantOperation.HasIndex(entity => new { entity.Operation, entity.GrantGroupId }).HasDatabaseName("ix_grant_group_operations_value");
+        grantOperation.Property(entity => entity.GrantGroupId).HasColumnName("grant_group_id").HasColumnType("text");
+        grantOperation.Property(entity => entity.Operation).HasColumnName("operation").HasConversion<string>().HasColumnType("text");
+        grantOperation.HasOne<AccessGrantGroupEntity>().WithMany().HasForeignKey(entity => entity.GrantGroupId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_access_grant_group_operations_group");
+    }
+
+    private static void ConfigureCases(ModelBuilder modelBuilder)
+    {
+        var managedCase = modelBuilder.Entity<ManagedCaseEntity>();
+        managedCase.ToTable("managed_cases", table =>
+        {
+            table.HasCheckConstraint("ck_managed_cases_kind", "kind IN ('Human', 'Animal')");
+            table.HasCheckConstraint("ck_managed_cases_sector", "sector IN ('HumanHealth', 'AnimalHealth')");
+            table.HasCheckConstraint("ck_managed_cases_kind_sector", "(kind = 'Human' AND sector = 'HumanHealth') OR (kind = 'Animal' AND sector = 'AnimalHealth')");
+            table.HasCheckConstraint("ck_managed_cases_versions", "resource_version > 0 AND aggregate_version >= 2 AND report_revision > 0 AND report_revision <= aggregate_version AND workflow_version >= 0 AND classification_version >= 0 AND laboratory_version >= 0 AND outcome_version >= 0");
+            table.HasCheckConstraint("ck_managed_cases_workflow", "workflow IN ('Reported', 'UnderReview', 'Active', 'AwaitingFollowUp', 'Resolved')");
+            table.HasCheckConstraint("ck_managed_cases_classification", "classification IN ('Unclassified', 'Suspected', 'Probable', 'Confirmed', 'RuledOut')");
+            table.HasCheckConstraint("ck_managed_cases_laboratory", "laboratory IN ('NotRecorded', 'Requested', 'Collected', 'Pending', 'ResultRecorded')");
+            table.HasCheckConstraint("ck_managed_cases_outcome_state", "outcome_state IN ('Unknown', 'NotRecorded', 'NotApplicable', 'Absent', 'Known')");
+            table.HasCheckConstraint("ck_managed_cases_outcome_value", "(outcome_state = 'Known' AND outcome_value IS NOT NULL) OR (outcome_state <> 'Known' AND outcome_value IS NULL)");
+            table.HasCheckConstraint("ck_managed_cases_ids_nonempty", "length(btrim(organization_id)) > 0 AND length(btrim(workspace_id)) > 0 AND length(btrim(country_code)) > 0 AND length(btrim(sensitivity_code)) > 0 AND length(btrim(accountable_owner_actor_id)) > 0");
+        });
+        managedCase.HasKey(entity => entity.CaseId).HasName("pk_managed_cases");
+        managedCase.HasAlternateKey(entity => new { entity.CaseId, entity.OrganizationId })
+            .HasName("ak_managed_cases_id_organization");
+        managedCase.HasIndex(entity => new { entity.AccountableOwnerActorId, entity.CaseId })
+            .HasDatabaseName("ix_managed_cases_owner");
+        managedCase.HasIndex(entity => new { entity.OrganizationId, entity.WorkspaceId, entity.CountryCode, entity.Sector, entity.SensitivityCode })
+            .HasDatabaseName("ix_managed_cases_scope");
+        managedCase.Property(entity => entity.CaseId).HasColumnName("case_id");
+        managedCase.Property(entity => entity.OrganizationId).HasColumnName("organization_id").HasColumnType("text");
+        managedCase.Property(entity => entity.WorkspaceId).HasColumnName("workspace_id").HasColumnType("text");
+        managedCase.Property(entity => entity.CountryCode).HasColumnName("country_code").HasColumnType("text");
+        managedCase.Property(entity => entity.Kind).HasColumnName("kind").HasConversion<string>().HasColumnType("text");
+        managedCase.Property(entity => entity.Sector).HasColumnName("sector").HasConversion<string>().HasColumnType("text");
+        managedCase.Property(entity => entity.SensitivityCode).HasColumnName("sensitivity_code").HasColumnType("text");
+        managedCase.Property(entity => entity.AccountableOwnerActorId).HasColumnName("accountable_owner_actor_id").HasColumnType("text");
+        managedCase.Property(entity => entity.ResourceVersion).HasColumnName("resource_version").IsConcurrencyToken();
+        managedCase.Property(entity => entity.AggregateVersion).HasColumnName("aggregate_version").IsConcurrencyToken();
+        managedCase.Property(entity => entity.ReportRevision).HasColumnName("report_revision");
+        managedCase.Property(entity => entity.Workflow).HasColumnName("workflow").HasConversion<string>().HasColumnType("text");
+        managedCase.Property(entity => entity.WorkflowVersion).HasColumnName("workflow_version");
+        managedCase.Property(entity => entity.Classification).HasColumnName("classification").HasConversion<string>().HasColumnType("text");
+        managedCase.Property(entity => entity.ClassificationVersion).HasColumnName("classification_version");
+        managedCase.Property(entity => entity.Laboratory).HasColumnName("laboratory").HasConversion<string>().HasColumnType("text");
+        managedCase.Property(entity => entity.LaboratoryVersion).HasColumnName("laboratory_version");
+        managedCase.Property(entity => entity.OutcomeState).HasColumnName("outcome_state").HasConversion<string>().HasColumnType("text");
+        managedCase.Property(entity => entity.OutcomeValue).HasColumnName("outcome_value").HasColumnType("text");
+        managedCase.Property(entity => entity.OutcomeVersion).HasColumnName("outcome_version");
+        managedCase.Property(entity => entity.CreatedAtUtc).HasColumnName("created_at_utc").HasColumnType("timestamp with time zone");
+        managedCase.Property(entity => entity.UpdatedAtUtc).HasColumnName("updated_at_utc").HasColumnType("timestamp with time zone");
+        managedCase.HasOne<WorkspaceEntity>().WithMany()
+            .HasForeignKey(entity => new { entity.WorkspaceId, entity.OrganizationId })
+            .HasPrincipalKey(entity => new { entity.WorkspaceId, entity.OrganizationId })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_managed_cases_workspace_scope");
+        managedCase.HasOne<ActorEntity>().WithMany().HasForeignKey(entity => entity.AccountableOwnerActorId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_managed_cases_accountable_owner");
+
+        var caseRegion = modelBuilder.Entity<ManagedCaseRegionEntity>();
+        caseRegion.ToTable("managed_case_regions", table =>
+            table.HasCheckConstraint("ck_managed_case_regions_id_nonempty", "length(btrim(region_id)) > 0"));
+        caseRegion.HasKey(entity => new { entity.CaseId, entity.RegionId }).HasName("pk_managed_case_regions");
+        caseRegion.HasIndex(entity => new { entity.RegionId, entity.CaseId }).HasDatabaseName("ix_managed_case_regions_region");
+        caseRegion.Property(entity => entity.CaseId).HasColumnName("case_id");
+        caseRegion.Property(entity => entity.RegionId).HasColumnName("region_id").HasColumnType("text");
+        caseRegion.HasOne<ManagedCaseEntity>().WithMany().HasForeignKey(entity => entity.CaseId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_managed_case_regions_case");
+
+        var share = modelBuilder.Entity<CaseShareEntity>();
+        share.ToTable("case_shares", table =>
+        {
+            table.HasCheckConstraint("ck_case_shares_expiry", "expires_at_utc IS NULL OR expires_at_utc > granted_at_utc");
+            table.HasCheckConstraint("ck_case_shares_grantor", "length(btrim(granted_by_actor_id)) > 0");
+            table.HasCheckConstraint("ck_case_shares_version", "version > 0");
+        });
+        share.HasKey(entity => new { entity.CaseId, entity.ActorId }).HasName("pk_case_shares");
+        share.HasIndex(entity => new { entity.ActorId, entity.IsActive, entity.ExpiresAtUtc })
+            .HasDatabaseName("ix_case_shares_actor_status_expiry");
+        share.Property(entity => entity.CaseId).HasColumnName("case_id");
+        share.Property(entity => entity.ActorId).HasColumnName("actor_id").HasColumnType("text");
+        share.Property(entity => entity.Version).HasColumnName("version").IsConcurrencyToken();
+        share.Property(entity => entity.IsActive).HasColumnName("is_active");
+        share.Property(entity => entity.GrantedByActorId).HasColumnName("granted_by_actor_id").HasColumnType("text");
+        share.Property(entity => entity.RevokedByActorId).HasColumnName("revoked_by_actor_id").HasColumnType("text");
+        share.Property(entity => entity.ChangeReason).HasColumnName("change_reason").HasColumnType("text");
+        share.Property(entity => entity.GrantedAtUtc).HasColumnName("granted_at_utc").HasColumnType("timestamp with time zone");
+        share.Property(entity => entity.ExpiresAtUtc).HasColumnName("expires_at_utc").HasColumnType("timestamp with time zone");
+        share.HasOne<ManagedCaseEntity>().WithMany().HasForeignKey(entity => entity.CaseId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_case_shares_case");
+        share.HasOne<ActorEntity>().WithMany().HasForeignKey(entity => entity.ActorId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_case_shares_actor");
+        share.HasOne<ActorEntity>().WithMany().HasForeignKey(entity => entity.GrantedByActorId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_case_shares_grantor");
+        share.HasOne<ActorEntity>().WithMany().HasForeignKey(entity => entity.RevokedByActorId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_case_shares_revoker");
+    }
+
+    private static void ConfigureEventsAndCommands(ModelBuilder modelBuilder)
+    {
+        var payload = modelBuilder.Entity<ProtectedEventPayloadEntity>();
+        payload.ToTable("protected_event_payloads", table =>
+        {
+            table.HasCheckConstraint("ck_protected_event_payloads_bytes", "octet_length(protected_bytes) > 0");
+            table.HasCheckConstraint("ck_protected_event_payloads_purpose", "length(btrim(protection_purpose_version)) > 0");
+        });
+        payload.HasKey(entity => entity.PayloadId).HasName("pk_protected_event_payloads");
+        payload.Property(entity => entity.PayloadId).HasColumnName("payload_id");
+        payload.Property(entity => entity.ProtectedBytes).HasColumnName("protected_bytes").HasColumnType("bytea");
+        payload.Property(entity => entity.ProtectionPurposeVersion).HasColumnName("protection_purpose_version").HasColumnType("text");
+        payload.Property(entity => entity.CreatedAtUtc).HasColumnName("created_at_utc").HasColumnType("timestamp with time zone");
+
+        var receipt = modelBuilder.Entity<CommandReceiptEntity>();
+        receipt.ToTable("command_receipts", table =>
+        {
+            table.HasCheckConstraint("ck_command_receipts_hash", "octet_length(canonical_payload_hash) = 32");
+            table.HasCheckConstraint("ck_command_receipts_versions", "schema_version > 0 AND first_aggregate_version > 0 AND last_aggregate_version >= first_aggregate_version AND report_revision > 0");
+            table.HasCheckConstraint("ck_command_receipts_ids_nonempty", "length(btrim(actor_id)) > 0 AND length(btrim(command_type)) > 0");
+        });
+        receipt.HasKey(entity => entity.ReceiptId).HasName("pk_command_receipts");
+        receipt.HasAlternateKey(entity => new { entity.ActorId, entity.CommandId, entity.CaseId })
+            .HasName("ak_command_receipts_actor_command_case");
+        receipt.HasIndex(entity => new { entity.ActorId, entity.CommandId }).IsUnique()
+            .HasDatabaseName("ux_command_receipts_actor_command");
+        receipt.HasIndex(entity => new { entity.CaseId, entity.AcceptedAtUtc })
+            .HasDatabaseName("ix_command_receipts_case_accepted");
+        receipt.Property(entity => entity.ReceiptId).HasColumnName("receipt_id");
+        receipt.Property(entity => entity.ActorId).HasColumnName("actor_id").HasColumnType("text");
+        receipt.Property(entity => entity.CommandId).HasColumnName("command_id");
+        receipt.Property(entity => entity.CaseId).HasColumnName("case_id");
+        receipt.Property(entity => entity.CommandType).HasColumnName("command_type").HasColumnType("text");
+        receipt.Property(entity => entity.SchemaVersion).HasColumnName("schema_version");
+        receipt.Property(entity => entity.CanonicalPayloadHash).HasColumnName("canonical_payload_hash").HasColumnType("bytea");
+        receipt.Property(entity => entity.FirstAggregateVersion).HasColumnName("first_aggregate_version");
+        receipt.Property(entity => entity.LastAggregateVersion).HasColumnName("last_aggregate_version");
+        receipt.Property(entity => entity.ReportRevision).HasColumnName("report_revision");
+        receipt.Property(entity => entity.AcceptedAtUtc).HasColumnName("accepted_at_utc").HasColumnType("timestamp with time zone");
+        receipt.HasOne<ManagedCaseEntity>().WithMany().HasForeignKey(entity => entity.CaseId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_command_receipts_case");
+
+        var caseEvent = modelBuilder.Entity<CaseEventEntity>();
+        caseEvent.ToTable("case_events", table =>
+        {
+            table.HasCheckConstraint("ck_case_events_versions", "aggregate_version > 0 AND report_revision > 0 AND schema_version > 0");
+            table.HasCheckConstraint("ck_case_events_type", "event_type IN ('CaseReported', 'CaseAssigned', 'CaseReportCorrected', 'CaseActionRequested', 'CaseActionRequestReviewed', 'CaseResolved', 'CaseReopened')");
+            table.HasCheckConstraint("ck_case_events_actor", "length(btrim(actor_id)) > 0");
+        });
+        caseEvent.HasKey(entity => entity.EventId).HasName("pk_case_events");
+        caseEvent.HasIndex(entity => new { entity.CaseId, entity.AggregateVersion }).IsUnique()
+            .HasDatabaseName("ux_case_events_case_aggregate_version");
+        caseEvent.HasIndex(entity => new { entity.CaseId, entity.CommandId })
+            .HasDatabaseName("ix_case_events_case_command");
+        caseEvent.Property(entity => entity.EventId).HasColumnName("event_id");
+        caseEvent.Property(entity => entity.CaseId).HasColumnName("case_id");
+        caseEvent.Property(entity => entity.AggregateVersion).HasColumnName("aggregate_version");
+        caseEvent.Property(entity => entity.ReportRevision).HasColumnName("report_revision");
+        caseEvent.Property(entity => entity.CommandId).HasColumnName("command_id");
+        caseEvent.Property(entity => entity.ActorId).HasColumnName("actor_id").HasColumnType("text");
+        caseEvent.Property(entity => entity.EventType).HasColumnName("event_type").HasColumnType("text");
+        caseEvent.Property(entity => entity.SchemaVersion).HasColumnName("schema_version");
+        caseEvent.Property(entity => entity.OccurredAtUtc).HasColumnName("occurred_at_utc").HasColumnType("timestamp with time zone");
+        caseEvent.Property(entity => entity.RecordedAtUtc).HasColumnName("recorded_at_utc").HasColumnType("timestamp with time zone");
+        caseEvent.Property(entity => entity.PayloadId).HasColumnName("payload_id");
+        caseEvent.HasOne<ManagedCaseEntity>().WithMany().HasForeignKey(entity => entity.CaseId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_case_events_case");
+        caseEvent.HasOne<ProtectedEventPayloadEntity>().WithMany().HasForeignKey(entity => entity.PayloadId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_case_events_payload");
+        caseEvent.HasOne<CommandReceiptEntity>().WithMany()
+            .HasForeignKey(entity => new { entity.ActorId, entity.CommandId, entity.CaseId })
+            .HasPrincipalKey(entity => new { entity.ActorId, entity.CommandId, entity.CaseId })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_case_events_accepted_receipt");
+
+        var outbox = modelBuilder.Entity<DomainOutboxEntity>();
+        outbox.ToTable("domain_outbox", table =>
+        {
+            table.HasCheckConstraint("ck_domain_outbox_attempt_count", "attempt_count >= 0");
+            table.HasCheckConstraint("ck_domain_outbox_message_type", "length(btrim(message_type)) > 0");
+            table.HasCheckConstraint("ck_domain_outbox_lease", "published_at_utc IS NULL OR lease_until_utc IS NULL");
+        });
+        outbox.HasKey(entity => entity.OutboxId).HasName("pk_domain_outbox");
+        outbox.HasIndex(entity => entity.EventId).IsUnique().HasDatabaseName("ux_domain_outbox_event");
+        outbox.HasIndex(entity => new { entity.AvailableAtUtc, entity.CreatedAtUtc })
+            .HasFilter("published_at_utc IS NULL")
+            .HasDatabaseName("ix_domain_outbox_pending");
+        outbox.Property(entity => entity.OutboxId).HasColumnName("outbox_id");
+        outbox.Property(entity => entity.EventId).HasColumnName("event_id");
+        outbox.Property(entity => entity.MessageType).HasColumnName("message_type").HasColumnType("text");
+        outbox.Property(entity => entity.CreatedAtUtc).HasColumnName("created_at_utc").HasColumnType("timestamp with time zone");
+        outbox.Property(entity => entity.AvailableAtUtc).HasColumnName("available_at_utc").HasColumnType("timestamp with time zone");
+        outbox.Property(entity => entity.AttemptCount).HasColumnName("attempt_count");
+        outbox.Property(entity => entity.LeaseUntilUtc).HasColumnName("lease_until_utc").HasColumnType("timestamp with time zone");
+        outbox.Property(entity => entity.PublishedAtUtc).HasColumnName("published_at_utc").HasColumnType("timestamp with time zone");
+        outbox.HasOne<CaseEventEntity>().WithMany().HasForeignKey(entity => entity.EventId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_domain_outbox_event");
+    }
+
+    private static void ConfigureAudit(ModelBuilder modelBuilder)
+    {
+        var audit = modelBuilder.Entity<SecurityAuditEntryEntity>();
+        audit.ToTable("security_audit_entries", table =>
+        {
+            table.HasCheckConstraint("ck_security_audit_epoch", "access_epoch >= 0");
+            table.HasCheckConstraint("ck_security_audit_actor", "length(btrim(actor_id)) > 0");
+            table.HasCheckConstraint("ck_security_audit_operation", "length(btrim(operation)) > 0");
+            table.HasCheckConstraint("ck_security_audit_decision", "length(btrim(decision_code)) > 0");
+        });
+        audit.HasKey(entity => entity.AuditId).HasName("pk_security_audit_entries");
+        audit.HasIndex(entity => new { entity.ActorId, entity.RecordedAtUtc })
+            .HasDatabaseName("ix_security_audit_actor_recorded");
+        audit.HasIndex(entity => new { entity.ResourceId, entity.RecordedAtUtc })
+            .HasDatabaseName("ix_security_audit_resource_recorded");
+        audit.Property(entity => entity.AuditId).HasColumnName("audit_id");
+        audit.Property(entity => entity.ActorId).HasColumnName("actor_id").HasColumnType("text");
+        audit.Property(entity => entity.TargetActorId).HasColumnName("target_actor_id").HasColumnType("text");
+        audit.Property(entity => entity.ResourceId).HasColumnName("resource_id");
+        audit.Property(entity => entity.Operation).HasColumnName("operation").HasColumnType("text");
+        audit.Property(entity => entity.DecisionCode).HasColumnName("decision_code").HasColumnType("text");
+        audit.Property(entity => entity.AccessEpoch).HasColumnName("access_epoch");
+        audit.Property(entity => entity.RecordedAtUtc).HasColumnName("recorded_at_utc").HasColumnType("timestamp with time zone");
+        audit.Property(entity => entity.ReasonCode).HasColumnName("reason_code").HasColumnType("text");
+    }
+}
