@@ -1,0 +1,57 @@
+{
+  "implementationVersion": "2.3",
+  "snapshotDate": "2026-10-26",
+  "checks": [
+    {
+      "check": "paired source files and revisions",
+      "evidence": "Root document metadata shows spec v1.3 and plan v2.3",
+      "result": "PASS"
+    },
+    {
+      "check": "source hashes",
+      "evidence": "4317a3348a9571dac115d5cd41429a2535f246fc9d3f059a8b4cb2e37a1ee4a7; d720d77df550c5b3141c759ac5addfc809d98a1df85a131637202884320b1062",
+      "result": "PASS"
+    },
+    {
+      "check": "task inventory extraction",
+      "evidence": "43 task headings extracted from implementation.md",
+      "result": "PASS"
+    },
+    {
+      "check": "acceptance scenario extraction",
+      "evidence": "72 scenario headings extracted from spec.md",
+      "result": "PASS"
+    },
+    {
+      "check": "product build and tests",
+      "evidence": "Documentation task was not authorized to run tests/build",
+      "result": "NOT RUN"
+    },
+    {
+      "check": "Android/provider/license/browser proof",
+      "evidence": "No corresponding evidence supplied",
+      "result": "NOT VERIFIED"
+    },
+    {
+      "check": "documentation local file links",
+      "evidence": "All relative Markdown file targets in docs/*.md exist",
+      "result": "PASS"
+    },
+    {
+      "check": "ledger table counts",
+      "evidence": "43 plan task headings; 72 spec acceptance scenario headings; 43 task rows and 72 scenario rows verified in ledgers",
+      "result": "PASS"
+    },
+    {
+      "check": "PC/additive requirement rows",
+      "evidence": "8 PC rows and 61 added-family rows (PUB/GEO/IDN/MEM/SUB) verified",
+      "result": "PASS"
+    }
+  ],
+  "sourceReportedRequirementCount": 350,
+  "specSha256": "4317a3348a9571dac115d5cd41429a2535f246fc9d3f059a8b4cb2e37a1ee4a7",
+  "implementationSha256": "d720d77df550c5b3141c759ac5addfc809d98a1df85a131637202884320b1062",
+  "sourceReportedAcceptanceScenarioCount": 72,
+  "specVersion": "1.3",
+  "extractedTaskCount": 43
+}
