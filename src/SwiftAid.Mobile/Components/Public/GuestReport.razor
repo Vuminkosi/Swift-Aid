@@ -45,6 +45,32 @@
                     <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => OpenDraftAsync(draft.ClientSubmissionId))">
                         Open draft
                     </MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_sending" OnClick="@(() => SendDraftAsync(draft.ClientSubmissionId))">
+                        Send report
+                    </MudButton>
+                </MudPaper>
+            }
+        </section>
+    }
+
+    @if (_queued.Count > 0)
+    {
+        <section class="guest-report__saved" aria-labelledby="queued-reports-title">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Spacing="2">
+                <MudText id="queued-reports-title" Typo="Typo.h6" HtmlTag="h2">Waiting to send</MudText>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@_sending" OnClick="SendPendingAsync">
+                    Try sending now
+                </MudButton>
+            </MudStack>
+            @foreach (var queued in _queued)
+            {
+                <MudPaper Class="guest-report__draft-row" Elevation="0" @key="queued.ClientSubmissionId">
+                    <div>
+                        <MudText Typo="Typo.subtitle1">Queued report</MudText>
+                        <MudText Typo="Typo.body2" Class="guest-report__muted">
+                            Saved @queued.CreatedAtUtc.ToLocalTime().ToString("g") on this device. It has not been sent yet.
+                        </MudText>
+                    </div>
                 </MudPaper>
             }
         </section>
@@ -88,12 +114,14 @@
 
 @code {
     private IReadOnlyList<GuestSubmissionSummary> _drafts = [];
+    private IReadOnlyList<GuestSubmissionSummary> _queued = [];
     private IReadOnlyList<GuestSubmissionSummary> _receipts = [];
     private Guid? _activeDraftId;
     private IntakeSubmission? _activeSubmission;
     private bool _loading = true;
     private bool _storageAvailable;
     private bool _refreshingReceipts;
+    private bool _sending;
     private string? _pageMessage;
 
     protected override async Task OnInitializedAsync() => await ReloadSavedReportsAsync();
@@ -108,6 +136,10 @@
                 .Where(report => report.State is GuestSubmissionLocalState.Draft or GuestSubmissionLocalState.NeedsAttention)
                 .OrderByDescending(report => report.CreatedAtUtc)
                 .ToArray();
+            _queued = reports
+                .Where(report => report.State == GuestSubmissionLocalState.Queued)
+                .OrderBy(report => report.CreatedAtUtc)
+                .ToArray();
             _receipts = reports
                 .Where(report => report.Receipt is not null)
                 .OrderByDescending(report => report.Receipt!.ReceivedAtUtc)
@@ -118,6 +150,7 @@
         catch
         {
             _drafts = [];
+            _queued = [];
             _receipts = [];
             _storageAvailable = false;
             _pageMessage = "Saved reports could not be opened. Try again before leaving this page.";
@@ -158,8 +191,67 @@
 
         _activeDraftId = saved.ClientSubmissionId;
         _activeSubmission = request.Submission with { ClientSubmissionId = saved.ClientSubmissionId };
-        _pageMessage = "Your draft is saved on this device. It has not been sent.";
+        _pageMessage = "Your draft is saved on this device. It has not been sent. Choose Send report to send it.";
         await ReloadSavedReportsAsync();
+    }
+
+    private async Task SendDraftAsync(Guid clientSubmissionId)
+    {
+        if (_sending)
+            return;
+
+        _sending = true;
+        try
+        {
+            await SubmissionStore.QueueAsync(clientSubmissionId);
+            await SubmitQueuedAsync();
+        }
+        catch (InvalidOperationException)
+        {
+            _pageMessage = "This report is not ready to send. Open the draft to review it.";
+            await ReloadSavedReportsAsync();
+        }
+        finally
+        {
+            _sending = false;
+        }
+    }
+
+    private async Task SendPendingAsync()
+    {
+        if (_sending)
+            return;
+
+        _sending = true;
+        try
+        {
+            await SubmitQueuedAsync();
+        }
+        finally
+        {
+            _sending = false;
+        }
+    }
+
+    private async Task SubmitQueuedAsync()
+    {
+        try
+        {
+            var result = await SubmissionCoordinator.SubmitPendingAsync();
+            await ReloadSavedReportsAsync();
+            _pageMessage = result.Received > 0
+                ? "Your report was sent. Your private receipt is shown below."
+                : result.NeedsAttention > 0
+                    ? "A report needs review before it can be sent. Open the draft to fix it."
+                    : result.RetryPending > 0 || result.Queued > 0
+                        ? "Sending is not possible right now. Your report stays queued on this device and will be retried."
+                        : "There is nothing waiting to send.";
+        }
+        catch
+        {
+            _pageMessage = "Sending failed. Your saved reports are unchanged on this device.";
+            await ReloadSavedReportsAsync();
+        }
     }
 
     private async Task RefreshReceiptsAsync()
