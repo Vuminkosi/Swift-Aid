@@ -1,0 +1,293 @@
+using System.Security.Cryptography;
+using System.Text.Json;
+using SwiftAid.Contracts.Intake;
+
+namespace SwiftAid.Client.Intake;
+
+/// <summary>Creates stable guest submission identities and proof before the item is queued.</summary>
+public sealed class GuestDraftStore(
+    IGuestSubmissionPersistence persistence,
+    TimeProvider? timeProvider = null,
+    IGuestIntakeTransport? transport = null) : IGuestSubmissionStore
+{
+    private static readonly SemaphoreSlim Gate = new(1, 1);
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
+    public async Task<GuestSubmissionSummary> CreateDraftAsync(
+        IntakeSubmission submission,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(submission);
+        await Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await CreateRecordAsync(submission, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            Gate.Release();
+        }
+    }
+
+    public async Task<GuestSubmissionSummary> CreateRevisionAsync(
+        Guid previousSubmissionId,
+        IntakeSubmission revisedSubmission,
+        CancellationToken cancellationToken = default)
+    {
+        if (previousSubmissionId == Guid.Empty) throw new ArgumentException("A previous report is required.", nameof(previousSubmissionId));
+        ArgumentNullException.ThrowIfNull(revisedSubmission);
+        await Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var previous = await persistence.GetAsync(previousSubmissionId, cancellationToken).ConfigureAwait(false)
+                ?? throw new KeyNotFoundException("The saved report could not be found.");
+            if (previous.State is not (GuestSubmissionLocalState.Draft or GuestSubmissionLocalState.NeedsAttention))
+            {
+                throw new InvalidOperationException("A queued or received report cannot be changed. Create a separate report revision instead.");
+            }
+
+            var replacement = CreateRecord(revisedSubmission, _timeProvider.GetUtcNow()) with
+            {
+                AudioAssets = (previous.AudioAssets ?? Array.Empty<GuestAudioAsset>())
+                    .Where(asset => revisedSubmission.OriginalAudioAttachmentIds.Contains(asset.AttachmentId))
+                    .ToArray()
+            };
+            var superseded = previous with
+            {
+                State = GuestSubmissionLocalState.Superseded,
+                UpdatedAtUtc = _timeProvider.GetUtcNow()
+            };
+            await persistence.SaveBatchAsync([superseded, replacement], cancellationToken).ConfigureAwait(false);
+            return ToSummary(replacement);
+        }
+        finally
+        {
+            Gate.Release();
+        }
+    }
+
+    public async Task<GuestSubmissionSummary> QueueAsync(
+        Guid clientSubmissionId,
+        CancellationToken cancellationToken = default)
+    {
+        if (clientSubmissionId == Guid.Empty) throw new ArgumentException("A report identifier is required.", nameof(clientSubmissionId));
+        await Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var current = await persistence.GetAsync(clientSubmissionId, cancellationToken).ConfigureAwait(false)
+                ?? throw new KeyNotFoundException("The saved report could not be found.");
+            if (current.State == GuestSubmissionLocalState.Queued || current.State == GuestSubmissionLocalState.Received)
+            {
+                return ToSummary(current);
+            }
+
+            if (current.State != GuestSubmissionLocalState.Draft)
+            {
+                throw new InvalidOperationException("This report is not ready to be queued.");
+            }
+
+            if (transport is null)
+            {
+                throw new GuestIntakeTransportException();
+            }
+
+            // Validate the selected country against the latest public snapshot only when queuing.
+            // An unavailable or stale catalogue leaves the local draft untouched.
+            var metadata = await transport.GetMetadataAsync(cancellationToken).ConfigureAwait(false);
+            var catalogue = await transport.GetCountriesAsync(cancellationToken).ConfigureAwait(false);
+            ValidateCurrentCountry(current.Submission, metadata, catalogue);
+            ValidateReadyToQueue(current.Submission);
+            var audioAssets = current.AudioAssets ?? Array.Empty<GuestAudioAsset>();
+            if (audioAssets.Count != current.Submission.OriginalAudioAttachmentIds.Count ||
+                !audioAssets.Select(asset => asset.AttachmentId).ToHashSet()
+                    .SetEquals(current.Submission.OriginalAudioAttachmentIds))
+            {
+                throw new InvalidOperationException("Original audio must be saved on this device before the report is queued.");
+            }
+
+            var queued = current with
+            {
+                State = GuestSubmissionLocalState.Queued,
+                UpdatedAtUtc = _timeProvider.GetUtcNow()
+            };
+            await persistence.SaveAsync(queued, cancellationToken).ConfigureAwait(false);
+            return ToSummary(queued);
+        }
+        finally
+        {
+            Gate.Release();
+        }
+    }
+
+    public async Task<GuestSubmissionSummary?> GetAsync(
+        Guid clientSubmissionId,
+        CancellationToken cancellationToken = default)
+    {
+        var item = await persistence.GetAsync(clientSubmissionId, cancellationToken).ConfigureAwait(false);
+        return item is null ? null : ToSummary(item);
+    }
+
+    public async Task<GuestDraftDetails?> GetDraftAsync(
+        Guid clientSubmissionId,
+        CancellationToken cancellationToken = default)
+    {
+        if (clientSubmissionId == Guid.Empty) throw new ArgumentException("A report identifier is required.", nameof(clientSubmissionId));
+        var item = await persistence.GetAsync(clientSubmissionId, cancellationToken).ConfigureAwait(false);
+        if (item is null || item.State is not (GuestSubmissionLocalState.Draft or GuestSubmissionLocalState.NeedsAttention))
+        {
+            return null;
+        }
+
+        return new GuestDraftDetails(
+            item.ClientSubmissionId,
+            item.Submission,
+            item.State,
+            item.CreatedAtUtc,
+            item.UpdatedAtUtc);
+    }
+
+    public async Task<IReadOnlyList<GuestSubmissionSummary>> GetAllAsync(CancellationToken cancellationToken = default)
+    {
+        var items = await persistence.GetAllAsync(cancellationToken).ConfigureAwait(false);
+        return items.Where(item => item.State != GuestSubmissionLocalState.Superseded)
+            .Select(ToSummary)
+            .OrderByDescending(item => item.CreatedAtUtc)
+            .ToArray();
+    }
+
+    private async Task<GuestSubmissionSummary> CreateRecordAsync(
+        IntakeSubmission submission,
+        CancellationToken cancellationToken)
+    {
+        var record = CreateRecord(submission, _timeProvider.GetUtcNow());
+        await persistence.SaveAsync(record, cancellationToken).ConfigureAwait(false);
+        return ToSummary(record);
+    }
+
+    private static GuestSubmissionRecord CreateRecord(IntakeSubmission submission, DateTimeOffset now)
+    {
+        ValidateSubmission(submission);
+        var id = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        var immutableSubmission = Freeze(submission with { ClientSubmissionId = id });
+        var payload = JsonSerializer.SerializeToUtf8Bytes(immutableSubmission, JsonOptions);
+        var hash = Convert.ToHexString(SHA256.HashData(payload));
+        CryptographicOperations.ZeroMemory(payload);
+
+        var proofBytes = RandomNumberGenerator.GetBytes(32);
+        try
+        {
+            var receiptProof = Convert.ToBase64String(proofBytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+            return new GuestSubmissionRecord(
+                id,
+                sessionId,
+                immutableSubmission,
+                receiptProof,
+                hash,
+                GuestSubmissionLocalState.Draft,
+                now,
+                now);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(proofBytes);
+        }
+    }
+
+    private static IntakeSubmission Freeze(IntakeSubmission submission) => submission with
+    {
+        Observations = Array.AsReadOnly(submission.Observations.ToArray()),
+        OriginalAudioAttachmentIds = Array.AsReadOnly(submission.OriginalAudioAttachmentIds.ToArray())
+    };
+
+    private static void ValidateSubmission(IntakeSubmission submission)
+    {
+        if (submission.SchemaVersion != 1 || !Enum.IsDefined(submission.SubjectScope) ||
+            submission.Observations is null || submission.OriginalAudioAttachmentIds is null ||
+            submission.CapturedAt is null || submission.Occurrence is null || submission.Location is null ||
+            submission.Confirmations is null ||
+            (submission.Narrative is not null && submission.Narrative.Length > 6000) ||
+            submission.Observations.Count > 20 || submission.Observations.Any(value =>
+                string.IsNullOrWhiteSpace(value) || value.Length > 1000) ||
+            submission.OriginalAudioAttachmentIds.Count > 2 ||
+            submission.OriginalAudioAttachmentIds.Any(id => id == Guid.Empty) ||
+            submission.OriginalAudioAttachmentIds.Distinct().Count() != submission.OriginalAudioAttachmentIds.Count)
+        {
+            throw new ArgumentException("The saved report is incomplete or exceeds local limits.", nameof(submission));
+        }
+    }
+
+    private static void ValidateReadyToQueue(IntakeSubmission submission)
+    {
+        ValidateSubmission(submission);
+        var confirmation = submission.Confirmations;
+        var location = submission.Location;
+        if (string.IsNullOrWhiteSpace(submission.Narrative) && submission.Observations.Count == 0 &&
+                submission.OriginalAudioAttachmentIds.Count == 0 ||
+            !confirmation.ReportReviewConfirmed || !confirmation.OccurrenceCountryConfirmed ||
+            !confirmation.ProcessingConfirmed || string.IsNullOrWhiteSpace(confirmation.OccurrenceCountryCode) ||
+            confirmation.OccurrenceCountryCode.Length != 2 || string.IsNullOrWhiteSpace(location.CountryCode) ||
+            !string.Equals(confirmation.OccurrenceCountryCode, confirmation.OccurrenceCountryCode.ToUpperInvariant(), StringComparison.Ordinal) ||
+            !string.Equals(location.CountryCode, location.CountryCode.ToUpperInvariant(), StringComparison.Ordinal) ||
+            string.IsNullOrWhiteSpace(location.CatalogueVersion) ||
+            !string.Equals(location.CatalogueVersion, confirmation.OccurrenceCountryCatalogueVersion, StringComparison.Ordinal) ||
+            !confirmation.OccurrenceCountryCode.All(char.IsAsciiLetter) ||
+            !string.Equals(confirmation.OccurrenceCountryCode, location.CountryCode, StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(confirmation.OccurrenceCountryCatalogueVersion) ||
+            string.IsNullOrWhiteSpace(confirmation.ProcessingPolicyReference) ||
+            string.IsNullOrWhiteSpace(confirmation.ProcessingPolicyVersion) ||
+            !Enum.IsDefined(submission.CapturedAt.Precision) || !Enum.IsDefined(submission.Occurrence.Precision) ||
+            !Enum.IsDefined(location.Source) || !Enum.IsDefined(location.Precision) ||
+            location.Region is null || location.Area is null || location.Locality is null ||
+            !Enum.IsDefined(location.Region.Presence) || !Enum.IsDefined(location.Area.Presence) ||
+            !Enum.IsDefined(location.Locality.Presence) ||
+            location.Latitude is < -90 or > 90 || location.Longitude is < -180 or > 180 ||
+            location.Latitude is { } latitude && !double.IsFinite(latitude) ||
+            location.Longitude is { } longitude && !double.IsFinite(longitude) ||
+            location.AccuracyMetres is < 0 || location.AccuracyMetres is { } accuracy && !double.IsFinite(accuracy) ||
+            (location.Latitude.HasValue != location.Longitude.HasValue) ||
+            (submission.OriginalAudioAttachmentIds.Count > 0 &&
+                (confirmation.RecordingConfirmed != true ||
+                 string.IsNullOrWhiteSpace(confirmation.RecordingPolicyReference) ||
+                 string.IsNullOrWhiteSpace(confirmation.RecordingPolicyVersion))))
+        {
+            throw new ArgumentException("The report needs valid details and the required confirmations.", nameof(submission));
+        }
+    }
+
+    private static void ValidateCurrentCountry(
+        IntakeSubmission submission,
+        PublicIntakeMetadata metadata,
+        PublicIntakeCountryCatalogue catalogue)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+        ArgumentNullException.ThrowIfNull(catalogue);
+        var selectedCode = submission.Confirmations?.OccurrenceCountryCode;
+        var version = submission.Confirmations?.OccurrenceCountryCatalogueVersion;
+        if (string.IsNullOrWhiteSpace(metadata.CountryCatalogueVersion) ||
+            !string.Equals(metadata.Version, metadata.CountryCatalogueVersion, StringComparison.Ordinal) ||
+            string.IsNullOrWhiteSpace(metadata.CountryCatalogueReference) ||
+            string.IsNullOrWhiteSpace(catalogue.Version) ||
+            !string.Equals(metadata.CountryCatalogueVersion, catalogue.Version, StringComparison.Ordinal) ||
+            !string.Equals(metadata.CountryCatalogueReference, catalogue.Reference, StringComparison.Ordinal) ||
+            string.IsNullOrWhiteSpace(selectedCode) || string.IsNullOrWhiteSpace(version) ||
+            !string.Equals(version, catalogue.Version, StringComparison.Ordinal) ||
+            catalogue.Countries is not { Count: > 0 } ||
+            catalogue.Countries.Any(country => country is null || country.Code is not { Length: 2 } ||
+                country.Code.Any(character => character is < 'A' or > 'Z') ||
+                string.IsNullOrWhiteSpace(country.Label)) ||
+            catalogue.Countries.Select(country => country.Code).Distinct(StringComparer.Ordinal).Count() !=
+                catalogue.Countries.Count ||
+            !catalogue.Countries.Any(country => string.Equals(country.Code, selectedCode, StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException("Choose a country from the current list before sending this report.");
+        }
+    }
+
+    internal static GuestSubmissionSummary ToSummary(GuestSubmissionRecord item) => new(
+        item.ClientSubmissionId,
+        item.State,
+        item.CreatedAtUtc,
+        item.Receipt);
+}

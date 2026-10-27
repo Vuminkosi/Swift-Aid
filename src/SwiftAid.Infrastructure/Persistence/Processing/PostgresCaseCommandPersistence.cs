@@ -7,7 +7,10 @@ using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases.Commands;
 using SwiftAid.Application.Serialization;
 using SwiftAid.Contracts.Commands;
+using SwiftAid.Contracts.Events;
 using SwiftAid.Domain.Cases;
+using SwiftAid.Domain.Notifications;
+using SwiftAid.Infrastructure.Persistence.Notifications;
 using SwiftAid.Infrastructure.Persistence.Protection;
 using SwiftAid.Infrastructure.Persistence.Transactions;
 
@@ -98,7 +101,7 @@ public sealed class PostgresCaseCommandPersistence : ICaseCommandPersistence
         foreach (var row in rows)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (row.SchemaVersion != CanonicalCaseCommandHasher.CurrentWireCommandSchemaVersion || row.PayloadId == Guid.Empty)
+            if (row.SchemaVersion is not (1 or 2) || row.PayloadId == Guid.Empty)
             {
                 throw InvalidJournal();
             }
@@ -200,14 +203,17 @@ public sealed class PostgresCaseCommandPersistence : ICaseCommandPersistence
                 entity.AggregateVersion,
                 entity.ReportRevision,
                 entity.RecordedAtUtc,
-                entity.SchemaVersion
+                entity.SchemaVersion,
+                entity.EventType
             })
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
         if (row.ReceiptId == Guid.Empty || row.CanonicalPayloadHash.Length != 32 ||
             row.FirstAggregateVersion < 1 || row.LastAggregateVersion < row.FirstAggregateVersion ||
             row.ReportRevision < 1 || row.AcceptedAtUtc.Offset != TimeSpan.Zero ||
-            storedEvents.Count == 0 || storedEvents.Any(item => item.SchemaVersion != 1 || item.EventId == Guid.Empty ||
+            storedEvents.Count == 0 || storedEvents.Any(item =>
+                (item.SchemaVersion == 2 && item.EventType is not (nameof(CaseEventType.CaseReported) or nameof(CaseEventType.CaseReportCorrected))) ||
+                item.SchemaVersion is not (1 or 2) || item.EventId == Guid.Empty ||
                 !string.Equals(item.ActorId, row.ActorId, StringComparison.Ordinal)) ||
             storedEvents.Count != row.LastAggregateVersion - row.FirstAggregateVersion + 1 ||
             storedEvents[0].AggregateVersion != row.FirstAggregateVersion ||
@@ -358,11 +364,12 @@ public sealed class PostgresCaseCommandPersistence : ICaseCommandPersistence
             try
             {
                 var payloadId = Guid.NewGuid();
+                var eventSchemaVersion = _eventSerializer.GetSchemaVersion(@event);
                 var reference = await _payloadStore.StageProtectedAsync(
                     current.CaseId,
                     payloadId,
                     eventType,
-                    CanonicalCaseCommandHasher.CurrentWireCommandSchemaVersion,
+                    eventSchemaVersion,
                     serialized,
                     cancellationToken).ConfigureAwait(false);
                 if (reference.PayloadId != payloadId || string.IsNullOrWhiteSpace(reference.ProtectionPurposeVersion))
@@ -370,7 +377,7 @@ public sealed class PostgresCaseCommandPersistence : ICaseCommandPersistence
                     throw new ProtectedCaseEventPayloadException();
                 }
 
-                preparedEvents.Add(new PreparedCaseEvent(@event, eventType, reference));
+                preparedEvents.Add(new PreparedCaseEvent(@event, eventType, eventSchemaVersion, reference));
             }
             finally
             {
@@ -439,7 +446,7 @@ public sealed class PostgresCaseCommandPersistence : ICaseCommandPersistence
                 CommandId = @event.CommandId,
                 ActorId = @event.ActorId,
                 EventType = prepared.EventType,
-                SchemaVersion = CanonicalCaseCommandHasher.CurrentWireCommandSchemaVersion,
+                SchemaVersion = prepared.SchemaVersion,
                 OccurredAtUtc = @event.OccurredAtUtc,
                 RecordedAtUtc = @event.RecordedAtUtc,
                 PayloadId = prepared.PayloadReference.PayloadId
@@ -452,6 +459,32 @@ public sealed class PostgresCaseCommandPersistence : ICaseCommandPersistence
                 CreatedAtUtc = @event.RecordedAtUtc,
                 AvailableAtUtc = @event.RecordedAtUtc,
                 AttemptCount = 0
+            });
+        }
+
+        foreach (var assignment in request.Events.OfType<CaseAssigned>())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var recipientActorId = assignment.AccountableOwnerId;
+            var occurrenceKey = $"{assignment.EventId:N}:{recipientActorId}";
+            var notification = NotificationItem.Create(
+                assignment.EventId,
+                occurrenceKey,
+                recipientActorId,
+                NotificationKind.CaseNeedsAttention,
+                NotificationResourceKind.ManagedCase,
+                assignment.CaseId,
+                NotificationAction.OpenCase,
+                NotificationRecipientRequirement.CurrentAccountableOwner,
+                assignment.RecordedAtUtc);
+
+            _dbContext.NotificationItems.Add(notification);
+            _dbContext.NotificationDeliveryOutbox.Add(new NotificationDeliveryOutboxEntity
+            {
+                OutboxId = Guid.NewGuid(),
+                NotificationId = notification.NotificationId,
+                CreatedAtUtc = assignment.RecordedAtUtc,
+                AvailableAtUtc = assignment.RecordedAtUtc
             });
         }
 
@@ -473,6 +506,7 @@ public sealed class PostgresCaseCommandPersistence : ICaseCommandPersistence
     private sealed record PreparedCaseEvent(
         CaseEvent Event,
         string EventType,
+        int SchemaVersion,
         ProtectedCaseEventPayloadReference PayloadReference);
 
     public async ValueTask StageDeniedAuditAsync(

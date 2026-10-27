@@ -1,9 +1,10 @@
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Data;
-using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Npgsql;
+using NpgsqlTypes;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases.Commands;
 using SwiftAid.Infrastructure.Persistence.Processing;
@@ -45,7 +46,7 @@ public sealed class PostgresCaseCommandUnitOfWork : ICaseCommandUnitOfWork, ICas
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (CurrentLease is not null || _dbContext.Database.CurrentTransaction is not null)
+            if (_currentLease is not null || _dbContext.Database.CurrentTransaction is not null)
             {
                 throw new InvalidOperationException("A case lease or database transaction is already active for this scoped context.");
             }
@@ -60,68 +61,35 @@ public sealed class PostgresCaseCommandUnitOfWork : ICaseCommandUnitOfWork, ICas
                 .ConfigureAwait(false);
             try
             {
-                const string authorityLockClause = "FOR SHARE";
-                var caseLockClause = mode == CaseLeaseMode.Write ? "FOR UPDATE" : "FOR SHARE";
-                var initial = await ReadCaseSeedAsync(caseId, cancellationToken).ConfigureAwait(false)
+                var initialOwnerActorId = await ReadCurrentOwnerActorIdAsync(caseId, cancellationToken).ConfigureAwait(false)
                     ?? throw new KeyNotFoundException("The managed case does not exist.");
 
-                var actorIds = NormalizeActorHints(actor, initial.AccountableOwnerActorId, additionalActorHints);
-                await LockSingleRowAsync(
-                    $"SELECT organization_id FROM public.organizations WHERE organization_id = @organization_id ORDER BY organization_id {authorityLockClause}",
-                    "organization_id", initial.OrganizationId, cancellationToken).ConfigureAwait(false);
-                await LockSingleRowAsync(
-                    $"SELECT workspace_id FROM public.workspaces WHERE workspace_id = @workspace_id ORDER BY workspace_id {authorityLockClause}",
-                    "workspace_id", initial.WorkspaceId, cancellationToken).ConfigureAwait(false);
-
-                var accessStateLockClause = mode == CaseLeaseMode.Write ? "FOR UPDATE" : "FOR SHARE";
-                var lockedAccessActors = await LockTextRowsAsync(
-                    $"SELECT actor_id FROM public.actor_access_states WHERE actor_id = ANY (@actor_ids) ORDER BY actor_id {accessStateLockClause}",
-                    "actor_ids", actorIds.ToArray(), cancellationToken).ConfigureAwait(false);
-                RequireAllActorsLocked(actorIds, lockedAccessActors, "actor access state");
-
-                var lockedActors = await LockTextRowsAsync(
-                    $"SELECT actor_id FROM public.actors WHERE actor_id = ANY (@actor_ids) ORDER BY actor_id {authorityLockClause}",
-                    "actor_ids", actorIds.ToArray(), cancellationToken).ConfigureAwait(false);
-                RequireAllActorsLocked(actorIds, lockedActors, "actor");
-
-                await LockTextRowsAsync(
-                    $"SELECT actor_id FROM public.organization_memberships WHERE organization_id = @organization_id AND actor_id = ANY (@actor_ids) ORDER BY actor_id, membership_id {authorityLockClause}",
-                    "organization_id", initial.OrganizationId, "actor_ids", actorIds.ToArray(), cancellationToken).ConfigureAwait(false);
-
-                var grantGroupIds = await LockTextRowsAsync(
-                    $"SELECT grant_group_id FROM public.access_grant_groups WHERE organization_id = @organization_id AND actor_id = ANY (@actor_ids) ORDER BY grant_group_id {authorityLockClause}",
-                    "organization_id", initial.OrganizationId, "actor_ids", actorIds.ToArray(), cancellationToken).ConfigureAwait(false);
-                if (grantGroupIds.Count > 0)
+                var actorIds = NormalizeActorHints(actor, initialOwnerActorId, additionalActorHints);
+                var lockResult = await AcquireCaseAuthorityLockAsync(
+                    transaction, actor.ActorId, caseId, actorIds, mode, cancellationToken).ConfigureAwait(false);
+                switch (lockResult)
                 {
-                    await LockTextRowsAsync(
-                        $"SELECT grant_group_id FROM public.access_grant_group_regions WHERE grant_group_id = ANY (@grant_group_ids) ORDER BY grant_group_id, region_id {authorityLockClause}",
-                        "grant_group_ids", grantGroupIds.ToArray(), cancellationToken).ConfigureAwait(false);
-                    await LockTextRowsAsync(
-                        $"SELECT grant_group_id FROM public.access_grant_group_operations WHERE grant_group_id = ANY (@grant_group_ids) ORDER BY grant_group_id, operation {authorityLockClause}",
-                        "grant_group_ids", grantGroupIds.ToArray(), cancellationToken).ConfigureAwait(false);
+                    case 0:
+                        break;
+                    case 1:
+                    {
+                        var discoveredOwner = await ReadCurrentOwnerActorIdAsync(caseId, cancellationToken)
+                            .ConfigureAwait(false);
+                        if (string.IsNullOrWhiteSpace(discoveredOwner) ||
+                            !string.Equals(discoveredOwner, discoveredOwner.Trim(), StringComparison.Ordinal))
+                        {
+                            throw new InvalidOperationException("The current case authority scope is unavailable.");
+                        }
+
+                        throw CreateDiscoveryChanged(caseId, actor.ActorId, additionalActorHints, discoveredOwner);
+                    }
+                    case 2:
+                        throw new InvalidOperationException("The case authority scope is unavailable.");
+                    case 3:
+                        throw new InvalidOperationException("The case authority lock request is invalid.");
+                    default:
+                        throw new InvalidOperationException("The case authority lock helper returned an unsupported result.");
                 }
-
-                await LockTextRowsAsync(
-                    $"SELECT actor_id FROM public.case_shares WHERE case_id = @case_id AND actor_id = ANY (@actor_ids) ORDER BY actor_id {authorityLockClause}",
-                    "case_id", caseId, "actor_ids", actorIds.ToArray(), cancellationToken).ConfigureAwait(false);
-
-                var current = await LockCaseAndReadAsync(caseId, caseLockClause, cancellationToken).ConfigureAwait(false)
-                    ?? throw new KeyNotFoundException("The managed case does not exist.");
-
-                if (!string.Equals(initial.OrganizationId, current.OrganizationId, StringComparison.Ordinal) ||
-                    !string.Equals(initial.WorkspaceId, current.WorkspaceId, StringComparison.Ordinal))
-                {
-                    throw CreateDiscoveryChanged(caseId, actor.ActorId, additionalActorHints, current.AccountableOwnerActorId);
-                }
-
-                if (!actorIds.Contains(current.AccountableOwnerActorId, StringComparer.Ordinal))
-                {
-                    throw CreateDiscoveryChanged(caseId, actor.ActorId, additionalActorHints, current.AccountableOwnerActorId);
-                }
-
-                await LockTextRowsAsync(
-                    $"SELECT region_id FROM public.managed_case_regions WHERE case_id = @case_id ORDER BY region_id {authorityLockClause}",
-                    "case_id", caseId, cancellationToken).ConfigureAwait(false);
 
                 var lease = new PostgresCaseCommandLease(
                     this, _dbContext, transaction, actor.ActorId, caseId, mode, actorIds, preexistingTrackedEntities);
@@ -191,95 +159,40 @@ public sealed class PostgresCaseCommandUnitOfWork : ICaseCommandUnitOfWork, ICas
         }
     }
 
-    private async Task<CaseSeed?> ReadCaseSeedAsync(Guid caseId, CancellationToken cancellationToken) =>
+    private async Task<string?> ReadCurrentOwnerActorIdAsync(Guid caseId, CancellationToken cancellationToken) =>
         await _dbContext.ManagedCases
             .AsNoTracking()
             .Where(entity => entity.CaseId == caseId)
-            .Select(entity => new CaseSeed(entity.OrganizationId, entity.WorkspaceId, entity.AccountableOwnerActorId))
+            .Select(entity => entity.AccountableOwnerActorId)
             .SingleOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
-    private async Task<CaseSeed?> LockCaseAndReadAsync(
+    private async Task<short> AcquireCaseAuthorityLockAsync(
+        IDbContextTransaction transaction,
+        string actorId,
         Guid caseId,
-        string caseLockClause,
+        ImmutableArray<string> actorHints,
+        CaseLeaseMode mode,
         CancellationToken cancellationToken)
     {
-        await using var command = CreateCommand(
-            $"SELECT organization_id, workspace_id, accountable_owner_actor_id FROM public.managed_cases WHERE case_id = @case_id {caseLockClause}",
-            ("case_id", caseId));
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        await using var command = _dbContext.Database.GetDbConnection().CreateCommand();
+        command.CommandText = "SELECT swiftaid_internal.lock_case_authority(@case_id, @actor_id, @actor_hints, @write)";
+        command.Transaction = transaction.GetDbTransaction();
+        command.Parameters.Add(new NpgsqlParameter("case_id", NpgsqlDbType.Uuid) { Value = caseId });
+        command.Parameters.Add(new NpgsqlParameter("actor_id", NpgsqlDbType.Text) { Value = actorId });
+        command.Parameters.Add(new NpgsqlParameter("actor_hints", NpgsqlDbType.Array | NpgsqlDbType.Text)
         {
-            return null;
-        }
-
-        return new CaseSeed(reader.GetString(0), reader.GetString(1), reader.GetString(2));
-    }
-
-    private async Task LockSingleRowAsync(
-        string sql,
-        string parameterName,
-        string parameterValue,
-        CancellationToken cancellationToken)
-    {
-        var rows = await LockTextRowsAsync(sql, parameterName, parameterValue, cancellationToken).ConfigureAwait(false);
-        if (rows.Count != 1)
+            Value = actorHints.ToArray()
+        });
+        command.Parameters.Add(new NpgsqlParameter("write", NpgsqlDbType.Boolean)
         {
-            throw new InvalidOperationException("The case authority scope is unavailable.");
-        }
-    }
+            Value = mode == CaseLeaseMode.Write
+        });
 
-    private async Task<List<string>> LockTextRowsAsync(
-        string sql,
-        string parameterName,
-        object parameterValue,
-        CancellationToken cancellationToken)
-    {
-        await using var command = CreateCommand(sql, (parameterName, parameterValue));
-        return await ReadTextRowsAsync(command, cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task<List<string>> LockTextRowsAsync(
-        string sql,
-        string firstParameterName,
-        object firstParameterValue,
-        string secondParameterName,
-        object secondParameterValue,
-        CancellationToken cancellationToken)
-    {
-        await using var command = CreateCommand(sql,
-            (firstParameterName, firstParameterValue),
-            (secondParameterName, secondParameterValue));
-        return await ReadTextRowsAsync(command, cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task<List<string>> ReadTextRowsAsync(DbCommand command, CancellationToken cancellationToken)
-    {
-        var values = new List<string>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-        {
-            values.Add(reader.GetString(0));
-        }
-
-        return values;
-    }
-
-    private DbCommand CreateCommand(string sql, params (string Name, object Value)[] parameters)
-    {
-        var command = _dbContext.Database.GetDbConnection().CreateCommand();
-        command.CommandText = sql;
-        command.Transaction = _dbContext.Database.CurrentTransaction?.GetDbTransaction()
-            ?? throw new InvalidOperationException("A PostgreSQL transaction is required for case authority access.");
-        foreach (var (name, value) in parameters)
-        {
-            var parameter = command.CreateParameter();
-            parameter.ParameterName = name;
-            parameter.Value = value;
-            command.Parameters.Add(parameter);
-        }
-
-        return command;
+        var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return result is short status
+            ? status
+            : throw new InvalidOperationException("The case authority lock helper returned an invalid result.");
     }
 
     private static ImmutableArray<string> NormalizeActorHints(
@@ -306,17 +219,6 @@ public sealed class PostgresCaseCommandUnitOfWork : ICaseCommandUnitOfWork, ICas
         return builder.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToImmutableArray();
     }
 
-    private static void RequireAllActorsLocked(
-        ImmutableArray<string> requestedActorIds,
-        IReadOnlyCollection<string> lockedActorIds,
-        string rowType)
-    {
-        if (requestedActorIds.Any(actorId => !lockedActorIds.Contains(actorId, StringComparer.Ordinal)))
-        {
-            throw new InvalidOperationException($"The required {rowType} authority row is unavailable.");
-        }
-    }
-
     private static CaseLeaseDiscoveryChangedException CreateDiscoveryChanged(
         Guid caseId,
         string actorId,
@@ -333,6 +235,4 @@ public sealed class PostgresCaseCommandUnitOfWork : ICaseCommandUnitOfWork, ICas
 
         return new CaseLeaseDiscoveryChangedException(caseId, hints);
     }
-
-    private sealed record CaseSeed(string OrganizationId, string WorkspaceId, string AccountableOwnerActorId);
 }

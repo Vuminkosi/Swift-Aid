@@ -475,7 +475,7 @@ public sealed class CaseAggregateTests
         observations.Add(new ReportedObservation("injected after apply"));
 
         Assert.Single(aggregate.Report!.Observations);
-        Assert.Single(Assert.Single(aggregate.Events.OfType<CaseReportCorrected>()).CorrectedReport.Observations);
+        Assert.Single(Assert.Single(aggregate.Events.OfType<CaseReportCorrected>()).CorrectedReport!.Observations);
     }
 
     [Fact]

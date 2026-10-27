@@ -130,6 +130,14 @@ internal sealed class CaseAuthorityPostgresFixture : IAsyncDisposable
         return new SwiftAidDbContext(options);
     }
 
+    public SwiftAidDbContext CreateRuntimeContext(
+        CaseAuthorityRuntimeProfile profile,
+        DbCommandInterceptor? interceptor = null)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        return profile.CreateRuntimeContext(this, interceptor);
+    }
+
     public async Task SetCaseOwnerAsync(string ownerActorId)
     {
         await using var dbContext = CreateDbContext();

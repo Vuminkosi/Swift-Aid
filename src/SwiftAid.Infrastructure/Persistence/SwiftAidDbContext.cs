@@ -1,6 +1,12 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using SwiftAid.Domain.Cases;
+using SwiftAid.Domain.Notifications;
+using SwiftAid.Infrastructure.Identity;
+using SwiftAid.Infrastructure.Persistence.Entities.Intake;
+using SwiftAid.Infrastructure.Persistence.Notifications;
 
 namespace SwiftAid.Infrastructure.Persistence;
 
@@ -8,8 +14,10 @@ namespace SwiftAid.Infrastructure.Persistence;
 /// The sole PostgreSQL persistence context for identity references, access grants,
 /// managed-case projections, event metadata, receipts, audit, and outbox records.
 /// </summary>
-public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> options) : DbContext(options)
+public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> options)
+    : IdentityUserContext<SwiftAidUser>(options)
 {
+    public DbSet<ExternalIdentityMappingEntity> ExternalIdentityMappings => Set<ExternalIdentityMappingEntity>();
     public DbSet<ActorEntity> Actors => Set<ActorEntity>();
     public DbSet<ActorAccessStateEntity> ActorAccessStates => Set<ActorAccessStateEntity>();
     public DbSet<OrganizationEntity> Organizations => Set<OrganizationEntity>();
@@ -26,15 +34,100 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
     public DbSet<CommandReceiptEntity> CommandReceipts => Set<CommandReceiptEntity>();
     public DbSet<DomainOutboxEntity> DomainOutbox => Set<DomainOutboxEntity>();
     public DbSet<SecurityAuditEntryEntity> SecurityAuditEntries => Set<SecurityAuditEntryEntity>();
+    public DbSet<NotificationItem> NotificationItems => Set<NotificationItem>();
+    public DbSet<NotificationDeliveryOutboxEntity> NotificationDeliveryOutbox => Set<NotificationDeliveryOutboxEntity>();
+    public DbSet<PushDeviceEntity> PushDevices => Set<PushDeviceEntity>();
+    public DbSet<IntakeSessionEntity> IntakeSessions => Set<IntakeSessionEntity>();
+    public DbSet<IntakeCapabilityEntity> IntakeCapabilities => Set<IntakeCapabilityEntity>();
+    public DbSet<IntakeReportEntity> IntakeReports => Set<IntakeReportEntity>();
+    public DbSet<IntakeRouteEntity> IntakeRoutes => Set<IntakeRouteEntity>();
+    public DbSet<IntakeAttachmentEntity> IntakeAttachments => Set<IntakeAttachmentEntity>();
+    public DbSet<IntakeOutboxEntity> IntakeOutbox => Set<IntakeOutboxEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+        ConfigureOpenIddictSchema(modelBuilder);
+        ConfigureIdentity(modelBuilder);
         ConfigureActors(modelBuilder);
         ConfigureOrganizationsAndAccess(modelBuilder);
         ConfigureCases(modelBuilder);
         ConfigureEventsAndCommands(modelBuilder);
         ConfigureAudit(modelBuilder);
+        modelBuilder.ApplyConfiguration(new NotificationItemEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new NotificationDeliveryOutboxEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new PushDeviceEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new IntakeSessionEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new IntakeCapabilityEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new IntakeReportEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new IntakeRouteEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new IntakeAttachmentEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new IntakeOutboxEntityConfiguration());
+    }
+
+    private static void ConfigureOpenIddictSchema(ModelBuilder modelBuilder)
+    {
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes()
+                     .Where(entityType => entityType.Name.StartsWith(
+                         "OpenIddict.EntityFrameworkCore.Models.",
+                         StringComparison.Ordinal)))
+        {
+            entityType.SetSchema("swiftaid_identity");
+        }
+    }
+
+    private static void ConfigureIdentity(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<SwiftAidUser>().ToTable("users", "swiftaid_identity");
+        modelBuilder.Entity<IdentityUserClaim<string>>().ToTable("user_claims", "swiftaid_identity");
+        modelBuilder.Entity<IdentityUserLogin<string>>().ToTable("user_logins", "swiftaid_identity");
+        modelBuilder.Entity<IdentityUserToken<string>>().ToTable("user_tokens", "swiftaid_identity");
+        modelBuilder.Entity<IdentityUserPasskey<string>>(passkey =>
+        {
+            passkey.HasKey(entity => entity.CredentialId);
+            passkey.ToTable("user_passkeys", "swiftaid_identity");
+            passkey.Property(entity => entity.CredentialId).HasMaxLength(1024);
+            passkey.Property(entity => entity.UserId).IsRequired();
+            passkey.HasOne<SwiftAidUser>()
+                .WithMany()
+                .HasForeignKey(entity => entity.UserId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("fk_user_passkeys_user");
+            passkey.OwnsOne(entity => entity.Data).ToJson();
+        });
+
+        modelBuilder.Entity<SwiftAidUser>()
+            .HasOne<ActorEntity>()
+            .WithOne()
+            .HasForeignKey<SwiftAidUser>(user => user.Id)
+            .OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_identity_users_actor");
+
+        var mapping = modelBuilder.Entity<ExternalIdentityMappingEntity>();
+        mapping.ToTable("external_identities", "swiftaid_identity", table =>
+        {
+            table.HasCheckConstraint(
+                "ck_external_identities_provider_length",
+                "length(btrim(provider)) BETWEEN 1 AND 128");
+            table.HasCheckConstraint(
+                "ck_external_identities_issuer_length",
+                "length(btrim(issuer)) BETWEEN 1 AND 2048");
+            table.HasCheckConstraint(
+                "ck_external_identities_subject_length",
+                "length(btrim(subject)) BETWEEN 1 AND 1024");
+        });
+        mapping.HasKey(entity => entity.MappingId).HasName("pk_external_identities");
+        mapping.Property(entity => entity.MappingId).HasColumnName("mapping_id").HasColumnType("uuid");
+        mapping.Property(entity => entity.ActorId).HasColumnName("actor_id").HasColumnType("text");
+        mapping.Property(entity => entity.Provider).HasColumnName("provider").HasColumnType("text");
+        mapping.Property(entity => entity.Issuer).HasColumnName("issuer").HasColumnType("text");
+        mapping.Property(entity => entity.Subject).HasColumnName("subject").HasColumnType("text");
+        mapping.Property(entity => entity.CreatedAtUtc).HasColumnName("created_at_utc")
+            .HasColumnType("timestamp with time zone");
+        mapping.HasIndex(entity => new { entity.Provider, entity.Issuer, entity.Subject })
+            .IsUnique().HasDatabaseName("ux_external_identities_provider_issuer_subject");
+        mapping.HasOne<ActorEntity>().WithMany().HasForeignKey(entity => entity.ActorId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_external_identities_actor");
     }
 
     private static void ConfigureActors(ModelBuilder modelBuilder)

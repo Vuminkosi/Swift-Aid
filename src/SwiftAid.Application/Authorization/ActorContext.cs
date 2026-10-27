@@ -22,6 +22,24 @@ public sealed class ActorContext
     public long AccessEpoch { get; }
 
     /// <summary>
+    /// Creates a background authorization context only from current actor state returned by the
+    /// trusted persistence adapter. This method is internal and does not accept client claims.
+    /// </summary>
+    internal static ActorContext FromTrustedAuthorizationState(TrustedActorAuthorizationState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        if (!state.IsActive ||
+            state.AccessEpoch < 0 ||
+            string.IsNullOrWhiteSpace(state.ActorId) ||
+            !string.Equals(state.ActorId, state.ActorId.Trim(), StringComparison.Ordinal))
+        {
+            throw new UnauthorizedAccessException("Current active actor state is required.");
+        }
+
+        return new ActorContext(state.ActorId, state.AccessEpoch);
+    }
+
+    /// <summary>
     /// Creates an actor context from the principal validated by server authentication.
     /// Callers must pass the authenticated server principal, never request-body data.
     /// </summary>

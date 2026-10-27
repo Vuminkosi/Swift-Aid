@@ -3,6 +3,7 @@ using System.Text.Json;
 using SwiftAid.Application.Serialization;
 using SwiftAid.Contracts.Commands;
 using SwiftAid.Domain.Cases;
+using SwiftAid.Contracts.Geography;
 
 namespace SwiftAid.Application.Tests;
 
@@ -133,6 +134,152 @@ public sealed class CaseEventSerializationTests
             Assert.Throws<InvalidDataException>(() => Serializer.SerializeToUtf8Bytes(review));
         }
     }
+
+    [Fact]
+    public void TypedHumanReport_UsesV2EnvelopeAndPreservesEvidenceMissingnessAndConfirmations()
+    {
+        var reportData = CreateHumanReport();
+        var events = CaseAggregate.CreateManagedCase(CaseId, InitialCommandId, "workspace-1", reportData,
+            OccurredAtUtc, RecordedAtUtc, new ActorCapabilities("officer-1", CaseCapability.AcceptReport));
+        var serialized = Serializer.SerializeToUtf8Bytes(events[0]);
+        using var document = JsonDocument.Parse(serialized);
+        var root = document.RootElement;
+        var report = root.GetProperty("payload").GetProperty("report");
+
+        Assert.Equal(2, root.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("Human", report.GetProperty("reportKind").GetString());
+        Assert.Equal("reported source narrative", report.GetProperty("evidence").GetProperty("narrative").GetProperty("text").GetString());
+        Assert.Equal("Unknown", report.GetProperty("human").GetProperty("ageYears").GetProperty("state").GetString());
+        Assert.Equal(JsonValueKind.Null, report.GetProperty("human").GetProperty("ageYears").GetProperty("value").ValueKind);
+        Assert.Equal("ZA", report.GetProperty("confirmations").GetProperty("occurrenceCountryCode").GetString());
+        Assert.Equal(2, Serializer.GetSchemaVersion(events[0]));
+        Assert.Equal(1, Serializer.GetSchemaVersion(events[1]));
+    }
+
+    [Fact]
+    public void TypedAnimalReport_UsesDistinctSubjectAndCountFieldsAndRecordingConfirmation()
+    {
+        var provenance = Provenance(ReportSourceKind.ReporterObservation, "animal-observation");
+        var context = CreateContext();
+        var audioProvenance = Provenance(ReportSourceKind.OriginalAudio, "audio-1");
+        var evidence = new ReportEvidence(null, [], new ReportEvidenceReference("opaque-audio-1", audioProvenance));
+        var report = AnimalReport.Create(Guid.Parse("40000000-0000-0000-0000-000000000001"), context,
+            AnimalSubjectScope.Herd, ReportedFact<string>.Known("cattle", provenance),
+            ReportedFact<string>.Unknown(provenance), evidence,
+            AnimalCount.Known(20, provenance, "herd-1"), AnimalCount.Known(4, provenance, "herd-1"),
+            AnimalCount.Unknown(provenance));
+        var confirmations = Confirmations(true);
+        var declinedAudio = new CaseReportEventData.AnimalV2(report, confirmations with
+        {
+            RecordingConfirmed = false,
+            RecordingPolicyReference = "recording-notice",
+            RecordingPolicyVersion = "2026-01"
+        });
+        Assert.Throws<ArgumentException>(() => CaseAggregate.CreateManagedCase(CaseId, InitialCommandId,
+            "workspace-1", declinedAudio, OccurredAtUtc, RecordedAtUtc,
+            new ActorCapabilities("officer-1", CaseCapability.AcceptReport)));
+
+        var reportData = declinedAudio with
+        {
+            Confirmations = declinedAudio.Confirmations with { RecordingConfirmed = true }
+        };
+        var events = CaseAggregate.CreateManagedCase(CaseId, InitialCommandId, "workspace-1", reportData,
+            OccurredAtUtc, RecordedAtUtc, new ActorCapabilities("officer-1", CaseCapability.AcceptReport));
+        using var document = JsonDocument.Parse(Serializer.SerializeToUtf8Bytes(events[0]));
+        var payload = document.RootElement.GetProperty("payload").GetProperty("report");
+
+        Assert.Equal("Animal", payload.GetProperty("reportKind").GetString());
+        Assert.Equal("Herd", payload.GetProperty("animal").GetProperty("subjectScope").GetString());
+        Assert.Equal(20, payload.GetProperty("animal").GetProperty("animalsAtRisk").GetProperty("value").GetInt32());
+        Assert.Equal("Unknown", payload.GetProperty("animal").GetProperty("animalsDead").GetProperty("state").GetString());
+        Assert.True(payload.GetProperty("confirmations").GetProperty("recordingConfirmed").GetBoolean());
+    }
+
+    [Fact]
+    public void TypedReportCorrection_UsesV2EnvelopeAndKeepsRevisionMetadata()
+    {
+        var correction = new CaseReportCorrected(CaseId, 3, 2, Guid.Parse("20000000-0000-0000-0000-000000000009"),
+            "officer-1", OccurredAtUtc, RecordedAtUtc, CreateHumanReport(), "reporter clarification", 1);
+
+        using var document = JsonDocument.Parse(Serializer.SerializeToUtf8Bytes(correction));
+        Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("CaseReportCorrected", document.RootElement.GetProperty("eventType").GetString());
+        Assert.Equal(1, document.RootElement.GetProperty("payload").GetProperty("previousReportRevision").GetInt64());
+        Assert.Equal(2, Serializer.GetSchemaVersion(correction));
+    }
+
+    [Fact]
+    public void ManagedCreation_RequiresExplicitConfirmationMetadata()
+    {
+        var valid = CreateHumanReport();
+        var invalid = valid with
+        {
+            Confirmations = valid.Confirmations with { ProcessingPolicyVersion = " " }
+        };
+
+        Assert.Throws<ArgumentException>(() => CaseAggregate.CreateManagedCase(CaseId, InitialCommandId,
+            "workspace-1", invalid, OccurredAtUtc, RecordedAtUtc,
+            new ActorCapabilities("officer-1", CaseCapability.AcceptReport)));
+    }
+
+    [Fact]
+    public void V2Schema_DeclaresVersionAndStrictTypedReportDiscriminator()
+    {
+        var schemaPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../contracts/events/case-event.v2.schema.json"));
+        using var schema = JsonDocument.Parse(File.ReadAllBytes(schemaPath));
+        var root = schema.RootElement;
+        Assert.Equal(2, root.GetProperty("properties").GetProperty("schemaVersion").GetProperty("const").GetInt32());
+        Assert.Equal(new[] { "CaseReported", "CaseReportCorrected" }, root.GetProperty("properties").GetProperty("eventType")
+            .GetProperty("enum").EnumerateArray().Select(value => value.GetString()).ToArray());
+        var report = root.GetProperty("$defs").GetProperty("report");
+        Assert.Contains("reportKind", report.GetProperty("required").EnumerateArray().Select(value => value.GetString()));
+        Assert.Contains("confirmations", report.GetProperty("required").EnumerateArray().Select(value => value.GetString()));
+        Assert.True(report.GetProperty("additionalProperties").GetBoolean() == false);
+        var offsetPattern = schema.RootElement.GetProperty("$defs").GetProperty("context")
+            .GetProperty("properties").GetProperty("capturedOffset").GetProperty("pattern").GetString()!;
+        Assert.Matches(offsetPattern, "+13:59");
+        Assert.Matches(offsetPattern, "-14:00");
+        Assert.DoesNotMatch(offsetPattern, "+14:30");
+        Assert.DoesNotMatch(offsetPattern, "-14:01");
+        var reportedTime = root.GetProperty("$defs").GetProperty("reportedTime");
+        Assert.Equal(new[] { "value", "localDate", "rangeStart", "rangeEnd", "originalOffset", "zoneId", "precision" },
+            reportedTime.GetProperty("required").EnumerateArray().Select(value => value.GetString()).ToArray());
+        Assert.Equal(4, reportedTime.GetProperty("allOf").GetArrayLength());
+    }
+
+    [Fact]
+    public void ReportContext_RejectsCapturedOffsetOutsideDateTimeOffsetRange()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => CreateHumanReport("+14:30"));
+    }
+
+    private static CaseReportEventData.HumanV2 CreateHumanReport(string capturedOffset = "+00:00")
+    {
+        var provenance = Provenance(ReportSourceKind.ReporterNarrative, "reporter-narrative-1");
+        var report = HumanReport.Create(Guid.Parse("40000000-0000-0000-0000-000000000002"), CreateContext(capturedOffset),
+            ReportedFact<string>.Unknown(provenance), ReportedFact<int>.Unknown(provenance),
+            ReportedFact<string>.Known("reported concern", provenance),
+            new ReportEvidence(new ReportedText("reported source narrative", provenance), [], null));
+        return new CaseReportEventData.HumanV2(report, Confirmations(false));
+    }
+
+    private static ReportContext CreateContext(string capturedOffset = "+00:00")
+    {
+        var provenance = Provenance(ReportSourceKind.ReporterObservation, "occurrence-time-1");
+        var occurrence = new ReportedTime(OccurredAtUtc, null, null, null, "+00:00", "Etc/UTC", ReportedTimePrecision.Exact);
+        var location = new LocationContext("ZA", new OptionalPlace(null, null, PresenceState.Unknown),
+            new OptionalPlace(null, null, PresenceState.Unknown), new OptionalPlace(null, null, PresenceState.Unknown),
+            null, null, null, LocationSource.Reporter, LocationPrecision.Unknown, "catalogue-2026-01");
+        return new ReportContext(ReportedFact<ReportedTime>.Known(occurrence, provenance), RecordedAtUtc,
+            capturedOffset, capturedOffset == "+00:00" ? "Etc/UTC" : null, ReportedTimePrecision.Exact, location);
+    }
+
+    private static ReportProvenance Provenance(ReportSourceKind source, string reference) => new(source, reference);
+
+    private static ReportConfirmations Confirmations(bool recordingPresent) => new(
+        true, "ZA", "catalogue-2026-01", true, true, "processing-notice", "2026-01",
+        recordingPresent ? true : null, recordingPresent ? "recording-notice" : null,
+        recordingPresent ? "2026-01" : null);
 
     private static string FixtureDirectory => Path.GetFullPath(
         Path.Combine(AppContext.BaseDirectory, "../../../../../contracts/fixtures/case-events"));

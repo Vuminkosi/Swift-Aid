@@ -55,9 +55,47 @@ internal static class DeterministicCaseEventId
         return new Guid(digest[..16]);
     }
 }
-public sealed record CaseReported(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, ReportFacts Report, string WorkspaceId) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
+public sealed record CaseReported : CaseEvent
+{
+    public CaseReported(Guid caseId, long aggregateVersion, long reportRevision, Guid commandId, string actorId,
+        DateTimeOffset? occurredAtUtc, DateTimeOffset recordedAtUtc, ReportFacts report, string workspaceId)
+        : this(caseId, aggregateVersion, reportRevision, commandId, actorId, occurredAtUtc, recordedAtUtc,
+            new CaseReportEventData.LegacyV1(report), workspaceId) { }
+
+    public CaseReported(Guid caseId, long aggregateVersion, long reportRevision, Guid commandId, string actorId,
+        DateTimeOffset? occurredAtUtc, DateTimeOffset recordedAtUtc, CaseReportEventData reportData, string workspaceId)
+        : base(caseId, aggregateVersion, reportRevision, commandId, actorId, occurredAtUtc, recordedAtUtc)
+    {
+        ReportData = reportData ?? throw new ArgumentNullException(nameof(reportData));
+        WorkspaceId = workspaceId;
+    }
+
+    public CaseReportEventData ReportData { get; init; }
+    public ReportFacts? Report => (ReportData as CaseReportEventData.LegacyV1)?.Report;
+    public string WorkspaceId { get; init; }
+}
 public sealed record CaseAssigned(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, string AccountableOwnerId) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
-public sealed record CaseReportCorrected(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, ReportFacts CorrectedReport, string Reason, long PreviousReportRevision) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
+public sealed record CaseReportCorrected : CaseEvent
+{
+    public CaseReportCorrected(Guid caseId, long aggregateVersion, long reportRevision, Guid commandId, string actorId,
+        DateTimeOffset? occurredAtUtc, DateTimeOffset recordedAtUtc, ReportFacts correctedReport, string reason, long previousReportRevision)
+        : this(caseId, aggregateVersion, reportRevision, commandId, actorId, occurredAtUtc, recordedAtUtc,
+            new CaseReportEventData.LegacyV1(correctedReport), reason, previousReportRevision) { }
+
+    public CaseReportCorrected(Guid caseId, long aggregateVersion, long reportRevision, Guid commandId, string actorId,
+        DateTimeOffset? occurredAtUtc, DateTimeOffset recordedAtUtc, CaseReportEventData correctedReportData, string reason, long previousReportRevision)
+        : base(caseId, aggregateVersion, reportRevision, commandId, actorId, occurredAtUtc, recordedAtUtc)
+    {
+        CorrectedReportData = correctedReportData ?? throw new ArgumentNullException(nameof(correctedReportData));
+        Reason = reason;
+        PreviousReportRevision = previousReportRevision;
+    }
+
+    public CaseReportEventData CorrectedReportData { get; init; }
+    public ReportFacts? CorrectedReport => (CorrectedReportData as CaseReportEventData.LegacyV1)?.Report;
+    public string Reason { get; init; }
+    public long PreviousReportRevision { get; init; }
+}
 public sealed record CaseActionRequested(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, Guid RequestId, CaseAction RequestedOperation, string Reason, IReadOnlyList<string> EvidenceEventIds, string? ProposedOwnerId) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
 public sealed record CaseActionRequestReviewed(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, Guid RequestId, CaseActionReviewOutcome Outcome, Guid? LinkedAcceptedEventId, string Reason) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
 public sealed record CaseResolved(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, string Reason) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
@@ -79,6 +117,7 @@ public sealed class CaseAggregate
     public long LaboratoryVersion { get; private set; }
     public long OutcomeVersion { get; private set; }
     public ReportFacts? Report { get; private set; }
+    public CaseReportEventData? ReportData { get; private set; }
     public string? WorkspaceId { get; private set; }
     public string? AccountableOwnerId { get; private set; }
     public CaseWorkflow Workflow { get; private set; } = CaseWorkflow.Reported;
@@ -110,6 +149,33 @@ public sealed class CaseAggregate
         ]);
     }
 
+    public static IReadOnlyList<CaseEvent> CreateManagedCase(
+        Guid caseId,
+        Guid commandId,
+        string workspaceId,
+        CaseReportEventData report,
+        DateTimeOffset? occurredAtUtc,
+        DateTimeOffset recordedAtUtc,
+        ActorCapabilities actor)
+    {
+        if (caseId == Guid.Empty) throw new ArgumentException("A case identifier is required.", nameof(caseId));
+        if (commandId == Guid.Empty) throw new ArgumentException("A command identifier is required.", nameof(commandId));
+        ArgumentNullException.ThrowIfNull(report);
+        ArgumentNullException.ThrowIfNull(actor);
+        ValidateRecordedAtUtc(recordedAtUtc);
+        RequireCapability(actor, CaseCapability.AcceptReport);
+        RequireText(workspaceId, nameof(workspaceId));
+        if (report is not (CaseReportEventData.HumanV2 or CaseReportEventData.AnimalV2))
+            throw new ArgumentException("Managed case creation requires a typed v2 report.", nameof(report));
+        ValidateNewReport(report);
+
+        return Array.AsReadOnly<CaseEvent>(
+        [
+            new CaseReported(caseId, 1, 1, commandId, actor.ActorId, occurredAtUtc, recordedAtUtc, report, workspaceId),
+            new CaseAssigned(caseId, 2, 1, commandId, actor.ActorId, occurredAtUtc, recordedAtUtc, actor.ActorId)
+        ]);
+    }
+
     public static CaseAggregate Replay(IEnumerable<CaseEvent> events)
     {
         ArgumentNullException.ThrowIfNull(events);
@@ -125,7 +191,7 @@ public sealed class CaseAggregate
         ArgumentNullException.ThrowIfNull(command);
         ArgumentNullException.ThrowIfNull(actor);
         if (_pendingAssignment is not null) throw new InvalidOperationException("A reassignment is awaiting its approved review event.");
-        if (AggregateVersion < 2 || Report is null) throw new InvalidOperationException("The case must be accepted before it can be changed.");
+        if (AggregateVersion < 2 || ReportData is null) throw new InvalidOperationException("The case must be accepted before it can be changed.");
         if (command.CommandId == Guid.Empty) throw new ArgumentException("A command identifier is required.", nameof(command.CommandId));
         ValidateRecordedAtUtc(command.RecordedAtUtc);
         if (command.ExpectedVersion != AggregateVersion) throw new InvalidOperationException("The command version is stale; refresh before changing this case.");
@@ -178,12 +244,13 @@ public sealed class CaseAggregate
         if (AggregateVersion == 0)
         {
             if (@event is not CaseReported first || first.AggregateVersion != 1 || first.ReportRevision != 1) throw new InvalidDataException("The first event must be CaseReported at report revision one.");
-            ValidateReport(first.Report);
+            ValidateNewReport(first.ReportData);
             RequireText(first.WorkspaceId, nameof(first.WorkspaceId));
             CaseId = first.CaseId;
             ReportRevision = first.ReportRevision;
             WorkflowVersion = first.AggregateVersion;
-            Report = SnapshotReport(first.Report);
+            ReportData = SnapshotReportData(first.ReportData);
+            Report = (ReportData as CaseReportEventData.LegacyV1)?.Report;
             WorkspaceId = first.WorkspaceId;
         }
         else
@@ -252,7 +319,8 @@ public sealed class CaseAggregate
         RequireCapability(actor, CaseCapability.CorrectReport);
         RequireText(command.Reason, nameof(command.Reason));
         RequireText(command.CorrectedNarrative, nameof(command.CorrectedNarrative));
-        var corrected = Report! with { Narrative = command.CorrectedNarrative };
+        var legacyReport = Report ?? throw new InvalidOperationException("The legacy narrative correction command cannot alter a typed v2 report.");
+        var corrected = legacyReport with { Narrative = command.CorrectedNarrative };
         return Array.AsReadOnly<CaseEvent>([new CaseReportCorrected(CaseId, version, ReportRevision + 1, command.CommandId, actor.ActorId, command.OccurredAtUtc, command.RecordedAtUtc, corrected, command.Reason, ReportRevision)]);
     }
 
@@ -360,8 +428,9 @@ public sealed class CaseAggregate
                 throw new InvalidDataException("The initial assignment must immediately follow the report under the same trusted command and actor.");
             case CaseReportCorrected corrected when corrected.PreviousReportRevision == ReportRevision && corrected.ReportRevision == ReportRevision + 1:
                 RequireText(corrected.Reason, nameof(corrected.Reason));
-                ValidateReport(corrected.CorrectedReport);
-                Report = SnapshotReport(corrected.CorrectedReport);
+                ValidateNewReport(corrected.CorrectedReportData);
+                ReportData = SnapshotReportData(corrected.CorrectedReportData);
+                Report = (ReportData as CaseReportEventData.LegacyV1)?.Report;
                 ReportRevision = corrected.ReportRevision;
                 break;
             case CaseReportCorrected:
@@ -449,16 +518,57 @@ public sealed class CaseAggregate
         if (report.Observations.Any(observation => string.IsNullOrWhiteSpace(observation.Narrative))) throw new ArgumentException("Reported observations must preserve non-empty source text.", nameof(report));
     }
 
+    private static void ValidateNewReport(CaseReportEventData reportData)
+    {
+        ArgumentNullException.ThrowIfNull(reportData);
+        switch (reportData)
+        {
+            case CaseReportEventData.LegacyV1 legacy:
+                ValidateReport(legacy.Report);
+                break;
+            case CaseReportEventData.HumanV2 human:
+                ArgumentNullException.ThrowIfNull(human.Report);
+                human.Report.Context.Validate();
+                human.Report.PseudonymousSubjectReference.Validate();
+                human.Report.AgeYears.Validate();
+                human.Report.ReportedConcern.Validate();
+                human.Report.Evidence.Validate();
+                human.Validate();
+                break;
+            case CaseReportEventData.AnimalV2 animal:
+                ArgumentNullException.ThrowIfNull(animal.Report);
+                animal.Report.Context.Validate();
+                animal.Report.Species.Validate();
+                animal.Report.HoldingReference.Validate();
+                animal.Report.Evidence.Validate();
+                animal.Report.AnimalsAtRisk.Validate();
+                animal.Report.AnimalsAffected.Validate();
+                animal.Report.AnimalsDead.Validate();
+                animal.Validate();
+                break;
+            default:
+                throw new InvalidDataException("The report payload variant is unsupported.");
+        }
+    }
+
     private static ReportFacts SnapshotReport(ReportFacts report) => report with
     {
         Observations = Array.AsReadOnly(report.Observations.ToArray())
     };
 
+    private static CaseReportEventData SnapshotReportData(CaseReportEventData reportData) => reportData switch
+    {
+        CaseReportEventData.LegacyV1 legacy => new CaseReportEventData.LegacyV1(SnapshotReport(legacy.Report)),
+        CaseReportEventData.HumanV2 human => new CaseReportEventData.HumanV2(human.Report, human.Confirmations with { }),
+        CaseReportEventData.AnimalV2 animal => new CaseReportEventData.AnimalV2(animal.Report, animal.Confirmations with { }),
+        _ => throw new InvalidDataException("The report payload variant is unsupported.")
+    };
+
     private static CaseEvent SnapshotEvent(CaseEvent @event) => @event switch
     {
-        CaseReported reported => reported with { Report = SnapshotReport(reported.Report) },
+        CaseReported reported => reported with { ReportData = SnapshotReportData(reported.ReportData) },
         CaseAssigned assignment => assignment,
-        CaseReportCorrected correction => correction with { CorrectedReport = SnapshotReport(correction.CorrectedReport) },
+        CaseReportCorrected correction => correction with { CorrectedReportData = SnapshotReportData(correction.CorrectedReportData) },
         CaseActionRequested request => request with { EvidenceEventIds = Array.AsReadOnly(request.EvidenceEventIds.ToArray()) },
         CaseActionRequestReviewed review => review,
         CaseResolved resolution => resolution,

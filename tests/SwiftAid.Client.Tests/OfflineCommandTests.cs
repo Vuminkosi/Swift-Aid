@@ -95,7 +95,9 @@ public sealed class OfflineCommandTests
         var dependent = Proposal(caseId, dependencyId: blocked.CommandId);
         var unrelated = Proposal(Guid.NewGuid());
         await fixture.Outbox.EnqueueAsync(blocked, CancellationToken.None);
+        fixture.Clock.Advance(TimeSpan.FromMilliseconds(1));
         await fixture.Outbox.EnqueueAsync(dependent, CancellationToken.None);
+        fixture.Clock.Advance(TimeSpan.FromMilliseconds(1));
         await fixture.Outbox.EnqueueAsync(unrelated, CancellationToken.None);
 
         var first = await fixture.Outbox.GetNextReadyAsync(fixture.CurrentAuthority, CancellationToken.None);

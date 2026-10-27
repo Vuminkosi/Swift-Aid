@@ -208,6 +208,16 @@ public sealed class CaseAccessPolicy : ICaseAccessPolicy
         matched++;
         var explicitlyAssignedOrShared =
             group.AssignedCaseIds.Contains(resource.CaseId) || group.SharedCaseIds.Contains(resource.CaseId);
+
+        // Assignment is not an override for jurisdiction: all resource dimensions
+        // remain part of the authorization intersection, including for direct shares.
+        var coversEveryRegion = resource.RegionIds.Count > 0 &&
+            resource.RegionIds.All(group.RegionIds.Contains);
+        if (!coversEveryRegion)
+        {
+            return (AccessDecisionCode.RegionOutsideGrant, matched);
+        }
+
         if (explicitlyAssignedOrShared)
         {
             return (null, matched + 1);
@@ -216,13 +226,6 @@ public sealed class CaseAccessPolicy : ICaseAccessPolicy
         if (!group.CanAccessJurisdictionalCases)
         {
             return (AccessDecisionCode.CaseNotAssignedOrShared, matched);
-        }
-
-        var coversEveryRegion = resource.RegionIds.Count > 0 &&
-            resource.RegionIds.All(group.RegionIds.Contains);
-        if (!coversEveryRegion)
-        {
-            return (AccessDecisionCode.RegionOutsideGrant, matched + 1);
         }
 
         return (null, matched + 2);

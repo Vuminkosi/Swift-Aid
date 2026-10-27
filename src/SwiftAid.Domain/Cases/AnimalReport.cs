@@ -168,6 +168,14 @@ public sealed class AnimalReport
                 "Reported dead count exceeds the affected count for the same population and observation period."));
         }
 
+        if (Comparable(AnimalsAtRisk, AnimalsDead) && AnimalsDead.Value.Value > AnimalsAtRisk.Value.Value)
+        {
+            issues.Add(new ReportValidationIssue(
+                ReportValidationIssueKind.CountRelationshipNeedsCorrection,
+                "reported-dead",
+                "Reported dead count exceeds the at-risk count for the same population and observation period."));
+        }
+
         return Array.AsReadOnly(issues.ToArray());
     }
 

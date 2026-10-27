@@ -1,3 +1,5 @@
+using SwiftAid.Contracts.Notifications;
+
 namespace SwiftAid.Application.Abstractions;
 
 public enum PushNotificationKind
@@ -12,7 +14,9 @@ public enum PushNotificationKind
 public sealed record PushNotificationRequest(
     string DeviceToken,
     PushNotificationKind Kind,
-    Guid NotificationId);
+    Guid NotificationId,
+    PushDevicePlatform Platform = PushDevicePlatform.Web,
+    bool SoundEnabled = false);
 
 public enum PushNotificationStatus
 {

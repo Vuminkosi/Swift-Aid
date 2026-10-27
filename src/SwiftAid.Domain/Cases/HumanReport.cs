@@ -104,7 +104,7 @@ public sealed record ReportContext
         ReportedTimePrecision capturePrecision,
         LocationContext location)
     {
-        Occurrence = occurrence;
+        Occurrence = ReportedTimeRules.Normalize(occurrence);
         CapturedAtUtc = capturedAtUtc?.ToUniversalTime();
         CapturedOffset = capturedOffset;
         CapturedZoneId = capturedZoneId;
@@ -124,10 +124,7 @@ public sealed record ReportContext
         ArgumentNullException.ThrowIfNull(Occurrence);
         Occurrence.Validate();
         if (!Enum.IsDefined(CapturePrecision)) throw new ArgumentOutOfRangeException(nameof(CapturePrecision));
-        if (Occurrence.Value.HasValue && !Enum.IsDefined(Occurrence.Value.Value.Precision))
-        {
-            throw new ArgumentOutOfRangeException(nameof(Occurrence), "Occurrence precision must be a defined value.");
-        }
+        if (Occurrence.Value.HasValue) ReportedTimeRules.Validate(Occurrence.Value.Value);
 
         ArgumentNullException.ThrowIfNull(Location);
         if (!double.IsFinite(Location.AccuracyMetres.GetValueOrDefault()) && Location.AccuracyMetres.HasValue)
@@ -147,54 +144,7 @@ public sealed record ReportContext
             throw new ArgumentOutOfRangeException(nameof(Location), "Reported coordinates are outside their valid ranges.");
         }
 
-        TimeSpan? capturedOffset = CapturedOffset is null ? null : ParseCapturedOffset(CapturedOffset);
-        var captureZone = ResolveCaptureZone(CapturedZoneId);
-        if (CapturedAtUtc is DateTimeOffset capturedAtUtc &&
-            capturedOffset is TimeSpan suppliedOffset &&
-            captureZone is not null &&
-            captureZone.GetUtcOffset(capturedAtUtc) != suppliedOffset)
-        {
-            throw new ArgumentException("The captured offset conflicts with the supplied time-zone identifier at the capture instant.", nameof(CapturedOffset));
-        }
-    }
-
-    private static TimeSpan ParseCapturedOffset(string offset)
-    {
-        if (offset.Length != 6 || (offset[0] != '+' && offset[0] != '-') || offset[3] != ':' ||
-            !char.IsAsciiDigit(offset[1]) || !char.IsAsciiDigit(offset[2]) ||
-            !char.IsAsciiDigit(offset[4]) || !char.IsAsciiDigit(offset[5]))
-        {
-            throw new ArgumentException("A captured UTC offset must use numeric ±HH:mm format.", nameof(CapturedOffset));
-        }
-
-        var hours = (offset[1] - '0') * 10 + offset[2] - '0';
-        var minutes = (offset[4] - '0') * 10 + offset[5] - '0';
-        if (hours > 14 || minutes > 59 || (hours == 14 && minutes != 0))
-        {
-            throw new ArgumentOutOfRangeException(nameof(CapturedOffset), "A captured UTC offset must be within DateTimeOffset's ±14:00 range.");
-        }
-
-        var sign = offset[0] == '-' ? -1 : 1;
-        return TimeSpan.FromMinutes(sign * (hours * 60 + minutes));
-    }
-
-    private static TimeZoneInfo? ResolveCaptureZone(string? zoneId)
-    {
-        if (zoneId is null) return null;
-        if (string.IsNullOrWhiteSpace(zoneId)) throw new ArgumentException("A supplied capture time-zone identifier cannot be blank.", nameof(CapturedZoneId));
-
-        try
-        {
-            return TimeZoneInfo.FindSystemTimeZoneById(zoneId);
-        }
-        catch (TimeZoneNotFoundException exception)
-        {
-            throw new ArgumentException("The supplied capture time-zone identifier is unknown.", nameof(CapturedZoneId), exception);
-        }
-        catch (InvalidTimeZoneException exception)
-        {
-            throw new ArgumentException("The supplied capture time-zone identifier is invalid.", nameof(CapturedZoneId), exception);
-        }
+        ReportedTimeRules.ValidateOffsetAndZone(CapturedAtUtc, CapturedOffset, CapturedZoneId, nameof(CapturedOffset));
     }
 }
 

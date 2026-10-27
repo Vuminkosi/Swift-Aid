@@ -15,6 +15,7 @@ using SwiftAid.Infrastructure.Persistence.Transactions;
 
 namespace SwiftAid.Integration.Tests;
 
+[Collection(CaseAuthorityPostgresCollection.Name)]
 public sealed class ProtectedPayloadPostgresTests
 {
     [CaseAuthorityPostgresFact]

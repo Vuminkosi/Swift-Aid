@@ -22,6 +22,504 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserClaim<string>", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("ClaimType")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ClaimValue")
+                        .HasColumnType("text");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("user_claims", "swiftaid_identity");
+                });
+
+            modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserLogin<string>", b =>
+                {
+                    b.Property<string>("LoginProvider")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ProviderKey")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ProviderDisplayName")
+                        .HasColumnType("text");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("LoginProvider", "ProviderKey");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("user_logins", "swiftaid_identity");
+                });
+
+            modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserPasskey<string>", b =>
+                {
+                    b.Property<byte[]>("CredentialId")
+                        .HasMaxLength(1024)
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("CredentialId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("user_passkeys", "swiftaid_identity");
+                });
+
+            modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserToken<string>", b =>
+                {
+                    b.Property<string>("UserId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("LoginProvider")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Name")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Value")
+                        .HasColumnType("text");
+
+                    b.HasKey("UserId", "LoginProvider", "Name");
+
+                    b.ToTable("user_tokens", "swiftaid_identity");
+                });
+
+            modelBuilder.Entity("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreApplication", b =>
+                {
+                    b.Property<string>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ApplicationType")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("ClientId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("ClientSecret")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ClientType")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("ConsentType")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("DisplayName")
+                        .HasColumnType("text");
+
+                    b.Property<string>("DisplayNames")
+                        .HasColumnType("text");
+
+                    b.Property<string>("JsonWebKeySet")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Permissions")
+                        .HasColumnType("text");
+
+                    b.Property<string>("PostLogoutRedirectUris")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Properties")
+                        .HasColumnType("text");
+
+                    b.Property<string>("RedirectUris")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Requirements")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Settings")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId")
+                        .IsUnique();
+
+                    b.ToTable("OpenIddictApplications", "swiftaid_identity");
+                });
+
+            modelBuilder.Entity("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreAuthorization", b =>
+                {
+                    b.Property<string>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ApplicationId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime?>("CreationDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Properties")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Scopes")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Status")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Subject")
+                        .HasMaxLength(400)
+                        .HasColumnType("character varying(400)");
+
+                    b.Property<string>("Type")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApplicationId", "Status", "Subject", "Type");
+
+                    b.ToTable("OpenIddictAuthorizations", "swiftaid_identity");
+                });
+
+            modelBuilder.Entity("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreScope", b =>
+                {
+                    b.Property<string>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Descriptions")
+                        .HasColumnType("text");
+
+                    b.Property<string>("DisplayName")
+                        .HasColumnType("text");
+
+                    b.Property<string>("DisplayNames")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Properties")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Resources")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("OpenIddictScopes", "swiftaid_identity");
+                });
+
+            modelBuilder.Entity("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreToken", b =>
+                {
+                    b.Property<string>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ApplicationId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("AuthorizationId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime?>("CreationDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ExpirationDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Payload")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Properties")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("RedemptionDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ReferenceId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Status")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Subject")
+                        .HasMaxLength(400)
+                        .HasColumnType("character varying(400)");
+
+                    b.Property<string>("Type")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AuthorizationId");
+
+                    b.HasIndex("ReferenceId")
+                        .IsUnique();
+
+                    b.HasIndex("ApplicationId", "Status", "Subject", "Type");
+
+                    b.ToTable("OpenIddictTokens", "swiftaid_identity");
+                });
+
+            modelBuilder.Entity("SwiftAid.Domain.Notifications.NotificationItem", b =>
+                {
+                    b.Property<Guid>("NotificationId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("notification_id");
+
+                    b.Property<Guid>("AcceptedEventId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("accepted_event_id");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("action");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<DateTimeOffset?>("DismissedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("dismissed_at_utc");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("OccurrenceKey")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("occurrence_key");
+
+                    b.Property<DateTimeOffset?>("ReadAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("read_at_utc");
+
+                    b.Property<string>("RecipientActorId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("recipient_actor_id");
+
+                    b.Property<string>("RecipientRequirement")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("recipient_requirement");
+
+                    b.Property<Guid>("ResourceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("resource_id");
+
+                    b.Property<string>("ResourceKind")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("resource_kind");
+
+                    b.HasKey("NotificationId")
+                        .HasName("pk_notification_items");
+
+                    b.HasIndex("AcceptedEventId");
+
+                    b.HasIndex("ResourceId");
+
+                    b.HasIndex("RecipientActorId", "OccurrenceKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_notification_items_recipient_occurrence");
+
+                    b.HasIndex("RecipientActorId", "CreatedAtUtc", "NotificationId")
+                        .HasDatabaseName("ix_notification_items_recipient_created");
+
+                    b.ToTable("notification_items", "swiftaid_notifications", t =>
+                        {
+                            t.HasCheckConstraint("ck_notification_items_accepted_event_nonempty", "accepted_event_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_notification_items_action", "action IN ('OpenCase')");
+
+                            t.HasCheckConstraint("ck_notification_items_actor_nonempty", "length(btrim(recipient_actor_id)) > 0");
+
+                            t.HasCheckConstraint("ck_notification_items_dismissed_after_created", "dismissed_at_utc IS NULL OR dismissed_at_utc >= created_at_utc");
+
+                            t.HasCheckConstraint("ck_notification_items_kind", "kind IN ('CaseNeedsAttention')");
+
+                            t.HasCheckConstraint("ck_notification_items_occurrence_key_nonempty", "length(btrim(occurrence_key)) > 0");
+
+                            t.HasCheckConstraint("ck_notification_items_read_after_created", "read_at_utc IS NULL OR read_at_utc >= created_at_utc");
+
+                            t.HasCheckConstraint("ck_notification_items_recipient_requirement", "recipient_requirement IN ('CurrentAccountableOwner', 'AuthorizedCaseMember')");
+
+                            t.HasCheckConstraint("ck_notification_items_resource_kind", "resource_kind IN ('ManagedCase')");
+                        });
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Identity.ExternalIdentityMappingEntity", b =>
+                {
+                    b.Property<Guid>("MappingId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("mapping_id");
+
+                    b.Property<string>("ActorId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("actor_id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("Issuer")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("issuer");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("provider");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("subject");
+
+                    b.HasKey("MappingId")
+                        .HasName("pk_external_identities");
+
+                    b.HasIndex("ActorId");
+
+                    b.HasIndex("Provider", "Issuer", "Subject")
+                        .IsUnique()
+                        .HasDatabaseName("ux_external_identities_provider_issuer_subject");
+
+                    b.ToTable("external_identities", "swiftaid_identity", t =>
+                        {
+                            t.HasCheckConstraint("ck_external_identities_issuer_length", "length(btrim(issuer)) BETWEEN 1 AND 2048");
+
+                            t.HasCheckConstraint("ck_external_identities_provider_length", "length(btrim(provider)) BETWEEN 1 AND 128");
+
+                            t.HasCheckConstraint("ck_external_identities_subject_length", "length(btrim(subject)) BETWEEN 1 AND 1024");
+                        });
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Identity.SwiftAidUser", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text");
+
+                    b.Property<int>("AccessFailedCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ConcurrencyStamp")
+                        .IsConcurrencyToken()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<bool>("EmailConfirmed")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("LockoutEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset?>("LockoutEnd")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("NormalizedEmail")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("NormalizedUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("PasswordHash")
+                        .HasColumnType("text");
+
+                    b.Property<string>("PhoneNumber")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("PhoneNumberConfirmed")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("SecurityStamp")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("TwoFactorEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("UserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NormalizedEmail")
+                        .HasDatabaseName("EmailIndex");
+
+                    b.HasIndex("NormalizedUserName")
+                        .IsUnique()
+                        .HasDatabaseName("UserNameIndex");
+
+                    b.ToTable("users", "swiftaid_identity");
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.AccessGrantGroupEntity", b =>
                 {
                     b.Property<string>("GrantGroupId")
@@ -729,6 +1227,136 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Notifications.NotificationDeliveryOutboxEntity", b =>
+                {
+                    b.Property<Guid>("OutboxId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("outbox_id");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempt_count");
+
+                    b.Property<DateTimeOffset>("AvailableAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("available_at_utc");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<DateTimeOffset?>("ExhaustedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("exhausted_at_utc");
+
+                    b.Property<Guid?>("LeaseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lease_id");
+
+                    b.Property<DateTimeOffset?>("LeaseUntilUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_until_utc");
+
+                    b.Property<Guid>("NotificationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("notification_id");
+
+                    b.Property<DateTimeOffset?>("PublishedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("published_at_utc");
+
+                    b.HasKey("OutboxId")
+                        .HasName("pk_notification_delivery_outbox");
+
+                    b.HasIndex("NotificationId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_notification_delivery_outbox_notification");
+
+                    b.HasIndex("AvailableAtUtc", "CreatedAtUtc", "OutboxId")
+                        .HasDatabaseName("ix_notification_delivery_outbox_pending")
+                        .HasFilter("published_at_utc IS NULL AND exhausted_at_utc IS NULL");
+
+                    b.ToTable("notification_delivery_outbox", "swiftaid_notifications", t =>
+                        {
+                            t.HasCheckConstraint("ck_notification_delivery_outbox_attempt_count", "attempt_count BETWEEN 0 AND 8");
+
+                            t.HasCheckConstraint("ck_notification_delivery_outbox_lease_pair", "(lease_id IS NULL) = (lease_until_utc IS NULL)");
+
+                            t.HasCheckConstraint("ck_notification_delivery_outbox_not_both_terminal", "published_at_utc IS NULL OR exhausted_at_utc IS NULL");
+
+                            t.HasCheckConstraint("ck_notification_delivery_outbox_terminal_state", "(published_at_utc IS NULL OR lease_id IS NULL) AND (exhausted_at_utc IS NULL OR lease_id IS NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Notifications.PushDeviceEntity", b =>
+                {
+                    b.Property<Guid>("DeviceId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("device_id");
+
+                    b.Property<string>("ActorId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("actor_id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<Guid>("InstallationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("installation_id");
+
+                    b.Property<string>("Platform")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("platform");
+
+                    b.Property<byte[]>("ProtectedToken")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("protected_token");
+
+                    b.Property<bool>("SoundEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("sound_enabled");
+
+                    b.Property<byte[]>("TokenFingerprint")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("token_fingerprint");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.HasKey("DeviceId")
+                        .HasName("pk_push_devices");
+
+                    b.HasIndex("TokenFingerprint")
+                        .IsUnique()
+                        .HasDatabaseName("ux_push_devices_token_fingerprint");
+
+                    b.HasIndex("ActorId", "InstallationId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_push_devices_actor_installation");
+
+                    b.ToTable("push_devices", "swiftaid_notifications", t =>
+                        {
+                            t.HasCheckConstraint("ck_push_devices_actor_nonempty", "length(btrim(actor_id)) > 0");
+
+                            t.HasCheckConstraint("ck_push_devices_installation_nonempty", "installation_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_push_devices_platform", "platform IN ('Android', 'Ios', 'Web')");
+
+                            t.HasCheckConstraint("ck_push_devices_token_material", "length(protected_token) > 0 AND octet_length(token_fingerprint) = 32");
+                        });
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.OrganizationEntity", b =>
                 {
                     b.Property<string>("OrganizationId")
@@ -989,6 +1617,153 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserClaim<string>", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Identity.SwiftAidUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserLogin<string>", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Identity.SwiftAidUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserPasskey<string>", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Identity.SwiftAidUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_user_passkeys_user");
+
+                    b.OwnsOne("Microsoft.AspNetCore.Identity.IdentityPasskeyData", "Data", b1 =>
+                        {
+                            b1.Property<byte[]>("IdentityUserPasskeyCredentialId");
+
+                            b1.Property<byte[]>("AttestationObject")
+                                .IsRequired();
+
+                            b1.Property<byte[]>("ClientDataJson")
+                                .IsRequired();
+
+                            b1.Property<DateTimeOffset>("CreatedAt");
+
+                            b1.Property<bool>("IsBackedUp");
+
+                            b1.Property<bool>("IsBackupEligible");
+
+                            b1.Property<bool>("IsUserVerified");
+
+                            b1.Property<string>("Name");
+
+                            b1.Property<byte[]>("PublicKey")
+                                .IsRequired();
+
+                            b1.Property<long>("SignCount");
+
+                            b1.PrimitiveCollection<string>("Transports");
+
+                            b1.HasKey("IdentityUserPasskeyCredentialId");
+
+                            b1.ToTable("user_passkeys", "swiftaid_identity");
+
+                            b1
+                                .ToJson("Data")
+                                .HasColumnType("jsonb");
+
+                            b1.WithOwner()
+                                .HasForeignKey("IdentityUserPasskeyCredentialId");
+                        });
+
+                    b.Navigation("Data")
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserToken<string>", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Identity.SwiftAidUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreAuthorization", b =>
+                {
+                    b.HasOne("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreApplication", "Application")
+                        .WithMany("Authorizations")
+                        .HasForeignKey("ApplicationId");
+
+                    b.Navigation("Application");
+                });
+
+            modelBuilder.Entity("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreToken", b =>
+                {
+                    b.HasOne("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreApplication", "Application")
+                        .WithMany("Tokens")
+                        .HasForeignKey("ApplicationId");
+
+                    b.HasOne("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreAuthorization", "Authorization")
+                        .WithMany("Tokens")
+                        .HasForeignKey("AuthorizationId");
+
+                    b.Navigation("Application");
+
+                    b.Navigation("Authorization");
+                });
+
+            modelBuilder.Entity("SwiftAid.Domain.Notifications.NotificationItem", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.CaseEventEntity", null)
+                        .WithMany()
+                        .HasForeignKey("AcceptedEventId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_notification_items_accepted_event");
+
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.ActorEntity", null)
+                        .WithMany()
+                        .HasForeignKey("RecipientActorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_notification_items_recipient_actor");
+
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.ManagedCaseEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ResourceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_notification_items_managed_case");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Identity.ExternalIdentityMappingEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.ActorEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ActorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_external_identities_actor");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Identity.SwiftAidUser", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.ActorEntity", null)
+                        .WithOne()
+                        .HasForeignKey("SwiftAid.Infrastructure.Identity.SwiftAidUser", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_identity_users_actor");
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.AccessGrantGroupEntity", b =>
                 {
                     b.HasOne("SwiftAid.Infrastructure.Persistence.ActorEntity", null)
@@ -1161,6 +1936,26 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_managed_case_regions_case");
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Notifications.NotificationDeliveryOutboxEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Domain.Notifications.NotificationItem", null)
+                        .WithMany()
+                        .HasForeignKey("NotificationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_notification_delivery_outbox_notification");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Notifications.PushDeviceEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.ActorEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ActorId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_push_devices_actor");
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.OrganizationMembershipEntity", b =>
                 {
                     b.HasOne("SwiftAid.Infrastructure.Persistence.ActorEntity", null)
@@ -1199,6 +1994,18 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_workspaces_organization");
+                });
+
+            modelBuilder.Entity("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreApplication", b =>
+                {
+                    b.Navigation("Authorizations");
+
+                    b.Navigation("Tokens");
+                });
+
+            modelBuilder.Entity("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreAuthorization", b =>
+                {
+                    b.Navigation("Tokens");
                 });
 #pragma warning restore 612, 618
         }

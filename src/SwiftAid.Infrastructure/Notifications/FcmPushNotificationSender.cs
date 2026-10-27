@@ -41,16 +41,46 @@ public sealed class FcmPushNotificationSender : IPushNotificationSender
 #pragma warning disable CS0618 // The approved port carries an FCM registration token, not a Firebase Installation ID.
             Token = request.DeviceToken,
 #pragma warning restore CS0618
-            Notification = new Notification
-            {
-                Title = "SwiftAid update",
-                Body = "Open SwiftAid to view an update."
-            },
             Data = new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["kind"] = request.Kind.ToString(),
                 ["notificationId"] = request.NotificationId.ToString("N")
-            }
+            },
+            Android = request.Platform == SwiftAid.Contracts.Notifications.PushDevicePlatform.Android
+                ? new AndroidConfig
+                {
+                    Priority = Priority.Normal,
+                    Notification = new AndroidNotification
+                    {
+                        Title = "SwiftAid update",
+                        Body = "Open SwiftAid to view an update.",
+                        ChannelId = request.SoundEnabled
+                            ? "swiftaid_notifications_gentle_v1"
+                            : "swiftaid_notifications_quiet_v1",
+                        Sound = request.SoundEnabled ? "relaxing_synth_ping" : null
+                    }
+                }
+                : null,
+            Apns = request.Platform == SwiftAid.Contracts.Notifications.PushDevicePlatform.Ios
+                ? new ApnsConfig
+                {
+                    Headers = new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["apns-push-type"] = "alert",
+                        ["apns-priority"] = "10"
+                    },
+                    Aps = new Aps
+                    {
+                        Alert = new ApsAlert
+                        {
+                            Title = "SwiftAid update",
+                            Body = "Open SwiftAid to view an update."
+                        },
+                        Sound = request.SoundEnabled ? "swiftaid_gentle_notification.wav" : null,
+                        ContentAvailable = true
+                    }
+                }
+                : null
         };
 
         try

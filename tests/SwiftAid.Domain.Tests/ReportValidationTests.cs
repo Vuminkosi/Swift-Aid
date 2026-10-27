@@ -400,6 +400,44 @@ public sealed class ReportValidationTests
     }
 
     [Fact]
+    public void AnimalCountsWithUnknownPopulationOrObservationPeriod_AreNotCompared()
+    {
+        var report = AnimalReport.Create(
+            Guid.NewGuid(),
+            Context(ReportedValue<ReportedTime>.Unknown),
+            AnimalSubjectScope.Flock,
+            ReportedFact<string>.Unknown(ObservationSource),
+            ReportedFact<string>.Unknown(ObservationSource),
+            new ReportEvidence(null, [new ReportedText("Animals appeared unwell.", ObservationSource)], null),
+            AnimalCount.Known(2, ObservationSource),
+            AnimalCount.Known(8, ObservationSource),
+            AnimalCount.Unknown(ObservationSource));
+
+        Assert.Empty(report.Validate());
+        Assert.Equal(ReportedValueState.Unknown, report.Species.Value.State);
+        Assert.Equal(ReportedValueState.Unknown, report.AnimalsDead.Value.State);
+    }
+
+    [Fact]
+    public void AnimalConcernIsAcceptedWithoutKnownDiseaseOrInferredClassification()
+    {
+        var report = AnimalReport.Create(
+            Guid.NewGuid(),
+            Context(ReportedValue<ReportedTime>.Unknown),
+            AnimalSubjectScope.Individual,
+            ReportedFact<string>.Known("cattle", ObservationSource),
+            ReportedFact<string>.Unknown(ObservationSource),
+            new ReportEvidence(null, [new ReportedText("Acute watery diarrhoea; cause not known.", ObservationSource)], null),
+            AnimalCount.Unknown(ObservationSource),
+            AnimalCount.Unknown(ObservationSource),
+            AnimalCount.Unknown(ObservationSource));
+
+        Assert.Empty(report.Validate());
+        Assert.Equal(ReportedValueState.Unknown, report.HoldingReference.Value.State);
+        Assert.Null(typeof(AnimalReport).GetProperty("Classification"));
+    }
+
+    [Fact]
     public void AnimalReport_RequiresAnExplicitDefinedSubjectScope()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => AnimalReport.Create(

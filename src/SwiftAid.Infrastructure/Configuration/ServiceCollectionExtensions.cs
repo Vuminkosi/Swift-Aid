@@ -8,13 +8,21 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.DataProtection;
+using OpenIddict.EntityFrameworkCore;
 using Minio;
 using NATS.Client.Core;
 using NATS.Net;
 using SwiftAid.Application.Abstractions;
+using SwiftAid.Application.Attachments;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases.Commands;
 using SwiftAid.Application.Jobs;
+using SwiftAid.Application.Notifications;
+using SwiftAid.Application.Intake;
 using SwiftAid.Application.Serialization;
 using SwiftAid.Contracts.Jobs;
 using SwiftAid.Infrastructure.Authorization;
@@ -23,9 +31,15 @@ using SwiftAid.Infrastructure.Messaging;
 using SwiftAid.Infrastructure.Notifications;
 using SwiftAid.Infrastructure.Persistence;
 using SwiftAid.Infrastructure.Persistence.Processing;
+using SwiftAid.Infrastructure.Persistence.Notifications;
 using SwiftAid.Infrastructure.Persistence.Protection;
+using SwiftAid.Infrastructure.Persistence.Repositories.Intake;
 using SwiftAid.Infrastructure.Persistence.Transactions;
 using SwiftAid.Infrastructure.Storage;
+using SwiftAid.Infrastructure.Identity;
+using SwiftAid.Infrastructure.Intake;
+using StackExchange.Redis;
+using SwiftAid.Domain.Intake;
 
 namespace SwiftAid.Infrastructure.Configuration;
 
@@ -64,6 +78,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IValidateOptions<QdrantOptions>>(optionsValidator);
         services.AddSingleton<IValidateOptions<MetaProviderOptions>>(optionsValidator);
         services.AddSingleton<IValidateOptions<FederationOptions>>(optionsValidator);
+        services.AddSingleton<IValidateOptions<IdentityServerOptions>>(optionsValidator);
         services.AddSingleton(transportSecurityOptions);
         services.AddSingleton<IOptions<TransportSecurityOptions>>(Options.Create(transportSecurityOptions));
         var minioOptions = RegisterOptions(services, ReadMinioOptions(configuration), optionsValidator);
@@ -73,13 +88,97 @@ public static class ServiceCollectionExtensions
         var fcmOptions = RegisterOptions(services, ReadFcmOptions(configuration), optionsValidator);
         _ = RegisterOptions(services, ReadQdrantOptions(configuration), optionsValidator);
         _ = RegisterOptions(services, ReadMetaOptions(configuration), optionsValidator);
-        _ = RegisterOptions(services, ReadFederationOptions(configuration), optionsValidator);
+        var federationOptions = RegisterOptions(services, ReadFederationOptions(configuration), optionsValidator);
+        if (federationOptions.FacebookWebLogin.Enabled && !redisOptions.Enabled)
+        {
+            throw new OptionsValidationException(
+                nameof(FederationOptions),
+                typeof(FederationOptions),
+                ["Federation:FacebookWebLogin requires Redis:Enabled for shared rate limiting."]);
+        }
+        services.TryAddSingleton(TimeProvider.System);
+        services.TryAddSingleton<IFacebookWebTokenValidator, FacebookWebTokenValidator>();
+        services.TryAddSingleton<IFacebookWebLoginRateLimiter, UnavailableFacebookWebLoginRateLimiter>();
+        var identityServerOptions = RegisterOptions(
+            services,
+            ReadIdentityServerOptions(configuration),
+            optionsValidator);
+        var intakeLimits = ReadIntakeLimits(configuration);
+        intakeLimits.Validate();
+        services.TryAdd(ServiceDescriptor.Singleton<IntakeLimits>(intakeLimits));
+        services.TryAddScoped<IIntakeSubmissionValidator, IntakeSubmissionValidator>();
+        services.TryAddScoped<ICoverageRouter, CoverageRouter>();
+        services.TryAddScoped<IIntakeService, IntakeService>();
+        services.TryAddScoped<IIntakeSessionEndpointService, IntakeSessionEndpointService>();
+        services.TryAddScoped<IIntakeCountryCatalogue, IntakeCountryCatalogue>();
+        services.TryAddScoped<IIntakeCoverageCatalog, PostgresIntakeCoverageCatalog>();
+        services.TryAddScoped<IIntakeSubmissionStore, PostgresIntakeSubmissionStore>();
+        services.TryAddScoped<IIntakeSessionAuthority, PostgresIntakeSessionAuthority>();
+        var intakeConsentOptions = ReadIntakeConsentOptions(configuration);
+        services.TryAddSingleton(intakeConsentOptions);
+        services.TryAddSingleton<IOptions<IntakeConsentOptions>>(Options.Create(intakeConsentOptions));
+        services.TryAddScoped<IIntakeConsentPolicy, ConfiguredIntakeConsentPolicy>();
+        services.TryAddScoped<IIntakeReceiptReader, PostgresIntakeReceiptReader>();
+        services.TryAddScoped<IIntakeDecisionStore, NotConfiguredIntakeDecisionStore>();
+        services.TryAddScoped<IIntakeAttachmentAuthority, NotConfiguredIntakeAttachmentAuthority>();
+        var intakeMetadataOptions = ReadIntakeMetadataOptions(configuration);
+        intakeMetadataOptions.Validate();
+        services.TryAddSingleton(intakeMetadataOptions);
+        services.TryAddSingleton<IIntakePublicMetadataProvider>(
+            _ => new IntakePublicMetadataProvider(intakeMetadataOptions));
         _ = RegisterOptions(services, new SwiftAidDatabaseOptions
         {
             ConnectionString = configuration.GetConnectionString("SwiftAid") ?? string.Empty
         }, optionsValidator);
 
-        RegisterCaseCommandProcessing(services, configuration, hostEnvironment);
+        var identityEnabled = federationOptions.Enabled || identityServerOptions.Enabled;
+        if (identityServerOptions.Enabled && !federationOptions.Enabled)
+        {
+            throw new OptionsValidationException(
+                nameof(IdentityServerOptions),
+                typeof(IdentityServerOptions),
+                ["Identity:Enabled requires at least one configured Federation provider."]);
+        }
+
+        if (identityServerOptions.Enabled &&
+            !(federationOptions.Google.Enabled && federationOptions.Google.CallbackVerified) &&
+            !(federationOptions.Facebook.Enabled && federationOptions.Facebook.CallbackVerified) &&
+            federationOptions.OrganizationProviders.All(provider => !provider.CallbackVerified))
+        {
+            throw new OptionsValidationException(
+                nameof(IdentityServerOptions),
+                typeof(IdentityServerOptions),
+                ["Identity:Enabled requires a Federation provider whose registration and callback checks are complete."]);
+        }
+
+        RegisterCaseCommandProcessing(services, configuration, hostEnvironment, identityEnabled);
+        if (identityEnabled)
+        {
+            RegisterIdentity(
+                services,
+                configuration,
+                federationOptions,
+                identityServerOptions,
+                hostEnvironment,
+                optionsValidator);
+        }
+
+        services.AddScoped<INotificationResourceAuthorizer, NotificationResourceAuthorizer>();
+        services.AddScoped<PostgresNotificationStore>();
+        services.AddScoped<INotificationItemWriter>(provider =>
+            provider.GetRequiredService<PostgresNotificationStore>());
+        services.AddScoped<INotificationItemQuery>(provider =>
+            provider.GetRequiredService<PostgresNotificationStore>());
+        services.AddScoped<INotificationDeliveryOutbox, PostgresNotificationDeliveryOutbox>();
+        if (identityEnabled)
+        {
+            services.AddScoped<IPushDeviceStore, PostgresPushDeviceStore>();
+        }
+        else
+        {
+            services.AddScoped<IPushDeviceStore, NotConfiguredPushDeviceStore>();
+        }
+        services.AddScoped<ITrustedNotificationRecipientAuthorizer, PostgresTrustedNotificationRecipientAuthorizer>();
 
         if (minioOptions.Enabled)
         {
@@ -90,6 +189,7 @@ public static class ServiceCollectionExtensions
                 .WithSSL(minioOptions.UseSsl)
                 .Build());
             services.AddSingleton<IObjectStorage, MinioObjectStorage>();
+            services.AddSingleton<IPrivateMediaObjectStore, MinioPrivateMediaObjectStore>();
         }
         else
         {
@@ -98,6 +198,16 @@ public static class ServiceCollectionExtensions
 
         if (redisOptions.Enabled)
         {
+            services.AddSingleton<IConnectionMultiplexer>(
+                _ => ConnectionMultiplexer.Connect(redisOptions.ConnectionString));
+
+            if (federationOptions.FacebookWebLogin.Enabled)
+            {
+                services.Replace(ServiceDescriptor.Singleton<
+                    IFacebookWebLoginRateLimiter,
+                    RedisFacebookWebLoginRateLimiter>());
+            }
+
             services.AddStackExchangeRedisCache(options =>
             {
                 options.Configuration = redisOptions.ConnectionString;
@@ -157,7 +267,8 @@ public static class ServiceCollectionExtensions
     private static void RegisterCaseCommandProcessing(
         IServiceCollection services,
         IConfiguration configuration,
-        IHostEnvironment? hostEnvironment)
+        IHostEnvironment? hostEnvironment,
+        bool identityEnabled)
     {
         var section = configuration.GetSection(CaseCommandProcessingServiceOptions.SectionName);
         var commandOptions = new CaseCommandProcessingServiceOptions
@@ -217,7 +328,14 @@ public static class ServiceCollectionExtensions
                 effectiveHostEnvironment,
                 provider.GetRequiredService<IKeyRingSecurityValidator>()));
 
-        services.AddDbContext<SwiftAidDbContext>(options => options.UseNpgsql(connectionString));
+        if (!identityEnabled)
+        {
+            services.AddDbContext<SwiftAidDbContext>(options =>
+            {
+                options.UseNpgsql(connectionString);
+                options.UseOpenIddict();
+            });
+        }
         services.AddScoped<PostgresCaseCommandUnitOfWork>();
         services.AddScoped<ICaseCommandUnitOfWork>(provider =>
             provider.GetRequiredService<PostgresCaseCommandUnitOfWork>());
@@ -232,10 +350,132 @@ public static class ServiceCollectionExtensions
                 provider.GetRequiredService<ProtectedPayloadOptions>(),
                 effectiveHostEnvironment,
                 provider.GetRequiredService<IKeyRingSecurityValidator>()));
+        services.Replace(ServiceDescriptor.Singleton<IDataProtectionProvider>(provider =>
+            provider.GetRequiredService<ProtectedPayloadDataProtectionProvider>()));
         services.AddScoped<IProtectedCaseEventPayloadStore, PostgresProtectedCaseEventPayloadStore>();
         services.AddScoped<ICaseCommandPersistence, PostgresCaseCommandPersistence>();
         services.AddScoped<ICaseCommandProcessor, CaseCommandProcessor>();
         services.AddHostedService<CaseCommandProcessingStartupValidator>();
+    }
+
+    private static void RegisterIdentity(
+        IServiceCollection services,
+        IConfiguration configuration,
+        FederationOptions federationOptions,
+        IdentityServerOptions identityServerOptions,
+        IHostEnvironment? hostEnvironment,
+        ProviderOptionsValidator optionsValidator)
+    {
+        var connectionString = configuration.GetConnectionString("SwiftAid");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new OptionsValidationException(
+                nameof(SwiftAidDatabaseOptions),
+                typeof(SwiftAidDatabaseOptions),
+                ["ConnectionStrings:SwiftAid is required when Federation or Identity is enabled."]);
+        }
+
+        var databaseOptions = new SwiftAidDatabaseOptions { ConnectionString = connectionString };
+        Validate(databaseOptions, optionsValidator);
+
+        RegisterIdentityDataProtection(services, configuration, hostEnvironment);
+
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddDbContext<SwiftAidDbContext>(options =>
+        {
+            options.UseNpgsql(connectionString);
+            options.UseOpenIddict();
+        });
+
+        services.AddIdentityCore<SwiftAidUser>(identity =>
+        {
+            identity.User.RequireUniqueEmail = false;
+            identity.SignIn.RequireConfirmedAccount = false;
+            identity.Lockout.AllowedForNewUsers = true;
+            identity.Stores.SchemaVersion = IdentitySchemaVersions.Version3;
+        })
+            .AddSignInManager()
+            .AddEntityFrameworkStores<SwiftAidDbContext>();
+        services.AddScoped<IUserClaimsPrincipalFactory<SwiftAidUser>, SwiftAidUserClaimsPrincipalFactory>();
+        services.AddAntiforgery(options => options.HeaderName = "X-CSRF-TOKEN");
+
+        services.AddAuthorization();
+        var authentication = services.AddAuthentication(IdentityConstants.ApplicationScheme)
+            .AddCookie(IdentityConstants.ApplicationScheme, cookie =>
+            {
+                cookie.Cookie.Name = "__Host-SwiftAid.Auth";
+                cookie.Cookie.HttpOnly = true;
+                cookie.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+                cookie.Cookie.SameSite = SameSiteMode.Lax;
+                cookie.Cookie.Path = "/";
+                cookie.LoginPath = "/auth/providers";
+                cookie.SlidingExpiration = false;
+            })
+            .AddCookie(IdentityConstants.ExternalScheme, cookie =>
+            {
+                cookie.Cookie.Name = "__Host-SwiftAid.External";
+                cookie.Cookie.HttpOnly = true;
+                cookie.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+                cookie.Cookie.SameSite = SameSiteMode.Lax;
+                cookie.Cookie.Path = "/";
+                cookie.ExpireTimeSpan = TimeSpan.FromMinutes(10);
+                cookie.SlidingExpiration = false;
+            });
+
+        FederationSetup.AddConfiguredProviders(authentication, federationOptions);
+        services.AddSingleton<OrganizationSsoRegistry>();
+        services.AddScoped<IExternalIdentityMappingStore, EfExternalIdentityMappingStore>();
+        services.AddScoped<IExternalIdentityResolver, ExternalIdentityResolver>();
+
+        if (identityServerOptions.Enabled)
+        {
+            IdentitySetup.AddOpenIddict(services, identityServerOptions);
+        }
+    }
+
+    private static void RegisterIdentityDataProtection(
+        IServiceCollection services,
+        IConfiguration configuration,
+        IHostEnvironment? hostEnvironment)
+    {
+        if (!services.Any(descriptor =>
+                descriptor.ServiceType == typeof(ProtectedPayloadDataProtectionProvider)))
+        {
+            var options = ReadProtectedPayloadOptions(configuration);
+            if (!options.Enabled)
+            {
+                throw new OptionsValidationException(
+                    nameof(ProtectedPayloadOptions),
+                    typeof(ProtectedPayloadOptions),
+                    ["DataProtection:Enabled must be true when Federation or Identity is enabled."]);
+            }
+
+            var effectiveEnvironment = hostEnvironment ?? ProductionHostEnvironment.Instance;
+            var inspector = new FileSystemKeyRingSecurityInspector();
+            var keyRingValidator = new KeyRingSecurityValidator(inspector);
+            services.TryAddSingleton<IKeyRingSecurityInspector>(inspector);
+            services.TryAddSingleton<IKeyRingSecurityValidator>(keyRingValidator);
+            var validator = new ProtectedPayloadOptionsValidator(effectiveEnvironment, keyRingValidator);
+            var validation = validator.Validate(Options.DefaultName, options);
+            if (validation.Failed)
+            {
+                throw new OptionsValidationException(
+                    nameof(ProtectedPayloadOptions),
+                    typeof(ProtectedPayloadOptions),
+                    validation.Failures);
+            }
+
+            services.AddSingleton(options);
+            services.AddSingleton<IOptions<ProtectedPayloadOptions>>(Options.Create(options));
+            services.AddSingleton<IValidateOptions<ProtectedPayloadOptions>>(validator);
+            services.AddSingleton(ProtectedPayloadDataProtectionProviderFactory.Create(
+                options,
+                effectiveEnvironment,
+                keyRingValidator));
+        }
+
+        services.Replace(ServiceDescriptor.Singleton<IDataProtectionProvider>(provider =>
+            provider.GetRequiredService<ProtectedPayloadDataProtectionProvider>()));
     }
 
     private static ProtectedPayloadOptions ReadProtectedPayloadOptions(IConfiguration configuration)
@@ -323,7 +563,67 @@ public static class ServiceCollectionExtensions
             EventStream = ReadString(section, nameof(NatsOptions.EventStream)),
             EventSubjectPrefix = ReadString(section, nameof(NatsOptions.EventSubjectPrefix)),
             NotificationStream = ReadString(section, nameof(NatsOptions.NotificationStream)),
-            NotificationSubject = ReadString(section, nameof(NatsOptions.NotificationSubject))
+            NotificationSubject = ReadString(section, nameof(NatsOptions.NotificationSubject)),
+            NotificationStreamMaxAgeSeconds = ReadInt32(section, nameof(NatsOptions.NotificationStreamMaxAgeSeconds), 86_400),
+            NotificationStreamMaxBytes = ReadLong(section, nameof(NatsOptions.NotificationStreamMaxBytes), 67_108_864),
+            NotificationStreamMaxMessages = ReadLong(section, nameof(NatsOptions.NotificationStreamMaxMessages), 100_000),
+            NotificationStreamMaxMessageSizeBytes = ReadInt32(section, nameof(NatsOptions.NotificationStreamMaxMessageSizeBytes), 16_384),
+            NotificationStreamReplicas = ReadInt32(section, nameof(NatsOptions.NotificationStreamReplicas), 1),
+            NotificationStreamDuplicateWindowSeconds = ReadInt32(section, nameof(NatsOptions.NotificationStreamDuplicateWindowSeconds), 120),
+            NotificationConsumerAckWaitSeconds = ReadInt32(
+                section,
+                nameof(NatsOptions.NotificationConsumerAckWaitSeconds),
+                30),
+            NotificationConsumerMaxDeliveries = ReadInt32(
+                section,
+                nameof(NatsOptions.NotificationConsumerMaxDeliveries),
+                8),
+            NotificationConsumerInactiveThresholdSeconds = ReadInt32(
+                section,
+                nameof(NatsOptions.NotificationConsumerInactiveThresholdSeconds),
+                120)
+        };
+    }
+
+    private static IntakeLimits ReadIntakeLimits(IConfiguration configuration)
+    {
+        var section = configuration.GetSection(IntakeLimits.SectionName);
+        return new IntakeLimits(
+            MaximumNarrativeCharacters: ReadInt32(section, nameof(IntakeLimits.MaximumNarrativeCharacters), 6_000),
+            MaximumAudioAttachments: ReadInt32(section, nameof(IntakeLimits.MaximumAudioAttachments), 2),
+            MaximumAudioDurationSeconds: ReadInt32(section, nameof(IntakeLimits.MaximumAudioDurationSeconds), 120),
+            MaximumAudioBytes: ReadLong(section, nameof(IntakeLimits.MaximumAudioBytes), 10 * 1024 * 1024),
+            MaximumSubmissionsPerCapabilityPerHour: ReadInt32(
+                section,
+                nameof(IntakeLimits.MaximumSubmissionsPerCapabilityPerHour),
+                10),
+            MaximumObservations: ReadInt32(section, nameof(IntakeLimits.MaximumObservations), 32),
+            MaximumObservationCharacters: ReadInt32(section, nameof(IntakeLimits.MaximumObservationCharacters), 300));
+    }
+
+    private static IntakeMetadataOptions ReadIntakeMetadataOptions(IConfiguration configuration)
+    {
+        var section = configuration.GetSection(IntakeMetadataOptions.SectionName);
+        return new IntakeMetadataOptions
+        {
+            CatalogueVersion = ReadString(section, nameof(IntakeMetadataOptions.CatalogueVersion), "2026-10-27.1"),
+            CatalogueReference = ReadString(section, nameof(IntakeMetadataOptions.CatalogueReference), "/public/v1/intake/metadata/countries"),
+            CatalogueSha256 = ReadString(section, nameof(IntakeMetadataOptions.CatalogueSha256), "10F08AC21834BB4ECA2BA77D38005D7191445D02E3A45921E625D6D6E0BB8570"),
+            PrivacyNoticeVersion = ReadString(section, nameof(IntakeMetadataOptions.PrivacyNoticeVersion), "2026-10-27.1"),
+            PrivacyNoticeReference = ReadString(section, nameof(IntakeMetadataOptions.PrivacyNoticeReference), "/privacy"),
+            PrivacyNoticeSourceCommit = ReadString(section, nameof(IntakeMetadataOptions.PrivacyNoticeSourceCommit), "a9bc0e6d1703dd47e8b0f2e3f78ff6f0e6e8f461")
+        };
+    }
+
+    private static IntakeConsentOptions ReadIntakeConsentOptions(IConfiguration configuration)
+    {
+        var section = configuration.GetSection(IntakeConsentOptions.SectionName);
+        return new IntakeConsentOptions
+        {
+            ProcessingPolicyReference = ReadString(section, nameof(IntakeConsentOptions.ProcessingPolicyReference)),
+            ProcessingPolicyVersion = ReadString(section, nameof(IntakeConsentOptions.ProcessingPolicyVersion)),
+            RecordingPolicyReference = ReadString(section, nameof(IntakeConsentOptions.RecordingPolicyReference)),
+            RecordingPolicyVersion = ReadString(section, nameof(IntakeConsentOptions.RecordingPolicyVersion))
         };
     }
 
@@ -386,9 +686,92 @@ public static class ServiceCollectionExtensions
             Enabled = ReadBool(section, nameof(FederationOptions.Enabled)),
             Authority = ReadString(section, nameof(FederationOptions.Authority)),
             ClientId = ReadString(section, nameof(FederationOptions.ClientId)),
-            ClientSecret = ReadString(section, nameof(FederationOptions.ClientSecret))
+            ClientSecret = ReadString(section, nameof(FederationOptions.ClientSecret)),
+            Google = ReadSocialProviderOptions(section.GetSection(nameof(FederationOptions.Google))),
+            Facebook = ReadSocialProviderOptions(section.GetSection(nameof(FederationOptions.Facebook))),
+            FacebookWebLogin = ReadFacebookWebLoginSettings(
+                section.GetSection(nameof(FederationOptions.FacebookWebLogin))),
+            OrganizationProviders = section.GetSection(nameof(FederationOptions.OrganizationProviders))
+                .GetChildren()
+                .Select(ReadOrganizationProviderOptions)
+                .ToList()
         };
     }
+
+    private static SocialProviderOptions ReadSocialProviderOptions(IConfigurationSection section) => new()
+    {
+        Enabled = ReadBool(section, nameof(SocialProviderOptions.Enabled)),
+        CallbackVerified = ReadBool(section, nameof(SocialProviderOptions.CallbackVerified)),
+        CallbackPath = ReadString(
+            section,
+            nameof(SocialProviderOptions.CallbackPath),
+            "/google/callback"),
+        ClientId = ReadString(section, nameof(SocialProviderOptions.ClientId)),
+        ClientSecret = ReadString(section, nameof(SocialProviderOptions.ClientSecret))
+    };
+
+    private static FacebookWebLoginSettings ReadFacebookWebLoginSettings(IConfigurationSection section) => new()
+    {
+        Enabled = ReadBool(section, nameof(FacebookWebLoginSettings.Enabled)),
+        RateLimitHmacKeyBase64 = ReadString(section, nameof(FacebookWebLoginSettings.RateLimitHmacKeyBase64)),
+        GraphApiVersion = ReadString(section, nameof(FacebookWebLoginSettings.GraphApiVersion)),
+        MaximumRequestBytes = ReadInt32(
+            section, nameof(FacebookWebLoginSettings.MaximumRequestBytes), 4096),
+        MaximumResponseBytes = ReadInt32(
+            section, nameof(FacebookWebLoginSettings.MaximumResponseBytes), 16384),
+        OutboundTimeoutSeconds = ReadInt32(
+            section, nameof(FacebookWebLoginSettings.OutboundTimeoutSeconds), 5),
+        MaximumConcurrentValidations = ReadInt32(
+            section, nameof(FacebookWebLoginSettings.MaximumConcurrentValidations), 10),
+        MaximumAttempts = ReadInt32(
+            section, nameof(FacebookWebLoginSettings.MaximumAttempts), 10),
+        RateLimitWindowSeconds = ReadInt32(
+            section, nameof(FacebookWebLoginSettings.RateLimitWindowSeconds), 60)
+    };
+
+    private static OrganizationSsoProviderOptions ReadOrganizationProviderOptions(IConfigurationSection section) => new()
+    {
+        ProviderId = ReadString(section, nameof(OrganizationSsoProviderOptions.ProviderId)),
+        DisplayName = ReadString(section, nameof(OrganizationSsoProviderOptions.DisplayName)),
+        CallbackVerified = ReadBool(section, nameof(OrganizationSsoProviderOptions.CallbackVerified)),
+        Authority = ReadString(section, nameof(OrganizationSsoProviderOptions.Authority)),
+        Issuer = ReadString(section, nameof(OrganizationSsoProviderOptions.Issuer)),
+        ClientId = ReadString(section, nameof(OrganizationSsoProviderOptions.ClientId)),
+        ClientSecret = ReadString(section, nameof(OrganizationSsoProviderOptions.ClientSecret)),
+        TenantClaimType = ReadString(section, nameof(OrganizationSsoProviderOptions.TenantClaimType)),
+        TenantClaimValue = ReadString(section, nameof(OrganizationSsoProviderOptions.TenantClaimValue))
+    };
+
+    private static IdentityServerOptions ReadIdentityServerOptions(IConfiguration configuration)
+    {
+        var section = configuration.GetSection(IdentityServerOptions.SectionName);
+        return new IdentityServerOptions
+        {
+            Enabled = ReadBool(section, nameof(IdentityServerOptions.Enabled)),
+            Issuer = ReadString(section, nameof(IdentityServerOptions.Issuer)),
+            SigningCertificatePath = ReadString(section, nameof(IdentityServerOptions.SigningCertificatePath)),
+            SigningCertificatePassword = ReadString(section, nameof(IdentityServerOptions.SigningCertificatePassword)),
+            EncryptionCertificatePath = ReadString(section, nameof(IdentityServerOptions.EncryptionCertificatePath)),
+            EncryptionCertificatePassword = ReadString(section, nameof(IdentityServerOptions.EncryptionCertificatePassword)),
+            AuthorizationCodeLifetimeSeconds = ReadInt32(section, nameof(IdentityServerOptions.AuthorizationCodeLifetimeSeconds), 120),
+            AccessTokenLifetimeSeconds = ReadInt32(section, nameof(IdentityServerOptions.AccessTokenLifetimeSeconds), 600),
+            RefreshTokenLifetimeSeconds = ReadInt32(section, nameof(IdentityServerOptions.RefreshTokenLifetimeSeconds), 2_592_000),
+            PublicClients = section.GetSection(nameof(IdentityServerOptions.PublicClients))
+                .GetChildren()
+                .Select(client => new IdentityPublicClientOptions
+                {
+                    ClientId = ReadString(client, nameof(IdentityPublicClientOptions.ClientId)),
+                    DisplayName = ReadString(client, nameof(IdentityPublicClientOptions.DisplayName)),
+                    RedirectUris = ReadStringList(client.GetSection(nameof(IdentityPublicClientOptions.RedirectUris))),
+                    PostLogoutRedirectUris = ReadStringList(client.GetSection(nameof(IdentityPublicClientOptions.PostLogoutRedirectUris)))
+                })
+                .ToList()
+        };
+    }
+
+    private static List<string> ReadStringList(IConfigurationSection section) => section.GetChildren()
+        .Select(child => child.Value ?? string.Empty)
+        .ToList();
 
     private static TransportSecurityOptions ReadTransportSecurityOptions(IConfiguration configuration)
     {
@@ -458,6 +841,7 @@ public static class ServiceCollectionExtensions
             QdrantOptions value => optionsValidator.Validate(Options.DefaultName, value),
             MetaProviderOptions value => optionsValidator.Validate(Options.DefaultName, value),
             FederationOptions value => optionsValidator.Validate(Options.DefaultName, value),
+            IdentityServerOptions value => optionsValidator.Validate(Options.DefaultName, value),
             SwiftAidDatabaseOptions value => optionsValidator.Validate(Options.DefaultName, value),
             _ => throw new NotSupportedException("The provider options type is not registered.")
         };
