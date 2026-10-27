@@ -5,7 +5,7 @@
 <MudContainer MaxWidth="MaxWidth.Medium" Class="mobile-start">
     <SwiftAidPageHeading Eyebrow="Community health support"
                          Title="Support that follows through."
-                         Description="SwiftAid is being prepared for private human and animal concern reporting and accountable follow-through."
+                         Description="Share a concern about a person or animal and keep your saved drafts private on this device."
                          HeadingId="start-heading" />
 
     <MudPaper Class="status-card" Elevation="0">
@@ -14,8 +14,11 @@
             <MudText Typo="Typo.h6" HtmlTag="h2">Current availability</MudText>
         </MudStack>
         <SwiftAidBodyText>
-            Public intake and offline capture are not available in this build. This app cannot submit or save a report.
+            You can save a private report draft on this device. Drafts are not sent yet.
         </SwiftAidBodyText>
+        <MudButton Href="/report" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.EditNote">
+            Start a report
+        </MudButton>
     </MudPaper>
 
     <SwiftAidServiceBoundaryNotice />

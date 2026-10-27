@@ -1,4 +1,11 @@
 @inherits LayoutComponentBase
+@implements IAsyncDisposable
+@using SwiftAid.Client.Notifications
+@using SwiftAid.Contracts.Notifications
+@using SwiftAid.UI.Components.Notifications
+@inject INotificationFeedClient NotificationClient
+@inject INotificationPlatformSettings NotificationPlatform
+@inject IJSRuntime JS
 
 <a class="skip-link" href="#main-content">Skip to main content</a>
 
@@ -16,6 +23,69 @@
                        aria-expanded="@(_drawerOpen ? "true" : "false")" />
         <MudText Typo="Typo.h6" Class="brand-mark">SwiftAid</MudText>
         <MudSpacer />
+        <MudBadge Content="@_unreadNotificationCount" Visible="@(_unreadNotificationCount > 0)" Color="Color.Primary" Overlap="true" Class="notification-badge">
+            <MudMenu Open="@_notificationMenuOpen"
+                     OpenChanged="NotificationMenuChangedAsync"
+                     AnchorOrigin="Origin.BottomRight"
+                     TransformOrigin="Origin.TopRight"
+                     PopoverClass="notification-menu-popover"
+                     Class="notification-menu">
+                <ActivatorContent Context="menuContext">
+                    <MudIconButton Icon="@Icons.Material.Outlined.Notifications"
+                                   Color="Color.Inherit"
+                                   OnClick="@menuContext.ToggleAsync"
+                                   aria-label="@NotificationButtonLabel" />
+                </ActivatorContent>
+                <ChildContent>
+                    @if (_notificationFeedAuthorized)
+                    {
+                        <div class="notification-settings" aria-label="Push notification settings">
+                            @if (_notificationPushEnabled)
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">Push notifications are on.</MudText>
+                                <MudCheckBox T="bool" Value="_notificationSoundEnabled" ValueChanged="SetNotificationSoundAsync"
+                                             Label="Play a gentle sound for new notifications" Disabled="_notificationSettingsBusy" />
+                                <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="DisableNotificationsAsync"
+                                           Disabled="_notificationSettingsBusy">Turn off push</MudButton>
+                            }
+                            else if (_notificationPermission == NotificationPermissionState.Denied)
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">Notifications are blocked. Allow them in your browser settings to turn on push.</MudText>
+                                <MudCheckBox T="bool" Value="_notificationSoundEnabled" ValueChanged="SetNotificationSoundPreferenceAsync"
+                                             Label="Play a gentle sound for new notifications" Disabled="_notificationSettingsBusy" />
+                            }
+                            else if (_notificationPermission != NotificationPermissionState.NotSupported)
+                            {
+                                <button @ref="_enableNotificationsButton" type="button" class="notification-enable"
+                                        @onclick="EnableNotificationsAsync" disabled="@_notificationSettingsBusy">
+                                    Enable push notifications
+                                </button>
+                                <MudCheckBox T="bool" Value="_notificationSoundEnabled" ValueChanged="SetNotificationSoundPreferenceAsync"
+                                             Label="Play a gentle sound for new notifications" Disabled="_notificationSettingsBusy" />
+                            }
+                            else
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">Push notifications are not available in this browser.</MudText>
+                            }
+                            @if (_notificationSettingsMessage is not null)
+                            {
+                                <MudText Typo="Typo.caption" Color="@(_notificationSettingsFailed ? Color.Error : Color.Secondary)" role="status">
+                                    @_notificationSettingsMessage
+                                </MudText>
+                            }
+                        </div>
+                        <MudDivider Class="my-2" />
+                    }
+                    <NotificationFeed Items="_notificationItems"
+                                      Loading="_notificationLoading"
+                                      PermissionDenied="_notificationPermissionDenied"
+                                      ErrorMessage="_notificationError"
+                                      OnRetry="RefreshNotificationsAsync"
+                                      OnMarkRead="MarkNotificationReadAsync"
+                                      OnDismiss="DismissNotificationAsync" />
+                </ChildContent>
+            </MudMenu>
+        </MudBadge>
         <MudChip T="string" Color="Color.Default" Variant="Variant.Outlined" Size="Size.Small">
             Public information
         </MudChip>
@@ -39,11 +109,337 @@
         <main id="main-content" tabindex="-1">
             @Body
         </main>
+
+        <footer aria-label="Site information">
+            <MudDivider />
+            <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Class="pa-4">
+                <MudText Typo="Typo.caption">SwiftAid</MudText>
+                <MudSpacer />
+                <MudLink Href="/privacy" Color="Color.Inherit">Privacy</MudLink>
+                <MudLink Href="/terms" Color="Color.Inherit">Terms</MudLink>
+            </MudStack>
+        </footer>
     </MudMainContent>
 </MudLayout>
 
 @code {
     private bool _drawerOpen = true;
+    private bool _notificationMenuOpen;
+    private bool _notificationLoading;
+    private bool _notificationPermissionDenied;
+    private bool _notificationFeedAuthorized;
+    private bool _notificationPushEnabled;
+    private bool _notificationSoundEnabled;
+    private bool _notificationSettingsBusy;
+    private bool _notificationSettingsFailed;
+    private bool _permissionRequestBound;
+    private ElementReference _enableNotificationsButton;
+    private NotificationPermissionState _notificationPermission = NotificationPermissionState.Unknown;
+    private string? _notificationSettingsMessage;
+    private string? _notificationError;
+    private IReadOnlyList<NotificationItemView> _notificationItems = Array.Empty<NotificationItemView>();
+    private CancellationTokenSource? _notificationMonitorCancellation;
+    private Task? _notificationMonitorTask;
+
+    private int _unreadNotificationCount =>
+        _notificationItems.Count(item => item.ReadAtUtc is null && item.DismissedAtUtc is null);
+
+    private string NotificationButtonLabel =>
+        _unreadNotificationCount == 0
+            ? "Notifications"
+            : $"Notifications, {_unreadNotificationCount} unread";
 
     private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+
+    private async Task NotificationMenuChangedAsync(bool isOpen)
+    {
+        _notificationMenuOpen = isOpen;
+
+        if (isOpen)
+        {
+            await LoadNotificationsAsync(CancellationToken.None);
+            if (!_notificationPermissionDenied && _notificationMonitorCancellation is null)
+            {
+                _notificationMonitorCancellation = new CancellationTokenSource();
+                _notificationMonitorTask = MonitorNotificationsAsync(_notificationMonitorCancellation.Token);
+            }
+
+            return;
+        }
+
+        await StopNotificationMonitorAsync();
+    }
+
+    private Task RefreshNotificationsAsync() => LoadNotificationsAsync(CancellationToken.None);
+
+    private async Task LoadNotificationsAsync(CancellationToken cancellationToken)
+    {
+        _notificationLoading = true;
+        _notificationError = null;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var result = await NotificationClient.GetAsync(cancellationToken);
+            _notificationPermissionDenied = result.Status == NotificationFeedStatus.PermissionDenied;
+            _notificationFeedAuthorized = result.Status == NotificationFeedStatus.Ready;
+            if (result.Status == NotificationFeedStatus.Ready)
+            {
+                _notificationItems = result.Items;
+                _notificationError = null;
+                await LoadNotificationSettingsAsync(cancellationToken);
+            }
+            else if (result.Status == NotificationFeedStatus.Unavailable)
+            {
+                _notificationItems = Array.Empty<NotificationItemView>();
+                _notificationError = "Notifications could not be loaded. Try again.";
+            }
+            else
+            {
+                _notificationItems = Array.Empty<NotificationItemView>();
+                _notificationFeedAuthorized = false;
+                _notificationPushEnabled = false;
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The menu closed or the circuit is shutting down.
+        }
+        catch (Exception)
+        {
+            _notificationError = "Notifications could not be loaded. Try again.";
+        }
+        finally
+        {
+            _notificationLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task LoadNotificationSettingsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var state = await NotificationPlatform.GetStateAsync(cancellationToken);
+            _notificationPermission = state.Permission;
+            _notificationPushEnabled = state.PushEnabled;
+            _notificationSoundEnabled = state.GentleSoundEnabled;
+        }
+        catch (Exception)
+        {
+            _notificationPermission = NotificationPermissionState.Unknown;
+            _notificationPushEnabled = false;
+            _notificationSoundEnabled = false;
+        }
+    }
+
+    private async Task EnableNotificationsAsync()
+    {
+        _notificationSettingsBusy = true;
+        _notificationSettingsMessage = null;
+        _notificationSettingsFailed = false;
+        try
+        {
+            // The capture-phase handler starts Notification.requestPermission synchronously
+            // from this button's trusted click, before this Blazor callback makes any roundtrip.
+            var result = await NotificationPlatform.EnableAsync(_notificationSoundEnabled);
+            await RefreshNotificationSettingsAsync(result);
+        }
+        catch (Exception)
+        {
+            _notificationSettingsFailed = true;
+            _notificationSettingsMessage = "Push notifications could not be enabled. Try again.";
+        }
+        finally
+        {
+            _notificationSettingsBusy = false;
+        }
+    }
+
+    private Task SetNotificationSoundAsync(bool enabled) => UpdateNotificationSoundAsync(enabled);
+
+    private Task SetNotificationSoundPreferenceAsync(bool enabled) => UpdateNotificationSoundAsync(enabled);
+
+    private async Task UpdateNotificationSoundAsync(bool enabled)
+    {
+        _notificationSettingsBusy = true;
+        _notificationSettingsMessage = null;
+        _notificationSettingsFailed = false;
+        try
+        {
+            if (_notificationPushEnabled)
+            {
+                var result = await NotificationPlatform.SetGentleSoundAsync(enabled);
+                if (result != NotificationPlatformResult.Enabled)
+                {
+                    await RefreshNotificationSettingsAsync(result);
+                    return;
+                }
+            }
+
+            _notificationSoundEnabled = enabled;
+        }
+        catch (Exception)
+        {
+            _notificationSettingsFailed = true;
+            _notificationSettingsMessage = "That preference could not be saved. Try again.";
+        }
+        finally
+        {
+            _notificationSettingsBusy = false;
+        }
+    }
+
+    private async Task DisableNotificationsAsync()
+    {
+        _notificationSettingsBusy = true;
+        _notificationSettingsMessage = null;
+        _notificationSettingsFailed = false;
+        try
+        {
+            var result = await NotificationPlatform.DisableAsync();
+            await RefreshNotificationSettingsAsync(result);
+        }
+        catch (Exception)
+        {
+            _notificationSettingsFailed = true;
+            _notificationSettingsMessage = "Push notifications could not be turned off. Try again.";
+        }
+        finally
+        {
+            _notificationSettingsBusy = false;
+        }
+    }
+
+    private async Task RefreshNotificationSettingsAsync(NotificationPlatformResult result)
+    {
+        await LoadNotificationSettingsAsync(CancellationToken.None);
+        _notificationSettingsFailed = result is not (NotificationPlatformResult.Enabled or NotificationPlatformResult.Disabled);
+        _notificationSettingsMessage = result switch
+        {
+            NotificationPlatformResult.Enabled => "Your notification preference is saved.",
+            NotificationPlatformResult.Disabled => "Push notifications are off.",
+            NotificationPlatformResult.PermissionDenied => "Allow notifications in your browser settings, then try again.",
+            NotificationPlatformResult.NotSupported => "Push notifications are not available in this browser.",
+            NotificationPlatformResult.NotAuthenticated => "Your sign-in is no longer valid. Refresh the page and try again.",
+            _ => "Push notifications could not be updated. Try again."
+        };
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        var shouldBind = _notificationMenuOpen && _notificationFeedAuthorized && !_notificationPushEnabled &&
+                         _notificationPermission is not (NotificationPermissionState.NotSupported or NotificationPermissionState.Denied);
+        if (shouldBind && !_permissionRequestBound)
+        {
+            try
+            {
+                _permissionRequestBound = await JS.InvokeAsync<bool>(
+                    "swiftAidNotifications.bindPermissionRequest", _enableNotificationsButton);
+            }
+            catch (Exception)
+            {
+                _permissionRequestBound = false;
+            }
+        }
+        else if (!shouldBind && _permissionRequestBound)
+        {
+            await UnbindPermissionRequestAsync();
+        }
+    }
+
+    private async Task UnbindPermissionRequestAsync()
+    {
+        if (!_permissionRequestBound)
+        {
+            return;
+        }
+
+        try
+        {
+            await JS.InvokeVoidAsync("swiftAidNotifications.unbindPermissionRequest", _enableNotificationsButton);
+        }
+        catch (Exception)
+        {
+            // The browser may already be shutting down; the element is no longer interactive.
+        }
+        finally
+        {
+            _permissionRequestBound = false;
+        }
+    }
+
+    private Task MonitorNotificationsAsync(CancellationToken cancellationToken) =>
+        NotificationClient.MonitorChangesAsync(LoadNotificationsAsync, cancellationToken);
+
+    private async Task<bool> MarkNotificationReadAsync(Guid notificationId)
+    {
+        try
+        {
+            if (!await NotificationClient.MarkReadAsync(notificationId))
+            {
+                return false;
+            }
+
+            await LoadNotificationsAsync(CancellationToken.None);
+            return _notificationError is null;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private async Task<bool> DismissNotificationAsync(Guid notificationId)
+    {
+        try
+        {
+            if (!await NotificationClient.DismissAsync(notificationId))
+            {
+                return false;
+            }
+
+            await LoadNotificationsAsync(CancellationToken.None);
+            return _notificationError is null;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private async Task StopNotificationMonitorAsync()
+    {
+        var cancellation = _notificationMonitorCancellation;
+        _notificationMonitorCancellation = null;
+        cancellation?.Cancel();
+
+        if (_notificationMonitorTask is not null)
+        {
+            try
+            {
+                await _notificationMonitorTask;
+            }
+            catch (OperationCanceledException)
+            {
+                // Normal shutdown of the open feed monitor.
+            }
+            catch (Exception)
+            {
+                // A later menu open starts a fresh feed monitor.
+            }
+            finally
+            {
+                _notificationMonitorTask = null;
+            }
+        }
+
+        cancellation?.Dispose();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await StopNotificationMonitorAsync();
+        await UnbindPermissionRequestAsync();
+    }
 }

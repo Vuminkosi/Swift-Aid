@@ -1,0 +1,18 @@
+@page "/managed-report"
+
+<PageTitle>Managed report registration | SwiftAid</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="managed-report-page">
+    <SwiftAidPageHeading Eyebrow="Managed case reporting"
+                         Title="Register a concern"
+                         Description="Record what was observed for a managed case. Keep unknown details unknown and use the reporter’s own words."
+                         HeadingId="managed-report-heading" />
+
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+        This mobile view keeps entries only while this form is open. It has no save or submit action; leaving the page clears the form.
+    </MudAlert>
+
+    <CaseReportRegistrationForm />
+
+    <SwiftAidServiceBoundaryNotice />
+</MudContainer>

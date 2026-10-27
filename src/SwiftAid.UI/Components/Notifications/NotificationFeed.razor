@@ -1,0 +1,167 @@
+@using SwiftAid.UI.Components.Notifications
+@using SwiftAid.Contracts.Notifications
+
+<section class="swiftaid-notification-feed" aria-label="Notifications">
+    <div class="swiftaid-notification-feed__heading">
+        <div>
+            <MudText Typo="Typo.subtitle1" Class="swiftaid-notification-feed__title">Notifications</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Private to your current staff account</MudText>
+        </div>
+        <MudBadge Content="@UnreadCount" Visible="@(_items.Count > 0)" Color="Color.Primary" Overlap="true">
+            <MudIcon Icon="@Icons.Material.Outlined.Notifications" aria-label="Unread notifications" />
+        </MudBadge>
+    </div>
+
+    @if (Loading)
+    {
+        <div class="swiftaid-notification-feed__state" role="status" aria-live="polite">
+            <MudProgressCircular Indeterminate="true" Size="Size.Small" aria-label="Loading notifications" />
+            <MudText Typo="Typo.body2">Loading notifications…</MudText>
+        </div>
+    }
+    else if (PermissionDenied)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="status">
+            Notifications are unavailable for this account.
+        </MudAlert>
+    }
+    else if (ErrorMessage is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" role="alert">
+            @ErrorMessage
+            <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="RetryAsync" aria-label="Retry loading notifications">Retry</MudButton>
+        </MudAlert>
+    }
+    else if (_items.Count == 0)
+    {
+        <div class="swiftaid-notification-feed__empty">
+            <MudIcon Icon="@Icons.Material.Outlined.DoneAll" aria-hidden="true" />
+            <MudText Typo="Typo.body2">You’re all caught up.</MudText>
+        </div>
+    }
+    else
+    {
+        <ul class="swiftaid-notification-feed__list">
+            @foreach (var item in _items)
+            {
+                <li @key="item.Id" class="swiftaid-notification-feed__item @(item.ReadAtUtc is null ? "is-unread" : null)">
+                    <div class="swiftaid-notification-feed__content">
+                        <MudText Typo="Typo.body2" Class="swiftaid-notification-feed__message">@SafeMessage(item.Kind)</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@item.CreatedAtUtc.ToLocalTime().ToString("g")</MudText>
+                    </div>
+                    <div class="swiftaid-notification-feed__actions">
+                        @if (HasPermittedAction(item.Action))
+                        {
+                                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="() => OpenAsync(item)" aria-label="Open notification">
+                                Open
+                            </MudButton>
+                        }
+                        @if (item.ReadAtUtc is null)
+                        {
+                            <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="() => MarkReadAsync(item)" aria-label="Mark notification as read">
+                                Mark read
+                            </MudButton>
+                        }
+                        @if (item.DismissedAtUtc is null)
+                        {
+                            <MudIconButton Icon="@Icons.Material.Outlined.Close" Size="Size.Small" OnClick="() => DismissAsync(item)" aria-label="Dismiss notification" />
+                        }
+                    </div>
+                </li>
+            }
+        </ul>
+        @if (MutationError)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Error" role="alert">That update could not be saved. Try again.</MudText>
+        }
+    }
+</section>
+
+@code {
+    [Parameter] public IReadOnlyList<NotificationItemView> Items { get; set; } = Array.Empty<NotificationItemView>();
+    [Parameter] public bool Loading { get; set; }
+    [Parameter] public bool PermissionDenied { get; set; }
+    [Parameter] public string? ErrorMessage { get; set; }
+    [Parameter] public EventCallback OnRetry { get; set; }
+    [Parameter] public Func<Guid, Task<bool>>? OnMarkRead { get; set; }
+    [Parameter] public Func<Guid, Task<bool>>? OnDismiss { get; set; }
+    [Parameter] public EventCallback<NotificationItemView> OnOpen { get; set; }
+
+    private IReadOnlyList<NotificationItemView> _items =>
+        (Items ?? Array.Empty<NotificationItemView>())
+        .Where(item => item.DismissedAtUtc is null)
+        .ToArray();
+    private int UnreadCount => _items.Count(item => item.ReadAtUtc is null);
+    private bool MutationError { get; set; }
+
+    private Task RetryAsync() => OnRetry.InvokeAsync();
+
+    private async Task MarkReadAsync(NotificationItemView item)
+    {
+        MutationError = false;
+        try
+        {
+            if (OnMarkRead is null || !await OnMarkRead(item.Id))
+            {
+                MutationError = true;
+            }
+        }
+        catch
+        {
+            MutationError = true;
+        }
+    }
+
+    private async Task DismissAsync(NotificationItemView item)
+    {
+        MutationError = false;
+        try
+        {
+            if (OnDismiss is null || !await OnDismiss(item.Id))
+            {
+                MutationError = true;
+            }
+        }
+        catch
+        {
+            MutationError = true;
+        }
+    }
+
+    private async Task OpenAsync(NotificationItemView item)
+    {
+        if (!HasPermittedAction(item.Action))
+        {
+            return;
+        }
+
+        MutationError = false;
+        if (item.ReadAtUtc is null)
+        {
+            try
+            {
+                if (OnMarkRead is null || !await OnMarkRead(item.Id))
+                {
+                    MutationError = true;
+                    return;
+                }
+            }
+            catch
+            {
+                MutationError = true;
+                return;
+            }
+        }
+
+        await OnOpen.InvokeAsync(item);
+    }
+
+    private bool HasPermittedAction(NotificationAction? action) =>
+        action is NotificationAction.OpenAssignedWork && OnOpen.HasDelegate;
+
+    private static string SafeMessage(NotificationKind kind) => kind switch
+    {
+        NotificationKind.CaseNeedsAttention => "A case needs your attention.",
+        _ => "You have a new notification."
+    };
+}

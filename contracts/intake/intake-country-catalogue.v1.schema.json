@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://swiftaid.online/contracts/intake/intake-country-catalogue.v1.schema.json",
+  "title": "SwiftAid public intake country catalogue v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "reference", "countries"],
+  "properties": {
+    "version": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$" },
+    "reference": { "type": "string", "pattern": "^/public/v1/intake/metadata/countries$" },
+    "countries": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Country codes must be distinct; enforced server-side.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "label"],
+        "properties": {
+          "code": { "type": "string", "pattern": "^[A-Z]{2}$" },
+          "label": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S" }
+        }
+      }
+    }
+  }
+}

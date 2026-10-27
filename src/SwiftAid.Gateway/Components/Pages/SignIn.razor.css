@@ -1,0 +1,72 @@
+.sign-in-page {
+    display: grid;
+    min-height: calc(100vh - 4rem);
+    align-content: start;
+    justify-items: center;
+    padding: clamp(1.25rem, 4vw, 3rem) 1rem;
+}
+
+.sign-in-panel {
+    display: grid;
+    width: min(100%, 34rem);
+    gap: 1.25rem;
+    padding: clamp(1.25rem, 4vw, 2rem);
+    border: 1px solid var(--sa-border);
+    border-radius: 1rem;
+    background: var(--sa-surface);
+}
+
+.sign-in-privacy-note,
+.sign-in-provider-note {
+    color: var(--sa-text-secondary);
+}
+
+.sign-in-provider-list {
+    display: grid;
+    gap: 0.875rem;
+}
+
+.sign-in-provider-option {
+    display: grid;
+    gap: 0.5rem;
+}
+
+.sign-in-provider-option form {
+    width: 100%;
+}
+
+.sign-in-refresh-button {
+    min-height: 2.75rem;
+}
+
+.sign-in-provider-button,
+.sign-in-secondary-button {
+    min-height: 3rem;
+}
+
+.sign-in-provider-button:focus-visible,
+.sign-in-secondary-button:focus-visible,
+.sign-in-refresh-button:focus-visible {
+    outline: 3px solid var(--sa-focus, var(--sa-primary));
+    outline-offset: 3px;
+}
+
+.sign-in-divider {
+    margin-block: 0.25rem;
+}
+
+.sign-in-alert {
+    align-items: start;
+}
+
+.sign-in-live-status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}

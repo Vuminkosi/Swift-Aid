@@ -1,0 +1,13 @@
+.managed-report-page {
+    display: grid;
+    gap: 1.5rem;
+    padding-block: clamp(1.25rem, 4vw, 2.5rem);
+}
+
+.managed-report-page ::deep .swiftaid-page-heading__description {
+    max-width: 64ch;
+}
+
+.managed-report-page ::deep .swiftaid-service-boundary {
+    max-width: 72rem;
+}

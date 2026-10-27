@@ -1,0 +1,302 @@
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Components.Forms
+@implements IDisposable
+
+<section class="case-report-registration" aria-labelledby="case-report-form-title">
+    <div class="case-report-registration__notice">
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+            You can review your entries, but this report cannot be sent yet. No report has been created.
+            Do not enter names, contact details, or other identifying information.
+        </MudAlert>
+    </div>
+
+    <MudText Typo="Typo.h5" HtmlTag="h2" id="case-report-form-title" Class="case-report-registration__title">
+        Report details
+    </MudText>
+
+    <EditForm EditContext="@_editContext" OnSubmit="HandleFormSubmit">
+        <DataAnnotationsValidator />
+        <div class="case-report-registration__summary" role="alert" aria-live="polite">
+            <ValidationSummary />
+        </div>
+
+        <div class="case-report-registration__sections">
+            <section class="case-report-registration__section" aria-labelledby="report-subject-heading">
+                <div class="case-report-registration__section-heading">
+                    <MudText Typo="Typo.h6" HtmlTag="h3" id="report-subject-heading">What is the concern about?</MudText>
+                    <MudText Typo="Typo.body2" Class="case-report-registration__hint">Choose one. A report mentioning several people will not be split into separate reports.</MudText>
+                </div>
+
+                <label class="case-report-registration__field-label" for="report-subject">Concern type <span>(required)</span></label>
+                <InputSelect TValue="ReportSubject?" id="report-subject" class="case-report-registration__control" required aria-required="true" aria-describedby="report-subject-error" @bind-Value="_draft.Subject">
+                    <option value="">Choose a concern type</option>
+                    <option value="@ReportSubject.Person">Person</option>
+                    <option value="@ReportSubject.Animal">Animal</option>
+                </InputSelect>
+                <div id="report-subject-error" class="case-report-registration__field-error">
+                    <ValidationMessage For="@(() => _draft.Subject)" />
+                </div>
+
+                @if (_draft.Subject == ReportSubject.Animal)
+                {
+                    <div class="case-report-registration__animal-fields">
+                        <div>
+                            <label class="case-report-registration__field-label" for="animal-scope">Animal scope <span>(required)</span></label>
+                            <InputSelect TValue="AnimalScope?" id="animal-scope" class="case-report-registration__control" required aria-required="true" aria-describedby="animal-scope-error" @bind-Value="_draft.AnimalScope">
+                                <option value="">Choose an animal scope</option>
+                                <option value="@AnimalScope.Individual">Individual animal</option>
+                                <option value="@AnimalScope.Herd">Herd</option>
+                                <option value="@AnimalScope.Flock">Flock</option>
+                                <option value="@AnimalScope.OtherGroup">Other group</option>
+                            </InputSelect>
+                            <div id="animal-scope-error" class="case-report-registration__field-error">
+                                <ValidationMessage For="@(() => _draft.AnimalScope)" />
+                            </div>
+                        </div>
+                        <div>
+                            <label class="case-report-registration__field-label" for="animal-species">Animal type or species <span>(optional)</span></label>
+                            <InputText id="animal-species" class="case-report-registration__control" @bind-Value="_draft.Species" autocomplete="off" />
+                        </div>
+                    </div>
+
+                    <fieldset class="case-report-registration__counts">
+                        <legend>Counts, if known</legend>
+                        <p class="case-report-registration__hint">Keep each count separate. Leave unknown counts blank.</p>
+                        <div class="case-report-registration__count-grid">
+                            <div>
+                                <label class="case-report-registration__field-label" for="animals-at-risk">Animals at risk</label>
+                                <InputNumber TValue="int?" id="animals-at-risk" class="case-report-registration__control" aria-describedby="animals-at-risk-error" min="0" @bind-Value="_draft.AnimalsAtRisk" />
+                                <div id="animals-at-risk-error" class="case-report-registration__field-error">
+                                    <ValidationMessage For="@(() => _draft.AnimalsAtRisk)" />
+                                </div>
+                            </div>
+                            <div>
+                                <label class="case-report-registration__field-label" for="animals-affected">Animals affected</label>
+                                <InputNumber TValue="int?" id="animals-affected" class="case-report-registration__control" aria-describedby="animals-affected-error" min="0" @bind-Value="_draft.AnimalsAffected" />
+                                <div id="animals-affected-error" class="case-report-registration__field-error">
+                                    <ValidationMessage For="@(() => _draft.AnimalsAffected)" />
+                                </div>
+                            </div>
+                            <div>
+                                <label class="case-report-registration__field-label" for="animals-dead">Animals reported dead</label>
+                                <InputNumber TValue="int?" id="animals-dead" class="case-report-registration__control" aria-describedby="animals-dead-error" min="0" @bind-Value="_draft.AnimalsDead" />
+                                <div id="animals-dead-error" class="case-report-registration__field-error">
+                                    <ValidationMessage For="@(() => _draft.AnimalsDead)" />
+                                </div>
+                            </div>
+                        </div>
+                    </fieldset>
+                }
+            </section>
+
+            <section class="case-report-registration__section" aria-labelledby="report-observation-heading">
+                <div class="case-report-registration__section-heading">
+                    <MudText Typo="Typo.h6" HtmlTag="h3" id="report-observation-heading">What was observed?</MudText>
+                    <MudText Typo="Typo.body2" Class="case-report-registration__hint">Use your own words. A diagnosis is not required.</MudText>
+                </div>
+
+                <label class="case-report-registration__field-label" for="report-narrative">Observation or account <span>(required)</span></label>
+                <InputTextArea id="report-narrative" class="case-report-registration__control case-report-registration__narrative" required aria-required="true" aria-describedby="report-narrative-error" @bind-Value="_draft.Narrative" rows="5" />
+                <div id="report-narrative-error" class="case-report-registration__field-error">
+                    <ValidationMessage For="@(() => _draft.Narrative)" />
+                </div>
+
+                <div class="case-report-registration__optional-fields">
+                    <div>
+                        <label class="case-report-registration__field-label" for="occurrence-date">When did it happen? <span>(optional)</span></label>
+                        <InputDate TValue="DateTime?" id="occurrence-date" class="case-report-registration__control" @bind-Value="_draft.OccurrenceDate" />
+                        <span class="case-report-registration__hint">Leave blank if unknown. This is not the time the report was received.</span>
+                    </div>
+                    <div>
+                        <label class="case-report-registration__field-label" for="reported-area">Area or place, in your words <span>(optional)</span></label>
+                        <InputText id="reported-area" class="case-report-registration__control" @bind-Value="_draft.ReportedArea" autocomplete="off" />
+                        <span class="case-report-registration__hint">Do not include a street address or a person’s name.</span>
+                    </div>
+                </div>
+            </section>
+
+            <section class="case-report-registration__section" aria-labelledby="report-confirmation-heading">
+                <div class="case-report-registration__section-heading">
+                    <MudText Typo="Typo.h6" HtmlTag="h3" id="report-confirmation-heading">Review and confirmations</MudText>
+                    <MudText Typo="Typo.body2" Class="case-report-registration__hint">Review your entries before continuing. Required confirmations are not available yet.</MudText>
+                </div>
+
+                <div class="case-report-registration__reference-list" aria-label="Country details">
+                    <div>
+                        <span class="case-report-registration__reference-label">Country</span>
+                        <span class="case-report-registration__reference-value">Unavailable</span>
+                    </div>
+                </div>
+
+                <div class="case-report-registration__confirmations">
+                    <div class="case-report-registration__confirmation">
+                        <InputCheckbox id="report-confirmed" class="case-report-registration__checkbox" required aria-required="true" aria-describedby="report-confirmed-error" @bind-Value="_draft.ReportConfirmed" />
+                        <label for="report-confirmed">I have reviewed the report details above.</label>
+                    </div>
+                    <div id="report-confirmed-error" class="case-report-registration__field-error">
+                        <ValidationMessage For="@(() => _draft.ReportConfirmed)" />
+                    </div>
+
+                    <div class="case-report-registration__confirmation case-report-registration__confirmation--unavailable">
+                        <InputCheckbox id="country-confirmed" class="case-report-registration__checkbox" disabled aria-describedby="country-confirmed-hint" @bind-Value="_draft.CountryConfirmed" />
+                        <label for="country-confirmed">I confirm the country shown above.</label>
+                        <span id="country-confirmed-hint" class="case-report-registration__hint">Country choices are not available right now.</span>
+                    </div>
+
+                    <div class="case-report-registration__confirmation case-report-registration__confirmation--unavailable">
+                        <InputCheckbox id="policy-confirmed" class="case-report-registration__checkbox" disabled aria-describedby="policy-confirmed-hint" @bind-Value="_draft.PolicyConfirmed" />
+                        <label for="policy-confirmed">I have read how SwiftAid uses the details I share.</label>
+                        <span id="policy-confirmed-hint" class="case-report-registration__hint">The privacy information is not available in this form yet.</span>
+                    </div>
+
+                    <div class="case-report-registration__confirmation case-report-registration__confirmation--unavailable">
+                        <InputCheckbox id="recording-confirmed" class="case-report-registration__checkbox" disabled aria-describedby="recording-confirmed-hint" @bind-Value="_draft.RecordingConfirmed" />
+                        <label for="recording-confirmed">If a recording is included, I have permission to share it.</label>
+                        <span id="recording-confirmed-hint" class="case-report-registration__hint">Recording attachments are not available in this form.</span>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <div class="case-report-registration__actions">
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="ReviewEntries" StartIcon="@Icons.Material.Filled.FactCheck">
+                Review entries
+            </MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="true" aria-describedby="submit-unavailable" StartIcon="@Icons.Material.Filled.Send">
+                Submit report
+            </MudButton>
+        </div>
+        <MudText id="submit-unavailable" Typo="Typo.body2" Class="case-report-registration__hint">
+                This report cannot be sent yet. Your entries have not been sent.
+        </MudText>
+
+        @if (_reviewAttempted)
+        {
+            <div class="case-report-registration__feedback" role="status" aria-live="polite">
+                @if (_reviewPassed)
+                {
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                        Your entries passed the checks available here. This report has not been sent.
+                    </MudAlert>
+                }
+                else
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+                        Check the highlighted fields before continuing.
+                    </MudAlert>
+                }
+            </div>
+        }
+    </EditForm>
+</section>
+
+@code {
+    private readonly RegistrationDraft _draft = new();
+    private EditContext _editContext = default!;
+    private bool _reviewAttempted;
+    private bool _reviewPassed;
+
+    protected override void OnInitialized()
+    {
+        _editContext = new EditContext(_draft);
+        _editContext.OnFieldChanged += HandleFieldChanged;
+    }
+
+    private void HandleFieldChanged(object? sender, FieldChangedEventArgs args)
+    {
+        _reviewAttempted = false;
+        _reviewPassed = false;
+    }
+
+    private void ReviewEntries()
+    {
+        _reviewAttempted = true;
+        _reviewPassed = _editContext.Validate();
+    }
+
+    private void HandleFormSubmit(EditContext _)
+    {
+        // Enter in a text field only runs local checks; there is no submit endpoint.
+        ReviewEntries();
+    }
+
+    public void Dispose() => _editContext.OnFieldChanged -= HandleFieldChanged;
+
+    private enum ReportSubject
+    {
+        Person,
+        Animal
+    }
+
+    private enum AnimalScope
+    {
+        Individual,
+        Herd,
+        Flock,
+        OtherGroup
+    }
+
+    private sealed class RegistrationDraft : IValidatableObject
+    {
+        private ReportSubject? _subject;
+
+        [Required(ErrorMessage = "Choose whether the concern is about a person or an animal.")]
+        public ReportSubject? Subject
+        {
+            get => _subject;
+            set
+            {
+                _subject = value;
+                if (value != ReportSubject.Animal)
+                {
+                    AnimalScope = null;
+                    Species = null;
+                    AnimalsAtRisk = null;
+                    AnimalsAffected = null;
+                    AnimalsDead = null;
+                }
+            }
+        }
+
+        public AnimalScope? AnimalScope { get; set; }
+
+        public string? Species { get; set; }
+
+        [Range(0, int.MaxValue, ErrorMessage = "Enter a whole number of zero or more, or leave the count blank.")]
+        public int? AnimalsAtRisk { get; set; }
+
+        [Range(0, int.MaxValue, ErrorMessage = "Enter a whole number of zero or more, or leave the count blank.")]
+        public int? AnimalsAffected { get; set; }
+
+        [Range(0, int.MaxValue, ErrorMessage = "Enter a whole number of zero or more, or leave the count blank.")]
+        public int? AnimalsDead { get; set; }
+
+        [Required(ErrorMessage = "Describe what was observed, or leave the form until you can provide a report.")]
+        public string Narrative { get; set; } = string.Empty;
+
+        public DateTime? OccurrenceDate { get; set; }
+
+        public string? ReportedArea { get; set; }
+
+        public bool ReportConfirmed { get; set; }
+
+        public bool CountryConfirmed { get; set; }
+
+        public bool PolicyConfirmed { get; set; }
+
+        public bool RecordingConfirmed { get; set; }
+
+        public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+        {
+            if (Subject == ReportSubject.Animal && AnimalScope is null)
+            {
+                yield return new ValidationResult("Choose an animal scope if known.", [nameof(AnimalScope)]);
+            }
+
+            if (!ReportConfirmed)
+            {
+                yield return new ValidationResult("Review and confirm the report details.", [nameof(ReportConfirmed)]);
+            }
+        }
+    }
+}

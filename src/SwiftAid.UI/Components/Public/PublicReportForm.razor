@@ -1,0 +1,381 @@
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Components.Forms
+@using SwiftAid.Contracts.Geography
+@using SwiftAid.Contracts.Intake
+@using SwiftAid.UI.Components.Public
+@implements IDisposable
+
+<section class="public-report" aria-labelledby="public-report-title">
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+        You do not need an account to report a concern. Reports are private and are not verified when first received.
+        Sending a report does not guarantee that a service is available or that someone will attend.
+    </MudAlert>
+
+    <MudText id="public-report-title" Typo="Typo.h5" HtmlTag="h2">Report details</MudText>
+
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+        @if (CanSaveDraft)
+        {
+            <span>Your draft can be saved on this device. It has not been sent.</span>
+        }
+        else
+        {
+            <span>This form is not saved on this device. Leaving this page will discard these entries; nothing has been sent.</span>
+        }
+    </MudAlert>
+
+    <EditForm EditContext="@_editContext" OnSubmit="HandleFormSubmit">
+        <DataAnnotationsValidator />
+        <div class="public-report__sections">
+            <section class="public-report__section" aria-labelledby="public-report-subject">
+                <div>
+                    <MudText id="public-report-subject" Typo="Typo.h6" HtmlTag="h3">Who or what is this concern about?</MudText>
+                    <MudText Typo="Typo.body2" Class="public-report__hint">Choose the closest description. You can leave unknown details blank.</MudText>
+                </div>
+
+                <label class="public-report__label" for="public-subject">Concern type</label>
+                <InputSelect id="public-subject" class="public-report__control" required aria-required="true" aria-describedby="public-subject-error" @bind-Value="_draft.SubjectScope">
+                    <option value="">Choose one</option>
+                    <option value="@IntakeSubjectScope.Human">A person</option>
+                    <option value="@IntakeSubjectScope.Individual">An individual animal</option>
+                    <option value="@IntakeSubjectScope.Herd">A herd of animals</option>
+                    <option value="@IntakeSubjectScope.Flock">A flock of animals</option>
+                    <option value="@IntakeSubjectScope.OtherGroup">Another group of animals</option>
+                </InputSelect>
+                <div id="public-subject-error" class="public-report__error"><ValidationMessage For="@(() => _draft.SubjectScope)" /></div>
+
+                <label class="public-report__label" for="public-narrative">What happened?</label>
+                <InputTextArea id="public-narrative" class="public-report__control public-report__narrative" rows="5"
+                               maxlength="6000" aria-describedby="public-narrative-help public-narrative-error"
+                               @bind-Value="_draft.Narrative" />
+                <span id="public-narrative-help" class="public-report__hint">Describe what you saw in your own words. Do not include names, phone numbers, or diagnoses.</span>
+                <div id="public-narrative-error" class="public-report__error"><ValidationMessage For="@(() => _draft.Narrative)" /></div>
+
+                <label class="public-report__label" for="public-observations">Other observations <span>(optional, one per line)</span></label>
+                <InputTextArea id="public-observations" class="public-report__control" rows="5" maxlength="20000"
+                               aria-describedby="public-observations-help" @bind-Value="_draft.ObservationsText" />
+                <span id="public-observations-help" class="public-report__hint">Keep separate details on separate lines. Unknown details can be left blank.</span>
+            </section>
+
+            <section class="public-report__section" aria-labelledby="public-report-time">
+                <div>
+                    <MudText id="public-report-time" Typo="Typo.h6" HtmlTag="h3">When and where did it happen?</MudText>
+                    <MudText Typo="Typo.body2" Class="public-report__hint">This is the event location and time, not where or when the report is sent.</MudText>
+                </div>
+
+                <div class="public-report__capture-time">
+                    <span class="public-report__label">Report started</span>
+                    @if (_draft.CapturedAt is { } capturedAt)
+                    {
+                        <time datetime="@capturedAt.ToString("O")">@capturedAt.ToLocalTime().ToString("g")</time>
+                    }
+                    else
+                    {
+                        <span>Unknown</span>
+                    }
+                    <span class="public-report__hint">Shown from this device clock. It is not the time the event happened.</span>
+                </div>
+
+                <div class="public-report__grid">
+                    <div>
+                        <label class="public-report__label" for="public-time-precision">Time known?</label>
+                        <InputSelect TValue="ReportedTimePrecision" id="public-time-precision" class="public-report__control" @bind-Value="_draft.OccurrencePrecision">
+                            <option value="@ReportedTimePrecision.Unknown">I do not know</option>
+                            <option value="@ReportedTimePrecision.DateOnly">Date only</option>
+                            <option value="@ReportedTimePrecision.Approximate">Approximate date or time</option>
+                            <option value="@ReportedTimePrecision.Exact">Exact date and time</option>
+                        </InputSelect>
+                    </div>
+                    @if (_draft.OccurrencePrecision != ReportedTimePrecision.Unknown)
+                    {
+                        <div>
+                            <label class="public-report__label" for="public-occurrence-date">Reported date</label>
+                            <InputDate TValue="DateTime?" id="public-occurrence-date" class="public-report__control" @bind-Value="_draft.OccurrenceDate" />
+                        </div>
+                    }
+                </div>
+                @if (_draft.OccurrencePrecision is ReportedTimePrecision.Approximate or ReportedTimePrecision.Exact)
+                {
+                    <span class="public-report__hint">Enter only details you know. Do not guess the timezone.</span>
+                    @if (_draft.OccurrencePrecision == ReportedTimePrecision.Exact)
+                    {
+                        <label class="public-report__label" for="public-occurrence-time">Reported local time</label>
+                        <InputText id="public-occurrence-time" type="time" class="public-report__control" @bind-Value="_draft.OccurrenceTime" />
+                        <label class="public-report__label" for="public-occurrence-offset">UTC offset <span>(required for an exact time; for example, +02:00)</span></label>
+                        <InputText id="public-occurrence-offset" class="public-report__control" maxlength="9" @bind-Value="_draft.OccurrenceOffset" />
+                    }
+                    <label class="public-report__label" for="public-time-note">Time zone, if known <span>(optional)</span></label>
+                    <InputText id="public-time-note" class="public-report__control" maxlength="160" @bind-Value="_draft.TimeNote" />
+                }
+
+                <label class="public-report__unknown">
+                    <InputCheckbox @bind-Value="_draft.LocationUnknown" @bind-Value:after="HandleLocationUnknownChanged" />
+                    <span>The event location is unknown</span>
+                </label>
+                @if (!_draft.LocationUnknown)
+                {
+                    <div>
+                        <label class="public-report__label" for="public-country">Country where the event happened</label>
+                        @if (HasCountryCatalogue)
+                        {
+                            <InputSelect id="public-country" class="public-report__control" @bind-Value="_draft.CountryCode" @bind-Value:after="ResetCountryConfirmation">
+                                <option value="">Choose a country</option>
+                                @foreach (var country in Countries)
+                                {
+                                    <option value="@country.Code">@country.Name</option>
+                                }
+                            </InputSelect>
+                            <span class="public-report__hint">Choose the closest matching country or area. SwiftAid’s current country list may not include every place.</span>
+                        }
+                        else
+                        {
+                            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+                                Country selection is temporarily unavailable. You can continue with the location marked unknown.
+                            </MudAlert>
+                        }
+                    </div>
+                    <div class="public-report__grid">
+                        <PublicReportPlaceField Label="Region" Presence="@_draft.RegionPresence" PresenceChanged="@(value => _draft.RegionPresence = value)"
+                                                Value="@_draft.Region" ValueChanged="@(value => _draft.Region = value)" />
+                        <PublicReportPlaceField Label="Area" Presence="@_draft.AreaPresence" PresenceChanged="@(value => _draft.AreaPresence = value)"
+                                                Value="@_draft.Area" ValueChanged="@(value => _draft.Area = value)" />
+                        <PublicReportPlaceField Label="Town, village, or locality" Presence="@_draft.LocalityPresence" PresenceChanged="@(value => _draft.LocalityPresence = value)"
+                                                Value="@_draft.Locality" ValueChanged="@(value => _draft.Locality = value)" />
+                    </div>
+                }
+            </section>
+
+            <section class="public-report__section" aria-labelledby="public-report-evidence">
+                <div>
+                    <MudText id="public-report-evidence" Typo="Typo.h6" HtmlTag="h3">Optional recording</MudText>
+                    <MudText Typo="Typo.body2" Class="public-report__hint">An original recording may help explain what happened. It is not required.</MudText>
+                </div>
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                    Adding a recording is not available here yet. Do not send private recordings through another channel.
+                </MudAlert>
+            </section>
+
+            <section class="public-report__section" aria-labelledby="public-report-confirmations">
+                <div>
+                    <MudText id="public-report-confirmations" Typo="Typo.h6" HtmlTag="h3">Before sending</MudText>
+                    <MudText Typo="Typo.body2" Class="public-report__hint">Your report stays private. If received, its receipt shows whether it is being reviewed and whether local service coverage is available.</MudText>
+                </div>
+
+                <label class="public-report__unknown">
+                    <InputCheckbox @bind-Value="_draft.ReportReviewConfirmed" />
+                    <span>I have reviewed what I entered.</span>
+                </label>
+                <MudText Typo="Typo.body2" Class="public-report__hint">Reports have not been verified when first received. A receipt does not mean someone has been assigned or that help is on the way.</MudText>
+                <div class="public-report__confirmation @(CanConfirmCountry ? string.Empty : "public-report__confirmation--unavailable")">
+                    <InputCheckbox id="public-country-confirm" @bind-Value="_draft.CountryConfirmed"
+                                   disabled="@(!CanConfirmCountry || string.IsNullOrWhiteSpace(_draft.CountryCode))"
+                                   aria-describedby="public-country-confirm-help" />
+                    <label for="public-country-confirm">I confirm the event country shown above.</label>
+                    <span id="public-country-confirm-help" class="public-report__hint">
+                        @(CanConfirmCountry ? "Select the country before confirming it." : "The current country choices are unavailable. Your draft can still be saved.")
+                    </span>
+                </div>
+                @if (HasPrivacyNotice)
+                {
+                    <MudLink Href="@PrivacyNoticeReference" Target="_blank" rel="noopener noreferrer">
+                        Read SwiftAid’s privacy notice
+                    </MudLink>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Class="public-report__hint">SwiftAid’s privacy notice is temporarily unavailable. You can still save a draft.</MudText>
+                }
+                <div class="public-report__confirmation">
+                    <InputCheckbox id="public-policy-confirm" @bind-Value="_draft.ProcessingConfirmed"
+                                   disabled="@(!HasPrivacyNotice)"
+                                   aria-describedby="public-policy-confirm-help" />
+                    <label for="public-policy-confirm">I have read how SwiftAid uses the details I share.</label>
+                    <span id="public-policy-confirm-help" class="public-report__hint">
+                        @(HasPrivacyNotice ? "Read the privacy notice before confirming." : "This confirmation is unavailable until the privacy notice is current.")
+                    </span>
+                </div>
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+                    Your report can be sent only after a country is selected, the required confirmations are complete, and a participating service is available.
+                </MudAlert>
+            </section>
+        </div>
+
+        <div class="public-report__actions">
+            <MudButton ButtonType="ButtonType.Button" Variant="Variant.Outlined" Color="Color.Primary"
+                       OnClick="ReviewEntries" StartIcon="@Icons.Material.Filled.FactCheck">
+                Review entries
+            </MudButton>
+            @if (CanSaveDraft)
+            {
+                <MudButton ButtonType="ButtonType.Button" Variant="Variant.Text" Color="Color.Primary"
+                           OnClick="SaveDraftAsync" StartIcon="@Icons.Material.Filled.Save">
+                    Save draft on this device
+                </MudButton>
+            }
+            <MudButton ButtonType="ButtonType.Button" Variant="Variant.Filled" Color="Color.Primary" Disabled="true"
+                       aria-describedby="public-submit-unavailable" StartIcon="@Icons.Material.Filled.Send">
+                Send report
+            </MudButton>
+        </div>
+        @if (!CanSaveDraft)
+        {
+        <MudText id="public-submit-unavailable" Typo="Typo.body2" Class="public-report__hint">
+            @if (CanSaveDraft)
+            {
+                <span>Sending is unavailable right now. Your saved draft stays on this device.</span>
+            }
+            else
+            {
+                <span>This form cannot save or send reports right now. Your entries have not been saved or sent.</span>
+            }
+        </MudText>
+        }
+        @if (_draftSaved || _saveError is not null)
+        {
+            <div role="status" aria-live="polite" class="public-report__feedback">
+                @if (_draftSaved)
+                {
+                    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true">
+                        Your report draft is saved on this device. It has not been sent.
+                    </MudAlert>
+                }
+                else
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+                        @_saveError
+                    </MudAlert>
+                }
+            </div>
+        }
+        @if (_reviewAttempted)
+        {
+            <div role="status" aria-live="polite" class="public-report__feedback">
+                <MudAlert Severity="@(_reviewPassed ? Severity.Info : Severity.Warning)" Variant="Variant.Outlined" Dense="true">
+                    @(_reviewPassed
+                        ? "The information appears complete. Your entries have not been saved or sent."
+                        : "Please review the highlighted entries.")
+                </MudAlert>
+            </div>
+        }
+    </EditForm>
+</section>
+
+@code {
+    private PublicReportDraft _draft = new() { CapturedAt = DateTimeOffset.Now };
+    private EditContext _editContext = default!;
+    private IntakeSubmission? _loadedSubmission;
+    private bool _parametersInitialized;
+    private bool _reviewAttempted;
+    private bool _reviewPassed;
+    private bool _draftSaved;
+    private string? _saveError;
+
+    [Parameter] public IReadOnlyList<PublicCountryOption> Countries { get; set; } = [];
+    [Parameter] public string? CountryCatalogueVersion { get; set; }
+    [Parameter] public bool CountryCatalogueIsCurrent { get; set; }
+    [Parameter] public string? PrivacyNoticeReference { get; set; }
+    [Parameter] public string? ProcessingPolicyReference { get; set; }
+    [Parameter] public string? ProcessingPolicyVersion { get; set; }
+    [Parameter] public bool DraftSavingAvailable { get; set; }
+    [Parameter] public Guid? CurrentDraftId { get; set; }
+    [Parameter] public IntakeSubmission? InitialSubmission { get; set; }
+    [Parameter] public EventCallback<PublicReportSaveRequest> OnSaveDraft { get; set; }
+
+    private bool HasCountryCatalogue => Countries.Count > 0 && !string.IsNullOrWhiteSpace(CountryCatalogueVersion);
+    private bool CanConfirmCountry => HasCountryCatalogue && CountryCatalogueIsCurrent;
+    private bool HasPrivacyNotice => !string.IsNullOrWhiteSpace(PrivacyNoticeReference) &&
+                                     !string.IsNullOrWhiteSpace(ProcessingPolicyVersion);
+
+    protected override void OnParametersSet()
+    {
+        if (_parametersInitialized && ReferenceEquals(_loadedSubmission, InitialSubmission))
+            return;
+
+        _parametersInitialized = true;
+
+        if (_editContext is not null)
+            _editContext.OnFieldChanged -= HandleFieldChanged;
+
+        _loadedSubmission = InitialSubmission;
+        _draft = InitialSubmission is null
+            ? new PublicReportDraft { CapturedAt = DateTimeOffset.Now }
+            : PublicReportDraft.FromSubmission(InitialSubmission);
+        _editContext = new EditContext(_draft);
+        _editContext.OnFieldChanged += HandleFieldChanged;
+        _draftSaved = InitialSubmission is not null;
+        _saveError = null;
+        _reviewAttempted = false;
+        _reviewPassed = false;
+    }
+
+    private bool CanSaveDraft => DraftSavingAvailable && OnSaveDraft.HasDelegate;
+
+    private void HandleFieldChanged(object? sender, FieldChangedEventArgs args)
+    {
+        _reviewAttempted = false;
+        _reviewPassed = false;
+        _draftSaved = false;
+        _saveError = null;
+    }
+
+    private void HandleLocationUnknownChanged()
+    {
+        if (!_draft.LocationUnknown)
+            return;
+
+        _draft.CountryCode = null;
+        _draft.CountryConfirmed = false;
+        _draft.RegionPresence = PresenceState.Unknown;
+        _draft.Region = null;
+        _draft.AreaPresence = PresenceState.Unknown;
+        _draft.Area = null;
+        _draft.LocalityPresence = PresenceState.Unknown;
+        _draft.Locality = null;
+    }
+
+    private void ResetCountryConfirmation() => _draft.CountryConfirmed = false;
+
+    private void ReviewEntries()
+    {
+        _reviewAttempted = true;
+        _reviewPassed = _editContext.Validate();
+    }
+
+    private Task HandleFormSubmit(EditContext _)
+    {
+        ReviewEntries();
+        return Task.CompletedTask;
+    }
+
+    private async Task SaveDraftAsync()
+    {
+        if (!CanSaveDraft)
+        {
+            return;
+        }
+
+        try
+        {
+            var submission = _draft.ToSubmission(
+                CountryCatalogueVersion,
+                ProcessingPolicyReference,
+                ProcessingPolicyVersion);
+            await OnSaveDraft.InvokeAsync(new PublicReportSaveRequest(CurrentDraftId, submission));
+            _draftSaved = true;
+            _saveError = null;
+        }
+        catch (InvalidOperationException exception)
+        {
+            _draftSaved = false;
+            _saveError = exception.Message;
+        }
+        catch
+        {
+            _draftSaved = false;
+            _saveError = "Your report draft could not be saved. Your entries remain on this screen only.";
+        }
+    }
+
+    public void Dispose() => _editContext.OnFieldChanged -= HandleFieldChanged;
+
+}

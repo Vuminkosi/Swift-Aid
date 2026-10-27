@@ -29,6 +29,45 @@
     letter-spacing: -0.03em;
 }
 
+.notification-badge {
+    margin-inline-end: 0.75rem;
+}
+
+.notification-settings {
+    display: grid;
+    gap: 0.35rem;
+    min-width: min(19rem, calc(100vw - 2rem));
+    padding: 0.65rem 0.85rem;
+    color: var(--sa-text-primary);
+}
+
+.notification-enable {
+    min-height: 2.75rem;
+    padding: 0.55rem 0.8rem;
+    border: 1px solid var(--sa-border);
+    border-radius: 0.45rem;
+    background: var(--sa-surface);
+    color: var(--sa-text-primary);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.notification-enable:hover {
+    background: var(--sa-canvas);
+}
+
+.notification-enable:focus-visible {
+    outline: 3px solid var(--sa-focus);
+    outline-offset: 2px;
+}
+
+.notification-enable:disabled {
+    cursor: wait;
+    opacity: 0.65;
+}
+
+
 .navigation-menu {
     padding: 1rem 0.75rem;
 }

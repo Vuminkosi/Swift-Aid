@@ -1,0 +1,198 @@
+@page "/report"
+@using SwiftAid.Client.Intake
+@using SwiftAid.Contracts.Intake
+@using SwiftAid.UI.Components.Public
+@inject IGuestSubmissionStore SubmissionStore
+@inject IGuestSubmissionCoordinator SubmissionCoordinator
+
+<PageTitle>Report a concern | SwiftAid</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="mobile-public-report">
+    <SwiftAidPageHeading Eyebrow="Private community reporting"
+                         Title="Report a concern"
+                         Description="Share a human or animal concern without creating an account. You can leave details unknown when you are unsure."
+                         HeadingId="mobile-public-report-heading" />
+
+    @if (_loading)
+    {
+        <div class="guest-report__loading" role="status" aria-live="polite">
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" Size="Size.Small" />
+            <span>Opening saved reports on this device…</span>
+        </div>
+    }
+    else if (!_storageAvailable)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
+            Saved reports on this device could not be opened. Your entries will remain on this screen only until saving is available.
+        </MudAlert>
+    }
+
+    @if (_drafts.Count > 0)
+    {
+        <section class="guest-report__saved" aria-labelledby="saved-drafts-title">
+            <MudText id="saved-drafts-title" Typo="Typo.h6" HtmlTag="h2">Saved drafts on this device</MudText>
+            @foreach (var draft in _drafts)
+            {
+                <MudPaper Class="guest-report__draft-row" Elevation="0" @key="draft.ClientSubmissionId">
+                    <div>
+                        <MudText Typo="Typo.subtitle1">
+                            @(draft.State == GuestSubmissionLocalState.NeedsAttention ? "Review before sending" : "Report draft")
+                        </MudText>
+                        <MudText Typo="Typo.body2" Class="guest-report__muted">
+                            Saved @draft.CreatedAtUtc.ToLocalTime().ToString("g") on this device. It has not been sent.
+                        </MudText>
+                    </div>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => OpenDraftAsync(draft.ClientSubmissionId))">
+                        Open draft
+                    </MudButton>
+                </MudPaper>
+            }
+        </section>
+    }
+
+    @if (_receipts.Count > 0)
+    {
+        <section class="guest-report__receipts" aria-labelledby="received-reports-title">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Spacing="2">
+                <MudText id="received-reports-title" Typo="Typo.h6" HtmlTag="h2">Reports with a receipt</MudText>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@_refreshingReceipts" OnClick="RefreshReceiptsAsync">
+                    Check for updates
+                </MudButton>
+            </MudStack>
+            @foreach (var report in _receipts)
+            {
+                <PublicReportReceipt Receipt="@(report.Receipt!)" @key="report.ClientSubmissionId" />
+            }
+        </section>
+    }
+
+    @if (_pageMessage is not null)
+    {
+        <div role="status" aria-live="polite">
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">@_pageMessage</MudAlert>
+        </div>
+    }
+
+    @if (_storageAvailable)
+    {
+        <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="StartNewReport">
+            Start a new report
+        </MudButton>
+    }
+
+    <PublicReportForm DraftSavingAvailable="@_storageAvailable"
+                      CurrentDraftId="@_activeDraftId"
+                      InitialSubmission="@_activeSubmission"
+                      OnSaveDraft="SaveDraftAsync" />
+</MudContainer>
+
+@code {
+    private IReadOnlyList<GuestSubmissionSummary> _drafts = [];
+    private IReadOnlyList<GuestSubmissionSummary> _receipts = [];
+    private Guid? _activeDraftId;
+    private IntakeSubmission? _activeSubmission;
+    private bool _loading = true;
+    private bool _storageAvailable;
+    private bool _refreshingReceipts;
+    private string? _pageMessage;
+
+    protected override async Task OnInitializedAsync() => await ReloadSavedReportsAsync();
+
+    private async Task ReloadSavedReportsAsync()
+    {
+        _loading = true;
+        try
+        {
+            var reports = await SubmissionStore.GetAllAsync();
+            _drafts = reports
+                .Where(report => report.State is GuestSubmissionLocalState.Draft or GuestSubmissionLocalState.NeedsAttention)
+                .OrderByDescending(report => report.CreatedAtUtc)
+                .ToArray();
+            _receipts = reports
+                .Where(report => report.Receipt is not null)
+                .OrderByDescending(report => report.Receipt!.ReceivedAtUtc)
+                .ToArray();
+            _storageAvailable = true;
+            _pageMessage = null;
+        }
+        catch
+        {
+            _drafts = [];
+            _receipts = [];
+            _storageAvailable = false;
+            _pageMessage = "Saved reports could not be opened. Try again before leaving this page.";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task OpenDraftAsync(Guid clientSubmissionId)
+    {
+        try
+        {
+            var draft = await SubmissionStore.GetDraftAsync(clientSubmissionId);
+            if (draft is null)
+            {
+                _pageMessage = "This draft is no longer available to edit. Refresh your saved reports and try again.";
+                await ReloadSavedReportsAsync();
+                return;
+            }
+
+            _activeDraftId = draft.ClientSubmissionId;
+            _activeSubmission = draft.Submission;
+            _pageMessage = "Draft opened. Changes remain on this device until you save them.";
+        }
+        catch
+        {
+            _pageMessage = "This draft could not be opened. Your other saved reports are unchanged.";
+        }
+    }
+
+    private async Task SaveDraftAsync(PublicReportSaveRequest request)
+    {
+        var saved = request.PreviousDraftId is { } previousDraftId
+            ? await SubmissionStore.CreateRevisionAsync(previousDraftId, request.Submission)
+            : await SubmissionStore.CreateDraftAsync(request.Submission);
+
+        _activeDraftId = saved.ClientSubmissionId;
+        _activeSubmission = request.Submission with { ClientSubmissionId = saved.ClientSubmissionId };
+        _pageMessage = "Your draft is saved on this device. It has not been sent.";
+        await ReloadSavedReportsAsync();
+    }
+
+    private async Task RefreshReceiptsAsync()
+    {
+        if (_refreshingReceipts)
+            return;
+
+        _refreshingReceipts = true;
+        try
+        {
+            var result = await SubmissionCoordinator.RefreshReceiptsAsync();
+            await ReloadSavedReportsAsync();
+            _pageMessage = result.RetryPending > 0
+                ? "Updates could not be checked right now. Your saved receipt remains on this device."
+                : result.Updated > 0
+                    ? "Your report status has been updated."
+                    : "There are no new report updates."
+                    ;
+        }
+        catch
+        {
+            _pageMessage = "Updates could not be checked right now. Your saved receipt remains on this device.";
+        }
+        finally
+        {
+            _refreshingReceipts = false;
+        }
+    }
+
+    private void StartNewReport()
+    {
+        _activeDraftId = null;
+        _activeSubmission = null;
+        _pageMessage = "Enter a new report. It is not saved until you choose Save draft.";
+    }
+}

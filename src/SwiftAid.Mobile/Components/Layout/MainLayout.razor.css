@@ -76,3 +76,18 @@ main {
         padding-right: 1.5rem !important;
     }
 }
+
+.mobile-app-bar {
+    border-bottom: 1px solid var(--sa-border);
+    color: var(--sa-text-primary);
+}
+
+.mobile-brand-mark {
+    font-weight: 700;
+    letter-spacing: -0.03em;
+}
+
+.mobile-notification-drawer {
+    background: var(--sa-surface);
+    color: var(--sa-text-primary);
+}

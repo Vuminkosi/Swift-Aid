@@ -1,0 +1,452 @@
+@using SwiftAid.Client.Notifications
+@using SwiftAid.Contracts.Notifications
+@using SwiftAid.UI.Components.Notifications
+@implements IAsyncDisposable
+@inject INotificationFeedClient NotificationClient
+@inject INotificationPlatformSettings PlatformSettings
+
+<section class="mobile-notification-center" aria-label="Notifications and preferences">
+    <div class="mobile-notification-center__heading">
+        <div>
+            <MudText Typo="Typo.h6">Notifications</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Private to your staff account</MudText>
+        </div>
+        @if (_unreadCount > 0)
+        {
+            <MudChip T="string" Color="Color.Primary" Size="Size.Small" aria-label="@($"{_unreadCount} unread")">
+                @_unreadCount unread
+            </MudChip>
+        }
+    </div>
+
+    <MudPaper Class="mobile-notification-center__settings" Outlined="true" Square="false">
+        <MudText Typo="Typo.subtitle2">Device notifications</MudText>
+
+        @if (_settingsLoading)
+        {
+            <div class="mobile-notification-center__state" role="status" aria-live="polite">
+                <MudProgressCircular Indeterminate="true" Size="Size.Small" aria-label="Checking notification settings" />
+                <MudText Typo="Typo.body2">Checking this device…</MudText>
+            </div>
+        }
+        else if (_feedLoading)
+        {
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Checking staff access…</MudText>
+        }
+        else if (_feedPermissionDenied)
+        {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                Sign in with an authorized staff account before enabling device notifications.
+            </MudAlert>
+        }
+        else if (_feedError is not null)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+                Staff access could not be confirmed. Load notifications before changing device settings.
+            </MudAlert>
+        }
+        else if (_platformState?.Permission == NotificationPermissionState.NotSupported)
+        {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                Push notifications are not available on this device.
+            </MudAlert>
+        }
+        else if (_platformState is null)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+                Device notification settings are unavailable right now.
+            </MudAlert>
+        }
+        else if (_platformState?.PushEnabled == true)
+        {
+            <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true">
+                Push notifications are enabled on this device.
+            </MudAlert>
+            <MudSwitch T="bool" Value="_gentleSoundEnabled" ValueChanged="GentleSoundChangedAsync"
+                       Color="Color.Primary" Label="Play a gentle sound while SwiftAid is open" />
+            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                This preference applies only while SwiftAid is open.
+            </MudText>
+            <MudButton Variant="Variant.Outlined" Color="Color.Default" OnClick="DisablePushAsync"
+                       Disabled="_settingsSaving" aria-label="Turn off SwiftAid notifications on this device">
+                Turn off on this device
+            </MudButton>
+        }
+        else
+        {
+            @if (_platformState?.Permission == NotificationPermissionState.Denied)
+            {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+                    Device permission is off. You can change it in your device settings.
+                </MudAlert>
+            }
+            <MudSwitch T="bool" @bind-Value="_gentleSoundEnabled" Color="Color.Primary"
+                       Label="Play a gentle sound while SwiftAid is open" Disabled="_settingsSaving" />
+            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                You can enable notifications for this device. SwiftAid asks for device permission only after you choose Enable.
+            </MudText>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="EnablePushAsync"
+                       Disabled="_settingsSaving || _platformState?.Permission == NotificationPermissionState.Denied">
+                @if (_settingsSaving)
+                {
+                    <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="me-2" aria-label="Enabling notifications" />
+                }
+                Enable notifications
+            </MudButton>
+        }
+
+        @if (_settingsMessage is not null)
+        {
+            <MudAlert Severity="@_settingsSeverity" Variant="Variant.Text" Dense="true" role="status" aria-live="polite">
+                @_settingsMessage
+            </MudAlert>
+        }
+    </MudPaper>
+
+    @if (_feedLoading)
+    {
+        <div class="mobile-notification-center__state" role="status" aria-live="polite">
+            <MudProgressCircular Indeterminate="true" Size="Size.Small" aria-label="Loading notifications" />
+            <MudText Typo="Typo.body2">Loading notifications…</MudText>
+        </div>
+    }
+    else if (_feedPermissionDenied)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+            Sign in with a staff account to view notifications.
+        </MudAlert>
+    }
+    else
+    {
+        <NotificationFeed Items="_notificationItems"
+                          Loading="false"
+                          ErrorMessage="_feedError"
+                          OnRetry="RefreshFeedAsync"
+                          OnMarkRead="MarkReadAsync"
+                          OnDismiss="DismissAsync" />
+    }
+</section>
+
+@code {
+    private const int MaximumRememberedSoundOccurrences = 512;
+
+    [Parameter] public EventCallback<int> UnreadCountChanged { get; set; }
+
+    private NotificationPlatformSettingsSnapshot? _platformState;
+    private IReadOnlyList<NotificationItemView> _notificationItems = Array.Empty<NotificationItemView>();
+    private readonly HashSet<Guid> _soundOccurrenceIds = [];
+    private readonly SemaphoreSlim _feedLoadGate = new(1, 1);
+    private CancellationTokenSource? _monitorCancellation;
+    private Task? _monitorTask;
+    private bool _settingsLoading = true;
+    private bool _settingsSaving;
+    private bool _gentleSoundEnabled;
+    private bool _feedLoading = true;
+    private bool _feedPermissionDenied;
+    private bool _hasAuthorizedFeedBaseline;
+    private string? _feedError;
+    private string? _settingsMessage;
+    private Severity _settingsSeverity = Severity.Info;
+
+    private int _unreadCount =>
+        _notificationItems.Count(item => item.ReadAtUtc is null && item.DismissedAtUtc is null);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadPlatformStateAsync();
+        await LoadFeedAsync(CancellationToken.None);
+        if (!_feedPermissionDenied)
+        {
+            _monitorCancellation = new CancellationTokenSource();
+            _monitorTask = NotificationClient.MonitorChangesAsync(LoadFeedAsync, _monitorCancellation.Token);
+        }
+    }
+
+    private async Task LoadPlatformStateAsync()
+    {
+        _settingsLoading = true;
+        try
+        {
+            _platformState = await PlatformSettings.GetStateAsync();
+            _gentleSoundEnabled = _platformState.GentleSoundEnabled;
+        }
+        catch (Exception)
+        {
+            _settingsMessage = "Device notification settings are unavailable right now.";
+            _settingsSeverity = Severity.Warning;
+        }
+        finally
+        {
+            _settingsLoading = false;
+        }
+    }
+
+    private async Task EnablePushAsync()
+    {
+        _settingsSaving = true;
+        _settingsMessage = null;
+        try
+        {
+            var result = await PlatformSettings.EnableAsync(_gentleSoundEnabled);
+            ApplyPlatformResult(result, enabling: true);
+            await LoadPlatformStateAsync();
+        }
+        catch (Exception)
+        {
+            SetSettingsMessage("Notifications could not be enabled. Try again.", Severity.Error);
+        }
+        finally
+        {
+            _settingsSaving = false;
+        }
+    }
+
+    private async Task DisablePushAsync()
+    {
+        _settingsSaving = true;
+        _settingsMessage = null;
+        try
+        {
+            var result = await PlatformSettings.DisableAsync();
+            ApplyPlatformResult(result, enabling: false);
+            await LoadPlatformStateAsync();
+        }
+        catch (Exception)
+        {
+            SetSettingsMessage("Notifications could not be turned off. Try again.", Severity.Error);
+        }
+        finally
+        {
+            _settingsSaving = false;
+        }
+    }
+
+    private async Task GentleSoundChangedAsync(bool enabled)
+    {
+        var previousValue = _gentleSoundEnabled;
+        _gentleSoundEnabled = enabled;
+
+        if (_platformState?.PushEnabled != true)
+        {
+            return;
+        }
+
+        _settingsSaving = true;
+        _settingsMessage = null;
+        try
+        {
+            var result = await PlatformSettings.SetGentleSoundAsync(enabled);
+            if (result is NotificationPlatformResult.Enabled or NotificationPlatformResult.Disabled)
+            {
+                _settingsMessage = enabled
+                    ? "Gentle sound is on while SwiftAid is open."
+                    : "Gentle sound is off.";
+                _settingsSeverity = Severity.Success;
+                return;
+            }
+
+            _gentleSoundEnabled = previousValue;
+            switch (result)
+            {
+                case NotificationPlatformResult.NotSupported:
+                    SetSettingsMessage("A separate in-app sound is not available on this device.", Severity.Info);
+                    break;
+                case NotificationPlatformResult.NotAuthenticated:
+                    SetSettingsMessage("Sign in with a staff account before changing notification settings.", Severity.Warning);
+                    break;
+                default:
+                    SetSettingsMessage("Sound preference could not be saved. Try again.", Severity.Error);
+                    break;
+            }
+        }
+        catch (Exception)
+        {
+            _gentleSoundEnabled = previousValue;
+            SetSettingsMessage("Sound preference could not be saved. Try again.", Severity.Error);
+        }
+        finally
+        {
+            _settingsSaving = false;
+        }
+    }
+
+    private void ApplyPlatformResult(NotificationPlatformResult result, bool enabling)
+    {
+        switch (result)
+        {
+            case NotificationPlatformResult.Enabled:
+                SetSettingsMessage("Notifications are enabled on this device.", Severity.Success);
+                break;
+            case NotificationPlatformResult.Disabled:
+                SetSettingsMessage("Notifications are off on this device.", Severity.Success);
+                break;
+            case NotificationPlatformResult.PermissionDenied:
+                SetSettingsMessage("Device permission is off. You can change it in your device settings.", Severity.Warning);
+                break;
+            case NotificationPlatformResult.NotSupported:
+                SetSettingsMessage("Push notifications are not available on this device.", Severity.Info);
+                break;
+            case NotificationPlatformResult.NotAuthenticated:
+                SetSettingsMessage("Sign in with a staff account before changing notification settings.", Severity.Warning);
+                break;
+            default:
+                SetSettingsMessage(
+                    enabling
+                        ? "Notifications could not be enabled. Try again."
+                        : "The device registration could not be confirmed as removed. Try again.",
+                    Severity.Error);
+                break;
+        }
+    }
+
+    private void SetSettingsMessage(string message, Severity severity)
+    {
+        _settingsMessage = message;
+        _settingsSeverity = severity;
+    }
+
+    private Task RefreshFeedAsync() => LoadFeedAsync(CancellationToken.None);
+
+    private async Task LoadFeedAsync(CancellationToken cancellationToken)
+    {
+        await _feedLoadGate.WaitAsync(cancellationToken);
+        try
+        {
+            _feedLoading = true;
+            _feedError = null;
+            await InvokeAsync(StateHasChanged);
+
+            try
+            {
+                var result = await NotificationClient.GetAsync(cancellationToken);
+                _feedPermissionDenied = result.Status == NotificationFeedStatus.PermissionDenied;
+                if (result.Status == NotificationFeedStatus.Ready)
+                {
+                    _notificationItems = result.Items;
+                    await ObserveNotificationOccurrencesAsync(result.Items, cancellationToken);
+                }
+                else if (result.Status == NotificationFeedStatus.Unavailable)
+                {
+                    _notificationItems = Array.Empty<NotificationItemView>();
+                    _feedError = "Notifications could not be loaded. Try again.";
+                }
+                else
+                {
+                    _notificationItems = Array.Empty<NotificationItemView>();
+                    _hasAuthorizedFeedBaseline = false;
+                    _soundOccurrenceIds.Clear();
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // The view is closing or the app is shutting down.
+            }
+            catch (Exception)
+            {
+                _feedError = "Notifications could not be loaded. Try again.";
+            }
+
+            _feedLoading = false;
+            await InvokeAsync(StateHasChanged);
+            await UnreadCountChanged.InvokeAsync(_unreadCount);
+        }
+        finally
+        {
+            _feedLoadGate.Release();
+        }
+    }
+
+    private async Task ObserveNotificationOccurrencesAsync(
+        IReadOnlyList<NotificationItemView> items,
+        CancellationToken cancellationToken)
+    {
+        if (!_hasAuthorizedFeedBaseline)
+        {
+            foreach (var item in items.Take(MaximumRememberedSoundOccurrences))
+            {
+                _soundOccurrenceIds.Add(item.Id);
+            }
+
+            _hasAuthorizedFeedBaseline = true;
+            return;
+        }
+
+        foreach (var item in items)
+        {
+            if (_soundOccurrenceIds.Contains(item.Id) ||
+                _soundOccurrenceIds.Count >= MaximumRememberedSoundOccurrences)
+            {
+                continue;
+            }
+
+            _soundOccurrenceIds.Add(item.Id);
+            if (_platformState is
+                {
+                    Permission: NotificationPermissionState.Granted,
+                    PushEnabled: true,
+                    GentleSoundEnabled: true
+                })
+            {
+                try
+                {
+                    _ = await PlatformSettings.TryPlayForegroundSoundAsync(item.Id, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception)
+                {
+                    // Sound is optional; it must not prevent the authorized feed from updating.
+                }
+            }
+        }
+    }
+
+    private async Task<bool> MarkReadAsync(Guid notificationId)
+    {
+        if (!await NotificationClient.MarkReadAsync(notificationId))
+        {
+            return false;
+        }
+
+        await LoadFeedAsync(CancellationToken.None);
+        return _feedError is null;
+    }
+
+    private async Task<bool> DismissAsync(Guid notificationId)
+    {
+        if (!await NotificationClient.DismissAsync(notificationId))
+        {
+            return false;
+        }
+
+        await LoadFeedAsync(CancellationToken.None);
+        return _feedError is null;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        var cancellation = _monitorCancellation;
+        _monitorCancellation = null;
+        cancellation?.Cancel();
+        if (_monitorTask is not null)
+        {
+            try
+            {
+                await _monitorTask;
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected when the notification drawer closes.
+            }
+            catch (Exception)
+            {
+                // Do not surface transport diagnostics during view disposal.
+            }
+        }
+
+        cancellation?.Dispose();
+        _feedLoadGate.Dispose();
+    }
+}

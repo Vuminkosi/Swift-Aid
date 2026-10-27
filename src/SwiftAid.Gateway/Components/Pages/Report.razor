@@ -1,18 +1,56 @@
 @page "/report"
+@using SwiftAid.Application.Intake
+@using SwiftAid.Contracts.Intake
+@using SwiftAid.UI.Components.Public
+@inject IIntakePublicMetadataProvider IntakeMetadataProvider
 
 <PageTitle>Report a concern | SwiftAid</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.Medium" Class="status-page">
-    <MudIcon Icon="@Icons.Material.Filled.EditNote" Color="Color.Primary" Size="Size.Large" />
-    <MudText Typo="Typo.h4" HtmlTag="h1">Report a concern</MudText>
-    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
-        Reporting is unavailable right now. Nothing has been sent.
-    </MudAlert>
-    <MudText Typo="Typo.body1">
-        This page does not collect or save report details.
-    </MudText>
-    <MudButton Href="/" Variant="Variant.Outlined" Color="Color.Primary"
-               StartIcon="@Icons.Material.Filled.ArrowBack">
-        Return home
-    </MudButton>
+    <SwiftAidPageHeading Eyebrow="Private community reporting"
+                         Title="Report a concern"
+                         Description="Share a human or animal concern without creating an account. You can leave details unknown when you are unsure."
+                         HeadingId="public-report-heading" />
+    <PublicReportForm Countries="_countries"
+                      CountryCatalogueVersion="_countryCatalogueVersion"
+                      CountryCatalogueIsCurrent="_countryCatalogueIsCurrent"
+                      PrivacyNoticeReference="_privacyNoticeReference"
+                      ProcessingPolicyReference="_privacyNoticeReference"
+                      ProcessingPolicyVersion="_privacyNoticeVersion" />
 </MudContainer>
+
+@code {
+    private IReadOnlyList<PublicCountryOption> _countries = [];
+    private string? _countryCatalogueVersion;
+    private bool _countryCatalogueIsCurrent;
+    private string? _privacyNoticeReference;
+    private string? _privacyNoticeVersion;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var metadata = IntakeMetadataProvider.GetMetadata();
+            _privacyNoticeReference = metadata.PrivacyNoticeReference;
+            _privacyNoticeVersion = metadata.PrivacyNoticeVersion;
+
+            var catalogue = await IntakeMetadataProvider.GetCountriesAsync(CancellationToken.None);
+            if (!string.Equals(metadata.CountryCatalogueVersion, catalogue.Version, StringComparison.Ordinal))
+                return;
+
+            _countryCatalogueVersion = catalogue.Version;
+            _countries = catalogue.Countries
+                .Select(country => new PublicCountryOption(country.Code, country.Label))
+                .ToArray();
+            _countryCatalogueIsCurrent = _countries.Count > 0;
+        }
+        catch
+        {
+            _countries = [];
+            _countryCatalogueVersion = null;
+            _countryCatalogueIsCurrent = false;
+            _privacyNoticeReference = null;
+            _privacyNoticeVersion = null;
+        }
+    }
+}

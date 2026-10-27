@@ -1,0 +1,89 @@
+.swiftaid-notification-feed {
+    min-width: 0;
+    max-width: min(94vw, 32rem);
+    padding: 0.75rem;
+}
+
+.swiftaid-notification-feed__heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding-bottom: 0.65rem;
+    border-bottom: 1px solid var(--mud-palette-divider);
+}
+
+.swiftaid-notification-feed__title {
+    font-weight: 600;
+}
+
+.swiftaid-notification-feed__state,
+.swiftaid-notification-feed__empty {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    min-height: 3.5rem;
+    padding: 0.5rem 0.25rem;
+}
+
+.swiftaid-notification-feed__empty {
+    color: var(--mud-palette-text-secondary);
+}
+
+.swiftaid-notification-feed__list {
+    display: grid;
+    gap: 0.25rem;
+    max-height: min(65vh, 34rem);
+    overflow: auto;
+    margin: 0;
+    padding: 0.25rem 0;
+    list-style: none;
+}
+
+.swiftaid-notification-feed__item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    min-width: 0;
+    padding: 0.55rem 0.5rem;
+    border-radius: 0.35rem;
+}
+
+.swiftaid-notification-feed__item.is-unread {
+    background: var(--mud-palette-action-default-hover);
+}
+
+.swiftaid-notification-feed__content {
+    display: grid;
+    min-width: 0;
+    gap: 0.15rem;
+}
+
+.swiftaid-notification-feed__message {
+    overflow-wrap: anywhere;
+}
+
+.swiftaid-notification-feed__actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 0.1rem;
+}
+
+@media (max-width: 600px) {
+    .swiftaid-notification-feed {
+        padding: 0.5rem;
+    }
+
+    .swiftaid-notification-feed__item {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 0.35rem;
+    }
+
+    .swiftaid-notification-feed__actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+}
