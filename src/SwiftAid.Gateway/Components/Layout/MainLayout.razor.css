@@ -1,3 +1,24 @@
+.skip-link {
+    position: fixed;
+    z-index: 1500;
+    inset-block-start: 0.75rem;
+    inset-inline-start: 0.75rem;
+    padding: 0.75rem 1rem;
+    transform: translateY(calc(-100% - 1rem));
+    border: 2px solid var(--sa-focus);
+    border-radius: 0.5rem;
+    background: var(--sa-surface);
+    color: var(--sa-text-primary);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.skip-link:focus-visible {
+    transform: translateY(0);
+    outline: 3px solid var(--sa-focus);
+    outline-offset: 3px;
+}
+
 .app-bar {
     border-bottom: 1px solid var(--sa-border);
     color: var(--sa-text-primary);

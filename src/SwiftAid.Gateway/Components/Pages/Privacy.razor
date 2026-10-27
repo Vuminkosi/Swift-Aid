@@ -1,0 +1,143 @@
+@page "/privacy"
+@page "/privay"
+@inject Microsoft.Extensions.Configuration.IConfiguration Configuration
+
+<PageTitle>Privacy | @ServiceName</PageTitle>
+
+<HeadContent>
+    <link rel="canonical" href="@CanonicalUrl" />
+    <meta name="description" content="How SwiftAid handles reports and account access." />
+</HeadContent>
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="py-8 px-4">
+    <MudStack Spacing="4">
+        <SwiftAidPageHeading Eyebrow="Your information"
+                             Title="Privacy"
+                             Description="@($"A clear summary of what to consider before sharing information with {ServiceName}.")"
+                             HeadingId="privacy-heading" />
+
+        <MudText Typo="Typo.body1">
+            This page describes the intended information boundaries of @ServiceName. It does not state a retention period or replace a service-specific privacy notice.
+        </MudText>
+
+        <section aria-labelledby="privacy-reporting-heading">
+            <MudText Typo="Typo.h5" HtmlTag="h2" id="privacy-reporting-heading">Reporting without an account</MudText>
+            <MudText Typo="Typo.body1">
+                You can browse public pages without an account. When reporting is available, you can submit without signing in. Share only the details needed to describe the concern. If a date, location, age, species or count is not known, leave it unknown rather than guessing.
+            </MudText>
+        </section>
+
+        <section aria-labelledby="privacy-sensitive-heading">
+            <MudText Typo="Typo.h5" HtmlTag="h2" id="privacy-sensitive-heading">Sensitive details</MudText>
+            <MudText Typo="Typo.body1">
+                Depending on the features available and what you choose to provide, a report may include human or animal observations, a narrative, a chosen date or area, and files such as a recording when that option is available. Share only the details needed to describe the concern. Avoid names, contact details or other identifying information unless they are needed for the support being requested.
+            </MudText>
+        </section>
+
+        <section aria-labelledby="privacy-use-heading">
+            <MudText Typo="Typo.h5" HtmlTag="h2" id="privacy-use-heading">How information is used</MudText>
+            <MudText Typo="Typo.body1">
+                Information is used to receive reports, save and review them for the relevant service, provide account access when you sign in, and show public information and sessions. If you sign in, your sign-in details help connect you with the features available to your account.
+            </MudText>
+            <MudText Typo="Typo.body1">
+                If Facebook sign-in is available and you choose it, Facebook handles authentication. SwiftAid does not receive your Facebook password and does not ask for permission to post on your behalf.
+            </MudText>
+        </section>
+
+        <section aria-labelledby="privacy-access-heading">
+            <MudText Typo="Typo.h5" HtmlTag="h2" id="privacy-access-heading">Who can see a report</MudText>
+            <MudText Typo="Typo.body1">
+                Private reports are not public. Only people with permission to work with a report should be able to see it. Public education and session information is separate from private case records. Signing in by itself does not provide access to an organization’s records.
+            </MudText>
+        </section>
+
+        <section aria-labelledby="privacy-offline-heading">
+            <MudText Typo="Typo.h5" HtmlTag="h2" id="privacy-offline-heading">Saved information on a device</MudText>
+            <MudText Typo="Typo.body1">
+                If you save information for offline use, a copy may remain on that device. Signing out or making a request from another device cannot immediately remove a copy that is already offline.
+            </MudText>
+        </section>
+
+        <section aria-labelledby="privacy-accuracy-heading">
+            <MudText Typo="Typo.h5" HtmlTag="h2" id="privacy-accuracy-heading">What a report means</MudText>
+            <MudText Typo="Typo.body1">
+                A report records information someone shared. It is not, by itself, a diagnosis, a confirmed condition, proof that a service has been arranged or a promise that someone will respond.
+            </MudText>
+        </section>
+
+        <section aria-labelledby="privacy-retention-heading">
+            <MudText Typo="Typo.h5" HtmlTag="h2" id="privacy-retention-heading">Retention and questions</MudText>
+            <MudText Typo="Typo.body1">
+                Retention can differ for an unsent draft, a submitted report and a file or recording, and depends on the applicable policy. This page does not state retention periods. Contact the service if you need details about access, correction, deletion or retention. Include only a minimal account or report reference in email; do not send health details by email.
+            </MudText>
+            <MudText Typo="Typo.body1">
+                <MudLink Href="/terms#data-deletion">How to request data deletion</MudLink>
+            </MudText>
+        </section>
+
+        <section aria-labelledby="privacy-contact-heading">
+            <MudText Typo="Typo.h5" HtmlTag="h2" id="privacy-contact-heading">Contact</MudText>
+            @if (PrivacyContactEmail is not null || SupportContactEmail is not null)
+            {
+                <MudStack Spacing="1">
+                    @if (PrivacyContactEmail is not null)
+                    {
+                        <MudText Typo="Typo.body1">
+                            Privacy: <MudLink Href="@MailTo(PrivacyContactEmail)">@PrivacyContactEmail</MudLink>
+                        </MudText>
+                    }
+                    @if (SupportContactEmail is not null)
+                    {
+                        <MudText Typo="Typo.body1">
+                            Support: <MudLink Href="@MailTo(SupportContactEmail)">@SupportContactEmail</MudLink>
+                        </MudText>
+                    }
+                </MudStack>
+            }
+            else
+            {
+                <MudText Typo="Typo.body1">Contact information has not been configured.</MudText>
+            }
+        </section>
+    </MudStack>
+</MudContainer>
+
+@code {
+    private string ServiceName => Configuration["PublicSite:ServiceName"] ?? "SwiftAid";
+
+    private string? PrivacyContactEmail => GetValidEmail(Configuration["PublicSite:PrivacyContactEmail"]);
+
+    private string? SupportContactEmail => GetValidEmail(Configuration["PublicSite:SupportContactEmail"]);
+
+    private string CanonicalUrl => BuildCanonicalUrl("privacy");
+
+    private string BuildCanonicalUrl(string page)
+    {
+        var configuredBaseUrl = Configuration["PublicSite:BaseUrl"];
+        if (!Uri.TryCreate(configuredBaseUrl, UriKind.Absolute, out var baseUri) ||
+            !string.Equals(baseUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+            !string.IsNullOrEmpty(baseUri.UserInfo) ||
+            !string.Equals(baseUri.AbsolutePath, "/", StringComparison.Ordinal) ||
+            !string.IsNullOrEmpty(baseUri.Query) ||
+            !string.IsNullOrEmpty(baseUri.Fragment))
+        {
+            return "/privacy";
+        }
+
+        return new Uri(baseUri, page).AbsoluteUri;
+    }
+
+    private static string? GetValidEmail(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) ||
+            !System.Net.Mail.MailAddress.TryCreate(value, out var address) ||
+            !string.Equals(address.Address, value, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return address.Address;
+    }
+
+    private static string MailTo(string address) => $"mailto:{address}";
+}
