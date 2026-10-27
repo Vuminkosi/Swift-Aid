@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Data;
 using System.Data.Common;
@@ -5,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases.Commands;
+using SwiftAid.Infrastructure.Persistence.Processing;
 
 namespace SwiftAid.Infrastructure.Persistence.Transactions;
 
@@ -48,6 +50,11 @@ public sealed class PostgresCaseCommandUnitOfWork : ICaseCommandUnitOfWork, ICas
                 throw new InvalidOperationException("A case lease or database transaction is already active for this scoped context.");
             }
 
+            RejectPendingChanges();
+            var preexistingTrackedEntities = _dbContext.ChangeTracker.Entries()
+                .Select(entry => entry.Entity)
+                .ToHashSet(ReferenceEqualityComparer.Instance);
+
             var transaction = await _dbContext.Database
                 .BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken)
                 .ConfigureAwait(false);
@@ -66,8 +73,9 @@ public sealed class PostgresCaseCommandUnitOfWork : ICaseCommandUnitOfWork, ICas
                     $"SELECT workspace_id FROM public.workspaces WHERE workspace_id = @workspace_id ORDER BY workspace_id {authorityLockClause}",
                     "workspace_id", initial.WorkspaceId, cancellationToken).ConfigureAwait(false);
 
+                var accessStateLockClause = mode == CaseLeaseMode.Write ? "FOR UPDATE" : "FOR SHARE";
                 var lockedAccessActors = await LockTextRowsAsync(
-                    $"SELECT actor_id FROM public.actor_access_states WHERE actor_id = ANY (@actor_ids) ORDER BY actor_id {authorityLockClause}",
+                    $"SELECT actor_id FROM public.actor_access_states WHERE actor_id = ANY (@actor_ids) ORDER BY actor_id {accessStateLockClause}",
                     "actor_ids", actorIds.ToArray(), cancellationToken).ConfigureAwait(false);
                 RequireAllActorsLocked(actorIds, lockedAccessActors, "actor access state");
 
@@ -115,11 +123,12 @@ public sealed class PostgresCaseCommandUnitOfWork : ICaseCommandUnitOfWork, ICas
                     $"SELECT region_id FROM public.managed_case_regions WHERE case_id = @case_id ORDER BY region_id {authorityLockClause}",
                     "case_id", caseId, cancellationToken).ConfigureAwait(false);
 
-                var lease = new PostgresCaseCommandLease(this, _dbContext, transaction, actor.ActorId, caseId, mode, actorIds);
+                var lease = new PostgresCaseCommandLease(
+                    this, _dbContext, transaction, actor.ActorId, caseId, mode, actorIds, preexistingTrackedEntities);
                 _currentLease = lease;
                 return lease;
             }
-            catch
+            catch (Exception exception)
             {
                 try
                 {
@@ -128,6 +137,11 @@ public sealed class PostgresCaseCommandUnitOfWork : ICaseCommandUnitOfWork, ICas
                 finally
                 {
                     await transaction.DisposeAsync().ConfigureAwait(false);
+                }
+
+                if (PostgresCaseCommandErrorMapper.TryMap(exception, out var mapped))
+                {
+                    throw mapped!;
                 }
 
                 throw;
@@ -144,6 +158,36 @@ public sealed class PostgresCaseCommandUnitOfWork : ICaseCommandUnitOfWork, ICas
         if (ReferenceEquals(_currentLease, lease))
         {
             _currentLease = null;
+        }
+    }
+
+    internal void ClearLeaseOwnedChanges(IReadOnlySet<object> preexistingTrackedEntities)
+    {
+        foreach (var entry in _dbContext.ChangeTracker.Entries()
+                     .Where(entry => !preexistingTrackedEntities.Contains(entry.Entity)))
+        {
+            entry.State = EntityState.Detached;
+        }
+    }
+
+    internal void RejectChangesToPreexistingEntities(IReadOnlySet<object> preexistingTrackedEntities)
+    {
+        foreach (var entry in _dbContext.ChangeTracker.Entries())
+        {
+            if (preexistingTrackedEntities.Contains(entry.Entity) &&
+                entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+            {
+                throw new InvalidOperationException("A case command lease cannot persist changes to pre-existing tracked entities.");
+            }
+        }
+    }
+
+    private void RejectPendingChanges()
+    {
+        if (_dbContext.ChangeTracker.Entries()
+            .Any(entry => entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted))
+        {
+            throw new InvalidOperationException("A case lease cannot begin with pending changes in its scoped context.");
         }
     }
 

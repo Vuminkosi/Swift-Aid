@@ -5,9 +5,25 @@ using SwiftAid.Infrastructure.Configuration;
 namespace SwiftAid.Infrastructure.Persistence.Protection;
 
 /// <summary>Validates key-ring configuration before a protected payload store is enabled.</summary>
-public sealed class ProtectedPayloadOptionsValidator(IHostEnvironment hostEnvironment)
-    : IValidateOptions<ProtectedPayloadOptions>
+public sealed class ProtectedPayloadOptionsValidator : IValidateOptions<ProtectedPayloadOptions>
 {
+    private readonly IHostEnvironment _hostEnvironment;
+    private readonly IKeyRingSecurityValidator _keyRingSecurityValidator;
+
+    public ProtectedPayloadOptionsValidator(IHostEnvironment hostEnvironment)
+        : this(hostEnvironment, new KeyRingSecurityValidator(new FileSystemKeyRingSecurityInspector()))
+    {
+    }
+
+    internal ProtectedPayloadOptionsValidator(
+        IHostEnvironment hostEnvironment,
+        IKeyRingSecurityValidator keyRingSecurityValidator)
+    {
+        _hostEnvironment = hostEnvironment ?? throw new ArgumentNullException(nameof(hostEnvironment));
+        _keyRingSecurityValidator = keyRingSecurityValidator ??
+            throw new ArgumentNullException(nameof(keyRingSecurityValidator));
+    }
+
     public ValidateOptionsResult Validate(string? name, ProtectedPayloadOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -29,6 +45,17 @@ public sealed class ProtectedPayloadOptionsValidator(IHostEnvironment hostEnviro
         {
             failures.Add("DataProtection:KeysPath must identify an existing absolute persistent directory.");
         }
+        else
+        {
+            try
+            {
+                _keyRingSecurityValidator.Validate(options.KeysPath);
+            }
+            catch (KeyRingSecurityException)
+            {
+                failures.Add("DataProtection:KeysPath failed filesystem security validation.");
+            }
+        }
 
         if (options.MaximumPayloadBytes is <= 0 or > int.MaxValue)
         {
@@ -43,7 +70,7 @@ public sealed class ProtectedPayloadOptionsValidator(IHostEnvironment hostEnviro
         }
 
         var isDevelopment = string.Equals(
-            hostEnvironment.EnvironmentName,
+            _hostEnvironment.EnvironmentName,
             Environments.Development,
             StringComparison.OrdinalIgnoreCase);
 

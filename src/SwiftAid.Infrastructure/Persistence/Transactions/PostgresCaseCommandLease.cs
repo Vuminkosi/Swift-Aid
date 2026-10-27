@@ -1,6 +1,8 @@
 using System.Collections.Immutable;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using SwiftAid.Application.Cases.Commands;
+using SwiftAid.Infrastructure.Persistence.Processing;
 
 namespace SwiftAid.Infrastructure.Persistence.Transactions;
 
@@ -8,6 +10,7 @@ internal sealed class PostgresCaseCommandLease : ICaseCommandLease
 {
     private readonly PostgresCaseCommandUnitOfWork _owner;
     private readonly IDbContextTransaction _transaction;
+    private readonly IReadOnlySet<object> _preexistingTrackedEntities;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private int _active = 1;
 
@@ -18,7 +21,8 @@ internal sealed class PostgresCaseCommandLease : ICaseCommandLease
         string primaryActorId,
         Guid caseId,
         CaseLeaseMode mode,
-        ImmutableArray<string> lockedActorIds)
+        ImmutableArray<string> lockedActorIds,
+        IReadOnlySet<object> preexistingTrackedEntities)
     {
         _owner = owner;
         DbContext = dbContext;
@@ -27,6 +31,7 @@ internal sealed class PostgresCaseCommandLease : ICaseCommandLease
         CaseId = caseId;
         Mode = mode;
         LockedActorIds = lockedActorIds;
+        _preexistingTrackedEntities = preexistingTrackedEntities;
     }
 
     public Guid CaseId { get; }
@@ -49,8 +54,35 @@ internal sealed class PostgresCaseCommandLease : ICaseCommandLease
         try
         {
             ObjectDisposedException.ThrowIf(!IsActive, this);
-            await _transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-            await CompleteAsync().ConfigureAwait(false);
+            if (Mode == CaseLeaseMode.Read)
+            {
+                if (DbContext.ChangeTracker.Entries()
+                    .Any(entry => entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted))
+                {
+                    throw new InvalidOperationException("A read case lease cannot commit pending changes.");
+                }
+            }
+            else
+            {
+                _owner.RejectChangesToPreexistingEntities(_preexistingTrackedEntities);
+                try
+                {
+                    await DbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                    await _transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (PostgresCaseCommandErrorMapper.TryMap(exception, out _))
+                {
+                    _ = PostgresCaseCommandErrorMapper.TryMap(exception, out var mapped);
+                    throw mapped!;
+                }
+
+                await CompleteAsync().ConfigureAwait(false);
+            }
+            if (Mode == CaseLeaseMode.Read)
+            {
+                await _transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                await CompleteAsync().ConfigureAwait(false);
+            }
         }
         finally
         {
@@ -96,7 +128,14 @@ internal sealed class PostgresCaseCommandLease : ICaseCommandLease
         }
         finally
         {
-            _owner.Release(this);
+            try
+            {
+                _owner.ClearLeaseOwnedChanges(_preexistingTrackedEntities);
+            }
+            finally
+            {
+                _owner.Release(this);
+            }
         }
     }
 }

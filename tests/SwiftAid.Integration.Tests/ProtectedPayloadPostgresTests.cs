@@ -456,32 +456,40 @@ public sealed class ProtectedPayloadPostgresTests
 
         public static ProtectedPayloadTestKeyRing Create()
         {
-            var rootPath = Path.Combine(Path.GetTempPath(), $"swiftaid-protected-payload-{Guid.NewGuid():N}");
+            var rootPath = PrivateKeyRingTestDirectory.CreateRoot("swiftaid-protected-payload");
             var keysPath = Path.Combine(rootPath, "keys");
             var certificatePath = Path.Combine(rootPath, "key-protection.pfx");
-            Directory.CreateDirectory(keysPath);
-
-            var password = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
-            using var rsa = RSA.Create(2048);
-            var request = new CertificateRequest(
-                "CN=SwiftAid Synthetic Payload Test",
-                rsa,
-                HashAlgorithmName.SHA256,
-                RSASignaturePadding.Pkcs1);
-            using var certificate = request.CreateSelfSigned(
-                DateTimeOffset.UtcNow.AddMinutes(-5),
-                DateTimeOffset.UtcNow.AddDays(1));
-            var pfxBytes = certificate.Export(X509ContentType.Pfx, password);
             try
             {
-                File.WriteAllBytes(certificatePath, pfxBytes);
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(pfxBytes);
-            }
+                keysPath = PrivateKeyRingTestDirectory.CreateKeyDirectory(rootPath);
 
-            return new ProtectedPayloadTestKeyRing(rootPath, keysPath, certificatePath, password);
+                var password = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+                using var rsa = RSA.Create(2048);
+                var request = new CertificateRequest(
+                    "CN=SwiftAid Synthetic Payload Test",
+                    rsa,
+                    HashAlgorithmName.SHA256,
+                    RSASignaturePadding.Pkcs1);
+                using var certificate = request.CreateSelfSigned(
+                    DateTimeOffset.UtcNow.AddMinutes(-5),
+                    DateTimeOffset.UtcNow.AddDays(1));
+                var pfxBytes = certificate.Export(X509ContentType.Pfx, password);
+                try
+                {
+                    File.WriteAllBytes(certificatePath, pfxBytes);
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(pfxBytes);
+                }
+
+                return new ProtectedPayloadTestKeyRing(rootPath, keysPath, certificatePath, password);
+            }
+            catch
+            {
+                PrivateKeyRingTestDirectory.DeleteRoot(rootPath);
+                throw;
+            }
         }
 
         public ProtectedPayloadOptions CreateOptions() => new()

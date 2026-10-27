@@ -306,7 +306,7 @@ public sealed class CaseAuthorityPostgresTests
 
 
     [CaseAuthorityPostgresFact]
-    public async Task Parent_authority_share_locks_allow_parallel_leases_on_distinct_cases()
+    public async Task Read_leases_allow_parallel_access_to_distinct_cases()
     {
         await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync().ConfigureAwait(false);
         var actor = fixture.CreateActor();
@@ -316,14 +316,86 @@ public sealed class CaseAuthorityPostgresTests
         var secondUnitOfWork = new PostgresCaseCommandUnitOfWork(secondContext);
 
         await using var firstLease = await firstUnitOfWork.BeginCaseAsync(
-            actor, fixture.CaseId, [], CaseLeaseMode.Write, CancellationToken.None).ConfigureAwait(false);
+            actor, fixture.CaseId, [], CaseLeaseMode.Read, CancellationToken.None).ConfigureAwait(false);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(4));
         await using var secondLease = await secondUnitOfWork.BeginCaseAsync(
-            actor, fixture.SiblingCaseId, [], CaseLeaseMode.Write, timeout.Token).ConfigureAwait(false);
+            actor, fixture.SiblingCaseId, [], CaseLeaseMode.Read, timeout.Token).ConfigureAwait(false);
 
         Assert.Equal(fixture.CaseId, firstLease.CaseId);
         Assert.Equal(fixture.SiblingCaseId, secondLease.CaseId);
+        Assert.Equal(CaseLeaseMode.Read, secondLease.Mode);
+    }
+
+
+    [CaseAuthorityPostgresFact]
+    public async Task Same_actor_write_leases_serialize_across_distinct_cases()
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync().ConfigureAwait(false);
+        var actor = fixture.CreateActor();
+        await using var firstContext = fixture.CreateDbContext();
+        await using var secondContext = fixture.CreateDbContext();
+        var firstUnitOfWork = new PostgresCaseCommandUnitOfWork(firstContext);
+        var secondUnitOfWork = new PostgresCaseCommandUnitOfWork(secondContext);
+        var firstLease = await firstUnitOfWork.BeginCaseAsync(
+            actor, fixture.CaseId, [], CaseLeaseMode.Write, CancellationToken.None).ConfigureAwait(false);
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var secondLeaseTask = secondUnitOfWork.BeginCaseAsync(
+            actor, fixture.SiblingCaseId, [], CaseLeaseMode.Write, timeout.Token).AsTask();
+        await Task.Delay(TimeSpan.FromMilliseconds(150), CancellationToken.None).ConfigureAwait(false);
+        Assert.False(secondLeaseTask.IsCompleted);
+
+        await firstLease.DisposeAsync().ConfigureAwait(false);
+        await using var secondLease = await secondLeaseTask.ConfigureAwait(false);
+        Assert.Equal(fixture.SiblingCaseId, secondLease.CaseId);
         Assert.Equal(CaseLeaseMode.Write, secondLease.Mode);
+    }
+
+
+    [CaseAuthorityPostgresFact]
+    public async Task Read_lease_rejects_and_detaches_writes_staged_during_the_lease()
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync().ConfigureAwait(false);
+        await using var dbContext = fixture.CreateDbContext();
+        var unitOfWork = new PostgresCaseCommandUnitOfWork(dbContext);
+        await using var lease = await unitOfWork.BeginCaseAsync(
+            fixture.CreateActor(), fixture.CaseId, [], CaseLeaseMode.Read, CancellationToken.None).ConfigureAwait(false);
+
+        var stagedActor = new ActorEntity
+        {
+            ActorId = $"lease-test-{Guid.NewGuid():N}",
+            Status = PersistentActorStatus.Active,
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+            UpdatedAtUtc = DateTimeOffset.UtcNow
+        };
+        dbContext.Actors.Add(stagedActor);
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => lease.CommitAsync(CancellationToken.None).AsTask()).ConfigureAwait(false);
+
+        await lease.DisposeAsync().ConfigureAwait(false);
+        Assert.Equal(EntityState.Detached, dbContext.Entry(stagedActor).State);
+    }
+
+
+    [CaseAuthorityPostgresFact]
+    public async Task Beginning_a_lease_rejects_preexisting_pending_changes()
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync().ConfigureAwait(false);
+        await using var dbContext = fixture.CreateDbContext();
+        var unitOfWork = new PostgresCaseCommandUnitOfWork(dbContext);
+        dbContext.Actors.Add(new ActorEntity
+        {
+            ActorId = $"pending-write-{Guid.NewGuid():N}",
+            Status = PersistentActorStatus.Active,
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+            UpdatedAtUtc = DateTimeOffset.UtcNow
+        });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => unitOfWork.BeginCaseAsync(
+            fixture.CreateActor(), fixture.CaseId, [], CaseLeaseMode.Read, CancellationToken.None).AsTask())
+            .ConfigureAwait(false);
+        Assert.Null(unitOfWork.CurrentLease);
+        Assert.Null(dbContext.Database.CurrentTransaction);
     }
 
 

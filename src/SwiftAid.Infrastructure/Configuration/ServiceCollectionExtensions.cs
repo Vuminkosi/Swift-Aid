@@ -1,17 +1,28 @@
 using FirebaseAdmin;
 using FirebaseAdmin.Messaging;
 using Google.Apis.Auth.OAuth2;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Minio;
 using NATS.Client.Core;
 using NATS.Net;
 using SwiftAid.Application.Abstractions;
+using SwiftAid.Application.Authorization;
+using SwiftAid.Application.Cases.Commands;
+using SwiftAid.Application.Serialization;
+using SwiftAid.Infrastructure.Authorization;
 using SwiftAid.Infrastructure.Caching;
 using SwiftAid.Infrastructure.Messaging;
 using SwiftAid.Infrastructure.Notifications;
+using SwiftAid.Infrastructure.Persistence;
+using SwiftAid.Infrastructure.Persistence.Processing;
+using SwiftAid.Infrastructure.Persistence.Protection;
+using SwiftAid.Infrastructure.Persistence.Transactions;
 using SwiftAid.Infrastructure.Storage;
 
 namespace SwiftAid.Infrastructure.Configuration;
@@ -63,6 +74,8 @@ public static class ServiceCollectionExtensions
         {
             ConnectionString = configuration.GetConnectionString("SwiftAid") ?? string.Empty
         }, optionsValidator);
+
+        RegisterCaseCommandProcessing(services, configuration, hostEnvironment);
 
         if (minioOptions.Enabled)
         {
@@ -133,6 +146,124 @@ public static class ServiceCollectionExtensions
         }
 
         return services;
+    }
+
+    private static void RegisterCaseCommandProcessing(
+        IServiceCollection services,
+        IConfiguration configuration,
+        IHostEnvironment? hostEnvironment)
+    {
+        var section = configuration.GetSection(CaseCommandProcessingServiceOptions.SectionName);
+        var commandOptions = new CaseCommandProcessingServiceOptions
+        {
+            Enabled = ReadBool(section, nameof(CaseCommandProcessingServiceOptions.Enabled)),
+            MaximumTransactionAttempts = ReadInt32(
+                section,
+                nameof(CaseCommandProcessingServiceOptions.MaximumTransactionAttempts),
+                3)
+        };
+        commandOptions.Validate();
+
+        var applicationOptions = new CaseCommandProcessingOptions
+        {
+            MaximumTransactionAttempts = commandOptions.MaximumTransactionAttempts
+        };
+        applicationOptions.Validate();
+
+        var protectionOptions = commandOptions.Enabled
+            ? ReadProtectedPayloadOptions(configuration)
+            : new ProtectedPayloadOptions();
+
+        services.AddSingleton(commandOptions);
+        services.AddSingleton<IOptions<CaseCommandProcessingServiceOptions>>(Options.Create(commandOptions));
+        services.AddSingleton(applicationOptions);
+        services.AddSingleton<IOptions<CaseCommandProcessingOptions>>(Options.Create(applicationOptions));
+        services.AddSingleton(protectionOptions);
+        services.AddSingleton<IOptions<ProtectedPayloadOptions>>(Options.Create(protectionOptions));
+
+        if (!commandOptions.Enabled)
+        {
+            return;
+        }
+
+        var connectionString = configuration.GetConnectionString("SwiftAid");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new OptionsValidationException(
+                nameof(SwiftAidDatabaseOptions),
+                typeof(SwiftAidDatabaseOptions),
+                ["ConnectionStrings:SwiftAid is required when CaseCommandProcessing is enabled."]);
+        }
+
+        if (!protectionOptions.Enabled)
+        {
+            throw new OptionsValidationException(
+                nameof(ProtectedPayloadOptions),
+                typeof(ProtectedPayloadOptions),
+                ["DataProtection:Enabled must be true when CaseCommandProcessing is enabled."]);
+        }
+
+        var effectiveHostEnvironment = hostEnvironment ?? ProductionHostEnvironment.Instance;
+        services.TryAddSingleton<IKeyRingSecurityInspector, FileSystemKeyRingSecurityInspector>();
+        services.TryAddSingleton<IKeyRingSecurityValidator, KeyRingSecurityValidator>();
+        services.AddSingleton<IValidateOptions<ProtectedPayloadOptions>>(provider =>
+            new ProtectedPayloadOptionsValidator(
+                effectiveHostEnvironment,
+                provider.GetRequiredService<IKeyRingSecurityValidator>()));
+
+        services.AddDbContext<SwiftAidDbContext>(options => options.UseNpgsql(connectionString));
+        services.AddScoped<PostgresCaseCommandUnitOfWork>();
+        services.AddScoped<ICaseCommandUnitOfWork>(provider =>
+            provider.GetRequiredService<PostgresCaseCommandUnitOfWork>());
+        services.AddScoped<ICaseCommandLeaseAccessor>(provider =>
+            provider.GetRequiredService<PostgresCaseCommandUnitOfWork>());
+        services.AddScoped<ICurrentAccessGrantStore, PostgresCurrentAccessGrantStore>();
+        services.AddScoped<ICaseAccessDescriptorStore, PostgresCaseAccessDescriptorStore>();
+        services.AddScoped<ICaseAccessPolicy, CaseAccessPolicy>();
+        services.AddSingleton<CaseEventSerializer>();
+        services.AddSingleton<ProtectedPayloadDataProtectionProvider>(provider =>
+            ProtectedPayloadDataProtectionProviderFactory.Create(
+                provider.GetRequiredService<ProtectedPayloadOptions>(),
+                effectiveHostEnvironment,
+                provider.GetRequiredService<IKeyRingSecurityValidator>()));
+        services.AddScoped<IProtectedCaseEventPayloadStore, PostgresProtectedCaseEventPayloadStore>();
+        services.AddScoped<ICaseCommandPersistence, PostgresCaseCommandPersistence>();
+        services.AddScoped<ICaseCommandProcessor, CaseCommandProcessor>();
+        services.AddHostedService<CaseCommandProcessingStartupValidator>();
+    }
+
+    private static ProtectedPayloadOptions ReadProtectedPayloadOptions(IConfiguration configuration)
+    {
+        var section = configuration.GetSection(ProtectedPayloadOptions.SectionName);
+        return new ProtectedPayloadOptions
+        {
+            Enabled = ReadBool(section, nameof(ProtectedPayloadOptions.Enabled)),
+            ApplicationName = ReadString(section, nameof(ProtectedPayloadOptions.ApplicationName)),
+            KeysPath = ReadString(section, nameof(ProtectedPayloadOptions.KeysPath)),
+            CertificatePath = ReadString(section, nameof(ProtectedPayloadOptions.CertificatePath)),
+            CertificatePassword = ReadString(section, nameof(ProtectedPayloadOptions.CertificatePassword)),
+            AllowUnencryptedDevelopmentKeys = ReadBool(
+                section,
+                nameof(ProtectedPayloadOptions.AllowUnencryptedDevelopmentKeys)),
+            MaximumPayloadBytes = ReadLong(section, nameof(ProtectedPayloadOptions.MaximumPayloadBytes))
+        };
+    }
+
+    private static int ReadInt32(IConfigurationSection section, string key, int defaultValue)
+    {
+        var raw = section[key];
+        if (raw is null)
+        {
+            return defaultValue;
+        }
+
+        return int.TryParse(
+            raw,
+            System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out var value)
+            ? value
+            : throw new InvalidOperationException($"{section.Path}:{key} must be an integer.");
     }
 
     private static TOptions RegisterOptions<TOptions>(
@@ -312,5 +443,18 @@ public static class ServiceCollectionExtensions
         {
             throw new OptionsValidationException(typeof(TOptions).Name, typeof(TOptions), result.Failures);
         }
+    }
+
+    private sealed class ProductionHostEnvironment : IHostEnvironment
+    {
+        public static ProductionHostEnvironment Instance { get; } = new();
+
+        public string EnvironmentName { get; set; } = Environments.Production;
+
+        public string ApplicationName { get; set; } = "SwiftAid";
+
+        public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
+
+        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
 }

@@ -13,12 +13,22 @@ public static class ProtectedPayloadDataProtectionProviderFactory
 {
     public static ProtectedPayloadDataProtectionProvider Create(
         ProtectedPayloadOptions options,
-        IHostEnvironment hostEnvironment)
+        IHostEnvironment hostEnvironment) =>
+        Create(
+            options,
+            hostEnvironment,
+            new KeyRingSecurityValidator(new FileSystemKeyRingSecurityInspector()));
+
+    internal static ProtectedPayloadDataProtectionProvider Create(
+        ProtectedPayloadOptions options,
+        IHostEnvironment hostEnvironment,
+        IKeyRingSecurityValidator keyRingSecurityValidator)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(hostEnvironment);
+        ArgumentNullException.ThrowIfNull(keyRingSecurityValidator);
 
-        var validator = new ProtectedPayloadOptionsValidator(hostEnvironment);
+        var validator = new ProtectedPayloadOptionsValidator(hostEnvironment, keyRingSecurityValidator);
         var validation = validator.Validate(Options.DefaultName, options);
         if (validation.Failed)
         {
@@ -71,7 +81,9 @@ public static class ProtectedPayloadDataProtectionProviderFactory
             throw;
         }
         catch (Exception exception) when (
-            exception is CryptographicException or IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+            exception is CryptographicException or IOException or UnauthorizedAccessException or
+                System.Security.SecurityException or System.ComponentModel.Win32Exception or
+                ArgumentException or InvalidOperationException or NotSupportedException)
         {
             certificate?.Dispose();
             throw new ProtectedCaseEventPayloadException();
