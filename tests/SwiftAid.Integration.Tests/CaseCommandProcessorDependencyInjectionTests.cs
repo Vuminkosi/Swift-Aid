@@ -6,6 +6,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases.Commands;
+using SwiftAid.Application.Cases.Registration;
+using SwiftAid.Application.Intake;
 using SwiftAid.Infrastructure.Configuration;
 using SwiftAid.Infrastructure.Persistence;
 using SwiftAid.Infrastructure.Persistence.Protection;
@@ -164,6 +166,62 @@ public sealed class CaseCommandProcessorDependencyInjectionTests
             }
 
             Assert.Throws<ObjectDisposedException>(() => dataProtectionProvider.CreateProtector("disposal-check"));
+        }
+        finally
+        {
+            PrivateKeyRingTestDirectory.DeleteRoot(keyRoot);
+        }
+    }
+
+    [Fact]
+    public async Task EnabledCommandProcessingResolvesPromotionAndRegistrationGraph()
+    {
+        var keyRoot = PrivateKeyRingTestDirectory.CreateRoot("swiftaid-promotion-di");
+        try
+        {
+            var keyDirectory = PrivateKeyRingTestDirectory.CreateKeyDirectory(keyRoot);
+            var services = new ServiceCollection();
+            services.AddLogging();
+            services.AddSwiftAidInfrastructure(Configuration(new Dictionary<string, string?>
+            {
+                ["CaseCommandProcessing:Enabled"] = "true",
+                ["CaseCommandProcessing:MaximumTransactionAttempts"] = "2",
+                ["ConnectionStrings:SwiftAid"] = "Host=127.0.0.1;Port=1;Database=swiftaid_di_test;Username=test",
+                ["DataProtection:Enabled"] = "true",
+                ["DataProtection:ApplicationName"] = "SwiftAid.Integration.Tests",
+                ["DataProtection:KeysPath"] = keyDirectory,
+                ["DataProtection:MaximumPayloadBytes"] = "1024",
+                ["DataProtection:AllowUnencryptedDevelopmentKeys"] = "true"
+            }), new TestHostEnvironment { EnvironmentName = Environments.Development });
+
+            var serviceProvider = services.BuildServiceProvider(new ServiceProviderOptions
+            {
+                ValidateScopes = true,
+                ValidateOnBuild = true
+            });
+
+            try
+            {
+                var hostedService = Assert.Single(serviceProvider.GetServices<IHostedService>());
+                await hostedService.StartAsync(CancellationToken.None);
+
+                await using var scope = serviceProvider.CreateAsyncScope();
+                var scoped = scope.ServiceProvider;
+                Assert.NotNull(scoped.GetRequiredService<IIntakeService>());
+                Assert.NotNull(scoped.GetRequiredService<IIntakePromotionService>());
+                Assert.NotNull(scoped.GetRequiredService<IManagedCaseRegistrationProcessor>());
+                Assert.NotNull(scoped.GetRequiredService<IIntakePromotionSource>());
+                Assert.NotNull(scoped.GetRequiredService<IIntakeSubmissionOpener>());
+                Assert.NotNull(scoped.GetRequiredService<IIntakePromotionWorkspaceResolver>());
+                Assert.NotNull(scoped.GetRequiredService<ICaseRegistrationPersistence>());
+                Assert.Same(
+                    scoped.GetRequiredService<IProtectedCaseEventPayloadStore>(),
+                    scoped.GetRequiredService<PostgresProtectedCaseEventPayloadStore>());
+            }
+            finally
+            {
+                await serviceProvider.DisposeAsync();
+            }
         }
         finally
         {
