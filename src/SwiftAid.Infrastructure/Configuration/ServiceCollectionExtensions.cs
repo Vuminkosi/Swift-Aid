@@ -20,6 +20,7 @@ using SwiftAid.Application.Abstractions;
 using SwiftAid.Application.Attachments;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases.Commands;
+using SwiftAid.Application.Cases.Registration;
 using SwiftAid.Application.Jobs;
 using SwiftAid.Application.Notifications;
 using SwiftAid.Application.Intake;
@@ -33,6 +34,7 @@ using SwiftAid.Infrastructure.Persistence;
 using SwiftAid.Infrastructure.Persistence.Processing;
 using SwiftAid.Infrastructure.Persistence.Notifications;
 using SwiftAid.Infrastructure.Persistence.Protection;
+using SwiftAid.Infrastructure.Persistence.Registration;
 using SwiftAid.Infrastructure.Persistence.Repositories.Intake;
 using SwiftAid.Infrastructure.Persistence.Transactions;
 using SwiftAid.Infrastructure.Storage;
@@ -342,6 +344,11 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<PostgresCaseCommandUnitOfWork>());
         services.AddScoped<ICaseCommandLeaseAccessor>(provider =>
             provider.GetRequiredService<PostgresCaseCommandUnitOfWork>());
+        services.AddScoped<PostgresCaseRegistrationUnitOfWork>();
+        services.AddScoped<ICaseRegistrationUnitOfWork>(provider =>
+            provider.GetRequiredService<PostgresCaseRegistrationUnitOfWork>());
+        services.AddScoped<ICaseRegistrationPersistence, PostgresCaseRegistrationPersistence>();
+        services.AddScoped<ICaseRegistrationAuthorization, PostgresCaseRegistrationAuthorization>();
         services.AddScoped<ICurrentAccessGrantStore, PostgresCurrentAccessGrantStore>();
         services.AddScoped<ICaseAccessDescriptorStore, PostgresCaseAccessDescriptorStore>();
         services.AddScoped<ICaseAccessPolicy, CaseAccessPolicy>();
