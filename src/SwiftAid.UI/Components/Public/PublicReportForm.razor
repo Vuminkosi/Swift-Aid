@@ -217,17 +217,10 @@
                 @( _sending ? "Sending report…" : "Send report" )
             </MudButton>
         </div>
-        @if (!CanSubmit)
+        @if (!CanSubmit && !CanSaveDraft)
         {
         <MudText id="public-submit-unavailable" Typo="Typo.body2" Class="public-report__hint">
-            @if (CanSaveDraft)
-            {
-                <span>Sending is unavailable right now. Your saved draft stays on this device.</span>
-            }
-            else
-            {
-                <span>This form cannot save or send reports right now. Your entries have not been saved or sent.</span>
-            }
+            <span>This form cannot save or send reports right now. Your entries have not been saved or sent.</span>
         </MudText>
         }
         @if (_draftSaved || _saveError is not null || _sendError is not null)
