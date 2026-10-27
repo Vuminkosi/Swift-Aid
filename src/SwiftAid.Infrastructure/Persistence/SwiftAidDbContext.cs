@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using SwiftAid.Domain.Cases;
 
 namespace SwiftAid.Infrastructure.Persistence;
@@ -44,7 +45,9 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
             table.HasCheckConstraint("ck_actors_status", "status IN ('Active', 'Suspended', 'Revoked')");
             table.HasCheckConstraint("ck_actors_id_nonempty", "length(btrim(actor_id)) > 0");
             table.HasCheckConstraint("ck_actors_expiry", "expires_at_utc IS NULL OR expires_at_utc > created_at_utc");
+            table.HasCheckConstraint("ck_actors_lock_token_zero", "lock_token = 0");
         });
+        ConfigureLockToken(actor);
         actor.HasKey(entity => entity.ActorId).HasName("pk_actors");
         actor.Property(entity => entity.ActorId).HasColumnName("actor_id").HasColumnType("text");
         actor.Property(entity => entity.Status).HasColumnName("status").HasConversion<string>().HasColumnType("text");
@@ -56,7 +59,9 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         {
             table.HasCheckConstraint("ck_actor_access_states_epoch", "access_epoch >= 0");
             table.HasCheckConstraint("ck_actor_access_states_version", "version > 0");
+            table.HasCheckConstraint("ck_actor_access_states_lock_token_zero", "lock_token = 0");
         });
+        ConfigureLockToken(accessState);
         accessState.HasKey(entity => entity.ActorId).HasName("pk_actor_access_states");
         accessState.Property(entity => entity.ActorId).HasColumnName("actor_id").HasColumnType("text");
         accessState.Property(entity => entity.AccessEpoch).HasColumnName("access_epoch");
@@ -70,7 +75,9 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         {
             table.HasCheckConstraint("ck_organizations_status", "status IN ('Active', 'Suspended', 'Revoked')");
             table.HasCheckConstraint("ck_organizations_id_nonempty", "length(btrim(organization_id)) > 0");
+            table.HasCheckConstraint("ck_organizations_lock_token_zero", "lock_token = 0");
         });
+        ConfigureLockToken(organizations);
         organizations.HasKey(entity => entity.OrganizationId).HasName("pk_organizations");
         organizations.Property(entity => entity.OrganizationId).HasColumnName("organization_id").HasColumnType("text");
         organizations.Property(entity => entity.Status).HasColumnName("status").HasConversion<string>().HasColumnType("text");
@@ -81,7 +88,9 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         {
             table.HasCheckConstraint("ck_workspaces_status", "status IN ('Active', 'Suspended', 'Revoked')");
             table.HasCheckConstraint("ck_workspaces_ids_nonempty", "length(btrim(workspace_id)) > 0 AND length(btrim(organization_id)) > 0");
+            table.HasCheckConstraint("ck_workspaces_lock_token_zero", "lock_token = 0");
         });
+        ConfigureLockToken(workspaces);
         workspaces.HasKey(entity => entity.WorkspaceId).HasName("pk_workspaces");
         workspaces.HasAlternateKey(entity => new { entity.WorkspaceId, entity.OrganizationId })
             .HasName("ak_workspaces_workspace_organization");
@@ -101,7 +110,9 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
             table.HasCheckConstraint("ck_memberships_validity", "expires_at_utc IS NULL OR expires_at_utc > valid_from_utc");
             table.HasCheckConstraint("ck_memberships_version", "version > 0");
             table.HasCheckConstraint("ck_memberships_ids_nonempty", "length(btrim(actor_id)) > 0 AND length(btrim(organization_id)) > 0 AND length(btrim(granted_by_actor_id)) > 0");
+            table.HasCheckConstraint("ck_organization_memberships_lock_token_zero", "lock_token = 0");
         });
+        ConfigureLockToken(membership);
         membership.HasKey(entity => entity.MembershipId).HasName("pk_organization_memberships");
         membership.HasAlternateKey(entity => new { entity.MembershipId, entity.ActorId, entity.OrganizationId })
             .HasName("ak_memberships_id_actor_organization");
@@ -136,7 +147,9 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
             table.HasCheckConstraint("ck_access_grant_groups_validity", "expires_at_utc > valid_from_utc");
             table.HasCheckConstraint("ck_access_grant_groups_version", "version > 0");
             table.HasCheckConstraint("ck_access_grant_groups_ids_nonempty", "length(btrim(grant_group_id)) > 0 AND length(btrim(actor_id)) > 0 AND length(btrim(organization_id)) > 0 AND length(btrim(workspace_id)) > 0 AND length(btrim(country_code)) > 0 AND length(btrim(sensitivity_code)) > 0 AND length(btrim(granted_by_actor_id)) > 0");
+            table.HasCheckConstraint("ck_access_grant_groups_lock_token_zero", "lock_token = 0");
         });
+        ConfigureLockToken(grant);
         grant.HasKey(entity => entity.GrantGroupId).HasName("pk_access_grant_groups");
         grant.HasIndex(entity => new { entity.ActorId, entity.Status, entity.ExpiresAtUtc })
             .HasDatabaseName("ix_access_grant_groups_actor_status_expiry");
@@ -175,7 +188,11 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
 
         var grantRegion = modelBuilder.Entity<AccessGrantRegionEntity>();
         grantRegion.ToTable("access_grant_group_regions", table =>
-            table.HasCheckConstraint("ck_access_grant_group_regions_id_nonempty", "length(btrim(region_id)) > 0"));
+        {
+            table.HasCheckConstraint("ck_access_grant_group_regions_id_nonempty", "length(btrim(region_id)) > 0");
+            table.HasCheckConstraint("ck_access_grant_group_regions_lock_token_zero", "lock_token = 0");
+        });
+        ConfigureLockToken(grantRegion);
         grantRegion.HasKey(entity => new { entity.GrantGroupId, entity.RegionId }).HasName("pk_access_grant_group_regions");
         grantRegion.HasIndex(entity => new { entity.RegionId, entity.GrantGroupId }).HasDatabaseName("ix_access_grant_group_regions_region");
         grantRegion.Property(entity => entity.GrantGroupId).HasColumnName("grant_group_id").HasColumnType("text");
@@ -185,7 +202,11 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
 
         var grantOperation = modelBuilder.Entity<AccessGrantOperationEntity>();
         grantOperation.ToTable("access_grant_group_operations", table =>
-            table.HasCheckConstraint("ck_grant_group_operations_value", "operation IN ('ReadCase', 'ReadAttachment', 'Synchronize', 'Search', 'Export', 'Count', 'RequestProtectedAction', 'ExecuteProtectedAction', 'ReadLinkedSignalEvidence')"));
+        {
+            table.HasCheckConstraint("ck_grant_group_operations_value", "operation IN ('ReadCase', 'ReadAttachment', 'Synchronize', 'Search', 'Export', 'Count', 'RequestProtectedAction', 'ExecuteProtectedAction', 'ReadLinkedSignalEvidence', 'CorrectReport', 'ReviewProtectedAction', 'AssignCase', 'ResolveCase', 'ReopenCase')");
+            table.HasCheckConstraint("ck_access_grant_group_operations_lock_token_zero", "lock_token = 0");
+        });
+        ConfigureLockToken(grantOperation);
         grantOperation.HasKey(entity => new { entity.GrantGroupId, entity.Operation }).HasName("pk_access_grant_group_operations");
         grantOperation.HasIndex(entity => new { entity.Operation, entity.GrantGroupId }).HasDatabaseName("ix_grant_group_operations_value");
         grantOperation.Property(entity => entity.GrantGroupId).HasColumnName("grant_group_id").HasColumnType("text");
@@ -209,7 +230,9 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
             table.HasCheckConstraint("ck_managed_cases_outcome_state", "outcome_state IN ('Unknown', 'NotRecorded', 'NotApplicable', 'Absent', 'Known')");
             table.HasCheckConstraint("ck_managed_cases_outcome_value", "(outcome_state = 'Known' AND outcome_value IS NOT NULL) OR (outcome_state <> 'Known' AND outcome_value IS NULL)");
             table.HasCheckConstraint("ck_managed_cases_ids_nonempty", "length(btrim(organization_id)) > 0 AND length(btrim(workspace_id)) > 0 AND length(btrim(country_code)) > 0 AND length(btrim(sensitivity_code)) > 0 AND length(btrim(accountable_owner_actor_id)) > 0");
+            table.HasCheckConstraint("ck_managed_cases_lock_token_zero", "lock_token = 0");
         });
+        ConfigureLockToken(managedCase);
         managedCase.HasKey(entity => entity.CaseId).HasName("pk_managed_cases");
         managedCase.HasAlternateKey(entity => new { entity.CaseId, entity.OrganizationId })
             .HasName("ak_managed_cases_id_organization");
@@ -248,7 +271,11 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
 
         var caseRegion = modelBuilder.Entity<ManagedCaseRegionEntity>();
         caseRegion.ToTable("managed_case_regions", table =>
-            table.HasCheckConstraint("ck_managed_case_regions_id_nonempty", "length(btrim(region_id)) > 0"));
+        {
+            table.HasCheckConstraint("ck_managed_case_regions_id_nonempty", "length(btrim(region_id)) > 0");
+            table.HasCheckConstraint("ck_managed_case_regions_lock_token_zero", "lock_token = 0");
+        });
+        ConfigureLockToken(caseRegion);
         caseRegion.HasKey(entity => new { entity.CaseId, entity.RegionId }).HasName("pk_managed_case_regions");
         caseRegion.HasIndex(entity => new { entity.RegionId, entity.CaseId }).HasDatabaseName("ix_managed_case_regions_region");
         caseRegion.Property(entity => entity.CaseId).HasColumnName("case_id");
@@ -262,7 +289,9 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
             table.HasCheckConstraint("ck_case_shares_expiry", "expires_at_utc IS NULL OR expires_at_utc > granted_at_utc");
             table.HasCheckConstraint("ck_case_shares_grantor", "length(btrim(granted_by_actor_id)) > 0");
             table.HasCheckConstraint("ck_case_shares_version", "version > 0");
+            table.HasCheckConstraint("ck_case_shares_lock_token_zero", "lock_token = 0");
         });
+        ConfigureLockToken(share);
         share.HasKey(entity => new { entity.CaseId, entity.ActorId }).HasName("pk_case_shares");
         share.HasIndex(entity => new { entity.ActorId, entity.IsActive, entity.ExpiresAtUtc })
             .HasDatabaseName("ix_case_shares_actor_status_expiry");
@@ -407,5 +436,14 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         audit.Property(entity => entity.AccessEpoch).HasColumnName("access_epoch");
         audit.Property(entity => entity.RecordedAtUtc).HasColumnName("recorded_at_utc").HasColumnType("timestamp with time zone");
         audit.Property(entity => entity.ReasonCode).HasColumnName("reason_code").HasColumnType("text");
+    }
+
+    private static void ConfigureLockToken<TEntity>(EntityTypeBuilder<TEntity> entity)
+        where TEntity : class
+    {
+        entity.Property<short>("LockToken")
+            .HasColumnName("lock_token")
+            .HasColumnType("smallint")
+            .HasDefaultValue((short)0);
     }
 }

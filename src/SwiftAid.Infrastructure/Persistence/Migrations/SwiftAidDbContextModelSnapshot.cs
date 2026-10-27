@@ -55,6 +55,12 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("granted_by_actor_id");
 
+                    b.Property<short>("LockToken")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((short)0)
+                        .HasColumnName("lock_token");
+
                     b.Property<Guid>("MembershipId")
                         .HasColumnType("uuid")
                         .HasColumnName("membership_id");
@@ -118,6 +124,8 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("ck_access_grant_groups_ids_nonempty", "length(btrim(grant_group_id)) > 0 AND length(btrim(actor_id)) > 0 AND length(btrim(organization_id)) > 0 AND length(btrim(workspace_id)) > 0 AND length(btrim(country_code)) > 0 AND length(btrim(sensitivity_code)) > 0 AND length(btrim(granted_by_actor_id)) > 0");
 
+                            t.HasCheckConstraint("ck_access_grant_groups_lock_token_zero", "lock_token = 0");
+
                             t.HasCheckConstraint("ck_access_grant_groups_sector", "sector IN ('HumanHealth', 'AnimalHealth')");
 
                             t.HasCheckConstraint("ck_access_grant_groups_status", "status IN ('Active', 'Suspended', 'Revoked')");
@@ -138,6 +146,12 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("operation");
 
+                    b.Property<short>("LockToken")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((short)0)
+                        .HasColumnName("lock_token");
+
                     b.HasKey("GrantGroupId", "Operation")
                         .HasName("pk_access_grant_group_operations");
 
@@ -146,7 +160,9 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
 
                     b.ToTable("access_grant_group_operations", null, t =>
                         {
-                            t.HasCheckConstraint("ck_grant_group_operations_value", "operation IN ('ReadCase', 'ReadAttachment', 'Synchronize', 'Search', 'Export', 'Count', 'RequestProtectedAction', 'ExecuteProtectedAction', 'ReadLinkedSignalEvidence')");
+                            t.HasCheckConstraint("ck_access_grant_group_operations_lock_token_zero", "lock_token = 0");
+
+                            t.HasCheckConstraint("ck_grant_group_operations_value", "operation IN ('ReadCase', 'ReadAttachment', 'Synchronize', 'Search', 'Export', 'Count', 'RequestProtectedAction', 'ExecuteProtectedAction', 'ReadLinkedSignalEvidence', 'CorrectReport', 'ReviewProtectedAction', 'AssignCase', 'ResolveCase', 'ReopenCase')");
                         });
                 });
 
@@ -160,6 +176,12 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("region_id");
 
+                    b.Property<short>("LockToken")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((short)0)
+                        .HasColumnName("lock_token");
+
                     b.HasKey("GrantGroupId", "RegionId")
                         .HasName("pk_access_grant_group_regions");
 
@@ -169,6 +191,8 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                     b.ToTable("access_grant_group_regions", null, t =>
                         {
                             t.HasCheckConstraint("ck_access_grant_group_regions_id_nonempty", "length(btrim(region_id)) > 0");
+
+                            t.HasCheckConstraint("ck_access_grant_group_regions_lock_token_zero", "lock_token = 0");
                         });
                 });
 
@@ -181,6 +205,12 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                     b.Property<long>("AccessEpoch")
                         .HasColumnType("bigint")
                         .HasColumnName("access_epoch");
+
+                    b.Property<short>("LockToken")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((short)0)
+                        .HasColumnName("lock_token");
 
                     b.Property<DateTimeOffset>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone")
@@ -197,6 +227,8 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                     b.ToTable("actor_access_states", null, t =>
                         {
                             t.HasCheckConstraint("ck_actor_access_states_epoch", "access_epoch >= 0");
+
+                            t.HasCheckConstraint("ck_actor_access_states_lock_token_zero", "lock_token = 0");
 
                             t.HasCheckConstraint("ck_actor_access_states_version", "version > 0");
                         });
@@ -216,6 +248,12 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("expires_at_utc");
 
+                    b.Property<short>("LockToken")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((short)0)
+                        .HasColumnName("lock_token");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("text")
@@ -233,6 +271,8 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_actors_expiry", "expires_at_utc IS NULL OR expires_at_utc > created_at_utc");
 
                             t.HasCheckConstraint("ck_actors_id_nonempty", "length(btrim(actor_id)) > 0");
+
+                            t.HasCheckConstraint("ck_actors_lock_token_zero", "lock_token = 0");
 
                             t.HasCheckConstraint("ck_actors_status", "status IN ('Active', 'Suspended', 'Revoked')");
                         });
@@ -342,6 +382,12 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("is_active");
 
+                    b.Property<short>("LockToken")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((short)0)
+                        .HasColumnName("lock_token");
+
                     b.Property<string>("RevokedByActorId")
                         .HasColumnType("text")
                         .HasColumnName("revoked_by_actor_id");
@@ -366,6 +412,8 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_case_shares_expiry", "expires_at_utc IS NULL OR expires_at_utc > granted_at_utc");
 
                             t.HasCheckConstraint("ck_case_shares_grantor", "length(btrim(granted_by_actor_id)) > 0");
+
+                            t.HasCheckConstraint("ck_case_shares_lock_token_zero", "lock_token = 0");
 
                             t.HasCheckConstraint("ck_case_shares_version", "version > 0");
                         });
@@ -550,6 +598,12 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("laboratory_version");
 
+                    b.Property<short>("LockToken")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((short)0)
+                        .HasColumnName("lock_token");
+
                     b.Property<string>("OrganizationId")
                         .IsRequired()
                         .HasColumnType("text")
@@ -631,6 +685,8 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("ck_managed_cases_laboratory", "laboratory IN ('NotRecorded', 'Requested', 'Collected', 'Pending', 'ResultRecorded')");
 
+                            t.HasCheckConstraint("ck_managed_cases_lock_token_zero", "lock_token = 0");
+
                             t.HasCheckConstraint("ck_managed_cases_outcome_state", "outcome_state IN ('Unknown', 'NotRecorded', 'NotApplicable', 'Absent', 'Known')");
 
                             t.HasCheckConstraint("ck_managed_cases_outcome_value", "(outcome_state = 'Known' AND outcome_value IS NOT NULL) OR (outcome_state <> 'Known' AND outcome_value IS NULL)");
@@ -653,6 +709,12 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("region_id");
 
+                    b.Property<short>("LockToken")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((short)0)
+                        .HasColumnName("lock_token");
+
                     b.HasKey("CaseId", "RegionId")
                         .HasName("pk_managed_case_regions");
 
@@ -662,6 +724,8 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                     b.ToTable("managed_case_regions", null, t =>
                         {
                             t.HasCheckConstraint("ck_managed_case_regions_id_nonempty", "length(btrim(region_id)) > 0");
+
+                            t.HasCheckConstraint("ck_managed_case_regions_lock_token_zero", "lock_token = 0");
                         });
                 });
 
@@ -674,6 +738,12 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at_utc");
+
+                    b.Property<short>("LockToken")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((short)0)
+                        .HasColumnName("lock_token");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -690,6 +760,8 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                     b.ToTable("organizations", null, t =>
                         {
                             t.HasCheckConstraint("ck_organizations_id_nonempty", "length(btrim(organization_id)) > 0");
+
+                            t.HasCheckConstraint("ck_organizations_lock_token_zero", "lock_token = 0");
 
                             t.HasCheckConstraint("ck_organizations_status", "status IN ('Active', 'Suspended', 'Revoked')");
                         });
@@ -719,6 +791,12 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("granted_by_actor_id");
+
+                    b.Property<short>("LockToken")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((short)0)
+                        .HasColumnName("lock_token");
 
                     b.Property<string>("OrganizationId")
                         .IsRequired()
@@ -771,6 +849,8 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_memberships_validity", "expires_at_utc IS NULL OR expires_at_utc > valid_from_utc");
 
                             t.HasCheckConstraint("ck_memberships_version", "version > 0");
+
+                            t.HasCheckConstraint("ck_organization_memberships_lock_token_zero", "lock_token = 0");
                         });
                 });
 
@@ -875,6 +955,12 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("workspace_id");
 
+                    b.Property<short>("LockToken")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((short)0)
+                        .HasColumnName("lock_token");
+
                     b.Property<string>("OrganizationId")
                         .IsRequired()
                         .HasColumnType("text")
@@ -896,6 +982,8 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                     b.ToTable("workspaces", null, t =>
                         {
                             t.HasCheckConstraint("ck_workspaces_ids_nonempty", "length(btrim(workspace_id)) > 0 AND length(btrim(organization_id)) > 0");
+
+                            t.HasCheckConstraint("ck_workspaces_lock_token_zero", "lock_token = 0");
 
                             t.HasCheckConstraint("ck_workspaces_status", "status IN ('Active', 'Suspended', 'Revoked')");
                         });
