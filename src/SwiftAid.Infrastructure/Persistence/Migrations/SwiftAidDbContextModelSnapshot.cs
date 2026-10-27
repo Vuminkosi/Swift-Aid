@@ -1047,6 +1047,414 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeAttachmentEntity", b =>
+                {
+                    b.Property<Guid>("AttachmentId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("attachment_id");
+
+                    b.Property<DateTimeOffset?>("AttachedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("attached_at_utc");
+
+                    b.Property<Guid>("CapabilityId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("capability_id");
+
+                    b.Property<Guid>("ClientSubmissionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("client_submission_id");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("content_type");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<int>("DurationSeconds")
+                        .HasColumnType("integer")
+                        .HasColumnName("duration_seconds");
+
+                    b.Property<DateTimeOffset>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at_utc");
+
+                    b.Property<string>("ObjectKey")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("object_key");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("size_bytes");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("state");
+
+                    b.HasKey("AttachmentId")
+                        .HasName("pk_intake_attachments");
+
+                    b.HasIndex("ObjectKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_intake_attachments_object_key");
+
+                    b.HasIndex("SessionId");
+
+                    b.HasIndex("ExpiresAtUtc", "State")
+                        .HasDatabaseName("ix_intake_attachments_expiry");
+
+                    b.HasIndex("CapabilityId", "SessionId", "ClientSubmissionId", "AttachmentId")
+                        .HasDatabaseName("ix_intake_attachments_binding");
+
+                    b.ToTable("intake_attachments", "swiftaid_intake", t =>
+                        {
+                            t.HasCheckConstraint("ck_intake_attachments_content_type", "length(btrim(content_type)) BETWEEN 1 AND 128");
+
+                            t.HasCheckConstraint("ck_intake_attachments_duration", "duration_seconds BETWEEN 1 AND 600");
+
+                            t.HasCheckConstraint("ck_intake_attachments_keys", "length(btrim(object_key)) BETWEEN 1 AND 512");
+
+                            t.HasCheckConstraint("ck_intake_attachments_size", "size_bytes BETWEEN 1 AND 104857600");
+
+                            t.HasCheckConstraint("ck_intake_attachments_state", "state IN ('Uploaded', 'Attached', 'Rejected', 'Expired')");
+
+                            t.HasCheckConstraint("ck_intake_attachments_validity", "expires_at_utc > created_at_utc");
+                        });
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeCapabilityEntity", b =>
+                {
+                    b.Property<Guid>("CapabilityId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("capability_id");
+
+                    b.Property<byte[]>("CapabilityDigest")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("capability_digest");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<DateTimeOffset>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at_utc");
+
+                    b.Property<DateTimeOffset?>("RevokedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("revoked_at_utc");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.HasKey("CapabilityId")
+                        .HasName("pk_intake_capabilities");
+
+                    b.HasIndex("CapabilityDigest")
+                        .IsUnique()
+                        .HasDatabaseName("ux_intake_capabilities_digest");
+
+                    b.HasIndex("SessionId", "ExpiresAtUtc")
+                        .HasDatabaseName("ix_intake_capabilities_session_expiry");
+
+                    b.ToTable("intake_capabilities", "swiftaid_intake", t =>
+                        {
+                            t.HasCheckConstraint("ck_intake_capabilities_digest", "octet_length(capability_digest) = 32");
+
+                            t.HasCheckConstraint("ck_intake_capabilities_expiry", "expires_at_utc > created_at_utc");
+                        });
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeOutboxEntity", b =>
+                {
+                    b.Property<Guid>("OutboxId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("outbox_id");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempts");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("event_type");
+
+                    b.Property<DateTimeOffset?>("PublishedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("published_at_utc");
+
+                    b.Property<Guid>("ReceiptId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("receipt_id");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("revision");
+
+                    b.HasKey("OutboxId")
+                        .HasName("pk_intake_outbox");
+
+                    b.HasIndex("CreatedAtUtc", "OutboxId")
+                        .HasDatabaseName("ix_intake_outbox_pending")
+                        .HasFilter("published_at_utc IS NULL");
+
+                    b.HasIndex("ReceiptId", "Revision", "EventType")
+                        .IsUnique()
+                        .HasDatabaseName("ux_intake_outbox_occurrence");
+
+                    b.ToTable("intake_outbox", "swiftaid_intake", t =>
+                        {
+                            t.HasCheckConstraint("ck_intake_outbox_attempts", "attempts >= 0");
+
+                            t.HasCheckConstraint("ck_intake_outbox_event_type", "event_type IN ('IntakeReceived')");
+
+                            t.HasCheckConstraint("ck_intake_outbox_revision", "revision > 0");
+                        });
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakePromotionEntity", b =>
+                {
+                    b.Property<Guid>("ReceiptId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("receipt_id");
+
+                    b.Property<string>("AcceptingOfficerActorId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("accepting_officer_actor_id");
+
+                    b.Property<Guid>("CaseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("case_id");
+
+                    b.Property<string>("InitialAssigneeActorId")
+                        .HasColumnType("text")
+                        .HasColumnName("initial_assignee_actor_id");
+
+                    b.Property<DateTimeOffset>("PromotedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("promoted_at_utc");
+
+                    b.Property<long>("SourceRevision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("source_revision");
+
+                    b.HasKey("ReceiptId")
+                        .HasName("pk_intake_promotions");
+
+                    b.HasIndex("CaseId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_intake_promotions_case");
+
+                    b.ToTable("intake_promotions", "swiftaid_intake", t =>
+                        {
+                            t.HasCheckConstraint("ck_intake_promotions_revision", "source_revision > 0");
+                        });
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeReportEntity", b =>
+                {
+                    b.Property<Guid>("ReceiptId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("receipt_id");
+
+                    b.Property<byte[]>("CanonicalPayloadDigest")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("canonical_payload_digest");
+
+                    b.Property<Guid>("ClientSubmissionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("client_submission_id");
+
+                    b.Property<DateTimeOffset?>("DecidedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("decided_at_utc");
+
+                    b.Property<string>("DecisionActorId")
+                        .HasColumnType("text")
+                        .HasColumnName("decision_actor_id");
+
+                    b.Property<string>("IntakeQueueId")
+                        .HasColumnType("text")
+                        .HasColumnName("intake_queue_id");
+
+                    b.Property<byte[]>("ProtectedPayload")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("protected_payload");
+
+                    b.Property<DateTimeOffset>("ReceivedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("received_at_utc");
+
+                    b.Property<string>("ReviewReason")
+                        .HasColumnType("text")
+                        .HasColumnName("review_reason");
+
+                    b.Property<string>("RoutingStatus")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("routing_status");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("bigint")
+                        .HasColumnName("version");
+
+                    b.HasKey("ReceiptId")
+                        .HasName("pk_intake_reports");
+
+                    b.HasIndex("SessionId", "ClientSubmissionId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_intake_reports_session_submission");
+
+                    b.HasIndex("IntakeQueueId", "Status", "ReceivedAtUtc")
+                        .HasDatabaseName("ix_intake_reports_review_queue");
+
+                    b.ToTable("intake_reports", "swiftaid_intake", t =>
+                        {
+                            t.HasCheckConstraint("ck_intake_reports_digest", "octet_length(canonical_payload_digest) = 32");
+
+                            t.HasCheckConstraint("ck_intake_reports_payload", "octet_length(protected_payload) > 0");
+
+                            t.HasCheckConstraint("ck_intake_reports_routing", "routing_status IN ('NeedsRouting', 'RoutedForReview', 'NoServiceCoverage')");
+
+                            t.HasCheckConstraint("ck_intake_reports_status", "status IN ('ReceivedUnverified', 'AwaitingReview', 'AcceptedIntoCase', 'LinkedAsEvidence', 'Declined')");
+
+                            t.HasCheckConstraint("ck_intake_reports_version", "version > 0");
+                        });
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeRouteEntity", b =>
+                {
+                    b.Property<Guid>("RouteId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("route_id");
+
+                    b.Property<string>("AreaId")
+                        .HasColumnType("text")
+                        .HasColumnName("area_id");
+
+                    b.Property<string>("CatalogueVersion")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("catalogue_version");
+
+                    b.Property<string>("CountryCode")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("country_code");
+
+                    b.Property<DateTimeOffset>("EffectiveFromUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("effective_from_utc");
+
+                    b.Property<DateTimeOffset?>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at_utc");
+
+                    b.Property<string>("IntakeQueueId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("intake_queue_id");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("ReceivingOrganizationId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("receiving_organization_id");
+
+                    b.Property<string>("RegionId")
+                        .HasColumnType("text")
+                        .HasColumnName("region_id");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("bigint")
+                        .HasColumnName("version");
+
+                    b.HasKey("RouteId")
+                        .HasName("pk_intake_routes");
+
+                    b.HasIndex("ReceivingOrganizationId")
+                        .HasDatabaseName("ix_intake_routes_organization");
+
+                    b.HasIndex("CountryCode", "CatalogueVersion", "RegionId", "AreaId", "IsActive")
+                        .HasDatabaseName("ix_intake_routes_match");
+
+                    b.ToTable("intake_routes", "swiftaid_intake", t =>
+                        {
+                            t.HasCheckConstraint("ck_intake_routes_country", "length(country_code) = 2 AND country_code = upper(country_code)");
+
+                            t.HasCheckConstraint("ck_intake_routes_ids", "length(btrim(catalogue_version)) > 0 AND length(btrim(receiving_organization_id)) > 0 AND length(btrim(intake_queue_id)) > 0");
+
+                            t.HasCheckConstraint("ck_intake_routes_validity", "expires_at_utc IS NULL OR expires_at_utc > effective_from_utc");
+
+                            t.HasCheckConstraint("ck_intake_routes_version", "version > 0");
+                        });
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeSessionEntity", b =>
+                {
+                    b.Property<Guid>("SessionId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<DateTimeOffset>("LastSeenAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_seen_at_utc");
+
+                    b.Property<byte[]>("ReceiptProofDigest")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("receipt_proof_digest");
+
+                    b.HasKey("SessionId")
+                        .HasName("pk_intake_sessions");
+
+                    b.ToTable("intake_sessions", "swiftaid_intake", t =>
+                        {
+                            t.HasCheckConstraint("ck_intake_sessions_proof_digest", "octet_length(receipt_proof_digest) = 32");
+                        });
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.ManagedCaseEntity", b =>
                 {
                     b.Property<Guid>("CaseId")
@@ -1906,6 +2314,73 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_domain_outbox_event");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeAttachmentEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeCapabilityEntity", null)
+                        .WithMany()
+                        .HasForeignKey("CapabilityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_intake_attachments_capability");
+
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeSessionEntity", null)
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_intake_attachments_session");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeCapabilityEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeSessionEntity", null)
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_intake_capabilities_session");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeOutboxEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeReportEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ReceiptId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_intake_outbox_report");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakePromotionEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeReportEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ReceiptId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_intake_promotions_report");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeReportEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeSessionEntity", null)
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_intake_reports_session");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeRouteEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.OrganizationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ReceivingOrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_intake_routes_organization");
                 });
 
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.ManagedCaseEntity", b =>
