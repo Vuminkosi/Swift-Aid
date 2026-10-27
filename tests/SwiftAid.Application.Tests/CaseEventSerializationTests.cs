@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using SwiftAid.Application.Serialization;
 using SwiftAid.Contracts.Commands;
@@ -62,8 +63,12 @@ public sealed class CaseEventSerializationTests
     {
         var actual = Serializer.SerializeToUtf8Bytes(@event);
         var fixturePath = Path.Combine(FixtureDirectory, fixtureName);
+        var expected = File.ReadAllText(fixturePath).Replace("\r\n", "\n", StringComparison.Ordinal);
+        var actualText = Encoding.UTF8.GetString(actual);
 
-        Assert.Equal(File.ReadAllBytes(fixturePath), actual);
+        Assert.DoesNotContain('\r', actualText);
+        Assert.EndsWith("\n", actualText);
+        Assert.Equal(expected, actualText);
     }
 
     [Theory]

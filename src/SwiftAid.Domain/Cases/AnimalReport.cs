@@ -16,12 +16,42 @@ public enum ReportValidationIssueKind
 }
 
 /// <summary>A factual count tied to its stated population and observation period.</summary>
-public sealed record AnimalCount(
-    ReportedValue<int> Value,
-    ReportProvenance Provenance,
-    string? PopulationReference,
-    ReportedFact<ReportedTime>? ObservationPeriod)
+public sealed record AnimalCount
 {
+    public AnimalCount(
+        ReportedValue<int> Value,
+        ReportProvenance Provenance,
+        string? PopulationReference,
+        ReportedFact<ReportedTime>? ObservationPeriod)
+    {
+        this.Value = Value;
+        this.Provenance = Provenance;
+        this.PopulationReference = PopulationReference;
+        this.ObservationPeriod = ObservationPeriod;
+    }
+
+    public ReportedValue<int> Value { get; init; }
+    public ReportProvenance Provenance { get; init; }
+    public string? PopulationReference { get; init; }
+    private ReportedFact<ReportedTime>? _observationPeriod;
+    public ReportedFact<ReportedTime>? ObservationPeriod
+    {
+        get => _observationPeriod;
+        init => _observationPeriod = value is null ? null : ReportedTimeRules.Normalize(value);
+    }
+
+    public void Deconstruct(
+        out ReportedValue<int> Value,
+        out ReportProvenance Provenance,
+        out string? PopulationReference,
+        out ReportedFact<ReportedTime>? ObservationPeriod)
+    {
+        Value = this.Value;
+        Provenance = this.Provenance;
+        PopulationReference = this.PopulationReference;
+        ObservationPeriod = this.ObservationPeriod;
+    }
+
     public void Validate()
     {
         ArgumentNullException.ThrowIfNull(Provenance);

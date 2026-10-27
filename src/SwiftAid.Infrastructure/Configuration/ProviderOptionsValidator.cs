@@ -11,6 +11,7 @@ public sealed class ProviderOptionsValidator :
     IValidateOptions<MinioOptions>,
     IValidateOptions<RedisOptions>,
     IValidateOptions<NatsOptions>,
+    IValidateOptions<JobPublisherOptions>,
     IValidateOptions<FcmOptions>,
     IValidateOptions<QdrantOptions>,
     IValidateOptions<MetaProviderOptions>,
@@ -117,6 +118,21 @@ public sealed class ProviderOptionsValidator :
         }
 
         return ValidateOptionsResult.Success;
+    }
+
+    public ValidateOptionsResult Validate(string? name, JobPublisherOptions options)
+    {
+        if (!string.Equals(
+                options.StreamName,
+                JobPublisherOptions.ExpectedStreamName,
+                StringComparison.Ordinal))
+        {
+            return Invalid("Nats:Jobs:StreamName must be SWIFTAID_JOBS.");
+        }
+
+        return options.MaximumMessageBytes is >= 1 and <= SwiftAid.Contracts.Jobs.JobEnvelope.MaximumMessageBytes
+            ? ValidateOptionsResult.Success
+            : Invalid($"Nats:Jobs:MaximumMessageBytes must be between 1 and {SwiftAid.Contracts.Jobs.JobEnvelope.MaximumMessageBytes}.");
     }
 
     public ValidateOptionsResult Validate(string? name, FcmOptions options)

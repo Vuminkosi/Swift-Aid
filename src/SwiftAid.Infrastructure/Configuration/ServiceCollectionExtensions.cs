@@ -14,7 +14,9 @@ using NATS.Net;
 using SwiftAid.Application.Abstractions;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases.Commands;
+using SwiftAid.Application.Jobs;
 using SwiftAid.Application.Serialization;
+using SwiftAid.Contracts.Jobs;
 using SwiftAid.Infrastructure.Authorization;
 using SwiftAid.Infrastructure.Caching;
 using SwiftAid.Infrastructure.Messaging;
@@ -57,6 +59,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IValidateOptions<MinioOptions>>(optionsValidator);
         services.AddSingleton<IValidateOptions<RedisOptions>>(optionsValidator);
         services.AddSingleton<IValidateOptions<NatsOptions>>(optionsValidator);
+        services.AddSingleton<IValidateOptions<JobPublisherOptions>>(optionsValidator);
         services.AddSingleton<IValidateOptions<FcmOptions>>(optionsValidator);
         services.AddSingleton<IValidateOptions<QdrantOptions>>(optionsValidator);
         services.AddSingleton<IValidateOptions<MetaProviderOptions>>(optionsValidator);
@@ -66,6 +69,7 @@ public static class ServiceCollectionExtensions
         var minioOptions = RegisterOptions(services, ReadMinioOptions(configuration), optionsValidator);
         var redisOptions = RegisterOptions(services, ReadRedisOptions(configuration), optionsValidator);
         var natsOptions = RegisterOptions(services, ReadNatsOptions(configuration), optionsValidator);
+        _ = RegisterOptions(services, ReadJobPublisherOptions(configuration), optionsValidator);
         var fcmOptions = RegisterOptions(services, ReadFcmOptions(configuration), optionsValidator);
         _ = RegisterOptions(services, ReadQdrantOptions(configuration), optionsValidator);
         _ = RegisterOptions(services, ReadMetaOptions(configuration), optionsValidator);
@@ -122,11 +126,13 @@ public static class ServiceCollectionExtensions
             }));
             services.AddSingleton<IEventPublisher, JetStreamEventPublisher>();
             services.AddSingleton<IInAppNotificationPublisher, JetStreamInAppNotificationPublisher>();
+            services.AddSingleton<IJobPublisher, JetStreamPublisher>();
         }
         else
         {
             services.AddSingleton<IEventPublisher, NotConfiguredEventPublisher>();
             services.AddSingleton<IInAppNotificationPublisher, NotConfiguredInAppNotificationPublisher>();
+            services.AddSingleton<IJobPublisher, NotConfiguredJobPublisher>();
         }
 
         if (fcmOptions.Enabled)
@@ -321,6 +327,22 @@ public static class ServiceCollectionExtensions
         };
     }
 
+    private static JobPublisherOptions ReadJobPublisherOptions(IConfiguration configuration)
+    {
+        var section = configuration.GetSection(JobPublisherOptions.SectionName);
+        return new JobPublisherOptions
+        {
+            StreamName = ReadString(
+                section,
+                nameof(JobPublisherOptions.StreamName),
+                JobPublisherOptions.ExpectedStreamName),
+            MaximumMessageBytes = ReadInt32(
+                section,
+                nameof(JobPublisherOptions.MaximumMessageBytes),
+                JobEnvelope.MaximumMessageBytes)
+        };
+    }
+
     private static FcmOptions ReadFcmOptions(IConfiguration configuration)
     {
         var section = configuration.GetSection(FcmOptions.SectionName);
@@ -431,6 +453,7 @@ public static class ServiceCollectionExtensions
             MinioOptions value => optionsValidator.Validate(Options.DefaultName, value),
             RedisOptions value => optionsValidator.Validate(Options.DefaultName, value),
             NatsOptions value => optionsValidator.Validate(Options.DefaultName, value),
+            JobPublisherOptions value => optionsValidator.Validate(Options.DefaultName, value),
             FcmOptions value => optionsValidator.Validate(Options.DefaultName, value),
             QdrantOptions value => optionsValidator.Validate(Options.DefaultName, value),
             MetaProviderOptions value => optionsValidator.Validate(Options.DefaultName, value),
@@ -456,5 +479,20 @@ public static class ServiceCollectionExtensions
         public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
 
         public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
+    }
+
+    private sealed class NotConfiguredJobPublisher : IJobPublisher
+    {
+        public ValueTask<PublishReceipt> PublishAsync(
+            JobEnvelope envelope,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(envelope);
+            return ValueTask.FromResult(cancellationToken.IsCancellationRequested
+                ? new PublishReceipt(JobPublishStatus.Cancelled)
+                : new PublishReceipt(
+                    JobPublishStatus.Unavailable,
+                    FailureCode: "job-publisher-not-configured"));
+        }
     }
 }
