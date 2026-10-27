@@ -11,6 +11,7 @@ using SwiftAid.Infrastructure.Persistence;
 
 namespace SwiftAid.Integration.Tests;
 
+[Collection(CaseAuthorityPostgresCollection.Name)]
 public sealed class CaseAuthorityLockHelperMigrationTests
 {
     private const string InitialMigration = "20261026220110_P21InitialPersistence";
