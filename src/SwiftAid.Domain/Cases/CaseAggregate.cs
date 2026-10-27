@@ -95,9 +95,13 @@ public sealed class CaseAggregate
         if (command.CommandId == Guid.Empty) throw new ArgumentException("A command identifier is required.", nameof(command.CommandId));
         ValidateRecordedAtUtc(command.RecordedAtUtc);
         RequireCapability(actor, CaseCapability.AcceptReport);
-        RequireCapability(actor, CaseCapability.AssignCase);
         ValidateReport(command.Report);
         RequireText(command.AccountableOwnerId, nameof(command.AccountableOwnerId));
+        if (!StringComparer.Ordinal.Equals(command.AccountableOwnerId, actor.ActorId))
+        {
+            throw new ArgumentException("The reporting actor must be the initial accountable owner.", nameof(command.AccountableOwnerId));
+        }
+
         RequireText(command.WorkspaceId, nameof(command.WorkspaceId));
         return Array.AsReadOnly<CaseEvent>(
         [
@@ -343,6 +347,11 @@ public sealed class CaseAggregate
         {
             case CaseAssigned assignment when AggregateVersion == 1 && assignment.ReportRevision == ReportRevision && assignment.CommandId == _events[0].CommandId && assignment.ActorId == _events[0].ActorId:
                 RequireText(assignment.AccountableOwnerId, nameof(assignment.AccountableOwnerId));
+                if (!StringComparer.Ordinal.Equals(assignment.AccountableOwnerId, _events[0].ActorId))
+                {
+                    throw new InvalidDataException("The initial accountable owner must be the reporting actor.");
+                }
+
                 AccountableOwnerId = assignment.AccountableOwnerId;
                 break;
             case CaseAssigned when AggregateVersion >= 2:

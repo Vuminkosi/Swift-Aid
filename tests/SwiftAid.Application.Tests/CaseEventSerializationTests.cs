@@ -87,8 +87,8 @@ public sealed class CaseEventSerializationTests
     {
         var report = new ReportFacts(CaseKind.Human, Sector.HumanHealth, "reported details", []);
         var initialEvents = CaseAggregate.Create(
-            new AcceptCaseCommand(InitialCommandId, CaseId, report, "worker-1", "workspace-1", OccurredAtUtc, RecordedAtUtc),
-            new ActorCapabilities("officer-1", CaseCapability.AcceptReport | CaseCapability.AssignCase));
+            new AcceptCaseCommand(InitialCommandId, CaseId, report, "officer-1", "workspace-1", OccurredAtUtc, RecordedAtUtc),
+            new ActorCapabilities("officer-1", CaseCapability.AcceptReport));
         var aggregate = CaseAggregate.Replay(initialEvents);
         var requestId = Guid.Parse("30000000-0000-0000-0000-000000000001");
         var requestEvents = aggregate.Decide(

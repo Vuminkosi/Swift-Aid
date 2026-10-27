@@ -9,12 +9,12 @@ public sealed class CaseAggregateTests
     [Fact]
     public void InitialAcceptance_EmitsReportAndAssignmentAndStartsVersionsAtTwoAndOne()
     {
-        var actor = new ActorCapabilities("officer-1", CaseCapability.AcceptReport | CaseCapability.AssignCase);
+        var actor = new ActorCapabilities("officer-1", CaseCapability.AcceptReport);
         var command = new AcceptCaseCommand(
             Guid.NewGuid(),
             Guid.NewGuid(),
             new ReportFacts(CaseKind.Human, Sector.HumanHealth, "reported narrative", []),
-            "worker-1",
+            "officer-1",
             "workspace-1",
             DateTimeOffset.Parse("2026-10-26T08:00:00Z"),
             DateTimeOffset.Parse("2026-10-26T08:01:00Z"));
@@ -41,9 +41,36 @@ public sealed class CaseAggregateTests
         Assert.Equal(ReportedValueState.Unknown, aggregate.Outcome.State);
         Assert.Equal(CaseWorkflow.Reported, aggregate.Workflow);
         Assert.Equal(ClinicalClassification.Unclassified, aggregate.Classification);
-        Assert.Equal("worker-1", aggregate.AccountableOwnerId);
+        Assert.Equal("officer-1", aggregate.AccountableOwnerId);
         Assert.Equal(events[0].EventId, CaseAggregate.Replay(events).Events[0].EventId);
         Assert.NotEqual(events[0].EventId, events[1].EventId);
+    }
+
+    [Fact]
+    public void Create_RequiresAcceptReportAndOnlyAllowsTheReportingActorAsInitialOwner()
+    {
+        var commandId = Guid.NewGuid();
+        var caseId = Guid.NewGuid();
+        var report = new ReportFacts(CaseKind.Human, Sector.HumanHealth, "reported narrative", []);
+        var command = new AcceptCaseCommand(commandId, caseId, report, "officer-1", "workspace-1", null, DateTimeOffset.UtcNow);
+
+        var events = CaseAggregate.Create(command, new ActorCapabilities("officer-1", CaseCapability.AcceptReport));
+        var aggregate = CaseAggregate.Replay(events);
+
+        Assert.Collection(events,
+            item => Assert.IsType<CaseReported>(item),
+            item => Assert.IsType<CaseAssigned>(item));
+        Assert.Equal(2, aggregate.AggregateVersion);
+        Assert.Equal(1, aggregate.ReportRevision);
+        Assert.Equal("officer-1", aggregate.AccountableOwnerId);
+        Assert.Equal("officer-1", Assert.IsType<CaseAssigned>(events[1]).AccountableOwnerId);
+
+        Assert.Throws<UnauthorizedAccessException>(() => CaseAggregate.Create(
+            command,
+            new ActorCapabilities("officer-1", CaseCapability.AssignCase)));
+        Assert.Throws<ArgumentException>(() => CaseAggregate.Create(
+            command with { AccountableOwnerId = "worker-1" },
+            new ActorCapabilities("officer-1", CaseCapability.AcceptReport)));
     }
 
     [Fact]
@@ -53,12 +80,12 @@ public sealed class CaseAggregateTests
             Guid.NewGuid(),
             Guid.NewGuid(),
             new ReportFacts(CaseKind.Human, Sector.HumanHealth, "reported narrative", []),
-            "worker-1",
+            "officer-1",
             "workspace-1",
             null,
             DateTimeOffset.Parse("2026-10-26T08:01:00Z"));
 
-        var events = CaseAggregate.Create(command, new ActorCapabilities("officer-1", CaseCapability.AcceptReport | CaseCapability.AssignCase));
+        var events = CaseAggregate.Create(command, new ActorCapabilities("officer-1", CaseCapability.AcceptReport));
 
         Assert.Null(events[0].OccurredAtUtc);
         Assert.Equal(DateTimeOffset.Parse("2026-10-26T08:01:00Z"), events[0].RecordedAtUtc);
@@ -68,8 +95,8 @@ public sealed class CaseAggregateTests
     public void Replay_IsDeterministic_AndRejectsOutOfOrderEvents()
     {
         var events = CaseAggregate.Create(
-            new AcceptCaseCommand(Guid.NewGuid(), Guid.NewGuid(), new ReportFacts(CaseKind.Animal, Sector.AnimalHealth, "animal concern", []), "vet-1", "workspace-1", null, DateTimeOffset.UtcNow),
-            new ActorCapabilities("officer-1", CaseCapability.AcceptReport | CaseCapability.AssignCase));
+            new AcceptCaseCommand(Guid.NewGuid(), Guid.NewGuid(), new ReportFacts(CaseKind.Animal, Sector.AnimalHealth, "animal concern", []), "officer-1", "workspace-1", null, DateTimeOffset.UtcNow),
+            new ActorCapabilities("officer-1", CaseCapability.AcceptReport));
 
         var first = CaseAggregate.Replay(events);
         var second = CaseAggregate.Replay(events);
@@ -92,6 +119,35 @@ public sealed class CaseAggregateTests
             [],
             null);
         Assert.Throws<InvalidDataException>(() => CaseAggregate.Replay([reportOnly, skippedAssignment]));
+    }
+
+    [Fact]
+    public void Replay_RejectsInitialAssignmentToDifferentActor()
+    {
+        var caseId = Guid.NewGuid();
+        var commandId = Guid.NewGuid();
+        var reportedAt = DateTimeOffset.Parse("2026-10-27T08:00:00Z");
+        var report = new CaseReported(
+            caseId,
+            1,
+            1,
+            commandId,
+            "officer-1",
+            null,
+            reportedAt,
+            new ReportFacts(CaseKind.Human, Sector.HumanHealth, "reported narrative", []),
+            "workspace-1");
+        var assignment = new CaseAssigned(
+            caseId,
+            2,
+            1,
+            commandId,
+            "officer-1",
+            null,
+            reportedAt,
+            "worker-1");
+
+        Assert.Throws<InvalidDataException>(() => CaseAggregate.Replay([report, assignment]));
     }
 
     [Fact]
@@ -159,7 +215,7 @@ public sealed class CaseAggregateTests
 
         Assert.Single(events);
         Assert.IsType<CaseActionRequested>(events[0]);
-        Assert.Equal("worker-1", requested.AccountableOwnerId);
+        Assert.Equal("officer-1", requested.AccountableOwnerId);
         Assert.Equal(CaseWorkflow.Reported, requested.Workflow);
         Assert.Equal(3, requested.AggregateVersion);
     }
@@ -229,7 +285,7 @@ public sealed class CaseAggregateTests
         var requested = CaseAggregate.Replay(aggregate.Events.Concat(request));
         var requestId = Assert.IsType<CaseActionRequested>(request.Single()).RequestId;
 
-        Assert.Equal("worker-1", requested.AccountableOwnerId);
+        Assert.Equal("officer-1", requested.AccountableOwnerId);
 
         var review = requested.Decide(
             new ReviewCaseActionRequestCommand(Guid.NewGuid(), requested.AggregateVersion, requestId, CaseActionReviewOutcome.Approved, null, "authorized transfer", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow),
@@ -243,7 +299,7 @@ public sealed class CaseAggregateTests
 
         var streamingAggregate = CaseAggregate.Replay(aggregate.Events.Concat(request));
         streamingAggregate.Apply(review[0]);
-        Assert.Equal("worker-1", streamingAggregate.AccountableOwnerId);
+        Assert.Equal("officer-1", streamingAggregate.AccountableOwnerId);
         Assert.Equal(requested.AggregateVersion, streamingAggregate.AggregateVersion);
         streamingAggregate.Apply(review[1]);
         Assert.Equal("worker-2", streamingAggregate.AccountableOwnerId);
@@ -286,6 +342,26 @@ public sealed class CaseAggregateTests
             condition.GetProperty("if").GetProperty("properties").GetProperty("outcome").TryGetProperty("enum", out var outcomes) &&
             outcomes.EnumerateArray().Any(value => value.GetString() == "Denied") &&
             condition.GetProperty("then").GetProperty("properties").GetProperty("linkedAcceptedEventId").GetProperty("type").GetString() == "null");
+    }
+
+    [Fact]
+    public void ReassignmentStillRequiresAssignCapabilityAndNonEmptyReviewReason()
+    {
+        var aggregate = AcceptedCase();
+        var requestEvents = aggregate.Decide(
+            new RequestCaseActionCommand(Guid.NewGuid(), aggregate.AggregateVersion, Guid.NewGuid(), CaseAction.Reassign, "request reassignment", [], "worker-2", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow),
+            new ActorCapabilities("officer-1", CaseCapability.RequestProtectedAction));
+        var requested = CaseAggregate.Replay(aggregate.Events.Concat(requestEvents));
+        var requestId = Assert.IsType<CaseActionRequested>(requestEvents.Single()).RequestId;
+
+        Assert.Throws<UnauthorizedAccessException>(() => requested.Decide(
+            new ReviewCaseActionRequestCommand(Guid.NewGuid(), requested.AggregateVersion, requestId, CaseActionReviewOutcome.Approved, null, "approved transfer", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow),
+            new ActorCapabilities("officer-1", CaseCapability.ReviewProtectedAction)));
+        Assert.Throws<ArgumentException>(() => requested.Decide(
+            new ReviewCaseActionRequestCommand(Guid.NewGuid(), requested.AggregateVersion, requestId, CaseActionReviewOutcome.Approved, null, " ", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow),
+            new ActorCapabilities("officer-1", CaseCapability.ReviewProtectedAction | CaseCapability.AssignCase)));
+        Assert.Equal("officer-1", requested.AccountableOwnerId);
+        Assert.Equal(3, requested.AggregateVersion);
     }
 
     [Fact]
@@ -450,8 +526,8 @@ public sealed class CaseAggregateTests
     }
 
     private static CaseAggregate AcceptedCase() => CaseAggregate.Replay(CaseAggregate.Create(
-        new AcceptCaseCommand(Guid.NewGuid(), Guid.NewGuid(), new ReportFacts(CaseKind.Human, Sector.HumanHealth, "reported narrative", []), "worker-1", "workspace-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow),
-        new ActorCapabilities("officer-1", CaseCapability.AcceptReport | CaseCapability.AssignCase)));
+        new AcceptCaseCommand(Guid.NewGuid(), Guid.NewGuid(), new ReportFacts(CaseKind.Human, Sector.HumanHealth, "reported narrative", []), "officer-1", "workspace-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow),
+        new ActorCapabilities("officer-1", CaseCapability.AcceptReport)));
 
     private static CaseAggregate AcceptedResolvedCase()
     {
