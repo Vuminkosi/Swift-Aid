@@ -14,7 +14,7 @@ and the implementation plan in [implementation.md, section 10.1](../implementati
 | Status | Evidence |
 |---|---|
 | **APPROVED CONTRACT** | Notifications are recipient-scoped attention items linked to accepted work. PostgreSQL is authoritative. JetStream carries backend events; Redis is for caching only. FCM is optional and requires consent. External text is generic. Reading or dismissing an item never acknowledges or completes casework. |
-| **IMPLEMENTED AND COMMITTED** | Gateway API/controller and web/mobile UI source, PostgreSQL item/device/outbox mappings, a `CaseAssigned` producer, a JetStream notification publisher, FCM sender, and web/mobile opt-in adapters are committed (backend P6.3 at `ef6f84c`, UI/push surfaces at `e12ed1d`). The current source uses Redis Pub/Sub for the live SSE change hint when Redis is enabled, which conflicts with the approved event-streaming decision. |
+| **IMPLEMENTED AND COMMITTED** | Gateway API/controller and web/mobile UI source, PostgreSQL item/device/outbox mappings, a `CaseAssigned` producer, a JetStream notification publisher, FCM sender, and web/mobile opt-in adapters are committed (backend P6.3 at `ef6f84c`, UI/push surfaces at `e12ed1d`). Gateway DI selects the JetStream change bridge when NATS is enabled and a heartbeat-only polling signal otherwise; no Redis Pub/Sub change path exists, so the NATS-only decision holds in code. |
 | **NOT VERIFIED** | Notification schema migration and PostgreSQL up/down behavior, current end-to-end tests, authenticated browser/mobile journeys, actual NATS stream provisioning and notification consumption, FCM provider delivery, device token refresh/revocation in a running app, and deployment are not verified by this documentation task. No notification migration file is present in the inspected migration directory. |
 | **COMMITTED / RELEASED** | Backend and UI/push sources are committed as cited above; nothing is released or deployed. |
 
@@ -43,11 +43,13 @@ script for exact bounds). A successful provisioning run in a target environment 
 **NOT VERIFIED** here. Do not infer a successful stream setup from a Compose configuration parse
 or NATS ACL entry.
 
-**Current source gap:** when `Redis:Enabled` is true, Gateway DI selects
-`RedisNotificationChangeSignal`, which uses Redis Pub/Sub for SSE change hints. The approved owner
-decision reserves Redis for caches and requires NATS for event streaming. This live-feed transport
-must move to the approved NATS path before this feature can be accepted. Polling exists as the
-disabled-Redis path. The current source gap is not a change to the approved contract.
+**Resolved in code; docs corrected 27 October 2026:** Gateway DI (`Program.cs`) selects
+`JetStreamNotificationChangeBridge` when `Nats:Enabled` is true and the heartbeat-only
+`PollingNotificationChangeSignal` otherwise. No Redis Pub/Sub change-signal path exists in the
+tree; Redis remains cache-only, which matches the approved owner decision. The old
+`RedisNotificationChangeSignal` gap note was stale and is withdrawn. `NotificationChangeSignalContractTests`
+pins only the guard clauses of both signals; DB-backed waiter behavior (change vs heartbeat vs
+deauthorization) and live-stream delivery remain **NOT VERIFIED**.
 
 ## Recipient API and client behavior
 
