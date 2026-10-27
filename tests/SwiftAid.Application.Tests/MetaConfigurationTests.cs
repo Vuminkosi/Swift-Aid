@@ -1,9 +1,40 @@
 using SwiftAid.Intelligence.Meta;
+using SwiftAid.Intelligence.Usage;
 
 namespace SwiftAid.Application.Tests;
 
 public sealed class MetaConfigurationTests
 {
+    [Fact]
+    public async Task InFlightReservationsPreventConcurrentBudgetOvershoot()
+    {
+        const int concurrentRequests = 10;
+        var store = new CoordinatedBudgetStore(concurrentRequests);
+        var budget = new MetaUsageBudget(store, new MetaUsageBudgetPolicy(
+            accountBalanceVerified: true,
+            pricingVerified: true,
+            totalCeilingUsd: 0.10m,
+            purposeCeilingsUsd: new Dictionary<UsagePurpose, decimal>
+            {
+                [UsagePurpose.Reasoning] = 0.10m,
+                [UsagePurpose.Transcription] = 0.10m,
+                [UsagePurpose.Evaluation] = 0.10m
+            },
+            maximumCalls: concurrentRequests,
+            maximumConcurrentCalls: concurrentRequests,
+            maximumInputTokensPerCall: 1_000,
+            maximumAudioSecondsPerCall: 300,
+            reserveCeilingUsd: 0m));
+
+        var decisions = await Task.WhenAll(Enumerable.Range(0, concurrentRequests).Select(_ =>
+            budget.TryReserveAsync(new UsageReservationRequest(
+                Guid.NewGuid(), UsagePurpose.Reasoning, 0.02m, 10, 0,
+                UsageChargeEvidence.VerifiedEstimate), CancellationToken.None).AsTask()));
+
+        Assert.Equal(5, decisions.Count(decision => decision.Allowed));
+        Assert.Equal(0.10m, store.ReservedUsd);
+    }
+
     [Fact]
     public async Task MissingCredentialDisablesProviderCapabilities()
     {
@@ -199,5 +230,49 @@ public sealed class MetaConfigurationTests
                     ? registration
                     : null);
         }
+    }
+
+    private sealed class CoordinatedBudgetStore(int participants) : IUsageBudgetStore
+    {
+        private readonly object _gate = new();
+        private readonly Dictionary<Guid, UsageReservationRequest> _reservations = [];
+        private readonly TaskCompletionSource _allArrived = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _arrivals;
+
+        public bool SupportsAtomicReservations => true;
+        public decimal ReservedUsd { get; private set; }
+
+        public async ValueTask<bool> TryReserveAsync(
+            UsageReservationRequest request,
+            MetaUsageBudgetPolicy policy,
+            CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref _arrivals) == participants)
+                _allArrived.TrySetResult();
+            await _allArrived.Task.WaitAsync(cancellationToken);
+
+            lock (_gate)
+            {
+                var amount = request.EstimatedCostUsd.GetValueOrDefault();
+                if (_reservations.ContainsKey(request.ReservationId) ||
+                    ReservedUsd + amount > policy.TotalCeilingUsd)
+                    return false;
+
+                _reservations.Add(request.ReservationId, request);
+                ReservedUsd += amount;
+                return true;
+            }
+        }
+
+        public ValueTask<bool> RecordActualAsync(
+            Guid reservationId,
+            decimal? actualChargeUsd,
+            UsageChargeEvidence evidence,
+            CancellationToken cancellationToken) => ValueTask.FromResult(false);
+
+        public ValueTask<bool> TransferReserveAsync(
+            AuthorizedReserveTransfer approval,
+            MetaUsageBudgetPolicy policy,
+            CancellationToken cancellationToken) => ValueTask.FromResult(false);
     }
 }
