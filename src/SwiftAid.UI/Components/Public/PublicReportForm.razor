@@ -212,12 +212,12 @@
                     Save draft on this device
                 </MudButton>
             }
-            <MudButton ButtonType="ButtonType.Button" Variant="Variant.Filled" Color="Color.Primary" Disabled="true"
-                       aria-describedby="public-submit-unavailable" StartIcon="@Icons.Material.Filled.Send">
-                Send report
+            <MudButton ButtonType="ButtonType.Button" Variant="Variant.Filled" Color="Color.Primary" Disabled="@(!CanSubmit || _sending)"
+                       aria-describedby="public-submit-unavailable" StartIcon="@Icons.Material.Filled.Send" OnClick="SendReportAsync">
+                @( _sending ? "Sending report…" : "Send report" )
             </MudButton>
         </div>
-        @if (!CanSaveDraft)
+        @if (!CanSubmit)
         {
         <MudText id="public-submit-unavailable" Typo="Typo.body2" Class="public-report__hint">
             @if (CanSaveDraft)
@@ -230,13 +230,19 @@
             }
         </MudText>
         }
-        @if (_draftSaved || _saveError is not null)
+        @if (_draftSaved || _saveError is not null || _sendError is not null)
         {
             <div role="status" aria-live="polite" class="public-report__feedback">
                 @if (_draftSaved)
                 {
                     <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true">
                         Your report draft is saved on this device. It has not been sent.
+                    </MudAlert>
+                }
+                else if (_sendError is not null)
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+                        @_sendError
                     </MudAlert>
                 }
                 else
@@ -269,6 +275,8 @@
     private bool _reviewPassed;
     private bool _draftSaved;
     private string? _saveError;
+    private bool _sending;
+    private string? _sendError;
 
     [Parameter] public IReadOnlyList<PublicCountryOption> Countries { get; set; } = [];
     [Parameter] public string? CountryCatalogueVersion { get; set; }
@@ -280,6 +288,8 @@
     [Parameter] public Guid? CurrentDraftId { get; set; }
     [Parameter] public IntakeSubmission? InitialSubmission { get; set; }
     [Parameter] public EventCallback<PublicReportSaveRequest> OnSaveDraft { get; set; }
+    [Parameter] public bool SubmitAvailable { get; set; }
+    [Parameter] public EventCallback<IntakeSubmission> OnSendReport { get; set; }
 
     private bool HasCountryCatalogue => Countries.Count > 0 && !string.IsNullOrWhiteSpace(CountryCatalogueVersion);
     private bool CanConfirmCountry => HasCountryCatalogue && CountryCatalogueIsCurrent;
@@ -309,6 +319,7 @@
     }
 
     private bool CanSaveDraft => DraftSavingAvailable && OnSaveDraft.HasDelegate;
+    private bool CanSubmit => SubmitAvailable && OnSendReport.HasDelegate;
 
     private void HandleFieldChanged(object? sender, FieldChangedEventArgs args)
     {
@@ -316,6 +327,7 @@
         _reviewPassed = false;
         _draftSaved = false;
         _saveError = null;
+        _sendError = null;
     }
 
     private void HandleLocationUnknownChanged()
@@ -373,6 +385,44 @@
         {
             _draftSaved = false;
             _saveError = "Your report draft could not be saved. Your entries remain on this screen only.";
+        }
+    }
+
+    private async Task SendReportAsync()
+    {
+        if (!CanSubmit || _sending)
+        {
+            return;
+        }
+
+        _sending = true;
+        try
+        {
+            _reviewAttempted = true;
+            _reviewPassed = _editContext.Validate();
+            if (!_reviewPassed)
+            {
+                return;
+            }
+
+            var submission = _draft.ToSubmission(
+                CountryCatalogueVersion,
+                ProcessingPolicyReference,
+                ProcessingPolicyVersion);
+            await OnSendReport.InvokeAsync(submission);
+            _sendError = null;
+        }
+        catch (InvalidOperationException exception)
+        {
+            _sendError = exception.Message;
+        }
+        catch
+        {
+            _sendError = "Your report could not be sent. Your entries remain on this screen.";
+        }
+        finally
+        {
+            _sending = false;
         }
     }
 

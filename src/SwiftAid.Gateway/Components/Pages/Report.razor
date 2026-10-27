@@ -1,8 +1,10 @@
 @page "/report"
 @using SwiftAid.Application.Intake
 @using SwiftAid.Contracts.Intake
+@using SwiftAid.Gateway.Intake
 @using SwiftAid.UI.Components.Public
 @inject IIntakePublicMetadataProvider IntakeMetadataProvider
+@inject WebGuestIntakeService GuestIntake
 
 <PageTitle>Report a concern | SwiftAid</PageTitle>
 
@@ -16,10 +18,25 @@
                       CountryCatalogueIsCurrent="_countryCatalogueIsCurrent"
                       PrivacyNoticeReference="_privacyNoticeReference"
                       ProcessingPolicyReference="_privacyNoticeReference"
-                      ProcessingPolicyVersion="_privacyNoticeVersion" />
+                      ProcessingPolicyVersion="_privacyNoticeVersion"
+                      SubmitAvailable="true"
+                      OnSendReport="SendReportAsync" />
+    @if (_sendError is not null)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-3">
+            @_sendError
+        </MudAlert>
+    }
+    @if (_receipt is not null)
+    {
+        <PublicReportReceipt Receipt="_receipt" />
+    }
 </MudContainer>
 
 @code {
+    private IntakeReceipt? _receipt;
+    private string? _sendError;
+    private bool _sending;
     private IReadOnlyList<PublicCountryOption> _countries = [];
     private string? _countryCatalogueVersion;
     private bool _countryCatalogueIsCurrent;
@@ -51,6 +68,55 @@
             _countryCatalogueIsCurrent = false;
             _privacyNoticeReference = null;
             _privacyNoticeVersion = null;
+        }
+    }
+
+    private async Task SendReportAsync(IntakeSubmission submission)
+    {
+        if (_sending)
+        {
+            return;
+        }
+
+        _sending = true;
+        try
+        {
+            _receipt = await GuestIntake.SubmitAsync(submission);
+            _sendError = null;
+        }
+        catch (IntakeSubmissionException exception) when (exception.Code == IntakeErrorCode.InvalidReport)
+        {
+            _receipt = null;
+            _sendError = "Your report needs review before it can be sent. Check the highlighted entries and try again.";
+        }
+        catch (IntakeSubmissionException exception) when (exception.Code == IntakeErrorCode.PayloadTooLarge)
+        {
+            _receipt = null;
+            _sendError = "Your report is too large to send. Shorten the narrative or remove recordings and try again.";
+        }
+        catch (IntakeSubmissionException exception) when (exception.Code == IntakeErrorCode.RateLimited)
+        {
+            _receipt = null;
+            _sendError = "Too many reports have been sent recently. Wait a little while and try again.";
+        }
+        catch (IntakeSubmissionException exception) when (exception.Code is IntakeErrorCode.SubmissionConflict or IntakeErrorCode.AlreadyPromoted)
+        {
+            _receipt = null;
+            _sendError = "This report has already been received. Your earlier receipt remains the record of it.";
+        }
+        catch (IntakeSubmissionException)
+        {
+            _receipt = null;
+            _sendError = "Your report could not be sent right now. Your entries remain on this screen — try again shortly.";
+        }
+        catch
+        {
+            _receipt = null;
+            _sendError = "Your report could not be sent. Your entries remain on this screen.";
+        }
+        finally
+        {
+            _sending = false;
         }
     }
 }

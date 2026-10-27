@@ -1,5 +1,6 @@
 using SwiftAid.Gateway.Components;
 using SwiftAid.Gateway.Endpoints;
+using SwiftAid.Gateway.Intake;
 using SwiftAid.Gateway.Notifications;
 using SwiftAid.Infrastructure.Configuration;
 using SwiftAid.Infrastructure.Identity;
@@ -34,6 +35,7 @@ builder.Services.AddAuthorization(options =>
     });
 });
 builder.Services.AddSwiftAidInfrastructure(builder.Configuration, builder.Environment);
+builder.Services.AddScoped<WebGuestIntakeService>();
 builder.Services.AddScoped<INotificationApiService, NotificationApiService>();
 builder.Services.AddScoped<INotificationFeedClient, InteractiveServerNotificationFeedClient>();
 builder.Services.AddScoped<INotificationPlatformSettings, GatewayNotificationPlatformSettings>();
