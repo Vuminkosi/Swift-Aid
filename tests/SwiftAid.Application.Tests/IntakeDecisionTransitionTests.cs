@@ -116,21 +116,12 @@ public sealed class IntakeDecisionTransitionTests
     [InlineData(IntakeDecisionKind.Decline)]
     public void StaleExpectedVersion_ConflictsBeforeAnyStateChange(IntakeDecisionKind kind)
     {
-        // AcceptIntoCase throws only after the version check, so a stale version still conflicts.
         var command = new IntakeDecision(Guid.NewGuid(), 1, kind, null);
 
-        if (kind == IntakeDecisionKind.AcceptIntoCase)
-        {
-            var (status, next) = IntakeDecisionTransition.Evaluate(
-                command, IntakeStatus.ReceivedUnverified, 2, IntakeRoutingStatus.RoutedForReview, "queue-zw-harare");
-            Assert.Equal(IntakeDecisionStatus.Conflict, status);
-            Assert.Null(next);
-            return;
-        }
-
-        var (applied, _) = IntakeDecisionTransition.Evaluate(
+        var (status, next) = IntakeDecisionTransition.Evaluate(
             command, IntakeStatus.ReceivedUnverified, 2, IntakeRoutingStatus.RoutedForReview, "queue-zw-harare");
-        Assert.Equal(IntakeDecisionStatus.Conflict, applied);
+        Assert.Equal(IntakeDecisionStatus.Conflict, status);
+        Assert.Null(next);
     }
 
     [Fact]
@@ -158,15 +149,45 @@ public sealed class IntakeDecisionTransitionTests
     }
 
     [Fact]
-    public void AcceptIntoCase_ThrowsPromotionUnavailable()
+    public void AcceptIntoCase_OnRoutedAwaitingReview_AppliesAcceptedIntoCase()
     {
         var command = new IntakeDecision(Guid.NewGuid(), 1, IntakeDecisionKind.AcceptIntoCase, null);
 
-        var exception = Assert.Throws<IntakePromotionUnavailableException>(() =>
-            IntakeDecisionTransition.Evaluate(
-                command, IntakeStatus.AwaitingReview, 1, IntakeRoutingStatus.RoutedForReview, "queue-zw-harare"));
+        var (status, next) = IntakeDecisionTransition.Evaluate(
+            command, IntakeStatus.AwaitingReview, 1, IntakeRoutingStatus.RoutedForReview, "queue-zw-harare");
 
-        Assert.NotEmpty(exception.Message);
+        Assert.Equal(IntakeDecisionStatus.Applied, status);
+        Assert.Equal(IntakeStatus.AcceptedIntoCase, next);
+    }
+
+    [Theory]
+    [InlineData(IntakeStatus.ReceivedUnverified, IntakeRoutingStatus.RoutedForReview, "queue-zw-harare")]
+    [InlineData(IntakeStatus.AwaitingReview, IntakeRoutingStatus.NeedsRouting, null)]
+    [InlineData(IntakeStatus.AwaitingReview, IntakeRoutingStatus.NoServiceCoverage, null)]
+    [InlineData(IntakeStatus.AwaitingReview, IntakeRoutingStatus.RoutedForReview, null)]
+    [InlineData(IntakeStatus.AwaitingReview, IntakeRoutingStatus.RoutedForReview, "")]
+    public void AcceptIntoCase_WithoutRoutedReviewState_IsInvalid(
+        IntakeStatus current, IntakeRoutingStatus routing, string? queueId)
+    {
+        var command = new IntakeDecision(Guid.NewGuid(), 1, IntakeDecisionKind.AcceptIntoCase, null);
+
+        var (status, next) = IntakeDecisionTransition.Evaluate(
+            command, current, 1, routing, queueId);
+
+        Assert.Equal(IntakeDecisionStatus.Invalid, status);
+        Assert.Null(next);
+    }
+
+    [Fact]
+    public void AcceptIntoCase_OnTerminalAccepted_ReappliesForReplay()
+    {
+        var command = new IntakeDecision(Guid.NewGuid(), 2, IntakeDecisionKind.AcceptIntoCase, null);
+
+        var (status, next) = IntakeDecisionTransition.Evaluate(
+            command, IntakeStatus.AcceptedIntoCase, 2, IntakeRoutingStatus.RoutedForReview, "queue-zw-harare");
+
+        Assert.Equal(IntakeDecisionStatus.Applied, status);
+        Assert.Equal(IntakeStatus.AcceptedIntoCase, next);
     }
 
     [Fact]

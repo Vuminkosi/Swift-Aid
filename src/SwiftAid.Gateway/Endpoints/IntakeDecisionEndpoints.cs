@@ -36,6 +36,7 @@ public static class IntakeDecisionEndpoints
             .WithName("RecordIntakeDecision")
             .Accepts<IntakeDecisionApiRequest>("application/json")
             .Produces<IntakeReceipt>(StatusCodes.Status200OK)
+            .Produces<IntakePromotionApiResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
@@ -92,11 +93,27 @@ public static class IntakeDecisionEndpoints
 
     /// <summary>
     /// Maps service outcomes to HTTP. Missing and unauthorized receipts share one generic 404 so
-    /// the response never reveals whether a receipt exists or who may review it.
+    /// the response never reveals whether a receipt exists or who may review it. A promotion
+    /// that created a case returns a staff-scoped response carrying the new case identifier.
     /// </summary>
     public static IResult MapResult(IntakeDecisionResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
+
+        if (result.Status == IntakeDecisionStatus.Applied && result.Receipt is not null &&
+            result.PromotedCaseId is { } promotedCaseId && promotedCaseId != Guid.Empty)
+        {
+            return Results.Json(
+                new IntakePromotionApiResponse(
+                    result.Receipt.ReceiptId,
+                    result.Receipt.ClientSubmissionId,
+                    result.Receipt.Status,
+                    result.Receipt.RoutingStatus,
+                    result.Receipt.ReceivedAtUtc,
+                    promotedCaseId),
+                options: JsonOptions,
+                statusCode: StatusCodes.Status200OK);
+        }
 
         return result.Status switch
         {
@@ -272,3 +289,12 @@ public sealed record IntakeDecisionApiRequest(
     string? Decision,
     string? ReviewReason,
     Guid? TargetCaseId = null);
+
+/// <summary>Staff-scoped promotion receipt; carries the newly registered case identifier.</summary>
+public sealed record IntakePromotionApiResponse(
+    Guid ReceiptId,
+    Guid ClientSubmissionId,
+    IntakeStatus Status,
+    IntakeRoutingStatus RoutingStatus,
+    DateTimeOffset ReceivedAtUtc,
+    Guid CaseId);

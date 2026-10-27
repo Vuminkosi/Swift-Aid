@@ -84,6 +84,7 @@ public sealed class IntakeService : IIntakeService
     private static readonly JsonSerializerOptions CanonicalJsonOptions = new(JsonSerializerDefaults.Web);
     private readonly IIntakeSubmissionStore _submissions;
     private readonly IIntakeDecisionStore _decisions;
+    private readonly IIntakePromotionService _promotion;
     private readonly IIntakeAttachmentAuthority _attachments;
     private readonly ICoverageRouter _coverageRouter;
     private readonly IIntakeSubmissionValidator _validator;
@@ -93,6 +94,7 @@ public sealed class IntakeService : IIntakeService
     public IntakeService(
         IIntakeSubmissionStore submissions,
         IIntakeDecisionStore decisions,
+        IIntakePromotionService promotion,
         IIntakeAttachmentAuthority attachments,
         ICoverageRouter coverageRouter,
         IIntakeSubmissionValidator validator,
@@ -101,6 +103,7 @@ public sealed class IntakeService : IIntakeService
     {
         _submissions = submissions ?? throw new ArgumentNullException(nameof(submissions));
         _decisions = decisions ?? throw new ArgumentNullException(nameof(decisions));
+        _promotion = promotion ?? throw new ArgumentNullException(nameof(promotion));
         _attachments = attachments ?? throw new ArgumentNullException(nameof(attachments));
         _coverageRouter = coverageRouter ?? throw new ArgumentNullException(nameof(coverageRouter));
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
@@ -199,6 +202,13 @@ public sealed class IntakeService : IIntakeService
             !Enum.IsDefined(command.Decision) || command.ReviewReason is { Length: > 1000 })
         {
             return Task.FromResult(new IntakeDecisionResult(IntakeDecisionStatus.Invalid, null));
+        }
+
+        // Promotion executes through the promotion service (registration + promotion link),
+        // never through the generic decision path.
+        if (command.Decision == IntakeDecisionKind.AcceptIntoCase)
+        {
+            return _promotion.PromoteAsync(command, actor, ct);
         }
 
         return _decisions.DecideAsync(command, actor, _timeProvider.GetUtcNow(), ct);

@@ -73,6 +73,7 @@ app.MapRazorComponents<App>()
 app.MapControllers();
 app.MapPublicIntakeEndpoints();
 app.MapIntakeDecisionEndpoints();
+app.MapManagedCaseRegistrationEndpoints();
 
 app.MapSwiftAidIdentityEndpoints(
     app.Services.GetRequiredService<FederationOptions>(),

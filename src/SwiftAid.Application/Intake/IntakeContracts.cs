@@ -45,7 +45,10 @@ public enum IntakeDecisionStatus
     Invalid
 }
 
-public sealed record IntakeDecisionResult(IntakeDecisionStatus Status, IntakeReceipt? Receipt);
+public sealed record IntakeDecisionResult(
+    IntakeDecisionStatus Status,
+    IntakeReceipt? Receipt,
+    Guid? PromotedCaseId = null);
 
 public sealed record IntakeCapability(
     Guid CapabilityId,
@@ -118,6 +121,83 @@ public interface IIntakeDecisionStore
         IntakeDecision decision,
         ActorContext actor,
         DateTimeOffset nowUtc,
+        CancellationToken ct);
+
+    /// <summary>
+    /// Atomically records the unique promotion link and transitions the receipt to
+    /// <c>AcceptedIntoCase</c> under the receipt lock. Returns <c>Conflict</c> when the
+    /// receipt advanced past the expected version or left the reviewable state, and
+    /// <c>NotFoundOrNotAuthorized</c> when it no longer exists.
+    /// </summary>
+    Task<IntakeDecisionResult> ApplyPromotionAsync(
+        IntakePromotionApplication application,
+        DateTimeOffset nowUtc,
+        CancellationToken ct);
+}
+
+/// <summary>Reviewer promotion of one intake receipt into a newly registered managed case.</summary>
+public sealed record IntakePromotionApplication(
+    Guid ReceiptId,
+    long ExpectedVersion,
+    Guid CaseId,
+    string AcceptingOfficerActorId,
+    long SourceRevision,
+    string InitialAssigneeActorId,
+    string? ReviewReason);
+
+/// <summary>Read-only promotion source: the sealed report, its routing, and its receiving organization.</summary>
+/// <remarks>
+/// The occurrence country and sector come from the mapped registration report, not from
+/// this record: registration authorizes against the sealed report's own claims.
+/// </remarks>
+public sealed record IntakePromotionSource(
+    Guid ReceiptId,
+    Guid ClientSubmissionId,
+    IntakeStatus Status,
+    long Version,
+    IntakeRoutingStatus RoutingStatus,
+    string? IntakeQueueId,
+    string ReceivingOrganizationId,
+    byte[] ProtectedPayload,
+    DateTimeOffset ReceivedAtUtc);
+
+/// <summary>Reads sealed promotion sources and existing promotion links without locking.</summary>
+public interface IIntakePromotionSource
+{
+    Task<IntakePromotionSource?> ReadSourceAsync(Guid receiptId, CancellationToken ct);
+
+    Task<Guid?> FindPromotedCaseIdAsync(Guid receiptId, CancellationToken ct);
+}
+
+/// <summary>Opens a sealed intake submission for staff promotion.</summary>
+public interface IIntakeSubmissionOpener
+{
+    /// <exception cref="IntakePromotionUnavailableException">
+    /// Thrown when the sealed payload cannot be opened; promotion cannot proceed.
+    /// </exception>
+    Task<IntakeSubmission> OpenAsync(byte[] protectedPayload, CancellationToken ct);
+}
+
+/// <summary>Resolves the officer's eligible registration workspaces for a promotion scope.</summary>
+public interface IIntakePromotionWorkspaceResolver
+{
+    Task<IReadOnlyList<string>> FindEligibleWorkspacesAsync(
+        ActorContext actor,
+        string organizationId,
+        string countryCode,
+        Sector sector,
+        CancellationToken ct);
+}
+
+/// <summary>Executes reviewer promotion of an intake receipt into a managed case.</summary>
+public interface IIntakePromotionService
+{
+    /// <exception cref="IntakePromotionUnavailableException">
+    /// Thrown when promotion cannot complete for infrastructure reasons; safe to retry.
+    /// </exception>
+    Task<IntakeDecisionResult> PromoteAsync(
+        IntakeDecision command,
+        ActorContext actor,
         CancellationToken ct);
 }
 

@@ -11,9 +11,10 @@ namespace SwiftAid.Application.Intake;
 /// Layering: the store returns <c>NotFoundOrNotAuthorized</c> when the receipt does not
 /// exist. Actor authorization (catchment reviewer) is enforced by the staff endpoint that
 /// calls <c>IIntakeService.DecideAsync</c>, not by this validator. <c>AcceptIntoCase</c>
-/// throws <see cref="IntakePromotionUnavailableException"/> because the unique promotion
-/// link must be atomic with the first managed-case events (spec §6), and the managed-case
-/// registration execution backend has no production implementation yet.
+/// applies only to a routed report awaiting review with no reviewer-named target case:
+/// the promotion service converts the sealed intake submission into a managed-case
+/// registration and records the unique promotion link. It never advances an unrouted,
+/// already-terminal, or version-stale report.
 /// </remarks>
 public static class IntakeDecisionTransition
 {
@@ -23,9 +24,6 @@ public static class IntakeDecisionTransition
     /// version. Never returns a new status for <c>Conflict</c>, <c>Invalid</c>, or
     /// <c>NotFoundOrNotAuthorized</c> callers.
     /// </summary>
-    /// <exception cref="IntakePromotionUnavailableException">
-    /// Thrown for <c>AcceptIntoCase</c>; promotion execution is unavailable.
-    /// </exception>
     public static (IntakeDecisionStatus Status, IntakeStatus? NewStatus) Evaluate(
         IntakeDecision command,
         IntakeStatus currentStatus,
@@ -81,7 +79,20 @@ public static class IntakeDecisionTransition
 
                 return (IntakeDecisionStatus.Applied, IntakeStatus.LinkedAsEvidence);
             case IntakeDecisionKind.AcceptIntoCase:
-                throw new IntakePromotionUnavailableException();
+                // Promotion creates the managed case; the reviewer never names the target.
+                if (command.TargetCaseId is not null)
+                {
+                    return (IntakeDecisionStatus.Invalid, null);
+                }
+
+                if (currentStatus != IntakeStatus.AwaitingReview ||
+                    routingStatus != IntakeRoutingStatus.RoutedForReview ||
+                    string.IsNullOrWhiteSpace(intakeQueueId))
+                {
+                    return (IntakeDecisionStatus.Invalid, null);
+                }
+
+                return (IntakeDecisionStatus.Applied, IntakeStatus.AcceptedIntoCase);
             default:
                 return (IntakeDecisionStatus.Invalid, null);
         }

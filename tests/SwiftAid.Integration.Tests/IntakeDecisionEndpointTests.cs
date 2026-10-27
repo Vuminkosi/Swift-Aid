@@ -198,6 +198,39 @@ public sealed class IntakeDecisionEndpointTests
     }
 
     [Fact]
+    public void MapResult_PromotionApplied_ReturnsStaffCaseProjection()
+    {
+        var receipt = new IntakeReceipt(Guid.NewGuid(), Guid.NewGuid(), IntakeStatus.AcceptedIntoCase, IntakeRoutingStatus.RoutedForReview, DateTimeOffset.UtcNow);
+        var caseId = Guid.NewGuid();
+
+        var response = IntakeDecisionEndpoints.MapResult(new IntakeDecisionResult(IntakeDecisionStatus.Applied, receipt, caseId));
+
+        var json = Assert.IsType<Microsoft.AspNetCore.Http.HttpResults.JsonHttpResult<IntakePromotionApiResponse>>(response);
+        Assert.Equal(200, json.StatusCode);
+        Assert.Equal(caseId, json.Value!.CaseId);
+        Assert.Equal(receipt.ReceiptId, json.Value.ReceiptId);
+        Assert.Equal(IntakeStatus.AcceptedIntoCase, json.Value.Status);
+    }
+
+    [Fact]
+    public async Task PromotionApplied_ReturnsCaseProjection()
+    {
+        var caseId = Guid.NewGuid();
+        await using var host = await TestDecisionHost.StartAsync(
+            serviceStatus: IntakeDecisionStatus.Applied, promotedCaseId: caseId);
+        using var request = DecisionRequest(Guid.NewGuid(), "AcceptIntoCase", 1, "Confirmed case.");
+
+        using var response = await host.SendAuthenticatedAsync(request, await host.GetAntiforgeryAsync());
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var projection = JsonSerializer.Deserialize<IntakePromotionApiResponse>(body, JsonOptions);
+        Assert.NotNull(projection);
+        Assert.Equal(caseId, projection.CaseId);
+        Assert.Equal(IntakeStatus.AwaitingReview, projection.Status);
+    }
+
+    [Fact]
     public void MapRequest_RejectsMalformedInput()
     {
         var receiptId = Guid.NewGuid();
@@ -323,7 +356,8 @@ internal sealed class TestDecisionHost : IAsyncDisposable
     public static async Task<TestDecisionHost> StartAsync(
         bool authorized = true,
         IntakeDecisionStatus serviceStatus = IntakeDecisionStatus.Applied,
-        bool throwPromotionUnavailable = false)
+        bool throwPromotionUnavailable = false,
+        Guid? promotedCaseId = null)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
@@ -343,7 +377,7 @@ internal sealed class TestDecisionHost : IAsyncDisposable
                 OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme, _ => { });
         builder.Services.AddAuthorization();
 
-        var service = new TestDecisionService(serviceStatus, throwPromotionUnavailable);
+        var service = new TestDecisionService(serviceStatus, throwPromotionUnavailable, promotedCaseId);
         var authorizer = new TestDecisionAuthorizer(authorized);
         builder.Services.AddSingleton<IIntakeService>(service);
         builder.Services.AddSingleton<IIntakeReviewAuthorizer>(authorizer);
@@ -402,7 +436,8 @@ internal sealed class TestDecisionHost : IAsyncDisposable
 
 internal sealed class TestDecisionService(
     IntakeDecisionStatus status = IntakeDecisionStatus.Applied,
-    bool throwPromotionUnavailable = false) : IIntakeService
+    bool throwPromotionUnavailable = false,
+    Guid? promotedCaseId = null) : IIntakeService
 {
     public static readonly Guid FixedReceiptId = Guid.Parse("d2c8a3b4-1111-4d22-9aa9-123456789abc");
 
@@ -428,7 +463,7 @@ internal sealed class TestDecisionService(
         var receipt = status == IntakeDecisionStatus.Applied
             ? new IntakeReceipt(FixedReceiptId, Guid.NewGuid(), IntakeStatus.AwaitingReview, IntakeRoutingStatus.RoutedForReview, DateTimeOffset.UtcNow)
             : null;
-        return Task.FromResult(new IntakeDecisionResult(status, receipt));
+        return Task.FromResult(new IntakeDecisionResult(status, receipt, promotedCaseId));
     }
 }
 

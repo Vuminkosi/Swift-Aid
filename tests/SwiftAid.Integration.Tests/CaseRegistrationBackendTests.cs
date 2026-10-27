@@ -486,7 +486,7 @@ public sealed class CaseRegistrationBackendTests
         return new RegisterManagedCaseRequest(Guid.NewGuid(), workspaceId, new CaseReportEventData.HumanV2(report, confirmations));
     }
 
-    private static async Task SeedRegistrationIdentitiesAsync(SwiftAidDbContext db)
+    internal static async Task SeedRegistrationIdentitiesAsync(SwiftAidDbContext db)
     {
         var now = DateTimeOffset.UtcNow;
         if (!await db.Actors.AsNoTracking().AnyAsync(item => item.ActorId == "officer-1"))
@@ -528,7 +528,7 @@ public sealed class CaseRegistrationBackendTests
         db.ChangeTracker.Clear();
     }
 
-    private static async Task SeedRegistrationGrantAsync(SwiftAidDbContext db, string grantCountry = "ZW")
+    internal static async Task SeedRegistrationGrantAsync(SwiftAidDbContext db, string grantCountry = "ZW")
     {
         await SeedRegistrationIdentitiesAsync(db);
         var now = DateTimeOffset.UtcNow;

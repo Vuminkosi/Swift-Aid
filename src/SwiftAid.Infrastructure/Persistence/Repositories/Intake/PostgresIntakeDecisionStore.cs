@@ -17,12 +17,12 @@ namespace SwiftAid.Infrastructure.Persistence.Repositories.Intake;
 /// <c>Applied</c> with the current receipt without rewriting state.
 /// </summary>
 /// <remarks>
-/// <c>AcceptIntoCase</c> is evaluated by <see cref="IntakeDecisionTransition"/> and throws
-/// <see cref="IntakePromotionUnavailableException"/>: the unique promotion link must be
-/// atomic with the first managed-case events (spec §6), and the managed-case registration
-/// execution backend has no production implementation yet. Actor authorization (catchment
-/// reviewer) is enforced by the staff endpoint; the store records the deciding actor and
-/// enforces data-integrity rules only.
+/// <c>AcceptIntoCase</c> never flows through <see cref="DecideAsync"/>: promotion executes
+/// through <c>IIntakePromotionService</c> (registration, then <see cref="ApplyPromotionAsync"/>),
+/// and a direct <c>AcceptIntoCase</c> decision here throws
+/// <see cref="IntakePromotionUnavailableException"/> to defend that invariant. Actor
+/// authorization (catchment reviewer) is enforced by the staff endpoint; the store records
+/// the deciding actor and enforces data-integrity rules only.
 /// </remarks>
 public sealed class PostgresIntakeDecisionStore : IIntakeDecisionStore
 {
@@ -46,6 +46,13 @@ public sealed class PostgresIntakeDecisionStore : IIntakeDecisionStore
             string.IsNullOrWhiteSpace(actor.ActorId))
         {
             return new IntakeDecisionResult(IntakeDecisionStatus.Invalid, null);
+        }
+
+        if (decision.Decision == IntakeDecisionKind.AcceptIntoCase)
+        {
+            // Promotion must run through the promotion service so the managed case is
+            // registered before the link is recorded; the generic path cannot create it.
+            throw new IntakePromotionUnavailableException();
         }
 
         await using var transaction = await _dbContext.Database
@@ -105,6 +112,85 @@ public sealed class PostgresIntakeDecisionStore : IIntakeDecisionStore
         await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
         await transaction.CommitAsync(ct).ConfigureAwait(false);
         return new IntakeDecisionResult(IntakeDecisionStatus.Applied, ToReceipt(report));
+    }
+
+    /// <summary>
+    /// Records the unique promotion link and transitions the receipt to
+    /// <c>AcceptedIntoCase</c> atomically under the receipt lock. The caller registers the
+    /// managed case first; this step only links it. A receipt that advanced past the
+    /// expected version or left the reviewable state conflicts so the caller can converge
+    /// on the winner's case.
+    /// </summary>
+    public async Task<IntakeDecisionResult> ApplyPromotionAsync(
+        IntakePromotionApplication application,
+        DateTimeOffset nowUtc,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(application);
+        if (application.ReceiptId == Guid.Empty || application.ExpectedVersion < 1 ||
+            application.CaseId == Guid.Empty || application.SourceRevision < 1 ||
+            string.IsNullOrWhiteSpace(application.AcceptingOfficerActorId) ||
+            string.IsNullOrWhiteSpace(application.InitialAssigneeActorId) ||
+            application.ReviewReason is { Length: > 1000 })
+        {
+            return new IntakeDecisionResult(IntakeDecisionStatus.Invalid, null);
+        }
+
+        await using var transaction = await _dbContext.Database
+            .BeginTransactionAsync(IsolationLevel.ReadCommitted, ct).ConfigureAwait(false);
+        await AcquireReceiptLockAsync(application.ReceiptId, transaction.GetDbTransaction(), ct)
+            .ConfigureAwait(false);
+
+        var report = await _dbContext.Set<IntakeReportEntity>()
+            .SingleOrDefaultAsync(item => item.ReceiptId == application.ReceiptId, ct).ConfigureAwait(false);
+        if (report is null)
+        {
+            return new IntakeDecisionResult(IntakeDecisionStatus.NotFoundOrNotAuthorized, null);
+        }
+
+        // Re-validate the guarded transition under the lock: only a routed report awaiting
+        // review at the expected version may be promoted here.
+        var (status, next) = IntakeDecisionTransition.Evaluate(
+            new IntakeDecision(
+                application.ReceiptId, application.ExpectedVersion, IntakeDecisionKind.AcceptIntoCase,
+                application.ReviewReason),
+            report.Status, report.Version, report.RoutingStatus, report.IntakeQueueId);
+        if (status != IntakeDecisionStatus.Applied || next != IntakeStatus.AcceptedIntoCase)
+        {
+            // Any non-applicable state under the lock is a lost race: normalize to Conflict
+            // so the caller converges on the winner instead of reporting a stale Invalid.
+            return new IntakeDecisionResult(IntakeDecisionStatus.Conflict, null);
+        }
+
+        var existing = await _dbContext.Set<IntakePromotionEntity>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item => item.ReceiptId == application.ReceiptId, ct).ConfigureAwait(false);
+        if (existing is not null)
+        {
+            return existing.CaseId == application.CaseId
+                ? new IntakeDecisionResult(IntakeDecisionStatus.Applied, ToReceipt(report), existing.CaseId)
+                : new IntakeDecisionResult(IntakeDecisionStatus.Conflict, null);
+        }
+
+        _dbContext.Add(new IntakePromotionEntity
+        {
+            ReceiptId = application.ReceiptId,
+            CaseId = application.CaseId,
+            AcceptingOfficerActorId = application.AcceptingOfficerActorId,
+            SourceRevision = application.SourceRevision,
+            InitialAssigneeActorId = application.InitialAssigneeActorId,
+            PromotedAtUtc = nowUtc
+        });
+
+        report.Status = IntakeStatus.AcceptedIntoCase;
+        report.Version += 1;
+        report.DecidedAtUtc = nowUtc;
+        report.DecisionActorId = application.AcceptingOfficerActorId;
+        report.ReviewReason = application.ReviewReason;
+
+        await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
+        return new IntakeDecisionResult(IntakeDecisionStatus.Applied, ToReceipt(report), application.CaseId);
     }
 
     /// <summary>

@@ -124,6 +124,11 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IIntakeDecisionStore, PostgresIntakeDecisionStore>();
         services.AddScoped<IIntakeReviewAuthorizer, PostgresIntakeReviewAuthorizer>();
         services.AddScoped<IIntakeAttachmentAuthority, PostgresIntakeAttachmentAuthority>();
+        services.AddScoped<IIntakePromotionSource, PostgresIntakePromotionSource>();
+        services.AddScoped<IIntakeSubmissionOpener, PostgresIntakeSubmissionOpener>();
+        services.AddScoped<IIntakePromotionWorkspaceResolver, PostgresIntakePromotionWorkspaceResolver>();
+        services.AddScoped<IIntakePromotionService, IntakePromotionProcessor>();
+        services.AddScoped<IManagedCaseRegistrationProcessor, CaseRegistrationProcessor>();
         var intakeMetadataOptions = ReadIntakeMetadataOptions(configuration);
         intakeMetadataOptions.Validate();
         services.TryAddSingleton(intakeMetadataOptions);
