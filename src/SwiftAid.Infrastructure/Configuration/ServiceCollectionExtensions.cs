@@ -360,7 +360,9 @@ public static class ServiceCollectionExtensions
                 provider.GetRequiredService<IKeyRingSecurityValidator>()));
         services.Replace(ServiceDescriptor.Singleton<IDataProtectionProvider>(provider =>
             provider.GetRequiredService<ProtectedPayloadDataProtectionProvider>()));
-        services.AddScoped<IProtectedCaseEventPayloadStore, PostgresProtectedCaseEventPayloadStore>();
+        services.AddScoped<PostgresProtectedCaseEventPayloadStore>();
+        services.AddScoped<IProtectedCaseEventPayloadStore>(provider =>
+            provider.GetRequiredService<PostgresProtectedCaseEventPayloadStore>());
         services.AddScoped<ICaseCommandPersistence, PostgresCaseCommandPersistence>();
         services.AddScoped<ICaseCommandProcessor, CaseCommandProcessor>();
         services.AddHostedService<CaseCommandProcessingStartupValidator>();

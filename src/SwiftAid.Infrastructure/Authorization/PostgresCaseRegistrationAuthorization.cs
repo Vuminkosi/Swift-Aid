@@ -16,7 +16,8 @@ namespace SwiftAid.Infrastructure.Authorization;
 /// operations (policy) and capabilities (constructed). Replay additionally requires the
 /// leased case's organization, workspace, country, sector, and sensitivity to sit inside the
 /// same grant group. Sensitivity is not scoped at creation because the report carries no
-/// sensitivity claim; the staging slice assigns the new case's sensitivity from the report.
+/// sensitivity claim; the staging slice assigns the new case's sensitivity from the
+/// re-verified grant group.
 /// </summary>
 public sealed class PostgresCaseRegistrationAuthorization : ICaseRegistrationAuthorization
 {

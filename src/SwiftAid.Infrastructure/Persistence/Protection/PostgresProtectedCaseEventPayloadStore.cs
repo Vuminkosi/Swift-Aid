@@ -3,12 +3,20 @@ using System.Security.Cryptography;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using SwiftAid.Application.Cases.Commands;
+using SwiftAid.Application.Cases.Registration;
 using SwiftAid.Infrastructure.Configuration;
+using SwiftAid.Infrastructure.Persistence.Registration;
 using SwiftAid.Infrastructure.Persistence.Transactions;
 
 namespace SwiftAid.Infrastructure.Persistence.Protection;
 
 /// <summary>Stages Data Protection ciphertext in the active case transaction.</summary>
+/// <remarks>
+/// Command journals stage through the command-lease guard; managed-case registration
+/// stages through <see cref="StageProtectedForRegistrationAsync"/> under the active
+/// create lease instead, because a not-yet-created case cannot satisfy the command
+/// lease's case binding. Both paths share the same encryption and insert core.
+/// </remarks>
 public sealed class PostgresProtectedCaseEventPayloadStore : IProtectedCaseEventPayloadStore
 {
     public const string CurrentPurposeVersion = "case-event-payload-v1";
@@ -55,6 +63,49 @@ public sealed class PostgresProtectedCaseEventPayloadStore : IProtectedCaseEvent
             throw new InvalidOperationException("A write case lease is required to stage protected payloads.");
         }
 
+        return StageCore(caseId, payloadId, eventType, schemaVersion, serializedBytes);
+    }
+
+    /// <summary>
+    /// Stages ciphertext under an active registration create lease. The caller must already
+    /// hold the lease; this verifies it is still the active create lease for this scoped
+    /// context before sharing the command-side encryption and insert core.
+    /// </summary>
+    public ValueTask<ProtectedCaseEventPayloadReference> StageProtectedForRegistrationAsync(
+        PostgresCaseRegistrationLease lease,
+        Guid caseId,
+        Guid payloadId,
+        string eventType,
+        int schemaVersion,
+        ReadOnlyMemory<byte> serializedBytes,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(lease);
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureEnabled();
+        ValidateMetadata(caseId, payloadId, eventType, schemaVersion);
+        if (serializedBytes.Length > _options.MaximumPayloadBytes)
+        {
+            throw new ArgumentOutOfRangeException(nameof(serializedBytes), "The serialized payload exceeds its configured size limit.");
+        }
+
+        if (!lease.IsActive || lease.Mode != CaseRegistrationLeaseMode.Create ||
+            !ReferenceEquals(lease.DbContext, _dbContext) ||
+            !ReferenceEquals(_dbContext.Database.CurrentTransaction, lease.Transaction))
+        {
+            throw new InvalidOperationException("An active registration create lease for this scoped PostgreSQL context is required.");
+        }
+
+        return StageCore(caseId, payloadId, eventType, schemaVersion, serializedBytes);
+    }
+
+    private ValueTask<ProtectedCaseEventPayloadReference> StageCore(
+        Guid caseId,
+        Guid payloadId,
+        string eventType,
+        int schemaVersion,
+        ReadOnlyMemory<byte> serializedBytes)
+    {
         var protector = CreatePurposeProtector(
             caseId,
             payloadId,
