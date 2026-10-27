@@ -209,3 +209,7 @@ The web page displayed the form with a permanently disabled Send button. Committ
 ## P12.2 compose image follow-up — 27 October 2026 (committed; scoped verification PASS)
 
 Parameterized the personal gateway image tag: `infra/compose.yml` now uses `${GATEWAY_IMAGE:-vuminkosimatibe/swiftaid-gateway:latest}` with a documented `GATEWAY_IMAGE` entry in `.env.example`; default behavior is unchanged. Verified: `docker compose config --quiet` PASS with CI-parity placeholders, resolved image confirmed for both the default and an explicit override. Actual image build/push remain unauthorised and NOT VERIFIED.
+
+## P2.4 form hint regression fix — 27 October 2026 (committed; scoped verification PASS)
+
+The web send path added a "Sending is unavailable right now" form hint for the save-without-send combination, which regressed Mobile: `GuestReport` saves drafts on-device and sends via page-level Send buttons, so the newly shown hint contradicted the working send path (pre-change, no hint displayed there). Fixed at the source: the hint now renders only when neither save nor send is possible (`!CanSubmit && !CanSaveDraft`), restoring pre-change visibility for Mobile and Gateway while keeping the honest cannot-save-or-send message for save-less consumers. Verified on .NET SDK 10.0.403: Gateway + Mobile Android builds 0 warnings/errors. Committed as `5e870fa` on `master`.
