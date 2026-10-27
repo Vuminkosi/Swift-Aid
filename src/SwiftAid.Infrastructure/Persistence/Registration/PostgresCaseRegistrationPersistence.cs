@@ -214,7 +214,8 @@ public sealed class PostgresCaseRegistrationPersistence : ICaseRegistrationPersi
 
             throw mapped;
         }
-        catch (PostgresException postgres) when (
+        catch (DbUpdateException dbUpdate) when (
+            dbUpdate.InnerException is PostgresException postgres &&
             postgres.SqlState == PostgresErrorCodes.UniqueViolation &&
             string.Equals(postgres.ConstraintName, "pk_managed_cases", StringComparison.Ordinal))
         {
@@ -426,6 +427,11 @@ public sealed class PostgresCaseRegistrationPersistence : ICaseRegistrationPersi
             AccessEpoch = request.AccessEpoch,
             RecordedAtUtc = now
         });
+
+        // Flush inside the lease transaction so a restaged command key raises its
+        // receipt/case uniqueness violation here, where the caller maps it to
+        // CommandKeyConflict, rather than surfacing only at lease commit.
+        await _dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
         return new CaseRegistrationAppendOutcome(
             CaseRegistrationAppendStatus.Staged, eventIds, 2, 1);

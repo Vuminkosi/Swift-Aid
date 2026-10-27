@@ -235,7 +235,22 @@ public sealed class PostgresCaseRegistrationAuthorization : ICaseRegistrationAut
             .AnyAsync(item => item.ActorId == actorId && item.OrganizationId == organizationId &&
                 item.Status == PersistentMembershipStatus.Active &&
                 item.ExpiresAtUtc != null && item.ExpiresAtUtc <= now, ct).ConfigureAwait(false);
-        return Denied(expired ? AccessDecisionCode.GrantExpired : AccessDecisionCode.GrantMissing);
+        if (expired)
+        {
+            return Denied(AccessDecisionCode.GrantExpired);
+        }
+
+        // The actor holds no usable membership in the case organization. An actor
+        // scoped to a different organization is outside the grant boundary rather
+        // than unknown; only an actor with no active membership anywhere is missing.
+        var scopedElsewhere = await _dbContext.OrganizationMemberships.AsNoTracking()
+            .AnyAsync(item => item.ActorId == actorId &&
+                item.Status == PersistentMembershipStatus.Active &&
+                item.ValidFromUtc <= now &&
+                (item.ExpiresAtUtc == null || item.ExpiresAtUtc > now), ct).ConfigureAwait(false);
+        return Denied(scopedElsewhere
+            ? AccessDecisionCode.OrganizationOutsideGrant
+            : AccessDecisionCode.GrantMissing);
     }
 
     private async Task<string?> FindGrantGroupAsync(

@@ -30,6 +30,7 @@ namespace SwiftAid.Integration.Tests;
 /// with the unique promotion link. Uses the same disposable loopback
 /// <c>swiftaid_intake_test</c> database gate as <see cref="IntakePostgresFactAttribute"/>.
 /// </summary>
+[Collection(IntakePostgresCollection.Name)]
 public sealed class IntakePromotionExecutionTests
 {
     [IntakePostgresFact]
@@ -37,13 +38,14 @@ public sealed class IntakePromotionExecutionTests
     {
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
         using var keyRing = SyntheticPromotionKeyRing.Create();
+        var payloadOptions = keyRing.CreateOptions();
         using var provider = ProtectedPayloadDataProtectionProviderFactory.Create(
-            keyRing.CreateOptions(), new TestHostEnvironment(Environments.Production));
+            payloadOptions, new TestHostEnvironment(Environments.Production));
         await CaseRegistrationBackendTests.SeedRegistrationGrantAsync(db);
         await SeedPromotionRouteAsync(db);
         var receiptId = await SeedRoutedReportAsync(db, provider);
 
-        var service = CreateService(db, provider);
+        var service = CreateService(db, payloadOptions, provider);
         var officer = CreateOfficer("officer-1");
         var result = await service.DecideAsync(
             new IntakeDecision(receiptId, 1, IntakeDecisionKind.AcceptIntoCase, "Confirmed case."),
@@ -104,10 +106,11 @@ public sealed class IntakePromotionExecutionTests
     {
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
         using var keyRing = SyntheticPromotionKeyRing.Create();
+        var payloadOptions = keyRing.CreateOptions();
         using var provider = ProtectedPayloadDataProtectionProviderFactory.Create(
-            keyRing.CreateOptions(), new TestHostEnvironment(Environments.Production));
+            payloadOptions, new TestHostEnvironment(Environments.Production));
 
-        var service = CreateService(db, provider);
+        var service = CreateService(db, payloadOptions, provider);
         var result = await service.DecideAsync(
             new IntakeDecision(Guid.NewGuid(), 1, IntakeDecisionKind.AcceptIntoCase, null),
             CreateOfficer("officer-1"),
@@ -116,7 +119,10 @@ public sealed class IntakePromotionExecutionTests
         Assert.Equal(IntakeDecisionStatus.NotFoundOrNotAuthorized, result.Status);
     }
 
-    private static IntakeService CreateService(SwiftAidDbContext db, ProtectedPayloadDataProtectionProvider provider)
+    private static IntakeService CreateService(
+        SwiftAidDbContext db,
+        ProtectedPayloadOptions payloadOptions,
+        ProtectedPayloadDataProtectionProvider provider)
     {
         var decisions = new PostgresIntakeDecisionStore(db);
         var registration = new CaseRegistrationProcessor(
@@ -125,7 +131,7 @@ public sealed class IntakePromotionExecutionTests
             new PostgresCaseRegistrationPersistence(
                 db,
                 new PostgresProtectedCaseEventPayloadStore(
-                    db, new PostgresCaseCommandUnitOfWork(db), new ProtectedPayloadOptions(), provider),
+                    db, new PostgresCaseCommandUnitOfWork(db), payloadOptions, provider),
                 new CaseEventSerializer()));
         var promotion = new IntakePromotionProcessor(
             new PostgresIntakePromotionSource(db),

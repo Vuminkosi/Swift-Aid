@@ -26,6 +26,7 @@ namespace SwiftAid.Integration.Tests;
 /// <c>swiftaid_intake_test</c> database gate as <see cref="IntakePostgresFactAttribute"/>.
 /// </summary>
 [Trait("Category", "IntakePostgres")]
+[Collection(IntakePostgresCollection.Name)]
 public sealed class CaseRegistrationBackendTests
 {
     [IntakePostgresFact]
@@ -122,6 +123,9 @@ public sealed class CaseRegistrationBackendTests
     {
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
         await SeedRegistrationIdentitiesAsync(db);
+        // Earlier suites in this shared collection leave officer-1 grants behind;
+        // reset the scope so this test deterministically observes "no grant".
+        await IntakeDecisionStoreTests.ResetOfficerScopeAsync(db, "officer-1", 7);
         var authorization = new PostgresCaseRegistrationAuthorization(db);
         var unitOfWork = new PostgresCaseRegistrationUnitOfWork(db);
 
@@ -531,30 +535,13 @@ public sealed class CaseRegistrationBackendTests
     internal static async Task SeedRegistrationGrantAsync(SwiftAidDbContext db, string grantCountry = "ZW")
     {
         await SeedRegistrationIdentitiesAsync(db);
-        var now = DateTimeOffset.UtcNow;
-        var membership = await db.OrganizationMemberships
-            .SingleOrDefaultAsync(item => item.ActorId == "officer-1" && item.OrganizationId == "org-zw-1");
-        if (membership is null)
-        {
-            membership = new OrganizationMembershipEntity
-            {
-                MembershipId = Guid.NewGuid(),
-                ActorId = "officer-1",
-                OrganizationId = "org-zw-1",
-                Status = PersistentMembershipStatus.Active,
-                ValidFromUtc = now.AddHours(-1),
-                GrantedByActorId = "officer-1",
-                Version = 1
-            };
-            db.OrganizationMemberships.Add(membership);
-            await db.SaveChangesAsync();
-        }
+        var membershipId = await IntakeDecisionStoreTests.ResetOfficerScopeAsync(db, "officer-1", 7);
 
         var grantGroupId = $"grant-group-reg-{Guid.NewGuid():N}";
         db.AccessGrantGroups.Add(new AccessGrantGroupEntity
         {
             GrantGroupId = grantGroupId,
-            MembershipId = membership.MembershipId,
+            MembershipId = membershipId,
             ActorId = "officer-1",
             OrganizationId = "org-zw-1",
             WorkspaceId = "workspace-1",
@@ -563,8 +550,8 @@ public sealed class CaseRegistrationBackendTests
             SensitivityCode = "standard",
             CanAccessJurisdictionalCases = false,
             Status = PersistentGrantStatus.Active,
-            ValidFromUtc = now.AddHours(-1),
-            ExpiresAtUtc = now.AddHours(1),
+            ValidFromUtc = DateTimeOffset.UtcNow.AddHours(-1),
+            ExpiresAtUtc = DateTimeOffset.UtcNow.AddHours(1),
             GrantedByActorId = "officer-1",
             Version = 1
         });

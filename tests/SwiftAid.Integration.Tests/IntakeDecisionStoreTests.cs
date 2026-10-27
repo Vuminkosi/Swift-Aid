@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using OpenIddict.EntityFrameworkCore;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Intake;
 using SwiftAid.Contracts.Commands;
@@ -35,6 +36,7 @@ public sealed class IntakePostgresFactAttribute : FactAttribute
 }
 
 [Trait("Category", "IntakePostgres")]
+[Collection(IntakePostgresCollection.Name)]
 public sealed class IntakeDecisionStoreTests
 {
     [IntakePostgresFact]
@@ -233,6 +235,91 @@ public sealed class IntakeDecisionStoreTests
             new Claim(ActorContext.AccessEpochClaimType, "7")
         ], "synthetic-test")));
 
+    /// <summary>
+    /// Resets the officer's authorization scope to a known state and returns the membership id.
+    /// Shared intake suites reuse stable officer identities; without this reset, an earlier
+    /// test's membership window, epoch, or grants would leak into later tests through the
+    /// shared disposable database.
+    /// </summary>
+    internal static async Task<Guid> ResetOfficerScopeAsync(
+        SwiftAidDbContext db, string officerId, long accessEpoch, bool membershipExpired = false)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (!await db.Actors.AsNoTracking().AnyAsync(item => item.ActorId == officerId))
+        {
+            db.Actors.Add(new ActorEntity
+            {
+                ActorId = officerId,
+                Status = PersistentActorStatus.Active,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            });
+            await db.SaveChangesAsync();
+        }
+
+        db.ChangeTracker.Clear();
+        var grantIds = await db.AccessGrantGroups.AsNoTracking()
+            .Where(item => item.ActorId == officerId)
+            .Select(item => item.GrantGroupId)
+            .ToArrayAsync();
+        if (grantIds.Length > 0)
+        {
+            await db.AccessGrantOperations
+                .Where(item => grantIds.Contains(item.GrantGroupId))
+                .ExecuteDeleteAsync();
+            await db.AccessGrantGroups
+                .Where(item => item.ActorId == officerId)
+                .ExecuteDeleteAsync();
+        }
+
+        var access = await db.ActorAccessStates
+            .SingleOrDefaultAsync(item => item.ActorId == officerId);
+        if (access is null)
+        {
+            db.ActorAccessStates.Add(new ActorAccessStateEntity
+            {
+                ActorId = officerId,
+                AccessEpoch = accessEpoch,
+                Version = 1,
+                UpdatedAtUtc = now
+            });
+        }
+        else
+        {
+            access.AccessEpoch = accessEpoch;
+            access.Version += 1;
+            access.UpdatedAtUtc = now;
+        }
+
+        var membership = await db.OrganizationMemberships
+            .SingleOrDefaultAsync(item => item.ActorId == officerId && item.OrganizationId == "org-zw-1");
+        if (membership is null)
+        {
+            membership = new OrganizationMembershipEntity
+            {
+                MembershipId = Guid.NewGuid(),
+                ActorId = officerId,
+                OrganizationId = "org-zw-1",
+                Status = PersistentMembershipStatus.Active,
+                ValidFromUtc = now.AddHours(-1),
+                ExpiresAtUtc = membershipExpired ? now.AddMinutes(-1) : null,
+                GrantedByActorId = "granter-1",
+                Version = 1
+            };
+            db.OrganizationMemberships.Add(membership);
+        }
+        else
+        {
+            membership.ValidFromUtc = now.AddHours(-1);
+            membership.ExpiresAtUtc = membershipExpired ? now.AddMinutes(-1) : null;
+            membership.Version += 1;
+        }
+
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        return membership.MembershipId;
+    }
+
     internal static async Task<Guid> SeedManagedCaseAsync(SwiftAidDbContext db, string organizationId = "org-zw-1")
     {
         var now = DateTimeOffset.UtcNow;
@@ -343,14 +430,19 @@ public sealed class IntakeDecisionStoreTests
         }
 
         var builder = new NpgsqlConnectionStringBuilder(configured);
-        if (builder.Host is not ("127.0.0.1" or "localhost" or "::1") ||
-            !string.Equals(builder.Database, "swiftaid_intake_test", StringComparison.Ordinal))
+        var databaseAllowed = string.Equals(builder.Database, "swiftaid_intake_test", StringComparison.Ordinal) ||
+            string.Equals(builder.Database, "swiftaid_test", StringComparison.Ordinal);
+        if (builder.Host is not ("127.0.0.1" or "localhost" or "::1") || !databaseAllowed)
         {
-            throw new InvalidOperationException("Intake fixtures accept only a loopback PostgreSQL database named swiftaid_intake_test.");
+            throw new InvalidOperationException("Intake fixtures accept only a loopback PostgreSQL database named swiftaid_intake_test or swiftaid_test.");
         }
 
+        // The design-time model (and production) applies OpenIddict's entity
+        // configuration via UseOpenIddict; the test harness must build the identical
+        // model or the migrator reports pending changes and refuses to migrate.
         var options = new DbContextOptionsBuilder<SwiftAidDbContext>()
             .UseNpgsql(builder.ConnectionString)
+            .UseOpenIddict()
             .Options;
         var context = new SwiftAidDbContext(options);
         await context.Database.MigrateAsync();

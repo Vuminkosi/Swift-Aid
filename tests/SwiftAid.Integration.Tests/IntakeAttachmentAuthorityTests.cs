@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using SwiftAid.Application.Intake;
 using SwiftAid.Contracts.Intake;
@@ -12,6 +13,7 @@ namespace SwiftAid.Integration.Tests;
 /// loopback <c>swiftaid_intake_test</c> database gate as <see cref="IntakePostgresFactAttribute"/>.
 /// </summary>
 [Trait("Category", "IntakePostgres")]
+[Collection(IntakePostgresCollection.Name)]
 public sealed class IntakeAttachmentAuthorityTests
 {
     private const int MaxDurationSeconds = 120;
@@ -169,9 +171,14 @@ public sealed class IntakeAttachmentAuthorityTests
         int durationSeconds = 45)
     {
         var now = DateTimeOffset.UtcNow;
+        // An expired reservation must still satisfy ck_intake_attachments_validity
+        // (expires_at_utc > created_at_utc): backdate creation when expiry is past.
+        var expiresAtUtc = now.Add(expiresIn ?? TimeSpan.FromHours(1));
+        var createdAtUtc = expiresAtUtc <= now ? expiresAtUtc.AddHours(-1) : now;
         var sessionId = Guid.NewGuid();
         var capabilityId = Guid.NewGuid();
         var clientSubmissionId = Guid.NewGuid();
+        var capabilityDigest = RandomNumberGenerator.GetBytes(32);
         db.IntakeSessions.Add(new IntakeSessionEntity
         {
             SessionId = sessionId,
@@ -183,7 +190,7 @@ public sealed class IntakeAttachmentAuthorityTests
         {
             CapabilityId = capabilityId,
             SessionId = sessionId,
-            CapabilityDigest = new byte[32],
+            CapabilityDigest = capabilityDigest,
             CreatedAtUtc = now,
             ExpiresAtUtc = now.AddHours(1)
         });
@@ -199,13 +206,13 @@ public sealed class IntakeAttachmentAuthorityTests
             SizeBytes = sizeBytes,
             DurationSeconds = durationSeconds,
             State = state,
-            CreatedAtUtc = now,
-            ExpiresAtUtc = now.Add(expiresIn ?? TimeSpan.FromHours(1))
+            CreatedAtUtc = createdAtUtc,
+            ExpiresAtUtc = expiresAtUtc
         });
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
         var capability = new IntakeCapability(
-            capabilityId, sessionId, new byte[32], now.AddHours(1), 10);
+            capabilityId, sessionId, capabilityDigest, now.AddHours(1), 10);
         return new BindingFixture(capability, clientSubmissionId, attachmentId);
     }
 }

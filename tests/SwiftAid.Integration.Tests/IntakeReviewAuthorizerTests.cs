@@ -15,6 +15,7 @@ namespace SwiftAid.Integration.Tests;
 /// loopback <c>swiftaid_intake_test</c> database gate as <see cref="IntakePostgresFactAttribute"/>.
 /// </summary>
 [Trait("Category", "IntakePostgres")]
+[Collection(IntakePostgresCollection.Name)]
 public sealed class IntakeReviewAuthorizerTests
 {
     [IntakePostgresFact]
@@ -126,24 +127,6 @@ public sealed class IntakeReviewAuthorizerTests
         string officerId = "officer-1")
     {
         var now = DateTimeOffset.UtcNow;
-        if (!await db.Actors.AsNoTracking().AnyAsync(item => item.ActorId == officerId))
-        {
-            db.Actors.Add(new ActorEntity
-            {
-                ActorId = officerId,
-                Status = PersistentActorStatus.Active,
-                CreatedAtUtc = now,
-                UpdatedAtUtc = now
-            });
-            db.ActorAccessStates.Add(new ActorAccessStateEntity
-            {
-                ActorId = officerId,
-                AccessEpoch = accessEpoch,
-                Version = 1,
-                UpdatedAtUtc = now
-            });
-        }
-
         if (!await db.Actors.AsNoTracking().AnyAsync(item => item.ActorId == "granter-1"))
         {
             db.Actors.Add(new ActorEntity
@@ -171,18 +154,7 @@ public sealed class IntakeReviewAuthorizerTests
                 Status = PersistentResourceStatus.Active
             });
         }
-        var membershipId = Guid.NewGuid();
-        db.OrganizationMemberships.Add(new OrganizationMembershipEntity
-        {
-            MembershipId = membershipId,
-            ActorId = officerId,
-            OrganizationId = "org-zw-1",
-            Status = PersistentMembershipStatus.Active,
-            ValidFromUtc = now.AddHours(-1),
-            ExpiresAtUtc = membershipExpired ? now.AddMinutes(-1) : null,
-            GrantedByActorId = "granter-1",
-            Version = 1
-        });
+        var membershipId = await IntakeDecisionStoreTests.ResetOfficerScopeAsync(db, officerId, accessEpoch, membershipExpired);
         var grantGroupId = $"grant-group-{Guid.NewGuid():N}";
         db.AccessGrantGroups.Add(new AccessGrantGroupEntity
         {
