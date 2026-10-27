@@ -359,6 +359,9 @@ paket-files/
 **/__pycache__/
 *.pyc
 
+# uv-managed project environments stay local; .python-version is the committed pin
+**/.venv/
+
 # Cake - Uncomment if you are using it
 #tools/**
 #!tools/packages.config

@@ -298,7 +298,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         var grantOperation = modelBuilder.Entity<AccessGrantOperationEntity>();
         grantOperation.ToTable("access_grant_group_operations", table =>
         {
-            table.HasCheckConstraint("ck_grant_group_operations_value", "operation IN ('ReadCase', 'ReadAttachment', 'Synchronize', 'Search', 'Export', 'Count', 'RequestProtectedAction', 'ExecuteProtectedAction', 'ReadLinkedSignalEvidence', 'CorrectReport', 'ReviewProtectedAction', 'AssignCase', 'ResolveCase', 'ReopenCase')");
+            table.HasCheckConstraint("ck_grant_group_operations_value", "operation IN ('ReadCase', 'ReadAttachment', 'Synchronize', 'Search', 'Export', 'Count', 'RequestProtectedAction', 'ExecuteProtectedAction', 'ReadLinkedSignalEvidence', 'CorrectReport', 'ReviewProtectedAction', 'AssignCase', 'ResolveCase', 'ReopenCase', 'ReviewIntake')");
             table.HasCheckConstraint("ck_access_grant_group_operations_lock_token_zero", "lock_token = 0");
         });
         ConfigureLockToken(grantOperation);

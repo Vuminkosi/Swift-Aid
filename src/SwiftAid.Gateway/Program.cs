@@ -72,6 +72,7 @@ app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 app.MapControllers();
 app.MapPublicIntakeEndpoints();
+app.MapIntakeDecisionEndpoints();
 
 app.MapSwiftAidIdentityEndpoints(
     app.Services.GetRequiredService<FederationOptions>(),

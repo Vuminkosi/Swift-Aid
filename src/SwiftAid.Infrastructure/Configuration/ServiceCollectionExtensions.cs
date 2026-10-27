@@ -120,6 +120,7 @@ public static class ServiceCollectionExtensions
         services.TryAddScoped<IIntakeConsentPolicy, ConfiguredIntakeConsentPolicy>();
         services.TryAddScoped<IIntakeReceiptReader, PostgresIntakeReceiptReader>();
         services.AddScoped<IIntakeDecisionStore, PostgresIntakeDecisionStore>();
+        services.AddScoped<IIntakeReviewAuthorizer, PostgresIntakeReviewAuthorizer>();
         services.TryAddScoped<IIntakeAttachmentAuthority, NotConfiguredIntakeAttachmentAuthority>();
         var intakeMetadataOptions = ReadIntakeMetadataOptions(configuration);
         intakeMetadataOptions.Validate();

@@ -186,6 +186,9 @@ public sealed class IntakeDecisionStoreTests
         return receiptId;
     }
 
+    internal static async Task<SwiftAidDbContext> CreateMigratedIntakeContextAsync() =>
+        await CreateMigratedContextAsync();
+
     private static async Task<SwiftAidDbContext> CreateMigratedContextAsync()
     {
         var configured = Environment.GetEnvironmentVariable(IntakePostgresFactAttribute.ConnectionVariable);

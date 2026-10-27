@@ -16,5 +16,11 @@ public enum CaseOperation
     ReviewProtectedAction = 10,
     AssignCase = 11,
     ResolveCase = 12,
-    ReopenCase = 13
+    ReopenCase = 13,
+    /// <summary>
+    /// Records a reviewer decision on a guest intake report. Evaluated only by the intake
+    /// review authorizer against the receiving organization's grant groups, never by the
+    /// shared case resource policy.
+    /// </summary>
+    ReviewIntake = 14
 }
