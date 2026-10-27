@@ -122,7 +122,7 @@ public sealed class CaseCommandAuthorizationMapTests
         CaseEvent[] events =
         [
             new CaseReported(CaseId, 1, 1, acceptanceCommandId, actorId, null, Now, report, "workspace-a"),
-            new CaseAssigned(CaseId, 2, 1, acceptanceCommandId, actorId, null, Now, "owner-a"),
+            new CaseAssigned(CaseId, 2, 1, acceptanceCommandId, actorId, null, Now, actorId),
             new CaseActionRequested(CaseId, 3, 1, requestCommandId, actorId, null, Now, RequestId,
                 action, "synthetic request reason", [], action == CaseAction.Reassign ? "owner-target" : null)
         ];

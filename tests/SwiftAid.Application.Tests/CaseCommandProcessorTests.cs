@@ -342,7 +342,7 @@ public sealed class CaseCommandProcessorTests
         var accessPolicy = new FakeAccessPolicy();
         var persistence = new FakePersistence
         {
-            Header = new CaseCommandCaseHeader(CaseId, aggregateVersion, 1, 1, "case-owner"),
+            Header = new CaseCommandCaseHeader(CaseId, aggregateVersion, 1, 1, "staff-actor"),
             Aggregate = aggregate ?? CreateAggregate(aggregateVersion)
         };
         var processor = new CaseCommandProcessor(unitOfWork, accessPolicy, persistence);
@@ -357,7 +357,7 @@ public sealed class CaseCommandProcessorTests
             new CaseReported(CaseId, 1, 1, acceptanceCommandId, "staff-actor", null, DatabaseNow,
                 new ReportFacts(CaseKind.Human, Sector.HumanHealth, "synthetic source", [new ReportedObservation("synthetic observation")]),
                 "workspace-a"),
-            new CaseAssigned(CaseId, 2, 1, acceptanceCommandId, "staff-actor", null, DatabaseNow, "case-owner")
+            new CaseAssigned(CaseId, 2, 1, acceptanceCommandId, "staff-actor", null, DatabaseNow, "staff-actor")
         };
         for (var nextVersion = 3; nextVersion <= version; nextVersion++)
         {
@@ -376,7 +376,7 @@ public sealed class CaseCommandProcessorTests
             new CaseReported(CaseId, 1, 1, acceptanceCommandId, "staff-actor", null, DatabaseNow,
                 new ReportFacts(CaseKind.Human, Sector.HumanHealth, "synthetic source", [new ReportedObservation("synthetic observation")]),
                 "workspace-a"),
-            new CaseAssigned(CaseId, 2, 1, acceptanceCommandId, "staff-actor", null, DatabaseNow, "case-owner"),
+            new CaseAssigned(CaseId, 2, 1, acceptanceCommandId, "staff-actor", null, DatabaseNow, "staff-actor"),
             new CaseResolved(CaseId, 3, 1, Guid.NewGuid(), "staff-actor", null, DatabaseNow, "synthetic resolution")
         ]);
     }
@@ -389,7 +389,7 @@ public sealed class CaseCommandProcessorTests
         new CaseReported(CaseId, 1, 1, acceptanceCommandId, "staff-actor", null, DatabaseNow,
             new ReportFacts(CaseKind.Human, Sector.HumanHealth, "synthetic source", [new ReportedObservation("synthetic observation")]),
             "workspace-a"),
-        new CaseAssigned(CaseId, 2, 1, acceptanceCommandId, "staff-actor", null, DatabaseNow, "case-owner"),
+        new CaseAssigned(CaseId, 2, 1, acceptanceCommandId, "staff-actor", null, DatabaseNow, "staff-actor"),
         new CaseActionRequested(CaseId, 3, 1, Guid.NewGuid(), "staff-actor", null, DatabaseNow,
             requestId, CaseAction.Reassign, "synthetic request", [], "future-owner")
         ]);

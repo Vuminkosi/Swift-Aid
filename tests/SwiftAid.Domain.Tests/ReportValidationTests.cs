@@ -146,6 +146,104 @@ public sealed class ReportValidationTests
     }
 
     [Fact]
+    public void ReportedTime_ExactInstantIsStoredInUtcAndRetainsOriginalOffsetAndZone()
+    {
+        var sourceInstant = DateTimeOffset.Parse("2026-10-20T08:15:00+02:00");
+        var reported = new ReportedTime(sourceInstant, null, null, null, "+02:00", "Africa/Mbabane", ReportedTimePrecision.Exact);
+        var normalized = ReportedTimeRules.Normalize(reported);
+
+        Assert.Equal(TimeSpan.Zero, normalized.Value!.Value.Offset);
+        Assert.Equal(sourceInstant.UtcDateTime, normalized.Value.Value.UtcDateTime);
+        Assert.Equal("+02:00", normalized.OriginalOffset);
+        Assert.Equal("Africa/Mbabane", normalized.ZoneId);
+    }
+
+    [Fact]
+    public void ReportedTime_DateOnlyAndApproximateValuesArePreserved()
+    {
+        var localDate = new DateOnly(2026, 10, 20);
+        var dateOnly = ReportedTimeRules.Normalize(new ReportedTime(null, localDate, null, null, null, null, ReportedTimePrecision.DateOnly));
+        var approximateRange = ReportedTimeRules.Normalize(new ReportedTime(null, null, localDate, localDate.AddDays(2), null, null, ReportedTimePrecision.Approximate));
+        var approximateDate = ReportedTimeRules.Normalize(new ReportedTime(null, localDate, null, null, null, null, ReportedTimePrecision.Approximate));
+        var approximateInstant = ReportedTimeRules.Normalize(new ReportedTime(
+            DateTimeOffset.Parse("2026-10-20T08:15:00+02:00"), null, null, null, "+02:00", null,
+            ReportedTimePrecision.Approximate));
+
+        Assert.Equal(localDate, dateOnly.LocalDate);
+        Assert.Equal(localDate, approximateRange.RangeStart);
+        Assert.Equal(localDate.AddDays(2), approximateRange.RangeEnd);
+        Assert.Equal(localDate, approximateDate.LocalDate);
+        Assert.Null(approximateDate.Value);
+        Assert.Equal(TimeSpan.Zero, approximateInstant.Value!.Value.Offset);
+        Assert.Equal("+02:00", approximateInstant.OriginalOffset);
+    }
+
+    [Fact]
+    public void ReportedTime_UnknownPrecisionDoesNotInventAnInstantOrDate()
+    {
+        var unknown = ReportedTimeRules.Normalize(new ReportedTime(null, null, null, null, null, null, ReportedTimePrecision.Unknown));
+
+        Assert.Null(unknown.Value);
+        Assert.Null(unknown.LocalDate);
+        Assert.Null(unknown.RangeStart);
+        Assert.Null(unknown.RangeEnd);
+        Assert.Equal(ReportedTimePrecision.Unknown, unknown.Precision);
+    }
+
+    [Fact]
+    public void ReportedTime_RejectsOffsetContradictingSuppliedZoneAtInstant()
+    {
+        var reportedTime = new ReportedTime(DateTimeOffset.Parse("2026-10-20T08:15:00+02:00"), null, null, null,
+            "+00:00", "Africa/Mbabane", ReportedTimePrecision.Exact);
+
+        Assert.Throws<ArgumentException>(() => ReportedTimeRules.Validate(reportedTime));
+    }
+
+    [Fact]
+    public void ReportedTime_RejectsMissingCompetingHalfAndReversedRepresentations()
+    {
+        var instant = DateTimeOffset.Parse("2026-10-20T08:15:00+02:00");
+        var day = new DateOnly(2026, 10, 20);
+        var invalid = new[]
+        {
+            new ReportedTime(null, null, null, null, null, null, ReportedTimePrecision.Exact),
+            new ReportedTime(instant, day, null, null, null, null, ReportedTimePrecision.Exact),
+            new ReportedTime(null, null, null, null, null, null, ReportedTimePrecision.DateOnly),
+            new ReportedTime(instant, day, null, null, null, null, ReportedTimePrecision.DateOnly),
+            new ReportedTime(null, null, null, null, null, null, ReportedTimePrecision.Approximate),
+            new ReportedTime(null, null, day, null, null, null, ReportedTimePrecision.Approximate),
+            new ReportedTime(instant, day, null, null, null, null, ReportedTimePrecision.Approximate),
+            new ReportedTime(null, null, day.AddDays(1), day, null, null, ReportedTimePrecision.Approximate),
+            new ReportedTime(instant, null, null, null, null, null, ReportedTimePrecision.Unknown),
+            new ReportedTime(null, day, null, null, null, null, ReportedTimePrecision.Unknown)
+        };
+
+        foreach (var reportedTime in invalid)
+        {
+            Assert.ThrowsAny<ArgumentException>(() => ReportedTimeRules.Validate(reportedTime));
+        }
+    }
+
+    [Fact]
+    public void AnimalObservationPeriod_NormalizesKnownInstantsAndUsesSharedTimeRules()
+    {
+        var instant = DateTimeOffset.Parse("2026-10-20T08:15:00+02:00");
+        var period = ReportedFact<ReportedTime>.Known(
+            new ReportedTime(instant, null, null, null, "+02:00", "Africa/Mbabane", ReportedTimePrecision.Exact),
+            ObservationSource);
+        var count = AnimalCount.Known(3, ObservationSource, "herd:1", period);
+
+        var normalizedInstant = count.ObservationPeriod!.Value.Value.Value;
+        Assert.True(normalizedInstant.HasValue);
+        Assert.Equal(TimeSpan.Zero, normalizedInstant.Value.Offset);
+        Assert.Equal("+02:00", count.ObservationPeriod.Value.Value.OriginalOffset);
+
+        Assert.ThrowsAny<ArgumentException>(() => AnimalCount.Known(3, ObservationSource, "herd:1",
+            ReportedFact<ReportedTime>.Known(new ReportedTime(null, null, new DateOnly(2026, 10, 21), null,
+                null, null, ReportedTimePrecision.Approximate), ObservationSource)));
+    }
+
+    [Fact]
     public void ReportContext_PreservesAbsentCaptureMetadataWithoutDefaults()
     {
         var report = HumanReport.Create(
