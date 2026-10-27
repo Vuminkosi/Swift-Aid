@@ -1178,6 +1178,41 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeEvidenceLinkEntity", b =>
+                {
+                    b.Property<Guid>("ReceiptId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("receipt_id");
+
+                    b.Property<Guid>("CaseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("case_id");
+
+                    b.Property<DateTimeOffset>("LinkedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("linked_at_utc");
+
+                    b.Property<string>("LinkingOfficerActorId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("linking_officer_actor_id");
+
+                    b.Property<long>("SourceRevision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("source_revision");
+
+                    b.HasKey("ReceiptId")
+                        .HasName("pk_intake_evidence_links");
+
+                    b.HasIndex("CaseId")
+                        .HasDatabaseName("ix_intake_evidence_links_case");
+
+                    b.ToTable("intake_evidence_links", "swiftaid_intake", t =>
+                        {
+                            t.HasCheckConstraint("ck_intake_evidence_links_revision", "source_revision > 0");
+                        });
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeOutboxEntity", b =>
                 {
                     b.Property<Guid>("OutboxId")
@@ -2341,6 +2376,23 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_intake_capabilities_session");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeEvidenceLinkEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.ManagedCaseEntity", null)
+                        .WithMany()
+                        .HasForeignKey("CaseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_intake_evidence_links_case");
+
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeReportEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ReceiptId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_intake_evidence_links_report");
                 });
 
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeOutboxEntity", b =>

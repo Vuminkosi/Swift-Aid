@@ -60,6 +60,21 @@ public sealed class PostgresIntakeDecisionStore : IIntakeDecisionStore
             return new IntakeDecisionResult(IntakeDecisionStatus.NotFoundOrNotAuthorized, null);
         }
 
+        // Evidence links are write-once: naming a different target after a link was recorded
+        // conflicts instead of silently affirming the original link.
+        if (decision.Decision == IntakeDecisionKind.LinkAsEvidence &&
+            decision.TargetCaseId is { } requestedTarget && requestedTarget != Guid.Empty)
+        {
+            var linkedCaseId = await _dbContext.Set<IntakeEvidenceLinkEntity>()
+                .Where(item => item.ReceiptId == decision.ReceiptId)
+                .Select(item => (Guid?)item.CaseId)
+                .SingleOrDefaultAsync(ct).ConfigureAwait(false);
+            if (linkedCaseId is not null && linkedCaseId != requestedTarget)
+            {
+                return new IntakeDecisionResult(IntakeDecisionStatus.Conflict, null);
+            }
+        }
+
         var (status, next) = IntakeDecisionTransition.Evaluate(
             decision, report.Status, report.Version, report.RoutingStatus, report.IntakeQueueId);
         if (status != IntakeDecisionStatus.Applied || next is null)
@@ -72,6 +87,15 @@ public sealed class PostgresIntakeDecisionStore : IIntakeDecisionStore
             return new IntakeDecisionResult(IntakeDecisionStatus.Applied, ToReceipt(report));
         }
 
+        if (decision.Decision == IntakeDecisionKind.LinkAsEvidence)
+        {
+            var linkResult = await ApplyEvidenceLinkAsync(decision, report, actor, nowUtc, ct).ConfigureAwait(false);
+            if (linkResult is not null)
+            {
+                return linkResult;
+            }
+        }
+
         report.Status = next.Value;
         report.Version += 1;
         report.DecidedAtUtc = nowUtc;
@@ -81,6 +105,54 @@ public sealed class PostgresIntakeDecisionStore : IIntakeDecisionStore
         await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
         await transaction.CommitAsync(ct).ConfigureAwait(false);
         return new IntakeDecisionResult(IntakeDecisionStatus.Applied, ToReceipt(report));
+    }
+
+    /// <summary>
+    /// Persists the evidence link atomically with the decision. A replay naming the same case
+    /// returns <c>null</c> so the caller proceeds with the status transition; a missing case
+    /// (removed after authorization) or a different target returns a terminal result.
+    /// </summary>
+    /// <returns>
+    /// <c>null</c> when the link was recorded and the caller should apply the report update;
+    /// otherwise the terminal decision result.
+    /// </returns>
+    private async Task<IntakeDecisionResult?> ApplyEvidenceLinkAsync(
+        IntakeDecision decision,
+        IntakeReportEntity report,
+        ActorContext actor,
+        DateTimeOffset nowUtc,
+        CancellationToken ct)
+    {
+        if (decision.TargetCaseId is not Guid linkTarget || linkTarget == Guid.Empty)
+        {
+            return new IntakeDecisionResult(IntakeDecisionStatus.Invalid, null);
+        }
+
+        var existing = await _dbContext.Set<IntakeEvidenceLinkEntity>()
+            .SingleOrDefaultAsync(item => item.ReceiptId == decision.ReceiptId, ct).ConfigureAwait(false);
+        if (existing is not null)
+        {
+            return existing.CaseId == decision.TargetCaseId.Value
+                ? new IntakeDecisionResult(IntakeDecisionStatus.Applied, ToReceipt(report))
+                : new IntakeDecisionResult(IntakeDecisionStatus.Conflict, null);
+        }
+
+        var caseExists = await _dbContext.ManagedCases.AsNoTracking()
+            .AnyAsync(item => item.CaseId == decision.TargetCaseId.Value, ct).ConfigureAwait(false);
+        if (!caseExists)
+        {
+            return new IntakeDecisionResult(IntakeDecisionStatus.Conflict, null);
+        }
+
+        _dbContext.Add(new IntakeEvidenceLinkEntity
+        {
+            ReceiptId = decision.ReceiptId,
+            CaseId = decision.TargetCaseId.Value,
+            LinkingOfficerActorId = actor.ActorId,
+            SourceRevision = report.Version,
+            LinkedAtUtc = nowUtc
+        });
+        return null;
     }
 
     private async Task AcquireReceiptLockAsync(

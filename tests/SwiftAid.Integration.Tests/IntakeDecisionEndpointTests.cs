@@ -207,9 +207,75 @@ public sealed class IntakeDecisionEndpointTests
         Assert.Throws<ArgumentException>(() => IntakeDecisionEndpoints.MapRequest(receiptId, new(1, 1, "decline", null)));
         Assert.Throws<ArgumentException>(() => IntakeDecisionEndpoints.MapRequest(receiptId, new(1, 1, null, null)));
         Assert.Throws<ArgumentException>(() => IntakeDecisionEndpoints.MapRequest(receiptId, new(1, 1, "Decline", new string('x', 1001))));
+        Assert.Throws<ArgumentException>(() => IntakeDecisionEndpoints.MapRequest(receiptId, new(1, 1, "LinkAsEvidence", null)));
+        Assert.Throws<ArgumentException>(() => IntakeDecisionEndpoints.MapRequest(receiptId, new(1, 1, "LinkAsEvidence", null, Guid.Empty)));
+        Assert.Throws<ArgumentException>(() => IntakeDecisionEndpoints.MapRequest(receiptId, new(1, 1, "Decline", null, Guid.NewGuid())));
+        Assert.Throws<ArgumentException>(() => IntakeDecisionEndpoints.MapRequest(receiptId, new(1, 1, "RouteForReview", null, Guid.NewGuid())));
 
         var decision = IntakeDecisionEndpoints.MapRequest(receiptId, new(1, 3, "RouteForReview", null));
         Assert.Equal(new IntakeDecision(receiptId, 3, IntakeDecisionKind.RouteForReview, null), decision);
+
+        var targetCaseId = Guid.NewGuid();
+        var link = IntakeDecisionEndpoints.MapRequest(receiptId, new(1, 2, "LinkAsEvidence", "See case file.", targetCaseId));
+        Assert.Equal(new IntakeDecision(receiptId, 2, IntakeDecisionKind.LinkAsEvidence, "See case file.", targetCaseId), link);
+    }
+
+    [Fact]
+    public async Task LinkDecision_UsesLinkAuthorizationWithTarget()
+    {
+        await using var host = await TestDecisionHost.StartAsync(serviceStatus: IntakeDecisionStatus.Applied);
+        var receiptId = Guid.NewGuid();
+        var targetCaseId = Guid.NewGuid();
+        using var request = LinkRequest(receiptId, targetCaseId);
+
+        using var response = await host.SendAuthenticatedAsync(request, await host.GetAntiforgeryAsync());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(0, host.Authorizer.Calls);
+        Assert.Equal(1, host.Authorizer.LinkCalls);
+        Assert.Equal(targetCaseId, host.Authorizer.LastTargetCaseId);
+        Assert.Equal(1, host.Service.Calls);
+        Assert.Equal(targetCaseId, host.Service.LastDecision!.TargetCaseId);
+    }
+
+    [Fact]
+    public async Task LinkDecision_WithoutTarget_IsInvalidBeforeAuthorization()
+    {
+        await using var host = await TestDecisionHost.StartAsync();
+        using var request = DecisionRequest(Guid.NewGuid(), "LinkAsEvidence", 1, null);
+
+        using var response = await host.SendAuthenticatedAsync(request, await host.GetAntiforgeryAsync());
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, host.Authorizer.Calls);
+        Assert.Equal(0, host.Authorizer.LinkCalls);
+        Assert.Equal(0, host.Service.Calls);
+    }
+
+    [Fact]
+    public async Task LinkDecision_WhenLinkUnauthorized_GetsNotFoundWithoutServiceCall()
+    {
+        await using var host = await TestDecisionHost.StartAsync(authorized: false);
+        using var request = LinkRequest(Guid.NewGuid(), Guid.NewGuid());
+
+        using var response = await host.SendAuthenticatedAsync(request, await host.GetAntiforgeryAsync());
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(0, host.Authorizer.Calls);
+        Assert.Equal(1, host.Authorizer.LinkCalls);
+        Assert.Equal(0, host.Service.Calls);
+    }
+
+    private static HttpRequestMessage LinkRequest(Guid receiptId, Guid targetCaseId)
+    {
+        var payload = JsonSerializer.Serialize(
+            new IntakeDecisionApiRequest(1, 1, "LinkAsEvidence", null, targetCaseId), JsonOptions);
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/intake/{receiptId:D}/decisions")
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
+        TestAuthenticationHandler.AddCookieAuthentication(request);
+        return request;
     }
 
     private static HttpRequestMessage DecisionRequest(Guid receiptId, string decision, long version, string? reason) =>
@@ -372,9 +438,20 @@ internal sealed class TestDecisionAuthorizer(bool authorized = true) : IIntakeRe
 
     public int Calls { get; private set; }
 
+    public int LinkCalls { get; private set; }
+
+    public Guid? LastTargetCaseId { get; private set; }
+
     public Task<bool> IsAuthorizedAsync(ActorContext actor, Guid receiptId, CancellationToken ct)
     {
         Calls++;
+        return Task.FromResult(_authorized);
+    }
+
+    public Task<bool> IsLinkAuthorizedAsync(ActorContext actor, Guid receiptId, Guid targetCaseId, CancellationToken ct)
+    {
+        LinkCalls++;
+        LastTargetCaseId = targetCaseId;
         return Task.FromResult(_authorized);
     }
 }

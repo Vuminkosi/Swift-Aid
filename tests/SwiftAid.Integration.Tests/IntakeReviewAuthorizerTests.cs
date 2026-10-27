@@ -51,10 +51,10 @@ public sealed class IntakeReviewAuthorizerTests
     public async Task AccessEpochMismatch_IsNotAuthorized()
     {
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
-        var receiptId = await SeedAuthorizerScenarioAsync(db, accessEpoch: 9);
+        var receiptId = await SeedAuthorizerScenarioAsync(db, accessEpoch: 9, officerId: "officer-epoch-9");
         var authorizer = new PostgresIntakeReviewAuthorizer(db);
 
-        Assert.False(await authorizer.IsAuthorizedAsync(CreateOfficer("officer-1"), receiptId, CancellationToken.None));
+        Assert.False(await authorizer.IsAuthorizedAsync(CreateOfficer("officer-epoch-9"), receiptId, CancellationToken.None));
     }
 
     [IntakePostgresFact]
@@ -65,6 +65,38 @@ public sealed class IntakeReviewAuthorizerTests
         var authorizer = new PostgresIntakeReviewAuthorizer(db);
 
         Assert.False(await authorizer.IsAuthorizedAsync(CreateOfficer("officer-1"), receiptId, CancellationToken.None));
+    }
+
+    [IntakePostgresFact]
+    public async Task LinkToSameOrganizationCase_IsAuthorized()
+    {
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var receiptId = await SeedAuthorizerScenarioAsync(db);
+        var caseId = await IntakeDecisionStoreTests.SeedManagedCaseAsync(db);
+        var authorizer = new PostgresIntakeReviewAuthorizer(db);
+
+        Assert.True(await authorizer.IsLinkAuthorizedAsync(CreateOfficer("officer-1"), receiptId, caseId, CancellationToken.None));
+    }
+
+    [IntakePostgresFact]
+    public async Task LinkToForeignOrganizationCase_IsNotAuthorized()
+    {
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var receiptId = await SeedAuthorizerScenarioAsync(db);
+        var foreignCaseId = await IntakeDecisionStoreTests.SeedManagedCaseAsync(db, "org-sz-1");
+        var authorizer = new PostgresIntakeReviewAuthorizer(db);
+
+        Assert.False(await authorizer.IsLinkAuthorizedAsync(CreateOfficer("officer-1"), receiptId, foreignCaseId, CancellationToken.None));
+    }
+
+    [IntakePostgresFact]
+    public async Task LinkToMissingCase_IsNotAuthorized()
+    {
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var receiptId = await SeedAuthorizerScenarioAsync(db);
+        var authorizer = new PostgresIntakeReviewAuthorizer(db);
+
+        Assert.False(await authorizer.IsLinkAuthorizedAsync(CreateOfficer("officer-1"), receiptId, Guid.NewGuid(), CancellationToken.None));
     }
 
     [IntakePostgresFact]
@@ -90,48 +122,60 @@ public sealed class IntakeReviewAuthorizerTests
         bool membershipExpired = false,
         long accessEpoch = 7,
         string grantCountry = "ZW",
-        string? queueId = "queue-zw-harare")
+        string? queueId = "queue-zw-harare",
+        string officerId = "officer-1")
     {
         var now = DateTimeOffset.UtcNow;
-        db.Actors.Add(new ActorEntity
+        if (!await db.Actors.AsNoTracking().AnyAsync(item => item.ActorId == officerId))
         {
-            ActorId = "officer-1",
-            Status = PersistentActorStatus.Active,
-            CreatedAtUtc = now,
-            UpdatedAtUtc = now
-        });
-        db.Actors.Add(new ActorEntity
+            db.Actors.Add(new ActorEntity
+            {
+                ActorId = officerId,
+                Status = PersistentActorStatus.Active,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            });
+            db.ActorAccessStates.Add(new ActorAccessStateEntity
+            {
+                ActorId = officerId,
+                AccessEpoch = accessEpoch,
+                Version = 1,
+                UpdatedAtUtc = now
+            });
+        }
+
+        if (!await db.Actors.AsNoTracking().AnyAsync(item => item.ActorId == "granter-1"))
         {
-            ActorId = "granter-1",
-            Status = PersistentActorStatus.Active,
-            CreatedAtUtc = now,
-            UpdatedAtUtc = now
-        });
-        db.ActorAccessStates.Add(new ActorAccessStateEntity
+            db.Actors.Add(new ActorEntity
+            {
+                ActorId = "granter-1",
+                Status = PersistentActorStatus.Active,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            });
+        }
+
+        if (!await db.Organizations.AsNoTracking().AnyAsync(item => item.OrganizationId == "org-zw-1"))
         {
-            ActorId = "officer-1",
-            AccessEpoch = accessEpoch,
-            Version = 1,
-            UpdatedAtUtc = now
-        });
-        db.Organizations.Add(new OrganizationEntity
-        {
-            OrganizationId = "org-zw-1",
-            Status = PersistentResourceStatus.Active,
-            CreatedAtUtc = now,
-            UpdatedAtUtc = now
-        });
-        db.Workspaces.Add(new WorkspaceEntity
-        {
-            WorkspaceId = "workspace-1",
-            OrganizationId = "org-zw-1",
-            Status = PersistentResourceStatus.Active
-        });
+            db.Organizations.Add(new OrganizationEntity
+            {
+                OrganizationId = "org-zw-1",
+                Status = PersistentResourceStatus.Active,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            });
+            db.Workspaces.Add(new WorkspaceEntity
+            {
+                WorkspaceId = "workspace-1",
+                OrganizationId = "org-zw-1",
+                Status = PersistentResourceStatus.Active
+            });
+        }
         var membershipId = Guid.NewGuid();
         db.OrganizationMemberships.Add(new OrganizationMembershipEntity
         {
             MembershipId = membershipId,
-            ActorId = "officer-1",
+            ActorId = officerId,
             OrganizationId = "org-zw-1",
             Status = PersistentMembershipStatus.Active,
             ValidFromUtc = now.AddHours(-1),
@@ -139,12 +183,12 @@ public sealed class IntakeReviewAuthorizerTests
             GrantedByActorId = "granter-1",
             Version = 1
         });
-        var grantGroupId = "grant-group-1";
+        var grantGroupId = $"grant-group-{Guid.NewGuid():N}";
         db.AccessGrantGroups.Add(new AccessGrantGroupEntity
         {
             GrantGroupId = grantGroupId,
             MembershipId = membershipId,
-            ActorId = "officer-1",
+            ActorId = officerId,
             OrganizationId = "org-zw-1",
             WorkspaceId = "workspace-1",
             CountryCode = grantCountry,
@@ -202,3 +246,4 @@ public sealed class IntakeReviewAuthorizerTests
         return receiptId;
     }
 }
+

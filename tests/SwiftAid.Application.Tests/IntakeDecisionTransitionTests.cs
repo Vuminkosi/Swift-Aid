@@ -72,15 +72,41 @@ public sealed class IntakeDecisionTransitionTests
     [Theory]
     [InlineData(IntakeStatus.ReceivedUnverified)]
     [InlineData(IntakeStatus.AwaitingReview)]
-    public void LinkAsEvidence_OnUndecidedReport_AppliesLinkedStatus(IntakeStatus current)
+    public void LinkAsEvidence_WithTargetCase_AppliesLinkedStatus(IntakeStatus current)
+    {
+        var command = new IntakeDecision(Guid.NewGuid(), 1, IntakeDecisionKind.LinkAsEvidence, null, Guid.NewGuid());
+
+        var (status, next) = IntakeDecisionTransition.Evaluate(
+            command, current, 1, IntakeRoutingStatus.RoutedForReview, "queue-zw-harare");
+
+        Assert.Equal(IntakeDecisionStatus.Applied, status);
+        Assert.Equal(IntakeStatus.LinkedAsEvidence, next);
+    }
+
+    [Fact]
+    public void LinkAsEvidence_WithoutTargetCase_IsInvalid()
     {
         var command = new IntakeDecision(Guid.NewGuid(), 1, IntakeDecisionKind.LinkAsEvidence, null);
 
         var (status, next) = IntakeDecisionTransition.Evaluate(
-            command, current, 1, IntakeRoutingStatus.NoServiceCoverage, null);
+            command, IntakeStatus.AwaitingReview, 1, IntakeRoutingStatus.RoutedForReview, "queue-zw-harare");
 
-        Assert.Equal(IntakeDecisionStatus.Applied, status);
-        Assert.Equal(IntakeStatus.LinkedAsEvidence, next);
+        Assert.Equal(IntakeDecisionStatus.Invalid, status);
+        Assert.Null(next);
+    }
+
+    [Theory]
+    [InlineData(IntakeDecisionKind.RouteForReview)]
+    [InlineData(IntakeDecisionKind.Decline)]
+    public void NonLinkDecisions_WithTargetCase_AreInvalid(IntakeDecisionKind kind)
+    {
+        var command = new IntakeDecision(Guid.NewGuid(), 1, kind, null, Guid.NewGuid());
+
+        var (status, next) = IntakeDecisionTransition.Evaluate(
+            command, IntakeStatus.ReceivedUnverified, 1, IntakeRoutingStatus.RoutedForReview, "queue-zw-harare");
+
+        Assert.Equal(IntakeDecisionStatus.Invalid, status);
+        Assert.Null(next);
     }
 
     [Theory]

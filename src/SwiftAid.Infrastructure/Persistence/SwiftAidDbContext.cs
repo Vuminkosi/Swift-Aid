@@ -44,6 +44,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
     public DbSet<IntakeAttachmentEntity> IntakeAttachments => Set<IntakeAttachmentEntity>();
     public DbSet<IntakeOutboxEntity> IntakeOutbox => Set<IntakeOutboxEntity>();
     public DbSet<IntakePromotionEntity> IntakePromotions => Set<IntakePromotionEntity>();
+    public DbSet<IntakeEvidenceLinkEntity> IntakeEvidenceLinks => Set<IntakeEvidenceLinkEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -65,6 +66,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         modelBuilder.ApplyConfiguration(new IntakeAttachmentEntityConfiguration());
         modelBuilder.ApplyConfiguration(new IntakeOutboxEntityConfiguration());
         modelBuilder.ApplyConfiguration(new IntakePromotionEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new IntakeEvidenceLinkEntityConfiguration());
     }
 
     private static void ConfigureOpenIddictSchema(ModelBuilder modelBuilder)

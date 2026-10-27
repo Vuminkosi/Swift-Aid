@@ -55,7 +55,8 @@ public static class IntakeDecisionTransition
         switch (command.Decision)
         {
             case IntakeDecisionKind.RouteForReview:
-                if (routingStatus != IntakeRoutingStatus.RoutedForReview ||
+                if (command.TargetCaseId is not null ||
+                    routingStatus != IntakeRoutingStatus.RoutedForReview ||
                     string.IsNullOrWhiteSpace(intakeQueueId))
                 {
                     return (IntakeDecisionStatus.Invalid, null);
@@ -63,10 +64,21 @@ public static class IntakeDecisionTransition
 
                 return (IntakeDecisionStatus.Applied, IntakeStatus.AwaitingReview);
             case IntakeDecisionKind.Decline:
+                if (command.TargetCaseId is not null)
+                {
+                    return (IntakeDecisionStatus.Invalid, null);
+                }
+
                 return (IntakeDecisionStatus.Applied, IntakeStatus.Declined);
             case IntakeDecisionKind.LinkAsEvidence:
-                // Target-case binding arrives with the managed-case linkage slice; the status
-                // transition reserves the report so it cannot be decided twice.
+                // The target managed case is named by the reviewer and verified by the review
+                // authorizer (same receiving organization as the report's queue); the decision
+                // store persists the link atomically with the status transition.
+                if (command.TargetCaseId is not Guid targetCaseId || targetCaseId == Guid.Empty)
+                {
+                    return (IntakeDecisionStatus.Invalid, null);
+                }
+
                 return (IntakeDecisionStatus.Applied, IntakeStatus.LinkedAsEvidence);
             case IntakeDecisionKind.AcceptIntoCase:
                 throw new IntakePromotionUnavailableException();

@@ -75,7 +75,19 @@ public static class IntakeDecisionEndpoints
             throw new ArgumentException("The review reason is too long.", nameof(request));
         }
 
-        return new IntakeDecision(receiptId, request.ExpectedVersion, decision, request.ReviewReason);
+        if (decision == IntakeDecisionKind.LinkAsEvidence)
+        {
+            if (request.TargetCaseId is not Guid wireTarget || wireTarget == Guid.Empty)
+            {
+                throw new ArgumentException("Linking evidence requires a target case.", nameof(request));
+            }
+        }
+        else if (request.TargetCaseId is not null)
+        {
+            throw new ArgumentException("Only evidence linkage accepts a target case.", nameof(request));
+        }
+
+        return new IntakeDecision(receiptId, request.ExpectedVersion, decision, request.ReviewReason, request.TargetCaseId);
     }
 
     /// <summary>
@@ -175,7 +187,11 @@ public static class IntakeDecisionEndpoints
 
         try
         {
-            if (!await authorizer.IsAuthorizedAsync(actor, decision.ReceiptId, cancellationToken).ConfigureAwait(false))
+            var authorized = decision.Decision == IntakeDecisionKind.LinkAsEvidence && decision.TargetCaseId is { } linkTarget
+                ? await authorizer.IsLinkAuthorizedAsync(actor, decision.ReceiptId, linkTarget, cancellationToken).ConfigureAwait(false)
+                : await authorizer.IsAuthorizedAsync(actor, decision.ReceiptId, cancellationToken).ConfigureAwait(false);
+
+            if (!authorized)
             {
                 return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "The intake decision was not found.");
             }
@@ -254,4 +270,5 @@ public sealed record IntakeDecisionApiRequest(
     int SchemaVersion,
     long ExpectedVersion,
     string? Decision,
-    string? ReviewReason);
+    string? ReviewReason,
+    Guid? TargetCaseId = null);

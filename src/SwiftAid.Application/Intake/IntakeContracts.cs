@@ -34,7 +34,8 @@ public sealed record IntakeDecision(
     Guid ReceiptId,
     long ExpectedVersion,
     IntakeDecisionKind Decision,
-    string? ReviewReason);
+    string? ReviewReason,
+    Guid? TargetCaseId = null);
 
 public enum IntakeDecisionStatus
 {

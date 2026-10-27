@@ -11,4 +11,12 @@ namespace SwiftAid.Application.Intake;
 public interface IIntakeReviewAuthorizer
 {
     Task<bool> IsAuthorizedAsync(ActorContext actor, Guid receiptId, CancellationToken ct);
+
+    /// <summary>
+    /// Determines whether the actor may link the receipt's report to the target managed case
+    /// as evidence. Requires review authorization plus same-organization containment: the case
+    /// must belong to the report's receiving organization so guest evidence cannot cross
+    /// organizational boundaries.
+    /// </summary>
+    Task<bool> IsLinkAuthorizedAsync(ActorContext actor, Guid receiptId, Guid targetCaseId, CancellationToken ct);
 }

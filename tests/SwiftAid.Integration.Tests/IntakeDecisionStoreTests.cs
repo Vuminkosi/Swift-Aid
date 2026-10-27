@@ -3,7 +3,9 @@ using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Intake;
+using SwiftAid.Contracts.Commands;
 using SwiftAid.Contracts.Intake;
+using SwiftAid.Domain.Cases;
 using SwiftAid.Infrastructure.Persistence;
 using SwiftAid.Infrastructure.Persistence.Entities.Intake;
 using SwiftAid.Infrastructure.Persistence.Repositories.Intake;
@@ -130,6 +132,87 @@ public sealed class IntakeDecisionStoreTests
     }
 
     [IntakePostgresFact]
+    public async Task LinkAsEvidence_RecordsLinkAtomicallyWithStatus()
+    {
+        await using var db = await CreateMigratedIntakeContextAsync();
+        var receiptId = await SeedReportAsync(db, IntakeStatus.AwaitingReview, 1);
+        var caseId = await SeedManagedCaseAsync(db);
+        var store = new PostgresIntakeDecisionStore(db);
+
+        var result = await store.DecideAsync(
+            new IntakeDecision(receiptId, 1, IntakeDecisionKind.LinkAsEvidence, null, caseId),
+            CreateOfficer("officer-1"),
+            DateTimeOffset.UtcNow,
+            CancellationToken.None);
+
+        Assert.Equal(IntakeDecisionStatus.Applied, result.Status);
+        Assert.Equal(IntakeStatus.LinkedAsEvidence, result.Receipt!.Status);
+        var stored = await db.IntakeReports.AsNoTracking().SingleAsync(item => item.ReceiptId == receiptId);
+        Assert.Equal(2, stored.Version);
+        var link = await db.IntakeEvidenceLinks.AsNoTracking().SingleAsync(item => item.ReceiptId == receiptId);
+        Assert.Equal(caseId, link.CaseId);
+        Assert.Equal("officer-1", link.LinkingOfficerActorId);
+        Assert.Equal(1, link.SourceRevision);
+    }
+
+    [IntakePostgresFact]
+    public async Task LinkReplay_SameCase_AppliesIdempotently()
+    {
+        await using var db = await CreateMigratedIntakeContextAsync();
+        var receiptId = await SeedReportAsync(db, IntakeStatus.AwaitingReview, 1);
+        var caseId = await SeedManagedCaseAsync(db);
+        var store = new PostgresIntakeDecisionStore(db);
+        var command = new IntakeDecision(receiptId, 1, IntakeDecisionKind.LinkAsEvidence, null, caseId);
+        await store.DecideAsync(command, CreateOfficer("officer-1"), DateTimeOffset.UtcNow, CancellationToken.None);
+
+        var replay = await store.DecideAsync(
+            command with { ExpectedVersion = 2 },
+            CreateOfficer("officer-1"),
+            DateTimeOffset.UtcNow,
+            CancellationToken.None);
+
+        Assert.Equal(IntakeDecisionStatus.Applied, replay.Status);
+        var stored = await db.IntakeReports.AsNoTracking().SingleAsync(item => item.ReceiptId == receiptId);
+        Assert.Equal(2, stored.Version);
+        Assert.Equal(1, await db.IntakeEvidenceLinks.AsNoTracking().CountAsync(item => item.ReceiptId == receiptId));
+    }
+
+    [IntakePostgresFact]
+    public async Task LinkReplay_DifferentCase_Conflicts()
+    {
+        await using var db = await CreateMigratedIntakeContextAsync();
+        var receiptId = await SeedReportAsync(db, IntakeStatus.AwaitingReview, 1);
+        var caseId = await SeedManagedCaseAsync(db);
+        var otherCaseId = await SeedManagedCaseAsync(db);
+        var store = new PostgresIntakeDecisionStore(db);
+        await store.DecideAsync(
+            new IntakeDecision(receiptId, 1, IntakeDecisionKind.LinkAsEvidence, null, caseId),
+            CreateOfficer("officer-1"), DateTimeOffset.UtcNow, CancellationToken.None);
+
+        var result = await store.DecideAsync(
+            new IntakeDecision(receiptId, 2, IntakeDecisionKind.LinkAsEvidence, null, otherCaseId),
+            CreateOfficer("officer-1"), DateTimeOffset.UtcNow, CancellationToken.None);
+
+        Assert.Equal(IntakeDecisionStatus.Conflict, result.Status);
+        Assert.Null(result.Receipt);
+    }
+
+    [IntakePostgresFact]
+    public async Task LinkToUnknownCase_Conflicts()
+    {
+        await using var db = await CreateMigratedIntakeContextAsync();
+        var receiptId = await SeedReportAsync(db, IntakeStatus.AwaitingReview, 1);
+        var store = new PostgresIntakeDecisionStore(db);
+
+        var result = await store.DecideAsync(
+            new IntakeDecision(receiptId, 1, IntakeDecisionKind.LinkAsEvidence, null, Guid.NewGuid()),
+            CreateOfficer("officer-1"), DateTimeOffset.UtcNow, CancellationToken.None);
+
+        Assert.Equal(IntakeDecisionStatus.Conflict, result.Status);
+        Assert.Null(result.Receipt);
+    }
+
+    [IntakePostgresFact]
     public async Task AcceptIntoCase_ThrowsPromotionUnavailable()
     {
         await using var db = await CreateMigratedContextAsync();
@@ -149,6 +232,68 @@ public sealed class IntakeDecisionStoreTests
             new Claim(ClaimTypes.NameIdentifier, actorId),
             new Claim(ActorContext.AccessEpochClaimType, "7")
         ], "synthetic-test")));
+
+    internal static async Task<Guid> SeedManagedCaseAsync(SwiftAidDbContext db, string organizationId = "org-zw-1")
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (!await db.Organizations.AsNoTracking().AnyAsync(item => item.OrganizationId == organizationId))
+        {
+            db.Organizations.Add(new OrganizationEntity
+            {
+                OrganizationId = organizationId,
+                Status = PersistentResourceStatus.Active,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            });
+            var workspaceId = organizationId == "org-zw-1" ? "workspace-1" : "workspace-sz-1";
+            db.Workspaces.Add(new WorkspaceEntity
+            {
+                WorkspaceId = workspaceId,
+                OrganizationId = organizationId,
+                Status = PersistentResourceStatus.Active
+            });
+        }
+
+        if (!await db.Actors.AsNoTracking().AnyAsync(item => item.ActorId == "officer-1"))
+        {
+            db.Actors.Add(new ActorEntity
+            {
+                ActorId = "officer-1",
+                Status = PersistentActorStatus.Active,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            });
+        }
+
+        var caseId = Guid.NewGuid();
+        db.ManagedCases.Add(new ManagedCaseEntity
+        {
+            CaseId = caseId,
+            OrganizationId = organizationId,
+            WorkspaceId = organizationId == "org-zw-1" ? "workspace-1" : "workspace-sz-1",
+            CountryCode = organizationId == "org-zw-1" ? "ZW" : "SZ",
+            Kind = CaseKind.Human,
+            Sector = Sector.HumanHealth,
+            SensitivityCode = "standard",
+            AccountableOwnerActorId = "officer-1",
+            ResourceVersion = 1,
+            AggregateVersion = 2,
+            ReportRevision = 1,
+            Workflow = CaseWorkflow.Reported,
+            WorkflowVersion = 0,
+            Classification = ClinicalClassification.Unclassified,
+            ClassificationVersion = 0,
+            Laboratory = LaboratoryState.NotRecorded,
+            LaboratoryVersion = 0,
+            OutcomeState = ReportedValueState.Unknown,
+            OutcomeVersion = 0,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        return caseId;
+    }
 
     private static async Task<Guid> SeedReportAsync(
         SwiftAidDbContext db,
