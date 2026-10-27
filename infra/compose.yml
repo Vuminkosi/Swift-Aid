@@ -5,7 +5,7 @@ services:
     build:
       context: ..
       dockerfile: src/SwiftAid.Gateway/Dockerfile
-    image: vuminkosimatibe/swiftaid-gateway:latest
+    image: ${GATEWAY_IMAGE:-vuminkosimatibe/swiftaid-gateway:latest}
     container_name: gateway
     env_file:
       - path: ${SWIFTAID_NATS_OPTIONS_FILE:-../.nats-overrides.env}
