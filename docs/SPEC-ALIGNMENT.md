@@ -29,6 +29,12 @@ The prior documentation baseline was committed at `0bf4cf45abce753011803a80f029b
 |---|---|---|---|---|
 | INF-01 | accepted | Product owner, 2026-10-26 | MinIO is the private original-file/audio/video object-store choice; Redis provides backend application cache and exact-result cache with bounded TTL; Qdrant is limited to scope-filtered AI memory/search indexing; PostgreSQL remains authoritative; NATS JetStream carries queues/events; FCM push is optional; native SQLite holds offline read models/drafts; UI assets are bundled. Provider configuration is server-side at the Gateway. | These are infrastructure choices and do not change other product requirements. The implementation plan v2.4 §3.3 says no Redis is required; this accepted owner choice adds Redis for backend application caching. Preserve that source statement and record the mismatch rather than rewriting the specification/plan. See [SERVICES.md](SERVICES.md). Runtime/provider capabilities remain independently gated. |
 
+## Approved design assumption: organization invitations
+
+| Decision | State | Actor/date | Decision | Scope and evidence |
+|---|---|---|---|---|
+| ORG-INV-01 | approved design assumption; NOT IMPLEMENTED | Product owner, 2026-10-27 | Only a current organization administrator with an independent membership-administration grant may issue an invitation. Use a high-entropy, one-time token stored as a keyed/hash digest, bound to its organization and to a verified intended contact when present. Expiry is configurable with a seven-day default; invitations are revocable. Acceptance is atomic and single-use, with idempotent replay. It may create only ordinary or pending organization membership plus an audit record; it never grants catchment, sector, sensitivity, action, assignment, or escalation permissions. Email is only a verified claim used to claim an invitation, never an identity key or merge signal. Recheck current authority at issue and acceptance, and audit issue, acceptance, expiry, and revocation. | Approved behavior design only; no implementation or test evidence is claimed. The P1.2 grant contract and P1.3 invitation verification remain pending. |
+
 ## Proposed product clarifications
 
 PC-01 through PC-08 remain proposed absent a recorded owner acceptance. No clinical or institutional policy approval is inferred.
