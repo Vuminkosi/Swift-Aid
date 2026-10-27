@@ -17,6 +17,7 @@
     <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" />
     <PackageReference Include="NATS.Net" />
     <PackageReference Include="FirebaseAdmin" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.Extensions" />
   </ItemGroup>
 
   <PropertyGroup>
