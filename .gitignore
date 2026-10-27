@@ -450,6 +450,7 @@ FodyWeavers.xsd
 
 # Local environment credentials
 /.env
+/.nats-overrides.env
 # Firebase keys and platform service configs are local secrets and stay untracked.
 /secrets/
 firebase-adminsdk*.json

@@ -46,6 +46,8 @@ jobs:
           NATS_GATEWAY_PASSWORD: local-validation-placeholder
           NATS_WORKER_USER: worker_check
           NATS_WORKER_PASSWORD: local-validation-placeholder
+          NATS_BOOTSTRAP_USER: bootstrap_check
+          NATS_BOOTSTRAP_PASSWORD: local-validation-placeholder
           MINIO_ROOT_USER: minio_check
           MINIO_ROOT_PASSWORD: local-validation-placeholder
           MINIO_BUCKET: swiftaid-config-check
