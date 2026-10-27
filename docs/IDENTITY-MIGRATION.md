@@ -12,14 +12,16 @@ The exact backup and restore commands depend on the deployment environment and a
 
 ## If migration application or verification fails
 
-Do not attempt to run `Down` after identity or authorization data has been written. Its guard is designed to refuse that rollback; the expected exception is:
+Do not attempt to run `Down` after identity or authorization data has been written. For an empty-schema rollback, first quiesce the SwiftAid Gateway and every other identity or OpenIddict writer. The migration requests `ACCESS EXCLUSIVE` locks on all ten tables in one deterministic `LOCK TABLE` statement before checking whether they are empty. It holds those locks through the table drops in EF/Npgsql's migration transaction. If any table has a row, the guard raises this exception before any drops:
 
 > P13IdentityMapping cannot be rolled back after identity data is written; use forward recovery or restore a verified backup.
 
-Prefer a reviewed forward fix that preserves the new identity state, then verify the repaired schema and application behavior. Do not bypass or remove the guard to force a rollback.
+Lock acquisition can wait on active transactions or encounter a deadlock. No production lock timeout is established by this migration. If a lock wait is unsafe or the transaction aborts, stop and diagnose it; no table drops commit when the migration transaction aborts. Retry only after the writers are quiesced and the cause is understood. Do not bypass or remove the guard to force a rollback.
+
+After any identity or authorization writes, rollback is prohibited. Prefer a reviewed forward fix that preserves the new identity state, then verify the repaired schema and application behavior.
 
 A restore is an alternative only when the incident lead determines it is operationally appropriate and the backup is verified. Coordinate a consistent recovery point for PostgreSQL and dependent key material, account for writes made after that point, and follow the platform recovery procedure. Restoring an older database can discard later identity and application changes; do not restore only the identity schema in isolation unless the approved recovery plan explicitly supports it.
 
 ## Verification status
 
-The guard and its ten-table scope are present in the migration source. A Docker-backed test of rollback on an empty schema and refusal after populating identity data is still pending. This note does not claim that the migration has been applied to a live environment or that a production backup/restore has been tested.
+The guard and its ten-table scope, lock statement, and transactional migration operations are present in the migration source. A Docker-backed test of empty-schema rollback, lock behavior, and refusal after populating identity data is still pending. This note does not claim that the migration has been applied to a live environment or that a production backup/restore has been tested.
