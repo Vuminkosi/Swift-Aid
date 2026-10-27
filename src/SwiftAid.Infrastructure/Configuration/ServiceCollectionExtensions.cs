@@ -121,7 +121,7 @@ public static class ServiceCollectionExtensions
         services.TryAddScoped<IIntakeReceiptReader, PostgresIntakeReceiptReader>();
         services.AddScoped<IIntakeDecisionStore, PostgresIntakeDecisionStore>();
         services.AddScoped<IIntakeReviewAuthorizer, PostgresIntakeReviewAuthorizer>();
-        services.TryAddScoped<IIntakeAttachmentAuthority, NotConfiguredIntakeAttachmentAuthority>();
+        services.AddScoped<IIntakeAttachmentAuthority, PostgresIntakeAttachmentAuthority>();
         var intakeMetadataOptions = ReadIntakeMetadataOptions(configuration);
         intakeMetadataOptions.Validate();
         services.TryAddSingleton(intakeMetadataOptions);
