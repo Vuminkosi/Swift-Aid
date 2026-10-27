@@ -450,6 +450,13 @@ FodyWeavers.xsd
 
 # Local environment credentials
 /.env
+# Firebase keys and platform service configs are local secrets and stay untracked.
+/secrets/
+firebase-adminsdk*.json
+swiftaid-fcm-service-account.json
+**/google-services.json
+**/GoogleService-Info.plist
 *.zip
 /.codex-temp
 /.codex
+/designs

@@ -1,0 +1,102 @@
+name: swiftaid-backend-tests
+
+services:
+  postgres:
+    image: postgis/postgis:17-3.6-alpine
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: swiftaid_fixture_admin
+      POSTGRES_PASSWORD: swiftaid-local-fixture-admin-only
+    volumes:
+      - type: bind
+        source: ./postgres-init.sql
+        target: /docker-entrypoint-initdb.d/010-swiftaid-test-databases.sql
+        read_only: true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U swiftaid_fixture_admin -d postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    networks:
+      backend-tests:
+        aliases:
+          - swiftaid-identity-postgres
+
+  redis:
+    image: redis:8.4.7-alpine3.22
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 3s
+    networks:
+      - backend-tests
+
+  nats:
+    image: nats:2.15.1-alpine3.22
+    command: ["--jetstream", "--store_dir=/data", "--http_port=8222"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8222/healthz >/dev/null"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 3s
+    networks:
+      - backend-tests
+
+  backend-tests:
+    build:
+      context: ../..
+      dockerfile: infra/testing/Dockerfile
+    environment:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+      SWIFTAID_RUN_SQLAUTH_FIXTURES: "1"
+      SWIFTAID_TEST_POSTGRES_CONNECTION: Host=127.0.0.1;Port=32703;Database=swiftaid_p21a;Username=p21_migration_owner;Password=swiftaid-local-fixture-p21-only;Timeout=5;Command Timeout=10
+      SWIFTAID_TEST_IDENTITY_POSTGRES_CONNECTION: Host=swiftaid-identity-postgres;Port=5432;Database=swiftaid_identity_test;Username=swiftaid_identity_test;Password=swiftaid-local-fixture-identity-only;Timeout=10;Command Timeout=30
+      SWIFTAID_TEST_REDIS_CONNECTION: redis:6379,abortConnect=false
+      SWIFTAID_RUN_NATS_FIXTURES: "1"
+      SWIFTAID_TEST_NATS_URL: nats://nats:4222
+    volumes:
+      - type: bind
+        source: ../../global.json
+        target: /source/global.json
+        read_only: true
+      - type: bind
+        source: ../../Directory.Build.props
+        target: /source/Directory.Build.props
+        read_only: true
+      - type: bind
+        source: ../../Directory.Packages.props
+        target: /source/Directory.Packages.props
+        read_only: true
+      - type: bind
+        source: ../../src
+        target: /source/src
+        read_only: true
+      - type: bind
+        source: ../../tests
+        target: /source/tests
+        read_only: true
+      - type: bind
+        source: ${SWIFTAID_BACKEND_TEST_RESULTS_DIR:?Set by scripts/test-backend-docker.ps1}
+        target: /test-output
+        bind:
+          create_host_path: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    networks:
+      - backend-tests
+    restart: "no"
+
+networks:
+  backend-tests:
+    internal: true

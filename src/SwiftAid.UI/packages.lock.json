@@ -197,6 +197,9 @@
         "type": "Transitive",
         "resolved": "10.0.14",
         "contentHash": "YZZ99v5PYCdyn2r8nqEIg141m1BhlVqwewwL4Z87s1h7FFS6oJG6CPOyGBO8/W6jYV57Ur/EmQEhSVgka2w1NA=="
+      },
+      "swiftaid.contracts": {
+        "type": "Project"
       }
     }
   }

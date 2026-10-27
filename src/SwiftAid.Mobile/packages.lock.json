@@ -54,6 +54,21 @@
           "Microsoft.Extensions.Localization": "10.0.1"
         }
       },
+      "Plugin.Firebase.CloudMessaging": {
+        "type": "Direct",
+        "requested": "[4.0.1, )",
+        "resolved": "4.0.1",
+        "contentHash": "qr35NDgV9BJNnn+hMkLWqDpObvtTlGyZSbQRgcSp04/s0kXzpV5vYgY9qsheLkoE5Oy+Hb1KjVT6PvPeViIqfg==",
+        "dependencies": {
+          "Plugin.Firebase.Core": "4.1.0",
+          "Xamarin.Firebase.Messaging": "124.0.0.2"
+        }
+      },
+      "Duende.IdentityModel": {
+        "type": "Transitive",
+        "resolved": "8.1.0",
+        "contentHash": "ncmC2ISg0efTqY74xI6gaLKlv4mErT5ruYK262dkSnAv07g9qYC2++q7AWWs1FyP2c0YZ6LvUtcoJmxZqYyVrA=="
+      },
       "GoogleGson": {
         "type": "Transitive",
         "resolved": "2.13.1.1",
@@ -483,6 +498,15 @@
         "resolved": "8.4.3",
         "contentHash": "+HjBpfUSS6pxC607cz6BAW1w6bxpTjurZ7x0Chvjcksg2eXPyj5BMPla068zAn/ZZtpIDaaNFNDyUcJ3kQkUfA=="
       },
+      "Plugin.Firebase.Core": {
+        "type": "Transitive",
+        "resolved": "4.1.0",
+        "contentHash": "iY0Rr1/1K64yn7efip70xRIAZulrhR4Ebz6GZMEce1eJ0GDeGp5rfqD91uEBZc+U8RKrZSCHSO5hC7G334lRIQ==",
+        "dependencies": {
+          "GoogleGson": "2.11.0.3",
+          "Xamarin.Firebase.Common": "121.0.0.6"
+        }
+      },
       "SQLitePCLRaw.bundle_e_sqlite3": {
         "type": "Transitive",
         "resolved": "2.1.13",
@@ -804,6 +828,14 @@
           "Xamarin.Kotlin.StdLib": "2.2.0.1"
         }
       },
+      "Xamarin.AndroidX.DocumentFile": {
+        "type": "Transitive",
+        "resolved": "1.0.1.29",
+        "contentHash": "ggovhzOvhJZ3/GlyWaYaV4tnG/ZEgjHh5NTNndg7MdGo+BM0fKqDgZtFj656ARejo3g6ghCismLShVAX444N0g==",
+        "dependencies": {
+          "Xamarin.AndroidX.Annotation": "1.8.2.1"
+        }
+      },
       "Xamarin.AndroidX.DrawerLayout": {
         "type": "Transitive",
         "resolved": "1.2.0.18",
@@ -897,6 +929,19 @@
         "contentHash": "PRLkeu5BFY57wbC128lPMHpQZO4fxEV6PL0gxe7gosfluAqggSn1x2v47paq4hOpSa0VvaXdz5JwFjL9j+1ZMA==",
         "dependencies": {
           "Xamarin.AndroidX.Annotation": "1.9.1.5"
+        }
+      },
+      "Xamarin.AndroidX.Legacy.Support.Core.Utils": {
+        "type": "Transitive",
+        "resolved": "1.0.0.29",
+        "contentHash": "6Na72GNdwyqO4kiYZ2YH3TtnokIBZ9227Snr8khlLYJ2TSKyMQokz2E9eEoHN0GZaYHurAb0M5WRpDgszyqTNA==",
+        "dependencies": {
+          "Xamarin.AndroidX.Annotation": "1.8.2.1",
+          "Xamarin.AndroidX.Core": "1.13.1.5",
+          "Xamarin.AndroidX.DocumentFile": "1.0.1.29",
+          "Xamarin.AndroidX.Loader": "1.1.0.29",
+          "Xamarin.AndroidX.LocalBroadcastManager": "1.1.0.17",
+          "Xamarin.AndroidX.Print": "1.0.0.29"
         }
       },
       "Xamarin.AndroidX.Lifecycle.Common": {
@@ -1094,6 +1139,14 @@
           "Xamarin.AndroidX.Lifecycle.ViewModel": "2.9.2.1"
         }
       },
+      "Xamarin.AndroidX.LocalBroadcastManager": {
+        "type": "Transitive",
+        "resolved": "1.1.0.17",
+        "contentHash": "WV4wthZZtbVMlr1Q4OdmoE7lQYjZo9GeJ1PfIxtf2bIlhaa3DqKibDfOrXGAMtbF/NGapRYTwOwMipNRRPWXHA==",
+        "dependencies": {
+          "Xamarin.AndroidX.Annotation": "1.8.2.1"
+        }
+      },
       "Xamarin.AndroidX.Navigation.Common": {
         "type": "Transitive",
         "resolved": "2.9.2.1",
@@ -1195,6 +1248,14 @@
           "Xamarin.AndroidX.Navigation.Runtime": "[2.9.2.1, 2.9.3)",
           "Xamarin.AndroidX.Transition": "1.6.0.1",
           "Xamarin.Google.Android.Material": "1.12.0.5"
+        }
+      },
+      "Xamarin.AndroidX.Print": {
+        "type": "Transitive",
+        "resolved": "1.0.0.29",
+        "contentHash": "/MQRPzG6YZMV7hfCSzWuDfTzy9V5aCxApXND0edFxywRDTnypJY50XKbESqrq4g1LfozcarljenUwtPqMSMpJw==",
+        "dependencies": {
+          "Xamarin.AndroidX.Annotation": "1.8.2.1"
         }
       },
       "Xamarin.AndroidX.ProfileInstaller.ProfileInstaller": {
@@ -1437,6 +1498,211 @@
           "Xamarin.Kotlin.StdLib": "2.2.0.1"
         }
       },
+      "Xamarin.Build.Download": {
+        "type": "Transitive",
+        "resolved": "0.11.4",
+        "contentHash": "u2ROt0h6P7mfs0jbmgvmTrqU/YEpEZcf16xcHa78GSEp7fOZunNtJLCZxooeI1V5p+lrr9kYdg3Pa8FoTbgcXQ=="
+      },
+      "Xamarin.Firebase.Annotations": {
+        "type": "Transitive",
+        "resolved": "116.2.0.14",
+        "contentHash": "8Ajhgrzz5ScJsGugjWl5rweFI96qKQ4nx03ZXyjhid3+otu81hNJOb2q3JyaJVl7lZ8LWRq6pJ2tAee3XRLIbQ==",
+        "dependencies": {
+          "Xamarin.Build.Download": "0.11.4",
+          "Xamarin.JavaX.Inject": "1.0.0.20"
+        }
+      },
+      "Xamarin.Firebase.Common": {
+        "type": "Transitive",
+        "resolved": "121.0.0.6",
+        "contentHash": "leRpJxH+LhKkWB6enalbyf+KKW1QbFAC6sdlWV1fZM+6EN7tutEatgusXxPNU5XSPgC6B3HQ6zdasuvVbJAaCw==",
+        "dependencies": {
+          "Xamarin.AndroidX.Annotation": "1.9.1.4",
+          "Xamarin.AndroidX.Concurrent.Futures": "1.2.0.7",
+          "Xamarin.Build.Download": "0.11.4",
+          "Xamarin.Firebase.Annotations": "116.2.0.14",
+          "Xamarin.Firebase.Components": "118.0.1.4",
+          "Xamarin.GooglePlayServices.Basement": "118.7.0.2",
+          "Xamarin.GooglePlayServices.Tasks": "118.3.0.2",
+          "Xamarin.Kotlin.StdLib": "2.0.21.4",
+          "Xamarin.KotlinX.Coroutines.Play.Services": "1.9.0.4"
+        }
+      },
+      "Xamarin.Firebase.Common.Ktx": {
+        "type": "Transitive",
+        "resolved": "121.0.0.2",
+        "contentHash": "QwPIJJSKrJOwcjlnpTPEQo+RBkU15Ln7W1rKzaock2GVV5u7JaBotWuUWmJJ/+60AZqVHdUHgrINq018ciO+mg==",
+        "dependencies": {
+          "Xamarin.Build.Download": "0.11.4",
+          "Xamarin.Firebase.Annotations": "116.2.0.10",
+          "Xamarin.Firebase.Common": "121.0.0.2",
+          "Xamarin.Firebase.Components": "118.0.0.2",
+          "Xamarin.Kotlin.StdLib.Jdk8": "2.0.10.1"
+        }
+      },
+      "Xamarin.Firebase.Components": {
+        "type": "Transitive",
+        "resolved": "118.0.1.4",
+        "contentHash": "WjECpOrHY6GeJmkhKlDgbmJ2LzvjIvzEQ5pFDuKOONChn9EM/1Habkm+Wr1Hr2lhmID0K8xPN/fugz5Tf2N46Q==",
+        "dependencies": {
+          "Xamarin.AndroidX.Annotation": "1.9.1.4",
+          "Xamarin.Build.Download": "0.11.4",
+          "Xamarin.Firebase.Annotations": "116.2.0.14",
+          "Xamarin.Google.ErrorProne.Annotations": "2.37.0.2"
+        }
+      },
+      "Xamarin.Firebase.Datatransport": {
+        "type": "Transitive",
+        "resolved": "119.0.0.2",
+        "contentHash": "hMZ7x69lzCmvozqM33RIXi1fPnibw1Ghe40d6ax86IAdh2ZzsqOxOJGKEiXprHOxMDQuKuYBiEb8igKq5FzcOg==",
+        "dependencies": {
+          "Xamarin.AndroidX.Annotation": "1.8.2.1",
+          "Xamarin.Build.Download": "0.11.4",
+          "Xamarin.Firebase.Common": "121.0.0.2",
+          "Xamarin.Firebase.Components": "118.0.0.2",
+          "Xamarin.Google.Android.DataTransport.TransportApi": "3.2.0.2",
+          "Xamarin.Google.Android.DataTransport.TransportBackendCct": "3.3.0.2",
+          "Xamarin.Google.Android.DataTransport.TransportRuntime": "3.3.0.2",
+          "Xamarin.Kotlin.StdLib.Jdk8": "2.0.10.1"
+        }
+      },
+      "Xamarin.Firebase.Encoders": {
+        "type": "Transitive",
+        "resolved": "117.0.0.18",
+        "contentHash": "bzGYwAdp+0lM7gBr83iARk/UdpFEel0XSiywKYvh5KwVXltAyr+2z+PQwnDcxlCcv9bBe++ogFq8yW4ESpM4AQ==",
+        "dependencies": {
+          "Xamarin.AndroidX.Annotation": "1.8.2.1",
+          "Xamarin.Build.Download": "0.11.4"
+        }
+      },
+      "Xamarin.Firebase.Encoders.JSON": {
+        "type": "Transitive",
+        "resolved": "118.0.1.10",
+        "contentHash": "1lmyOxz7gFtd0p/BCb0QRcbdVmEYFLA1ZOcNfyQzsBQOinUYtdlAX4vinyqiFIgluh2R5l8gQxHRTBJRNTMHEA==",
+        "dependencies": {
+          "Xamarin.AndroidX.Annotation": "1.8.2.1",
+          "Xamarin.Build.Download": "0.11.4",
+          "Xamarin.Firebase.Encoders": "117.0.0.18",
+          "Xamarin.Kotlin.StdLib.Jdk8": "2.0.10.1"
+        }
+      },
+      "Xamarin.Firebase.Encoders.Proto": {
+        "type": "Transitive",
+        "resolved": "116.0.0.13",
+        "contentHash": "rtnMu0aOYwUwFfT4kjKTwVl9Yos0AZtCx8K1D0sJhiz4xu4IM5G7nqAGS1ZefF5mePAdUbiGlB20L3D8VzPm4A==",
+        "dependencies": {
+          "Xamarin.AndroidX.Annotation": "1.8.2.1",
+          "Xamarin.Build.Download": "0.11.4",
+          "Xamarin.Firebase.Encoders": "117.0.0.18"
+        }
+      },
+      "Xamarin.Firebase.Iid.Interop": {
+        "type": "Transitive",
+        "resolved": "117.1.0.18",
+        "contentHash": "8vHEnQb1IHauMwTmv00aAxxyPAVfBse/1cXDMHkgYteJYicTRjS9MgA7DFUVXgN50JOoN/uDs6MRaknLvOqY1A==",
+        "dependencies": {
+          "Xamarin.Build.Download": "0.11.4",
+          "Xamarin.GooglePlayServices.Basement": "118.4.0.2",
+          "Xamarin.GooglePlayServices.Tasks": "118.2.0.2"
+        }
+      },
+      "Xamarin.Firebase.Installations": {
+        "type": "Transitive",
+        "resolved": "118.0.0.2",
+        "contentHash": "5sjNOhZzvjPxl22xPuFPKdi7WnMnHqZ1pDo7IOF9GndZXEFXOkLVTNEdc/ab7wuiKQMeaSpyZZvRRkJkZkQ0eQ==",
+        "dependencies": {
+          "Xamarin.Build.Download": "0.11.4",
+          "Xamarin.Firebase.Annotations": "116.2.0.10",
+          "Xamarin.Firebase.Common": "121.0.0.2",
+          "Xamarin.Firebase.Common.Ktx": "121.0.0.2",
+          "Xamarin.Firebase.Components": "118.0.0.2",
+          "Xamarin.Firebase.Installations.InterOp": "117.2.0.6",
+          "Xamarin.GooglePlayServices.Tasks": "118.2.0.2",
+          "Xamarin.Kotlin.StdLib": "2.0.10.1"
+        }
+      },
+      "Xamarin.Firebase.Installations.InterOp": {
+        "type": "Transitive",
+        "resolved": "117.2.0.6",
+        "contentHash": "HkOjQ7q9GRx1jLOAnDt+7+rQQ2Kj6qaHi0KTcycxwzGn++SAwYtWqnt1J7jOPAeoRkT4MSNYXLaad0fQlu2zeA==",
+        "dependencies": {
+          "Xamarin.Build.Download": "0.11.4",
+          "Xamarin.Firebase.Annotations": "116.2.0.10",
+          "Xamarin.GooglePlayServices.Tasks": "118.2.0.2"
+        }
+      },
+      "Xamarin.Firebase.Measurement.Connector": {
+        "type": "Transitive",
+        "resolved": "120.0.1.6",
+        "contentHash": "G9SqgbOM+HlHxoLN8/T8gmU5BH/Gd8F/cFiDy10CuuIFRkhtFOa3UqcEWjEN7lXvW4HSSEY53a/mUcU3CmpK6Q==",
+        "dependencies": {
+          "Xamarin.Build.Download": "0.11.4",
+          "Xamarin.Firebase.Annotations": "116.2.0.10",
+          "Xamarin.GooglePlayServices.Basement": "118.4.0.2"
+        }
+      },
+      "Xamarin.Firebase.Messaging": {
+        "type": "Transitive",
+        "resolved": "124.0.0.2",
+        "contentHash": "K+PESmAjVmDL+yIUKWxsab0PFfz9IONKSYEjOskRTwCoZBI3L3TCl+ux4RARBy7TwV9J9IveGMw8UhLZMxtIhA==",
+        "dependencies": {
+          "Xamarin.AndroidX.Annotation": "1.8.2.1",
+          "Xamarin.Build.Download": "0.11.4",
+          "Xamarin.Firebase.Common": "121.0.0.2",
+          "Xamarin.Firebase.Common.Ktx": "121.0.0.2",
+          "Xamarin.Firebase.Components": "118.0.0.2",
+          "Xamarin.Firebase.Datatransport": "119.0.0.2",
+          "Xamarin.Firebase.Encoders": "117.0.0.18",
+          "Xamarin.Firebase.Encoders.JSON": "118.0.1.10",
+          "Xamarin.Firebase.Encoders.Proto": "116.0.0.13",
+          "Xamarin.Firebase.Iid.Interop": "117.1.0.18",
+          "Xamarin.Firebase.Installations": "118.0.0.2",
+          "Xamarin.Firebase.Installations.InterOp": "117.2.0.6",
+          "Xamarin.Firebase.Measurement.Connector": "120.0.1.6",
+          "Xamarin.Google.Android.DataTransport.TransportApi": "3.2.0.2",
+          "Xamarin.Google.Android.DataTransport.TransportBackendCct": "3.3.0.2",
+          "Xamarin.Google.Android.DataTransport.TransportRuntime": "3.3.0.2",
+          "Xamarin.Google.ErrorProne.Annotations": "2.30.0.1",
+          "Xamarin.GooglePlayServices.Base": "118.5.0.2",
+          "Xamarin.GooglePlayServices.Basement": "118.4.0.2",
+          "Xamarin.GooglePlayServices.CloudMessaging": "117.3.0.2",
+          "Xamarin.GooglePlayServices.Stats": "117.1.0.2",
+          "Xamarin.GooglePlayServices.Tasks": "118.2.0.2",
+          "Xamarin.Kotlin.StdLib": "2.0.10.1"
+        }
+      },
+      "Xamarin.Google.Android.DataTransport.TransportApi": {
+        "type": "Transitive",
+        "resolved": "3.2.0.2",
+        "contentHash": "Cy02cg5wOsdLNTTBsCnuyEu4OhkNXPXV2IiBkKbAu5+iejHFxdiULx+kQEqGGukZwOm3YorCb3lVRpJq10o4KA==",
+        "dependencies": {
+          "Xamarin.AndroidX.Annotation": "1.8.2.1"
+        }
+      },
+      "Xamarin.Google.Android.DataTransport.TransportBackendCct": {
+        "type": "Transitive",
+        "resolved": "3.3.0.2",
+        "contentHash": "Urcc8jodG6o7nt0MnAN11cfeT2hCbHmT7l2+Kok8iyGCNJdUmTVzuUE8z/+5nLF4OwnYt7+tDMhPOdQj/sk0tg==",
+        "dependencies": {
+          "Xamarin.AndroidX.Annotation": "1.8.2.1",
+          "Xamarin.Firebase.Encoders": "117.0.0.18",
+          "Xamarin.Firebase.Encoders.JSON": "118.0.1.10",
+          "Xamarin.Google.Android.DataTransport.TransportApi": "3.2.0.2",
+          "Xamarin.Google.Android.DataTransport.TransportRuntime": "3.3.0.2"
+        }
+      },
+      "Xamarin.Google.Android.DataTransport.TransportRuntime": {
+        "type": "Transitive",
+        "resolved": "3.3.0.2",
+        "contentHash": "8QxSkBn4B37TP8pHWZv5mgTvv+/30LIfbkRfMZp8KzfBmgztd4g+5kXszDnxb+EhG3I8hY6g4q/FnZWLvpsK9w==",
+        "dependencies": {
+          "Xamarin.AndroidX.Annotation": "1.8.2.1",
+          "Xamarin.Firebase.Encoders": "117.0.0.18",
+          "Xamarin.Firebase.Encoders.Proto": "116.0.0.13",
+          "Xamarin.Google.Android.DataTransport.TransportApi": "3.2.0.2",
+          "Xamarin.JavaX.Inject": "1.0.0.16"
+        }
+      },
       "Xamarin.Google.Android.Material": {
         "type": "Transitive",
         "resolved": "1.12.0.5",
@@ -1488,6 +1754,64 @@
         "resolved": "1.0.0.29",
         "contentHash": "5w1ErO9PmpGR3ii2qJkzV1ntOJGSrd7NyOdop3Sw+q/DQ6oCdyoOq3jbJ3Stg0ACOUItN7XO6EqAvNQ8jQaV0g=="
       },
+      "Xamarin.GooglePlayServices.Base": {
+        "type": "Transitive",
+        "resolved": "118.5.0.2",
+        "contentHash": "0AEDf+TKW7Q//HxyS/9RPuCk6fJfq0Js2iiLBkvumZfbe57gFNnkoJEQXNw8DTbJqjEEpHapjEAGzh3UoQGxeg==",
+        "dependencies": {
+          "Xamarin.AndroidX.Collection": "1.4.3.1",
+          "Xamarin.AndroidX.Core": "1.13.1.5",
+          "Xamarin.AndroidX.Fragment": "1.8.3.1",
+          "Xamarin.Build.Download": "0.11.4",
+          "Xamarin.GooglePlayServices.Basement": "118.4.0.2",
+          "Xamarin.GooglePlayServices.Tasks": "118.2.0.2"
+        }
+      },
+      "Xamarin.GooglePlayServices.Basement": {
+        "type": "Transitive",
+        "resolved": "118.7.0.2",
+        "contentHash": "lqkRYQha/6FbEsUdFq2A074qQB6gMytNa/pkRGIq7BIo2+dWmJL4muWKXzGpJ8iiSeyljEm4cONqCpplQlItPA==",
+        "dependencies": {
+          "Xamarin.AndroidX.Collection": "1.5.0.2",
+          "Xamarin.AndroidX.Core": "1.16.0.2",
+          "Xamarin.AndroidX.Fragment": "1.8.6.2",
+          "Xamarin.Build.Download": "0.11.4"
+        }
+      },
+      "Xamarin.GooglePlayServices.CloudMessaging": {
+        "type": "Transitive",
+        "resolved": "117.3.0.2",
+        "contentHash": "H+hLajax5qS/Q82UlFmhuApbkHJ26nxYlv8MJ1UB9cjZIsEWPbk2Vb361RFjFaC9UIWrhB19xp8MHo+tfjQAIw==",
+        "dependencies": {
+          "Xamarin.Build.Download": "0.11.4",
+          "Xamarin.GooglePlayServices.Basement": "118.4.0.2",
+          "Xamarin.GooglePlayServices.Tasks": "118.2.0.2"
+        }
+      },
+      "Xamarin.GooglePlayServices.Stats": {
+        "type": "Transitive",
+        "resolved": "117.1.0.2",
+        "contentHash": "ILLpDU/M7/PDX1YHYpXIKHRA7WuxzPky2bStLwrK10N1hINn6rq6VWNoNWVFCJI73lflIYhVol6+otBsvyYKTA==",
+        "dependencies": {
+          "Xamarin.AndroidX.Legacy.Support.Core.Utils": "1.0.0.29",
+          "Xamarin.Build.Download": "0.11.4",
+          "Xamarin.GooglePlayServices.Basement": "118.4.0.2"
+        }
+      },
+      "Xamarin.GooglePlayServices.Tasks": {
+        "type": "Transitive",
+        "resolved": "118.3.0.2",
+        "contentHash": "sa8GmTiq18NdVG8wXp8uXpL8zLyaKniLnZg84BtAYQIWWvofPQXHZLwC42txuPosBaCDo/1yW2SoNVr0QMA88w==",
+        "dependencies": {
+          "Xamarin.Build.Download": "0.11.4",
+          "Xamarin.GooglePlayServices.Basement": "118.7.0.2"
+        }
+      },
+      "Xamarin.JavaX.Inject": {
+        "type": "Transitive",
+        "resolved": "1.0.0.20",
+        "contentHash": "xKiRbhe8av2s24CKTbe5xmKvMWnhRjORsBqkEaTkPmU3/FIg8sqTCHsSDeowUrD573PHYmcGajCazdkb/D+mGA=="
+      },
       "Xamarin.Jetbrains.Annotations": {
         "type": "Transitive",
         "resolved": "26.0.2.3",
@@ -1504,6 +1828,23 @@
         "contentHash": "jPxSvOvFabE8sTl+3v66s2q0RobE+KwJ9OkOqaxOFDesJJhNxo0qPa5DAoAiPRU00vbIQTu3op/cOpcK5ptRSQ==",
         "dependencies": {
           "Xamarin.Jetbrains.Annotations": "26.0.2.3"
+        }
+      },
+      "Xamarin.Kotlin.StdLib.Jdk7": {
+        "type": "Transitive",
+        "resolved": "2.0.10.1",
+        "contentHash": "q+ZcBSqs7tPzvU6jeW93BUUoOAPxmzU+Tv1WcFBJ7a6d0N5k4qffcf4PBe5drOJotze9f/HoHn7LCOpTC6eNfQ==",
+        "dependencies": {
+          "Xamarin.Kotlin.StdLib": "2.0.10.1"
+        }
+      },
+      "Xamarin.Kotlin.StdLib.Jdk8": {
+        "type": "Transitive",
+        "resolved": "2.0.10.1",
+        "contentHash": "rlSxjtLuwCEznvot/IiEhQ8sGSr0w8nVQiGlJu33R1n02Ur11VX8IK1zaU4No2mHc7jG2fWE0L6hWOPsfefQZA==",
+        "dependencies": {
+          "Xamarin.Kotlin.StdLib": "2.0.10.1",
+          "Xamarin.Kotlin.StdLib.Jdk7": "2.0.10.1"
         }
       },
       "Xamarin.KotlinX.Coroutines.Android": {
@@ -1532,6 +1873,16 @@
           "Xamarin.Kotlin.StdLib": "2.2.0.1"
         }
       },
+      "Xamarin.KotlinX.Coroutines.Play.Services": {
+        "type": "Transitive",
+        "resolved": "1.9.0.4",
+        "contentHash": "8MSL5qcltPeaSYOSLHJiyV3iokxMaZIwSV5FN7G1AnmPBlwVdbTABIHtEeIuqzGwM099gc60JvWuAoAmXAJJpQ==",
+        "dependencies": {
+          "Xamarin.GooglePlayServices.Tasks": "118.3.0.2",
+          "Xamarin.Kotlin.StdLib": "2.0.21.4",
+          "Xamarin.KotlinX.Coroutines.Core.Jvm": "1.9.0.4"
+        }
+      },
       "Xamarin.KotlinX.Serialization.Core": {
         "type": "Transitive",
         "resolved": "1.9.0.1",
@@ -1552,6 +1903,7 @@
         "type": "Project",
         "dependencies": {
           "CommunityToolkit.Datasync.Client": "[10.1.2, )",
+          "Duende.IdentityModel.OidcClient": "[7.1.1, )",
           "Microsoft.EntityFrameworkCore.Sqlite": "[10.0.14, )",
           "SwiftAid.Contracts": "[1.0.0, )"
         }
@@ -1564,7 +1916,8 @@
         "dependencies": {
           "Blazor.Lottie.Player": "[1.0.6, )",
           "Microsoft.AspNetCore.Components.Web": "[10.0.14, )",
-          "MudBlazor": "[9.11.0, )"
+          "MudBlazor": "[9.11.0, )",
+          "SwiftAid.Contracts": "[1.0.0, )"
         }
       },
       "Blazor.Lottie.Player": {
@@ -1592,6 +1945,16 @@
           "Microsoft.Extensions.Http": "10.0.9",
           "Microsoft.Extensions.Logging.Abstractions": "10.0.9",
           "Microsoft.Spatial": "8.4.3"
+        }
+      },
+      "Duende.IdentityModel.OidcClient": {
+        "type": "CentralTransitive",
+        "requested": "[7.1.1, )",
+        "resolved": "7.1.1",
+        "contentHash": "YyuyW1KaCotSTuEBMt5NTXecuKwX2kU0FmaJ+X39QdQvYGAlOv2Yfp8Vo2vVihw6+3EEcpbDKgfiaoJ3EyI8Fg==",
+        "dependencies": {
+          "Duende.IdentityModel": "8.1.0",
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.13"
         }
       },
       "Microsoft.AspNetCore.Components.Web": {
@@ -1636,6 +1999,687 @@
       }
     },
     "net10.0-android36.0/android-arm64": {},
-    "net10.0-android36.0/android-x64": {}
+    "net10.0-android36.0/android-x64": {},
+    "net10.0-android36.0/iossimulator-x64": {},
+    "net10.0-ios26.5": {
+      "Microsoft.AspNetCore.Components.WebView.Maui": {
+        "type": "Direct",
+        "requested": "[10.0.120, )",
+        "resolved": "10.0.120",
+        "contentHash": "Nk0cIM3iLFdwFojOWFYDfAq4euUugMho/0NPWf588JgQwtEsXKFsds7sVdcPzcH7MJC+a2mpn+VZ8cHDZSU/Rg==",
+        "dependencies": {
+          "Microsoft.AspNetCore.Authorization": "10.0.0",
+          "Microsoft.AspNetCore.Components.WebView": "10.0.0",
+          "Microsoft.JSInterop": "10.0.0"
+        }
+      },
+      "Microsoft.Extensions.Logging.Debug": {
+        "type": "Direct",
+        "requested": "[10.0.0, )",
+        "resolved": "10.0.0",
+        "contentHash": "A/4vBtVaySLBGj4qluye+KSbeVCCMa6GcTbxf2YgnSDHs9b9105+VojBJ1eJPel8F1ny0JOh+Ci3vgCKn69tNQ==",
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.0",
+          "Microsoft.Extensions.Logging": "10.0.0",
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.0"
+        }
+      },
+      "Microsoft.Maui.Controls": {
+        "type": "Direct",
+        "requested": "[10.0.120, )",
+        "resolved": "10.0.120",
+        "contentHash": "hUXOEc7NSpv21v/M/VJEC+t3prlMRYMm5RbTzVZuMIerJ/mZKC6mY+GLa0FhP3N2GDkmrBNE7MW5BlBWppmm1Q==",
+        "dependencies": {
+          "Microsoft.Maui.Controls.Build.Tasks": "10.0.120",
+          "Microsoft.Maui.Controls.Core": "10.0.120",
+          "Microsoft.Maui.Controls.Xaml": "10.0.120",
+          "Microsoft.Maui.Resizetizer": "10.0.120"
+        }
+      },
+      "Microsoft.NET.ILLink.Tasks": {
+        "type": "Direct",
+        "requested": "[10.0.14, )",
+        "resolved": "10.0.14",
+        "contentHash": "YlTamXppEQls6DYWt7RdUuwWDb0lyw/vXCaGeQpLCpsLmfwGuCkOz/vIGgMTV7ECsJcavkCOkxZXv9s8rdAHkQ=="
+      },
+      "MudBlazor": {
+        "type": "Direct",
+        "requested": "[9.11.0, )",
+        "resolved": "9.11.0",
+        "contentHash": "hboxF5cQuMYjB0w6+tScmNt0ACuoCu35TGPsCmCq8OeQgvtPtzQ1s9auAOrINj/J6I/ZyBB1rmUzrcMKj14RFA==",
+        "dependencies": {
+          "Microsoft.AspNetCore.Components": "10.0.1",
+          "Microsoft.AspNetCore.Components.Web": "10.0.1",
+          "Microsoft.Extensions.Localization": "10.0.1"
+        }
+      },
+      "Plugin.Firebase.CloudMessaging": {
+        "type": "Direct",
+        "requested": "[4.0.1, )",
+        "resolved": "4.0.1",
+        "contentHash": "qr35NDgV9BJNnn+hMkLWqDpObvtTlGyZSbQRgcSp04/s0kXzpV5vYgY9qsheLkoE5Oy+Hb1KjVT6PvPeViIqfg==",
+        "dependencies": {
+          "AdamE.Firebase.iOS.CloudMessaging": "12.5.0.4",
+          "Plugin.Firebase.Core": "4.1.0"
+        }
+      },
+      "AdamE.Firebase.iOS.CloudMessaging": {
+        "type": "Transitive",
+        "resolved": "12.5.0.4",
+        "contentHash": "CBxcfCfi5zuHKfBY6qLNVSYaWh9WOjvjWiee59K9C1OmkI/GON5ES/HF9nKMxiVNL+ViOc+nSEuhm7FLQhc16A==",
+        "dependencies": {
+          "AdamE.Firebase.iOS.Core": "12.5.0.4",
+          "AdamE.Firebase.iOS.Installations": "12.5.0.4"
+        }
+      },
+      "AdamE.Firebase.iOS.Core": {
+        "type": "Transitive",
+        "resolved": "12.5.0.4",
+        "contentHash": "mIuGq0R3o1SPNXhOmEsjjYkUc2AH/WUa3e6mmWp838jKwL8yrs4Ew8/sG9weOSvx8HxIjHY6m418UhKLYIRO/g==",
+        "dependencies": {
+          "AdamE.Google.iOS.GoogleDataTransport": "[10.1.0, 11.0.0)",
+          "AdamE.Google.iOS.GoogleUtilities": "[8.1.0, 9.0.0)",
+          "AdamE.Google.iOS.Nanopb": "[3.30910.0, 4.0.0)",
+          "AdamE.Google.iOS.PromisesObjC": "[2.4.0, 3.0.0)"
+        }
+      },
+      "AdamE.Firebase.iOS.Installations": {
+        "type": "Transitive",
+        "resolved": "12.5.0.4",
+        "contentHash": "CKuPMcP7XDD+6OOuWFha25BxdEz0nmgb+eXYPqKilNM5KqlJIZRuLo9klKlZkLM0qNMENDqCvprD8YY1yKd13g==",
+        "dependencies": {
+          "AdamE.Firebase.iOS.Core": "12.5.0.4"
+        }
+      },
+      "AdamE.Google.iOS.GoogleDataTransport": {
+        "type": "Transitive",
+        "resolved": "10.1.0",
+        "contentHash": "KKsMuRovGRRcavhJPHuPIFe1WZ14VlwP/KBIhgMhGjJNEWYaURPR+kzu/p+xRBD/LRBMFgzk7zsRjysza6g1IA==",
+        "dependencies": {
+          "AdamE.Google.iOS.Nanopb": "[3.30910.0, 4.0.0)",
+          "AdamE.Google.iOS.PromisesObjC": "[2.4.0, 3.0.0)",
+          "System.Runtime.InteropServices.NFloat.Internal": "6.0.1"
+        }
+      },
+      "AdamE.Google.iOS.GoogleUtilities": {
+        "type": "Transitive",
+        "resolved": "8.1.0",
+        "contentHash": "GJyRDGLWl5jgFg4KduXe2V8kIXs6O5muNrn1GTd+/Wwi9blMasFGHluW9L6RIj1NvwmcvN9rZTVXC9pgDaIiqw=="
+      },
+      "AdamE.Google.iOS.Nanopb": {
+        "type": "Transitive",
+        "resolved": "3.30910.0",
+        "contentHash": "l+MjR2jjZEqeoPw5ZQDizjFE0cpuUzi8M0hHtPIybbbY0cFVTJpSESI2mftsh5fJtHXxOdrS3xwEXsCUpn0uiA==",
+        "dependencies": {
+          "System.Runtime.InteropServices.NFloat.Internal": "6.0.1"
+        }
+      },
+      "AdamE.Google.iOS.PromisesObjC": {
+        "type": "Transitive",
+        "resolved": "2.4.0",
+        "contentHash": "Y+fXP0Gri6QNCLXlnSZUCy2NBS6DKHlNoU/AZ14mGZp4JxeH+vkmIQLL7XdHf8WZqut0Nmb3BDSZCOih5T8NEw==",
+        "dependencies": {
+          "System.Runtime.InteropServices.NFloat.Internal": "6.0.1"
+        }
+      },
+      "Duende.IdentityModel": {
+        "type": "Transitive",
+        "resolved": "8.1.0",
+        "contentHash": "ncmC2ISg0efTqY74xI6gaLKlv4mErT5ruYK262dkSnAv07g9qYC2++q7AWWs1FyP2c0YZ6LvUtcoJmxZqYyVrA=="
+      },
+      "Microsoft.AspNetCore.Authorization": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "0iRuv9FevMH1TFuYBMY7M+Z/Xm1V8iEDM5p3i+oBWLEdlLyPgMA+RkQDN/1a0MMAEisPxHseTOJ5vnb3n9HARg==",
+        "dependencies": {
+          "Microsoft.AspNetCore.Metadata": "10.0.14",
+          "Microsoft.Extensions.Diagnostics": "10.0.14",
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.14",
+          "Microsoft.Extensions.Options": "10.0.14"
+        }
+      },
+      "Microsoft.AspNetCore.Components": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "MAuPVtxnAmZcu0lFYVUW+xxuwufIwalz8Gp2b5D3ogLN4OKCBJ8LSO9j1f45LJs3c2LZ+/6Jj7nFtU0itUcJpg==",
+        "dependencies": {
+          "Microsoft.AspNetCore.Authorization": "10.0.14",
+          "Microsoft.AspNetCore.Components.Analyzers": "10.0.14"
+        }
+      },
+      "Microsoft.AspNetCore.Components.Analyzers": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "qWj8T3qD0MzxuradKXMYSX/68czXLIANyts7nlQitMSrdup3aeH6BXSULVXcXiHg4OGD5M82eKtQrY3O4YZd8A=="
+      },
+      "Microsoft.AspNetCore.Components.Forms": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "fD6xw8fKERmW0OhngY42d3Pzjk6/oaFZzx1RzCJjB2Ory8pzzBTARiZZBVwW7oh/O25H5dtjTVTz2d+yxpYr+A==",
+        "dependencies": {
+          "Microsoft.AspNetCore.Components": "10.0.14",
+          "Microsoft.Extensions.Validation": "10.0.14"
+        }
+      },
+      "Microsoft.AspNetCore.Components.WebView": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "fdBlMj2W0Kv5qIsUKotipoaCUQT1LgWc9QVbS0dJpiFL5UWytp6JvKrB71dj6tuqCZwb2VpcKyIj6uQWfG5VLw==",
+        "dependencies": {
+          "Microsoft.AspNetCore.Components.Web": "10.0.0",
+          "Microsoft.Extensions.Configuration.Binder": "10.0.0",
+          "Microsoft.Extensions.Configuration.Json": "10.0.0",
+          "Microsoft.Extensions.FileProviders.Composite": "10.0.0",
+          "Microsoft.Extensions.FileProviders.Embedded": "10.0.0",
+          "Microsoft.Extensions.Logging": "10.0.0"
+        }
+      },
+      "Microsoft.AspNetCore.Metadata": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "RXaeKIj2fJEEXghowZLAqTBOm2D+aGcLmQgCD/BMHkWjkhnBQ9QND0fOctxrisdojsg1lmF+aRWA7L5qa1pE8g=="
+      },
+      "Microsoft.Data.Sqlite.Core": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "1p9rO3Q2X/L/9YrYog3vaDzi8u+WZfJCOkDYoHqmofqYP0DLPLPyZcS2Rnh/79JXAodgbs1AgsaNwLpIvC3Xew==",
+        "dependencies": {
+          "SQLitePCLRaw.core": "2.1.13"
+        }
+      },
+      "Microsoft.EntityFrameworkCore.Abstractions": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "/SaznoTTFfKzxYEbCPAwwKBR3XT92DZgH4jJ3/cqs2skP3o2D+TL6i9Aaj+8Azwtu6/sRd0ve4P2mN12nfVmCw=="
+      },
+      "Microsoft.EntityFrameworkCore.Analyzers": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "gaANlGNTxkgODX2eeVT8jjd3AmlFilQV4DFf8qoW30+wUCm2o4N7nEHtZvnHIwfhaJni2DqcjE47Au7tC0Q5jA=="
+      },
+      "Microsoft.EntityFrameworkCore.Relational": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "Ut0kgtfoKX9QElQVEXSEAgdQc79jISWStVWSOhfPDDHNSKMwFzSXG3gtdYFTAbsBoV+8NtXdVaj4xwdqeky8UA==",
+        "dependencies": {
+          "Microsoft.EntityFrameworkCore": "10.0.14",
+          "Microsoft.Extensions.Caching.Memory": "10.0.14",
+          "Microsoft.Extensions.Configuration.Abstractions": "10.0.14",
+          "Microsoft.Extensions.Logging": "10.0.14"
+        }
+      },
+      "Microsoft.EntityFrameworkCore.Sqlite.Core": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "08VGlMQ9WbK869as9Ho+VZQbM5Qu6zdorgeh6ShVwQgLYgfUBiaIm02T7spfW7Xc1MBHCvclwPgGWpvx5BYGXQ==",
+        "dependencies": {
+          "Microsoft.Data.Sqlite.Core": "10.0.14",
+          "Microsoft.EntityFrameworkCore.Relational": "10.0.14",
+          "Microsoft.Extensions.Caching.Memory": "10.0.14",
+          "Microsoft.Extensions.Configuration.Abstractions": "10.0.14",
+          "Microsoft.Extensions.DependencyModel": "10.0.14",
+          "Microsoft.Extensions.Logging": "10.0.14",
+          "SQLitePCLRaw.core": "2.1.13"
+        }
+      },
+      "Microsoft.Extensions.Caching.Abstractions": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "enSfqeENnSjGH3YAYKsCtsa5ob0HNiwF2nwJiC2yhilNXTlD/0prxrgPkWjoAp9svJcu04AiEIKtdh/A54P2fA==",
+        "dependencies": {
+          "Microsoft.Extensions.Primitives": "10.0.14"
+        }
+      },
+      "Microsoft.Extensions.Caching.Memory": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "AxK3kyD6sWNpYKf+66huE7wHHjgKHONlD1dUaD/CxjZVBLEpH5N4jaqgszTcZvaM9/XVeXF28K3E0wsTyTA4Xg==",
+        "dependencies": {
+          "Microsoft.Extensions.Caching.Abstractions": "10.0.14",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.14",
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.14",
+          "Microsoft.Extensions.Options": "10.0.14",
+          "Microsoft.Extensions.Primitives": "10.0.14"
+        }
+      },
+      "Microsoft.Extensions.Configuration": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "UcnvaEaMvRckDDhyqY1OZkFwBqpZArkHFKB6dWaQWT9XTuNttNNX8Cqsb/Sic2LfJxsMLJUXnYrxY3iX5LN9pQ==",
+        "dependencies": {
+          "Microsoft.Extensions.Configuration.Abstractions": "10.0.14",
+          "Microsoft.Extensions.Primitives": "10.0.14"
+        }
+      },
+      "Microsoft.Extensions.Configuration.Abstractions": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "4YdfvaoWn3tB1xQQHGrhRTFWJ8fGOqxThxduynSZy9ZFTiSaUi3vX4EK/kj8h2HQMwTlks9MWV1fv2WRBv5/1w==",
+        "dependencies": {
+          "Microsoft.Extensions.Primitives": "10.0.14"
+        }
+      },
+      "Microsoft.Extensions.Configuration.Binder": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "brDb5kgle2iY2lWHgeV/KOqnBEpVnlMFigGJ/WW7KP9Nj6C/t53f/h5boYyVXB0bEhgpL+ctbewDJMI+zAMj1w==",
+        "dependencies": {
+          "Microsoft.Extensions.Configuration": "10.0.14",
+          "Microsoft.Extensions.Configuration.Abstractions": "10.0.14"
+        }
+      },
+      "Microsoft.Extensions.Configuration.FileExtensions": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "LqCTyF0twrG4tyEN6PpSC5ewRBDwCBazRUfCOdRddwaQ3n2S57GDDeYOlTLcbV/V2dxSSZWg5Ofr48h6BsBmxw==",
+        "dependencies": {
+          "Microsoft.Extensions.Configuration": "10.0.0",
+          "Microsoft.Extensions.Configuration.Abstractions": "10.0.0",
+          "Microsoft.Extensions.FileProviders.Abstractions": "10.0.0",
+          "Microsoft.Extensions.FileProviders.Physical": "10.0.0",
+          "Microsoft.Extensions.Primitives": "10.0.0"
+        }
+      },
+      "Microsoft.Extensions.Configuration.Json": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "BIOPTEAZoeWbHlDT9Zudu+rpecZizFwhdIFRiyZKDml7JbayXmfTXKUt+ezifsSXfBkWDdJM10oDOxo8pufEng==",
+        "dependencies": {
+          "Microsoft.Extensions.Configuration": "10.0.0",
+          "Microsoft.Extensions.Configuration.Abstractions": "10.0.0",
+          "Microsoft.Extensions.Configuration.FileExtensions": "10.0.0",
+          "Microsoft.Extensions.FileProviders.Abstractions": "10.0.0"
+        }
+      },
+      "Microsoft.Extensions.DependencyInjection": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "2LzcuVjemeXR+WdY9wGIr8iGb7fYsDAit+IScxXX2XJnX0b++mWcE/WO6fEGIqhdMfSQM2ZS5JGMHYZix7YXZg==",
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.14"
+        }
+      },
+      "Microsoft.Extensions.DependencyInjection.Abstractions": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "QtpQzuSZVyTPCuHW058yCs9Nj0394uUkNyFHS813nOmK9UgUdBdaprJ5PPsBgsQIpxADTsTkbaMMonykem6qdw=="
+      },
+      "Microsoft.Extensions.DependencyModel": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "N8OcqM0370wSXMJ3ZxO66rSElHrIgxvpfUn0vV7zRj7NvKo0nfwgEoTmC3Yz3860o60IaQ4KIPyeLIGX9EeNWA=="
+      },
+      "Microsoft.Extensions.Diagnostics": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "80VqW8eKxQaxBOLDNpLUdxOlxzWn/jqBSxNBCfD8GCjcshNDpFvUgKh8uvvZwvkfBbwmNPWPWHyy9F+RLd1dlQ==",
+        "dependencies": {
+          "Microsoft.Extensions.Configuration": "10.0.14",
+          "Microsoft.Extensions.Diagnostics.Abstractions": "10.0.14",
+          "Microsoft.Extensions.Options.ConfigurationExtensions": "10.0.14"
+        }
+      },
+      "Microsoft.Extensions.Diagnostics.Abstractions": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "vm+PPso6vOwGeX52MdOPh6z/R6KHgxQUwqq7k7Jc9jhy2JOxO2KB4xfoJQBBp2Ni8M4zKgJ4r2a1dgrYG7+MKw==",
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.14",
+          "Microsoft.Extensions.Options": "10.0.14"
+        }
+      },
+      "Microsoft.Extensions.FileProviders.Abstractions": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "/ppSdehKk3fuXjlqCDgSOtjRK/pSHU8eWgzSHfHdwVm5BP4Dgejehkw+PtxKG2j98qTDEHDst2Y99aNsmJldmw==",
+        "dependencies": {
+          "Microsoft.Extensions.Primitives": "10.0.0"
+        }
+      },
+      "Microsoft.Extensions.FileProviders.Composite": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "oi6UKOtboSHd/sQRgiPN5BXMGHUWyBmgu/nC/khs+eJYdeitciqW7MWIvs9sZIG1rOTH2cuLjMu9VeK4bL0Jvg==",
+        "dependencies": {
+          "Microsoft.Extensions.FileProviders.Abstractions": "10.0.0",
+          "Microsoft.Extensions.Primitives": "10.0.0"
+        }
+      },
+      "Microsoft.Extensions.FileProviders.Embedded": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "ECaTMB4NdV9W1es9J6tN0yoXRPUHKMi5+2L7hcVZ5k9zVdxccIx6+vMllwEYcdTaO0mCETEmdH4F0KxCqgnPaw==",
+        "dependencies": {
+          "Microsoft.Extensions.FileProviders.Abstractions": "10.0.0"
+        }
+      },
+      "Microsoft.Extensions.FileProviders.Physical": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "UZUQ74lQMmvcprlG8w+XpxBbyRDQqfb7GAnccITw32hdkUBlmm9yNC4xl4aR9YjgV3ounZcub194sdmLSfBmPA==",
+        "dependencies": {
+          "Microsoft.Extensions.FileProviders.Abstractions": "10.0.0",
+          "Microsoft.Extensions.FileSystemGlobbing": "10.0.0",
+          "Microsoft.Extensions.Primitives": "10.0.0"
+        }
+      },
+      "Microsoft.Extensions.FileSystemGlobbing": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "5hfVl/e+bx1px2UkN+1xXhd3hu7Ui6ENItBzckFaRDQXfr+SHT/7qrCDrlQekCF/PBtEu2vtk87U2+gDEF8EhQ=="
+      },
+      "Microsoft.Extensions.Hosting.Abstractions": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "KrN6TGFwCwqOkLLk/idW/XtDQh+8In+CL9T4M1Dx+5ScsjTq4TlVbal8q532m82UYrMr6RiQJF2HvYCN0QwVsA==",
+        "dependencies": {
+          "Microsoft.Extensions.Configuration.Abstractions": "10.0.0",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.0",
+          "Microsoft.Extensions.Diagnostics.Abstractions": "10.0.0",
+          "Microsoft.Extensions.FileProviders.Abstractions": "10.0.0",
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.0"
+        }
+      },
+      "Microsoft.Extensions.Http": {
+        "type": "Transitive",
+        "resolved": "10.0.9",
+        "contentHash": "5jdmuLRg1HO7x/v8McOf6ndhkMQWImkRBtJpXM8+xIocXNdLqCItyyFLKusdILc62TDzHuLlqaWoxtOA5FFOPg==",
+        "dependencies": {
+          "Microsoft.Extensions.Configuration.Abstractions": "10.0.9",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.9",
+          "Microsoft.Extensions.Diagnostics": "10.0.9",
+          "Microsoft.Extensions.Logging": "10.0.9",
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.9",
+          "Microsoft.Extensions.Options": "10.0.9"
+        }
+      },
+      "Microsoft.Extensions.Localization": {
+        "type": "Transitive",
+        "resolved": "10.0.1",
+        "contentHash": "yJBI3IRm9uTRu7cPc7i90/8+CuiiJJ5M4khj6iWQcYnq6VrG+H2U5GzpRLtkVCsgxc1LjtkNMEbSDatfBA+z5g==",
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.1",
+          "Microsoft.Extensions.Localization.Abstractions": "10.0.1",
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.1",
+          "Microsoft.Extensions.Options": "10.0.1"
+        }
+      },
+      "Microsoft.Extensions.Localization.Abstractions": {
+        "type": "Transitive",
+        "resolved": "10.0.1",
+        "contentHash": "TQSQWF+iZdtGNgPiu7gKUqrTEeRD/mhk7KeYiuEwmTUPbawsYfPSNzSvOOeueJ0nU1697X8HZ2vCp2ByHNHkZg=="
+      },
+      "Microsoft.Extensions.Logging": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "O2fXL6JmtkFwkigxS8fPTQpLXxGDjgZco5D+h88s++Cl0bDCs023PVkpNoifciJ+f30I82jnp8tpwF0wCLdFtA==",
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection": "10.0.14",
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.14",
+          "Microsoft.Extensions.Options": "10.0.14"
+        }
+      },
+      "Microsoft.Extensions.Logging.Abstractions": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "SwcbEBtkECq3D2oywvHkm46fyrX9Dd2JPWphDnHUc2+cUWR1Mdo41atAjh/9iZjgQxuvbKfZKXqostT/LZfefA==",
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.14"
+        }
+      },
+      "Microsoft.Extensions.Options": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "EeN/33S418m9oWEaZY4N5T+BNxtOqNTIFoFbIgBKwylh4OJPKIWFAzbIhpTdNbwUs26MhkmbLCAbdY+YCJ1dIQ==",
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.14",
+          "Microsoft.Extensions.Primitives": "10.0.14"
+        }
+      },
+      "Microsoft.Extensions.Options.ConfigurationExtensions": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "4wcIU0rE04ejEfCwHTftu9O8fgH6CRYCe+tseRapikUBn1Kic3QdO7ku22SwFyLrzdWGYPUZMEgv57ZYuuc5gA==",
+        "dependencies": {
+          "Microsoft.Extensions.Configuration.Abstractions": "10.0.14",
+          "Microsoft.Extensions.Configuration.Binder": "10.0.14",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.14",
+          "Microsoft.Extensions.Options": "10.0.14",
+          "Microsoft.Extensions.Primitives": "10.0.14"
+        }
+      },
+      "Microsoft.Extensions.Primitives": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "1bbZqqCJTPba3inTADExbp/9PsGVyvGOX3zr6tFr7ySCgVkX9Lpw7BV0TizktNItd3SsbUu1sQfSAYm1GZMoNw=="
+      },
+      "Microsoft.Extensions.Validation": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "60BCCGjCU/CxDSqmMtRStBYTMy36G+0NJ5iiZWJTPtztcHvUkbpRSum4GIeyky/9yRyt/vQ4Gfe3zjyctyQoDA==",
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.14",
+          "Microsoft.Extensions.Options": "10.0.14"
+        }
+      },
+      "Microsoft.JSInterop": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "YZZ99v5PYCdyn2r8nqEIg141m1BhlVqwewwL4Z87s1h7FFS6oJG6CPOyGBO8/W6jYV57Ur/EmQEhSVgka2w1NA=="
+      },
+      "Microsoft.Maui.Controls.Build.Tasks": {
+        "type": "Transitive",
+        "resolved": "10.0.120",
+        "contentHash": "K6bM1dHDAk6rOiZJajHveB3NkdVpWUzSpKA4HVfUU6On72a8iI62mhAROjPzE0RKB5C2IiCwjDL6vcHt23Z7kw==",
+        "dependencies": {
+          "Microsoft.Maui.Controls.Core": "10.0.120",
+          "Microsoft.Maui.Controls.Xaml": "10.0.120"
+        }
+      },
+      "Microsoft.Maui.Controls.Core": {
+        "type": "Transitive",
+        "resolved": "10.0.120",
+        "contentHash": "G1zdT4D/VA9i4rHmb8I7hs6TGfSfK8d27GLoRYjsDtlxXqAlQwZAu90YaBnfZRtaloPRTLar9CL651j1kKclCg==",
+        "dependencies": {
+          "Microsoft.Extensions.Configuration": "10.0.0",
+          "Microsoft.Extensions.DependencyInjection": "10.0.0",
+          "Microsoft.Extensions.Logging": "10.0.0",
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.0",
+          "Microsoft.Maui.Core": "10.0.120"
+        }
+      },
+      "Microsoft.Maui.Controls.Xaml": {
+        "type": "Transitive",
+        "resolved": "10.0.120",
+        "contentHash": "xerwAT2s6+oMq4yNaCLHtkZ6ApxVXKo6y79CRuAINzg1UA2q6NmMeoLBg1ciYhep6ijoPMYJgR2ftXj1bDz5Sg==",
+        "dependencies": {
+          "Microsoft.Extensions.Configuration": "10.0.0",
+          "Microsoft.Maui.Controls.Core": "10.0.120",
+          "Microsoft.Maui.Core": "10.0.120"
+        }
+      },
+      "Microsoft.Maui.Core": {
+        "type": "Transitive",
+        "resolved": "10.0.120",
+        "contentHash": "00j12+iX7drRJJ3i7pdhJ2bLIAsEwJPXabhHx7VtaX6Xs/q+YP2UkGxH95Lj9GN4J5kUo2q+wflp8J9QuUBoCA==",
+        "dependencies": {
+          "Microsoft.Extensions.Configuration": "10.0.0",
+          "Microsoft.Extensions.DependencyInjection": "10.0.0",
+          "Microsoft.Extensions.Hosting.Abstractions": "10.0.0",
+          "Microsoft.Extensions.Logging": "10.0.0",
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.0",
+          "Microsoft.Maui.Essentials": "10.0.120",
+          "Microsoft.Maui.Graphics": "10.0.120"
+        }
+      },
+      "Microsoft.Maui.Essentials": {
+        "type": "Transitive",
+        "resolved": "10.0.120",
+        "contentHash": "xJ+29QLkKVxqz0paMEXic+VUWBUeoasnE0NQFInTSKNNVfsM30+FtS2V0EgOHFyKiixSHiKl1ET96KJ+zGft6Q==",
+        "dependencies": {
+          "Microsoft.Maui.Graphics": "10.0.120"
+        }
+      },
+      "Microsoft.Maui.Graphics": {
+        "type": "Transitive",
+        "resolved": "10.0.120",
+        "contentHash": "Z1ZkDyUIpMPYH84wC8za4n/OcSXIKU6fGc2EfZ0dWGldPjrJtbYLWqFLBSK3QW80/FbpGDsskhaynDUnC+dOlw=="
+      },
+      "Microsoft.Maui.Resizetizer": {
+        "type": "Transitive",
+        "resolved": "10.0.120",
+        "contentHash": "pLoG4oTvsu7sC/Vfaj4Belhy0mNZ3PkyjiOQ0c/J1MJuUXcHqMDMPinB1ctsfwegS8HBIa5dkFapPdYPGPWEVw=="
+      },
+      "Microsoft.Spatial": {
+        "type": "Transitive",
+        "resolved": "8.4.3",
+        "contentHash": "+HjBpfUSS6pxC607cz6BAW1w6bxpTjurZ7x0Chvjcksg2eXPyj5BMPla068zAn/ZZtpIDaaNFNDyUcJ3kQkUfA=="
+      },
+      "Plugin.Firebase.Core": {
+        "type": "Transitive",
+        "resolved": "4.1.0",
+        "contentHash": "iY0Rr1/1K64yn7efip70xRIAZulrhR4Ebz6GZMEce1eJ0GDeGp5rfqD91uEBZc+U8RKrZSCHSO5hC7G334lRIQ==",
+        "dependencies": {
+          "AdamE.Firebase.iOS.Core": "12.5.0.4"
+        }
+      },
+      "SQLitePCLRaw.bundle_e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.13",
+        "contentHash": "NlDixlC7uHmo+ojXRgkNvN0tQtVGpLDZ3x2OpgNj+G07VHh5cXSszFDrAiC4BpUiPwkcaeuQkMV9WQ123xVtmQ==",
+        "dependencies": {
+          "SQLitePCLRaw.lib.e_sqlite3.ios": "2.1.13",
+          "SQLitePCLRaw.provider.internal": "2.1.13",
+          "System.Runtime.InteropServices.NFloat.Internal": "6.0.1"
+        }
+      },
+      "SQLitePCLRaw.core": {
+        "type": "Transitive",
+        "resolved": "2.1.13",
+        "contentHash": "2joofoinuHBFs0nMX3nKuXgxpXryRkCOdM2Ua6HBqQLLy6IW+5f28ZI+HAvMyF8vG7XfNz/lwfBfE6V4juru8Q=="
+      },
+      "SQLitePCLRaw.lib.e_sqlite3.ios": {
+        "type": "Transitive",
+        "resolved": "2.1.13",
+        "contentHash": "8au20cIr1wbDHl5RsjvTcitDDS/QDPts4ea6HODj7zXCsXVscCNBhbHUHu0ccWfaplEMa6zxFF9juHsTxhtd+g==",
+        "dependencies": {
+          "System.Runtime.InteropServices.NFloat.Internal": "6.0.1"
+        }
+      },
+      "SQLitePCLRaw.provider.internal": {
+        "type": "Transitive",
+        "resolved": "2.1.13",
+        "contentHash": "u4ZBu0P7b4hbFnwS8uDtfw7stjLn+L8TaC05mctPlYyZbn1+Q7t6YQAi9Ru7z4i6ib7l6MX8Fx7TxnsZHBGrTA==",
+        "dependencies": {
+          "SQLitePCLRaw.core": "2.1.13"
+        }
+      },
+      "System.Runtime.InteropServices.NFloat.Internal": {
+        "type": "Transitive",
+        "resolved": "6.0.1",
+        "contentHash": "vq+81ZqZz9oHV6iWgGXFnxHAyO5xA73nfvDNu5LwymIK294is5bRo3P063VToAbDRyyc0qq/YFRYjHmiD6Cv8Q=="
+      },
+      "swiftaid.client": {
+        "type": "Project",
+        "dependencies": {
+          "CommunityToolkit.Datasync.Client": "[10.1.2, )",
+          "Duende.IdentityModel.OidcClient": "[7.1.1, )",
+          "Microsoft.EntityFrameworkCore.Sqlite": "[10.0.14, )",
+          "SwiftAid.Contracts": "[1.0.0, )"
+        }
+      },
+      "swiftaid.contracts": {
+        "type": "Project"
+      },
+      "swiftaid.ui": {
+        "type": "Project",
+        "dependencies": {
+          "Blazor.Lottie.Player": "[1.0.6, )",
+          "Microsoft.AspNetCore.Components.Web": "[10.0.14, )",
+          "MudBlazor": "[9.11.0, )",
+          "SwiftAid.Contracts": "[1.0.0, )"
+        }
+      },
+      "Blazor.Lottie.Player": {
+        "type": "CentralTransitive",
+        "requested": "[1.0.6, )",
+        "resolved": "1.0.6",
+        "contentHash": "gJ5vAiVYo29ZOe7UvIxLSCCR6jXkaBFmcE2ZROby9Md/KjrCqMyoLDmC4W67mxFF17PooYdDei50UIH1cIFUVQ==",
+        "dependencies": {
+          "Microsoft.AspNetCore.Components": "9.0.6",
+          "Microsoft.AspNetCore.Components.Web": "9.0.6",
+          "Microsoft.Extensions.Localization": "9.0.6"
+        }
+      },
+      "CommunityToolkit.Datasync.Client": {
+        "type": "CentralTransitive",
+        "requested": "[10.1.2, )",
+        "resolved": "10.1.2",
+        "contentHash": "ysYTzAC5uqadJmYhmUBxvCj1s/6iSteQjytEoBiZgWluEV4GWsUvQPVd5qD0S9YDhEMDnNFP4lkI9CMU4kqZog==",
+        "dependencies": {
+          "Microsoft.EntityFrameworkCore": "10.0.9",
+          "Microsoft.EntityFrameworkCore.Relational": "10.0.9",
+          "Microsoft.EntityFrameworkCore.Sqlite": "10.0.9",
+          "Microsoft.Extensions.Caching.Memory": "10.0.9",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.9",
+          "Microsoft.Extensions.Http": "10.0.9",
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.9",
+          "Microsoft.Spatial": "8.4.3"
+        }
+      },
+      "Duende.IdentityModel.OidcClient": {
+        "type": "CentralTransitive",
+        "requested": "[7.1.1, )",
+        "resolved": "7.1.1",
+        "contentHash": "YyuyW1KaCotSTuEBMt5NTXecuKwX2kU0FmaJ+X39QdQvYGAlOv2Yfp8Vo2vVihw6+3EEcpbDKgfiaoJ3EyI8Fg==",
+        "dependencies": {
+          "Duende.IdentityModel": "8.1.0",
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.13"
+        }
+      },
+      "Microsoft.AspNetCore.Components.Web": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.14, )",
+        "resolved": "10.0.14",
+        "contentHash": "SVNV6nfDggaBCETwy6v/995JOBH6MKtuEmPQVh3mF6BxipOihl2Sd2d46nenXnadCp+d0QniKmUrahYC5VETPA==",
+        "dependencies": {
+          "Microsoft.AspNetCore.Components": "10.0.14",
+          "Microsoft.AspNetCore.Components.Forms": "10.0.14",
+          "Microsoft.Extensions.DependencyInjection": "10.0.14",
+          "Microsoft.Extensions.Primitives": "10.0.14",
+          "Microsoft.JSInterop": "10.0.14"
+        }
+      },
+      "Microsoft.EntityFrameworkCore": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.14, )",
+        "resolved": "10.0.14",
+        "contentHash": "vY3931PYPIDBbKovGHbACmpOWvURvKNyRXfCjMh5yLW+FH6vLWeqUu2xzSCRo4Oz4tgx9GYpd0JlV5LDyAoQdg==",
+        "dependencies": {
+          "Microsoft.EntityFrameworkCore.Abstractions": "10.0.14",
+          "Microsoft.EntityFrameworkCore.Analyzers": "10.0.14",
+          "Microsoft.Extensions.Caching.Memory": "10.0.14",
+          "Microsoft.Extensions.Logging": "10.0.14"
+        }
+      },
+      "Microsoft.EntityFrameworkCore.Sqlite": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.14, )",
+        "resolved": "10.0.14",
+        "contentHash": "lxrwnVwvlIfQD4IF4WUVupE6Qxfj3MfFftDVwo7tsGAWCKLL8Ttb8UjIt+gE4e9nRlH7EgdC6TrsArFGnNYREw==",
+        "dependencies": {
+          "Microsoft.EntityFrameworkCore.Sqlite.Core": "10.0.14",
+          "Microsoft.Extensions.Caching.Memory": "10.0.14",
+          "Microsoft.Extensions.Configuration.Abstractions": "10.0.14",
+          "Microsoft.Extensions.DependencyModel": "10.0.14",
+          "Microsoft.Extensions.Logging": "10.0.14",
+          "SQLitePCLRaw.bundle_e_sqlite3": "2.1.13",
+          "SQLitePCLRaw.core": "2.1.13"
+        }
+      }
+    },
+    "net10.0-ios26.5/android-arm64": {},
+    "net10.0-ios26.5/android-x64": {},
+    "net10.0-ios26.5/iossimulator-x64": {}
   }
 }
