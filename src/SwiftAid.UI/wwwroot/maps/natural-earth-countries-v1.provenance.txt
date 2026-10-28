@@ -1,0 +1,17 @@
+Natural Earth country geometry provenance
+
+Source dataset: ne_110m_admin_0_countries.geojson
+Source repository: https://github.com/nvkelso/natural-earth-vector
+Pinned commit: ca96624a56bd078437bca8184e78163e5039ad19
+Pinned source URL: https://raw.githubusercontent.com/nvkelso/natural-earth-vector/ca96624a56bd078437bca8184e78163e5039ad19/geojson/ne_110m_admin_0_countries.geojson
+Source SHA-256: 6866C877D39CBA9C357620878839B336D569F8C662D3CFAB4CB1DBE2D39C977F
+Terms: Natural Earth data is public domain; see https://www.naturalearthdata.com/about/terms-of-use/
+
+Derived asset: natural-earth-countries-v1.json
+Derived asset SHA-256: 1FADA13F496FACA7A9594425A5685A467371AABF6A555A3DF818B9F4576744C1
+Features: 175 geometry features: 174 officially assigned ISO alpha-2 codes plus one XK/Kosovo regional geometry exception. XK is a display-only regional code, not an officially assigned ISO alpha-2 code or an authoritative report-country or service-catalogue value.
+Projection: Equirectangular, viewBox 960 by 480.
+Simplification: Douglas-Peucker, 0.45 screen-pixel tolerance at the stated viewBox.
+Included fields: two-letter geometry code, public country name, and simplified SVG path strings only.
+Excluded fields: population, case/report records, observations, coordinates from SwiftAid data, and all non-geographic attributes.
+Use: Basemap geometry only. Aggregate counts are supplied separately by the typed IMapAggregateClient and are never used to derive polygon positions. Geometry does not authorize, define, or validate the report-country catalogue or report-country and region selection or acceptance.
