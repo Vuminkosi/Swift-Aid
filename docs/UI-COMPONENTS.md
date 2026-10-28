@@ -29,3 +29,40 @@ The current loader component is shown only when its `IsLoading` parameter is tru
 GIF, Lottie JSON, and still PNG assets are bundled under `wwwroot/assets/loading` in Gateway, Mobile, and the canonical `SwiftAid.UI` RCL. All three copy sets have matching hashes: GIF `4B28427B74D9DC564C8C78112C91F57B0CD77AC612B95B1F1D87C897FC7FD2BB`; Lottie JSON `0DE3B1CF5373A84F12D31BB2AC8A7E3012DDD14D9538B3237C5AE08D1E0DD294`; still PNG `0A77628A1871FBE7DF3270D239142DCD556C546AFD854BDAB67FC0C0448D7279`. Package references to `Blazor.Lottie.Player` 1.0.6 exist in both app projects. The current source explicitly configures the local `./_content/Blazor.Lottie.Player/lottie.min.js` file; its JS helper loads this local path and does not rely on the package's default CDN setting. This source path does not by itself prove offline runtime operation.
 
 Implementation handoff reports Gateway Release and Android Release builds passed with zero warnings/errors and JavaScript syntax checks passed. The bounded browser fixture rendered GIF then Lottie DOMLoaded SVG/canvas and exercised reduced-motion fallback; this does not establish a full application workflow. Android device rendering, performance, and device interaction remain NOT VERIFIED. Runtime accessibility-tree behavior remains NOT VERIFIED. NuGet metadata reports `Blazor.Lottie.Player` 1.0.6 as MIT and .NET 8+ compatible; MudXtra describes it as a standalone package. The pinned repository LICENSE is MIT, but the source project declares 1.0.5, so exact equivalence with the 1.0.6 NuGet artifact is NOT VERIFIED. GIF/Lottie/icon authorship, license and redistribution rights remain NOT VERIFIED; the owner selection does not imply public redistribution rights. Asset sizes and copy/source hashes are recorded in [RIGHTS-REGISTER.md](RIGHTS-REGISTER.md).
+
+## Lane B shared design system (2026-10-28)
+
+Reference boards are copied byte-identical into `docs/design/references/` (SHA-256 match against `designs/` originals): `SwiftAid Health Surveillance UI Showcase.png` (`457D4E24…BE88CB`), `SwiftAid One Health UI Storyboard-1.png` (`804527EB…20DFC414`), `SwiftAid Health Management UI Showcase-2.png` (`29E6360F…FEE485CA`). Originals in `designs/` are unaltered. Tokens below were read from those three images.
+
+### Shared token components (`src/SwiftAid.UI/Components/Theme/`)
+
+| Component | File | Purpose | Renderer |
+|---|---|---|---|
+| Design tokens | `SwiftAidDesignTokens.cs` | Single source for brand hex values (`#126FE1` primary blue, `#00695C` action teal, `#55D5B7` dark teal, `#80BFFF` dark link), status-pill colors (Escalated `#B4233A`, In Progress `#075CB5`, Follow-up `#B45309`, Open/Resolved `#176B43`), chart series, map cluster colors, typography scale (12/14/16/20/24), 4-pt spacing (4/8/16/24/32), radii (12/999/8), plus `ToMudColor()` status-to-MudBlazor mapping | C# constants, no UI |
+| Status chip | `SwiftAidStatusChip.razor` | Reference-style status pill (`Status` parameter, required) with `aria-label="Status: …"` | MudBlazor `MudChip` |
+| Section card | `SwiftAidSectionCard.razor` | Card shell with required `Title`, optional `Subtitle`, `ChildContent`, `Actions` (Recent Alerts, Case Summary, AI Analysis Summary patterns) | MudBlazor `MudCard` |
+| Stat tile | `SwiftAidStatTile.razor` | Metric tile with required `Label`/`Value`, optional `Delta`/`DeltaUp` trend (dashboard stat rows) | MudBlazor `MudPaper` + `MudText` |
+
+`SwiftAidThemeProvider.razor` is unchanged and still owns theming via `SwiftAidBrandTheme.Create()` (light primary `#00695C`, dark primary `#55D5B7`). The new token class names values only; it does not replace the brand theme.
+
+### Existing shared components (`src/SwiftAid.UI/Components/`)
+
+| Component | Covers on the boards |
+|---|---|
+| `SwiftAidPageHeading.razor` | Page headings (Dashboard, Case List, Surveillance, Community Education, Reports & Analytics) |
+| `SwiftAidBodyText.razor` | Secondary/body copy with semantic light/dark tokens |
+| `SwiftAidLoader.razor` (+ boundary) | Loading/pending states (mobile offline "pending sync", submission confirmations) |
+| `SwiftAidServiceBoundaryNotice.razor` | Truthful unavailable/out-of-scope states (no AI triage, no clinical advice) |
+| `CaseReportRegistrationForm.razor` | Guided case capture (Report a Case / New Case Report flows) |
+| `Cases/CaseTimelineView.razor` | Immutable case history timeline (Case Details screens) |
+| `Coordination/IntakeCoordinationQueue.razor` | Staff intake queue (`/intake-coordination`) |
+| `Notifications/NotificationFeed.razor` | Alerts/notifications (Recent Alerts, Recent Activity) |
+| `Public/PublicReportForm.razor`, `PublicReportPlaceField.razor`, `PublicReportReceipt.razor`, `PublicReportDraft.cs` | Public intake form and receipt (intake receipt grants no staff access) |
+
+### MudBlazor-vs-Syncfusion decisions
+
+MudBlazor stays primary for every surface observed on the three boards: app shell/nav, stat tiles, cards, status pills, tabs, forms, steppers, dialogs, lists, standard tables, and simple charts. No Syncfusion package is referenced and no Syncfusion component is used. A Syncfusion control is allowed only when a concrete screen records: the screen, the exact component, why the MudBlazor equivalent is insufficient, package version, license basis and key protection, Android and web test evidence, accessibility, offline, and performance notes — with a working MudBlazor fallback kept while that gate is unresolved. The map/geospatial view, multi-resource scheduler, advanced queue grid, and complex interactive analytics on the boards are the only candidate surfaces, and none is implemented with Syncfusion in this lane.
+
+### Tested behavior
+
+`dotnet build` on `src/SwiftAid.UI/SwiftAid.UI.csproj` passes (result recorded in the Lane B handoff). No placeholder or lorem-ipsum text exists on any new UI surface: all new components render only caller-supplied text; defaults are real labels ("New"). Browser rendering, device display, screen-reader behavior, and rendered contrast acceptance remain NOT VERIFIED. Per-screen route mapping is in [UI-SCREEN-CHECKLIST.md](UI-SCREEN-CHECKLIST.md).

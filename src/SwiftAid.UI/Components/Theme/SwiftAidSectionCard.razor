@@ -1,0 +1,35 @@
+<MudCard Elevation="1" Class="swiftaid-section-card">
+    <MudCardHeader>
+        <CardHeaderContent>
+            <MudText Typo="Typo.h6">@Title</MudText>
+            @if (!string.IsNullOrWhiteSpace(Subtitle))
+            {
+                <MudText Typo="Typo.body2" Color="Color.Secondary">@Subtitle</MudText>
+            }
+        </CardHeaderContent>
+        <CardHeaderActions>
+            @Actions
+        </CardHeaderActions>
+    </MudCardHeader>
+    <MudCardContent>
+        @ChildContent
+    </MudCardContent>
+</MudCard>
+
+@code {
+    /// <summary>Card heading, for example "Recent Alerts" or "Case Summary".</summary>
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>Optional supporting line under the heading.</summary>
+    [Parameter]
+    public string? Subtitle { get; set; }
+
+    /// <summary>Card body content.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Optional header actions (links, buttons).</summary>
+    [Parameter]
+    public RenderFragment? Actions { get; set; }
+}

@@ -78,6 +78,7 @@ app.MapIntakeDecisionEndpoints();
 app.MapIntakeCoordinationEndpoints();
 app.MapManagedCaseRegistrationEndpoints();
 app.MapCaseTimelineEndpoints();
+app.MapCaseCommandEndpoints();
 
 app.MapSwiftAidIdentityEndpoints(
     app.Services.GetRequiredService<FederationOptions>(),
