@@ -6,6 +6,7 @@ using Microsoft.Maui.Storage;
 using Duende.IdentityModel.OidcClient.Browser;
 using SwiftAid.Client.LocalStore;
 using SwiftAid.Client.Authentication;
+using SwiftAid.Client.Mobile;
 using SwiftAid.Client.Notifications;
 using SwiftAid.Client.Intake;
 using SwiftAid.Mobile.Services.Notifications;
@@ -31,6 +32,19 @@ public static class MauiProgram
 			"SwiftAid.Mobile.appsettings.json")
 			?? throw new InvalidOperationException("The packaged appsettings.json resource is missing.");
 		builder.Configuration.AddJsonStream(appSettingsStream);
+#if DEBUG
+		// Development overrides (typically a host-loopback gateway). Release builds
+		// ship only the production appsettings.json above.
+		var devSettingsStream = typeof(MauiProgram).Assembly.GetManifestResourceStream(
+			"SwiftAid.Mobile.appsettings.Development.json");
+		if (devSettingsStream is not null)
+		{
+			using (devSettingsStream)
+			{
+				builder.Configuration.AddJsonStream(devSettingsStream);
+			}
+		}
+#endif
 
 		builder
 			.UseMauiApp<App>()
@@ -69,19 +83,24 @@ public static class MauiProgram
             sp.GetRequiredService<IGuestSubmissionPersistence>(),
             sp.GetRequiredService<TimeProvider>()));
 
+		// On the Android emulator, "localhost" is the emulator itself. Rewrite a
+		// loopback gateway to the emulator host-loopback alias 10.0.2.2; a loopback
+		// address on a physical device fails fast because it can never be correct.
+		var isAndroidEmulator = DeviceInfo.Current.Platform == DevicePlatform.Android &&
+			DeviceInfo.Current.DeviceType == DeviceType.Virtual;
 		var configuredGatewayAddress = builder.Configuration["SwiftAid:GatewayBaseAddress"];
-		Uri? gatewayBaseAddress = null;
-		if (!string.IsNullOrWhiteSpace(configuredGatewayAddress))
+		if (!isAndroidEmulator &&
+			DeviceInfo.Current.Platform == DevicePlatform.Android &&
+			MobileGatewayAddress.IsLoopbackConfigured(configuredGatewayAddress))
 		{
-			if (!Uri.TryCreate(configuredGatewayAddress, UriKind.Absolute, out gatewayBaseAddress) ||
-				gatewayBaseAddress.Scheme != Uri.UriSchemeHttps ||
-				!string.IsNullOrEmpty(gatewayBaseAddress.UserInfo) ||
-				!string.IsNullOrEmpty(gatewayBaseAddress.Query) ||
-				!string.IsNullOrEmpty(gatewayBaseAddress.Fragment))
-			{
-				throw new InvalidOperationException("SwiftAid:GatewayBaseAddress must be an HTTPS URL without credentials, query, or fragment.");
-			}
+			throw new InvalidOperationException(
+				"SwiftAid:GatewayBaseAddress points at the device loopback, which is unreachable from a physical Android device. Set a reachable gateway address (LAN hostname or IP).");
 		}
+
+		var gatewayBaseAddress = MobileGatewayAddress.Resolve(
+			configuredGatewayAddress,
+			"SwiftAid:GatewayBaseAddress",
+			rewriteLoopbackForAndroidEmulator: isAndroidEmulator);
 
         builder.Services.AddSingleton(TimeProvider.System);
         builder.Services.AddSingleton<SecureNativeSessionStore>();
@@ -89,8 +108,12 @@ public static class MauiProgram
         builder.Services.AddSingleton<INativeSessionReader>(sp => sp.GetRequiredService<SecureNativeSessionStore>());
 
         var nativeIdentity = builder.Configuration.GetSection("SwiftAid:NativeIdentity");
+        var nativeAuthority = MobileGatewayAddress.Resolve(
+            nativeIdentity["Authority"],
+            "SwiftAid:NativeIdentity:Authority",
+            rewriteLoopbackForAndroidEmulator: isAndroidEmulator)?.ToString() ?? string.Empty;
         var nativeLoginOptions = new NativeLoginOptions(
-            nativeIdentity["Authority"] ?? string.Empty,
+            nativeAuthority,
             nativeIdentity["ClientId"] ?? string.Empty,
             nativeIdentity["RedirectUri"] ?? string.Empty,
             nativeIdentity["PostLogoutRedirectUri"] ?? string.Empty);
