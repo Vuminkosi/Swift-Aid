@@ -2,6 +2,7 @@
 @using SwiftAid.Contracts.Cases
 @using SwiftAid.UI.Components.Cases
 @inject ICaseTimelineClient TimelineClient
+@inject ICaseCommandClient CommandClient
 
 <PageTitle>Case history | SwiftAid</PageTitle>
 
@@ -13,12 +14,15 @@
 
     <CaseNextActionsCard Timeline="_timeline" Loading="_loading" />
 
-    <CaseTimelineView Client="TimelineClient" CaseId="CaseId" />
+    <CaseTimelineView @ref="_timelineView" Client="TimelineClient" CaseId="CaseId" />
+
+    <CaseCommandPanel Client="CommandClient" CaseId="CaseId" OnCommandSucceeded="HandleCommandSucceededAsync" />
 </MudContainer>
 
 @code {
     [Parameter] public Guid CaseId { get; set; }
 
+    private CaseTimelineView? _timelineView;
     private CaseTimeline? _timeline;
     private bool _loading = true;
     private Guid _loadedCaseId = Guid.Empty;
@@ -53,6 +57,15 @@
         finally
         {
             _loading = false;
+        }
+    }
+
+    private async Task HandleCommandSucceededAsync(CaseCommandResult _)
+    {
+        await LoadTimelineAsync();
+        if (_timelineView is not null)
+        {
+            await _timelineView.RefreshAsync();
         }
     }
 }

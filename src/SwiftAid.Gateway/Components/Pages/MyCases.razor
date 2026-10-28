@@ -1,0 +1,16 @@
+@page "/my-cases"
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.UI.Components.Cases
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ICaseQueueClient QueueClient
+
+<PageTitle>My cases | SwiftAid</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="my-cases-page">
+    <SwiftAidPageHeading Eyebrow="Officer workspace"
+                         Title="My cases"
+                         Description="Cases you own, newest activity first. Report content stays sealed; open a case for its immutable history."
+                         HeadingId="my-cases-heading" />
+
+    <CaseQueue Client="QueueClient" />
+</MudContainer>

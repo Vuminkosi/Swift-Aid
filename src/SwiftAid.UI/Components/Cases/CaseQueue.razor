@@ -1,0 +1,126 @@
+@using SwiftAid.Contracts.Cases
+
+<section class="case-queue" aria-label="My assigned cases">
+    @if (_loading)
+    {
+        <div class="case-queue__state" role="status" aria-live="polite">
+            <MudProgressCircular Indeterminate="true" Size="Size.Small" aria-label="Loading assigned cases" />
+            <MudText Typo="Typo.body2">Loading your cases…</MudText>
+        </div>
+    }
+    else if (_denied)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="status">
+            Your account is not authorized to view assigned cases.
+        </MudAlert>
+    }
+    else if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" role="alert">
+            @_error
+            <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="RefreshAsync" aria-label="Retry loading assigned cases">Retry</MudButton>
+        </MudAlert>
+    }
+    else if (_items.Count == 0)
+    {
+        <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" role="status">
+            No cases are currently assigned to you.
+        </MudAlert>
+    }
+    else
+    {
+        <MudTable Items="_items" Hover="true" Dense="true" aria-label="Assigned cases">
+            <HeaderContent>
+                <MudTh>Case</MudTh>
+                <MudTh>Workflow</MudTh>
+                <MudTh>Country</MudTh>
+                <MudTh>Version</MudTh>
+                <MudTh>Updated</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Case">
+                    <MudLink Href="@($"/case/{context.CaseId:D}")" aria-label="@($"Open case {context.CaseId:D}")">
+                        @context.CaseId.ToString("D")[..8]…
+                    </MudLink>
+                </MudTd>
+                <MudTd DataLabel="Workflow"><MudChip T="string" Size="Size.Small" Color="@WorkflowColor(context.Workflow)">@context.Workflow</MudChip></MudTd>
+                <MudTd DataLabel="Country">@context.CountryCode</MudTd>
+                <MudTd DataLabel="Version">@context.AggregateVersion</MudTd>
+                <MudTd DataLabel="Updated">@context.UpdatedAtUtc.ToLocalTime().ToString("g")</MudTd>
+            </RowTemplate>
+        </MudTable>
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="case-queue__notice">
+            Newest activity first. Only cases you own and may read are listed.
+        </MudText>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public ICaseQueueClient Client { get; set; } = null!;
+
+    [Parameter] public int? Limit { get; set; }
+
+    private IReadOnlyList<CaseQueueItem> _items = Array.Empty<CaseQueueItem>();
+    private bool _loading = true;
+    private bool _denied;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Client is null)
+        {
+            _error = "The case service is not available.";
+            _loading = false;
+            return;
+        }
+
+        await RefreshAsync();
+    }
+
+    /// <summary>Reloads the officer queue; called by hosting pages after commands change ownership.</summary>
+    public async Task RefreshAsync()
+    {
+        if (Client is null)
+        {
+            return;
+        }
+
+        _loading = true;
+        _denied = false;
+        _error = null;
+        _items = Array.Empty<CaseQueueItem>();
+        StateHasChanged();
+
+        try
+        {
+            var result = await Client.GetMineAsync(Limit);
+            if (result.Access == CaseQueueAccess.Denied)
+            {
+                _denied = true;
+            }
+            else if (result.Access == CaseQueueAccess.Unavailable)
+            {
+                _error = "Your cases are temporarily unavailable. Check your connection and try again.";
+            }
+            else
+            {
+                _items = result.Items;
+            }
+        }
+        catch (Exception)
+        {
+            _error = "Your cases are temporarily unavailable. Check your connection and try again.";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static Color WorkflowColor(string workflow) => workflow switch
+    {
+        "Resolved" => Color.Success,
+        "Reopened" => Color.Warning,
+        _ => Color.Primary
+    };
+}
