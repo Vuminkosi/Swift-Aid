@@ -1,0 +1,218 @@
+.welcome-surface {
+    display: grid;
+    grid-template-rows: max(7rem, 16vh) minmax(0, 1fr);
+    align-content: stretch;
+    gap: 0;
+    width: min(100%, 28rem);
+    height: 100svh;
+    min-height: 100svh;
+    box-sizing: border-box;
+    margin-inline: auto;
+    padding: 0 0.5rem max(4rem, calc(3rem + env(safe-area-inset-bottom)));
+}
+
+.welcome-surface__header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.625rem;
+    min-width: 0;
+    align-self: center;
+    padding: 0.5rem;
+    border-radius: 0;
+    background: transparent;
+    color: #fff;
+}
+
+.welcome-surface__brand-mark {
+    width: 2.5rem;
+    height: 2.5rem;
+    flex: 0 0 auto;
+    border-radius: 0.625rem;
+    object-fit: cover;
+}
+
+.welcome-surface__header h1 {
+    margin: 0;
+    color: inherit;
+    font-size: clamp(1.625rem, 6vw, 2rem);
+    font-weight: 700;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+}
+
+.welcome-surface__card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+    min-width: 0;
+    width: 100%;
+    max-width: 25rem;
+    min-height: 0;
+    box-sizing: border-box;
+    justify-self: center;
+    align-self: start;
+    padding: clamp(0.75rem, 4vw, 1rem);
+    border: 1px solid rgb(16 42 67 / 8%);
+    border-radius: 1rem;
+    background: #fff;
+    color: #172b40;
+    box-shadow: none;
+}
+
+.welcome-surface__field-group {
+    display: grid;
+    grid-template-rows: auto;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.welcome-surface__field-group legend {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.welcome-surface__choices {
+    display: grid;
+    grid-template-rows: repeat(3, minmax(3.125rem, auto));
+    align-content: start;
+    gap: 0.375rem;
+}
+
+.welcome-surface__choice {
+    display: flex;
+    box-sizing: border-box;
+    align-items: center;
+    gap: 0.75rem;
+    min-width: 0;
+    min-height: 3.125rem;
+    padding: 0.5rem 0.75rem;
+    border: 0;
+    border-block-end: 1px solid #e4e9ef;
+    border-radius: 0;
+    background: transparent;
+    color: #26384a;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+    transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.welcome-surface__choice ::deep .mud-icon-root {
+    flex: 0 0 auto;
+    color: #516477;
+    font-size: 1.25rem;
+}
+
+.welcome-surface__choice-title {
+    min-width: 0;
+    font-size: 0.875rem;
+    font-weight: 650;
+    line-height: 1.25;
+}
+
+.welcome-surface__choice:hover {
+    border-color: #78a9ee;
+    background: #f1f6ff;
+}
+
+.welcome-surface__choice.is-selected,
+.welcome-surface__choice[aria-pressed="true"] {
+    border: 1px solid #0875e1;
+    border-color: #0875e1;
+    border-radius: 0.625rem;
+    background: #0875e1;
+    color: #fff;
+    box-shadow: none;
+}
+
+.welcome-surface__choice.is-selected ::deep .mud-icon-root,
+.welcome-surface__choice[aria-pressed="true"] ::deep .mud-icon-root {
+    color: #fff;
+}
+
+.welcome-surface__choice:focus-visible {
+    outline: 3px solid #82b5ff;
+    outline-offset: 2px;
+}
+
+.welcome-surface__country {
+    display: grid;
+    gap: 0.375rem;
+    min-width: 0;
+}
+
+.welcome-surface__country ::deep .mud-input-control {
+    margin: 0;
+}
+
+.welcome-surface__country ::deep .mud-input-outlined-border {
+    border-color: #dce3eb;
+}
+
+.welcome-surface__country ::deep .mud-input-slot,
+.welcome-surface__country ::deep .mud-input-label {
+    color: #26384a;
+}
+
+.welcome-surface__actions {
+    display: flex;
+    min-width: 0;
+}
+
+.welcome-surface__actions ::deep .mud-button-root {
+    width: 100%;
+    min-width: 0;
+    min-height: 3rem;
+    border-radius: 0.625rem;
+    font-weight: 700;
+    box-shadow: none;
+}
+
+.welcome-surface__actions ::deep .mud-button-root.mud-button-filled {
+    background-color: transparent;
+    color: var(--mud-palette-primary);
+    box-shadow: none;
+}
+
+@media (max-height: 680px) {
+    .welcome-surface {
+        grid-template-rows: max(7rem, 16vh) minmax(0, 1fr);
+    }
+
+    .welcome-surface__card {
+        min-height: 0;
+        gap: 0.625rem;
+    }
+
+    .welcome-surface__choice {
+        min-height: 3rem;
+    }
+}
+
+@media (max-height: 480px) {
+    .welcome-surface {
+        height: auto;
+        grid-template-rows: max(7rem, 16vh) auto;
+        align-content: start;
+    }
+
+    .welcome-surface__card {
+        align-self: start;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .welcome-surface__choice {
+        transition: none;
+    }
+}
