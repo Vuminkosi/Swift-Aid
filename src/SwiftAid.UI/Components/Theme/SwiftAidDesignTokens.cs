@@ -2,7 +2,9 @@ namespace SwiftAid.UI.Components.Theme;
 
 /// <summary>
 /// Shared design tokens extracted from the three owner reference boards
-/// (copies in docs/design/references/). Single source of truth for hex values,
+/// (copies in docs/design/references/) and the product icon
+/// (swiftaid-icon.png at the repo root; brand blues/greens below are
+/// pixel-sampled from it). Single source of truth for hex values,
 /// MudBlazor status mapping, typography, spacing, and shape. MudBlazor remains
 /// the primary renderer; <see cref="SwiftAid.UI.Theme.SwiftAidBrandTheme"/>
 /// owns the live MudPalette. This class only names tokens so components and
@@ -11,28 +13,28 @@ namespace SwiftAid.UI.Components.Theme;
 public static class SwiftAidDesignTokens
 {
     // Brand / primary actions (web header buttons, mobile primary buttons).
-    public const string BrandBlue = "#126FE1";
-    public const string ActionTeal = "#00695C";
-    public const string DarkTeal = "#55D5B7";
-    public const string DarkLink = "#80BFFF";
+    public const string BrandBlue = "#1778EC";
+    public const string ActionTeal = "#045676";
+    public const string DarkTeal = "#23A4DA";
+    public const string DarkLink = "#23A4DA";
 
     // Status pills observed on the reference boards.
     public const string Escalated = "#B4233A";
     public const string EscalatedBackground = "#FDE8EA";
-    public const string InProgress = "#075CB5";
+    public const string InProgress = "#1778EC";
     public const string InProgressBackground = "#E3EFFC";
     public const string FollowUpDue = "#B45309";
     public const string FollowUpBackground = "#FEF3C7";
-    public const string OpenNew = "#176B43";
+    public const string OpenNew = "#148E58";
     public const string OpenBackground = "#E3F4E9";
     public const string Monitoring = "#B45309";
-    public const string Assigned = "#075CB5";
+    public const string Assigned = "#1778EC";
     public const string PendingSync = "#B45309";
-    public const string Resolved = "#176B43";
+    public const string Resolved = "#148E58";
 
     // Chart series (Cases-by-Disease legends on reference boards).
-    public const string SeriesCholera = "#126FE1";
-    public const string SeriesMalaria = "#23AE70";
+    public const string SeriesCholera = "#1778EC";
+    public const string SeriesMalaria = "#27A961";
     public const string SeriesMeasles = "#F59E0B";
     public const string SeriesAnimal = "#8B5CF6";
     public const string SeriesTb = "#EF4444";
@@ -40,7 +42,7 @@ public static class SwiftAidDesignTokens
     // Map cluster badges.
     public const string ClusterHigh = "#EF4444";
     public const string ClusterMedium = "#F59E0B";
-    public const string ClusterLow = "#126FE1";
+    public const string ClusterLow = "#1778EC";
 
     // Surfaces.
     public const string PageBackgroundLight = "#F5FAF8";

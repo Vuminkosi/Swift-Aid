@@ -1,8 +1,9 @@
 :root {
     color-scheme: light;
-    --sa-brand-blue: #126fe1;
-    --sa-brand-teal: #0b8b84;
-    --sa-brand-green: #23ae70;
+    /* Brand ramp pixel-sampled from swiftaid-icon.png (azure -> teal -> green). */
+    --sa-brand-blue: #1778ec;
+    --sa-brand-teal: #10a3a8;
+    --sa-brand-green: #27a961;
     --sa-canvas: #f5faf8;
     --sa-surface: #ffffff;
     --sa-surface-elevated: #ffffff;
@@ -11,13 +12,13 @@
     --sa-text-secondary: #3e5e5a;
     --sa-text-muted: #536e69;
     --sa-border: #718e87;
-    --sa-action-primary: #00695c;
-    --sa-action-hover: #005549;
-    --sa-action-active: #00453c;
+    --sa-action-primary: #1778ec;
+    --sa-action-hover: #146ad0;
+    --sa-action-active: #125eb8;
     --sa-action-foreground: #ffffff;
-    --sa-focus: #005eb8;
-    --sa-link: #075cb5;
-    --sa-success: #176b43;
+    --sa-focus: #1778ec;
+    --sa-link: #1778ec;
+    --sa-success: #148e58;
     --sa-success-foreground: #ffffff;
     --sa-danger: #b4233a;
     --sa-danger-foreground: #ffffff;
@@ -34,13 +35,13 @@
     --sa-text-secondary: #c6ddd6;
     --sa-text-muted: #a7c3bc;
     --sa-border: #5b7b74;
-    --sa-action-primary: #55d5b7;
-    --sa-action-hover: #74e5cb;
-    --sa-action-active: #95f0d8;
+    --sa-action-primary: #23a4da;
+    --sa-action-hover: #54bce2;
+    --sa-action-active: #7ccdee;
     --sa-action-foreground: #062d29;
     --sa-focus: #7dd3fc;
-    --sa-link: #80bfff;
-    --sa-success: #23ae70;
+    --sa-link: #23a4da;
+    --sa-success: #27a961;
     --sa-success-foreground: #062d29;
     --sa-danger: #fb7185;
     --sa-danger-foreground: #40131e;
