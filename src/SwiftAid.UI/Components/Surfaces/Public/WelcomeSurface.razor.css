@@ -1,14 +1,14 @@
 .welcome-surface {
     display: grid;
-    grid-template-rows: max(7rem, 16vh) minmax(0, 1fr);
+    grid-template-rows: max(7.5rem, 18svh) minmax(0, 1fr);
     align-content: stretch;
     gap: 0;
     width: min(100%, 28rem);
-    height: 100svh;
+    height: 100dvh;
     min-height: 100svh;
     box-sizing: border-box;
     margin-inline: auto;
-    padding: 0 0.5rem max(4rem, calc(3rem + env(safe-area-inset-bottom)));
+    padding: 0 1rem max(4rem, calc(3rem + env(safe-area-inset-bottom)));
 }
 
 .welcome-surface__header {
@@ -25,17 +25,17 @@
 }
 
 .welcome-surface__brand-mark {
-    width: 2.5rem;
-    height: 2.5rem;
+    width: 3rem;
+    height: 3rem;
     flex: 0 0 auto;
-    border-radius: 0.625rem;
+    border-radius: 0.75rem;
     object-fit: cover;
 }
 
 .welcome-surface__header h1 {
     margin: 0;
     color: inherit;
-    font-size: clamp(1.625rem, 6vw, 2rem);
+    font-size: clamp(1.75rem, 7vw, 2.125rem);
     font-weight: 700;
     line-height: 1.15;
     letter-spacing: -0.02em;
@@ -44,18 +44,18 @@
 .welcome-surface__card {
     display: flex;
     flex-direction: column;
-    gap: 0.625rem;
+    gap: 0.75rem;
     min-width: 0;
     width: 100%;
-    max-width: 25rem;
+    max-width: 24rem;
     min-height: 0;
     box-sizing: border-box;
     justify-self: center;
     align-self: center;
-    padding: clamp(0.75rem, 4vw, 1rem);
-    border: 1px solid rgb(16 42 67 / 8%);
-    border-radius: 1rem;
-    background: #fff;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
     color: #172b40;
     box-shadow: none;
 }
@@ -186,13 +186,17 @@
 
 @media (max-height: 680px) {
     .welcome-surface {
-        grid-template-rows: max(7rem, 16vh) minmax(0, 1fr);
+        height: auto;
+        min-height: 100dvh;
+        grid-template-rows: max(6.5rem, 18svh) auto;
+        align-content: start;
     }
 
     .welcome-surface__card {
         min-height: 0;
-        gap: 0.625rem;
-        align-self: start;
+        gap: 0.75rem;
+        align-self: center;
+        margin-block: clamp(1.25rem, 4svh, 2rem);
     }
 
     .welcome-surface__choice {
@@ -202,13 +206,11 @@
 
 @media (max-height: 480px) {
     .welcome-surface {
-        height: auto;
-        grid-template-rows: max(7rem, 16vh) auto;
-        align-content: start;
+        grid-template-rows: max(5.5rem, 16svh) auto;
     }
 
     .welcome-surface__card {
-        align-self: start;
+        margin-block: 1rem;
     }
 }
 
