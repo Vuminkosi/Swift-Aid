@@ -38,6 +38,7 @@ builder.Services.AddSwiftAidInfrastructure(builder.Configuration, builder.Enviro
 builder.Services.AddScoped<WebGuestIntakeService>();
 builder.Services.AddScoped<SwiftAid.Contracts.Intake.IIntakeCoordinationClient, SwiftAid.Gateway.Intake.IntakeCoordinationGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseTimelineClient, SwiftAid.Gateway.Cases.CaseTimelineGatewayClient>();
+builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseCommandClient, SwiftAid.Gateway.Cases.CaseCommandGatewayClient>();
 builder.Services.AddScoped<INotificationApiService, NotificationApiService>();
 builder.Services.AddScoped<INotificationFeedClient, InteractiveServerNotificationFeedClient>();
 builder.Services.AddScoped<INotificationPlatformSettings, GatewayNotificationPlatformSettings>();

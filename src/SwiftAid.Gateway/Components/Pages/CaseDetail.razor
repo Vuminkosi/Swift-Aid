@@ -3,6 +3,7 @@
 @using SwiftAid.UI.Components.Cases
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ICaseTimelineClient TimelineClient
+@inject ICaseCommandClient CommandClient
 
 <PageTitle>Case history | SwiftAid</PageTitle>
 
@@ -12,9 +13,21 @@
                          Description="Immutable event history for one managed case. Content stays sealed; this view records what happened, when, and at which version."
                          HeadingId="case-detail-heading" />
 
-    <CaseTimelineView Client="TimelineClient" CaseId="CaseId" />
+    <CaseTimelineView @ref="_timeline" Client="TimelineClient" CaseId="CaseId" />
+
+    <CaseCommandPanel Client="CommandClient" CaseId="CaseId" OnCommandSucceeded="HandleCommandSucceededAsync" />
 </MudContainer>
 
 @code {
     [Parameter] public Guid CaseId { get; set; }
+
+    private CaseTimelineView? _timeline;
+
+    private async Task HandleCommandSucceededAsync(CaseCommandResult _)
+    {
+        if (_timeline is not null)
+        {
+            await _timeline.RefreshAsync();
+        }
+    }
 }

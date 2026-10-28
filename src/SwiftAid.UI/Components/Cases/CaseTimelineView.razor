@@ -100,7 +100,8 @@
         }
     }
 
-    private async Task RefreshAsync()
+    /// <summary>Reloads the timeline; called by hosting pages after a successful command.</summary>
+    public async Task RefreshAsync()
     {
         if (Client is null || CaseId == Guid.Empty)
         {

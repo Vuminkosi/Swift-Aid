@@ -1,0 +1,32 @@
+.case-command-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.case-command-panel__hint {
+    display: block;
+    margin-top: 0.25rem;
+}
+
+.case-command-panel__field {
+    margin-top: 0.75rem;
+}
+
+.case-command-panel__alert {
+    margin-top: 0.75rem;
+}
+
+.case-command-panel__state {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1rem 0;
+}
+
+.case-command-panel__actions {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0 1rem 1rem;
+}

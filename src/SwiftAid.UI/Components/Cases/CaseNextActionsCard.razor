@@ -1,0 +1,53 @@
+@using SwiftAid.Contracts.Cases
+
+<section class="case-next-actions" aria-label="Next actions">
+    <MudCard Class="case-next-actions__card" Outlined="true">
+        <MudCardContent>
+            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Next actions</MudText>
+            @if (Loading)
+            {
+                <div class="case-next-actions__state" role="status" aria-live="polite">
+                    <MudProgressCircular Indeterminate="true" Size="Size.Small" aria-label="Loading next actions" />
+                    <MudText Typo="Typo.body2">Loading next actions…</MudText>
+                </div>
+            }
+            else if (Timeline is null)
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" role="status">
+                    Next actions are unavailable right now. The case history may not exist, or your account may not have permission to read this case.
+                </MudAlert>
+            }
+            else if (NextActions.Count == 0)
+            {
+                <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" role="status">
+                    No outstanding actions. The recorded history shows no pending review and the case reads as resolved.
+                </MudAlert>
+            }
+            else
+            {
+                <MudList T="string" Dense="true" Class="case-next-actions__list">
+                    @foreach (var action in NextActions)
+                    {
+                        <MudListItem T="string" Text="@action" />
+                    }
+                </MudList>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    Derived from recorded history event types only. Report content stays sealed and is not shown here.
+                </MudText>
+            }
+        </MudCardContent>
+    </MudCard>
+</section>
+
+@code {
+    /// <summary>
+    /// Timeline payload already loaded by the hosting page. This card never calls
+    /// an API itself; it only presents outstanding items derived from history labels.
+    /// </summary>
+    [Parameter] public CaseTimeline? Timeline { get; set; }
+
+    [Parameter] public bool Loading { get; set; }
+
+    private IReadOnlyList<string> NextActions =>
+        Timeline is null ? Array.Empty<string>() : CaseNextActions.Derive(Timeline);
+}

@@ -1,0 +1,293 @@
+@using SwiftAid.Contracts.Cases
+
+<section class="case-command-panel" aria-label="Case actions">
+    <MudCard Outlined="true" Class="case-command-panel__card">
+        <MudCardContent>
+            <MudText Typo="Typo.subtitle1">Case actions</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="case-command-panel__hint">
+                Resolve, request reassignment, review a protected action, correct the report, or reopen this case.
+                Every action needs a reason and a confirmation.
+            </MudText>
+
+            @if (_sending)
+            {
+                <div class="case-command-panel__state" role="status" aria-live="polite">
+                    <MudProgressCircular Indeterminate="true" Size="Size.Small" aria-label="Sending case action" />
+                    <MudText Typo="Typo.body2">Sending case action…</MudText>
+                </div>
+            }
+            else if (_result is not null && (_result.Status == CaseCommandStatus.Accepted || _result.Status == CaseCommandStatus.Replayed))
+            {
+                <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" role="status" Class="case-command-panel__alert">
+                    The case action was recorded@( _result.AggregateVersion.HasValue ? $" at aggregate version {_result.AggregateVersion.Value}" : string.Empty).
+                    <MudButton Variant="Variant.Text" Color="Color.Success" OnClick="ResetAsync" aria-label="Send another case action">Send another</MudButton>
+                </MudAlert>
+            }
+            else
+            {
+                @if (_result is not null && _result.Status == CaseCommandStatus.Denied)
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="status" Class="case-command-panel__alert">
+                        This case was not found, or your account may not have permission to act on this case.
+                    </MudAlert>
+                }
+                else if (_result is not null && _result.Status == CaseCommandStatus.Conflict)
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="status" Class="case-command-panel__alert">
+                        The case changed before the action was recorded. Review the latest history and try again.
+                        <MudButton Variant="Variant.Text" Color="Color.Warning" OnClick="ClearResultAsync" aria-label="Retry case action">Retry</MudButton>
+                    </MudAlert>
+                }
+                else if (_result is not null && (_result.Status == CaseCommandStatus.Invalid || _result.Status == CaseCommandStatus.Unavailable))
+                {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" role="alert" Class="case-command-panel__alert">
+                        @(_result.Status == CaseCommandStatus.Invalid
+                            ? "The case action is invalid. Check the reason and identifiers, then try again."
+                            : "The case action is temporarily unavailable. Check your connection and try again.")
+                        <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="ClearResultAsync" aria-label="Retry case action">Retry</MudButton>
+                    </MudAlert>
+                }
+                else if (_error is not null)
+                {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" role="alert" Class="case-command-panel__alert">
+                        @_error
+                    </MudAlert>
+                }
+
+                <MudSelect T="string" Label="Action" @bind-Value="_operation" Class="case-command-panel__field">
+                    <MudSelectItem Value="@("Resolve")">Resolve</MudSelectItem>
+                    <MudSelectItem Value="@("RequestReassignment")">Request reassignment</MudSelectItem>
+                    <MudSelectItem Value="@("ReviewAction")">Review action</MudSelectItem>
+                    <MudSelectItem Value="@("CorrectReport")">Correct report</MudSelectItem>
+                    <MudSelectItem Value="@("Reopen")">Reopen</MudSelectItem>
+                </MudSelect>
+
+                @if (_operation == "ReviewAction")
+                {
+                    <MudTextField T="string" Label="Request id" HelperText="Protected-action request key (GUID)."
+                                  @bind-Value="_requestIdText" Class="case-command-panel__field" />
+                    <MudSelect T="string" Label="Outcome" @bind-Value="_outcome" Class="case-command-panel__field">
+                        <MudSelectItem Value="@("Approved")">Approved</MudSelectItem>
+                        <MudSelectItem Value="@("Denied")">Denied</MudSelectItem>
+                    </MudSelect>
+                    <MudTextField T="string" Label="Proposed owner id (optional)" HelperText="Accepted owner when approval reassigns the case."
+                                  @bind-Value="_proposedOwnerId" Class="case-command-panel__field" />
+                }
+                else if (_operation == "RequestReassignment")
+                {
+                    <MudTextField T="string" Label="Proposed owner id" HelperText="Canonical accountable owner for the reassignment."
+                                  @bind-Value="_proposedOwnerId" Class="case-command-panel__field" />
+                }
+                else if (_operation == "Reopen")
+                {
+                    <MudTextField T="string" Label="Accountable owner id" HelperText="Canonical accountable owner for the reopened case."
+                                  @bind-Value="_proposedOwnerId" Class="case-command-panel__field" />
+                }
+
+                <MudTextField T="string" Label="@ReasonLabel" HelperText="Operator reason; required and stored with the action."
+                              @bind-Value="_reason" Lines="3" Class="case-command-panel__field" />
+
+                @if (_confirming)
+                {
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status" Class="case-command-panel__alert">
+                        Confirm sending <strong>@OperationLabel</strong> for this case.
+                    </MudAlert>
+                }
+            }
+        </MudCardContent>
+        @if (!_sending && (_result is null || (_result.Status != CaseCommandStatus.Accepted && _result.Status != CaseCommandStatus.Replayed)))
+        {
+            <MudCardActions Class="case-command-panel__actions">
+                @if (!_confirming)
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="BeginConfirmAsync" aria-label="Review case action">Review</MudButton>
+                }
+                else
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SendAsync" aria-label="Confirm and send case action">Confirm and send</MudButton>
+                    <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="CancelConfirmAsync" aria-label="Back to editing case action">Back</MudButton>
+                }
+            </MudCardActions>
+        }
+    </MudCard>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public ICaseCommandClient Client { get; set; } = null!;
+
+    [Parameter, EditorRequired] public Guid CaseId { get; set; }
+
+    [Parameter] public EventCallback<CaseCommandResult> OnCommandSucceeded { get; set; }
+
+    private string _operation = "Resolve";
+    private string? _reason;
+    private string? _proposedOwnerId;
+    private string? _requestIdText;
+    private string _outcome = "Approved";
+    private bool _confirming;
+    private bool _sending;
+    private string? _error;
+    private CaseCommandResult? _result;
+
+    private string OperationLabel => _operation switch
+    {
+        "RequestReassignment" => "Request reassignment",
+        "ReviewAction" => "Review action",
+        "CorrectReport" => "Correct report",
+        "Reopen" => "Reopen",
+        _ => "Resolve"
+    };
+
+    private string ReasonLabel => _operation switch
+    {
+        "CorrectReport" => "Corrected narrative and reason",
+        _ => "Reason"
+    };
+
+    private Task BeginConfirmAsync()
+    {
+        _error = null;
+        _result = null;
+        if (string.IsNullOrWhiteSpace(_reason))
+        {
+            _error = "A reason is required before the action can be reviewed.";
+            return Task.CompletedTask;
+        }
+
+        if ((_operation == "RequestReassignment" || _operation == "Reopen") && string.IsNullOrWhiteSpace(_proposedOwnerId))
+        {
+            _error = "An owner identifier is required for this action.";
+            return Task.CompletedTask;
+        }
+
+        if (_operation == "ReviewAction" && !string.IsNullOrWhiteSpace(_requestIdText) && !Guid.TryParse(_requestIdText, out _))
+        {
+            _error = "The request id must be a valid identifier.";
+            return Task.CompletedTask;
+        }
+
+        _confirming = true;
+        return Task.CompletedTask;
+    }
+
+    private Task CancelConfirmAsync()
+    {
+        _confirming = false;
+        return Task.CompletedTask;
+    }
+
+    private Task ClearResultAsync()
+    {
+        _result = null;
+        _error = null;
+        _confirming = false;
+        return Task.CompletedTask;
+    }
+
+    private Task ResetAsync()
+    {
+        _result = null;
+        _error = null;
+        _confirming = false;
+        _reason = null;
+        _proposedOwnerId = null;
+        _requestIdText = null;
+        _outcome = "Approved";
+        _operation = "Resolve";
+        return Task.CompletedTask;
+    }
+
+    private async Task SendAsync()
+    {
+        if (Client is null || CaseId == Guid.Empty || _sending)
+        {
+            return;
+        }
+
+        CaseCommandInput input;
+        try
+        {
+            input = BuildInput();
+        }
+        catch (ArgumentException exception)
+        {
+            _error = exception.Message;
+            _confirming = false;
+            return;
+        }
+
+        _sending = true;
+        _error = null;
+        _result = null;
+
+        try
+        {
+            var result = await Client.SendAsync(CaseId, input);
+            _result = result;
+            _confirming = false;
+            if (result.Status == CaseCommandStatus.Accepted || result.Status == CaseCommandStatus.Replayed)
+            {
+                await OnCommandSucceeded.InvokeAsync(result);
+            }
+        }
+        catch (Exception)
+        {
+            _error = "The case action could not be sent. Check your connection and try again.";
+            _confirming = false;
+        }
+        finally
+        {
+            _sending = false;
+        }
+    }
+
+    private CaseCommandInput BuildInput()
+    {
+        if (string.IsNullOrWhiteSpace(_reason))
+        {
+            throw new ArgumentException("A reason is required for this case action.");
+        }
+
+        return _operation switch
+        {
+            "RequestReassignment" => new CaseCommandInput(
+                "RequestProtectedAction", "Reassign", _reason, RequireOwner(_proposedOwnerId), null, null, null),
+            "ReviewAction" => new CaseCommandInput(
+                "ReviewProtectedAction", null, _reason, BlankToNull(_proposedOwnerId), ParseOptionalRequestId(_requestIdText), _outcome, null),
+            "CorrectReport" => new CaseCommandInput(
+                "CorrectReport", null, _reason, null, null, null, null),
+            "Reopen" => new CaseCommandInput(
+                "Reopen", null, _reason, RequireOwner(_proposedOwnerId), null, null, null),
+            _ => new CaseCommandInput(
+                "Resolve", null, _reason, null, null, null, null),
+        };
+    }
+
+    private static string RequireOwner(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException("An owner identifier is required for this case action.");
+        }
+
+        return value;
+    }
+
+    private static string? BlankToNull(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value;
+
+    private static Guid? ParseOptionalRequestId(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        if (!Guid.TryParse(value, out var parsed))
+        {
+            throw new ArgumentException("The request id must be a valid identifier.");
+        }
+
+        return parsed;
+    }
+}

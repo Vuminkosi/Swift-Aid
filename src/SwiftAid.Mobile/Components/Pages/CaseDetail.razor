@@ -11,9 +11,48 @@
                          Description="Immutable event history for one managed case. Content stays sealed; this view records what happened, when, and at which version."
                          HeadingId="case-detail-heading" />
 
+    <CaseNextActionsCard Timeline="_timeline" Loading="_loading" />
+
     <CaseTimelineView Client="TimelineClient" CaseId="CaseId" />
 </MudContainer>
 
 @code {
     [Parameter] public Guid CaseId { get; set; }
+
+    private CaseTimeline? _timeline;
+    private bool _loading = true;
+    private Guid _loadedCaseId = Guid.Empty;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (CaseId != Guid.Empty && CaseId != _loadedCaseId)
+        {
+            _loadedCaseId = CaseId;
+            await LoadTimelineAsync();
+        }
+    }
+
+    private async Task LoadTimelineAsync()
+    {
+        _loading = true;
+        _timeline = null;
+
+        try
+        {
+            var result = await TimelineClient.GetAsync(CaseId, null);
+            if (result.Access == CaseTimelineAccess.Found)
+            {
+                _timeline = result.Timeline;
+            }
+        }
+        catch (Exception)
+        {
+            // The card renders its unavailable state; CaseTimelineView reports its own errors.
+            _timeline = null;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
 }
