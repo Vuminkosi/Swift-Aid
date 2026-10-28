@@ -38,6 +38,7 @@ using SwiftAid.Infrastructure.Persistence.Protection;
 using SwiftAid.Infrastructure.Persistence.Registration;
 using SwiftAid.Infrastructure.Persistence.Repositories.Cases;
 using SwiftAid.Infrastructure.Persistence.Repositories.Intake;
+using SwiftAid.Infrastructure.Persistence.Sessions;
 using SwiftAid.Infrastructure.Persistence.Transactions;
 using SwiftAid.Infrastructure.Storage;
 using SwiftAid.Infrastructure.Identity;
@@ -386,6 +387,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICaseMonitoringSummaryQuery, CaseMonitoringSummaryQuery>();
         services.AddScoped<ICaseMonitoringQueueStore, PostgresCaseMonitoringQueueStore>();
         services.AddScoped<ICaseMonitoringQueueQuery, CaseMonitoringQueueQuery>();
+        // Community sessions ride the same pipeline flag: when the pipeline is disabled the
+        // service stays unregistered and the staff/public session endpoints fail closed
+        // through their nullable GetService checks (pinned by CommunitySessionEndpointTests).
+        services.AddCommunitySessions();
         services.AddHostedService<CaseCommandProcessingStartupValidator>();
     }
 

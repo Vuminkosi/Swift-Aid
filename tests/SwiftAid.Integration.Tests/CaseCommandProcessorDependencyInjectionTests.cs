@@ -8,6 +8,8 @@ using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases.Commands;
 using SwiftAid.Application.Cases.Registration;
 using SwiftAid.Application.Intake;
+using SwiftAid.Application.Sessions;
+using SwiftAid.Contracts.Sessions;
 using SwiftAid.Infrastructure.Configuration;
 using SwiftAid.Infrastructure.Persistence;
 using SwiftAid.Infrastructure.Persistence.Protection;
@@ -36,6 +38,32 @@ public sealed class CaseCommandProcessorDependencyInjectionTests
         Assert.Empty(serviceProvider.GetServices<IHostedService>());
         Assert.Null(serviceProvider.GetService<IScopeService>());
         Assert.Null(services.SingleOrDefault(descriptor => descriptor.ServiceType == typeof(SwiftAidDbContext)));
+    }
+
+    [Fact]
+    public void DisabledCommandProcessingWithConnectionStringStillRegistersNoDatabaseCommandOrSessionServices()
+    {
+        // A connection string alone enables nothing: without the pipeline (or identity) flag the
+        // DbContext, command pipeline, and session services all stay unregistered by design, so
+        // their endpoints keep failing closed. Do NOT "fix" a startup validation error by
+        // registering the DbContext here — run with CaseCommandProcessing:Enabled = true instead.
+        // (Disabled-mode containers are intentionally not validatable; build without validation,
+        // matching DisabledCommandProcessingDoesNotRegisterDatabaseOrCommandServices.)
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSwiftAidInfrastructure(Configuration(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:SwiftAid"] = "Host=127.0.0.1;Port=1;Database=swiftaid_di_test;Username=test"
+        }));
+
+        using var serviceProvider = services.BuildServiceProvider();
+
+        Assert.Null(serviceProvider.GetService<SwiftAidDbContext>());
+        Assert.Null(services.SingleOrDefault(descriptor => descriptor.ServiceType == typeof(SwiftAidDbContext)));
+        Assert.Null(serviceProvider.GetService<ICaseCommandProcessor>());
+        Assert.Null(serviceProvider.GetService<ICaseCommandUnitOfWork>());
+        Assert.Null(serviceProvider.GetService<ICommunitySessionService>());
+        Assert.Null(serviceProvider.GetService<ICommunitySessionStore>());
     }
 
     [Fact]
@@ -217,6 +245,50 @@ public sealed class CaseCommandProcessorDependencyInjectionTests
                 Assert.Same(
                     scoped.GetRequiredService<IProtectedCaseEventPayloadStore>(),
                     scoped.GetRequiredService<PostgresProtectedCaseEventPayloadStore>());
+            }
+            finally
+            {
+                await serviceProvider.DisposeAsync();
+            }
+        }
+        finally
+        {
+            PrivateKeyRingTestDirectory.DeleteRoot(keyRoot);
+        }
+    }
+
+    [Fact]
+    public async Task EnabledCommandProcessingRegistersCommunitySessionServices()
+    {
+        var keyRoot = PrivateKeyRingTestDirectory.CreateRoot("swiftaid-session-di");
+        try
+        {
+            var keyDirectory = PrivateKeyRingTestDirectory.CreateKeyDirectory(keyRoot);
+            var services = new ServiceCollection();
+            services.AddLogging();
+            services.AddSwiftAidInfrastructure(Configuration(new Dictionary<string, string?>
+            {
+                ["CaseCommandProcessing:Enabled"] = "true",
+                ["CaseCommandProcessing:MaximumTransactionAttempts"] = "2",
+                ["ConnectionStrings:SwiftAid"] = "Host=127.0.0.1;Port=1;Database=swiftaid_di_test;Username=test",
+                ["DataProtection:Enabled"] = "true",
+                ["DataProtection:ApplicationName"] = "SwiftAid.Integration.Tests",
+                ["DataProtection:KeysPath"] = keyDirectory,
+                ["DataProtection:MaximumPayloadBytes"] = "1024",
+                ["DataProtection:AllowUnencryptedDevelopmentKeys"] = "true"
+            }), new TestHostEnvironment { EnvironmentName = Environments.Development });
+
+            var serviceProvider = services.BuildServiceProvider(new ServiceProviderOptions
+            {
+                ValidateScopes = true,
+                ValidateOnBuild = true
+            });
+
+            try
+            {
+                await using var scope = serviceProvider.CreateAsyncScope();
+                Assert.NotNull(scope.ServiceProvider.GetRequiredService<ICommunitySessionService>());
+                Assert.NotNull(scope.ServiceProvider.GetRequiredService<ICommunitySessionStore>());
             }
             finally
             {
