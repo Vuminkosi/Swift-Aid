@@ -26,7 +26,9 @@ services:
       TransportSecurity__AllowedDevelopmentHosts__3: qdrant
 
       # PostgreSQL
-      ConnectionStrings__SwiftAid: "Host=postgres;Port=${POSTGRES_PORT:-5432};Database=${POSTGRES_DB:?Set POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+      # NOTE: the port here is the in-container Postgres port (always 5432).
+      # POSTGRES_PORT only remaps the host-side published port.
+      ConnectionStrings__SwiftAid: "Host=postgres;Port=5432;Database=${POSTGRES_DB:?Set POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
 
       # Qdrant
       Qdrant__Endpoint: "http://qdrant:6333"
@@ -108,17 +110,28 @@ services:
       FirebaseWeb__MeasurementId: "${FIREBASE_WEB_MEASUREMENT_ID:-}"
       FirebaseWeb__VapidKey: "${FIREBASE_WEB_VAPID_KEY:-}"
 
-      CaseCommandProcessing__Enabled: "${CaseCommandProcessing__Enabled:-true}"
-      CaseCommandProcessing__MaximumTransactionAttempts: "${CaseCommandProcessing__MaximumTransactionAttempts:-5}" 
+      # The local stack is only useful with the pipeline on: with it off every
+      # DB-backed route (intake, sessions, commands) fails closed and the gateway
+      # serves only metadata/health. This pins the compose requirement explicitly.
+      CaseCommandProcessing__Enabled: "true"
+      CaseCommandProcessing__MaximumTransactionAttempts: "${CaseCommandProcessing__MaximumTransactionAttempts:-3}" 
 
-      DataProtection__Enabled: "${DataProtection__Enabled:-false}"
+      # Local-dev key ring: unencrypted dev keys on an ephemeral tmpfs mount
+      # (mode 700, app uid 1654). Sealed payloads do not survive gateway restarts;
+      # production must use a certificate-protected persistent key ring instead.
+      DataProtection__Enabled: "true"
       DataProtection__ApplicationName: "${DataProtection__ApplicationName:-SwiftAid}"
+      DataProtection__KeysPath: "/var/swiftaid/keys"
+      DataProtection__MaximumPayloadBytes: "65536"
+      DataProtection__AllowUnencryptedDevelopmentKeys: "true"
 
     secrets:
       - source: fcm-service-account
         target: swiftaid-fcm-service-account.json
     ports:
       - "127.0.0.1:${GATEWAY_PORT:-8080}:8080"
+    tmpfs:
+      - /var/swiftaid/keys:rw,noexec,nosuid,uid=1654,gid=1654,mode=700
     depends_on:
       postgres:
         condition: service_healthy
