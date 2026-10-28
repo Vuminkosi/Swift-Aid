@@ -12,7 +12,10 @@ services:
         required: false
     environment:
       # ASP.NET Core
-      ASPNETCORE_ENVIRONMENT: Production
+      # Local Compose stack: Development unlocks the TransportSecurity plaintext-dev
+      # allowances below (redis/minio/nats/qdrant are plaintext inside this network).
+      # Production deployments must override this to Production with TLS endpoints.
+      ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_HTTP_PORTS: "8080"
 
       # Transport Security

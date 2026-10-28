@@ -148,6 +148,8 @@ fi
 
 # `stream add` uses the CREATE API. The bootstrap account has no UPDATE or
 # PURGE permission; a race with an existing stream therefore fails safely.
+# `--defaults` accepts all prompts: `stream add` asks for confirmation even
+# when every flag is supplied, and there is no terminal in Compose.
 nats stream add "$stream" \
     --subjects "$subject" \
     --storage file \
@@ -159,7 +161,8 @@ nats stream add "$stream" \
     --max-msg-size "$max_message_size" \
     --replicas 1 \
     --dupe-window "${duplicate_window_seconds}s" \
-    --ack
+    --ack \
+    --defaults
 
 nats stream info "$stream" --json > "$stream_info" ||
     fail "created $stream but could not verify it; operator inspection is required."
