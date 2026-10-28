@@ -40,7 +40,8 @@ public sealed class GuestSubmissionCoordinator(
                             State = GuestSubmissionLocalState.NeedsAttention,
                             IntakeCapability = null,
                             CapabilityExpiresAtUtc = null,
-                            UpdatedAtUtc = _timeProvider.GetUtcNow()
+                            UpdatedAtUtc = _timeProvider.GetUtcNow(),
+                            Version = checked(item.Version + 1)
                         }, cancellationToken).ConfigureAwait(false);
                         needsAttention++;
                         continue;
@@ -56,7 +57,8 @@ public sealed class GuestSubmissionCoordinator(
                             SessionId = Guid.NewGuid(),
                             IntakeCapability = null,
                             CapabilityExpiresAtUtc = null,
-                            UpdatedAtUtc = _timeProvider.GetUtcNow()
+                            UpdatedAtUtc = _timeProvider.GetUtcNow(),
+                            Version = checked(item.Version + 1)
                         };
                         await persistence.SaveAsync(item, cancellationToken).ConfigureAwait(false);
                         capability = null;
@@ -82,7 +84,8 @@ public sealed class GuestSubmissionCoordinator(
                         {
                             IntakeCapability = capability,
                             CapabilityExpiresAtUtc = capabilityExpiry,
-                            UpdatedAtUtc = _timeProvider.GetUtcNow()
+                            UpdatedAtUtc = _timeProvider.GetUtcNow(),
+                            Version = checked(item.Version + 1)
                         };
                         await persistence.SaveAsync(item, cancellationToken).ConfigureAwait(false);
                     }
@@ -109,7 +112,8 @@ public sealed class GuestSubmissionCoordinator(
                         Receipt = receipt,
                         IntakeCapability = null,
                         CapabilityExpiresAtUtc = null,
-                        UpdatedAtUtc = _timeProvider.GetUtcNow()
+                        UpdatedAtUtc = _timeProvider.GetUtcNow(),
+                        Version = checked(item.Version + 1)
                     };
                     await persistence.SaveAsync(acknowledged, cancellationToken).ConfigureAwait(false);
                     received++;
@@ -125,7 +129,8 @@ public sealed class GuestSubmissionCoordinator(
                         State = GuestSubmissionLocalState.NeedsAttention,
                         IntakeCapability = null,
                         CapabilityExpiresAtUtc = null,
-                        UpdatedAtUtc = _timeProvider.GetUtcNow()
+                        UpdatedAtUtc = _timeProvider.GetUtcNow(),
+                        Version = checked(item.Version + 1)
                     }, cancellationToken).ConfigureAwait(false);
                     needsAttention++;
                 }
@@ -179,7 +184,8 @@ public sealed class GuestSubmissionCoordinator(
                         await persistence.SaveAsync(item with
                         {
                             Receipt = receipt,
-                            UpdatedAtUtc = _timeProvider.GetUtcNow()
+                            UpdatedAtUtc = _timeProvider.GetUtcNow(),
+                            Version = checked(item.Version + 1)
                         }, cancellationToken).ConfigureAwait(false);
                         updated++;
                     }

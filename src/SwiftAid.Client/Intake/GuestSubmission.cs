@@ -37,7 +37,8 @@ public sealed record GuestSubmissionRecord(
     string? IntakeCapability = null,
     DateTimeOffset? CapabilityExpiresAtUtc = null,
     IntakeReceipt? Receipt = null,
-    IReadOnlyList<GuestAudioAsset>? AudioAssets = null);
+    IReadOnlyList<GuestAudioAsset>? AudioAssets = null,
+    long Version = 1);
 
 /// <summary>Safe view that excludes report text, receipt proof, and intake capability.</summary>
 public sealed record GuestSubmissionSummary(
@@ -52,7 +53,8 @@ public sealed record GuestDraftDetails(
     IntakeSubmission Submission,
     GuestSubmissionLocalState State,
     DateTimeOffset CreatedAtUtc,
-    DateTimeOffset UpdatedAtUtc);
+    DateTimeOffset UpdatedAtUtc,
+    long Version = 1);
 
 public sealed record GuestSyncSummary(int Queued, int Received, int RetryPending, int NeedsAttention);
 
@@ -76,6 +78,15 @@ public interface IGuestSubmissionStore
     Task<GuestSubmissionSummary> CreateRevisionAsync(
         Guid previousSubmissionId,
         IntakeSubmission revisedSubmission,
+        CancellationToken cancellationToken = default);
+
+    Task<GuestAudioRetakeResult> RetakeAudioAsync(
+        Guid submissionId,
+        Guid attachmentId,
+        long expectedVersion,
+        CancellationToken cancellationToken = default);
+
+    Task<GuestAudioCleanupRetrySummary> RetryPendingAudioCleanupAsync(
         CancellationToken cancellationToken = default);
 
     Task<GuestSubmissionSummary> QueueAsync(Guid clientSubmissionId, CancellationToken cancellationToken = default);
@@ -131,6 +142,10 @@ public interface IGuestAudioStore
     Task<byte[]> ReadOriginalAsync(
         Guid clientSubmissionId,
         Guid attachmentId,
+        CancellationToken cancellationToken = default);
+
+    Task<GuestAudioCleanupResult> CleanupSupersededOriginalAsync(
+        GuestAudioCleanupIntent intent,
         CancellationToken cancellationToken = default);
 }
 

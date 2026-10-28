@@ -247,6 +247,7 @@ public sealed class EncryptedGuestSubmissionStore : IGuestSubmissionPersistence
     {
         if (item.ClientSubmissionId == Guid.Empty || item.Submission.ClientSubmissionId != item.ClientSubmissionId ||
             item.Submission.SchemaVersion != 1 || !Enum.IsDefined(item.State) ||
+            item.Version <= 0 ||
             item.CreatedAtUtc.Offset != TimeSpan.Zero || item.UpdatedAtUtc.Offset != TimeSpan.Zero ||
             item.UpdatedAtUtc < item.CreatedAtUtc || string.IsNullOrWhiteSpace(item.PayloadSha256) ||
             item.PayloadSha256.Length != 64 || item.ReceiptProof.Length != 43 ||

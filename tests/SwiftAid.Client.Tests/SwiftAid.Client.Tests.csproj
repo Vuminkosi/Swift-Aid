@@ -20,4 +20,11 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Intake\IGuestInstallKeyStore.cs" Link="Linked\Mobile\IGuestInstallKeyStore.cs" />
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Intake\EncryptedGuestSubmissionStore.cs" Link="Linked\Mobile\EncryptedGuestSubmissionStore.cs" />
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Intake\EncryptedGuestAudioStore.cs" Link="Linked\Mobile\EncryptedGuestAudioStore.cs" />
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Intake\EncryptedGuestAudioCleanupJournal.cs" Link="Linked\Mobile\EncryptedGuestAudioCleanupJournal.cs" />
+  </ItemGroup>
+
 </Project>

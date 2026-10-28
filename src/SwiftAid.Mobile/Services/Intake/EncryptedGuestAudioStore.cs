@@ -18,18 +18,21 @@ public sealed class EncryptedGuestAudioStore : IGuestAudioStore
     private readonly IGuestInstallKeyStore _keyStore;
     private readonly IGuestSubmissionPersistence _submissionStore;
     private readonly TimeProvider _timeProvider;
+    private readonly IGuestDraftMutationGate _mutationGate;
 
     public EncryptedGuestAudioStore(
         string appPrivateDirectory,
         IGuestInstallKeyStore keyStore,
         IGuestSubmissionPersistence submissionStore,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IGuestDraftMutationGate? mutationGate = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(appPrivateDirectory);
         _audioDirectory = Path.Combine(appPrivateDirectory, "guest-intake", "audio");
         _keyStore = keyStore ?? throw new ArgumentNullException(nameof(keyStore));
         _submissionStore = submissionStore ?? throw new ArgumentNullException(nameof(submissionStore));
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _mutationGate = mutationGate ?? GuestDraftMutationGate.Instance;
     }
 
     public async Task<GuestAudioAsset> SaveOriginalAsync(
@@ -51,6 +54,7 @@ public sealed class EncryptedGuestAudioStore : IGuestAudioStore
             throw new ArgumentException("The recording is not within the supported limits.");
         }
 
+        await using var mutationLease = await _mutationGate.AcquireAsync(cancellationToken).ConfigureAwait(false);
         await Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         byte[] original = [];
         try
@@ -74,10 +78,21 @@ public sealed class EncryptedGuestAudioStore : IGuestAudioStore
                 GuestAudioLocalState.LocalOnly);
             var existingAssets = submission.AudioAssets ?? Array.Empty<GuestAudioAsset>();
             var existing = existingAssets.SingleOrDefault(item => item.AttachmentId == attachmentId);
+            var submissions = await _submissionStore.GetAllAsync(cancellationToken).ConfigureAwait(false);
+            var attachmentAlreadyReferenced = submissions.Any(item =>
+                item.ClientSubmissionId != clientSubmissionId &&
+                (item.Submission.OriginalAudioAttachmentIds.Contains(attachmentId) ||
+                 (item.AudioAssets ?? Array.Empty<GuestAudioAsset>()).Any(audio => audio.AttachmentId == attachmentId)));
+            if (attachmentAlreadyReferenced)
+            {
+                throw new InvalidOperationException("This recording identifier is already used by another report.");
+            }
+
             if (existing is not null)
             {
                 if (existing == asset)
                 {
+                    await WriteEncryptedAsync(asset, original, cancellationToken).ConfigureAwait(false);
                     return existing;
                 }
 
@@ -88,7 +103,8 @@ public sealed class EncryptedGuestAudioStore : IGuestAudioStore
             await _submissionStore.SaveAsync(submission with
             {
                 AudioAssets = existingAssets.Append(asset).ToArray(),
-                UpdatedAtUtc = _timeProvider.GetUtcNow()
+                UpdatedAtUtc = _timeProvider.GetUtcNow(),
+                Version = checked(submission.Version + 1)
             }, cancellationToken).ConfigureAwait(false);
             return asset;
         }
@@ -185,6 +201,88 @@ public sealed class EncryptedGuestAudioStore : IGuestAudioStore
             if (fileBytes.Length > 0) CryptographicOperations.ZeroMemory(fileBytes);
             if (key.Length > 0) CryptographicOperations.ZeroMemory(key);
             if (plaintext.Length > 0) CryptographicOperations.ZeroMemory(plaintext);
+            Gate.Release();
+        }
+    }
+
+    public async Task<GuestAudioCleanupResult> CleanupSupersededOriginalAsync(
+        GuestAudioCleanupIntent intent,
+        CancellationToken cancellationToken = default)
+    {
+        if (intent is null || !intent.IsValid)
+        {
+            return new GuestAudioCleanupResult(GuestAudioCleanupCode.InvalidRequest);
+        }
+
+        await Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var submissions = await _submissionStore.GetAllAsync(cancellationToken).ConfigureAwait(false);
+            var superseded = submissions.SingleOrDefault(item => item.ClientSubmissionId == intent.SupersededSubmissionId);
+            var replacement = submissions.SingleOrDefault(item => item.ClientSubmissionId == intent.ReplacementSubmissionId);
+            if (superseded is null || replacement is null ||
+                superseded.State != GuestSubmissionLocalState.Superseded ||
+                superseded.Version != intent.ExpectedSupersededVersion ||
+                replacement.State is not (GuestSubmissionLocalState.Draft or GuestSubmissionLocalState.NeedsAttention) ||
+                replacement.Version != intent.ExpectedReplacementVersion ||
+                replacement.Submission.OriginalAudioAttachmentIds.Contains(intent.AttachmentId) ||
+                (replacement.AudioAssets ?? Array.Empty<GuestAudioAsset>()).Any(asset => asset.AttachmentId == intent.AttachmentId))
+            {
+                return new GuestAudioCleanupResult(GuestAudioCleanupCode.NotSafe);
+            }
+
+            var supersededAssets = superseded.AudioAssets ?? Array.Empty<GuestAudioAsset>();
+            if (!superseded.Submission.OriginalAudioAttachmentIds.Contains(intent.AttachmentId) ||
+                !supersededAssets.Any(asset => asset.AttachmentId == intent.AttachmentId))
+            {
+                return new GuestAudioCleanupResult(GuestAudioCleanupCode.NotSafe);
+            }
+
+            var otherReferenceExists = submissions.Any(item =>
+                item.ClientSubmissionId != superseded.ClientSubmissionId &&
+                (item.Submission.OriginalAudioAttachmentIds.Contains(intent.AttachmentId) ||
+                 (item.AudioAssets ?? Array.Empty<GuestAudioAsset>()).Any(asset => asset.AttachmentId == intent.AttachmentId)));
+            if (otherReferenceExists)
+            {
+                return new GuestAudioCleanupResult(GuestAudioCleanupCode.RetainedForHistory);
+            }
+
+            var path = GetPath(intent.AttachmentId);
+            if (!File.Exists(path))
+            {
+                return new GuestAudioCleanupResult(GuestAudioCleanupCode.AlreadyAbsent);
+            }
+
+            try
+            {
+                File.Delete(path);
+                return !File.Exists(path)
+                    ? new GuestAudioCleanupResult(GuestAudioCleanupCode.Removed)
+                    : new GuestAudioCleanupResult(GuestAudioCleanupCode.Failed);
+            }
+            catch (IOException)
+            {
+                return new GuestAudioCleanupResult(GuestAudioCleanupCode.Failed);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return new GuestAudioCleanupResult(GuestAudioCleanupCode.Failed);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (GuestSubmissionStoreUnavailableException)
+        {
+            return new GuestAudioCleanupResult(GuestAudioCleanupCode.Unavailable);
+        }
+        catch (Exception)
+        {
+            return new GuestAudioCleanupResult(GuestAudioCleanupCode.Failed);
+        }
+        finally
+        {
             Gate.Release();
         }
     }

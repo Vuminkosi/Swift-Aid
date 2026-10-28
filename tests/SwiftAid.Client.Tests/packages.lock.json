@@ -325,11 +325,18 @@
           "CommunityToolkit.Datasync.Client": "[10.1.2, )",
           "Duende.IdentityModel.OidcClient": "[7.1.1, )",
           "Microsoft.EntityFrameworkCore.Sqlite": "[10.0.14, )",
-          "SwiftAid.Contracts": "[1.0.0, )"
+          "SwiftAid.Contracts": "[1.0.0, )",
+          "SwiftAid.GuestIntake": "[1.0.0, )"
         }
       },
       "swiftaid.contracts": {
         "type": "Project"
+      },
+      "swiftaid.guestintake": {
+        "type": "Project",
+        "dependencies": {
+          "SwiftAid.Contracts": "[1.0.0, )"
+        }
       },
       "CommunityToolkit.Datasync.Client": {
         "type": "CentralTransitive",

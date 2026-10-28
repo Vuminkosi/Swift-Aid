@@ -4,11 +4,6 @@ using SwiftAid.Client.Intake;
 
 namespace SwiftAid.Mobile.Services.Intake;
 
-public interface IGuestInstallKeyStore
-{
-    Task<byte[]> GetOrCreateKeyAsync(CancellationToken cancellationToken);
-}
-
 /// <summary>Holds one app-install encryption key in the operating system's protected key store.</summary>
 public sealed class GuestInstallKeyStore : IGuestInstallKeyStore
 {

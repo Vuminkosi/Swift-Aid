@@ -266,6 +266,12 @@
       "swiftaid.contracts": {
         "type": "Project"
       },
+      "swiftaid.guestintake": {
+        "type": "Project",
+        "dependencies": {
+          "SwiftAid.Contracts": "[1.0.0, )"
+        }
+      },
       "Microsoft.EntityFrameworkCore": {
         "type": "CentralTransitive",
         "requested": "[10.0.14, )",

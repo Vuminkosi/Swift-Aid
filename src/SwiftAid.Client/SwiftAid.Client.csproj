@@ -2,6 +2,19 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SwiftAid.Contracts\SwiftAid.Contracts.csproj" />
+    <ProjectReference Include="..\SwiftAid.GuestIntake\SwiftAid.GuestIntake.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Intake\GuestSubmission.cs" />
+    <Compile Remove="Intake\GuestAudioCleanupContracts.cs" />
+    <Compile Remove="Intake\GuestDraftMutationGate.cs" />
+    <Compile Remove="Intake\GuestDraftStore.cs" />
+    <Compile Remove="Intake\GuestSubmissionCoordinator.cs" />
+    <Compile Remove="Intake\GuestIntakeHttpClient.cs" />
+    <Compile Remove="Presentation\UiCapabilityContracts.cs" />
+    <Compile Remove="Presentation\PublicWorkflows\PublicWorkflowContracts.cs" />
+    <Compile Remove="Presentation\PublicWorkflows\PublicIntakeProcessingPolicyContracts.cs" />
   </ItemGroup>
 
   <ItemGroup>
