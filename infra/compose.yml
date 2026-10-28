@@ -11,70 +11,106 @@ services:
       - path: ${SWIFTAID_NATS_OPTIONS_FILE:-../.nats-overrides.env}
         required: false
     environment:
-      - ASPNETCORE_ENVIRONMENT=Development
-      - ASPNETCORE_HTTP_PORTS=8080
-      - TransportSecurity__AllowPlaintextDevelopment=true
-      - TransportSecurity__AllowedDevelopmentHosts__0=minio
-      - TransportSecurity__AllowedDevelopmentHosts__1=redis
-      - TransportSecurity__AllowedDevelopmentHosts__2=nats
-      - TransportSecurity__AllowedDevelopmentHosts__3=qdrant
-      - "ConnectionStrings__SwiftAid=Host=postgres;Port=5432;Database=${POSTGRES_DB:?Set POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
-      - Qdrant__Endpoint=http://qdrant:6333
-      - "Qdrant__ApiKey=${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}"
-      - Nats__Url=nats://nats:4222
-      - "Nats__Username=${NATS_GATEWAY_USER:?Set NATS_GATEWAY_USER in .env}"
-      - "Nats__Password=${NATS_GATEWAY_PASSWORD:?Set NATS_GATEWAY_PASSWORD in .env}"
-      - Nats__Enabled=true
-      - Nats__EventStream=SWIFTAID_EVENTS
-      - Nats__EventSubjectPrefix=swiftaid.events.case
-      - "Nats__NotificationStream=${NATS_NOTIFICATION_STREAM:-SWIFTAID_NOTIFICATIONS}"
-      - "Nats__NotificationSubject=${NATS_NOTIFICATION_SUBJECT:-swiftaid.notifications.inapp}"
-      - Minio__Endpoint=http://minio:9000
-      - "Minio__Bucket=${MINIO_BUCKET:?Set MINIO_BUCKET in .env}"
-      - "Minio__MaxObjectSizeBytes=${MINIO_MAX_OBJECT_SIZE_BYTES:-104857600}"
-      - "Minio__AccessKey=${MINIO_APP_ACCESS_KEY:-}"
-      - "Minio__SecretKey=${MINIO_APP_SECRET_KEY:-}"
-      - Minio__UseSsl=false
-      - "Minio__Enabled=${MINIO_ENABLED:-false}"
-      - "Redis__ConnectionString=redis:6379,password=${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env},abortConnect=false"
-      - "Redis__InstanceName=${REDIS_INSTANCE_NAME:-swiftaid:}"
-      - "Redis__MaximumTtlSeconds=${REDIS_MAXIMUM_TTL_SECONDS:-3600}"
-      - Redis__Enabled=true
-      - "Federation__Enabled=${Federation__Enabled:-false}"
-      - "Federation__Google__Enabled=${Federation__Google__Enabled:-false}"
-      - "Federation__Google__CallbackVerified=${Federation__Google__CallbackVerified:-false}"
-      - "Federation__Google__ClientId=${Federation__Google__ClientId:-}"
-      - "Federation__Google__ClientSecret=${Federation__Google__ClientSecret:-}"
-      - "Federation__Google__CallbackPath=${Federation__Google__CallbackPath:-/google/callback}"
-      - "Federation__Facebook__Enabled=${Federation__Facebook__Enabled:-false}"
-      - "Federation__Facebook__CallbackVerified=${Federation__Facebook__CallbackVerified:-false}"
-      - "Federation__Facebook__ClientId=${Federation__Facebook__ClientId:-}"
-      - "Federation__Facebook__ClientSecret=${Federation__Facebook__ClientSecret:-}"
-      - "Identity__Enabled=${Identity__Enabled:-false}"
-      - "Identity__Issuer=${Identity__Issuer:-https://swiftaid.online/}"
-      - "Identity__AuthorizationCodeLifetimeSeconds=${Identity__AuthorizationCodeLifetimeSeconds:-120}"
-      - "Identity__AccessTokenLifetimeSeconds=${Identity__AccessTokenLifetimeSeconds:-600}"
-      - "Identity__RefreshTokenLifetimeSeconds=${Identity__RefreshTokenLifetimeSeconds:-2592000}"
-      - "Identity__SigningCertificatePath=${Identity__SigningCertificatePath:-}"
-      - "Identity__SigningCertificatePassword=${Identity__SigningCertificatePassword:-}"
-      - "Identity__EncryptionCertificatePath=${Identity__EncryptionCertificatePath:-}"
-      - "Identity__EncryptionCertificatePassword=${Identity__EncryptionCertificatePassword:-}"
-      - "Identity__PublicClients__0__ClientId=${Identity__PublicClients__0__ClientId:-swiftaid-mobile}"
-      - "Identity__PublicClients__0__DisplayName=${Identity__PublicClients__0__DisplayName:-SwiftAid Mobile}"
-      - "Identity__PublicClients__0__RedirectUris__0=${Identity__PublicClients__0__RedirectUris__0:-online.swiftaid.mobile:/oauth2redirect}"
-      - "Identity__PublicClients__0__PostLogoutRedirectUris__0=${Identity__PublicClients__0__PostLogoutRedirectUris__0:-online.swiftaid.mobile:/signout-callback}"
-      - "Fcm__Enabled=${FCM_ENABLED:-false}"
-      - "Fcm__ProjectId=${FCM_PROJECT_ID:-}"
-      - Fcm__CredentialsFilePath=/run/secrets/swiftaid-fcm-service-account.json
-      - "FirebaseWeb__Enabled=${FIREBASE_WEB_ENABLED:-false}"
-      - "FirebaseWeb__ApiKey=${FIREBASE_WEB_API_KEY:-}"
-      - "FirebaseWeb__AuthDomain=${FIREBASE_WEB_AUTH_DOMAIN:-}"
-      - "FirebaseWeb__ProjectId=${FIREBASE_WEB_PROJECT_ID:-}"
-      - "FirebaseWeb__StorageBucket=${FIREBASE_WEB_STORAGE_BUCKET:-}"
-      - "FirebaseWeb__MessagingSenderId=${FIREBASE_WEB_MESSAGING_SENDER_ID:-}"
-      - "FirebaseWeb__AppId=${FIREBASE_WEB_APP_ID:-}"
-      - "FirebaseWeb__MeasurementId=${FIREBASE_WEB_MEASUREMENT_ID:-}"
-      - "FirebaseWeb__VapidKey=${FIREBASE_WEB_VAPID_KEY:-}"
+      # ASP.NET Core
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: "8080"
+
+      # Transport Security
+      TransportSecurity__AllowPlaintextDevelopment: "true"
+      TransportSecurity__AllowedDevelopmentHosts__0: minio
+      TransportSecurity__AllowedDevelopmentHosts__1: redis
+      TransportSecurity__AllowedDevelopmentHosts__2: nats
+      TransportSecurity__AllowedDevelopmentHosts__3: qdrant
+
+      # PostgreSQL
+      ConnectionStrings__SwiftAid: "Host=postgres;Port=${POSTGRES_PORT:-5432};Database=${POSTGRES_DB:?Set POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+
+      # Qdrant
+      Qdrant__Endpoint: "http://qdrant:6333"
+      Qdrant__ApiKey: "${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}"
+
+      # NATS
+      Nats__Url: "nats://nats:${NATS_PORT:-4222}"
+      Nats__Username: "${NATS_GATEWAY_USER:?Set NATS_GATEWAY_USER in .env}"
+      Nats__Password: "${NATS_GATEWAY_PASSWORD:?Set NATS_GATEWAY_PASSWORD in .env}"
+      Nats__Enabled: "true"
+      Nats__EventStream: "SWIFTAID_EVENTS"
+      Nats__EventSubjectPrefix: "swiftaid.events.case"
+      Nats__NotificationStream: "${NATS_NOTIFICATION_STREAM:-SWIFTAID_NOTIFICATIONS}"
+      Nats__NotificationSubject: "${NATS_NOTIFICATION_SUBJECT:-swiftaid.notifications.inapp}"
+
+      # MinIO
+      Minio__Endpoint: "http://minio:${MINIO_API_PORT:-9000}"
+      Minio__Bucket: "${MINIO_BUCKET:?Set MINIO_BUCKET in .env}"
+      Minio__MaxObjectSizeBytes: "${MINIO_MAX_OBJECT_SIZE_BYTES:-104857600}"
+      Minio__AccessKey: "${MINIO_APP_ACCESS_KEY:-}"
+      Minio__SecretKey: "${MINIO_APP_SECRET_KEY:-}"
+      Minio__UseSsl: "false"
+      Minio__Enabled: "${MINIO_ENABLED:-false}"
+
+      # Redis
+      Redis__ConnectionString: "redis:${REDIS_PORT:-6379},password=${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env},abortConnect=false"
+      Redis__InstanceName: "${REDIS_INSTANCE_NAME:-swiftaid:}"
+      Redis__MaximumTtlSeconds: "${REDIS_MAXIMUM_TTL_SECONDS:-3600}"
+      Redis__Enabled: "true"
+
+      # Federation
+      Federation__Enabled: "${Federation__Enabled:-false}"
+
+      # Google Federation
+      Federation__Google__Enabled: "${Federation__Google__Enabled:-false}"
+      Federation__Google__CallbackVerified: "${Federation__Google__CallbackVerified:-false}"
+      Federation__Google__ClientId: "${Federation__Google__ClientId:-}"
+      Federation__Google__ClientSecret: "${Federation__Google__ClientSecret:-}"
+      Federation__Google__CallbackPath: "${Federation__Google__CallbackPath:-/google/callback}"
+
+      # Facebook Federation
+      Federation__Facebook__Enabled: "${Federation__Facebook__Enabled:-false}"
+      Federation__Facebook__CallbackVerified: "${Federation__Facebook__CallbackVerified:-false}"
+      Federation__Facebook__ClientId: "${Federation__Facebook__ClientId:-}"
+      Federation__Facebook__ClientSecret: "${Federation__Facebook__ClientSecret:-}"
+
+      # Identity
+      Identity__Enabled: "${Identity__Enabled:-false}"
+      Identity__Issuer: "${Identity__Issuer:-https://swiftaid.online/}"
+      Identity__AuthorizationCodeLifetimeSeconds: "${Identity__AuthorizationCodeLifetimeSeconds:-120}"
+      Identity__AccessTokenLifetimeSeconds: "${Identity__AccessTokenLifetimeSeconds:-600}"
+      Identity__RefreshTokenLifetimeSeconds: "${Identity__RefreshTokenLifetimeSeconds:-2592000}"
+
+      # Identity Certificates
+      Identity__SigningCertificatePath: "${Identity__SigningCertificatePath:-}"
+      Identity__SigningCertificatePassword: "${Identity__SigningCertificatePassword:-}"
+      Identity__EncryptionCertificatePath: "${Identity__EncryptionCertificatePath:-}"
+      Identity__EncryptionCertificatePassword: "${Identity__EncryptionCertificatePassword:-}"
+
+      # Identity Public Clients
+      Identity__PublicClients__0__ClientId: "${Identity__PublicClients__0__ClientId:-swiftaid-mobile}"
+      Identity__PublicClients__0__DisplayName: "${Identity__PublicClients__0__DisplayName:-SwiftAid Mobile}"
+      Identity__PublicClients__0__RedirectUris__0: "${Identity__PublicClients__0__RedirectUris__0:-online.swiftaid.mobile:/oauth2redirect}"
+      Identity__PublicClients__0__PostLogoutRedirectUris__0: "${Identity__PublicClients__0__PostLogoutRedirectUris__0:-online.swiftaid.mobile:/signout-callback}"
+
+      # Firebase Cloud Messaging
+      Fcm__Enabled: "${FCM_ENABLED:-false}"
+      Fcm__ProjectId: "${FCM_PROJECT_ID:-}"
+      Fcm__CredentialsFilePath: "/run/secrets/swiftaid-fcm-service-account.json"
+
+      # Firebase Web
+      FirebaseWeb__Enabled: "${FIREBASE_WEB_ENABLED:-false}"
+      FirebaseWeb__ApiKey: "${FIREBASE_WEB_API_KEY:-}"
+      FirebaseWeb__AuthDomain: "${FIREBASE_WEB_AUTH_DOMAIN:-}"
+      FirebaseWeb__ProjectId: "${FIREBASE_WEB_PROJECT_ID:-}"
+      FirebaseWeb__StorageBucket: "${FIREBASE_WEB_STORAGE_BUCKET:-}"
+      FirebaseWeb__MessagingSenderId: "${FIREBASE_WEB_MESSAGING_SENDER_ID:-}"
+      FirebaseWeb__AppId: "${FIREBASE_WEB_APP_ID:-}"
+      FirebaseWeb__MeasurementId: "${FIREBASE_WEB_MEASUREMENT_ID:-}"
+      FirebaseWeb__VapidKey: "${FIREBASE_WEB_VAPID_KEY:-}"
+
+      CaseCommandProcessing__Enabled: "${CaseCommandProcessing__Enabled:-true}"
+      CaseCommandProcessing__MaximumTransactionAttempts: "${CaseCommandProcessing__MaximumTransactionAttempts:-5}" 
+
+      DataProtection__Enabled: "${DataProtection__Enabled:-false}"
+      DataProtection__ApplicationName: "${DataProtection__ApplicationName:-SwiftAid}"
+
     secrets:
       - source: fcm-service-account
         target: swiftaid-fcm-service-account.json
