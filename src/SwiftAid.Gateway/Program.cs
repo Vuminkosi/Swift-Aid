@@ -41,6 +41,7 @@ builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseTimelineClient, SwiftAi
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseQueueClient, SwiftAid.Gateway.Cases.CaseQueueGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.IMonitoringQueueClient, SwiftAid.Gateway.Cases.MonitoringQueueGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseCommandClient, SwiftAid.Gateway.Cases.CaseCommandGatewayClient>();
+builder.Services.AddScoped<SwiftAid.Gateway.Sessions.SessionGatewayClient>();
 builder.Services.AddScoped<INotificationApiService, NotificationApiService>();
 builder.Services.AddScoped<INotificationFeedClient, InteractiveServerNotificationFeedClient>();
 builder.Services.AddScoped<INotificationPlatformSettings, GatewayNotificationPlatformSettings>();
@@ -84,6 +85,8 @@ app.MapCaseTimelineEndpoints();
 app.MapCaseQueueEndpoints();
 app.MapMonitoringQueueEndpoints();
 app.MapCaseCommandEndpoints();
+app.MapCommunitySessionEndpoints();
+app.MapPublicSessionEndpoints();
 
 app.MapSwiftAidIdentityEndpoints(
     app.Services.GetRequiredService<FederationOptions>(),

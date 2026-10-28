@@ -1,0 +1,44 @@
+.session-public-list__state {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 16px 0;
+}
+
+.session-public-list__card {
+    border-radius: 12px;
+}
+
+.session-public-list__heading {
+    flex-wrap: wrap;
+}
+
+.session-public-list__tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 8px;
+}
+
+.session-public-list__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 8px;
+}
+
+.session-public-list__invitation {
+    margin-top: 8px;
+    padding: 8px 12px;
+}
+
+.session-public-list__invitation-text {
+    white-space: pre-wrap;
+    font-family: inherit;
+    margin: 4px 0 0;
+}
+
+.session-public-list__notice {
+    display: block;
+    margin-top: 12px;
+}

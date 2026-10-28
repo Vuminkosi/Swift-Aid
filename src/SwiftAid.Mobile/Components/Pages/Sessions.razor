@@ -1,0 +1,55 @@
+@page "/sessions"
+@using SwiftAid.Contracts.Sessions
+@using SwiftAid.UI.Components.Sessions
+@using SwiftAid.Client.Sessions
+@inject CommunitySessionHttpClient SessionClient
+
+<PageTitle>Community sessions | SwiftAid</PageTitle>
+
+<div class="sessions-page">
+    <h1>Community sessions</h1>
+    <p>
+        Published community education sessions. Copying an invitation never sends anything
+        and never marks anyone as attending. Officer planning stays on the web workspace;
+        this page shows the public list only.
+    </p>
+
+    <PublicSessionList Sessions="_sessions"
+                       Loading="_loading"
+                       ErrorMessage="ListError"
+                       OnRetry="LoadAsync"
+                       LoadInvitationTextAsync="LoadInvitationAsync"
+                       ShareTextAsync="ShareAsync" />
+</div>
+
+@code {
+    private IReadOnlyList<PublicSessionView> _sessions = Array.Empty<PublicSessionView>();
+    private bool _loading = true;
+    private string? ListError { get; set; }
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        ListError = null;
+        try
+        {
+            _sessions = await SessionClient.ListPublicAsync(null);
+        }
+        catch (Exception)
+        {
+            ListError = "Published sessions are temporarily unavailable. Check your connection and try again.";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private Task<string?> LoadInvitationAsync(Guid sessionId) =>
+        SessionClient.GetInvitationTextAsync(sessionId);
+
+    private static Task ShareAsync(string text) =>
+        Share.Default.RequestAsync(new ShareTextRequest(text, "Community session invitation"));
+}

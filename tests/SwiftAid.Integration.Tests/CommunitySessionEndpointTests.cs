@@ -1,0 +1,650 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using OpenIddict.Validation.AspNetCore;
+using SwiftAid.Contracts.Sessions;
+using SwiftAid.Gateway.Endpoints;
+
+namespace SwiftAid.Integration.Tests;
+
+/// <summary>
+/// P10.1 community-session endpoints: auth, limit validation, 409/422 mapping, and
+/// public 404s for non-published sessions. Fake-service style; no live database.
+/// </summary>
+public sealed class CommunitySessionEndpointTests
+{
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly Guid KnownSessionId = Guid.Parse("d0c00001-2222-4a44-9aa9-123456789abc");
+
+    [Fact]
+    public void OfficerRoutes_RequireStaffAuthentication()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddAuthorization();
+        using var app = builder.Build();
+        app.MapCommunitySessionEndpoints();
+
+        var expectedSchemes = string.Join(",",
+            IdentityConstants.ApplicationScheme,
+            OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
+        var routes = ((IEndpointRouteBuilder)app).DataSources
+            .SelectMany(source => source.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Where(candidate => (candidate.RoutePattern.RawText ?? string.Empty).StartsWith(
+                "/api/v1/sessions", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.Equal(6, routes.Length);
+        foreach (var route in routes)
+        {
+            var authorization = Assert.Single(route.Metadata.GetOrderedMetadata<IAuthorizeData>());
+            Assert.Equal(expectedSchemes, authorization.AuthenticationSchemes);
+        }
+    }
+
+    [Fact]
+    public void PublicRoutes_AllowAnonymous()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddAuthorization();
+        using var app = builder.Build();
+        app.MapPublicSessionEndpoints();
+
+        var routes = ((IEndpointRouteBuilder)app).DataSources
+            .SelectMany(source => source.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Where(candidate => (candidate.RoutePattern.RawText ?? string.Empty).StartsWith(
+                "/public/v1/sessions", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.Equal(4, routes.Length);
+        foreach (var route in routes)
+        {
+            Assert.NotEmpty(route.Metadata.GetOrderedMetadata<IAllowAnonymous>());
+        }
+    }
+
+    [Fact]
+    public async Task AnonymousCreate_IsUnauthorized()
+    {
+        await using var host = await TestSessionHost.StartAsync();
+        using var request = CreateJsonRequest(HttpMethod.Post, "/api/v1/sessions", ValidCreateRequest());
+
+        using var response = await host.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal(0, host.Service.ExecuteCalls);
+    }
+
+    [Fact]
+    public async Task CookieWithoutAntiforgeryToken_IsRejected()
+    {
+        await using var host = await TestSessionHost.StartAsync();
+        using var request = CreateJsonRequest(HttpMethod.Post, "/api/v1/sessions", ValidCreateRequest());
+        TestAuthenticationHandler.AddCookieAuthentication(request);
+
+        using var response = await host.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, host.Service.ExecuteCalls);
+    }
+
+    [Fact]
+    public async Task CreateDraft_IsAccepted()
+    {
+        await using var host = await TestSessionHost.StartAsync();
+        using var request = CreateJsonRequest(HttpMethod.Post, "/api/v1/sessions", ValidCreateRequest());
+
+        using var response = await host.SendBearerAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = JsonSerializer.Deserialize<SessionCommandResult>(body, JsonOptions);
+        Assert.NotNull(result);
+        Assert.NotEqual(Guid.Empty, result!.SessionId);
+        Assert.Equal("actor-1", host.Service.LastActorId);
+        var command = Assert.IsType<CreateSessionDraftCommand>(host.Service.LastCommand);
+        Assert.Equal(0, command.ExpectedVersion);
+        Assert.Equal("Dry-season holding hygiene", command.Title);
+        Assert.Equal("planned for review", command.Reason);
+    }
+
+    [Fact]
+    public async Task CreateDraft_WithoutTitle_IsRejected()
+    {
+        await using var host = await TestSessionHost.StartAsync();
+        var request = ValidCreateRequest() with { Title = " " };
+        using var message = CreateJsonRequest(HttpMethod.Post, "/api/v1/sessions", request);
+
+        using var response = await host.SendBearerAsync(message);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, host.Service.ExecuteCalls);
+    }
+
+    [Fact]
+    public async Task Update_WithZeroVersion_IsRejected()
+    {
+        await using var host = await TestSessionHost.StartAsync();
+        var request = ValidUpdateRequest() with { ExpectedVersion = 0 };
+        using var message = CreateJsonRequest(HttpMethod.Put, $"/api/v1/sessions/{KnownSessionId:D}", request);
+
+        using var response = await host.SendBearerAsync(message);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, host.Service.ExecuteCalls);
+    }
+
+    [Fact]
+    public async Task Update_IsAccepted()
+    {
+        await using var host = await TestSessionHost.StartAsync();
+        using var message = CreateJsonRequest(HttpMethod.Put, $"/api/v1/sessions/{KnownSessionId:D}", ValidUpdateRequest());
+
+        using var response = await host.SendBearerAsync(message);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = JsonSerializer.Deserialize<SessionCommandResult>(body, JsonOptions);
+        Assert.NotNull(result);
+        Assert.Equal(KnownSessionId, result!.SessionId);
+        var command = Assert.IsType<UpdateSessionCommand>(host.Service.LastCommand);
+        Assert.Equal(3, command.ExpectedVersion);
+    }
+
+    [Fact]
+    public async Task Review_WithStaleVersion_MapsToConflict()
+    {
+        await using var host = await TestSessionHost.StartAsync();
+        host.Service.OnExecute = (_, _) =>
+            throw new InvalidOperationException("The expected version 2 does not match the current version 3.");
+        using var message = CreateJsonRequest(
+            HttpMethod.Post,
+            $"/api/v1/sessions/{KnownSessionId:D}/review",
+            new ReviewSessionApiRequest(2, false, "second look"));
+
+        using var response = await host.SendBearerAsync(message);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Schedule_InThePast_MapsToUnprocessable()
+    {
+        await using var host = await TestSessionHost.StartAsync();
+        host.Service.OnExecute = (_, _) =>
+            throw new InvalidOperationException("A session can only be scheduled for a future start.");
+        using var message = CreateJsonRequest(
+            HttpMethod.Post,
+            $"/api/v1/sessions/{KnownSessionId:D}/schedule",
+            new ScheduleSessionApiRequest(2, "publish now"));
+
+        using var response = await host.SendBearerAsync(message);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Cancel_WithoutReason_IsRejected()
+    {
+        await using var host = await TestSessionHost.StartAsync();
+        using var message = CreateJsonRequest(
+            HttpMethod.Post,
+            $"/api/v1/sessions/{KnownSessionId:D}/cancel",
+            new CancelSessionApiRequest(2, " ", "venue closed"));
+
+        using var response = await host.SendBearerAsync(message);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, host.Service.ExecuteCalls);
+    }
+
+    [Fact]
+    public async Task Cancel_IsAccepted()
+    {
+        await using var host = await TestSessionHost.StartAsync();
+        using var message = CreateJsonRequest(
+            HttpMethod.Post,
+            $"/api/v1/sessions/{KnownSessionId:D}/cancel",
+            new CancelSessionApiRequest(2, "venue flooded", "venue closed"));
+
+        using var response = await host.SendBearerAsync(message);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var command = Assert.IsType<CancelSessionCommand>(host.Service.LastCommand);
+        Assert.Equal("venue flooded", command.CancellationReason);
+    }
+
+    [Fact]
+    public async Task Complete_IsAccepted()
+    {
+        await using var host = await TestSessionHost.StartAsync();
+        using var message = CreateJsonRequest(
+            HttpMethod.Post,
+            $"/api/v1/sessions/{KnownSessionId:D}/complete",
+            new CompleteSessionApiRequest(3, "session held"));
+
+        using var response = await host.SendBearerAsync(message);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.IsType<CompleteSessionCommand>(host.Service.LastCommand);
+    }
+
+    [Fact]
+    public async Task DisabledPipeline_OfficerRoute_GetsNotFound()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddAntiforgery();
+        builder.Services.AddAuthentication(options =>
+            {
+                options.DefaultAuthenticateScheme = IdentityConstants.ApplicationScheme;
+                options.DefaultChallengeScheme = IdentityConstants.ApplicationScheme;
+            })
+            .AddScheme<AuthenticationSchemeOptions, TestAuthenticationHandler>(
+                IdentityConstants.ApplicationScheme, _ => { })
+            .AddScheme<AuthenticationSchemeOptions, TestAuthenticationHandler>(
+                OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme, _ => { });
+        builder.Services.AddAuthorization();
+        // No ICommunitySessionService: the session pipeline is disabled here.
+        using var app = builder.Build();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.MapCommunitySessionEndpoints();
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+        using var request = CreateJsonRequest(HttpMethod.Post, "/api/v1/sessions", ValidCreateRequest());
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", TestAuthenticationHandler.BearerToken);
+
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        await app.StopAsync();
+    }
+
+    [Theory]
+    [InlineData("/public/v1/sessions?limit=0")]
+    [InlineData("/public/v1/sessions?limit=-4")]
+    [InlineData("/public/v1/sessions?limit=101")]
+    [InlineData("/public/v1/sessions?limit=not-a-number")]
+    public async Task PublicList_InvalidLimit_IsRejected(string address)
+    {
+        await using var host = await TestSessionHost.StartAsync();
+        using var request = new HttpRequestMessage(HttpMethod.Get, address);
+
+        using var response = await host.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, host.Service.ListCalls);
+    }
+
+    [Fact]
+    public async Task PublicList_ReturnsOkEmptyList()
+    {
+        await using var host = await TestSessionHost.StartAsync(items: []);
+
+        using var response = await host.Client.GetAsync("/public/v1/sessions");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var sessions = JsonSerializer.Deserialize<IReadOnlyList<PublicSessionView>>(body, JsonOptions);
+        Assert.NotNull(sessions);
+        Assert.Empty(sessions!);
+    }
+
+    [Fact]
+    public async Task PublicList_PassesLimit()
+    {
+        await using var host = await TestSessionHost.StartAsync();
+
+        using var response = await host.Client.GetAsync("/public/v1/sessions?limit=25");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(25, host.Service.LastLimit);
+    }
+
+    [Fact]
+    public async Task PublicGet_UnknownSession_GetsNotFound()
+    {
+        await using var host = await TestSessionHost.StartAsync();
+
+        using var response = await host.Client.GetAsync($"/public/v1/sessions/{Guid.NewGuid():D}");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PublicGet_PublishedSession_ReturnsProjection()
+    {
+        await using var host = await TestSessionHost.StartAsync(withPublished: true);
+
+        using var response = await host.Client.GetAsync($"/public/v1/sessions/{KnownSessionId:D}");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var session = JsonSerializer.Deserialize<PublicSessionView>(body, JsonOptions);
+        Assert.NotNull(session);
+        Assert.Equal("Dry-season holding hygiene", session!.Title);
+    }
+
+    [Fact]
+    public async Task PublicCalendar_ReturnsCalendarFile()
+    {
+        await using var host = await TestSessionHost.StartAsync(withPublished: true);
+
+        using var response = await host.Client.GetAsync($"/public/v1/sessions/{KnownSessionId:D}/calendar");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("text/calendar", response.Content.Headers.ContentType?.MediaType);
+        Assert.Contains($"UID:swiftaid-community-session-{KnownSessionId:D}", body);
+        Assert.Contains("SEQUENCE:1", body);
+        Assert.Contains($"session-{KnownSessionId:D}.ics",
+            response.Content.Headers.ContentDisposition?.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublicCalendar_UnknownSession_GetsNotFound()
+    {
+        await using var host = await TestSessionHost.StartAsync();
+
+        using var response = await host.Client.GetAsync($"/public/v1/sessions/{Guid.NewGuid():D}/calendar");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PublicInvitation_ReturnsLogisticsText()
+    {
+        await using var host = await TestSessionHost.StartAsync(withPublished: true);
+
+        using var response = await host.Client.GetAsync($"/public/v1/sessions/{KnownSessionId:D}/invitation");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("text/plain", response.Content.Headers.ContentType?.MediaType);
+        Assert.Contains("Dry-season holding hygiene", body);
+        Assert.Contains("officer-2", body);
+    }
+
+    [Fact]
+    public async Task PublicInvitation_UnknownSession_GetsNotFound()
+    {
+        await using var host = await TestSessionHost.StartAsync();
+
+        using var response = await host.Client.GetAsync($"/public/v1/sessions/{Guid.NewGuid():D}/invitation");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DisabledPipeline_PublicRoute_GetsNotFound()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddAuthentication();
+        builder.Services.AddAuthorization();
+        // No ICommunitySessionService: the session pipeline is disabled here.
+        using var app = builder.Build();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.MapPublicSessionEndpoints();
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        using var response = await client.GetAsync("/public/v1/sessions");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        await app.StopAsync();
+    }
+
+    [Fact]
+    public void MapResult_CoversOutcomes()
+    {
+        var ok = CommunitySessionEndpoints.MapResult(
+            new SessionCommandResult(KnownSessionId, 1, "Draft"));
+        Assert.Equal(200,
+            ((Microsoft.AspNetCore.Http.HttpResults.JsonHttpResult<SessionCommandResult>)ok).StatusCode);
+
+        var unavailable = CommunitySessionEndpoints.MapResult(
+            new SessionCommandResult(Guid.Empty, 0, "Draft"));
+        Assert.Equal(503,
+            ((Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult)unavailable).StatusCode);
+    }
+
+    [Theory]
+    [InlineData(typeof(ArgumentException), 400)]
+    [InlineData(typeof(UnauthorizedAccessException), 404)]
+    [InlineData(typeof(TimeoutException), 503)]
+    public void MapCommandException_CoversSimpleCases(Type exceptionType, int statusCode)
+    {
+        var exception = (Exception)Activator.CreateInstance(exceptionType, "failure")!;
+        var result = CommunitySessionEndpoints.MapCommandException(exception);
+
+        Assert.Equal(statusCode,
+            ((Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult)result).StatusCode);
+    }
+
+    [Fact]
+    public void MapCommandException_VersionConflict_Is409()
+    {
+        var result = CommunitySessionEndpoints.MapCommandException(
+            new InvalidOperationException("The expected version 2 does not match the current version 3."));
+
+        Assert.Equal(409,
+            ((Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult)result).StatusCode);
+    }
+
+    [Fact]
+    public void MapCommandException_StateViolation_Is422()
+    {
+        var result = CommunitySessionEndpoints.MapCommandException(
+            new InvalidOperationException("A session can only be scheduled for a future start."));
+
+        Assert.Equal(422,
+            ((Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult)result).StatusCode);
+    }
+
+    private static CreateSessionApiRequest ValidCreateRequest() => new(
+        "Dry-season holding hygiene",
+        "Practical steps for clean holding areas.",
+        "Livestock keepers near Harare showgrounds",
+        ["hygiene"],
+        "ZW",
+        "region-zw-harare",
+        "Animal",
+        "officer-2",
+        "en",
+        new DateTimeOffset(2026, 11, 5, 10, 0, 0, TimeSpan.Zero),
+        "Africa/Harare",
+        60,
+        40,
+        [new SessionMaterialApiRef("mat-hygiene-1", "v2")],
+        "Public",
+        "None",
+        null,
+        [24, 1],
+        "planned for review");
+
+    private static UpdateSessionApiRequest ValidUpdateRequest() => new(
+        3,
+        "Dry-season holding hygiene",
+        "Practical steps for clean holding areas.",
+        "Livestock keepers near Harare showgrounds",
+        ["hygiene"],
+        "officer-2",
+        "en",
+        new DateTimeOffset(2026, 11, 5, 10, 0, 0, TimeSpan.Zero),
+        60,
+        40,
+        [new SessionMaterialApiRef("mat-hygiene-1", "v2")],
+        "Public",
+        "None",
+        null,
+        [24, 1],
+        "corrected summary");
+
+    private static HttpRequestMessage CreateJsonRequest<T>(HttpMethod method, string address, T body) =>
+        new(method, address)
+        {
+            Content = new StringContent(JsonSerializer.Serialize(body, JsonOptions), Encoding.UTF8, "application/json")
+        };
+
+    private static PublicSessionView PublishedView() => new(
+        KnownSessionId,
+        3,
+        "Dry-season holding hygiene",
+        "Practical steps for clean holding areas.",
+        "Livestock keepers near Harare showgrounds",
+        ["hygiene"],
+        "ZW",
+        "region-zw-harare",
+        "Animal",
+        "officer-2",
+        "en",
+        new DateTimeOffset(2026, 11, 5, 10, 0, 0, TimeSpan.Zero),
+        "Africa/Harare",
+        60,
+        40,
+        [new StoredSessionMaterial("mat-hygiene-1", "v2")],
+        SessionChannelType.None,
+        null,
+        "Scheduled",
+        null,
+        1);
+
+    private const string PublishedIcs =
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//SwiftAid//Community Session//EN\r\nBEGIN:VEVENT\r\n" +
+        "UID:swiftaid-community-session-d0c00001-2222-4a44-9aa9-123456789abc\r\n" +
+        "DTSTAMP:20261028T080000Z\r\nDTSTART:20261105T100000Z\r\nDURATION:PT1H0M\r\n" +
+        "SUMMARY:Dry-season holding hygiene\r\nSEQUENCE:1\r\nSTATUS:CONFIRMED\r\nTRANSP:OPAQUE\r\n" +
+        "END:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    private const string PublishedInvitation =
+        "You are invited: Dry-season holding hygiene\r\nWhen: Thursday, 5 November 2026 12:00 (Africa/Harare)\r\n" +
+        "Duration: 60 minutes\r\nPresenter: officer-2\r\nWhere: region-zw-harare, ZW\r\n" +
+        "Practical steps for clean holding areas.\r\n";
+
+    private sealed class FakeCommunitySessionService : ICommunitySessionService
+    {
+        public int ExecuteCalls { get; private set; }
+        public int ListCalls { get; private set; }
+        public int? LastLimit { get; private set; }
+        public SessionCommand? LastCommand { get; private set; }
+        public string? LastActorId { get; private set; }
+
+        public Func<SessionCommand, string, SessionCommandResult>? OnExecute { get; set; }
+        public bool WithPublished { get; set; }
+
+        public Task<SessionCommandResult> ExecuteAsync(SessionCommand command, string actorId, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            ExecuteCalls++;
+            LastCommand = command;
+            LastActorId = actorId;
+            if (OnExecute is not null)
+            {
+                return Task.FromResult(OnExecute(command, actorId));
+            }
+
+            return Task.FromResult(new SessionCommandResult(
+                command.SessionId, command.ExpectedVersion + 1, "Draft"));
+        }
+
+        public Task<CommunitySessionView?> GetStaffAsync(Guid sessionId, string actorId, CancellationToken ct) =>
+            Task.FromResult<CommunitySessionView?>(null);
+
+        public Task<IReadOnlyList<PublicSessionView>> ListPublicAsync(int? limit, CancellationToken ct)
+        {
+            ListCalls++;
+            LastLimit = limit;
+            IReadOnlyList<PublicSessionView> sessions =
+                WithPublished ? [CommunitySessionEndpointTests.PublishedView()] : [];
+            return Task.FromResult(sessions);
+        }
+
+        public Task<PublicSessionView?> GetPublicAsync(Guid sessionId, CancellationToken ct) =>
+            Task.FromResult<PublicSessionView?>(
+                WithPublished && sessionId == CommunitySessionEndpointTests.KnownSessionId
+                    ? CommunitySessionEndpointTests.PublishedView()
+                    : null);
+
+        public Task<string?> GetIcsAsync(Guid sessionId, DateTimeOffset generatedAtUtc, CancellationToken ct) =>
+            Task.FromResult<string?>(
+                WithPublished && sessionId == CommunitySessionEndpointTests.KnownSessionId
+                    ? PublishedIcs
+                    : null);
+
+        public Task<string?> GetInvitationTextAsync(Guid sessionId, CancellationToken ct) =>
+            Task.FromResult<string?>(
+                WithPublished && sessionId == CommunitySessionEndpointTests.KnownSessionId
+                    ? PublishedInvitation
+                    : null);
+    }
+
+    private sealed class TestSessionHost : IAsyncDisposable
+    {
+        private readonly WebApplication _application;
+
+        public HttpClient Client { get; }
+
+        public FakeCommunitySessionService Service { get; }
+
+        private TestSessionHost(WebApplication application, HttpClient client, FakeCommunitySessionService service)
+        {
+            _application = application;
+            Client = client;
+            Service = service;
+        }
+
+        public static async Task<TestSessionHost> StartAsync(
+            IReadOnlyList<PublicSessionView>? items = null, bool withPublished = false)
+        {
+            var service = new FakeCommunitySessionService { WithPublished = withPublished };
+            var builder = WebApplication.CreateBuilder();
+            builder.WebHost.UseTestServer();
+            builder.Services.AddAntiforgery();
+            builder.Services.AddAuthentication(options =>
+                {
+                    options.DefaultAuthenticateScheme = IdentityConstants.ApplicationScheme;
+                    options.DefaultChallengeScheme = IdentityConstants.ApplicationScheme;
+                })
+                .AddScheme<AuthenticationSchemeOptions, TestAuthenticationHandler>(
+                    IdentityConstants.ApplicationScheme, _ => { })
+                .AddScheme<AuthenticationSchemeOptions, TestAuthenticationHandler>(
+                    OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme, _ => { });
+            builder.Services.AddAuthorization();
+            builder.Services.AddSingleton<ICommunitySessionService>(service);
+            var app = builder.Build();
+            app.UseAuthentication();
+            app.UseAuthorization();
+            app.MapCommunitySessionEndpoints();
+            app.MapPublicSessionEndpoints();
+            await app.StartAsync().ConfigureAwait(false);
+
+            return new TestSessionHost(app, app.GetTestClient(), service);
+        }
+
+        public Task<HttpResponseMessage> SendBearerAsync(HttpRequestMessage request)
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", TestAuthenticationHandler.BearerToken);
+            return Client.SendAsync(request);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            Client.Dispose();
+            await _application.StopAsync();
+            await _application.DisposeAsync();
+        }
+    }
+}

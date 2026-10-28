@@ -1,15 +1,213 @@
 @page "/sessions"
+@using SwiftAid.Contracts.Sessions
+@using SwiftAid.UI.Components.Sessions
+@using SwiftAid.Gateway.Sessions
+@using Microsoft.AspNetCore.Components.Authorization
+@using SwiftAid.Application.Authorization
+@inject SessionGatewayClient SessionClient
+@inject AuthenticationStateProvider AuthState
 
 <PageTitle>Community sessions | SwiftAid</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.Medium" Class="status-page">
+<MudContainer MaxWidth="MaxWidth.Large" Class="status-page">
     <MudIcon Icon="@Icons.Material.Filled.Event" Color="Color.Primary" Size="Size.Large" />
     <MudText Typo="Typo.h4" HtmlTag="h1">Community sessions</MudText>
-    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
-        No public sessions are available yet.
-    </MudAlert>
     <MudText Typo="Typo.body1">
-        Public session listings will appear here when an organizer has published them.
-        No subscription or social message is sent from this page.
+        Published community education sessions. Copying an invitation or downloading a calendar
+        file never sends anything and never marks anyone as attending.
     </MudText>
+
+    <PublicSessionList Sessions="_sessions"
+                       Loading="_loadingList"
+                       ErrorMessage="ListError"
+                       OnRetry="LoadListAsync"
+                       LoadInvitationTextAsync="LoadInvitationAsync" />
+
+    <AuthorizeView>
+        <Authorized>
+            <MudDivider Class="my-4" />
+            <MudText Typo="Typo.h5" HtmlTag="h2">Officer workspace</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                Plan a new session, or manage the session you just saved. Publishing happens only
+                through review and scheduling below; nothing is shared automatically.
+            </MudText>
+            <SessionEditor SessionId="_editingSessionId"
+                           ExpectedVersion="_editingVersion"
+                           Status="_editingStatus"
+                           CreatedByActorId="_editingCreatedBy"
+                           CurrentActorId="_actorId"
+                           InitialSession="_staffView"
+                           Busy="_busy"
+                           ServerError="_serverError"
+                           OnCreate="HandleCreateAsync"
+                           OnUpdate="HandleUpdateAsync"
+                           OnReview="HandleReviewAsync"
+                           OnSchedule="HandleScheduleAsync"
+                           OnCancel="HandleCancelAsync"
+                           OnComplete="HandleCompleteAsync" />
+        </Authorized>
+        <NotAuthorized>
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-4">
+                Staff members can sign in to plan and publish sessions.
+            </MudText>
+        </NotAuthorized>
+    </AuthorizeView>
 </MudContainer>
+
+@code {
+    private IReadOnlyList<PublicSessionView> _sessions = Array.Empty<PublicSessionView>();
+    private bool _loadingList = true;
+    private string? ListError { get; set; }
+    private bool _busy;
+    private string? _serverError;
+    private string? _actorId;
+    private Guid? _editingSessionId;
+    private long _editingVersion;
+    private string? _editingStatus;
+    private string? _editingCreatedBy;
+    private CommunitySessionView? _staffView;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadActorAsync();
+        await LoadListAsync();
+    }
+
+    private async Task LoadActorAsync()
+    {
+        try
+        {
+            var state = await AuthState.GetAuthenticationStateAsync();
+            var principal = state.User;
+            if (principal?.Identity?.IsAuthenticated == true)
+            {
+                _actorId = ActorContext.FromValidatedPrincipal(principal).ActorId;
+            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            _actorId = null;
+        }
+    }
+
+    private async Task LoadListAsync()
+    {
+        _loadingList = true;
+        ListError = null;
+        try
+        {
+            _sessions = await SessionClient.ListPublicAsync(null);
+        }
+        catch (Exception)
+        {
+            ListError = "Published sessions are temporarily unavailable. Check your connection and try again.";
+        }
+        finally
+        {
+            _loadingList = false;
+        }
+    }
+
+    private Task<string?> LoadInvitationAsync(Guid sessionId) =>
+        SessionClient.GetInvitationTextAsync(sessionId);
+
+    private async Task HandleCreateAsync(SessionCreateSubmission submission)
+    {
+        var command = submission.Input.ToCommand(
+            Guid.NewGuid(), submission.Reason, DateTimeOffset.UtcNow);
+        await RunCommandAsync(command);
+    }
+
+    private Task HandleUpdateAsync(SessionUpdateSubmission submission) =>
+        RunCommandAsync(submission.Input.ToCommand(
+            submission.SessionId, submission.ExpectedVersion, submission.Reason, DateTimeOffset.UtcNow));
+
+    private Task HandleReviewAsync(SessionReviewSubmission submission)
+    {
+        if (_editingSessionId is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        return RunCommandAsync(new ReviewSessionCommand(
+            _editingSessionId.Value,
+            _editingVersion,
+            submission.AcknowledgeSelfReview,
+            submission.Reason,
+            DateTimeOffset.UtcNow));
+    }
+
+    private Task HandleScheduleAsync(string reason)
+    {
+        if (_editingSessionId is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        return RunCommandAsync(new ScheduleSessionCommand(
+            _editingSessionId.Value, _editingVersion, reason, DateTimeOffset.UtcNow));
+    }
+
+    private Task HandleCancelAsync(SessionCancelSubmission submission)
+    {
+        if (_editingSessionId is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        return RunCommandAsync(new CancelSessionCommand(
+            _editingSessionId.Value,
+            _editingVersion,
+            submission.CancellationReason,
+            submission.Reason,
+            DateTimeOffset.UtcNow));
+    }
+
+    private Task HandleCompleteAsync(string reason)
+    {
+        if (_editingSessionId is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        return RunCommandAsync(new CompleteSessionCommand(
+            _editingSessionId.Value, _editingVersion, reason, DateTimeOffset.UtcNow));
+    }
+
+    private async Task RunCommandAsync(SessionCommand command)
+    {
+        _busy = true;
+        _serverError = null;
+        try
+        {
+            var outcome = await SessionClient.ExecuteAsync(command);
+            if (outcome.Succeeded && outcome.Result is not null)
+            {
+                _editingSessionId = outcome.Result.SessionId;
+                _editingVersion = outcome.Result.Version;
+                _editingStatus = outcome.Result.Status;
+                _staffView = await SessionClient.GetStaffAsync(outcome.Result.SessionId);
+                if (_staffView is not null)
+                {
+                    _editingCreatedBy = _staffView.CreatedByActorId;
+                    _editingVersion = _staffView.Version;
+                    _editingStatus = _staffView.Status;
+                }
+                else if (_editingCreatedBy is null)
+                {
+                    _editingCreatedBy = _actorId;
+                }
+
+                await LoadListAsync();
+            }
+            else
+            {
+                _serverError = outcome.Error ?? "The change could not be recorded. Please try again.";
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

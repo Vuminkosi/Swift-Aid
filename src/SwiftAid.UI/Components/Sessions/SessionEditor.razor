@@ -1,0 +1,603 @@
+@using SwiftAid.Contracts.Sessions
+
+<section class="session-editor" aria-label="Community session editor">
+    <MudText Typo="Typo.h6" HtmlTag="h2">@(IsNew ? "Plan a new community session" : $"Edit community session")</MudText>
+
+    @if (!IsNew)
+    {
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Status: @(Status ?? "unknown") · version @ExpectedVersion
+            @if (!string.IsNullOrWhiteSpace(CreatedByActorId))
+            {
+                <span> · planned by @CreatedByActorId</span>
+            }
+        </MudText>
+    }
+
+    @if (ServerError is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" role="alert" Class="mt-2">@ServerError</MudAlert>
+    }
+
+    <MudGrid Class="mt-2">
+        <MudItem xs="12" md="6">
+            <MudTextField T="string" Label="Title" @bind-Value="_title" Required="true"
+                         Error='@HasError("Title")' ErrorText='@FieldError("Title")' />
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudTextField T="string" Label="Presenter" @bind-Value="_presenter" Required="true"
+                         Error='@HasError("Presenter")' ErrorText='@FieldError("Presenter")' />
+        </MudItem>
+        <MudItem xs="12">
+            <MudTextField T="string" Label="Public summary" Lines="3" @bind-Value="_summary" Required="true"
+                         HelperText="Shown to the public. Logistics only: what the session covers, never patient details."
+                         Error='@HasError("Summary")' ErrorText='@FieldError("Summary")' />
+        </MudItem>
+        <MudItem xs="12">
+            <MudTextField T="string" Label="Who should attend" @bind-Value="_audience" Required="true"
+                         HelperText="Describe the audience in general terms, for example livestock keepers near the showgrounds."
+                         Error='@HasError("Audience")' ErrorText='@FieldError("Audience")' />
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudTextField T="string" Label="Country code" @bind-Value="_country" Required="true"
+                         Error='@HasError("Country")' ErrorText='@FieldError("Country")' />
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudTextField T="string" Label="Region" @bind-Value="_region" Required="true"
+                         Error='@HasError("Region")' ErrorText='@FieldError("Region")' />
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudTextField T="string" Label="Sector" @bind-Value="_sector" Required="true"
+                         Error='@HasError("Sector")' ErrorText='@FieldError("Sector")' />
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudTextField T="string" Label="Language" @bind-Value="_language" Required="true"
+                         Error='@HasError("Language")' ErrorText='@FieldError("Language")' />
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudTextField T="string" Label="Topic tags (comma separated)" @bind-Value="_topicTagsText"
+                         Error='@HasError("Tags")' ErrorText='@FieldError("Tags")' />
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudTextField T="string" Label="Time zone" @bind-Value="_timeZone" Required="true"
+                         HelperText="An IANA time zone, for example Africa/Harare."
+                         Error='@HasError("TimeZone")' ErrorText='@FieldError("TimeZone")' />
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudTextField T="DateTime?" Format="s" InputType="InputType.DateTimeLocal" Label="Start date and time"
+                         @bind-Value="_startLocal" Required="true"
+                         HelperText="Wall-clock time in the time zone above."
+                         Error='@HasError("Start")' ErrorText='@FieldError("Start")' />
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudTextField T="string" Label="Duration (minutes)" @bind-Value="_durationText" Required="true" InputType="InputType.Number"
+                         Error='@HasError("Duration")' ErrorText='@FieldError("Duration")' />
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudTextField T="string" Label="Capacity (optional)" @bind-Value="_capacityText" InputType="InputType.Number"
+                         Error='@HasError("Capacity")' ErrorText='@FieldError("Capacity")' />
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudSelect T="string" Label="Visibility" @bind-Value="_visibility">
+                <MudSelectItem Value="@("Public")">Public (appears in the public list)</MudSelectItem>
+                <MudSelectItem Value="@("Internal")">Internal (never appears in the public list)</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudSelect T="string" Label="Channel" @bind-Value="_channelType">
+                <MudSelectItem Value="@("None")">No online channel</MudSelectItem>
+                <MudSelectItem Value="@("FacebookPage")">Facebook page</MudSelectItem>
+                <MudSelectItem Value="@("WhatsAppGroup")">WhatsApp group</MudSelectItem>
+                <MudSelectItem Value="@("Other")">Other channel</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        @if (!string.Equals(_channelType, "None", StringComparison.Ordinal))
+        {
+            <MudItem xs="12">
+                <MudTextField T="string" Label="Channel link" @bind-Value="_channelLink" Required="true"
+                             HelperText="Paste the destination link from the channel you already manage. SwiftAid never posts on your behalf."
+                             Error='@HasError("ChannelLink")' ErrorText='@FieldError("ChannelLink")' />
+            </MudItem>
+        }
+        <MudItem xs="12">
+            <MudTextField T="string" Label="Reminder lead hours (comma separated, optional)" @bind-Value="_reminderLeadsText"
+                         HelperText="Whole hours between 1 and 168, no repeats. Example: 24, 1."
+                         Error='@HasError("ReminderLeads")' ErrorText='@FieldError("ReminderLeads")' />
+        </MudItem>
+        <MudItem xs="12">
+            <MudText Typo="Typo.subtitle2">Source materials</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                At least one human-authored, source-linked material is required. New or unreviewed content cannot be published.
+            </MudText>
+            @foreach (var row in _materials)
+            {
+                <div class="session-editor__material-row" @key="row.Key">
+                    <MudTextField T="string" Label="Material" @bind-Value="row.MaterialId" />
+                    <MudTextField T="string" Label="Source version" @bind-Value="row.SourceVersion" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error"
+                                   OnClick="() => RemoveMaterial(row)" aria-label="Remove material" Disabled="Busy" />
+                </div>
+            }
+            @if (!string.IsNullOrEmpty(FieldError("Materials")))
+            {
+                <MudText Typo="Typo.caption" Color="Color.Error">@FieldError("Materials")</MudText>
+            }
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="AddMaterial" Disabled="Busy">Add material</MudButton>
+        </MudItem>
+        <MudItem xs="12">
+            <MudTextField T="string" Label="Reason for this change" @bind-Value="_reason" Required="true"
+                         HelperText="Recorded with the change for review."
+                         Error='@HasError("Reason")' ErrorText='@FieldError("Reason")' />
+        </MudItem>
+    </MudGrid>
+
+    <div class="session-editor__actions">
+        @if (IsNew)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SubmitCreateAsync" Disabled="Busy">Save draft</MudButton>
+        }
+        else
+        {
+            @if (CanUpdate)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SubmitUpdateAsync" Disabled="Busy">Save changes</MudButton>
+            }
+            @if (IsDraft)
+            {
+                @if (IsSelfReview)
+                {
+                    <MudCheckBox T="bool" @bind-Value="_acknowledgeSelfReview" Color="Color.Primary">
+                        I planned this draft and I have reviewed it for publication.
+                    </MudCheckBox>
+                    @if (!string.IsNullOrEmpty(FieldError("SelfReview")))
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Error">@FieldError("SelfReview")</MudText>
+                    }
+                }
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="SubmitReviewAsync" Disabled="Busy">Record review</MudButton>
+            }
+            @if (IsReviewed)
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="SubmitScheduleAsync" Disabled="Busy">Publish schedule</MudButton>
+            }
+            @if (IsScheduled)
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="SubmitCompleteAsync" Disabled="Busy">Mark complete</MudButton>
+            }
+            @if (CanCancel)
+            {
+                @if (!_confirmingCancel)
+                {
+                    <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="() => _confirmingCancel = true" Disabled="Busy">Cancel session…</MudButton>
+                }
+                else
+                {
+                    <MudTextField T="string" Label="Cancellation reason" @bind-Value="_cancellationReason" Required="true"
+                                 Error='@HasError("CancellationReason")' ErrorText='@FieldError("CancellationReason")' />
+                    <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="SubmitCancelAsync" Disabled="Busy">Yes, cancel this session</MudButton>
+                    <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="() => _confirmingCancel = false" Disabled="Busy">Keep session</MudButton>
+                }
+            }
+        }
+    </div>
+</section>
+
+@code {
+    [Parameter] public Guid? SessionId { get; set; }
+
+    [Parameter] public long ExpectedVersion { get; set; }
+
+    [Parameter] public string? Status { get; set; }
+
+    [Parameter] public string? CreatedByActorId { get; set; }
+
+    [Parameter] public string? CurrentActorId { get; set; }
+
+    [Parameter] public CommunitySessionView? InitialSession { get; set; }
+
+    [Parameter] public bool Busy { get; set; }
+
+    [Parameter] public string? ServerError { get; set; }
+
+    [Parameter] public EventCallback<SessionCreateSubmission> OnCreate { get; set; }
+
+    [Parameter] public EventCallback<SessionUpdateSubmission> OnUpdate { get; set; }
+
+    [Parameter] public EventCallback<SessionReviewSubmission> OnReview { get; set; }
+
+    [Parameter] public EventCallback<string> OnSchedule { get; set; }
+
+    [Parameter] public EventCallback<SessionCancelSubmission> OnCancel { get; set; }
+
+    [Parameter] public EventCallback<string> OnComplete { get; set; }
+
+    private string _title = string.Empty;
+    private string _summary = string.Empty;
+    private string _audience = string.Empty;
+    private string _country = string.Empty;
+    private string _region = string.Empty;
+    private string _sector = string.Empty;
+    private string _presenter = string.Empty;
+    private string _language = string.Empty;
+    private string _topicTagsText = string.Empty;
+    private string _timeZone = "Africa/Harare";
+    private DateTime? _startLocal;
+    private string _durationText = "60";
+    private string _capacityText = string.Empty;
+    private string _visibility = "Public";
+    private string _channelType = "None";
+    private string? _channelLink;
+    private string _reminderLeadsText = "24, 1";
+    private readonly List<MaterialRow> _materials = new();
+    private string _reason = string.Empty;
+    private string? _cancellationReason;
+    private bool _acknowledgeSelfReview;
+    private bool _confirmingCancel;
+    private Guid? _loadedForSessionId;
+    private readonly Dictionary<string, string> _errors = new(StringComparer.Ordinal);
+
+    private bool IsNew => SessionId is null;
+    private bool IsDraft => string.Equals(Status, "Draft", StringComparison.OrdinalIgnoreCase);
+    private bool IsReviewed => string.Equals(Status, "Reviewed", StringComparison.OrdinalIgnoreCase);
+    private bool IsScheduled => string.Equals(Status, "Scheduled", StringComparison.OrdinalIgnoreCase);
+    private bool CanUpdate => IsDraft || IsReviewed || IsScheduled;
+    private bool CanCancel => IsReviewed || IsScheduled;
+    private bool IsSelfReview =>
+        CurrentActorId is not null &&
+        string.Equals(CurrentActorId, CreatedByActorId, StringComparison.Ordinal);
+
+    protected override void OnParametersSet()
+    {
+        if (InitialSession is not null && _loadedForSessionId != InitialSession.SessionId)
+        {
+            _loadedForSessionId = InitialSession.SessionId;
+            Prefill(InitialSession);
+        }
+        else if (InitialSession is null && _loadedForSessionId is not null)
+        {
+            _loadedForSessionId = null;
+        }
+    }
+
+    private void Prefill(CommunitySessionView view)
+    {
+        _title = view.Title;
+        _summary = view.Summary;
+        _audience = view.AudienceDescription;
+        _country = view.CountryCode;
+        _region = view.RegionId;
+        _sector = view.Sector;
+        _presenter = view.Presenter;
+        _language = view.Language;
+        _topicTagsText = string.Join(", ", view.TopicTags);
+        _timeZone = view.TimeZoneId;
+        _startLocal = ToWallClock(view.StartUtc, view.TimeZoneId);
+        _durationText = view.DurationMinutes.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        _capacityText = view.Capacity?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+        _visibility = view.Visibility.ToString();
+        _channelType = view.ChannelType.ToString();
+        _channelLink = view.ChannelLink;
+        _reminderLeadsText = string.Join(", ", view.ReminderLeadHours);
+        _materials.Clear();
+        foreach (var material in view.Materials)
+        {
+            _materials.Add(new MaterialRow { MaterialId = material.MaterialId, SourceVersion = material.SourceVersion });
+        }
+
+        _errors.Clear();
+        _confirmingCancel = false;
+    }
+
+    private static DateTime? ToWallClock(DateTimeOffset startUtc, string timeZoneId)
+    {
+        try
+        {
+            var zone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+            return TimeZoneInfo.ConvertTime(startUtc, zone).DateTime;
+        }
+        catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException or ArgumentException)
+        {
+            return startUtc.UtcDateTime;
+        }
+    }
+
+    private string? FieldError(string key) => _errors.TryGetValue(key, out var message) ? message : null;
+
+    private bool HasError(string key) => _errors.ContainsKey(key);
+
+    private void AddMaterial() => _materials.Add(new MaterialRow());
+
+    private void RemoveMaterial(MaterialRow row) => _materials.Remove(row);
+
+    private async Task SubmitCreateAsync()
+    {
+        if (!ValidateForm(requireReason: true, forSchedule: false))
+        {
+            return;
+        }
+
+        await OnCreate.InvokeAsync(new SessionCreateSubmission(BuildCreateInput(), _reason.Trim()));
+    }
+
+    private async Task SubmitUpdateAsync()
+    {
+        if (!ValidateForm(requireReason: true, forSchedule: false))
+        {
+            return;
+        }
+
+        await OnUpdate.InvokeAsync(new SessionUpdateSubmission(
+            SessionId!.Value, ExpectedVersion, BuildUpdateInput(), _reason.Trim()));
+    }
+
+    private async Task SubmitReviewAsync()
+    {
+        if (!ValidateForm(requireReason: true, forSchedule: false))
+        {
+            return;
+        }
+
+        if (IsSelfReview && !_acknowledgeSelfReview)
+        {
+            _errors["SelfReview"] = "A creator publishing their own draft must explicitly acknowledge the self-review.";
+            return;
+        }
+
+        await OnReview.InvokeAsync(new SessionReviewSubmission(_acknowledgeSelfReview, _reason.Trim()));
+    }
+
+    private async Task SubmitScheduleAsync()
+    {
+        if (!ValidateForm(requireReason: true, forSchedule: true))
+        {
+            return;
+        }
+
+        await OnSchedule.InvokeAsync(_reason.Trim());
+    }
+
+    private async Task SubmitCancelAsync()
+    {
+        if (!ValidateForm(requireReason: true, forSchedule: false))
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_cancellationReason))
+        {
+            _errors["CancellationReason"] = "A cancellation reason is required.";
+            return;
+        }
+
+        await OnCancel.InvokeAsync(new SessionCancelSubmission(_cancellationReason.Trim(), _reason.Trim()));
+    }
+
+    private async Task SubmitCompleteAsync()
+    {
+        if (!ValidateForm(requireReason: true, forSchedule: false))
+        {
+            return;
+        }
+
+        await OnComplete.InvokeAsync(_reason.Trim());
+    }
+
+    private CreateSessionInput BuildCreateInput() => new(
+        _title.Trim(),
+        _summary.Trim(),
+        _audience.Trim(),
+        ParseTags(),
+        _country.Trim(),
+        _region.Trim(),
+        _sector.Trim(),
+        _presenter.Trim(),
+        _language.Trim(),
+        ToStartUtc(),
+        _timeZone.Trim(),
+        int.Parse(_durationText.Trim(), System.Globalization.CultureInfo.InvariantCulture),
+        ParseCapacity(),
+        _materials.Select(m => new SessionMaterialInput(m.MaterialId.Trim(), m.SourceVersion.Trim())).ToArray(),
+        Enum.Parse<SessionVisibility>(_visibility, ignoreCase: true),
+        Enum.Parse<SessionChannelType>(_channelType, ignoreCase: true),
+        string.IsNullOrWhiteSpace(_channelLink) ? null : _channelLink.Trim(),
+        ParseReminderLeads());
+
+    private UpdateSessionInput BuildUpdateInput()
+    {
+        var create = BuildCreateInput();
+        return new UpdateSessionInput(
+            create.Title,
+            create.Summary,
+            create.AudienceDescription,
+            create.TopicTags,
+            create.Presenter,
+            create.Language,
+            create.StartUtc,
+            create.DurationMinutes,
+            create.Capacity,
+            create.Materials,
+            create.Visibility,
+            create.ChannelType,
+            create.ChannelLink,
+            create.ReminderLeadHours);
+    }
+
+    private bool ValidateForm(bool requireReason, bool forSchedule)
+    {
+        _errors.Clear();
+
+        Require(_title, "Title", "A title is required.");
+        Require(_summary, "Summary", "A public summary is required.");
+        Require(_audience, "Audience", "Describe who should attend.");
+        Require(_country, "Country", "A country code is required.");
+        Require(_region, "Region", "A region is required.");
+        Require(_sector, "Sector", "A sector is required.");
+        Require(_presenter, "Presenter", "A presenter is required.");
+        Require(_language, "Language", "A language is required.");
+        Require(_timeZone, "TimeZone", "A time zone is required.");
+
+        TimeZoneInfo? zone = null;
+        if (!string.IsNullOrWhiteSpace(_timeZone))
+        {
+            try
+            {
+                zone = TimeZoneInfo.FindSystemTimeZoneById(_timeZone.Trim());
+            }
+            catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException or ArgumentException)
+            {
+                _errors["TimeZone"] = "The time zone is unknown on this host.";
+            }
+        }
+
+        DateTimeOffset? startUtc = null;
+        if (_startLocal is null)
+        {
+            _errors["Start"] = "A session start is required.";
+        }
+        else if (zone is not null)
+        {
+            try
+            {
+                startUtc = new DateTimeOffset(
+                    TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(_startLocal.Value, DateTimeKind.Unspecified), zone));
+            }
+            catch (ArgumentException)
+            {
+                _errors["Start"] = "That local time does not exist in the selected time zone.";
+            }
+        }
+
+        if (forSchedule && startUtc is not null && startUtc.Value <= DateTimeOffset.UtcNow)
+        {
+            _errors["Start"] = "A session can only be scheduled for a future start.";
+        }
+
+        if (!int.TryParse(_durationText?.Trim(), System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var duration) ||
+            duration < 1 || duration > 1440)
+        {
+            _errors["Duration"] = "Duration must be between 1 and 1440 minutes.";
+        }
+
+        if (!string.IsNullOrWhiteSpace(_capacityText))
+        {
+            if (!int.TryParse(_capacityText.Trim(), System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out var capacity) ||
+                capacity < 1)
+            {
+                _errors["Capacity"] = "Capacity must be positive when set.";
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(_topicTagsText))
+        {
+            var tags = _topicTagsText.Split(',').Select(t => t.Trim()).ToArray();
+            if (tags.Any(string.IsNullOrWhiteSpace))
+            {
+                _errors["Tags"] = "Topic tags must not be blank.";
+            }
+        }
+
+        if (_materials.Count == 0)
+        {
+            _errors["Materials"] = "At least one source-linked material is required.";
+        }
+        else if (_materials.Any(m => string.IsNullOrWhiteSpace(m.MaterialId) || string.IsNullOrWhiteSpace(m.SourceVersion)))
+        {
+            _errors["Materials"] = "Each material needs an identifier and a source version.";
+        }
+
+        if (string.Equals(_channelType, "None", StringComparison.Ordinal))
+        {
+            if (!string.IsNullOrWhiteSpace(_channelLink))
+            {
+                _errors["ChannelLink"] = "A channel link requires a channel type.";
+            }
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(_channelLink))
+            {
+                _errors["ChannelLink"] = "A channel link is required for the selected channel type.";
+            }
+            else if (!Uri.TryCreate(_channelLink.Trim(), UriKind.Absolute, out var uri) ||
+                (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            {
+                _errors["ChannelLink"] = "A channel link must be an absolute http(s) URL.";
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(_reminderLeadsText))
+        {
+            var parts = _reminderLeadsText.Split(',').Select(p => p.Trim()).ToArray();
+            var parsed = new List<int>(parts.Length);
+            var valid = true;
+            foreach (var part in parts)
+            {
+                if (!int.TryParse(part, System.Globalization.NumberStyles.Integer,
+                        System.Globalization.CultureInfo.InvariantCulture, out var lead) ||
+                    lead < 1 || lead > 168)
+                {
+                    valid = false;
+                    break;
+                }
+
+                parsed.Add(lead);
+            }
+
+            if (!valid)
+            {
+                _errors["ReminderLeads"] = "Reminder lead hours must be whole hours between 1 and 168.";
+            }
+            else if (parsed.Distinct().Count() != parsed.Count)
+            {
+                _errors["ReminderLeads"] = "Reminder lead hours must be distinct.";
+            }
+        }
+
+        if (requireReason && string.IsNullOrWhiteSpace(_reason))
+        {
+            _errors["Reason"] = "A reason for this change is required.";
+        }
+
+        return _errors.Count == 0;
+
+        void Require(string? value, string key, string message)
+        {
+            if (!_errors.ContainsKey(key) && string.IsNullOrWhiteSpace(value))
+            {
+                _errors[key] = message;
+            }
+        }
+    }
+
+    private IReadOnlyList<string> ParseTags() =>
+        string.IsNullOrWhiteSpace(_topicTagsText)
+            ? Array.Empty<string>()
+            : _topicTagsText.Split(',').Select(t => t.Trim()).Where(t => t.Length > 0).ToArray();
+
+    private int? ParseCapacity() =>
+        string.IsNullOrWhiteSpace(_capacityText)
+            ? null
+            : int.Parse(_capacityText.Trim(), System.Globalization.CultureInfo.InvariantCulture);
+
+    private IReadOnlyList<int> ParseReminderLeads() =>
+        string.IsNullOrWhiteSpace(_reminderLeadsText)
+            ? Array.Empty<int>()
+            : _reminderLeadsText.Split(',').Select(p => int.Parse(p.Trim(), System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+
+    private DateTimeOffset ToStartUtc()
+    {
+        var zone = TimeZoneInfo.FindSystemTimeZoneById(_timeZone.Trim());
+        return new DateTimeOffset(
+            TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(_startLocal!.Value, DateTimeKind.Unspecified), zone));
+    }
+
+    private sealed class MaterialRow
+    {
+        public Guid Key { get; } = Guid.NewGuid();
+        public string MaterialId { get; set; } = string.Empty;
+        public string SourceVersion { get; set; } = string.Empty;
+    }
+}

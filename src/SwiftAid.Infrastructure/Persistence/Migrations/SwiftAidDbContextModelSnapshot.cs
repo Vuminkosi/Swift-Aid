@@ -2281,6 +2281,269 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Sessions.CommunitySessionEntity", b =>
+                {
+                    b.Property<Guid>("SessionId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.Property<string>("AudienceDescription")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("audience_description");
+
+                    b.Property<string>("CancellationReason")
+                        .HasColumnType("text")
+                        .HasColumnName("cancellation_reason");
+
+                    b.Property<DateTimeOffset?>("CancelledAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("cancelled_at_utc");
+
+                    b.Property<int?>("Capacity")
+                        .HasColumnType("integer")
+                        .HasColumnName("capacity");
+
+                    b.Property<string>("ChannelLink")
+                        .HasColumnType("text")
+                        .HasColumnName("channel_link");
+
+                    b.Property<string>("ChannelType")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("channel_type");
+
+                    b.Property<DateTimeOffset?>("CompletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at_utc");
+
+                    b.Property<string>("CountryCode")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("country_code");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("CreatedByActorId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("created_by");
+
+                    b.Property<int>("DurationMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("duration_minutes");
+
+                    b.Property<string>("Language")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("language");
+
+                    b.Property<string>("MaterialsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("materials");
+
+                    b.Property<string>("Presenter")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("presenter");
+
+                    b.Property<long>("PublishedVersion")
+                        .HasColumnType("bigint")
+                        .HasColumnName("published_version");
+
+                    b.Property<string>("RegionId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("region_id");
+
+                    b.Property<string>("ReminderLeadHoursJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("reminder_lead_hours");
+
+                    b.Property<DateTimeOffset?>("ReviewedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("reviewed_at_utc");
+
+                    b.Property<string>("ReviewedByActorId")
+                        .HasColumnType("text")
+                        .HasColumnName("reviewed_by");
+
+                    b.Property<DateTimeOffset?>("ScheduledAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("scheduled_at_utc");
+
+                    b.Property<string>("Sector")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("sector");
+
+                    b.Property<bool>("SelfReviewAcknowledged")
+                        .HasColumnType("boolean")
+                        .HasColumnName("self_review_acknowledged");
+
+                    b.Property<DateTimeOffset>("StartUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("start_utc");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<string>("Summary")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("summary");
+
+                    b.Property<string>("TimeZoneId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("time_zone_id");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("title");
+
+                    b.Property<string>("TopicTagsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("topic_tags");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("version");
+
+                    b.Property<string>("Visibility")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("visibility");
+
+                    b.HasKey("SessionId")
+                        .HasName("pk_community_sessions");
+
+                    b.HasIndex("Visibility", "Status", "StartUtc")
+                        .HasDatabaseName("ix_community_sessions_public_listing");
+
+                    b.ToTable("community_sessions", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_community_sessions_channel", "channel_type IN ('None', 'FacebookPage', 'WhatsAppGroup', 'Other')");
+
+                            t.HasCheckConstraint("ck_community_sessions_duration", "duration_minutes BETWEEN 1 AND 1440");
+
+                            t.HasCheckConstraint("ck_community_sessions_ids_nonempty", "length(btrim(title)) > 0 AND length(btrim(country_code)) > 0 AND length(btrim(region_id)) > 0 AND length(btrim(created_by)) > 0 AND length(btrim(time_zone_id)) > 0");
+
+                            t.HasCheckConstraint("ck_community_sessions_status", "status IN ('Draft', 'Reviewed', 'Scheduled', 'Completed', 'Cancelled')");
+
+                            t.HasCheckConstraint("ck_community_sessions_version", "version > 0");
+
+                            t.HasCheckConstraint("ck_community_sessions_visibility", "visibility IN ('Public', 'Internal')");
+                        });
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Sessions.CommunitySessionRevisionEntity", b =>
+                {
+                    b.Property<Guid>("RevisionId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("revision_id");
+
+                    b.Property<string>("ActorId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("actor_id");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("reason");
+
+                    b.Property<DateTimeOffset>("RecordedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("recorded_at_utc");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.Property<string>("SnapshotJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("snapshot");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("bigint")
+                        .HasColumnName("version");
+
+                    b.HasKey("RevisionId")
+                        .HasName("pk_community_session_revisions");
+
+                    b.HasIndex("SessionId", "Version")
+                        .IsUnique()
+                        .HasDatabaseName("ux_community_session_revisions_session_version");
+
+                    b.ToTable("community_session_revisions", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_community_session_revisions_actor", "length(btrim(actor_id)) > 0 AND length(btrim(reason)) > 0");
+
+                            t.HasCheckConstraint("ck_community_session_revisions_version", "version > 0");
+                        });
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Sessions.SessionReminderOccurrenceEntity", b =>
+                {
+                    b.Property<Guid>("OccurrenceId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("occurrence_id");
+
+                    b.Property<int>("LeadHours")
+                        .HasColumnType("integer")
+                        .HasColumnName("lead_hours");
+
+                    b.Property<DateTimeOffset>("RemindAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("remind_at_utc");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("bigint")
+                        .HasColumnName("version");
+
+                    b.HasKey("OccurrenceId")
+                        .HasName("pk_session_reminder_occurrences");
+
+                    b.HasIndex("SessionId", "Status", "RemindAtUtc")
+                        .HasDatabaseName("ix_session_reminder_occurrences_due");
+
+                    b.HasIndex("SessionId", "Version", "LeadHours")
+                        .IsUnique()
+                        .HasDatabaseName("ux_session_reminder_occurrences_session_version_lead");
+
+                    b.ToTable("session_reminder_occurrences", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_session_reminder_occurrences_lead", "lead_hours BETWEEN 1 AND 168");
+
+                            t.HasCheckConstraint("ck_session_reminder_occurrences_status", "status IN ('Pending', 'Suppressed', 'Sent')");
+
+                            t.HasCheckConstraint("ck_session_reminder_occurrences_version", "version > 0");
+                        });
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.WorkspaceEntity", b =>
                 {
                     b.Property<string>("WorkspaceId")
@@ -2812,6 +3075,26 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasForeignKey("RevokedByActorId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_memberships_revoker");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Sessions.CommunitySessionRevisionEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.Sessions.CommunitySessionEntity", null)
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_community_session_revisions_session");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Sessions.SessionReminderOccurrenceEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.Sessions.CommunitySessionEntity", null)
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_session_reminder_occurrences_session");
                 });
 
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.WorkspaceEntity", b =>

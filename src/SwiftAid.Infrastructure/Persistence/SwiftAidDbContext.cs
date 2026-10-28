@@ -8,6 +8,7 @@ using SwiftAid.Infrastructure.Identity;
 using SwiftAid.Infrastructure.Persistence.Entities.Cases;
 using SwiftAid.Infrastructure.Persistence.Entities.Intake;
 using SwiftAid.Infrastructure.Persistence.Notifications;
+using SwiftAid.Infrastructure.Persistence.Sessions;
 
 namespace SwiftAid.Infrastructure.Persistence;
 
@@ -50,6 +51,9 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
     public DbSet<ManagedCaseObservationEntity> ManagedCaseObservations => Set<ManagedCaseObservationEntity>();
     public DbSet<ManagedCaseFollowUpEntity> ManagedCaseFollowUps => Set<ManagedCaseFollowUpEntity>();
     public DbSet<ManagedCaseEscalationEntity> ManagedCaseEscalations => Set<ManagedCaseEscalationEntity>();
+    public DbSet<CommunitySessionEntity> CommunitySessions => Set<CommunitySessionEntity>();
+    public DbSet<CommunitySessionRevisionEntity> CommunitySessionRevisions => Set<CommunitySessionRevisionEntity>();
+    public DbSet<SessionReminderOccurrenceEntity> SessionReminderOccurrences => Set<SessionReminderOccurrenceEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -76,6 +80,9 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         modelBuilder.ApplyConfiguration(new ManagedCaseObservationEntityConfiguration());
         modelBuilder.ApplyConfiguration(new ManagedCaseFollowUpEntityConfiguration());
         modelBuilder.ApplyConfiguration(new ManagedCaseEscalationEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new CommunitySessionEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new CommunitySessionRevisionEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new SessionReminderOccurrenceEntityConfiguration());
     }
 
     private static void ConfigureOpenIddictSchema(ModelBuilder modelBuilder)

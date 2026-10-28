@@ -1,0 +1,18 @@
+.session-editor__material-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: 8px;
+}
+
+.session-editor__material-row .mud-input-control {
+    flex: 1;
+}
+
+.session-editor__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-top: 16px;
+}
