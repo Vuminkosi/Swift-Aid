@@ -29,10 +29,21 @@ public sealed class IntakeReportEntityConfiguration : IEntityTypeConfiguration<I
         builder.Property(item => item.DecidedAtUtc).HasColumnName("decided_at_utc").HasColumnType("timestamp with time zone");
         builder.Property(item => item.DecisionActorId).HasColumnName("decision_actor_id").HasColumnType("text");
         builder.Property(item => item.ReviewReason).HasColumnName("review_reason").HasColumnType("text");
+        builder.Property(item => item.RoutingCountryCode).HasColumnName("routing_country_code").HasColumnType("text");
+        builder.Property(item => item.RoutingRegionId).HasColumnName("routing_region_id").HasColumnType("text");
+        builder.Property(item => item.RoutingAreaId).HasColumnName("routing_area_id").HasColumnType("text");
+        builder.Property(item => item.RoutingCatalogueVersion).HasColumnName("routing_catalogue_version").HasColumnType("text");
+        builder.Property(item => item.SubjectScope).HasColumnName("subject_scope").HasConversion<string>().HasColumnType("text");
+        builder.Property(item => item.CoordinatorActorId).HasColumnName("coordinator_actor_id").HasColumnType("text");
+        builder.Property(item => item.CoordinatorAssignedAtUtc).HasColumnName("coordinator_assigned_at_utc").HasColumnType("timestamp with time zone");
+        builder.Property(item => item.ClarificationRequestedAtUtc).HasColumnName("clarification_requested_at_utc").HasColumnType("timestamp with time zone");
+        builder.Property(item => item.ClarificationReason).HasColumnName("clarification_reason").HasColumnType("text");
         builder.HasIndex(item => new { item.SessionId, item.ClientSubmissionId }).IsUnique()
             .HasDatabaseName("ux_intake_reports_session_submission");
         builder.HasIndex(item => new { item.IntakeQueueId, item.Status, item.ReceivedAtUtc })
             .HasDatabaseName("ix_intake_reports_review_queue");
+        builder.HasIndex(item => new { item.RoutingStatus, item.ReceivedAtUtc, item.ReceiptId })
+            .HasDatabaseName("ix_intake_reports_coordination_queue");
         builder.HasOne<IntakeSessionEntity>().WithMany().HasForeignKey(item => item.SessionId)
             .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_intake_reports_session");
     }

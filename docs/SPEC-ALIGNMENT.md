@@ -90,6 +90,22 @@ PC-01 through PC-08 remain proposed absent a recorded owner acceptance. No clini
 | PC-06 | Worker-documented receipt names reporter and confirmation method; no implied digital signature | P5.1, P8.3 | proposed |
 | PC-07 | Resolved cases are history-first; reopen for new operational work; permitted corrections preserve closure | P1.1, P5.3, P11.1 | proposed |
 | PC-08 | Same authorized demo officer may draft and publish only with explicit recorded review; never claim independent review | P7.3, P10.1, P11.2 | proposed |
+| PC-09 | Unroutable public reports owned by a restricted SwiftAid Intake Coordination queue (`NeedsRouting`: coordinator reviews ambiguous/incomplete routing; `NoServiceCoverage`: coordinator records uncovered-service status and may evaluate future referral options); administrative review only, no clinical/emergency/referral guarantee; no exposure without explicit eligible catchment and authorization; acceptance still atomically creates the managed case with the authorized owner; restricted access, audited decisions, bounded sensitive-content access | P2.2, P2.4 | owner-approved (27 Oct 2026, conditions in subsection) |
+
+### PC-09 Intake Coordination queue (OWNER-APPROVED 27 October 2026; implementation conditions below)
+
+Unroutable public reports are owned by a restricted SwiftAid Intake Coordination queue rather than left without a triage owner. `NeedsRouting` reports carry administrative review responsibility assigned to an authorized platform intake coordinator for ambiguous or incomplete routing information; `NoServiceCoverage` reports retain the private report and uncovered-service status for restricted coordination review, and a coordinator may evaluate future referral options. This is administrative review responsibility only: not a guarantee of clinical service, case acceptance, emergency response, or external referral.
+
+Owner-imposed implementation restrictions (binding on the slice):
+
+- Coordinators inspect only the minimum information necessary to assess routing (receipt identity, lifecycle/queue state, coarse country/area/region routing codes, subject scope, timing). Narrative, observations, precise coordinates, and original audio stay out of coordination projections; sensitive details require additional explicit authorization and are never self-granted through the coordination path (no sealed-payload decryption is wired into it).
+- Coordinators may correct routing metadata through versioned decisions (assign a configured, currently eligible queue with a recorded reason), request appropriate factual clarification (recorded flag and reason; no reporter contact is invented for account-free reports), and select an eligible configured organization queue.
+- Coordinators cannot impersonate reporters, create organization grants, self-assign clinical responsibilities, or promise service coverage. Claiming review responsibility is self-only (a coordinator claims a report for their own review, never for another actor).
+- Geographic proximity alone never grants an organization access: coordinator authority derives only from an explicit platform coordination grant, and queue visibility never crosses into organization casework.
+- Only an authorized organization reviewer may accept a report into managed casework; coordinator assignment hands the report to organization review but never promotes it. Promotion still preserves the original evidence and atomically establishes the managed case with the accountable owner.
+- Every intake coordination action records actor, authority (coordination organization and grant), reason, time, and resulting state; the action history is queryable per receipt.
+
+Status: APPROVED for implementation. The coordination queue, coordinator role/grant operation, authorization rule, audit record, API, and UI surface are implemented in the P2.4 slice under these conditions. No clinical or institutional policy approval is inferred.
 
 ## P8.6 approved scope addition
 

@@ -103,6 +103,7 @@ public interface IIntakeSessionAuthority
 /// Atomic idempotency boundary for private intake and its receipt/outbox. Within a session, the same
 /// client submission ID, session proof digest and payload digest return the original receipt; the same
 /// key with a different payload digest conflicts. A capability renewal never creates a second intake.
+/// Validated original-audio reservations transition to <c>Attached</c> in the same transaction.
 /// </summary>
 public interface IIntakeSubmissionStore
 {
@@ -112,6 +113,7 @@ public interface IIntakeSubmissionStore
         ReadOnlyMemory<byte> canonicalPayloadDigest,
         CoverageResult coverage,
         DateTimeOffset receivedAtUtc,
+        IReadOnlyList<Guid> attachmentIds,
         CancellationToken ct);
 }
 

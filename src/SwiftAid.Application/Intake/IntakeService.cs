@@ -183,6 +183,7 @@ public sealed class IntakeService : IIntakeService
                 payloadDigest,
                 coverage,
                 _timeProvider.GetUtcNow(),
+                command.OriginalAudioAttachmentIds,
                 ct).ConfigureAwait(false);
         }
         finally

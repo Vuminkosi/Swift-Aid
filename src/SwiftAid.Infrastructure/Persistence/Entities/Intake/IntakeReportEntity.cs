@@ -18,4 +18,15 @@ public sealed class IntakeReportEntity
     public DateTimeOffset? DecidedAtUtc { get; set; }
     public string? DecisionActorId { get; set; }
     public string? ReviewReason { get; set; }
+    /// <summary>Coarse routing-assessment country carried in cleartext; sealed details stay protected.</summary>
+    public string? RoutingCountryCode { get; set; }
+    public string? RoutingRegionId { get; set; }
+    public string? RoutingAreaId { get; set; }
+    public string? RoutingCatalogueVersion { get; set; }
+    public IntakeSubjectScope? SubjectScope { get; set; }
+    /// <summary>Coordinator that claimed administrative review (self-claim only); never a clinical owner.</summary>
+    public string? CoordinatorActorId { get; set; }
+    public DateTimeOffset? CoordinatorAssignedAtUtc { get; set; }
+    public DateTimeOffset? ClarificationRequestedAtUtc { get; set; }
+    public string? ClarificationReason { get; set; }
 }

@@ -129,6 +129,12 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IIntakePromotionWorkspaceResolver, PostgresIntakePromotionWorkspaceResolver>();
         services.AddScoped<IIntakePromotionService, IntakePromotionProcessor>();
         services.AddScoped<IManagedCaseRegistrationProcessor, CaseRegistrationProcessor>();
+        var intakeCoordinationOptions = ReadIntakeCoordinationOptions(configuration);
+        intakeCoordinationOptions.Validate();
+        services.TryAddSingleton(intakeCoordinationOptions);
+        services.AddScoped<IIntakeCoordinationAuthorizer, PostgresIntakeCoordinationAuthorizer>();
+        services.AddScoped<IIntakeCoordinationStore, PostgresIntakeCoordinationStore>();
+        services.AddScoped<IIntakeCoordinationService, IntakeCoordinationProcessor>();
         var intakeMetadataOptions = ReadIntakeMetadataOptions(configuration);
         intakeMetadataOptions.Validate();
         services.TryAddSingleton(intakeMetadataOptions);
@@ -627,6 +633,19 @@ public static class ServiceCollectionExtensions
             PrivacyNoticeVersion = ReadString(section, nameof(IntakeMetadataOptions.PrivacyNoticeVersion), "2026-10-27.1"),
             PrivacyNoticeReference = ReadString(section, nameof(IntakeMetadataOptions.PrivacyNoticeReference), "/privacy"),
             PrivacyNoticeSourceCommit = ReadString(section, nameof(IntakeMetadataOptions.PrivacyNoticeSourceCommit), "a9bc0e6d1703dd47e8b0f2e3f78ff6f0e6e8f461")
+        };
+    }
+
+    private static IntakeCoordinationOptions ReadIntakeCoordinationOptions(IConfiguration configuration)
+    {
+        var section = configuration.GetSection(IntakeCoordinationOptions.SectionName);
+        var enabledText = ReadString(section, nameof(IntakeCoordinationOptions.Enabled), "false");
+        return new IntakeCoordinationOptions
+        {
+            Enabled = !string.Equals(enabledText, "false", StringComparison.OrdinalIgnoreCase),
+            CoordinationOrganizationId = ReadString(section, nameof(IntakeCoordinationOptions.CoordinationOrganizationId)),
+            DefaultPageLimit = ReadInt32(section, nameof(IntakeCoordinationOptions.DefaultPageLimit), 50),
+            MaximumPageLimit = ReadInt32(section, nameof(IntakeCoordinationOptions.MaximumPageLimit), 200)
         };
     }
 

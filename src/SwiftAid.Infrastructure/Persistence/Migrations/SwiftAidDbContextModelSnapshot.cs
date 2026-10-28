@@ -660,7 +660,7 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("ck_access_grant_group_operations_lock_token_zero", "lock_token = 0");
 
-                            t.HasCheckConstraint("ck_grant_group_operations_value", "operation IN ('ReadCase', 'ReadAttachment', 'Synchronize', 'Search', 'Export', 'Count', 'RequestProtectedAction', 'ExecuteProtectedAction', 'ReadLinkedSignalEvidence', 'CorrectReport', 'ReviewProtectedAction', 'AssignCase', 'ResolveCase', 'ReopenCase', 'ReviewIntake')");
+                            t.HasCheckConstraint("ck_grant_group_operations_value", "operation IN ('ReadCase', 'ReadAttachment', 'Synchronize', 'Search', 'Export', 'Count', 'RequestProtectedAction', 'ExecuteProtectedAction', 'ReadLinkedSignalEvidence', 'CorrectReport', 'ReviewProtectedAction', 'AssignCase', 'ResolveCase', 'ReopenCase', 'ReviewIntake', 'CoordinateIntake')");
                         });
                 });
 
@@ -1178,6 +1178,93 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeCoordinationActionEntity", b =>
+                {
+                    b.Property<Guid>("ActionId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("action_id");
+
+                    b.Property<DateTimeOffset>("ActedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("acted_at_utc");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("action");
+
+                    b.Property<string>("ActorId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("actor_id");
+
+                    b.Property<string>("CoordinationOrganizationId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("coordination_organization_id");
+
+                    b.Property<string>("FromQueueId")
+                        .HasColumnType("text")
+                        .HasColumnName("from_queue_id");
+
+                    b.Property<string>("FromRouting")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("from_routing");
+
+                    b.Property<string>("FromStatus")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("from_status");
+
+                    b.Property<string>("GrantGroupId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("grant_group_id");
+
+                    b.Property<string>("Reason")
+                        .HasColumnType("text")
+                        .HasColumnName("reason");
+
+                    b.Property<Guid>("ReceiptId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("receipt_id");
+
+                    b.Property<long>("ResultingVersion")
+                        .HasColumnType("bigint")
+                        .HasColumnName("resulting_version");
+
+                    b.Property<string>("ToQueueId")
+                        .HasColumnType("text")
+                        .HasColumnName("to_queue_id");
+
+                    b.Property<string>("ToRouting")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("to_routing");
+
+                    b.Property<string>("ToStatus")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("to_status");
+
+                    b.HasKey("ActionId")
+                        .HasName("pk_intake_coordination_actions");
+
+                    b.HasIndex("ReceiptId", "ActedAtUtc")
+                        .HasDatabaseName("ix_intake_coordination_actions_receipt");
+
+                    b.ToTable("intake_coordination_actions", "swiftaid_intake", t =>
+                        {
+                            t.HasCheckConstraint("ck_intake_coordination_action", "action IN ('ClaimForReview', 'AssignQueue', 'RequestClarification', 'RecordNoServiceCoverage')");
+
+                            t.HasCheckConstraint("ck_intake_coordination_actor", "length(btrim(actor_id)) > 0 AND length(btrim(coordination_organization_id)) > 0 AND length(btrim(grant_group_id)) > 0");
+
+                            t.HasCheckConstraint("ck_intake_coordination_version", "resulting_version > 0");
+                        });
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeEvidenceLinkEntity", b =>
                 {
                     b.Property<Guid>("ReceiptId")
@@ -1318,9 +1405,25 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("bytea")
                         .HasColumnName("canonical_payload_digest");
 
+                    b.Property<string>("ClarificationReason")
+                        .HasColumnType("text")
+                        .HasColumnName("clarification_reason");
+
+                    b.Property<DateTimeOffset?>("ClarificationRequestedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("clarification_requested_at_utc");
+
                     b.Property<Guid>("ClientSubmissionId")
                         .HasColumnType("uuid")
                         .HasColumnName("client_submission_id");
+
+                    b.Property<string>("CoordinatorActorId")
+                        .HasColumnType("text")
+                        .HasColumnName("coordinator_actor_id");
+
+                    b.Property<DateTimeOffset?>("CoordinatorAssignedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("coordinator_assigned_at_utc");
 
                     b.Property<DateTimeOffset?>("DecidedAtUtc")
                         .HasColumnType("timestamp with time zone")
@@ -1347,6 +1450,22 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("review_reason");
 
+                    b.Property<string>("RoutingAreaId")
+                        .HasColumnType("text")
+                        .HasColumnName("routing_area_id");
+
+                    b.Property<string>("RoutingCatalogueVersion")
+                        .HasColumnType("text")
+                        .HasColumnName("routing_catalogue_version");
+
+                    b.Property<string>("RoutingCountryCode")
+                        .HasColumnType("text")
+                        .HasColumnName("routing_country_code");
+
+                    b.Property<string>("RoutingRegionId")
+                        .HasColumnType("text")
+                        .HasColumnName("routing_region_id");
+
                     b.Property<string>("RoutingStatus")
                         .IsRequired()
                         .HasColumnType("text")
@@ -1361,6 +1480,10 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("status");
 
+                    b.Property<string>("SubjectScope")
+                        .HasColumnType("text")
+                        .HasColumnName("subject_scope");
+
                     b.Property<long>("Version")
                         .HasColumnType("bigint")
                         .HasColumnName("version");
@@ -1374,6 +1497,9 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("IntakeQueueId", "Status", "ReceivedAtUtc")
                         .HasDatabaseName("ix_intake_reports_review_queue");
+
+                    b.HasIndex("RoutingStatus", "ReceivedAtUtc", "ReceiptId")
+                        .HasDatabaseName("ix_intake_reports_coordination_queue");
 
                     b.ToTable("intake_reports", "swiftaid_intake", t =>
                         {
@@ -2376,6 +2502,16 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_intake_capabilities_session");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeCoordinationActionEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeReportEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ReceiptId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_intake_coordination_actions_report");
                 });
 
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeEvidenceLinkEntity", b =>

@@ -98,11 +98,29 @@ public sealed class IntakeAttachmentAuthorityTests
         var fixture = await SeedBindingAsync(db, state: IntakeAttachmentState.Attached);
         var authority = new PostgresIntakeAttachmentAuthority(db);
 
+        // The reservation was consumed by the seeded submission; presenting it under a
+        // different client submission must fail even though the ids are otherwise known.
+        var status = await authority.ValidateSubmissionAttachmentsAsync(
+            fixture.Capability, Guid.NewGuid(), [fixture.AttachmentId],
+            MaxDurationSeconds, MaxBytesPerAttachment, CancellationToken.None);
+
+        Assert.Equal(IntakeAttachmentValidationStatus.InvalidBinding, status);
+    }
+
+    [IntakePostgresFact]
+    public async Task AttachedReservation_ReplayedBySameTriple_IsValid()
+    {
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var fixture = await SeedBindingAsync(db, state: IntakeAttachmentState.Attached);
+        var authority = new PostgresIntakeAttachmentAuthority(db);
+
+        // Idempotent retry of the submission that consumed the reservation re-presents
+        // the same triple; the commit path returns the original receipt.
         var status = await authority.ValidateSubmissionAttachmentsAsync(
             fixture.Capability, fixture.ClientSubmissionId, [fixture.AttachmentId],
             MaxDurationSeconds, MaxBytesPerAttachment, CancellationToken.None);
 
-        Assert.Equal(IntakeAttachmentValidationStatus.InvalidBinding, status);
+        Assert.Equal(IntakeAttachmentValidationStatus.Valid, status);
     }
 
     [IntakePostgresFact]

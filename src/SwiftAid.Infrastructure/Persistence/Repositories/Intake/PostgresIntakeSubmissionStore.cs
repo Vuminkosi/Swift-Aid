@@ -38,11 +38,18 @@ public sealed class PostgresIntakeSubmissionStore : IIntakeSubmissionStore
         ReadOnlyMemory<byte> canonicalPayloadDigest,
         CoverageResult coverage,
         DateTimeOffset receivedAtUtc,
+        IReadOnlyList<Guid> attachmentIds,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(submission);
         ArgumentNullException.ThrowIfNull(capability);
         ArgumentNullException.ThrowIfNull(coverage);
+        ArgumentNullException.ThrowIfNull(attachmentIds);
+        var distinctAttachmentIds = attachmentIds.Where(id => id != Guid.Empty).Distinct().ToArray();
+        if (distinctAttachmentIds.Length != attachmentIds.Count)
+        {
+            throw new IntakeSubmissionException(IntakeErrorCode.CapabilityInvalid);
+        }
         _intakeLimits.Validate();
         if (submission.ClientSubmissionId == Guid.Empty || capability.CapabilityId == Guid.Empty ||
             capability.SessionId == Guid.Empty || capability.ReceiptProofDigest.Length != 32 ||
@@ -79,6 +86,16 @@ public sealed class PostgresIntakeSubmissionStore : IIntakeSubmissionStore
                 throw new IntakeSubmissionException(IntakeErrorCode.SubmissionConflict);
             }
 
+            // Best-effort heal: a retried submission re-asserts the attachment binding
+            // without failing when the original commit already attached the rows.
+            await AttachReservationsAsync(
+                capability.SessionId,
+                capability.CapabilityId,
+                submission.ClientSubmissionId,
+                distinctAttachmentIds,
+                receivedAtUtc,
+                requireAll: false,
+                cancellationToken).ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return ToReceipt(existing);
         }
@@ -120,7 +137,14 @@ public sealed class PostgresIntakeSubmissionStore : IIntakeSubmissionStore
             RoutingStatus = coverage.Status,
             IntakeQueueId = coverage.Status == IntakeRoutingStatus.RoutedForReview ? coverage.IntakeQueueId : null,
             Version = 1,
-            ReceivedAtUtc = receivedAtUtc
+            ReceivedAtUtc = receivedAtUtc,
+            RoutingCountryCode = NormalizeRoutingCode(submission.Location.CountryCode),
+            RoutingRegionId = NormalizeRoutingCode(submission.Location.Region.NormalizedId),
+            RoutingAreaId = NormalizeRoutingCode(submission.Location.Area.NormalizedId),
+            RoutingCatalogueVersion = string.IsNullOrWhiteSpace(submission.Location.CatalogueVersion)
+                ? null
+                : submission.Location.CatalogueVersion,
+            SubjectScope = submission.SubjectScope
         };
         _dbContext.Add(report);
         _dbContext.Add(new IntakeOutboxEntity
@@ -136,6 +160,18 @@ public sealed class PostgresIntakeSubmissionStore : IIntakeSubmissionStore
         try
         {
             await _dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+            // The service validates reservations before commit; the transition to Attached
+            // must land in the same transaction so a reservation can never back two reports.
+            await AttachReservationsAsync(
+                capability.SessionId,
+                capability.CapabilityId,
+                submission.ClientSubmissionId,
+                distinctAttachmentIds,
+                receivedAtUtc,
+                requireAll: true,
+                cancellationToken).ConfigureAwait(false);
+
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return ToReceipt(report);
         }
@@ -160,6 +196,42 @@ public sealed class PostgresIntakeSubmissionStore : IIntakeSubmissionStore
         };
         command.Parameters.Add(parameter);
         await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static string? NormalizeRoutingCode(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private async Task AttachReservationsAsync(
+        Guid sessionId,
+        Guid capabilityId,
+        Guid clientSubmissionId,
+        Guid[] attachmentIds,
+        DateTimeOffset attachedAtUtc,
+        bool requireAll,
+        CancellationToken cancellationToken)
+    {
+        if (attachmentIds.Length == 0)
+        {
+            return;
+        }
+
+        var attached = await _dbContext.Set<IntakeAttachmentEntity>()
+            .Where(item => item.SessionId == sessionId
+                && item.CapabilityId == capabilityId
+                && item.ClientSubmissionId == clientSubmissionId
+                && attachmentIds.Contains(item.AttachmentId)
+                && item.State == IntakeAttachmentState.Uploaded)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(item => item.State, IntakeAttachmentState.Attached)
+                    .SetProperty(item => item.AttachedAtUtc, attachedAtUtc),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (requireAll && attached != attachmentIds.Length)
+        {
+            throw new IntakeSubmissionException(IntakeErrorCode.CapabilityInvalid);
+        }
     }
 
     private static IntakeReceipt ToReceipt(IntakeReportEntity report) => new(

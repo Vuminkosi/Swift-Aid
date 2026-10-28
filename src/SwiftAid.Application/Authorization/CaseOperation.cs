@@ -22,5 +22,12 @@ public enum CaseOperation
     /// review authorizer against the receiving organization's grant groups, never by the
     /// shared case resource policy.
     /// </summary>
-    ReviewIntake = 14
+    ReviewIntake = 14,
+    /// <summary>
+    /// Coordinates an unrouted guest intake report (PC-09). Evaluated only by the intake
+    /// coordination authorizer against a grant in the configured platform coordination
+    /// organization, never by the shared case resource policy. Grants no case, clinical,
+    /// or coverage authority.
+    /// </summary>
+    CoordinateIntake = 15
 }

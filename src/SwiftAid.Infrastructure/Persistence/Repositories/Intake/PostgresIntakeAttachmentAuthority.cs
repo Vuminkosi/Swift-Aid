@@ -8,9 +8,11 @@ namespace SwiftAid.Infrastructure.Persistence.Repositories.Intake;
 /// <summary>
 /// Validates guest media bindings against server-issued upload reservations. Every attachment
 /// must be reserved for the exact submitting (capability, session, client submission) triple,
-/// still <c>Uploaded</c>, unexpired, and within the caller-supplied size/duration bounds.
-/// Binding mismatches (unknown, foreign, already-consumed, or expired reservations, duplicate
-/// references) report <c>InvalidBinding</c>; bound reservations over quota report <c>TooLarge</c>.
+/// still <c>Uploaded</c> (or already <c>Attached</c> by this same triple's committed report),
+/// unexpired while awaiting first use, and within the caller-supplied size/duration bounds.
+/// Binding mismatches (unknown, foreign, consumed-by-another-submission, or expired
+/// reservations, duplicate references) report <c>InvalidBinding</c>; bound reservations
+/// over quota report <c>TooLarge</c>.
 /// </summary>
 /// <remarks>
 /// Validate-only: lifecycle transitions (<c>Uploaded</c> to <c>Attached</c>, expiry sweeps)
@@ -80,8 +82,20 @@ public sealed class PostgresIntakeAttachmentAuthority : IIntakeAttachmentAuthori
         {
             if (row.SessionId != capability.SessionId ||
                 row.CapabilityId != capability.CapabilityId ||
-                row.ClientSubmissionId != clientSubmissionId ||
-                row.State != IntakeAttachmentState.Uploaded ||
+                row.ClientSubmissionId != clientSubmissionId)
+            {
+                return IntakeAttachmentValidationStatus.InvalidBinding;
+            }
+
+            // An Attached reservation bound to this exact triple is the idempotent
+            // replay of the submission that consumed it; the commit path re-asserts
+            // the binding without moving the row and returns the original receipt.
+            if (row.State == IntakeAttachmentState.Attached)
+            {
+                continue;
+            }
+
+            if (row.State != IntakeAttachmentState.Uploaded ||
                 row.ExpiresAtUtc <= now)
             {
                 return IntakeAttachmentValidationStatus.InvalidBinding;

@@ -1,5 +1,6 @@
 @inherits LayoutComponentBase
 @implements IAsyncDisposable
+@using Microsoft.AspNetCore.Components.Authorization
 @using SwiftAid.Client.Notifications
 @using SwiftAid.Contracts.Notifications
 @using SwiftAid.UI.Components.Notifications
@@ -98,6 +99,9 @@
             <MudNavLink Href="/report" Icon="@Icons.Material.Filled.EditNote">Report a concern</MudNavLink>
             <MudNavLink Href="/education" Icon="@Icons.Material.Filled.MenuBook">Education</MudNavLink>
             <MudNavLink Href="/sessions" Icon="@Icons.Material.Filled.Event">Community sessions</MudNavLink>
+            <AuthorizeView>
+                <MudNavLink Href="/intake-coordination" Icon="@Icons.Material.Filled.Rule">Intake coordination</MudNavLink>
+            </AuthorizeView>
         </MudNavMenu>
         <MudDivider Class="drawer-divider" />
         <MudText Typo="Typo.caption" Class="drawer-note">
