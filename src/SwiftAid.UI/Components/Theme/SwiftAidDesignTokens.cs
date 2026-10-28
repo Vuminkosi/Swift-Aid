@@ -14,6 +14,9 @@ public static class SwiftAidDesignTokens
 {
     // Brand / primary actions (web header buttons, mobile primary buttons).
     public const string BrandBlue = "#1778EC";
+    public const string BrandNavy = "#102A43";
+    public const string BrandNavyDeep = "#0B1F33";
+    public const string BrandNavyMuted = "#193B5A";
     public const string ActionTeal = "#045676";
     public const string DarkTeal = "#23A4DA";
     public const string DarkLink = "#23A4DA";
@@ -46,6 +49,7 @@ public static class SwiftAidDesignTokens
 
     // Surfaces.
     public const string PageBackgroundLight = "#F5FAF8";
+    public const string PageBackgroundNeutral = "#F4F7FB";
     public const string CardSurfaceLight = "#FFFFFF";
     public const string InkPrimaryLight = "#123B39";
     public const string InkSecondaryLight = "#3E5E5A";
@@ -68,6 +72,21 @@ public static class SwiftAidDesignTokens
     public const int RadiusCard = 12;
     public const int RadiusPill = 999;
     public const int RadiusButton = 8;
+
+    // Responsive layout breakpoints shared by compact web and mobile shells.
+    public const int BreakpointMobile = 600;
+    public const int BreakpointTablet = 960;
+    public const int BreakpointDesktop = 1280;
+
+    // Accessible status surfaces are paired with foreground colors.
+    public const string StatusInformation = "#175CD3";
+    public const string StatusInformationBackground = "#EFF8FF";
+    public const string StatusWarning = "#93370D";
+    public const string StatusWarningBackground = "#FFFAEB";
+    public const string StatusError = "#B42318";
+    public const string StatusErrorBackground = "#FEF3F2";
+    public const string StatusSuccess = "#067647";
+    public const string StatusSuccessBackground = "#ECFDF3";
 
     /// <summary>Maps a reference-board status label to a MudBlazor color.</summary>
     public static MudBlazor.Color ToMudColor(string? status) => status?.Trim().ToLowerInvariant() switch

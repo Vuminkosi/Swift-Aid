@@ -1,0 +1,96 @@
+@using SwiftAid.UI.Components.Theme
+
+@if (State != SwiftAidViewState.Populated)
+{
+    <MudPaper Class="@PanelClass" Elevation="0" role="@(State == SwiftAidViewState.Loading ? "status" : "region")" aria-labelledby="@HeadingId" aria-live="@(State == SwiftAidViewState.Loading ? "polite" : null)">
+        <div class="swiftaid-status-panel__content">
+            @if (State == SwiftAidViewState.Loading)
+            {
+                <MudProgressCircular Class="swiftaid-status-panel__icon" Indeterminate="true" Size="Size.Small" aria-hidden="true" />
+            }
+            else
+            {
+                <MudIcon Class="swiftaid-status-panel__icon" Icon="@Icon" aria-hidden="true" />
+            }
+
+            <div class="swiftaid-status-panel__copy">
+                <MudText id="@HeadingId" Typo="Typo.subtitle1" HtmlTag="h2">@Heading</MudText>
+                @if (!string.IsNullOrWhiteSpace(Description))
+                {
+                    <MudText Typo="Typo.body2" Class="swiftaid-status-panel__description">@Description</MudText>
+                }
+
+                @if (Actions is not null || OnRetry.HasDelegate)
+                {
+                    <div class="swiftaid-status-panel__actions">
+                        @Actions
+                        @if (OnRetry.HasDelegate)
+                        {
+                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="OnRetry" aria-label="Retry loading this section">
+                                Try again
+                            </MudButton>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </MudPaper>
+}
+else
+{
+    @ChildContent
+}
+
+@code {
+    [Parameter]
+    public SwiftAidViewState State { get; set; }
+
+    [Parameter]
+    public string? Title { get; set; }
+
+    [Parameter]
+    public string? Description { get; set; }
+
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    [Parameter]
+    public RenderFragment? Actions { get; set; }
+
+    [Parameter]
+    public EventCallback OnRetry { get; set; }
+
+    [Parameter]
+    public string? Class { get; set; }
+
+    private string PanelClass => string.Join(" ", new[]
+    {
+        "swiftaid-status-panel",
+        $"swiftaid-status-panel--{State.ToString().ToLowerInvariant()}",
+        Class
+    }.Where(value => !string.IsNullOrWhiteSpace(value)));
+
+    private string HeadingId { get; } = $"swiftaid-state-{Guid.NewGuid():N}";
+
+    private string Heading => !string.IsNullOrWhiteSpace(Title)
+        ? Title
+        : State switch
+        {
+            SwiftAidViewState.Loading => "Loading",
+            SwiftAidViewState.Empty => "Nothing to show yet",
+            SwiftAidViewState.Offline => "You are offline",
+            SwiftAidViewState.Error => "This information is unavailable",
+            SwiftAidViewState.Denied => "Access is unavailable",
+            SwiftAidViewState.Information => "Information",
+            _ => string.Empty
+        };
+
+    private string Icon => State switch
+    {
+        SwiftAidViewState.Empty => Icons.Material.Outlined.Inbox,
+        SwiftAidViewState.Offline => Icons.Material.Outlined.CloudOff,
+        SwiftAidViewState.Error => Icons.Material.Outlined.ErrorOutline,
+        SwiftAidViewState.Denied => Icons.Material.Outlined.Lock,
+        _ => Icons.Material.Outlined.Info
+    };
+}

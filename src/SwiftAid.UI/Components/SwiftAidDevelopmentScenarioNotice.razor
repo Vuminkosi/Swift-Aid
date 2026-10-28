@@ -1,0 +1,19 @@
+@if (IsActive)
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Icon="@Icons.Material.Filled.Science" Class="swiftaid-development-notice" role="status" aria-live="polite">
+        <MudText Typo="Typo.subtitle2" HtmlTag="strong">Development scenario · synthetic data</MudText>
+        @if (!string.IsNullOrWhiteSpace(Description))
+        {
+            <MudText Typo="Typo.body2">@Description</MudText>
+        }
+    </MudAlert>
+}
+
+@code {
+    /// <summary>Set from the host's explicit development-scenario configuration.</summary>
+    [Parameter]
+    public bool IsActive { get; set; }
+
+    [Parameter]
+    public string? Description { get; set; } = "Displayed records and actions are for demonstration only.";
+}

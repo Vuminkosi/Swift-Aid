@@ -2,9 +2,13 @@
     color-scheme: light;
     /* Brand ramp pixel-sampled from swiftaid-icon.png (azure -> teal -> green). */
     --sa-brand-blue: #1778ec;
+    --sa-brand-navy: #102a43;
+    --sa-brand-navy-deep: #0b1f33;
+    --sa-brand-navy-muted: #193b5a;
     --sa-brand-teal: #10a3a8;
     --sa-brand-green: #27a961;
     --sa-canvas: #f5faf8;
+    --sa-canvas-neutral: #f4f7fb;
     --sa-surface: #ffffff;
     --sa-surface-elevated: #ffffff;
     --sa-surface-subtle: #e8f5f2;
@@ -22,6 +26,21 @@
     --sa-success-foreground: #ffffff;
     --sa-danger: #b4233a;
     --sa-danger-foreground: #ffffff;
+    --sa-status-info: #175cd3;
+    --sa-status-info-soft: #eff8ff;
+    --sa-status-warning: #93370d;
+    --sa-status-warning-soft: #fffaeb;
+    --sa-status-error: #b42318;
+    --sa-status-error-soft: #fef3f2;
+    --sa-status-success: #067647;
+    --sa-status-success-soft: #ecfdf3;
+    --sa-radius-card: 12px;
+    --sa-radius-control: 8px;
+    --sa-space-xs: 4px;
+    --sa-space-sm: 8px;
+    --sa-space-md: 16px;
+    --sa-space-lg: 24px;
+    --sa-mobile-nav-height: 68px;
     --sa-overlay: rgb(7 27 25 / 48%);
 }
 
@@ -45,6 +64,14 @@
     --sa-success-foreground: #062d29;
     --sa-danger: #fb7185;
     --sa-danger-foreground: #40131e;
+    --sa-status-info: #84caff;
+    --sa-status-info-soft: #102b44;
+    --sa-status-warning: #fec84b;
+    --sa-status-warning-soft: #422e12;
+    --sa-status-error: #fda29b;
+    --sa-status-error-soft: #411b1b;
+    --sa-status-success: #6ce9a6;
+    --sa-status-success-soft: #123b2b;
     --sa-overlay: rgb(0 0 0 / 64%);
 }
 
@@ -60,4 +87,116 @@ button:focus-visible,
 [tabindex]:focus-visible {
     outline: 3px solid var(--sa-focus);
     outline-offset: 3px;
+}
+
+.swiftaid-section-card {
+    border: 1px solid var(--sa-border);
+    border-radius: var(--sa-radius-card);
+    background: var(--sa-surface);
+    box-shadow: 0 1px 3px rgb(16 42 67 / 8%);
+}
+
+.swiftaid-section-card .mud-card-header {
+    padding: 1rem 1rem 0.5rem;
+}
+
+.swiftaid-section-card .mud-card-content {
+    padding: 0.75rem 1rem 1rem;
+}
+
+.swiftaid-stat-tile {
+    min-width: 0;
+    border: 1px solid var(--sa-border);
+    border-radius: var(--sa-radius-card);
+    background: var(--sa-surface);
+    box-shadow: 0 1px 3px rgb(16 42 67 / 8%);
+}
+
+.swiftaid-stat-tile .mud-typography-h5 {
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+}
+
+.swiftaid-status-panel {
+    min-width: 0;
+    border: 1px solid var(--sa-border);
+    border-radius: var(--sa-radius-card);
+    background: var(--sa-surface);
+}
+
+.swiftaid-status-panel__content {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+}
+
+.swiftaid-status-panel__copy {
+    min-width: 0;
+}
+
+.swiftaid-status-panel__description {
+    color: var(--sa-text-secondary);
+    overflow-wrap: anywhere;
+}
+
+.swiftaid-status-panel__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+.swiftaid-status-panel__icon {
+    flex: 0 0 auto;
+    margin-top: 0.1rem;
+}
+
+.swiftaid-development-notice {
+    border-radius: var(--sa-radius-control);
+    font-weight: 600;
+}
+
+.swiftaid-status-panel--information .swiftaid-status-panel__icon {
+    color: var(--sa-status-info);
+}
+
+.swiftaid-status-panel--warning .swiftaid-status-panel__icon {
+    color: var(--sa-status-warning);
+}
+
+.swiftaid-status-panel--error .swiftaid-status-panel__icon {
+    color: var(--sa-status-error);
+}
+
+.swiftaid-status-panel--success .swiftaid-status-panel__icon {
+    color: var(--sa-status-success);
+}
+
+.swiftaid-status-panel--loading .swiftaid-status-panel__icon {
+    color: var(--sa-action-primary);
+}
+
+.swiftaid-page-heading__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+}
+
+@media (max-width: 600px) {
+    .swiftaid-section-card .mud-card-header {
+        padding: 0.875rem 0.875rem 0.375rem;
+    }
+
+    .swiftaid-section-card .mud-card-content {
+        padding: 0.5rem 0.875rem 0.875rem;
+    }
+
+    .swiftaid-page-heading__actions {
+        width: 100%;
+    }
+
+    .swiftaid-page-heading__actions > * {
+        min-height: 44px;
+    }
 }
