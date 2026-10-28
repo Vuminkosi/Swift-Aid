@@ -1,25 +1,391 @@
 @page "/"
+@implements IDisposable
+@using SwiftAid.Client.Intake
+@using SwiftAid.Client.Presentation
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.Contracts.Intake
+@using SwiftAid.Mobile.Services.Authentication
+@using SwiftAid.Mobile.Services.Welcome
+@using SwiftAid.UI.Components.Public
+@using SwiftAid.UI.Components.Surfaces.Public
+@inject IMobileAuthenticationSession AuthenticationSession
+@inject IMobileHomeOverviewClient HomeOverviewClient
+@inject ICaseQueueClient CaseQueueClient
+@inject IGuestIntakeTransport IntakeTransport
+@inject IMobileWelcomePreferenceStore WelcomePreferenceStore
 
 <PageTitle>SwiftAid | Community support</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.Medium" Class="mobile-start">
-    <SwiftAidPageHeading Eyebrow="Community health support"
-                         Title="Support that follows through."
-                         Description="Share a concern about a person or animal and keep your saved drafts private on this device."
-                         HeadingId="start-heading" />
+<PublicHomeSurface IsSignedIn="@(_authenticationState == AuthenticationViewState.SignedIn)"
+                       WorkerReportHref="/report"
+                       GuestReportsHref="/report?view=tracking"
+                       CaseQueueClient="CaseQueueClient"
+                       HomeOverview="_homeOverview"
+                       OnHomeOverviewRetry="LoadHomeOverviewAsync"
+                       ShowWelcome="@(_authenticationState != AuthenticationViewState.SignedIn && _welcomePreferences?.IsPublicWelcomeCompleted != true)"
+                       WelcomeCountryOptions="_countryOptions"
+                       WelcomeSelectedCountryCode="@_selectedCountryCode"
+                       WelcomeSelectedIntent="@_welcomePreferences?.SelectedIntent"
+                       WelcomeCountryLoading="_countryLoading"
+                       WelcomeCountryErrorMessage="@_countryErrorMessage"
+                       WelcomeInteractionDisabled="_signInInProgress"
+                       OnWelcomeSelectionChanged="OnWelcomeSelectionChanged"
+                       OnWelcomeContinue="ContinueAsync" />
+@if (!string.IsNullOrWhiteSpace(_signInMessage))
+{
+    <div role="status" aria-live="polite">
+        <MudAlert Severity="Severity.Info" Class="ma-4">@_signInMessage</MudAlert>
+    </div>
+}
+@if (!string.IsNullOrWhiteSpace(_welcomePreferenceMessage))
+{
+    <div role="status" aria-live="polite">
+        <MudAlert Severity="Severity.Warning" Class="ma-4">@_welcomePreferenceMessage</MudAlert>
+    </div>
+}
 
-    <MudPaper Class="status-card" Elevation="0">
-        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
-            <MudIcon Icon="@Icons.Material.Filled.Info" Color="Color.Primary" Size="Size.Medium" />
-            <MudText Typo="Typo.h6" HtmlTag="h2">Current availability</MudText>
-        </MudStack>
-        <SwiftAidBodyText>
-            You can save a private report draft on this device. Drafts are not sent yet.
-        </SwiftAidBodyText>
-        <MudButton Href="/report" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.EditNote">
-            Start a report
-        </MudButton>
-    </MudPaper>
+@code {
+    private AuthenticationViewState _authenticationState = AuthenticationViewState.SignedOut;
+    private IReadOnlyList<PublicCountryOption> _countryOptions = Array.Empty<PublicCountryOption>();
+    private string? _selectedCountryCode;
+    private bool _countryLoading;
+    private string? _countryErrorMessage;
+    private string? _signInMessage;
+    private MobileWelcomePreferences? _welcomePreferences;
+    private readonly CancellationTokenSource _lifetime = new();
+    private bool _authenticationRefreshStarted;
+    private bool _signInInProgress;
+    private string? _welcomePreferenceMessage;
+    private bool _disposed;
+    private int _countryLoadRevision;
+    private PublicHomeOverview _homeOverview = new(
+        PublicHomeOverviewState.Loading, null, null, null,
+        Array.Empty<PublicHomeCount>(), Array.Empty<PublicHomeActivity>());
 
-    <SwiftAidServiceBoundaryNotice />
-</MudContainer>
+    protected override Task OnInitializedAsync()
+    {
+        try
+        {
+            _welcomePreferences = WelcomePreferenceStore.Get();
+            _selectedCountryCode = _welcomePreferences?.CountryCode;
+        }
+        catch (Exception)
+        {
+            _welcomePreferences = null;
+        }
+
+        _countryLoading = true;
+        return Task.CompletedTask;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _authenticationRefreshStarted)
+        {
+            return;
+        }
+
+        _authenticationRefreshStarted = true;
+        await RefreshAuthenticationAsync();
+    }
+
+    private async Task RefreshAuthenticationAsync()
+    {
+        _countryErrorMessage = null;
+        _signInMessage = null;
+        try
+        {
+            _authenticationState = await AuthenticationSession.IsSignedInAsync()
+                ? AuthenticationViewState.SignedIn
+                : AuthenticationViewState.SignedOut;
+        }
+        catch (OperationCanceledException)
+        {
+            _authenticationState = AuthenticationViewState.SignedOut;
+        }
+        catch (Exception)
+        {
+            _authenticationState = AuthenticationViewState.SignedOut;
+        }
+
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (_authenticationState == AuthenticationViewState.SignedOut)
+        {
+            _ = LoadCountriesAsync();
+        }
+        else if (_authenticationState == AuthenticationViewState.SignedIn)
+        {
+            await LoadHomeOverviewAsync();
+        }
+
+        if (!_disposed)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task LoadHomeOverviewAsync()
+    {
+        _homeOverview = _homeOverview with { State = PublicHomeOverviewState.Loading };
+        try
+        {
+            var result = await HomeOverviewClient.GetAsync(new MobileHomeOverviewQuery(5));
+            if (result.Code == UiCapabilityResultCode.Denied)
+            {
+                _homeOverview = EmptyOverview(PublicHomeOverviewState.Denied);
+                return;
+            }
+
+            if (!result.Succeeded || result.Value is not { } overview || !overview.IsValid)
+            {
+                _homeOverview = EmptyOverview(PublicHomeOverviewState.Unavailable);
+                return;
+            }
+
+            var freshness = overview.EvaluateFreshness(DateTimeOffset.UtcNow);
+            var counts = overview.WorkCounts
+                .Where(count => count.Kind is MobileHomeWorkCountKind.AssignedCases or
+                    MobileHomeWorkCountKind.DueFollowUps or MobileHomeWorkCountKind.OverdueFollowUps)
+                .Select(count => new PublicHomeCount(
+                    count.Kind == MobileHomeWorkCountKind.AssignedCases
+                        ? PublicHomeCountKind.Cases : PublicHomeCountKind.FollowUps,
+                    count.State switch
+                    {
+                        MobileHomeValueState.Available => PublicHomeCountState.Available,
+                        MobileHomeValueState.Suppressed => PublicHomeCountState.Suppressed,
+                        _ => PublicHomeCountState.Unavailable
+                    },
+                    count.Value))
+                .GroupBy(count => count.Kind)
+                .Select(group =>
+                {
+                    var available = group.Where(count => count.State == PublicHomeCountState.Available)
+                        .Select(count => count.Value).Where(value => value.HasValue).Select(value => value!.Value).ToArray();
+                    if (group.Any(count => count.State != PublicHomeCountState.Available))
+                        return new PublicHomeCount(group.Key, group.Any(count => count.State == PublicHomeCountState.Suppressed)
+                            ? PublicHomeCountState.Suppressed : PublicHomeCountState.Unavailable, null);
+                    return new PublicHomeCount(group.Key, PublicHomeCountState.Available,
+                        group.Key == PublicHomeCountKind.FollowUps ? available.DefaultIfEmpty().Max() : available.Single());
+                }).ToArray();
+            var activities = overview.RecentActivity.Select(activity => new PublicHomeActivity(
+                activity.Kind switch
+                {
+                    MobileHomeActivityKind.CaseReported => PublicHomeActivityKind.CaseReported,
+                    MobileHomeActivityKind.FollowUpCompleted => PublicHomeActivityKind.FollowUpCompleted,
+                    MobileHomeActivityKind.AssignmentReceived => PublicHomeActivityKind.AssignmentReceived,
+                    MobileHomeActivityKind.AssistanceProvided => PublicHomeActivityKind.AssistanceProvided,
+                    _ => PublicHomeActivityKind.EscalationOpened
+                },
+                activity.OccurredAtUtc,
+                activity.Destination switch
+                {
+                    MobileHomeActivityDestination.Cases => PublicHomeActivityDestination.Cases,
+                    MobileHomeActivityDestination.FollowUps => PublicHomeActivityDestination.FollowUps,
+                    _ => PublicHomeActivityDestination.Assistance
+                })).ToArray();
+
+            var state = freshness == MobileHomeFreshnessState.Stale
+                ? PublicHomeOverviewState.Stale
+                : freshness == MobileHomeFreshnessState.Unknown
+                    ? PublicHomeOverviewState.FreshnessUnknown
+                : overview.Completeness == MobileHomeCompleteness.Partial
+                    ? PublicHomeOverviewState.Partial
+                    : overview.WorkCounts.All(count => count.State == MobileHomeValueState.Available && count.Value == 0) && activities.Length == 0
+                        ? PublicHomeOverviewState.Empty
+                        : PublicHomeOverviewState.Populated;
+            _homeOverview = new PublicHomeOverview(state, overview.VerifiedDisplayName,
+                overview.AuthorizedWorkspaceLabel, overview.AuthorizedRegionLabel, counts, activities);
+        }
+        catch (OperationCanceledException)
+        {
+            _homeOverview = EmptyOverview(PublicHomeOverviewState.Unavailable);
+        }
+        catch (Exception)
+        {
+            _homeOverview = EmptyOverview(PublicHomeOverviewState.Unavailable);
+        }
+    }
+
+    private static PublicHomeOverview EmptyOverview(PublicHomeOverviewState state) => new(
+        state, null, null, null, Array.Empty<PublicHomeCount>(), Array.Empty<PublicHomeActivity>());
+
+    private async Task LoadCountriesAsync()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        var revision = Interlocked.Increment(ref _countryLoadRevision);
+        _countryLoading = true;
+        _countryErrorMessage = null;
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            var catalogue = await IntakeTransport.GetCountriesAsync(_lifetime.Token);
+            if (_disposed || revision != _countryLoadRevision)
+            {
+                return;
+            }
+
+            var loadedOptions = catalogue.Countries
+                .Select(country => new PublicCountryOption(country.Code, country.Label))
+                .ToArray();
+            _countryOptions = loadedOptions;
+
+            if (!_countryOptions.Any(country => string.Equals(country.Code, _selectedCountryCode, StringComparison.OrdinalIgnoreCase)))
+            {
+                _selectedCountryCode = _countryOptions
+                    .FirstOrDefault(country => string.Equals(country.Code, "ZW", StringComparison.OrdinalIgnoreCase))?.Code
+                    ?? _countryOptions.FirstOrDefault()?.Code;
+
+                if (_welcomePreferences is not null)
+                {
+                    SaveWelcomePreferences(
+                        _welcomePreferences.SelectedIntent,
+                        _selectedCountryCode,
+                        _welcomePreferences.IsPublicWelcomeCompleted);
+                }
+            }
+
+            if (_countryOptions.Count == 0)
+            {
+                _countryErrorMessage = "Country choices are not available right now.";
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            if (!_disposed && revision == _countryLoadRevision)
+            {
+                _countryOptions = Array.Empty<PublicCountryOption>();
+                _countryErrorMessage = "Country choices are not available right now.";
+            }
+        }
+        catch (Exception)
+        {
+            if (!_disposed && revision == _countryLoadRevision)
+            {
+                _countryOptions = Array.Empty<PublicCountryOption>();
+                _countryErrorMessage = "Country choices are not available right now.";
+            }
+        }
+        finally
+        {
+            if (!_disposed && revision == _countryLoadRevision)
+            {
+                _countryLoading = false;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private Task OnWelcomeSelectionChanged(WelcomeContinueRequest request)
+    {
+        if (_signInInProgress)
+        {
+            return Task.CompletedTask;
+        }
+
+        SaveWelcomePreferences(request.Intent, request.CountryCode, _welcomePreferences?.IsPublicWelcomeCompleted ?? false);
+
+        return Task.CompletedTask;
+    }
+
+    private async Task ContinueAsync(WelcomeContinueRequest request)
+    {
+        if (_signInInProgress)
+        {
+            return;
+        }
+
+        SaveWelcomePreferences(request.Intent, request.CountryCode, isPublicWelcomeCompleted: request.Intent == WelcomeNavigationIntent.PublicUser);
+        _signInMessage = null;
+        if (request.Intent == WelcomeNavigationIntent.PublicUser)
+        {
+            return;
+        }
+
+        _signInInProgress = true;
+        _authenticationState = AuthenticationViewState.Loading;
+        try
+        {
+            var signInCompleted = await AuthenticationSession.SignInAsync();
+            if (!signInCompleted)
+            {
+                _authenticationState = AuthenticationViewState.SignedOut;
+                _signInMessage = "Sign-in was not completed. You can try again.";
+                return;
+            }
+
+            _authenticationState = await AuthenticationSession.IsSignedInAsync()
+                ? AuthenticationViewState.SignedIn
+                : AuthenticationViewState.Unavailable;
+            if (_authenticationState == AuthenticationViewState.SignedIn)
+            {
+                await LoadHomeOverviewAsync();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            _authenticationState = AuthenticationViewState.Unavailable;
+        }
+        catch (Exception)
+        {
+            _authenticationState = AuthenticationViewState.Unavailable;
+        }
+        finally
+        {
+            _signInInProgress = false;
+        }
+    }
+
+    private bool IsCountryInCurrentCatalogue(string? countryCode) =>
+        !string.IsNullOrWhiteSpace(countryCode) &&
+        _countryOptions.Any(country => string.Equals(country.Code, countryCode, StringComparison.OrdinalIgnoreCase));
+
+    private void SaveWelcomePreferences(
+        WelcomeNavigationIntent intent,
+        string? countryCode,
+        bool isPublicWelcomeCompleted = false)
+    {
+        var selectedCountryCode = _countryOptions
+            .FirstOrDefault(country => string.Equals(country.Code, countryCode, StringComparison.OrdinalIgnoreCase))?.Code
+            ?? (_countryOptions.Count == 0 && countryCode is { Length: 2 } && countryCode.All(char.IsAsciiLetter)
+                ? countryCode.ToUpperInvariant()
+                : _countryOptions.Count == 0 && string.IsNullOrWhiteSpace(countryCode)
+                    ? _welcomePreferences?.CountryCode
+                    : null);
+
+        var preferences = new MobileWelcomePreferences(intent, selectedCountryCode, isPublicWelcomeCompleted);
+        try
+        {
+            WelcomePreferenceStore.Save(preferences);
+            _welcomePreferenceMessage = null;
+        }
+        catch (Exception)
+        {
+            _welcomePreferenceMessage = "This choice will only be remembered until you close SwiftAid.";
+        }
+
+        _welcomePreferences = preferences;
+        _selectedCountryCode = selectedCountryCode;
+    }
+
+    private enum AuthenticationViewState
+    {
+        Loading,
+        SignedOut,
+        SignedIn,
+        Unavailable
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _lifetime.Cancel();
+    }
+}

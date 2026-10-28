@@ -1,53 +1,152 @@
 @inherits LayoutComponentBase
+@implements IDisposable
 @using SwiftAid.Mobile.Components.Notifications
-@using SwiftAid.Mobile.Components.Authentication
+@using SwiftAid.Mobile.Services.Authentication
+@using SwiftAid.Mobile.Services.Welcome
+@using SwiftAid.UI.Components.Surfaces.Shell
+@inject IMobileAuthenticationSession AuthenticationSession
+@inject IMobileWelcomePreferenceStore WelcomePreferenceStore
+@inject NavigationManager Navigation
 
 <SwiftAidThemeProvider />
 <MudPopoverProvider />
 <MudDialogProvider />
 <MudSnackbarProvider />
 
-<MudLayout>
-    <MudAppBar Elevation="0" Color="Color.Surface" Class="mobile-app-bar">
-        <MudText Typo="Typo.h6" Class="mobile-brand-mark">SwiftAid</MudText>
-        <MudSpacer />
-        <MobileAuthenticationControl />
+<SwiftAidApplicationShell PageLabel="SwiftAid mobile workspace"
+                          ContentClass="mobile-workspace"
+                          ShowAppChrome="@ShowAppChrome"
+                          HiddenChromeClass="@(IsActivePublicReportWizard ? "swiftaid-app-shell--report" : "swiftaid-app-shell--focused")">
+    <HeaderActions>
         <MudBadge Content="@_unreadNotificationCount" Visible="@(_unreadNotificationCount > 0)"
                   Color="Color.Primary" Overlap="true">
-            <MudIconButton Icon="@Icons.Material.Outlined.Notifications"
+            <MudIconButton Icon="@Icons.Material.Outlined.NotificationsNone"
                            Color="Color.Inherit"
                            OnClick="ToggleNotifications"
                            aria-label="@NotificationButtonLabel"
                            aria-controls="mobile-notification-drawer"
                            aria-expanded="@(_notificationsOpen ? "true" : "false")" />
         </MudBadge>
-    </MudAppBar>
+        <MudIconButton Href="/account"
+                       Icon="@Icons.Material.Outlined.PersonOutline"
+                       Color="Color.Inherit"
+                       aria-label="Account and sign-in settings" />
+    </HeaderActions>
 
-    <MudDrawer id="mobile-notification-drawer"
-               Open="_notificationsOpen"
-               OpenChanged="NotificationDrawerChanged"
-               Anchor="Anchor.End"
-               Variant="DrawerVariant.Temporary"
-               Elevation="0"
-               Width="min(92vw, 28rem)"
-               Class="mobile-notification-drawer">
-        @if (_notificationsOpen)
-        {
-            <MobileNotificationCenter UnreadCountChanged="UnreadNotificationCountChanged" />
-        }
-    </MudDrawer>
+    <DesktopNavigation>
+        <NavLink href="/" Match="NavLinkMatch.All"><MudIcon Icon="@Icons.Material.Filled.Home" aria-hidden="true" /><span>Dashboard</span></NavLink>
+        <NavLink href="@CasesHref"><MudIcon Icon="@Icons.Material.Filled.FolderOpen" aria-hidden="true" /><span>Cases</span></NavLink>
+        <NavLink href="/education"><MudIcon Icon="@Icons.Material.Filled.MenuBook" aria-hidden="true" /><span>Education</span></NavLink>
+        <NavLink href="/sessions"><MudIcon Icon="@Icons.Material.Filled.Event" aria-hidden="true" /><span>Community</span></NavLink>
+        <NavLink href="/account"><MudIcon Icon="@Icons.Material.Filled.Settings" aria-hidden="true" /><span>Settings</span></NavLink>
+    </DesktopNavigation>
 
-    <MudMainContent>
-        <main id="main-content" tabindex="-1">
-            @Body
-        </main>
-    </MudMainContent>
-</MudLayout>
+    <MobileNavigation>
+        <NavLink href="/" Match="NavLinkMatch.All"><MudIcon Icon="@Icons.Material.Filled.Home" aria-hidden="true" /><span>Home</span></NavLink>
+        <NavLink href="@CasesHref"><MudIcon Icon="@Icons.Material.Filled.FolderOpen" aria-hidden="true" /><span>Cases</span></NavLink>
+        <NavLink href="/report" class="mobile-report-link" aria-label="Report a concern">
+            <MudIcon Icon="@Icons.Material.Filled.Add" aria-hidden="true" />
+        </NavLink>
+        <NavLink href="/sessions"><MudIcon Icon="@Icons.Material.Filled.Groups" aria-hidden="true" /><span>Community</span></NavLink>
+        <NavLink href="/more"><MudIcon Icon="@Icons.Material.Filled.MoreHoriz" aria-hidden="true" /><span>More</span></NavLink>
+    </MobileNavigation>
+
+    <ChildContent>
+        <MobileConnectivityReconnect />
+        <MudLayout>
+            <MudDrawer id="mobile-notification-drawer"
+                       Open="_notificationsOpen"
+                       OpenChanged="NotificationDrawerChanged"
+                       Anchor="Anchor.End"
+                       Variant="DrawerVariant.Temporary"
+                       Elevation="0"
+                       Width="min(92vw, 28rem)"
+                       Class="mobile-notification-drawer">
+                @if (_notificationsOpen)
+                {
+                    <MobileNotificationCenter UnreadCountChanged="UnreadNotificationCountChanged" />
+                }
+            </MudDrawer>
+            <MudMainContent>
+                @if (IsPublicSafeRoute || (_authenticationResolved && _signedIn))
+                {
+                    @Body
+                }
+                else if (_authenticationResolved)
+                {
+                    <section class="mobile-sign-in-required" aria-labelledby="mobile-sign-in-required-title">
+                        <MudIcon Icon="@Icons.Material.Filled.Lock" Color="Color.Secondary" aria-hidden="true" />
+                        <MudText Typo="Typo.body1" id="mobile-sign-in-required-title" role="status">Sign in to view this page.</MudText>
+                        <MudButton Href="/account" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Login">
+                            Sign in
+                        </MudButton>
+                    </section>
+                }
+                else
+                {
+                    <div class="mobile-authentication-check" role="status" aria-live="polite">
+                        <MudProgressLinear Indeterminate="true" Color="Color.Primary" aria-label="Checking sign-in" />
+                        <MudText Typo="Typo.body2">Checking your sign-in…</MudText>
+                    </div>
+                }
+            </MudMainContent>
+        </MudLayout>
+    </ChildContent>
+</SwiftAidApplicationShell>
 
 @code {
     private bool _notificationsOpen;
     private int _unreadNotificationCount;
+    private bool _signedIn;
+    private bool _authenticationResolved;
+    private bool _publicWelcomeCompleted;
+    private bool ShowAppChrome => !IsActivePublicReportWizard &&
+        (_signedIn || !IsAtLandingRoute || _publicWelcomeCompleted);
+    private bool IsAtLandingRoute => string.Equals(CurrentPath, "/", StringComparison.OrdinalIgnoreCase);
+    private bool IsActivePublicReportWizard =>
+        CurrentPath.Equals("/report", StringComparison.OrdinalIgnoreCase) && !IsTrackingView;
+    private bool IsTrackingView
+    {
+        get
+        {
+            var viewValues = Navigation.ToAbsoluteUri(Navigation.Uri).Query
+                .TrimStart('?')
+                .Split('&', StringSplitOptions.RemoveEmptyEntries)
+                .Select(parameter => parameter.Split('=', 2))
+                .Where(parameter => string.Equals(
+                    Uri.UnescapeDataString(parameter[0]),
+                    "view",
+                    StringComparison.OrdinalIgnoreCase))
+                .Select(parameter => parameter.Length == 2
+                    ? Uri.UnescapeDataString(parameter[1])
+                    : string.Empty)
+                .Take(2)
+                .ToArray();
 
+            return viewValues.Length == 1 &&
+                string.Equals(viewValues[0], "tracking", StringComparison.OrdinalIgnoreCase);
+        }
+    }
+    private string CurrentPath
+    {
+        get
+        {
+            var path = Navigation.ToAbsoluteUri(Navigation.Uri).AbsolutePath.TrimEnd('/');
+            return string.IsNullOrEmpty(path) ? "/" : path;
+        }
+    }
+    private bool IsPublicSafeRoute => CurrentPath.Equals("/", StringComparison.OrdinalIgnoreCase) ||
+        CurrentPath.Equals("/report", StringComparison.OrdinalIgnoreCase) ||
+        CurrentPath.Equals("/education", StringComparison.OrdinalIgnoreCase) ||
+        CurrentPath.Equals("/sessions", StringComparison.OrdinalIgnoreCase) ||
+        CurrentPath.Equals("/account", StringComparison.OrdinalIgnoreCase) ||
+        CurrentPath.Equals("/more", StringComparison.OrdinalIgnoreCase) ||
+        CurrentPath.Equals("/not-found", StringComparison.OrdinalIgnoreCase);
+    private string CasesHref => _signedIn ? "/my-cases" : "/report?view=tracking";
+    private readonly CancellationTokenSource _lifetime = new();
+    private long _authenticationRevision;
+    private bool _disposed;
+    private bool _publicRouteAuthenticationRefreshStarted;
     private string NotificationButtonLabel =>
         _notificationsOpen
             ? "Close notifications"
@@ -57,8 +156,181 @@
 
     private void ToggleNotifications() => _notificationsOpen = !_notificationsOpen;
 
+    protected override async Task OnInitializedAsync()
+    {
+        AuthenticationSession.AuthenticationStateChanged += AuthenticationStateChanged;
+        WelcomePreferenceStore.PreferencesChanged += WelcomePreferencesChanged;
+        Navigation.LocationChanged += LocationChanged;
+        RefreshPublicWelcomeCompletion();
+        if (!IsPublicSafeRoute)
+        {
+            await RefreshAuthenticationStateAsync(Volatile.Read(ref _authenticationRevision));
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || !IsPublicSafeRoute || _publicRouteAuthenticationRefreshStarted)
+        {
+            return;
+        }
+
+        _publicRouteAuthenticationRefreshStarted = true;
+        await RefreshAuthenticationStateOnRendererAsync(Volatile.Read(ref _authenticationRevision));
+    }
+
+    private void LocationChanged(object? sender, LocationChangedEventArgs args)
+    {
+        _ = HandleLocationChangedOnRendererAsync();
+    }
+
+    private async Task HandleLocationChangedOnRendererAsync()
+    {
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                RefreshPublicWelcomeCompletion();
+                if (!IsPublicSafeRoute)
+                {
+                    var revision = Interlocked.Increment(ref _authenticationRevision);
+                    if (BeginAuthenticationRefresh(revision))
+                    {
+                        StateHasChanged();
+                        await ResolveAuthenticationStateAsync(revision);
+                    }
+                }
+
+                StateHasChanged();
+            });
+        }
+        catch (Exception) when (_disposed)
+        {
+        }
+    }
+
+    private void RefreshPublicWelcomeCompletion()
+    {
+        try
+        {
+            _publicWelcomeCompleted = WelcomePreferenceStore.Get()?.IsPublicWelcomeCompleted == true;
+        }
+        catch (Exception)
+        {
+            // If local preferences are unavailable, keep the chooser as the safe signed-out root.
+            _publicWelcomeCompleted = false;
+        }
+    }
+
+    private void WelcomePreferencesChanged(
+        object? sender,
+        MobileWelcomePreferencesChangedEventArgs args)
+    {
+        _ = RefreshWelcomePreferencesOnRendererAsync(args.Preferences);
+    }
+
+    private async Task RefreshWelcomePreferencesOnRendererAsync(
+        MobileWelcomePreferences preferences)
+    {
+        try
+        {
+            await InvokeAsync(() =>
+            {
+                _publicWelcomeCompleted = preferences.IsPublicWelcomeCompleted;
+                StateHasChanged();
+            });
+        }
+        catch (Exception) when (_disposed)
+        {
+        }
+    }
+
+    private async Task RefreshAuthenticationStateAsync(long revision)
+    {
+        if (!BeginAuthenticationRefresh(revision))
+        {
+            return;
+        }
+
+        await ResolveAuthenticationStateAsync(revision);
+    }
+
+    private bool BeginAuthenticationRefresh(long revision)
+    {
+        if (_disposed || revision != Volatile.Read(ref _authenticationRevision))
+        {
+            return false;
+        }
+
+        _authenticationResolved = false;
+        _signedIn = false;
+        return true;
+    }
+
+    private async Task ResolveAuthenticationStateAsync(long revision)
+    {
+        var isSignedIn = false;
+        try
+        {
+            isSignedIn = await AuthenticationSession.IsSignedInAsync(_lifetime.Token);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception)
+        {
+            // Keep the navigation fail-closed if persisted session state is unavailable.
+        }
+
+        if (!_disposed && revision == Volatile.Read(ref _authenticationRevision))
+        {
+            _signedIn = isSignedIn;
+            _authenticationResolved = true;
+        }
+    }
+
+    private void AuthenticationStateChanged(object? sender, EventArgs args)
+    {
+        var revision = Interlocked.Increment(ref _authenticationRevision);
+        _ = RefreshAuthenticationStateOnRendererAsync(revision);
+    }
+
+    private async Task RefreshAuthenticationStateOnRendererAsync(long revision)
+    {
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                if (BeginAuthenticationRefresh(revision))
+                {
+                    StateHasChanged();
+                    await ResolveAuthenticationStateAsync(revision);
+                    if (!_disposed)
+                    {
+                        StateHasChanged();
+                    }
+                }
+            });
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception) when (_disposed)
+        {
+        }
+    }
+
     private void NotificationDrawerChanged(bool isOpen) => _notificationsOpen = isOpen;
 
-    private void UnreadNotificationCountChanged(int unreadCount) =>
-        _unreadNotificationCount = unreadCount;
+    private void UnreadNotificationCountChanged(int unreadCount) => _unreadNotificationCount = unreadCount;
+
+    public void Dispose()
+    {
+        _disposed = true;
+        AuthenticationSession.AuthenticationStateChanged -= AuthenticationStateChanged;
+        WelcomePreferenceStore.PreferencesChanged -= WelcomePreferencesChanged;
+        Navigation.LocationChanged -= LocationChanged;
+        _lifetime.Cancel();
+        _lifetime.Dispose();
+    }
 }
