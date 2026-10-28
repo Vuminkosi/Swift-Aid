@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "eventId": "f7192063-5e28-e6ce-0fc3-0c572dfcdee3",
+  "eventType": "CaseFollowUpOutcomeRecorded",
+  "caseId": "10000000-0000-0000-0000-000000000001",
+  "aggregateVersion": 4,
+  "reportRevision": 1,
+  "commandId": "20000000-0000-0000-0000-000000000010",
+  "actorId": "worker-1",
+  "occurredAtUtc": null,
+  "recordedAtUtc": "2026-10-26T08:01:00+00:00",
+  "payload": {
+    "followUpId": "40000000-0000-0000-0000-000000000002",
+    "outcome": "Missed",
+    "outcomeNotes": "nobody present at holding",
+    "previousDueAtUtc": "2026-10-30T08:00:00+00:00",
+    "newDueAtUtc": null,
+    "reason": "attempt logged"
+  }
+}

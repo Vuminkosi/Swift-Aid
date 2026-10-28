@@ -15,6 +15,9 @@ public static class CaseCommandAuthorizationMap
         return command switch
         {
             CorrectReportCommand => Requirement(CaseOperation.CorrectReport, CaseCapability.CorrectReport),
+            RecordObservationCommand => Requirement(CaseOperation.RecordObservation, CaseCapability.RecordObservation),
+            ScheduleFollowUpCommand or RecordFollowUpOutcomeCommand => Requirement(CaseOperation.ManageFollowUp, CaseCapability.ManageFollowUp),
+            RaiseEscalationCommand or AcknowledgeEscalationCommand or CloseEscalationCommand => Requirement(CaseOperation.ManageEscalation, CaseCapability.ManageEscalation),
             RequestCaseActionCommand request => ResolveRequest(request),
             ReviewCaseActionRequestCommand review => ResolveReview(review, replayedAggregate),
             ResolveCaseCommand => Requirement(CaseOperation.ResolveCase, CaseCapability.ResolveCase),

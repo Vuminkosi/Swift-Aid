@@ -660,7 +660,7 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("ck_access_grant_group_operations_lock_token_zero", "lock_token = 0");
 
-                            t.HasCheckConstraint("ck_grant_group_operations_value", "operation IN ('ReadCase', 'ReadAttachment', 'Synchronize', 'Search', 'Export', 'Count', 'RequestProtectedAction', 'ExecuteProtectedAction', 'ReadLinkedSignalEvidence', 'CorrectReport', 'ReviewProtectedAction', 'AssignCase', 'ResolveCase', 'ReopenCase', 'ReviewIntake', 'CoordinateIntake')");
+                            t.HasCheckConstraint("ck_grant_group_operations_value", "operation IN ('ReadCase', 'ReadAttachment', 'Synchronize', 'Search', 'Export', 'Count', 'RequestProtectedAction', 'ExecuteProtectedAction', 'ReadLinkedSignalEvidence', 'CorrectReport', 'ReviewProtectedAction', 'AssignCase', 'ResolveCase', 'ReopenCase', 'ReviewIntake', 'CoordinateIntake', 'RecordObservation', 'ManageFollowUp', 'ManageEscalation')");
                         });
                 });
 
@@ -843,7 +843,7 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("ck_case_events_actor", "length(btrim(actor_id)) > 0");
 
-                            t.HasCheckConstraint("ck_case_events_type", "event_type IN ('CaseReported', 'CaseAssigned', 'CaseReportCorrected', 'CaseActionRequested', 'CaseActionRequestReviewed', 'CaseResolved', 'CaseReopened')");
+                            t.HasCheckConstraint("ck_case_events_type", "event_type IN ('CaseReported', 'CaseAssigned', 'CaseReportCorrected', 'CaseActionRequested', 'CaseActionRequestReviewed', 'CaseResolved', 'CaseReopened', 'CaseObservationRecorded', 'CaseFollowUpScheduled', 'CaseFollowUpOutcomeRecorded', 'CaseEscalationRaised', 'CaseEscalationAcknowledged', 'CaseEscalationClosed')");
 
                             t.HasCheckConstraint("ck_case_events_versions", "aggregate_version > 0 AND report_revision > 0 AND schema_version > 0");
                         });
@@ -1044,6 +1044,141 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_domain_outbox_lease", "published_at_utc IS NULL OR lease_until_utc IS NULL");
 
                             t.HasCheckConstraint("ck_domain_outbox_message_type", "length(btrim(message_type)) > 0");
+                        });
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Cases.ManagedCaseEscalationEntity", b =>
+                {
+                    b.Property<Guid>("EscalationId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("escalation_id");
+
+                    b.Property<long?>("AcknowledgedVersion")
+                        .HasColumnType("bigint")
+                        .HasColumnName("acknowledged_version");
+
+                    b.Property<Guid>("CaseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("case_id");
+
+                    b.Property<long?>("ClosedVersion")
+                        .HasColumnType("bigint")
+                        .HasColumnName("closed_version");
+
+                    b.Property<long>("RaisedVersion")
+                        .HasColumnType("bigint")
+                        .HasColumnName("raised_version");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.HasKey("EscalationId")
+                        .HasName("pk_managed_case_escalations");
+
+                    b.HasIndex("CaseId")
+                        .HasDatabaseName("ix_managed_case_escalations_case");
+
+                    b.ToTable("managed_case_escalations", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_managed_case_escalations_status", "status IN ('Raised', 'Acknowledged', 'Closed')");
+
+                            t.HasCheckConstraint("ck_managed_case_escalations_versions", "raised_version > 0 AND (acknowledged_version IS NULL OR acknowledged_version > 0) AND (closed_version IS NULL OR closed_version > 0)");
+                        });
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Cases.ManagedCaseFollowUpEntity", b =>
+                {
+                    b.Property<Guid>("FollowUpId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("follow_up_id");
+
+                    b.Property<string>("AssigneeActorId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("assignee_actor_id");
+
+                    b.Property<Guid>("CaseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("case_id");
+
+                    b.Property<DateTimeOffset>("DueAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("due_at_utc");
+
+                    b.Property<long?>("OutcomeVersion")
+                        .HasColumnType("bigint")
+                        .HasColumnName("outcome_version");
+
+                    b.Property<string>("Purpose")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("purpose");
+
+                    b.Property<long>("ScheduledVersion")
+                        .HasColumnType("bigint")
+                        .HasColumnName("scheduled_version");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.HasKey("FollowUpId")
+                        .HasName("pk_managed_case_follow_ups");
+
+                    b.HasIndex("CaseId")
+                        .HasDatabaseName("ix_managed_case_follow_ups_case");
+
+                    b.ToTable("managed_case_follow_ups", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_managed_case_follow_ups_status", "status IN ('Scheduled', 'Completed', 'Missed', 'Unreachable', 'Cancelled')");
+
+                            t.HasCheckConstraint("ck_managed_case_follow_ups_text", "length(btrim(purpose)) > 0 AND length(btrim(assignee_actor_id)) > 0");
+
+                            t.HasCheckConstraint("ck_managed_case_follow_ups_versions", "scheduled_version > 0 AND (outcome_version IS NULL OR outcome_version > 0)");
+                        });
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Cases.ManagedCaseObservationEntity", b =>
+                {
+                    b.Property<Guid>("ObservationId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("observation_id");
+
+                    b.Property<long>("AggregateVersion")
+                        .HasColumnType("bigint")
+                        .HasColumnName("aggregate_version");
+
+                    b.Property<Guid>("CaseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("case_id");
+
+                    b.Property<string>("Narrative")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("narrative");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("source");
+
+                    b.HasKey("ObservationId")
+                        .HasName("pk_managed_case_observations");
+
+                    b.HasIndex("CaseId")
+                        .HasDatabaseName("ix_managed_case_observations_case");
+
+                    b.ToTable("managed_case_observations", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_managed_case_observations_text", "length(btrim(narrative)) > 0 AND length(btrim(source)) > 0");
+
+                            t.HasCheckConstraint("ck_managed_case_observations_version", "aggregate_version > 0");
                         });
                 });
 
@@ -2475,6 +2610,36 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_domain_outbox_event");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Cases.ManagedCaseEscalationEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.ManagedCaseEntity", null)
+                        .WithMany()
+                        .HasForeignKey("CaseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_managed_case_escalations_case");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Cases.ManagedCaseFollowUpEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.ManagedCaseEntity", null)
+                        .WithMany()
+                        .HasForeignKey("CaseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_managed_case_follow_ups_case");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Cases.ManagedCaseObservationEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.ManagedCaseEntity", null)
+                        .WithMany()
+                        .HasForeignKey("CaseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_managed_case_observations_case");
                 });
 
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Intake.IntakeAttachmentEntity", b =>

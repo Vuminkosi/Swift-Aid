@@ -5,7 +5,8 @@
         <MudCardContent>
             <MudText Typo="Typo.subtitle1">Case actions</MudText>
             <MudText Typo="Typo.body2" Color="Color.Secondary" Class="case-command-panel__hint">
-                Resolve, request reassignment, request assistance, review a protected action, correct the report, or reopen this case.
+                Resolve, request reassignment, request assistance, review a protected action, correct the report, reopen, record an observation,
+                schedule follow-up, record a follow-up outcome, or raise, acknowledge, or close an escalation.
                 Every action needs a reason and a confirmation.
             </MudText>
 
@@ -61,6 +62,12 @@
                     <MudSelectItem Value="@("ReviewAction")">Review action</MudSelectItem>
                     <MudSelectItem Value="@("CorrectReport")">Correct report</MudSelectItem>
                     <MudSelectItem Value="@("Reopen")">Reopen</MudSelectItem>
+                    <MudSelectItem Value="@("RecordObservation")">Record observation</MudSelectItem>
+                    <MudSelectItem Value="@("ScheduleFollowUp")">Schedule follow-up</MudSelectItem>
+                    <MudSelectItem Value="@("RecordFollowUpOutcome")">Record follow-up outcome</MudSelectItem>
+                    <MudSelectItem Value="@("RaiseEscalation")">Raise escalation</MudSelectItem>
+                    <MudSelectItem Value="@("AcknowledgeEscalation")">Acknowledge escalation</MudSelectItem>
+                    <MudSelectItem Value="@("CloseEscalation")">Close escalation</MudSelectItem>
                 </MudSelect>
 
                 @if (_operation == "ReviewAction")
@@ -88,6 +95,65 @@
                 {
                     <MudTextField T="string" Label="Accountable owner id" HelperText="Canonical accountable owner for the reopened case."
                                   @bind-Value="_proposedOwnerId" Class="case-command-panel__field" />
+                }
+                else if (_operation == "RecordObservation")
+                {
+                    <MudTextField T="string" Label="Observation id (optional)" HelperText="Observation key (GUID). Leave blank to generate one."
+                                  @bind-Value="_observationIdText" Class="case-command-panel__field" />
+                    <MudTextField T="string" Label="Observation note" HelperText="Factual note to record in the case history."
+                                  @bind-Value="_narrative" Lines="3" Class="case-command-panel__field" />
+                    <MudTextField T="string" Label="Source" HelperText="Where the observation comes from (for example, home visit)."
+                                  @bind-Value="_source" Class="case-command-panel__field" />
+                }
+                else if (_operation == "ScheduleFollowUp")
+                {
+                    <MudTextField T="string" Label="Follow-up id (optional)" HelperText="Follow-up key (GUID). Leave blank to generate one."
+                                  @bind-Value="_followUpIdText" Class="case-command-panel__field" />
+                    <MudTextField T="string" Label="Purpose" HelperText="What the follow-up is for."
+                                  @bind-Value="_purpose" Lines="2" Class="case-command-panel__field" />
+                    <MudTextField T="string" Label="Assignee id" HelperText="Staff member responsible for the follow-up."
+                                  @bind-Value="_assigneeActorId" Class="case-command-panel__field" />
+                    <MudTextField T="string" Label="Due at (UTC)" HelperText="Due time in ISO format, for example 2026-11-02T08:00:00Z."
+                                  @bind-Value="_dueAtUtcText" Class="case-command-panel__field" />
+                }
+                else if (_operation == "RecordFollowUpOutcome")
+                {
+                    <MudTextField T="string" Label="Follow-up id" HelperText="Follow-up key (GUID) from the scheduled follow-up."
+                                  @bind-Value="_followUpIdText" Class="case-command-panel__field" />
+                    <MudSelect T="string" Label="Outcome" @bind-Value="_followUpOutcome" Class="case-command-panel__field">
+                        <MudSelectItem Value="@("Completed")">Completed</MudSelectItem>
+                        <MudSelectItem Value="@("Missed")">Missed</MudSelectItem>
+                        <MudSelectItem Value="@("Unreachable")">Unreachable</MudSelectItem>
+                        <MudSelectItem Value="@("Rescheduled")">Rescheduled</MudSelectItem>
+                        <MudSelectItem Value="@("Cancelled")">Cancelled</MudSelectItem>
+                    </MudSelect>
+                    <MudTextField T="string" Label="Outcome notes" HelperText="Factual notes about the follow-up attempt."
+                                  @bind-Value="_outcomeNotes" Lines="3" Class="case-command-panel__field" />
+                    <MudTextField T="string" Label="New due time (UTC, optional)" HelperText="Required when rescheduling, in ISO format, for example 2026-11-02T08:00:00Z."
+                                  @bind-Value="_newDueAtUtcText" Class="case-command-panel__field" />
+                }
+                else if (_operation == "RaiseEscalation")
+                {
+                    <MudTextField T="string" Label="Escalation id (optional)" HelperText="Escalation key (GUID). Leave blank to generate one."
+                                  @bind-Value="_escalationIdText" Class="case-command-panel__field" />
+                    <MudTextField T="string" Label="Recipient route" HelperText="Configured recipient route for this escalation."
+                                  @bind-Value="_recipientRoute" Class="case-command-panel__field" />
+                    <MudTextField T="string" Label="Evidence references (optional)" HelperText="Comma-separated history references supporting this escalation."
+                                  @bind-Value="_evidenceEventIdsText" Class="case-command-panel__field" />
+                }
+                else if (_operation == "AcknowledgeEscalation")
+                {
+                    <MudTextField T="string" Label="Escalation id" HelperText="Escalation key (GUID) from the raised escalation."
+                                  @bind-Value="_escalationIdText" Class="case-command-panel__field" />
+                    <MudTextField T="string" Label="Action summary (optional)" HelperText="Short summary of the action taken."
+                                  @bind-Value="_actionSummary" Lines="2" Class="case-command-panel__field" />
+                }
+                else if (_operation == "CloseEscalation")
+                {
+                    <MudTextField T="string" Label="Escalation id" HelperText="Escalation key (GUID) from the raised escalation."
+                                  @bind-Value="_escalationIdText" Class="case-command-panel__field" />
+                    <MudTextField T="string" Label="Resolution" HelperText="How the escalation was resolved."
+                                  @bind-Value="_resolution" Lines="3" Class="case-command-panel__field" />
                 }
 
                 <MudTextField T="string" Label="@ReasonLabel" HelperText="Operator reason; required and stored with the action."
@@ -130,6 +196,21 @@
     private string? _proposedOwnerId;
     private string? _requestIdText;
     private string _outcome = "Approved";
+    private string? _observationIdText;
+    private string? _narrative;
+    private string? _source;
+    private string? _followUpIdText;
+    private string? _purpose;
+    private string? _assigneeActorId;
+    private string? _dueAtUtcText;
+    private string _followUpOutcome = "Completed";
+    private string? _outcomeNotes;
+    private string? _newDueAtUtcText;
+    private string? _escalationIdText;
+    private string? _recipientRoute;
+    private string? _resolution;
+    private string? _actionSummary;
+    private string? _evidenceEventIdsText;
     private bool _confirming;
     private bool _sending;
     private string? _error;
@@ -142,6 +223,12 @@
         "ReviewAction" => "Review action",
         "CorrectReport" => "Correct report",
         "Reopen" => "Reopen",
+        "RecordObservation" => "Record observation",
+        "ScheduleFollowUp" => "Schedule follow-up",
+        "RecordFollowUpOutcome" => "Record follow-up outcome",
+        "RaiseEscalation" => "Raise escalation",
+        "AcknowledgeEscalation" => "Acknowledge escalation",
+        "CloseEscalation" => "Close escalation",
         _ => "Resolve"
     };
 
@@ -173,6 +260,110 @@
             return Task.CompletedTask;
         }
 
+        if (_operation == "RecordObservation")
+        {
+            if (!string.IsNullOrWhiteSpace(_observationIdText) && !Guid.TryParse(_observationIdText, out _))
+            {
+                _error = "The observation id must be a valid identifier.";
+                return Task.CompletedTask;
+            }
+
+            if (string.IsNullOrWhiteSpace(_narrative))
+            {
+                _error = "An observation note is required before the action can be reviewed.";
+                return Task.CompletedTask;
+            }
+
+            if (string.IsNullOrWhiteSpace(_source))
+            {
+                _error = "An observation source is required before the action can be reviewed.";
+                return Task.CompletedTask;
+            }
+        }
+
+        if (_operation == "ScheduleFollowUp")
+        {
+            if (!string.IsNullOrWhiteSpace(_followUpIdText) && !Guid.TryParse(_followUpIdText, out _))
+            {
+                _error = "The follow-up id must be a valid identifier.";
+                return Task.CompletedTask;
+            }
+
+            if (string.IsNullOrWhiteSpace(_purpose))
+            {
+                _error = "A follow-up purpose is required before the action can be reviewed.";
+                return Task.CompletedTask;
+            }
+
+            if (string.IsNullOrWhiteSpace(_assigneeActorId))
+            {
+                _error = "A follow-up assignee is required before the action can be reviewed.";
+                return Task.CompletedTask;
+            }
+
+            if (!DateTimeOffset.TryParse(_dueAtUtcText, out _))
+            {
+                _error = "The due time must be a valid date and time.";
+                return Task.CompletedTask;
+            }
+        }
+
+        if (_operation == "RecordFollowUpOutcome")
+        {
+            if (!Guid.TryParse(_followUpIdText, out _))
+            {
+                _error = "The follow-up id must be a valid identifier.";
+                return Task.CompletedTask;
+            }
+
+            if (string.IsNullOrWhiteSpace(_outcomeNotes))
+            {
+                _error = "Outcome notes are required before the action can be reviewed.";
+                return Task.CompletedTask;
+            }
+
+            if (!string.IsNullOrWhiteSpace(_newDueAtUtcText) && !DateTimeOffset.TryParse(_newDueAtUtcText, out _))
+            {
+                _error = "The new due time must be a valid date and time.";
+                return Task.CompletedTask;
+            }
+
+            if (string.Equals(_followUpOutcome, "Rescheduled", StringComparison.Ordinal) && string.IsNullOrWhiteSpace(_newDueAtUtcText))
+            {
+                _error = "A new due time is required when rescheduling.";
+                return Task.CompletedTask;
+            }
+        }
+
+        if (_operation is "RaiseEscalation" or "AcknowledgeEscalation" or "CloseEscalation")
+        {
+            if (_operation == "RaiseEscalation")
+            {
+                if (!string.IsNullOrWhiteSpace(_escalationIdText) && !Guid.TryParse(_escalationIdText, out _))
+                {
+                    _error = "The escalation id must be a valid identifier.";
+                    return Task.CompletedTask;
+                }
+
+                if (string.IsNullOrWhiteSpace(_recipientRoute))
+                {
+                    _error = "A recipient route is required before the action can be reviewed.";
+                    return Task.CompletedTask;
+                }
+            }
+            else if (!Guid.TryParse(_escalationIdText, out _))
+            {
+                _error = "The escalation id must be a valid identifier.";
+                return Task.CompletedTask;
+            }
+
+            if (_operation == "CloseEscalation" && string.IsNullOrWhiteSpace(_resolution))
+            {
+                _error = "A resolution is required before the action can be reviewed.";
+                return Task.CompletedTask;
+            }
+        }
+
         _confirming = true;
         return Task.CompletedTask;
     }
@@ -200,6 +391,21 @@
         _proposedOwnerId = null;
         _requestIdText = null;
         _outcome = "Approved";
+        _observationIdText = null;
+        _narrative = null;
+        _source = null;
+        _followUpIdText = null;
+        _purpose = null;
+        _assigneeActorId = null;
+        _dueAtUtcText = null;
+        _followUpOutcome = "Completed";
+        _outcomeNotes = null;
+        _newDueAtUtcText = null;
+        _escalationIdText = null;
+        _recipientRoute = null;
+        _resolution = null;
+        _actionSummary = null;
+        _evidenceEventIdsText = null;
         _operation = "Resolve";
         return Task.CompletedTask;
     }
@@ -267,6 +473,36 @@
                 "CorrectReport", null, _reason, null, null, null, null),
             "Reopen" => new CaseCommandInput(
                 "Reopen", null, _reason, RequireOwner(_proposedOwnerId), null, null, null),
+            "RecordObservation" => new CaseCommandInput(
+                "RecordObservation", null, _reason, null, null, null, null,
+                ObservationId: ParseOptionalId(_observationIdText) ?? Guid.NewGuid(),
+                Narrative: RequireText(_narrative, "An observation note is required for this case action."),
+                Source: RequireText(_source, "An observation source is required for this case action.")),
+            "ScheduleFollowUp" => new CaseCommandInput(
+                "ScheduleFollowUp", null, _reason, null, null, null, null,
+                FollowUpId: ParseOptionalId(_followUpIdText) ?? Guid.NewGuid(),
+                Purpose: RequireText(_purpose, "A follow-up purpose is required for this case action."),
+                AssigneeActorId: RequireText(_assigneeActorId, "A follow-up assignee is required for this case action."),
+                DueAtUtc: ParseRequiredDateTime(_dueAtUtcText, "The due time must be a valid date and time.")),
+            "RecordFollowUpOutcome" => new CaseCommandInput(
+                "RecordFollowUpOutcome", null, _reason, null, null, null, null,
+                FollowUpId: ParseRequiredId(_followUpIdText, "The follow-up id must be a valid identifier."),
+                OutcomeName: _followUpOutcome,
+                OutcomeNotes: RequireText(_outcomeNotes, "Outcome notes are required for this case action."),
+                NewDueAtUtc: ParseOptionalDateTime(_newDueAtUtcText, "The new due time must be a valid date and time.")),
+            "RaiseEscalation" => new CaseCommandInput(
+                "RaiseEscalation", null, _reason, null, null, null, null,
+                EscalationId: ParseOptionalId(_escalationIdText) ?? Guid.NewGuid(),
+                RecipientRoute: RequireText(_recipientRoute, "A recipient route is required for this case action."),
+                EvidenceEventIds: ParseEvidenceReferences(_evidenceEventIdsText)),
+            "AcknowledgeEscalation" => new CaseCommandInput(
+                "AcknowledgeEscalation", null, _reason, null, null, null, null,
+                EscalationId: ParseRequiredId(_escalationIdText, "The escalation id must be a valid identifier."),
+                ActionSummary: BlankToNull(_actionSummary)),
+            "CloseEscalation" => new CaseCommandInput(
+                "CloseEscalation", null, _reason, null, null, null, null,
+                EscalationId: ParseRequiredId(_escalationIdText, "The escalation id must be a valid identifier."),
+                Resolution: RequireText(_resolution, "A resolution is required for this case action.")),
             _ => new CaseCommandInput(
                 "Resolve", null, _reason, null, null, null, null),
         };
@@ -280,6 +516,80 @@
         }
 
         return value;
+    }
+
+    private static string RequireText(string? value, string message)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException(message);
+        }
+
+        return value;
+    }
+
+    private static Guid? ParseOptionalId(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        if (!Guid.TryParse(value, out var parsed))
+        {
+            throw new ArgumentException("The identifier must be a valid identifier.");
+        }
+
+        return parsed;
+    }
+
+    private static Guid ParseRequiredId(string? value, string message)
+    {
+        if (!Guid.TryParse(value, out var parsed))
+        {
+            throw new ArgumentException(message);
+        }
+
+        return parsed;
+    }
+
+    private static DateTimeOffset ParseRequiredDateTime(string? value, string message)
+    {
+        if (!DateTimeOffset.TryParse(value, out var parsed))
+        {
+            throw new ArgumentException(message);
+        }
+
+        return parsed;
+    }
+
+    private static DateTimeOffset? ParseOptionalDateTime(string? value, string message)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        if (!DateTimeOffset.TryParse(value, out var parsed))
+        {
+            throw new ArgumentException(message);
+        }
+
+        return parsed;
+    }
+
+    private static IReadOnlyList<string>? ParseEvidenceReferences(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var references = value
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(reference => !string.IsNullOrWhiteSpace(reference))
+            .ToArray();
+        return references.Length == 0 ? null : references;
     }
 
     private static string? BlankToNull(string? value) =>

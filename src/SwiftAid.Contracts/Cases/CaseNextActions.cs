@@ -78,6 +78,87 @@ public static class CaseNextActions
             actions.Add($"Action requested ({entry.Label}) — check the full history for its review.");
         }
 
+        // Outstanding follow-ups: a scheduled follow-up with no later outcome event
+        // may still need doing. Matching is positional (a later outcome closes any
+        // earlier schedule), mirroring the pending-review style. Outcome wording
+        // never implies care was completed: missed, unreachable, and rescheduled
+        // outcomes only record what was observed about the attempt.
+        var outcomeAfter = new bool[timeline.Entries.Count];
+        var sawOutcome = false;
+        for (var i = timeline.Entries.Count - 1; i >= 0; i--)
+        {
+            outcomeAfter[i] = sawOutcome;
+            if (timeline.Entries[i].Kind == CaseTimelineEntryKind.Authoritative &&
+                string.Equals(timeline.Entries[i].EventType, "CaseFollowUpOutcomeRecorded", StringComparison.Ordinal))
+            {
+                sawOutcome = true;
+            }
+        }
+
+        const int maximumFollowUpItems = 5;
+        var pendingFollowUps = 0;
+        for (var i = 0; i < timeline.Entries.Count && pendingFollowUps < maximumFollowUpItems; i++)
+        {
+            var entry = timeline.Entries[i];
+            if (entry.Kind != CaseTimelineEntryKind.Authoritative ||
+                !string.Equals(entry.EventType, "CaseFollowUpScheduled", StringComparison.Ordinal) ||
+                outcomeAfter[i])
+            {
+                continue;
+            }
+
+            pendingFollowUps++;
+            actions.Add($"Follow-up scheduled ({entry.Label}) — outcome not yet recorded; check the full history for its outcome.");
+        }
+
+        // Outstanding escalations: a raised escalation with no later acknowledgement
+        // may still need a response. Matching is positional (a later acknowledgement
+        // closes any earlier raise), mirroring the pending-review style.
+        var acknowledgedAfter = new bool[timeline.Entries.Count];
+        var sawAcknowledgement = false;
+        for (var i = timeline.Entries.Count - 1; i >= 0; i--)
+        {
+            acknowledgedAfter[i] = sawAcknowledgement;
+            if (timeline.Entries[i].Kind == CaseTimelineEntryKind.Authoritative &&
+                string.Equals(timeline.Entries[i].EventType, "CaseEscalationAcknowledged", StringComparison.Ordinal))
+            {
+                sawAcknowledgement = true;
+            }
+        }
+
+        const int maximumEscalationItems = 5;
+        var pendingEscalations = 0;
+        for (var i = 0; i < timeline.Entries.Count && pendingEscalations < maximumEscalationItems; i++)
+        {
+            var entry = timeline.Entries[i];
+            if (entry.Kind != CaseTimelineEntryKind.Authoritative ||
+                !string.Equals(entry.EventType, "CaseEscalationRaised", StringComparison.Ordinal) ||
+                acknowledgedAfter[i])
+            {
+                continue;
+            }
+
+            pendingEscalations++;
+            actions.Add($"Escalation raised ({entry.Label}) — acknowledgement not yet recorded; check the full history for its acknowledgement.");
+        }
+
+        // Latest-observation presence: note when the recorded history includes at
+        // least one observation, without restating sealed content.
+        CaseTimelineEntry? latestObservation = null;
+        foreach (var entry in timeline.Entries)
+        {
+            if (entry.Kind == CaseTimelineEntryKind.Authoritative &&
+                string.Equals(entry.EventType, "CaseObservationRecorded", StringComparison.Ordinal))
+            {
+                latestObservation = entry;
+            }
+        }
+
+        if (latestObservation is not null)
+        {
+            actions.Add($"Latest observation recorded ({latestObservation.Label}).");
+        }
+
         return actions;
     }
 }

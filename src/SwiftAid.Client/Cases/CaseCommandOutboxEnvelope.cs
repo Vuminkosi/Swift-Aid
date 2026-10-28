@@ -15,7 +15,22 @@ public sealed record CaseCommandIntent(
     string? Reason,
     string? ProposedOwnerId,
     Guid? RequestId,
-    string? Outcome);
+    string? Outcome,
+    Guid? ObservationId = null,
+    string? Narrative = null,
+    string? Source = null,
+    Guid? FollowUpId = null,
+    string? Purpose = null,
+    string? AssigneeActorId = null,
+    DateTimeOffset? DueAtUtc = null,
+    string? OutcomeName = null,
+    string? OutcomeNotes = null,
+    DateTimeOffset? NewDueAtUtc = null,
+    Guid? EscalationId = null,
+    string? RecipientRoute = null,
+    string? Resolution = null,
+    string? ActionSummary = null,
+    IReadOnlyList<string>? EvidenceEventIds = null);
 
 /// <summary>Version-one JSON codec for <see cref="CaseCommandIntent"/> outbox payloads.</summary>
 public static class CaseCommandIntentCodec
@@ -33,7 +48,22 @@ public static class CaseCommandIntentCodec
             input.Reason,
             input.ProposedOwnerId,
             input.RequestId,
-            input.Outcome);
+            input.Outcome,
+            input.ObservationId,
+            input.Narrative,
+            input.Source,
+            input.FollowUpId,
+            input.Purpose,
+            input.AssigneeActorId,
+            input.DueAtUtc,
+            input.OutcomeName,
+            input.OutcomeNotes,
+            input.NewDueAtUtc,
+            input.EscalationId,
+            input.RecipientRoute,
+            input.Resolution,
+            input.ActionSummary,
+            input.EvidenceEventIds);
     }
 
     public static byte[] Encode(CaseCommandIntent intent)
@@ -51,7 +81,22 @@ public static class CaseCommandIntentCodec
             intent.Reason,
             intent.ProposedOwnerId,
             intent.RequestId,
-            intent.Outcome), JsonOptions);
+            intent.Outcome,
+            intent.ObservationId,
+            intent.Narrative,
+            intent.Source,
+            intent.FollowUpId,
+            intent.Purpose,
+            intent.AssigneeActorId,
+            intent.DueAtUtc,
+            intent.OutcomeName,
+            intent.OutcomeNotes,
+            intent.NewDueAtUtc,
+            intent.EscalationId,
+            intent.RecipientRoute,
+            intent.Resolution,
+            intent.ActionSummary,
+            intent.EvidenceEventIds), JsonOptions);
     }
 
     public static CaseCommandIntent Decode(byte[] payload)
@@ -72,7 +117,22 @@ public static class CaseCommandIntentCodec
                 envelope.Reason,
                 envelope.ProposedOwnerId,
                 envelope.RequestId,
-                envelope.Outcome);
+                envelope.Outcome,
+                envelope.ObservationId,
+                envelope.Narrative,
+                envelope.Source,
+                envelope.FollowUpId,
+                envelope.Purpose,
+                envelope.AssigneeActorId,
+                envelope.DueAtUtc,
+                envelope.OutcomeName,
+                envelope.OutcomeNotes,
+                envelope.NewDueAtUtc,
+                envelope.EscalationId,
+                envelope.RecipientRoute,
+                envelope.Resolution,
+                envelope.ActionSummary,
+                envelope.EvidenceEventIds);
         }
         catch (JsonException ex)
         {
@@ -87,5 +147,20 @@ public static class CaseCommandIntentCodec
         string? Reason,
         string? ProposedOwnerId,
         Guid? RequestId,
-        string? Outcome);
+        string? Outcome,
+        Guid? ObservationId,
+        string? Narrative,
+        string? Source,
+        Guid? FollowUpId,
+        string? Purpose,
+        string? AssigneeActorId,
+        DateTimeOffset? DueAtUtc,
+        string? OutcomeName,
+        string? OutcomeNotes,
+        DateTimeOffset? NewDueAtUtc,
+        Guid? EscalationId,
+        string? RecipientRoute,
+        string? Resolution,
+        string? ActionSummary,
+        IReadOnlyList<string>? EvidenceEventIds);
 }

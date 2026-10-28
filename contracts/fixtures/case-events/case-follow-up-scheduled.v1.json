@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "eventId": "871e7712-32a5-be06-da90-72f66cf6ba6f",
+  "eventType": "CaseFollowUpScheduled",
+  "caseId": "10000000-0000-0000-0000-000000000001",
+  "aggregateVersion": 3,
+  "reportRevision": 1,
+  "commandId": "20000000-0000-0000-0000-000000000009",
+  "actorId": "officer-1",
+  "occurredAtUtc": null,
+  "recordedAtUtc": "2026-10-26T08:01:00+00:00",
+  "payload": {
+    "followUpId": "40000000-0000-0000-0000-000000000002",
+    "purpose": "revisit holding",
+    "assigneeActorId": "worker-1",
+    "dueAtUtc": "2026-10-30T08:00:00+00:00"
+  }
+}

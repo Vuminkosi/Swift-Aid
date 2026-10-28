@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "eventId": "6beba2db-6d05-c5f3-c861-943736402d47",
+  "eventType": "CaseEscalationAcknowledged",
+  "caseId": "10000000-0000-0000-0000-000000000001",
+  "aggregateVersion": 4,
+  "reportRevision": 1,
+  "commandId": "20000000-0000-0000-0000-000000000013",
+  "actorId": "officer-1",
+  "occurredAtUtc": null,
+  "recordedAtUtc": "2026-10-26T08:01:00+00:00",
+  "payload": {
+    "escalationId": "40000000-0000-0000-0000-000000000003",
+    "actionSummary": "supervisor paged",
+    "reason": "acknowledged"
+  }
+}

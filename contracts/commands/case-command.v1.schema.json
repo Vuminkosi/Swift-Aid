@@ -11,7 +11,7 @@
     "caseId": { "type": "string", "format": "uuid" },
     "expectedVersion": { "type": "integer", "minimum": 0 },
     "commandType": {
-      "enum": ["CaseReported", "CaseReportCorrected", "CaseActionRequested", "CaseActionRequestReviewed", "CaseResolved", "CaseReopened"]
+      "enum": ["CaseReported", "CaseReportCorrected", "CaseActionRequested", "CaseActionRequestReviewed", "CaseResolved", "CaseReopened", "CaseObservationRecorded", "CaseFollowUpScheduled", "CaseFollowUpOutcomeRecorded", "CaseEscalationRaised", "CaseEscalationAcknowledged", "CaseEscalationClosed"]
     },
     "occurredAtUtc": { "type": ["string", "null"], "format": "date-time" },
     "reason": { "type": ["string", "null"], "minLength": 1 },
@@ -22,7 +22,13 @@
         { "$ref": "#/$defs/actionRequest" },
         { "$ref": "#/$defs/actionReview" },
         { "$ref": "#/$defs/resolution" },
-        { "$ref": "#/$defs/reopening" }
+        { "$ref": "#/$defs/reopening" },
+        { "$ref": "#/$defs/observationRecord" },
+        { "$ref": "#/$defs/followUpSchedule" },
+        { "$ref": "#/$defs/followUpOutcome" },
+        { "$ref": "#/$defs/escalationRaise" },
+        { "$ref": "#/$defs/escalationAcknowledge" },
+        { "$ref": "#/$defs/escalationClose" }
       ]
     }
   },
@@ -32,7 +38,13 @@
     { "if": { "properties": { "commandType": { "const": "CaseActionRequested" } }, "required": ["commandType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/actionRequest" } } } },
     { "if": { "properties": { "commandType": { "const": "CaseActionRequestReviewed" } }, "required": ["commandType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/actionReview" } } } },
     { "if": { "properties": { "commandType": { "const": "CaseResolved" } }, "required": ["commandType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/resolution" } } } },
-    { "if": { "properties": { "commandType": { "const": "CaseReopened" } }, "required": ["commandType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/reopening" } } } }
+    { "if": { "properties": { "commandType": { "const": "CaseReopened" } }, "required": ["commandType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/reopening" } } } },
+    { "if": { "properties": { "commandType": { "const": "CaseObservationRecorded" } }, "required": ["commandType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/observationRecord" } } } },
+    { "if": { "properties": { "commandType": { "const": "CaseFollowUpScheduled" } }, "required": ["commandType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/followUpSchedule" } } } },
+    { "if": { "properties": { "commandType": { "const": "CaseFollowUpOutcomeRecorded" } }, "required": ["commandType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/followUpOutcome" } } } },
+    { "if": { "properties": { "commandType": { "const": "CaseEscalationRaised" } }, "required": ["commandType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/escalationRaise" } } } },
+    { "if": { "properties": { "commandType": { "const": "CaseEscalationAcknowledged" } }, "required": ["commandType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/escalationAcknowledge" } } } },
+    { "if": { "properties": { "commandType": { "const": "CaseEscalationClosed" } }, "required": ["commandType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/escalationClose" } } } }
   ],
   "$defs": {
     "observation": {
@@ -90,6 +102,66 @@
       "type": "object", "additionalProperties": false,
       "required": ["reason", "accountableOwnerId"],
       "properties": { "reason": { "type": "string", "minLength": 1 }, "accountableOwnerId": { "type": "string", "minLength": 1 } }
+    },
+    "observationRecord": {
+      "type": "object", "additionalProperties": false,
+      "required": ["observationId", "narrative", "source", "reason"],
+      "properties": {
+        "observationId": { "type": "string", "format": "uuid" },
+        "narrative": { "type": "string", "minLength": 1 },
+        "source": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "followUpSchedule": {
+      "type": "object", "additionalProperties": false,
+      "required": ["followUpId", "purpose", "assigneeActorId", "dueAtUtc", "reason"],
+      "properties": {
+        "followUpId": { "type": "string", "format": "uuid" },
+        "purpose": { "type": "string", "minLength": 1 },
+        "assigneeActorId": { "type": "string", "minLength": 1 },
+        "dueAtUtc": { "type": "string", "format": "date-time" },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "followUpOutcome": {
+      "type": "object", "additionalProperties": false,
+      "required": ["followUpId", "outcome", "outcomeNotes", "reason"],
+      "properties": {
+        "followUpId": { "type": "string", "format": "uuid" },
+        "outcome": { "enum": ["Completed", "Missed", "Unreachable", "Rescheduled", "Cancelled"] },
+        "outcomeNotes": { "type": "string", "minLength": 1 },
+        "newDueAtUtc": { "type": ["string", "null"], "format": "date-time" },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "escalationRaise": {
+      "type": "object", "additionalProperties": false,
+      "required": ["escalationId", "reason", "evidenceEventIds", "recipientRoute"],
+      "properties": {
+        "escalationId": { "type": "string", "format": "uuid" },
+        "reason": { "type": "string", "minLength": 1 },
+        "evidenceEventIds": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "recipientRoute": { "type": "string", "minLength": 1 }
+      }
+    },
+    "escalationAcknowledge": {
+      "type": "object", "additionalProperties": false,
+      "required": ["escalationId", "reason"],
+      "properties": {
+        "escalationId": { "type": "string", "format": "uuid" },
+        "actionSummary": { "type": ["string", "null"], "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "escalationClose": {
+      "type": "object", "additionalProperties": false,
+      "required": ["escalationId", "resolution", "reason"],
+      "properties": {
+        "escalationId": { "type": "string", "format": "uuid" },
+        "resolution": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 }
+      }
     }
   }
 }

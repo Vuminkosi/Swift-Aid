@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "eventId": "ef259f96-0033-66b4-38e7-6f8af0bb12e0",
+  "eventType": "CaseObservationRecorded",
+  "caseId": "10000000-0000-0000-0000-000000000001",
+  "aggregateVersion": 3,
+  "reportRevision": 1,
+  "commandId": "20000000-0000-0000-0000-000000000008",
+  "actorId": "officer-1",
+  "occurredAtUtc": "2026-10-26T08:00:00+00:00",
+  "recordedAtUtc": "2026-10-26T08:01:00+00:00",
+  "payload": {
+    "observationId": "40000000-0000-0000-0000-000000000001",
+    "narrative": "subject resting, breathing normal",
+    "source": "home-visit"
+  }
+}

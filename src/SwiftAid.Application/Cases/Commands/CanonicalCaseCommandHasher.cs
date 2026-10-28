@@ -89,7 +89,9 @@ public static class CanonicalCaseCommandHasher
             throw new NotSupportedException("Case creation is not supported by the non-creation command hash protocol.");
         }
 
-        if (command is not (CorrectReportCommand or RequestCaseActionCommand or ReviewCaseActionRequestCommand or ResolveCaseCommand or ReopenCaseCommand))
+        if (command is not (CorrectReportCommand or RequestCaseActionCommand or ReviewCaseActionRequestCommand or ResolveCaseCommand or ReopenCaseCommand
+            or RecordObservationCommand or ScheduleFollowUpCommand or RecordFollowUpOutcomeCommand
+            or RaiseEscalationCommand or AcknowledgeEscalationCommand or CloseEscalationCommand))
         {
             throw new NotSupportedException($"Command type {command.GetType().Name} is not supported by canonical hash protocol v1.");
         }
@@ -202,6 +204,121 @@ public static class CanonicalCaseCommandHasher
 
             case AcceptCaseCommand:
                 throw new NotSupportedException("Case creation is not supported by the non-creation command hash protocol.");
+
+            case RecordObservationCommand observation:
+                RequireIdentifier(observation.ObservationId, nameof(observation.ObservationId));
+                RequireText(observation.Narrative, nameof(observation.Narrative));
+                RequireText(observation.Source, nameof(observation.Source));
+                RequireText(observation.Reason, nameof(observation.Reason));
+                var observationSnapshot = observation with { OccurredAtUtc = Normalize(observation.OccurredAtUtc) };
+                return (observationSnapshot, "RecordObservation", observationSnapshot.Reason, writer =>
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("observationId", observationSnapshot.ObservationId.ToString("D"));
+                    writer.WriteString("narrative", observationSnapshot.Narrative);
+                    writer.WriteString("source", observationSnapshot.Source);
+                    writer.WriteEndObject();
+                });
+
+            case ScheduleFollowUpCommand schedule:
+                RequireIdentifier(schedule.FollowUpId, nameof(schedule.FollowUpId));
+                RequireText(schedule.Purpose, nameof(schedule.Purpose));
+                RequireIdentifier(schedule.AssigneeActorId, nameof(schedule.AssigneeActorId));
+                RequireText(schedule.Reason, nameof(schedule.Reason));
+                var scheduleSnapshot = schedule with { OccurredAtUtc = Normalize(schedule.OccurredAtUtc) };
+                return (scheduleSnapshot, "ScheduleFollowUp", scheduleSnapshot.Reason, writer =>
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("followUpId", scheduleSnapshot.FollowUpId.ToString("D"));
+                    writer.WriteString("purpose", scheduleSnapshot.Purpose);
+                    writer.WriteString("assigneeActorId", scheduleSnapshot.AssigneeActorId);
+                    writer.WriteString("dueAtUtc", scheduleSnapshot.DueAtUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+                    writer.WriteEndObject();
+                });
+
+            case RecordFollowUpOutcomeCommand outcome:
+                if (!Enum.IsDefined(outcome.Outcome))
+                {
+                    throw new ArgumentOutOfRangeException(nameof(outcome), "The follow-up outcome is unknown.");
+                }
+
+                RequireIdentifier(outcome.FollowUpId, nameof(outcome.FollowUpId));
+                RequireText(outcome.OutcomeNotes, nameof(outcome.OutcomeNotes));
+                RequireText(outcome.Reason, nameof(outcome.Reason));
+                var outcomeSnapshot = outcome with { OccurredAtUtc = Normalize(outcome.OccurredAtUtc) };
+                return (outcomeSnapshot, "RecordFollowUpOutcome", outcomeSnapshot.Reason, writer =>
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("followUpId", outcomeSnapshot.FollowUpId.ToString("D"));
+                    writer.WriteString("outcome", outcomeSnapshot.Outcome.ToString());
+                    writer.WriteString("outcomeNotes", outcomeSnapshot.OutcomeNotes);
+                    if (outcomeSnapshot.NewDueAtUtc is null)
+                    {
+                        writer.WriteNull("newDueAtUtc");
+                    }
+                    else
+                    {
+                        writer.WriteString("newDueAtUtc", outcomeSnapshot.NewDueAtUtc.Value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+                    }
+
+                    writer.WriteEndObject();
+                });
+
+            case RaiseEscalationCommand escalation:
+                RequireIdentifier(escalation.EscalationId, nameof(escalation.EscalationId));
+                RequireText(escalation.Reason, nameof(escalation.Reason));
+                RequireIdentifier(escalation.RecipientRoute, nameof(escalation.RecipientRoute));
+                ArgumentNullException.ThrowIfNull(escalation.EvidenceEventIds);
+                var escalationEvidence = escalation.EvidenceEventIds.ToArray();
+                foreach (var eventId in escalationEvidence)
+                {
+                    RequireIdentifier(eventId, nameof(escalation.EvidenceEventIds));
+                }
+
+                var escalationSnapshot = escalation with
+                {
+                    OccurredAtUtc = Normalize(escalation.OccurredAtUtc),
+                    EvidenceEventIds = Array.AsReadOnly(escalationEvidence)
+                };
+                return (escalationSnapshot, "RaiseEscalation", escalationSnapshot.Reason, writer =>
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("escalationId", escalationSnapshot.EscalationId.ToString("D"));
+                    writer.WriteStartArray("evidenceEventIds");
+                    foreach (var eventId in escalationSnapshot.EvidenceEventIds)
+                    {
+                        writer.WriteStringValue(eventId);
+                    }
+
+                    writer.WriteEndArray();
+                    writer.WriteString("recipientRoute", escalationSnapshot.RecipientRoute);
+                    writer.WriteEndObject();
+                });
+
+            case AcknowledgeEscalationCommand acknowledge:
+                RequireIdentifier(acknowledge.EscalationId, nameof(acknowledge.EscalationId));
+                RequireText(acknowledge.Reason, nameof(acknowledge.Reason));
+                var acknowledgeSnapshot = acknowledge with { OccurredAtUtc = Normalize(acknowledge.OccurredAtUtc) };
+                return (acknowledgeSnapshot, "AcknowledgeEscalation", acknowledgeSnapshot.Reason, writer =>
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("escalationId", acknowledgeSnapshot.EscalationId.ToString("D"));
+                    WriteNullableString(writer, "actionSummary", acknowledgeSnapshot.ActionSummary);
+                    writer.WriteEndObject();
+                });
+
+            case CloseEscalationCommand close:
+                RequireIdentifier(close.EscalationId, nameof(close.EscalationId));
+                RequireText(close.Resolution, nameof(close.Resolution));
+                RequireText(close.Reason, nameof(close.Reason));
+                var closeSnapshot = close with { OccurredAtUtc = Normalize(close.OccurredAtUtc) };
+                return (closeSnapshot, "CloseEscalation", closeSnapshot.Reason, writer =>
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("escalationId", closeSnapshot.EscalationId.ToString("D"));
+                    writer.WriteString("resolution", closeSnapshot.Resolution);
+                    writer.WriteEndObject();
+                });
 
             default:
                 throw new NotSupportedException($"Command type {command.GetType().Name} is not supported by canonical hash protocol v1.");

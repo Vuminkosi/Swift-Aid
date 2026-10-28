@@ -382,6 +382,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICaseTimelineQuery, CaseTimelineQuery>();
         services.AddScoped<ICaseQueueStore, PostgresCaseQueueStore>();
         services.AddScoped<ICaseQueueQuery, CaseQueueQuery>();
+        services.AddScoped<ICaseMonitoringSummaryStore, PostgresCaseMonitoringSummaryStore>();
+        services.AddScoped<ICaseMonitoringSummaryQuery, CaseMonitoringSummaryQuery>();
         services.AddHostedService<CaseCommandProcessingStartupValidator>();
     }
 

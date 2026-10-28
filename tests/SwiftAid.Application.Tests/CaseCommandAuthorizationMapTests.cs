@@ -94,6 +94,37 @@ public sealed class CaseCommandAuthorizationMapTests
     }
 
     [Fact]
+    public void Monitoring_commands_map_to_narrow_server_owned_requirements()
+    {
+        var aggregate = CreateAggregate(CaseAction.Resolve);
+        var observation = CaseCommandAuthorizationMap.Resolve(
+            new RecordObservationCommand(Guid.NewGuid(), 3, Guid.NewGuid(), "visit note", "home-visit", "record visit", null, Now), aggregate);
+        var schedule = CaseCommandAuthorizationMap.Resolve(
+            new ScheduleFollowUpCommand(Guid.NewGuid(), 3, Guid.NewGuid(), "revisit holding", "worker-1", Now.AddDays(2), "routine check", null, Now), aggregate);
+        var outcome = CaseCommandAuthorizationMap.Resolve(
+            new RecordFollowUpOutcomeCommand(Guid.NewGuid(), 3, Guid.NewGuid(), FollowUpOutcome.Missed, "nobody present", null, "attempt logged", null, Now), aggregate);
+        var raise = CaseCommandAuthorizationMap.Resolve(
+            new RaiseEscalationCommand(Guid.NewGuid(), 3, Guid.NewGuid(), "holding unreachable twice", [], "duty-officer", null, Now), aggregate);
+        var acknowledge = CaseCommandAuthorizationMap.Resolve(
+            new AcknowledgeEscalationCommand(Guid.NewGuid(), 3, Guid.NewGuid(), null, "acknowledged", null, Now), aggregate);
+        var close = CaseCommandAuthorizationMap.Resolve(
+            new CloseEscalationCommand(Guid.NewGuid(), 3, Guid.NewGuid(), "supervisor visited", "resolved", null, Now), aggregate);
+
+        Assert.Equal([CaseOperation.RecordObservation], observation.RequiredOperations);
+        Assert.Equal(CaseCapability.RecordObservation, observation.RequiredCapabilities);
+        Assert.Equal([CaseOperation.ManageFollowUp], schedule.RequiredOperations);
+        Assert.Equal(CaseCapability.ManageFollowUp, schedule.RequiredCapabilities);
+        Assert.Equal([CaseOperation.ManageFollowUp], outcome.RequiredOperations);
+        Assert.Equal(CaseCapability.ManageFollowUp, outcome.RequiredCapabilities);
+        Assert.Equal([CaseOperation.ManageEscalation], raise.RequiredOperations);
+        Assert.Equal(CaseCapability.ManageEscalation, raise.RequiredCapabilities);
+        Assert.Equal([CaseOperation.ManageEscalation], acknowledge.RequiredOperations);
+        Assert.Equal(CaseCapability.ManageEscalation, acknowledge.RequiredCapabilities);
+        Assert.Equal([CaseOperation.ManageEscalation], close.RequiredOperations);
+        Assert.Equal(CaseCapability.ManageEscalation, close.RequiredCapabilities);
+    }
+
+    [Fact]
     public void Creation_and_malformed_authoritative_requests_are_not_authorized()
     {
         var aggregate = CreateAggregate((CaseAction)999);

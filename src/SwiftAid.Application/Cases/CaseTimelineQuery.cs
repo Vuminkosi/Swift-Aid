@@ -152,6 +152,12 @@ public sealed class CaseTimelineQuery(
         "CaseActionRequestReviewed" => "Protected action reviewed",
         "CaseResolved" => "Case resolved",
         "CaseReopened" => "Case reopened",
+        "CaseObservationRecorded" => "Observation recorded",
+        "CaseFollowUpScheduled" => "Follow-up scheduled",
+        "CaseFollowUpOutcomeRecorded" => "Follow-up outcome recorded",
+        "CaseEscalationRaised" => "Escalation raised",
+        "CaseEscalationAcknowledged" => "Escalation acknowledged",
+        "CaseEscalationClosed" => "Escalation closed",
         _ => $"Recorded event ({eventType}, schema v{schemaVersion})"
     };
 }

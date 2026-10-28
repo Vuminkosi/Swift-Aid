@@ -219,6 +219,43 @@ public sealed class CanonicalCaseCommandHasherTests
         Assert.Throws<ArgumentException>(() => CreateSnapshot(actor, CaseId, reassignmentWithoutOwner));
     }
 
+    [Fact]
+    public void Monitoring_commands_hash_significantly_and_reject_unknown_outcomes()
+    {
+        var actor = CreateActor("worker-a");
+        var observation = new RecordObservationCommand(CommandId, 3, Guid.NewGuid(), "visit note", "home-visit", "record visit", Now, Now);
+        var observationHash = CreateSnapshot(actor, CaseId, observation).CanonicalPayloadHash;
+        Assert.NotEqual(observationHash, CreateSnapshot(actor, CaseId, observation with { Narrative = "other note" }).CanonicalPayloadHash);
+        Assert.NotEqual(observationHash, CreateSnapshot(actor, CaseId, observation with { Source = "phone-call" }).CanonicalPayloadHash);
+        Assert.NotEqual(observationHash, CreateSnapshot(actor, CaseId, observation with { ObservationId = Guid.NewGuid() }).CanonicalPayloadHash);
+
+        var schedule = new ScheduleFollowUpCommand(CommandId, 3, Guid.NewGuid(), "revisit holding", "worker-1", Now.AddDays(2), "routine check", Now, Now);
+        var scheduleHash = CreateSnapshot(actor, CaseId, schedule).CanonicalPayloadHash;
+        Assert.NotEqual(scheduleHash, CreateSnapshot(actor, CaseId, schedule with { DueAtUtc = Now.AddDays(3) }).CanonicalPayloadHash);
+        Assert.NotEqual(scheduleHash, CreateSnapshot(actor, CaseId, schedule with { AssigneeActorId = "worker-2" }).CanonicalPayloadHash);
+
+        var outcome = new RecordFollowUpOutcomeCommand(CommandId, 3, Guid.NewGuid(), FollowUpOutcome.Missed, "nobody present", null, "attempt logged", Now, Now);
+        var outcomeHash = CreateSnapshot(actor, CaseId, outcome).CanonicalPayloadHash;
+        Assert.NotEqual(outcomeHash, CreateSnapshot(actor, CaseId, outcome with { Outcome = FollowUpOutcome.Unreachable }).CanonicalPayloadHash);
+
+        var escalation = new RaiseEscalationCommand(CommandId, 3, Guid.NewGuid(), "concern", ["event-a"], "duty-officer", Now, Now);
+        var escalationHash = CreateSnapshot(actor, CaseId, escalation).CanonicalPayloadHash;
+        Assert.NotEqual(escalationHash, CreateSnapshot(actor, CaseId, escalation with { RecipientRoute = "other-route" }).CanonicalPayloadHash);
+
+        var acknowledge = new AcknowledgeEscalationCommand(CommandId, 3, Guid.NewGuid(), "supervisor paged", "acknowledged", Now, Now);
+        var acknowledgeHash = CreateSnapshot(actor, CaseId, acknowledge).CanonicalPayloadHash;
+        Assert.NotEqual(acknowledgeHash, CreateSnapshot(actor, CaseId, acknowledge with { ActionSummary = (string?)null }).CanonicalPayloadHash);
+
+        var close = new CloseEscalationCommand(CommandId, 3, Guid.NewGuid(), "visited holding", "resolved", Now, Now);
+        var closeHash = CreateSnapshot(actor, CaseId, close).CanonicalPayloadHash;
+        Assert.NotEqual(closeHash, CreateSnapshot(actor, CaseId, close with { Resolution = "other resolution" }).CanonicalPayloadHash);
+
+        Assert.Distinct([observationHash, scheduleHash, outcomeHash, escalationHash, acknowledgeHash, closeHash]);
+
+        var invalidOutcome = outcome with { Outcome = (FollowUpOutcome)999 };
+        Assert.Throws<ArgumentOutOfRangeException>(() => CreateSnapshot(actor, CaseId, invalidOutcome));
+    }
+
     private static CanonicalCaseCommandSnapshot CreateSnapshot(
         ActorContext actor,
         Guid caseId,

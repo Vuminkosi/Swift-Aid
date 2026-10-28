@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "eventId": "6d3b2c65-05c7-0f4b-5793-624d84df518f",
+  "eventType": "CaseFollowUpOutcomeRecorded",
+  "caseId": "10000000-0000-0000-0000-000000000001",
+  "aggregateVersion": 5,
+  "reportRevision": 1,
+  "commandId": "20000000-0000-0000-0000-000000000011",
+  "actorId": "officer-1",
+  "occurredAtUtc": null,
+  "recordedAtUtc": "2026-10-26T08:01:00+00:00",
+  "payload": {
+    "followUpId": "40000000-0000-0000-0000-000000000002",
+    "outcome": "Rescheduled",
+    "outcomeNotes": "retry after market day",
+    "previousDueAtUtc": "2026-10-30T08:00:00+00:00",
+    "newDueAtUtc": "2026-11-02T08:00:00+00:00",
+    "reason": "new attempt"
+  }
+}

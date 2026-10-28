@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using SwiftAid.Domain.Cases;
 using SwiftAid.Domain.Notifications;
 using SwiftAid.Infrastructure.Identity;
+using SwiftAid.Infrastructure.Persistence.Entities.Cases;
 using SwiftAid.Infrastructure.Persistence.Entities.Intake;
 using SwiftAid.Infrastructure.Persistence.Notifications;
 
@@ -46,6 +47,9 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
     public DbSet<IntakePromotionEntity> IntakePromotions => Set<IntakePromotionEntity>();
     public DbSet<IntakeEvidenceLinkEntity> IntakeEvidenceLinks => Set<IntakeEvidenceLinkEntity>();
     public DbSet<IntakeCoordinationActionEntity> IntakeCoordinationActions => Set<IntakeCoordinationActionEntity>();
+    public DbSet<ManagedCaseObservationEntity> ManagedCaseObservations => Set<ManagedCaseObservationEntity>();
+    public DbSet<ManagedCaseFollowUpEntity> ManagedCaseFollowUps => Set<ManagedCaseFollowUpEntity>();
+    public DbSet<ManagedCaseEscalationEntity> ManagedCaseEscalations => Set<ManagedCaseEscalationEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -69,6 +73,9 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         modelBuilder.ApplyConfiguration(new IntakePromotionEntityConfiguration());
         modelBuilder.ApplyConfiguration(new IntakeEvidenceLinkEntityConfiguration());
         modelBuilder.ApplyConfiguration(new IntakeCoordinationActionEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new ManagedCaseObservationEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new ManagedCaseFollowUpEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new ManagedCaseEscalationEntityConfiguration());
     }
 
     private static void ConfigureOpenIddictSchema(ModelBuilder modelBuilder)
@@ -302,7 +309,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         var grantOperation = modelBuilder.Entity<AccessGrantOperationEntity>();
         grantOperation.ToTable("access_grant_group_operations", table =>
         {
-            table.HasCheckConstraint("ck_grant_group_operations_value", "operation IN ('ReadCase', 'ReadAttachment', 'Synchronize', 'Search', 'Export', 'Count', 'RequestProtectedAction', 'ExecuteProtectedAction', 'ReadLinkedSignalEvidence', 'CorrectReport', 'ReviewProtectedAction', 'AssignCase', 'ResolveCase', 'ReopenCase', 'ReviewIntake', 'CoordinateIntake')");
+            table.HasCheckConstraint("ck_grant_group_operations_value", "operation IN ('ReadCase', 'ReadAttachment', 'Synchronize', 'Search', 'Export', 'Count', 'RequestProtectedAction', 'ExecuteProtectedAction', 'ReadLinkedSignalEvidence', 'CorrectReport', 'ReviewProtectedAction', 'AssignCase', 'ResolveCase', 'ReopenCase', 'ReviewIntake', 'CoordinateIntake', 'RecordObservation', 'ManageFollowUp', 'ManageEscalation')");
             table.HasCheckConstraint("ck_access_grant_group_operations_lock_token_zero", "lock_token = 0");
         });
         ConfigureLockToken(grantOperation);
@@ -459,7 +466,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         caseEvent.ToTable("case_events", table =>
         {
             table.HasCheckConstraint("ck_case_events_versions", "aggregate_version > 0 AND report_revision > 0 AND schema_version > 0");
-            table.HasCheckConstraint("ck_case_events_type", "event_type IN ('CaseReported', 'CaseAssigned', 'CaseReportCorrected', 'CaseActionRequested', 'CaseActionRequestReviewed', 'CaseResolved', 'CaseReopened')");
+            table.HasCheckConstraint("ck_case_events_type", "event_type IN ('CaseReported', 'CaseAssigned', 'CaseReportCorrected', 'CaseActionRequested', 'CaseActionRequestReviewed', 'CaseResolved', 'CaseReopened', 'CaseObservationRecorded', 'CaseFollowUpScheduled', 'CaseFollowUpOutcomeRecorded', 'CaseEscalationRaised', 'CaseEscalationAcknowledged', 'CaseEscalationClosed')");
             table.HasCheckConstraint("ck_case_events_actor", "length(btrim(actor_id)) > 0");
         });
         caseEvent.HasKey(entity => entity.EventId).HasName("pk_case_events");

@@ -100,11 +100,41 @@ public sealed record CaseActionRequested(Guid CaseId, long AggregateVersion, lon
 public sealed record CaseActionRequestReviewed(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, Guid RequestId, CaseActionReviewOutcome Outcome, Guid? LinkedAcceptedEventId, string Reason) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
 public sealed record CaseResolved(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, string Reason) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
 public sealed record CaseReopened(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, string Reason, string AccountableOwnerId) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
+public sealed record CaseObservationRecorded(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, Guid ObservationId, string Narrative, string Source) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
+public sealed record CaseFollowUpScheduled(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, Guid FollowUpId, string Purpose, string AssigneeActorId, DateTimeOffset DueAtUtc) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
+public sealed record CaseFollowUpOutcomeRecorded(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, Guid FollowUpId, FollowUpOutcome Outcome, string OutcomeNotes, DateTimeOffset PreviousDueAtUtc, DateTimeOffset? NewDueAtUtc, string Reason) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
+public sealed record CaseEscalationRaised(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, Guid EscalationId, string Reason, IReadOnlyList<string> EvidenceEventIds, string RecipientRoute) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
+public sealed record CaseEscalationAcknowledged(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, Guid EscalationId, string? ActionSummary, string Reason) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
+public sealed record CaseEscalationClosed(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, Guid EscalationId, string Resolution, string Reason) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
+
+/// <summary>Current state of one scheduled follow-up. Rescheduling updates the due time in place; history stays in the event stream.</summary>
+public sealed record FollowUpState(Guid FollowUpId, string Purpose, string AssigneeActorId, DateTimeOffset DueAtUtc, FollowUpStatus Status);
+
+public enum FollowUpStatus
+{
+    Scheduled,
+    Completed,
+    Missed,
+    Unreachable,
+    Cancelled
+}
+
+/// <summary>Current state of one staff-owned escalation. The case owner stays accountable throughout.</summary>
+public sealed record EscalationState(Guid EscalationId, EscalationStatus Status);
+
+public enum EscalationStatus
+{
+    Raised,
+    Acknowledged,
+    Closed
+}
 
 /// <summary>Immutable case state rebuilt from its ordered event stream.</summary>
 public sealed class CaseAggregate
 {
     private readonly List<CaseEvent> _events = [];
+    private readonly List<FollowUpState> _followUps = [];
+    private readonly List<EscalationState> _escalations = [];
     private CaseAssigned? _pendingAssignment;
 
     private CaseAggregate() => Classification = ClinicalClassification.Unclassified;
@@ -120,6 +150,10 @@ public sealed class CaseAggregate
     public CaseReportEventData? ReportData { get; private set; }
     public string? WorkspaceId { get; private set; }
     public string? AccountableOwnerId { get; private set; }
+    public CaseObservationRecorded? LatestObservation { get; private set; }
+    public int ObservationCount { get; private set; }
+    public IReadOnlyList<FollowUpState> FollowUps => _followUps.AsReadOnly();
+    public IReadOnlyList<EscalationState> Escalations => _escalations.AsReadOnly();
     public CaseWorkflow Workflow { get; private set; } = CaseWorkflow.Reported;
     public ClinicalClassification Classification { get; private set; }
     public LaboratoryState Laboratory { get; private set; } = LaboratoryState.NotRecorded;
@@ -203,6 +237,12 @@ public sealed class CaseAggregate
             ReviewCaseActionRequestCommand review => DecideReview(review, actor, version),
             ResolveCaseCommand resolution => DecideResolution(resolution, actor, version),
             ReopenCaseCommand reopening => DecideReopen(reopening, actor, version),
+            RecordObservationCommand observation => DecideRecordObservation(observation, actor, version),
+            ScheduleFollowUpCommand schedule => DecideScheduleFollowUp(schedule, actor, version),
+            RecordFollowUpOutcomeCommand outcome => DecideRecordFollowUpOutcome(outcome, actor, version),
+            RaiseEscalationCommand escalation => DecideRaiseEscalation(escalation, actor, version),
+            AcknowledgeEscalationCommand acknowledge => DecideAcknowledgeEscalation(acknowledge, actor, version),
+            CloseEscalationCommand close => DecideCloseEscalation(close, actor, version),
             _ => throw new NotSupportedException($"The command type {command.GetType().Name} is not supported by this aggregate.")
         };
     }
@@ -409,6 +449,101 @@ public sealed class CaseAggregate
         return Array.AsReadOnly<CaseEvent>([new CaseReopened(CaseId, version, ReportRevision, command.CommandId, actor.ActorId, command.OccurredAtUtc, command.RecordedAtUtc, command.Reason, command.AccountableOwnerId)]);
     }
 
+    private void RequireUnresolvedMonitoringTarget(string operation)
+    {
+        if (Workflow == CaseWorkflow.Resolved) throw new InvalidOperationException($"Monitoring work cannot be recorded on a resolved case; reopen it before {operation}.");
+    }
+
+    private IReadOnlyList<CaseEvent> DecideRecordObservation(RecordObservationCommand command, ActorCapabilities actor, long version)
+    {
+        RequireCapability(actor, CaseCapability.RecordObservation);
+        RequireUnresolvedMonitoringTarget("recording an observation");
+        if (command.ObservationId == Guid.Empty) throw new ArgumentException("An observation identifier is required.", nameof(command.ObservationId));
+        RequireText(command.Narrative, nameof(command.Narrative));
+        RequireText(command.Source, nameof(command.Source));
+        if (_events.OfType<CaseObservationRecorded>().Any(item => item.ObservationId == command.ObservationId)) throw new InvalidOperationException("The observation identifier is already recorded on this case.");
+        return Array.AsReadOnly<CaseEvent>([new CaseObservationRecorded(CaseId, version, ReportRevision, command.CommandId, actor.ActorId, command.OccurredAtUtc, command.RecordedAtUtc, command.ObservationId, command.Narrative, command.Source)]);
+    }
+
+    private IReadOnlyList<CaseEvent> DecideScheduleFollowUp(ScheduleFollowUpCommand command, ActorCapabilities actor, long version)
+    {
+        RequireCapability(actor, CaseCapability.ManageFollowUp);
+        RequireUnresolvedMonitoringTarget("scheduling follow-up work");
+        if (command.FollowUpId == Guid.Empty) throw new ArgumentException("A follow-up identifier is required.", nameof(command.FollowUpId));
+        RequireText(command.Purpose, nameof(command.Purpose));
+        RequireText(command.AssigneeActorId, nameof(command.AssigneeActorId));
+        if (command.DueAtUtc == default) throw new ArgumentException("A follow-up due time is required.", nameof(command.DueAtUtc));
+        if (_followUps.Any(item => item.FollowUpId == command.FollowUpId)) throw new InvalidOperationException("The follow-up identifier is already scheduled on this case.");
+        return Array.AsReadOnly<CaseEvent>([new CaseFollowUpScheduled(CaseId, version, ReportRevision, command.CommandId, actor.ActorId, command.OccurredAtUtc, command.RecordedAtUtc, command.FollowUpId, command.Purpose, command.AssigneeActorId, command.DueAtUtc)]);
+    }
+
+    private IReadOnlyList<CaseEvent> DecideRecordFollowUpOutcome(RecordFollowUpOutcomeCommand command, ActorCapabilities actor, long version)
+    {
+        RequireCapability(actor, CaseCapability.ManageFollowUp);
+        RequireUnresolvedMonitoringTarget("recording a follow-up outcome");
+        if (!Enum.IsDefined(command.Outcome)) throw new ArgumentOutOfRangeException(nameof(command.Outcome));
+        RequireText(command.OutcomeNotes, nameof(command.OutcomeNotes));
+        RequireText(command.Reason, nameof(command.Reason));
+        var followUp = _followUps.SingleOrDefault(item => item.FollowUpId == command.FollowUpId)
+            ?? throw new InvalidOperationException("The follow-up does not exist on this case.");
+        if (followUp.Status is FollowUpStatus.Completed or FollowUpStatus.Cancelled) throw new InvalidOperationException("A completed or cancelled follow-up cannot receive another outcome.");
+        if (followUp.Status is FollowUpStatus.Missed or FollowUpStatus.Unreachable && command.Outcome != FollowUpOutcome.Rescheduled)
+        {
+            throw new InvalidOperationException("A missed or unreachable follow-up can only be rescheduled, preserving the attempt history.");
+        }
+
+        DateTimeOffset? newDue = null;
+        if (command.Outcome == FollowUpOutcome.Rescheduled)
+        {
+            if (command.NewDueAtUtc is null || command.NewDueAtUtc == default) throw new ArgumentException("Rescheduling requires a new due time.", nameof(command.NewDueAtUtc));
+            if (command.NewDueAtUtc == followUp.DueAtUtc) throw new ArgumentException("Rescheduling requires a different due time.", nameof(command.NewDueAtUtc));
+            newDue = command.NewDueAtUtc;
+        }
+        else if (command.NewDueAtUtc is not null)
+        {
+            throw new ArgumentException("A new due time is only valid when rescheduling.", nameof(command.NewDueAtUtc));
+        }
+
+        return Array.AsReadOnly<CaseEvent>([new CaseFollowUpOutcomeRecorded(CaseId, version, ReportRevision, command.CommandId, actor.ActorId, command.OccurredAtUtc, command.RecordedAtUtc, command.FollowUpId, command.Outcome, command.OutcomeNotes, followUp.DueAtUtc, newDue, command.Reason)]);
+    }
+
+    private IReadOnlyList<CaseEvent> DecideRaiseEscalation(RaiseEscalationCommand command, ActorCapabilities actor, long version)
+    {
+        RequireCapability(actor, CaseCapability.ManageEscalation);
+        RequireUnresolvedMonitoringTarget("raising an escalation");
+        if (command.EscalationId == Guid.Empty) throw new ArgumentException("An escalation identifier is required.", nameof(command.EscalationId));
+        RequireText(command.Reason, nameof(command.Reason));
+        RequireText(command.RecipientRoute, nameof(command.RecipientRoute));
+        ArgumentNullException.ThrowIfNull(command.EvidenceEventIds);
+        if (command.EvidenceEventIds.Any(string.IsNullOrWhiteSpace)) throw new ArgumentException("Escalation evidence references cannot be empty.", nameof(command.EvidenceEventIds));
+        if (_escalations.Any(item => item.EscalationId == command.EscalationId)) throw new InvalidOperationException("The escalation identifier is already raised on this case.");
+        return Array.AsReadOnly<CaseEvent>([new CaseEscalationRaised(CaseId, version, ReportRevision, command.CommandId, actor.ActorId, command.OccurredAtUtc, command.RecordedAtUtc, command.EscalationId, command.Reason, Array.AsReadOnly(command.EvidenceEventIds.ToArray()), command.RecipientRoute)]);
+    }
+
+    private IReadOnlyList<CaseEvent> DecideAcknowledgeEscalation(AcknowledgeEscalationCommand command, ActorCapabilities actor, long version)
+    {
+        RequireCapability(actor, CaseCapability.ManageEscalation);
+        RequireUnresolvedMonitoringTarget("acknowledging an escalation");
+        RequireText(command.Reason, nameof(command.Reason));
+        var escalation = _escalations.SingleOrDefault(item => item.EscalationId == command.EscalationId)
+            ?? throw new InvalidOperationException("The escalation does not exist on this case.");
+        if (escalation.Status != EscalationStatus.Raised) throw new InvalidOperationException("Only a raised escalation can be acknowledged.");
+        var summary = string.IsNullOrWhiteSpace(command.ActionSummary) ? null : command.ActionSummary;
+        return Array.AsReadOnly<CaseEvent>([new CaseEscalationAcknowledged(CaseId, version, ReportRevision, command.CommandId, actor.ActorId, command.OccurredAtUtc, command.RecordedAtUtc, command.EscalationId, summary, command.Reason)]);
+    }
+
+    private IReadOnlyList<CaseEvent> DecideCloseEscalation(CloseEscalationCommand command, ActorCapabilities actor, long version)
+    {
+        RequireCapability(actor, CaseCapability.ManageEscalation);
+        RequireUnresolvedMonitoringTarget("closing an escalation");
+        RequireText(command.Resolution, nameof(command.Resolution));
+        RequireText(command.Reason, nameof(command.Reason));
+        var escalation = _escalations.SingleOrDefault(item => item.EscalationId == command.EscalationId)
+            ?? throw new InvalidOperationException("The escalation does not exist on this case.");
+        if (escalation.Status != EscalationStatus.Acknowledged) throw new InvalidOperationException("Only an acknowledged escalation can be closed.");
+        return Array.AsReadOnly<CaseEvent>([new CaseEscalationClosed(CaseId, version, ReportRevision, command.CommandId, actor.ActorId, command.OccurredAtUtc, command.RecordedAtUtc, command.EscalationId, command.Resolution, command.Reason)]);
+    }
+
     private void ApplyExistingEvent(CaseEvent @event)
     {
         switch (@event)
@@ -467,9 +602,122 @@ public sealed class CaseAggregate
                 break;
             case CaseReopened:
                 throw new InvalidDataException("Reopening requires a resolved case and its current report revision.");
+            case CaseObservationRecorded observation when observation.ReportRevision == ReportRevision:
+                RequireText(observation.Narrative, nameof(observation.Narrative));
+                RequireText(observation.Source, nameof(observation.Source));
+                if (observation.ObservationId == Guid.Empty || _events.OfType<CaseObservationRecorded>().Any(item => item.ObservationId == observation.ObservationId))
+                {
+                    throw new InvalidDataException("A recorded observation must carry a unique identifier.");
+                }
+
+                LatestObservation = observation;
+                ObservationCount++;
+                break;
+            case CaseObservationRecorded:
+                throw new InvalidDataException("A recorded observation must reference the current report revision.");
+            case CaseFollowUpScheduled scheduled when scheduled.ReportRevision == ReportRevision:
+                RequireText(scheduled.Purpose, nameof(scheduled.Purpose));
+                RequireText(scheduled.AssigneeActorId, nameof(scheduled.AssigneeActorId));
+                if (scheduled.FollowUpId == Guid.Empty || scheduled.DueAtUtc == default || _followUps.Any(item => item.FollowUpId == scheduled.FollowUpId))
+                {
+                    throw new InvalidDataException("A scheduled follow-up must carry a unique identifier and a due time.");
+                }
+
+                _followUps.Add(new FollowUpState(scheduled.FollowUpId, scheduled.Purpose, scheduled.AssigneeActorId, scheduled.DueAtUtc, FollowUpStatus.Scheduled));
+                break;
+            case CaseFollowUpScheduled:
+                throw new InvalidDataException("A scheduled follow-up must reference the current report revision.");
+            case CaseFollowUpOutcomeRecorded outcome when outcome.ReportRevision == ReportRevision:
+                ApplyFollowUpOutcome(outcome);
+                break;
+            case CaseFollowUpOutcomeRecorded:
+                throw new InvalidDataException("A follow-up outcome must reference the current report revision.");
+            case CaseEscalationRaised raised when raised.ReportRevision == ReportRevision:
+                RequireText(raised.Reason, nameof(raised.Reason));
+                RequireText(raised.RecipientRoute, nameof(raised.RecipientRoute));
+                if (raised.EscalationId == Guid.Empty || _escalations.Any(item => item.EscalationId == raised.EscalationId))
+                {
+                    throw new InvalidDataException("A raised escalation must carry a unique identifier.");
+                }
+
+                _escalations.Add(new EscalationState(raised.EscalationId, EscalationStatus.Raised));
+                break;
+            case CaseEscalationRaised:
+                throw new InvalidDataException("A raised escalation must reference the current report revision.");
+            case CaseEscalationAcknowledged acknowledged when acknowledged.ReportRevision == ReportRevision:
+                var toAcknowledge = _escalations.SingleOrDefault(item => item.EscalationId == acknowledged.EscalationId)
+                    ?? throw new InvalidDataException("An acknowledgement must reference an existing escalation.");
+                if (toAcknowledge.Status != EscalationStatus.Raised) throw new InvalidDataException("Only a raised escalation can be acknowledged.");
+                _escalations.Remove(toAcknowledge);
+                _escalations.Add(toAcknowledge with { Status = EscalationStatus.Acknowledged });
+                break;
+            case CaseEscalationAcknowledged:
+                throw new InvalidDataException("An escalation acknowledgement must reference the current report revision and a raised escalation.");
+            case CaseEscalationClosed closed when closed.ReportRevision == ReportRevision:
+                RequireText(closed.Resolution, nameof(closed.Resolution));
+                var toClose = _escalations.SingleOrDefault(item => item.EscalationId == closed.EscalationId)
+                    ?? throw new InvalidDataException("A closure must reference an existing escalation.");
+                if (toClose.Status != EscalationStatus.Acknowledged) throw new InvalidDataException("Only an acknowledged escalation can be closed.");
+                _escalations.Remove(toClose);
+                _escalations.Add(toClose with { Status = EscalationStatus.Closed });
+                break;
+            case CaseEscalationClosed:
+                throw new InvalidDataException("An escalation closure must reference the current report revision and an acknowledged escalation.");
             default:
                 throw new InvalidDataException($"Event type {@event.GetType().Name} is unsupported by this aggregate version.");
         }
+    }
+
+    private void ApplyFollowUpOutcome(CaseFollowUpOutcomeRecorded outcome)
+    {
+        RequireText(outcome.OutcomeNotes, nameof(outcome.OutcomeNotes));
+        RequireText(outcome.Reason, nameof(outcome.Reason));
+        if (!Enum.IsDefined(outcome.Outcome)) throw new InvalidDataException("A follow-up outcome must use a known outcome.");
+        var followUp = _followUps.SingleOrDefault(item => item.FollowUpId == outcome.FollowUpId)
+            ?? throw new InvalidDataException("A follow-up outcome must reference an existing follow-up.");
+        if (followUp.Status is FollowUpStatus.Completed or FollowUpStatus.Cancelled)
+        {
+            throw new InvalidDataException("A completed or cancelled follow-up cannot receive another outcome.");
+        }
+
+        if (followUp.Status is FollowUpStatus.Missed or FollowUpStatus.Unreachable && outcome.Outcome != FollowUpOutcome.Rescheduled)
+        {
+            throw new InvalidDataException("A missed or unreachable follow-up can only be rescheduled.");
+        }
+
+        if (outcome.PreviousDueAtUtc != followUp.DueAtUtc)
+        {
+            throw new InvalidDataException("A follow-up outcome must preserve the current due time.");
+        }
+
+        FollowUpStatus status = outcome.Outcome switch
+        {
+            FollowUpOutcome.Completed => FollowUpStatus.Completed,
+            FollowUpOutcome.Missed => FollowUpStatus.Missed,
+            FollowUpOutcome.Unreachable => FollowUpStatus.Unreachable,
+            FollowUpOutcome.Cancelled => FollowUpStatus.Cancelled,
+            FollowUpOutcome.Rescheduled => FollowUpStatus.Scheduled,
+            _ => throw new InvalidDataException("A follow-up outcome must use a known outcome.")
+        };
+
+        if (outcome.Outcome == FollowUpOutcome.Rescheduled)
+        {
+            if (outcome.NewDueAtUtc is null || outcome.NewDueAtUtc == default || outcome.NewDueAtUtc == followUp.DueAtUtc)
+            {
+                throw new InvalidDataException("Rescheduling must record a different new due time.");
+            }
+        }
+        else if (outcome.NewDueAtUtc is not null)
+        {
+            throw new InvalidDataException("A new due time is only valid when rescheduling.");
+        }
+
+        _followUps.Remove(followUp);
+        _followUps.Add(followUp with
+        {
+            DueAtUtc = outcome.NewDueAtUtc ?? followUp.DueAtUtc,
+            Status = status
+        });
     }
 
     private void ApplyReview(CaseActionRequestReviewed review)
@@ -573,6 +821,12 @@ public sealed class CaseAggregate
         CaseActionRequestReviewed review => review,
         CaseResolved resolution => resolution,
         CaseReopened reopening => reopening,
+        CaseObservationRecorded observation => observation,
+        CaseFollowUpScheduled scheduled => scheduled,
+        CaseFollowUpOutcomeRecorded outcome => outcome,
+        CaseEscalationRaised raised => raised with { EvidenceEventIds = Array.AsReadOnly(raised.EvidenceEventIds.ToArray()) },
+        CaseEscalationAcknowledged acknowledged => acknowledged,
+        CaseEscalationClosed closed => closed,
         _ => throw new InvalidDataException($"Event type {@event.GetType().Name} is unsupported by this aggregate version.")
     };
 

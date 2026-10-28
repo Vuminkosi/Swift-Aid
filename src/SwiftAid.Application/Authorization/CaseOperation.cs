@@ -29,5 +29,11 @@ public enum CaseOperation
     /// organization, never by the shared case resource policy. Grants no case, clinical,
     /// or coverage authority.
     /// </summary>
-    CoordinateIntake = 15
+    CoordinateIntake = 15,
+    /// <summary>Appends a staff-recorded factual observation to an active managed case.</summary>
+    RecordObservation = 16,
+    /// <summary>Schedules follow-up work and records its outcome on an active managed case.</summary>
+    ManageFollowUp = 17,
+    /// <summary>Raises, acknowledges, and closes staff-owned escalations on an active managed case.</summary>
+    ManageEscalation = 18
 }

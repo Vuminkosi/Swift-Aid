@@ -10,7 +10,13 @@ public enum CaseEventType
     CaseActionRequested,
     CaseActionRequestReviewed,
     CaseResolved,
-    CaseReopened
+    CaseReopened,
+    CaseObservationRecorded,
+    CaseFollowUpScheduled,
+    CaseFollowUpOutcomeRecorded,
+    CaseEscalationRaised,
+    CaseEscalationAcknowledged,
+    CaseEscalationClosed
 }
 
 public abstract record CaseEventPayload;
@@ -46,6 +52,28 @@ public sealed record CaseActionRequestReviewedPayload(
 public sealed record CaseResolvedPayload(string Reason) : CaseEventPayload;
 
 public sealed record CaseReopenedPayload(string Reason, string AccountableOwnerId) : CaseEventPayload;
+
+public sealed record CaseObservationRecordedPayload(Guid ObservationId, string Narrative, string Source) : CaseEventPayload;
+
+public sealed record CaseFollowUpScheduledPayload(Guid FollowUpId, string Purpose, string AssigneeActorId, DateTimeOffset DueAtUtc) : CaseEventPayload;
+
+public sealed record CaseFollowUpOutcomeRecordedPayload(
+    Guid FollowUpId,
+    FollowUpOutcome Outcome,
+    string OutcomeNotes,
+    DateTimeOffset PreviousDueAtUtc,
+    DateTimeOffset? NewDueAtUtc,
+    string Reason) : CaseEventPayload;
+
+public sealed record CaseEscalationRaisedPayload(
+    Guid EscalationId,
+    string Reason,
+    IReadOnlyList<string> EvidenceEventIds,
+    string RecipientRoute) : CaseEventPayload;
+
+public sealed record CaseEscalationAcknowledgedPayload(Guid EscalationId, string? ActionSummary, string Reason) : CaseEventPayload;
+
+public sealed record CaseEscalationClosedPayload(Guid EscalationId, string Resolution, string Reason) : CaseEventPayload;
 
 /// <summary>Versioned wire envelope for a single managed-case event.</summary>
 public sealed record CaseEventEnvelope<TPayload>(

@@ -140,6 +140,60 @@ public sealed class CaseCommandGatewayClient(
                 RequireOwnerId(input.ProposedOwnerId),
                 null,
                 recordedAt),
+            "RecordObservation" => new RecordObservationCommand(
+                commandId,
+                expectedVersion,
+                RequireIdentifier(input.ObservationId, "An observation identifier is required."),
+                RequireText(input.Narrative, "An observation narrative is required."),
+                RequireText(input.Source, "An observation source is required."),
+                RequireReason(input),
+                null,
+                recordedAt),
+            "ScheduleFollowUp" => new ScheduleFollowUpCommand(
+                commandId,
+                expectedVersion,
+                RequireIdentifier(input.FollowUpId, "A follow-up identifier is required."),
+                RequireText(input.Purpose, "A follow-up purpose is required."),
+                RequireText(input.AssigneeActorId, "A follow-up assignee is required."),
+                RequireDueAtUtc(input),
+                RequireReason(input),
+                null,
+                recordedAt),
+            "RecordFollowUpOutcome" => new RecordFollowUpOutcomeCommand(
+                commandId,
+                expectedVersion,
+                RequireIdentifier(input.FollowUpId, "A follow-up identifier is required."),
+                RequireFollowUpOutcome(input.OutcomeName),
+                RequireText(input.OutcomeNotes, "Follow-up outcome notes are required."),
+                input.NewDueAtUtc,
+                RequireReason(input),
+                null,
+                recordedAt),
+            "RaiseEscalation" => new RaiseEscalationCommand(
+                commandId,
+                expectedVersion,
+                RequireIdentifier(input.EscalationId, "An escalation identifier is required."),
+                RequireReason(input),
+                RequireEvidenceEventIds(input),
+                RequireText(input.RecipientRoute, "An escalation recipient route is required."),
+                null,
+                recordedAt),
+            "AcknowledgeEscalation" => new AcknowledgeEscalationCommand(
+                commandId,
+                expectedVersion,
+                RequireIdentifier(input.EscalationId, "An escalation identifier is required."),
+                RequireOptionalText(input.ActionSummary),
+                RequireReason(input),
+                null,
+                recordedAt),
+            "CloseEscalation" => new CloseEscalationCommand(
+                commandId,
+                expectedVersion,
+                RequireIdentifier(input.EscalationId, "An escalation identifier is required."),
+                RequireText(input.Resolution, "An escalation resolution is required."),
+                RequireReason(input),
+                null,
+                recordedAt),
             _ => throw new ArgumentException("The case command type is not supported.", nameof(input)),
         };
     }
@@ -235,6 +289,80 @@ public sealed class CaseCommandGatewayClient(
         }
 
         return parsed;
+    }
+
+    private static Guid RequireIdentifier(Guid? value, string message)
+    {
+        if (value is null || value == Guid.Empty)
+        {
+            throw new ArgumentException(message, nameof(value));
+        }
+
+        return value.Value;
+    }
+
+    private static string RequireText(string? value, string message)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException(message, nameof(value));
+        }
+
+        return value;
+    }
+
+    private static string? RequireOptionalText(string? value)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException("The optional text value is invalid.", nameof(value));
+        }
+
+        return value;
+    }
+
+    private static DateTimeOffset RequireDueAtUtc(CaseCommandInput input)
+    {
+        if (input.DueAtUtc is null)
+        {
+            throw new ArgumentException("A follow-up due time is required.", nameof(input));
+        }
+
+        return input.DueAtUtc.Value;
+    }
+
+    private static FollowUpOutcome RequireFollowUpOutcome(string? outcomeName)
+    {
+        if (!Enum.TryParse<FollowUpOutcome>(outcomeName, ignoreCase: false, out var parsed) ||
+            !Enum.IsDefined(parsed))
+        {
+            throw new ArgumentException("The follow-up outcome is not supported.", nameof(outcomeName));
+        }
+
+        return parsed;
+    }
+
+    private static IReadOnlyList<string> RequireEvidenceEventIds(CaseCommandInput input)
+    {
+        if (input.EvidenceEventIds is null)
+        {
+            return [];
+        }
+
+        foreach (var evidenceEventId in input.EvidenceEventIds)
+        {
+            if (string.IsNullOrWhiteSpace(evidenceEventId))
+            {
+                throw new ArgumentException("The escalation evidence references are invalid.", nameof(input));
+            }
+        }
+
+        return input.EvidenceEventIds;
     }
 
     private async Task<ActorContext?> GetActorAsync()

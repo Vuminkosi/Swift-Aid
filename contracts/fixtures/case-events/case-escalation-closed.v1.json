@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "eventId": "cf50fe0f-3497-16b7-8010-8897fe0d5319",
+  "eventType": "CaseEscalationClosed",
+  "caseId": "10000000-0000-0000-0000-000000000001",
+  "aggregateVersion": 5,
+  "reportRevision": 1,
+  "commandId": "20000000-0000-0000-0000-000000000014",
+  "actorId": "officer-1",
+  "occurredAtUtc": null,
+  "recordedAtUtc": "2026-10-26T08:01:00+00:00",
+  "payload": {
+    "escalationId": "40000000-0000-0000-0000-000000000003",
+    "resolution": "supervisor visited holding",
+    "reason": "resolved"
+  }
+}

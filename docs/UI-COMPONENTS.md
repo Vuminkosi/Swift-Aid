@@ -66,3 +66,20 @@ MudBlazor stays primary for every surface observed on the three boards: app shel
 ### Tested behavior
 
 `dotnet build` on `src/SwiftAid.UI/SwiftAid.UI.csproj` passes (result recorded in the Lane B handoff). No placeholder or lorem-ipsum text exists on any new UI surface: all new components render only caller-supplied text; defaults are real labels ("New"). Browser rendering, device display, screen-reader behavior, and rendered contrast acceptance remain NOT VERIFIED. Per-screen route mapping is in [UI-SCREEN-CHECKLIST.md](UI-SCREEN-CHECKLIST.md).
+
+## Case monitoring command panel (P5.2, 2026-10-28)
+
+`src/SwiftAid.UI/Components/Cases/CaseCommandPanel.razor` (shared by Gateway and Mobile case-detail pages via `ICaseCommandClient`) adds six staff operations alongside the existing six. All labels are factual staff-facing language; no clinical advice, no invented defaults (the escalation recipient route is free text with no default), no implementation jargon. Every operation requires a reason plus confirmation, following the existing Review/Confirm pattern.
+
+| Operation | Fields | Identifier rule |
+|---|---|---|
+| Record observation | Observation note, source, optional observation id | Blank id generates a new key; a supplied id must parse as a GUID. |
+| Schedule follow-up | Purpose, assignee id, due time (UTC, ISO format), optional follow-up id | Blank id generates a new key; due time must parse. |
+| Record follow-up outcome | Follow-up id (required), outcome (Completed/Missed/Unreachable/Rescheduled/Cancelled), outcome notes, optional new due time | Follow-up id must parse; a new due time is required when rescheduling. Outcome wording never implies care was completed. |
+| Raise escalation | Optional escalation id, recipient route (required, free text), optional comma-separated evidence references | Blank id generates a new key. |
+| Acknowledge escalation | Escalation id (required), optional action summary | Escalation id must parse. |
+| Close escalation | Escalation id (required), resolution | Escalation id must parse. |
+
+`CaseNextActionsCard` notes now also cover scheduled follow-ups with no later outcome event, raised escalations with no later acknowledgement, and latest-observation presence; missed/unreachable/rescheduled wording never implies care completed. Timeline labels for the six new event types render generically until the Application-owned `CaseTimelineQuery.LabelFor` gains arms (reported separately); no placeholder text is shown.
+
+MudBlazor remains the only component library on this panel; no Syncfusion use. Verified: `SwiftAid.UI`, Gateway, Client, and Mobile Android Release builds pass with zero warnings/errors; Client (119), Application (237), and case-command endpoint suites (43) pass. Browser rendering, device display, and screen-reader behavior remain NOT VERIFIED.

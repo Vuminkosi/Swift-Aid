@@ -124,6 +124,60 @@ public static class CaseCommandEndpoints
                 RequireOwnerId(request),
                 request.OccurredAtUtc,
                 recordedAt),
+            "RecordObservation" => new RecordObservationCommand(
+                request.CommandId,
+                request.ExpectedVersion,
+                RequireObservationId(request),
+                RequireNarrative(request),
+                RequireSource(request),
+                RequireReason(request),
+                request.OccurredAtUtc,
+                recordedAt),
+            "ScheduleFollowUp" => new ScheduleFollowUpCommand(
+                request.CommandId,
+                request.ExpectedVersion,
+                RequireFollowUpId(request),
+                RequirePurpose(request),
+                RequireAssigneeActorId(request),
+                RequireDueAtUtc(request),
+                RequireReason(request),
+                request.OccurredAtUtc,
+                recordedAt),
+            "RecordFollowUpOutcome" => new RecordFollowUpOutcomeCommand(
+                request.CommandId,
+                request.ExpectedVersion,
+                RequireFollowUpId(request),
+                RequireFollowUpOutcome(request),
+                RequireOutcomeNotes(request),
+                request.NewDueAtUtc,
+                RequireReason(request),
+                request.OccurredAtUtc,
+                recordedAt),
+            "RaiseEscalation" => new RaiseEscalationCommand(
+                request.CommandId,
+                request.ExpectedVersion,
+                RequireEscalationId(request),
+                RequireReason(request),
+                RequireEvidenceEventIds(request),
+                RequireRecipientRoute(request),
+                request.OccurredAtUtc,
+                recordedAt),
+            "AcknowledgeEscalation" => new AcknowledgeEscalationCommand(
+                request.CommandId,
+                request.ExpectedVersion,
+                RequireEscalationId(request),
+                RequireOptionalActionSummary(request.ActionSummary),
+                RequireReason(request),
+                request.OccurredAtUtc,
+                recordedAt),
+            "CloseEscalation" => new CloseEscalationCommand(
+                request.CommandId,
+                request.ExpectedVersion,
+                RequireEscalationId(request),
+                RequireResolution(request),
+                RequireReason(request),
+                request.OccurredAtUtc,
+                recordedAt),
             _ => throw new ArgumentException("The case command type is not supported.", nameof(request)),
         };
     }
@@ -322,6 +376,160 @@ public static class CaseCommandEndpoints
         return outcome;
     }
 
+    private static Guid RequireObservationId(CaseCommandApiRequest request)
+    {
+        if (request.ObservationId is null || request.ObservationId == Guid.Empty)
+        {
+            throw new ArgumentException("An observation identifier is required.", nameof(request));
+        }
+
+        return request.ObservationId.Value;
+    }
+
+    private static Guid RequireFollowUpId(CaseCommandApiRequest request)
+    {
+        if (request.FollowUpId is null || request.FollowUpId == Guid.Empty)
+        {
+            throw new ArgumentException("A follow-up identifier is required.", nameof(request));
+        }
+
+        return request.FollowUpId.Value;
+    }
+
+    private static Guid RequireEscalationId(CaseCommandApiRequest request)
+    {
+        if (request.EscalationId is null || request.EscalationId == Guid.Empty)
+        {
+            throw new ArgumentException("An escalation identifier is required.", nameof(request));
+        }
+
+        return request.EscalationId.Value;
+    }
+
+    private static string RequireNarrative(CaseCommandApiRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Narrative))
+        {
+            throw new ArgumentException("An observation narrative is required.", nameof(request));
+        }
+
+        return request.Narrative;
+    }
+
+    private static string RequireSource(CaseCommandApiRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Source))
+        {
+            throw new ArgumentException("An observation source is required.", nameof(request));
+        }
+
+        return request.Source;
+    }
+
+    private static string RequirePurpose(CaseCommandApiRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Purpose))
+        {
+            throw new ArgumentException("A follow-up purpose is required.", nameof(request));
+        }
+
+        return request.Purpose;
+    }
+
+    private static string RequireAssigneeActorId(CaseCommandApiRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.AssigneeActorId))
+        {
+            throw new ArgumentException("A follow-up assignee is required.", nameof(request));
+        }
+
+        return request.AssigneeActorId;
+    }
+
+    private static DateTimeOffset RequireDueAtUtc(CaseCommandApiRequest request)
+    {
+        if (request.DueAtUtc is null)
+        {
+            throw new ArgumentException("A follow-up due time is required.", nameof(request));
+        }
+
+        return request.DueAtUtc.Value;
+    }
+
+    private static FollowUpOutcome RequireFollowUpOutcome(CaseCommandApiRequest request)
+    {
+        if (!Enum.TryParse<FollowUpOutcome>(request.OutcomeName, ignoreCase: false, out var outcome) ||
+            !Enum.IsDefined(outcome))
+        {
+            throw new ArgumentException("The follow-up outcome is not supported.", nameof(request));
+        }
+
+        return outcome;
+    }
+
+    private static string RequireOutcomeNotes(CaseCommandApiRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.OutcomeNotes))
+        {
+            throw new ArgumentException("Follow-up outcome notes are required.", nameof(request));
+        }
+
+        return request.OutcomeNotes;
+    }
+
+    private static string RequireRecipientRoute(CaseCommandApiRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.RecipientRoute))
+        {
+            throw new ArgumentException("An escalation recipient route is required.", nameof(request));
+        }
+
+        return request.RecipientRoute;
+    }
+
+    private static string RequireResolution(CaseCommandApiRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Resolution))
+        {
+            throw new ArgumentException("An escalation resolution is required.", nameof(request));
+        }
+
+        return request.Resolution;
+    }
+
+    private static string? RequireOptionalActionSummary(string? actionSummary)
+    {
+        if (actionSummary is null)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(actionSummary))
+        {
+            throw new ArgumentException("The escalation action summary is invalid.", nameof(actionSummary));
+        }
+
+        return actionSummary;
+    }
+
+    private static IReadOnlyList<string> RequireEvidenceEventIds(CaseCommandApiRequest request)
+    {
+        if (request.EvidenceEventIds is null)
+        {
+            return [];
+        }
+
+        foreach (var evidenceEventId in request.EvidenceEventIds)
+        {
+            if (string.IsNullOrWhiteSpace(evidenceEventId))
+            {
+                throw new ArgumentException("The escalation evidence references are invalid.", nameof(request));
+            }
+        }
+
+        return request.EvidenceEventIds;
+    }
+
     private static ActorContext? TryGetActor(HttpContext context)
     {
         if (context.User.Identity?.IsAuthenticated != true)
@@ -393,7 +601,7 @@ public static class CaseCommandEndpoints
 
 /// <summary>Version-one wire request for a managed-case non-creation command.</summary>
 /// <param name="SchemaVersion">Wire schema version; only 1 is supported.</param>
-/// <param name="CommandType">One of CorrectReport, RequestProtectedAction, ReviewProtectedAction, Resolve, Reopen.</param>
+/// <param name="CommandType">One of CorrectReport, RequestProtectedAction, ReviewProtectedAction, Resolve, Reopen, RecordObservation, ScheduleFollowUp, RecordFollowUpOutcome, RaiseEscalation, AcknowledgeEscalation, CloseEscalation.</param>
 /// <param name="CommandId">Stable idempotency key for the command.</param>
 /// <param name="ExpectedVersion">Aggregate version the command applies to; at least 2.</param>
 /// <param name="OccurredAtUtc">Optional source occurrence time; the server clock is authoritative for recording.</param>
@@ -401,6 +609,21 @@ public static class CaseCommandEndpoints
 /// <param name="ProposedOwnerId">Reassignment target or reopened-case owner; required by Reopen.</param>
 /// <param name="RequestId">Protected-action request key; defaults to the command id when absent.</param>
 /// <param name="Outcome">Review outcome (Pending, Denied, Approved); required by ReviewProtectedAction.</param>
+/// <param name="ObservationId">Observation key; required by RecordObservation.</param>
+/// <param name="Narrative">Observation narrative; required by RecordObservation.</param>
+/// <param name="Source">Observation source; required by RecordObservation.</param>
+/// <param name="FollowUpId">Follow-up key; required by ScheduleFollowUp and RecordFollowUpOutcome.</param>
+/// <param name="Purpose">Follow-up purpose; required by ScheduleFollowUp.</param>
+/// <param name="AssigneeActorId">Follow-up assignee; required by ScheduleFollowUp.</param>
+/// <param name="DueAtUtc">Follow-up due time; required by ScheduleFollowUp.</param>
+/// <param name="OutcomeName">Follow-up outcome name (Completed, Missed, Unreachable, Rescheduled, Cancelled); required by RecordFollowUpOutcome.</param>
+/// <param name="OutcomeNotes">Follow-up outcome notes; required by RecordFollowUpOutcome.</param>
+/// <param name="NewDueAtUtc">Replacement due time; used by RecordFollowUpOutcome only when rescheduling.</param>
+/// <param name="EscalationId">Escalation key; required by RaiseEscalation, AcknowledgeEscalation, CloseEscalation.</param>
+/// <param name="RecipientRoute">Configured escalation recipient route; required by RaiseEscalation. Never a default.</param>
+/// <param name="Resolution">Escalation resolution; required by CloseEscalation.</param>
+/// <param name="ActionSummary">Optional action summary recorded with an acknowledgement.</param>
+/// <param name="EvidenceEventIds">Escalation evidence references for RaiseEscalation.</param>
 public sealed record CaseCommandApiRequest(
     int SchemaVersion,
     string? CommandType,
@@ -411,7 +634,22 @@ public sealed record CaseCommandApiRequest(
     string? ProposedOwnerId,
     Guid? RequestId,
     string? Outcome,
-    string? Action);
+    string? Action,
+    Guid? ObservationId = null,
+    string? Narrative = null,
+    string? Source = null,
+    Guid? FollowUpId = null,
+    string? Purpose = null,
+    string? AssigneeActorId = null,
+    DateTimeOffset? DueAtUtc = null,
+    string? OutcomeName = null,
+    string? OutcomeNotes = null,
+    DateTimeOffset? NewDueAtUtc = null,
+    Guid? EscalationId = null,
+    string? RecipientRoute = null,
+    string? Resolution = null,
+    string? ActionSummary = null,
+    IReadOnlyList<string>? EvidenceEventIds = null);
 
 /// <summary>Accepted or replayed case-command receipt.</summary>
 public sealed record CaseCommandApiResponse(

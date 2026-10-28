@@ -56,6 +56,39 @@ public sealed class CaseEventSerializationTests
             CaseId, 4, 1, Guid.Parse("20000000-0000-0000-0000-000000000007"), "officer-1", null,
             RecordedAtUtc, "new support work", "worker-1"),
             "case-reopened.v1.json"];
+        yield return [new CaseObservationRecorded(
+            CaseId, 3, 1, Guid.Parse("20000000-0000-0000-0000-000000000008"), "officer-1", OccurredAtUtc,
+            RecordedAtUtc, Guid.Parse("40000000-0000-0000-0000-000000000001"), "subject resting, breathing normal", "home-visit"),
+            "case-observation-recorded.v1.json"];
+        yield return [new CaseFollowUpScheduled(
+            CaseId, 3, 1, Guid.Parse("20000000-0000-0000-0000-000000000009"), "officer-1", null,
+            RecordedAtUtc, Guid.Parse("40000000-0000-0000-0000-000000000002"), "revisit holding", "worker-1",
+            new DateTimeOffset(2026, 10, 30, 8, 0, 0, TimeSpan.Zero)),
+            "case-follow-up-scheduled.v1.json"];
+        yield return [new CaseFollowUpOutcomeRecorded(
+            CaseId, 4, 1, Guid.Parse("20000000-0000-0000-0000-000000000010"), "worker-1", null,
+            RecordedAtUtc, Guid.Parse("40000000-0000-0000-0000-000000000002"), FollowUpOutcome.Missed,
+            "nobody present at holding", new DateTimeOffset(2026, 10, 30, 8, 0, 0, TimeSpan.Zero), null, "attempt logged"),
+            "case-follow-up-outcome-missed.v1.json"];
+        yield return [new CaseFollowUpOutcomeRecorded(
+            CaseId, 5, 1, Guid.Parse("20000000-0000-0000-0000-000000000011"), "officer-1", null,
+            RecordedAtUtc, Guid.Parse("40000000-0000-0000-0000-000000000002"), FollowUpOutcome.Rescheduled,
+            "retry after market day", new DateTimeOffset(2026, 10, 30, 8, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 11, 2, 8, 0, 0, TimeSpan.Zero), "new attempt"),
+            "case-follow-up-outcome-rescheduled.v1.json"];
+        yield return [new CaseEscalationRaised(
+            CaseId, 3, 1, Guid.Parse("20000000-0000-0000-0000-000000000012"), "worker-1", null,
+            RecordedAtUtc, Guid.Parse("40000000-0000-0000-0000-000000000003"), "holding unreachable twice",
+            ["evidence-1"], "duty-officer"),
+            "case-escalation-raised.v1.json"];
+        yield return [new CaseEscalationAcknowledged(
+            CaseId, 4, 1, Guid.Parse("20000000-0000-0000-0000-000000000013"), "officer-1", null,
+            RecordedAtUtc, Guid.Parse("40000000-0000-0000-0000-000000000003"), "supervisor paged", "acknowledged"),
+            "case-escalation-acknowledged.v1.json"];
+        yield return [new CaseEscalationClosed(
+            CaseId, 5, 1, Guid.Parse("20000000-0000-0000-0000-000000000014"), "officer-1", null,
+            RecordedAtUtc, Guid.Parse("40000000-0000-0000-0000-000000000003"), "supervisor visited holding", "resolved"),
+            "case-escalation-closed.v1.json"];
     }
 
     [Theory]

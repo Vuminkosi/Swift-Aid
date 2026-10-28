@@ -10,6 +10,7 @@ using SwiftAid.Contracts.Commands;
 using SwiftAid.Contracts.Events;
 using SwiftAid.Domain.Cases;
 using SwiftAid.Domain.Notifications;
+using SwiftAid.Infrastructure.Persistence.Entities.Cases;
 using SwiftAid.Infrastructure.Persistence.Notifications;
 using SwiftAid.Infrastructure.Persistence.Protection;
 using SwiftAid.Infrastructure.Persistence.Transactions;
@@ -353,7 +354,9 @@ public sealed class PostgresCaseCommandPersistence : ICaseCommandPersistence
         foreach (var @event in request.Events)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (@event is not (CaseAssigned or CaseReportCorrected or CaseActionRequested or CaseActionRequestReviewed or CaseResolved or CaseReopened))
+            if (@event is not (CaseAssigned or CaseReportCorrected or CaseActionRequested or CaseActionRequestReviewed or CaseResolved or CaseReopened
+                or CaseObservationRecorded or CaseFollowUpScheduled or CaseFollowUpOutcomeRecorded
+                or CaseEscalationRaised or CaseEscalationAcknowledged or CaseEscalationClosed))
             {
                 // Non-creation command processing must not create a first-report event.
                 throw InvalidJournal();
@@ -488,6 +491,8 @@ public sealed class PostgresCaseCommandPersistence : ICaseCommandPersistence
             });
         }
 
+        await MaintainMonitoringProjectionsAsync(request.Events, cancellationToken).ConfigureAwait(false);
+
         _dbContext.SecurityAuditEntries.Add(new SecurityAuditEntryEntity
         {
             AuditId = Guid.NewGuid(),
@@ -501,6 +506,94 @@ public sealed class PostgresCaseCommandPersistence : ICaseCommandPersistence
         });
 
         return CaseCommandAppendOutcome.Staged(eventIds, replayed.AggregateVersion, replayed.ReportRevision);
+    }
+
+    /// <summary>
+    /// Maintains the case-monitoring read models from the decided events inside the same
+    /// lease transaction as the guarded projection update. Observation, schedule, and
+    /// raise events insert rows; outcome, acknowledge, and close events update the status
+    /// of the row created by the matching schedule or raise. Only event fields are copied.
+    /// </summary>
+    private async ValueTask MaintainMonitoringProjectionsAsync(
+        IReadOnlyList<CaseEvent> events,
+        CancellationToken cancellationToken)
+    {
+        foreach (var @event in events)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            switch (@event)
+            {
+                case CaseObservationRecorded observation:
+                    _dbContext.ManagedCaseObservations.Add(new ManagedCaseObservationEntity
+                    {
+                        ObservationId = observation.ObservationId,
+                        CaseId = observation.CaseId,
+                        Narrative = observation.Narrative,
+                        Source = observation.Source,
+                        AggregateVersion = observation.AggregateVersion
+                    });
+                    break;
+                case CaseFollowUpScheduled scheduled:
+                    _dbContext.ManagedCaseFollowUps.Add(new ManagedCaseFollowUpEntity
+                    {
+                        FollowUpId = scheduled.FollowUpId,
+                        CaseId = scheduled.CaseId,
+                        Purpose = scheduled.Purpose,
+                        AssigneeActorId = scheduled.AssigneeActorId,
+                        DueAtUtc = scheduled.DueAtUtc,
+                        Status = FollowUpStatus.Scheduled,
+                        ScheduledVersion = scheduled.AggregateVersion,
+                        OutcomeVersion = null
+                    });
+                    break;
+                case CaseFollowUpOutcomeRecorded outcome:
+                    var followUp = await _dbContext.ManagedCaseFollowUps
+                        .SingleOrDefaultAsync(item => item.FollowUpId == outcome.FollowUpId, cancellationToken)
+                        .ConfigureAwait(false)
+                        ?? throw InvalidJournal();
+                    followUp.DueAtUtc = outcome.NewDueAtUtc ?? followUp.DueAtUtc;
+                    followUp.Status = outcome.Outcome switch
+                    {
+                        FollowUpOutcome.Completed => FollowUpStatus.Completed,
+                        FollowUpOutcome.Missed => FollowUpStatus.Missed,
+                        FollowUpOutcome.Unreachable => FollowUpStatus.Unreachable,
+                        FollowUpOutcome.Cancelled => FollowUpStatus.Cancelled,
+                        FollowUpOutcome.Rescheduled => FollowUpStatus.Scheduled,
+                        _ => throw InvalidJournal()
+                    };
+                    followUp.OutcomeVersion = outcome.AggregateVersion;
+                    break;
+                case CaseEscalationRaised raised:
+                    _dbContext.ManagedCaseEscalations.Add(new ManagedCaseEscalationEntity
+                    {
+                        EscalationId = raised.EscalationId,
+                        CaseId = raised.CaseId,
+                        Status = EscalationStatus.Raised,
+                        RaisedVersion = raised.AggregateVersion,
+                        AcknowledgedVersion = null,
+                        ClosedVersion = null
+                    });
+                    break;
+                case CaseEscalationAcknowledged acknowledged:
+                    var toAcknowledge = await _dbContext.ManagedCaseEscalations
+                        .SingleOrDefaultAsync(item => item.EscalationId == acknowledged.EscalationId, cancellationToken)
+                        .ConfigureAwait(false)
+                        ?? throw InvalidJournal();
+                    toAcknowledge.Status = EscalationStatus.Acknowledged;
+                    toAcknowledge.AcknowledgedVersion = acknowledged.AggregateVersion;
+                    break;
+                case CaseEscalationClosed closed:
+                    var toClose = await _dbContext.ManagedCaseEscalations
+                        .SingleOrDefaultAsync(item => item.EscalationId == closed.EscalationId, cancellationToken)
+                        .ConfigureAwait(false)
+                        ?? throw InvalidJournal();
+                    toClose.Status = EscalationStatus.Closed;
+                    toClose.ClosedVersion = closed.AggregateVersion;
+                    break;
+                default:
+                    break;
+            }
+        }
     }
 
     private sealed record PreparedCaseEvent(

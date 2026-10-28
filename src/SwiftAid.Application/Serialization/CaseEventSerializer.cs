@@ -30,6 +30,18 @@ public sealed class CaseEventSerializer
                 new CaseResolvedPayload(resolution.Reason)),
             CaseReopened reopening => Serialize(reopening, CaseEventType.CaseReopened,
                 new CaseReopenedPayload(reopening.Reason, reopening.AccountableOwnerId)),
+            CaseObservationRecorded observation => Serialize(observation, CaseEventType.CaseObservationRecorded,
+                new CaseObservationRecordedPayload(observation.ObservationId, observation.Narrative, observation.Source)),
+            CaseFollowUpScheduled scheduled => Serialize(scheduled, CaseEventType.CaseFollowUpScheduled,
+                new CaseFollowUpScheduledPayload(scheduled.FollowUpId, scheduled.Purpose, scheduled.AssigneeActorId, NormalizeTimestamp(scheduled.DueAtUtc))),
+            CaseFollowUpOutcomeRecorded outcome => Serialize(outcome, CaseEventType.CaseFollowUpOutcomeRecorded,
+                MapFollowUpOutcome(outcome)),
+            CaseEscalationRaised raised => Serialize(raised, CaseEventType.CaseEscalationRaised,
+                new CaseEscalationRaisedPayload(raised.EscalationId, raised.Reason, Array.AsReadOnly(raised.EvidenceEventIds.ToArray()), raised.RecipientRoute)),
+            CaseEscalationAcknowledged acknowledged => Serialize(acknowledged, CaseEventType.CaseEscalationAcknowledged,
+                new CaseEscalationAcknowledgedPayload(acknowledged.EscalationId, acknowledged.ActionSummary, acknowledged.Reason)),
+            CaseEscalationClosed closed => Serialize(closed, CaseEventType.CaseEscalationClosed,
+                new CaseEscalationClosedPayload(closed.EscalationId, closed.Resolution, closed.Reason)),
             _ => throw new NotSupportedException($"Event type {@event.GetType().Name} is not supported by the case-event v1 contract.")
         };
     }
@@ -41,7 +53,9 @@ public sealed class CaseEventSerializer
         {
             CaseReported { ReportData: CaseReportEventData.HumanV2 or CaseReportEventData.AnimalV2 } => 2,
             CaseReportCorrected { CorrectedReportData: CaseReportEventData.HumanV2 or CaseReportEventData.AnimalV2 } => 2,
-            CaseReported or CaseAssigned or CaseReportCorrected or CaseActionRequested or CaseActionRequestReviewed or CaseResolved or CaseReopened => 1,
+            CaseReported or CaseAssigned or CaseReportCorrected or CaseActionRequested or CaseActionRequestReviewed or CaseResolved or CaseReopened
+            or CaseObservationRecorded or CaseFollowUpScheduled or CaseFollowUpOutcomeRecorded
+            or CaseEscalationRaised or CaseEscalationAcknowledged or CaseEscalationClosed => 1,
             _ => throw new NotSupportedException($"Event type {@event.GetType().Name} is not supported by the case-event wire contract.")
         };
     }
@@ -226,6 +240,25 @@ public sealed class CaseEventSerializer
         return new CaseActionRequestedPayload(request.RequestId, request.RequestedOperation, request.Reason,
             Array.AsReadOnly(request.EvidenceEventIds.ToArray()), request.ProposedOwnerId);
     }
+
+    private static CaseFollowUpOutcomeRecordedPayload MapFollowUpOutcome(CaseFollowUpOutcomeRecorded outcome)
+    {
+        if (!Enum.IsDefined(outcome.Outcome))
+        {
+            throw new InvalidDataException("The follow-up outcome is outside the case-event v1 contract.");
+        }
+
+        DateTimeOffset? newDue = outcome.NewDueAtUtc is null ? null : NormalizeTimestamp(outcome.NewDueAtUtc.Value);
+        return new CaseFollowUpOutcomeRecordedPayload(
+            outcome.FollowUpId,
+            outcome.Outcome,
+            outcome.OutcomeNotes,
+            NormalizeTimestamp(outcome.PreviousDueAtUtc),
+            newDue,
+            outcome.Reason);
+    }
+
+    private static DateTimeOffset NormalizeTimestamp(DateTimeOffset value) => value.ToUniversalTime();
 
     private static CaseActionRequestReviewedPayload MapReview(CaseActionRequestReviewed review)
     {

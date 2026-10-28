@@ -73,6 +73,18 @@ internal static class CaseEventJournalReader
                     ["reason"], ValidateReasonPayload),
                 nameof(CaseEventType.CaseReopened) => Read<CaseReopenedPayload>(serialized,
                     ["reason", "accountableOwnerId"], ValidateReopenedPayload),
+                nameof(CaseEventType.CaseObservationRecorded) => Read<CaseObservationRecordedPayload>(serialized,
+                    ["observationId", "narrative", "source"], ValidateObservationPayload),
+                nameof(CaseEventType.CaseFollowUpScheduled) => Read<CaseFollowUpScheduledPayload>(serialized,
+                    ["followUpId", "purpose", "assigneeActorId", "dueAtUtc"], ValidateFollowUpScheduledPayload),
+                nameof(CaseEventType.CaseFollowUpOutcomeRecorded) => Read<CaseFollowUpOutcomeRecordedPayload>(serialized,
+                    ["followUpId", "outcome", "outcomeNotes", "previousDueAtUtc", "newDueAtUtc", "reason"], ValidateFollowUpOutcomePayload),
+                nameof(CaseEventType.CaseEscalationRaised) => Read<CaseEscalationRaisedPayload>(serialized,
+                    ["escalationId", "reason", "evidenceEventIds", "recipientRoute"], ValidateEscalationRaisedPayload),
+                nameof(CaseEventType.CaseEscalationAcknowledged) => Read<CaseEscalationAcknowledgedPayload>(serialized,
+                    ["escalationId", "actionSummary", "reason"], ValidateEscalationAcknowledgedPayload),
+                nameof(CaseEventType.CaseEscalationClosed) => Read<CaseEscalationClosedPayload>(serialized,
+                    ["escalationId", "resolution", "reason"], ValidateEscalationClosedPayload),
                 _ => throw InvalidJournal()
             };
 
@@ -225,6 +237,32 @@ internal static class CaseEventJournalReader
                 envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
                 envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
                 reopened.Reason, reopened.AccountableOwnerId),
+            CaseEventType.CaseObservationRecorded when payload is CaseObservationRecordedPayload observation => new CaseObservationRecorded(
+                envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
+                envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
+                observation.ObservationId, observation.Narrative, observation.Source),
+            CaseEventType.CaseFollowUpScheduled when payload is CaseFollowUpScheduledPayload scheduled => new CaseFollowUpScheduled(
+                envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
+                envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
+                scheduled.FollowUpId, scheduled.Purpose, scheduled.AssigneeActorId, scheduled.DueAtUtc),
+            CaseEventType.CaseFollowUpOutcomeRecorded when payload is CaseFollowUpOutcomeRecordedPayload outcome => new CaseFollowUpOutcomeRecorded(
+                envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
+                envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
+                outcome.FollowUpId, outcome.Outcome, outcome.OutcomeNotes, outcome.PreviousDueAtUtc, outcome.NewDueAtUtc,
+                outcome.Reason),
+            CaseEventType.CaseEscalationRaised when payload is CaseEscalationRaisedPayload raised => new CaseEscalationRaised(
+                envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
+                envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
+                raised.EscalationId, raised.Reason,
+                Array.AsReadOnly(raised.EvidenceEventIds.ToArray()), raised.RecipientRoute),
+            CaseEventType.CaseEscalationAcknowledged when payload is CaseEscalationAcknowledgedPayload acknowledged => new CaseEscalationAcknowledged(
+                envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
+                envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
+                acknowledged.EscalationId, acknowledged.ActionSummary, acknowledged.Reason),
+            CaseEventType.CaseEscalationClosed when payload is CaseEscalationClosedPayload closed => new CaseEscalationClosed(
+                envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
+                envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
+                closed.EscalationId, closed.Resolution, closed.Reason),
             _ => throw InvalidJournal()
         };
     }
@@ -483,6 +521,102 @@ internal static class CaseEventJournalReader
     {
         RequireText(value.Reason);
         RequireIdentifier(value.AccountableOwnerId);
+    }
+
+    private static void ValidateObservationPayload(JsonElement payload, CaseObservationRecordedPayload value)
+    {
+        if (!IsCanonicalGuid(payload, "observationId") || value.ObservationId == Guid.Empty)
+        {
+            throw InvalidJournal();
+        }
+
+        RequireText(value.Narrative);
+        RequireText(value.Source);
+    }
+
+    private static void ValidateFollowUpScheduledPayload(JsonElement payload, CaseFollowUpScheduledPayload value)
+    {
+        if (!IsCanonicalGuid(payload, "followUpId") || value.FollowUpId == Guid.Empty)
+        {
+            throw InvalidJournal();
+        }
+
+        RequireText(value.Purpose);
+        RequireIdentifier(value.AssigneeActorId);
+        if (value.DueAtUtc == default)
+        {
+            throw InvalidJournal();
+        }
+    }
+
+    private static void ValidateFollowUpOutcomePayload(JsonElement payload, CaseFollowUpOutcomeRecordedPayload value)
+    {
+        if (!IsCanonicalGuid(payload, "followUpId") || value.FollowUpId == Guid.Empty ||
+            !IsExactEnumValue(payload, "outcome", value.Outcome))
+        {
+            throw InvalidJournal();
+        }
+
+        RequireText(value.OutcomeNotes);
+        RequireText(value.Reason);
+        if (value.PreviousDueAtUtc == default)
+        {
+            throw InvalidJournal();
+        }
+
+        if ((value.Outcome == FollowUpOutcome.Rescheduled) != value.NewDueAtUtc.HasValue ||
+            (value.NewDueAtUtc.HasValue && value.NewDueAtUtc.Value == default))
+        {
+            throw InvalidJournal();
+        }
+    }
+
+    private static void ValidateEscalationRaisedPayload(JsonElement payload, CaseEscalationRaisedPayload value)
+    {
+        if (!IsCanonicalGuid(payload, "escalationId") || value.EscalationId == Guid.Empty)
+        {
+            throw InvalidJournal();
+        }
+
+        RequireText(value.Reason);
+        RequireIdentifier(value.RecipientRoute);
+        if (value.EvidenceEventIds is null || value.EvidenceEventIds.Any(string.IsNullOrWhiteSpace))
+        {
+            throw InvalidJournal();
+        }
+
+        if (!payload.TryGetProperty("evidenceEventIds", out var evidence) ||
+            evidence.ValueKind != JsonValueKind.Array ||
+            evidence.GetArrayLength() != value.EvidenceEventIds.Count)
+        {
+            throw InvalidJournal();
+        }
+    }
+
+    private static void ValidateEscalationAcknowledgedPayload(JsonElement payload, CaseEscalationAcknowledgedPayload value)
+    {
+        if (!IsCanonicalGuid(payload, "escalationId") || value.EscalationId == Guid.Empty)
+        {
+            throw InvalidJournal();
+        }
+
+        if (value.ActionSummary is not null && payload.GetProperty("actionSummary").ValueKind != JsonValueKind.String)
+        {
+            throw InvalidJournal();
+        }
+
+        RequireText(value.Reason);
+    }
+
+    private static void ValidateEscalationClosedPayload(JsonElement payload, CaseEscalationClosedPayload value)
+    {
+        if (!IsCanonicalGuid(payload, "escalationId") || value.EscalationId == Guid.Empty)
+        {
+            throw InvalidJournal();
+        }
+
+        RequireText(value.Resolution);
+        RequireText(value.Reason);
     }
 
     private static ReportFacts ToDomainReport(CaseReportPayload report)
