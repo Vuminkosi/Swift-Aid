@@ -3,6 +3,7 @@ WORKDIR /source
 
 COPY global.json Directory.Build.props Directory.Packages.props SwiftAid.sln ./
 COPY src ./src
+COPY resources ./resources
 
 RUN dotnet restore src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --locked-mode
 RUN dotnet publish src/SwiftAid.Gateway/SwiftAid.Gateway.csproj \
