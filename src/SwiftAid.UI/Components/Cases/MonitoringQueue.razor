@@ -1,0 +1,154 @@
+@using SwiftAid.Contracts.Cases
+
+<section class="monitoring-queue" aria-label="Monitoring queue">
+    @if (_loading)
+    {
+        <div class="monitoring-queue__state" role="status" aria-live="polite">
+            <MudProgressCircular Indeterminate="true" Size="Size.Small" aria-label="Loading monitoring queue" />
+            <MudText Typo="Typo.body2">Loading monitoring work…</MudText>
+        </div>
+    }
+    else if (_denied)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="status">
+            Your account is not authorized to view monitoring work.
+        </MudAlert>
+    }
+    else if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" role="alert">
+            @_error
+            <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="RefreshAsync" aria-label="Retry loading monitoring queue">Retry</MudButton>
+        </MudAlert>
+    }
+    else if (_items.Count == 0)
+    {
+        <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" role="status">
+            No open follow-ups or unacknowledged escalations.
+        </MudAlert>
+    }
+    else
+    {
+        <MudTable Items="_items" Hover="true" Dense="true" aria-label="Open monitoring work">
+            <HeaderContent>
+                <MudTh>Work</MudTh>
+                <MudTh>Summary</MudTh>
+                <MudTh>Assignee</MudTh>
+                <MudTh>Due</MudTh>
+                <MudTh>Status</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Work">
+                    <MudChip T="string" Size="Size.Small" Color="@KindColor(context.Kind)">@KindLabel(context.Kind)</MudChip>
+                </MudTd>
+                <MudTd DataLabel="Summary">
+                    <MudLink Href="@($"/case/{context.CaseId:D}")" aria-label="@($"Open case {context.CaseId:D}")">
+                        @context.Summary
+                    </MudLink>
+                </MudTd>
+                <MudTd DataLabel="Assignee">@(context.AssigneeActorId ?? "—")</MudTd>
+                <MudTd DataLabel="Due">
+                    @if (context.DueAtUtc.HasValue)
+                    {
+                        <span class="@(context.IsOverdue ? "monitoring-queue__overdue" : null)">
+                            @context.DueAtUtc.Value.ToLocalTime().ToString("g")
+                        </span>
+                    }
+                    else
+                    {
+                        <span>—</span>
+                    }
+                </MudTd>
+                <MudTd DataLabel="Status">
+                    <MudChip T="string" Size="Size.Small" Color="@StatusColor(context)">@context.Status</MudChip>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="monitoring-queue__notice">
+            Due earliest first. Only work on cases you may read is listed.
+        </MudText>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public IMonitoringQueueClient Client { get; set; } = null!;
+
+    [Parameter] public MonitoringQueueScope Scope { get; set; } = MonitoringQueueScope.Assigned;
+
+    [Parameter] public int? Limit { get; set; }
+
+    private IReadOnlyList<MonitoringQueueItem> _items = Array.Empty<MonitoringQueueItem>();
+    private bool _loading = true;
+    private bool _denied;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Client is null)
+        {
+            _error = "The monitoring service is not available.";
+            _loading = false;
+            return;
+        }
+
+        await RefreshAsync();
+    }
+
+    /// <summary>Reloads the monitoring queue; called by hosting pages after monitoring commands.</summary>
+    public async Task RefreshAsync()
+    {
+        if (Client is null)
+        {
+            return;
+        }
+
+        _loading = true;
+        _denied = false;
+        _error = null;
+        _items = Array.Empty<MonitoringQueueItem>();
+        StateHasChanged();
+
+        try
+        {
+            var result = Scope == MonitoringQueueScope.Assigned
+                ? await Client.GetAssignedAsync(Limit)
+                : await Client.GetOpenAsync(Limit);
+            if (result.Access == CaseQueueAccess.Denied)
+            {
+                _denied = true;
+            }
+            else if (result.Access == CaseQueueAccess.Unavailable)
+            {
+                _error = "Monitoring work is temporarily unavailable. Check your connection and try again.";
+            }
+            else
+            {
+                _items = result.Items;
+            }
+        }
+        catch (Exception)
+        {
+            _error = "Monitoring work is temporarily unavailable. Check your connection and try again.";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static string KindLabel(MonitoringQueueKind kind) => kind switch
+    {
+        MonitoringQueueKind.FollowUp => "Follow-up",
+        MonitoringQueueKind.Escalation => "Escalation",
+        _ => kind.ToString()
+    };
+
+    private static Color KindColor(MonitoringQueueKind kind) => kind switch
+    {
+        MonitoringQueueKind.Escalation => Color.Warning,
+        _ => Color.Primary
+    };
+
+    private static Color StatusColor(MonitoringQueueItem item) =>
+        item.IsOverdue ? Color.Error : Color.Default;
+}

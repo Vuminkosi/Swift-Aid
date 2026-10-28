@@ -1,0 +1,20 @@
+@page "/monitoring"
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.UI.Components.Cases
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject IMonitoringQueueClient MonitoringClient
+
+<PageTitle>Monitoring | SwiftAid</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="monitoring-page">
+    <SwiftAidPageHeading Eyebrow="Officer workspace"
+                         Title="Monitoring"
+                         Description="Open follow-ups and unacknowledged escalations on cases you may read. Overdue work is highlighted; open a case for its immutable history."
+                         HeadingId="monitoring-heading" />
+
+    <MudText Typo="Typo.h6" Class="mt-4">Assigned to me</MudText>
+    <MonitoringQueue Client="MonitoringClient" Scope="MonitoringQueueScope.Assigned" />
+
+    <MudText Typo="Typo.h6" Class="mt-6">All open work</MudText>
+    <MonitoringQueue Client="MonitoringClient" Scope="MonitoringQueueScope.Open" />
+</MudContainer>

@@ -80,6 +80,12 @@ MudBlazor stays primary for every surface observed on the three boards: app shel
 | Acknowledge escalation | Escalation id (required), optional action summary | Escalation id must parse. |
 | Close escalation | Escalation id (required), resolution | Escalation id must parse. |
 
-`CaseNextActionsCard` notes now also cover scheduled follow-ups with no later outcome event, raised escalations with no later acknowledgement, and latest-observation presence; missed/unreachable/rescheduled wording never implies care completed. Timeline labels for the six new event types render generically until the Application-owned `CaseTimelineQuery.LabelFor` gains arms (reported separately); no placeholder text is shown.
+`CaseNextActionsCard` notes now also cover scheduled follow-ups with no later outcome event, raised escalations with no later acknowledgement, and latest-observation presence; missed/unreachable/rescheduled wording never implies care completed. Timeline labels for the six new event types render via `CaseTimelineQuery.LabelFor` arms added in the queue follow-up; no placeholder text is shown.
 
 MudBlazor remains the only component library on this panel; no Syncfusion use. Verified: `SwiftAid.UI`, Gateway, Client, and Mobile Android Release builds pass with zero warnings/errors; Client (119), Application (237), and case-command endpoint suites (43) pass. Browser rendering, device display, and screen-reader behavior remain NOT VERIFIED.
+
+## Monitoring queue (SA-FUP-06/SA-MON-04, 2026-10-28)
+
+`src/SwiftAid.UI/Components/Cases/MonitoringQueue.razor` (+ `.razor.css`) renders the cross-case queue: due-first open follow-ups with overdue highlighting, raised escalations, assignee, and status chips. States covered: loading, denied, error with retry, and empty (empty is a normal outcome, never proof of absence). Links open the per-case timeline behind ReadCase. Consumed by the Gateway `/monitoring` page (assigned + open sections, staff-only nav entry) and the Mobile `/monitoring` page, both through `IMonitoringQueueClient`. Queue rows carry scheduling identity and status only; narratives and sealed payloads stay on the per-case timeline.
+
+MudBlazor only; no Syncfusion. Verified: `SwiftAid.UI`, Gateway Release, and Mobile Android Release builds pass with zero warnings/errors; Application (242), Client (127), and Integration live (388) suites pass. Browser rendering, device display, and screen-reader behavior remain NOT VERIFIED.
