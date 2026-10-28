@@ -7,6 +7,7 @@
 @inject INotificationFeedClient NotificationClient
 @inject INotificationPlatformSettings NotificationPlatform
 @inject IJSRuntime JS
+@inject NavigationManager Navigation
 
 <a class="skip-link" href="#main-content">Skip to main content</a>
 
@@ -83,7 +84,8 @@
                                       ErrorMessage="_notificationError"
                                       OnRetry="RefreshNotificationsAsync"
                                       OnMarkRead="MarkNotificationReadAsync"
-                                      OnDismiss="DismissNotificationAsync" />
+                                      OnDismiss="DismissNotificationAsync"
+                                      OnOpen="OpenNotification" />
                 </ChildContent>
             </MudMenu>
         </MudBadge>
@@ -154,6 +156,16 @@
             : $"Notifications, {_unreadNotificationCount} unread";
 
     private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+
+    private void OpenNotification(NotificationItemView item)
+    {
+        if (item.Action == NotificationAction.OpenAssignedWork &&
+            Guid.TryParseExact(item.OpaqueResourceReference, "D", out var caseId) &&
+            caseId != Guid.Empty)
+        {
+            Navigation.NavigateTo($"/case/{caseId:D}");
+        }
+    }
 
     private async Task NotificationMenuChangedAsync(bool isOpen)
     {

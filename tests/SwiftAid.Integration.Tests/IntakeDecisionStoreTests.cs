@@ -267,6 +267,9 @@ public sealed class IntakeDecisionStoreTests
             await db.AccessGrantOperations
                 .Where(item => grantIds.Contains(item.GrantGroupId))
                 .ExecuteDeleteAsync();
+            await db.AccessGrantRegions
+                .Where(item => grantIds.Contains(item.GrantGroupId))
+                .ExecuteDeleteAsync();
             await db.AccessGrantGroups
                 .Where(item => item.ActorId == officerId)
                 .ExecuteDeleteAsync();

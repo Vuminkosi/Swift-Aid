@@ -131,6 +131,8 @@ public static class MauiProgram
             sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
         builder.Services.AddTransient<SwiftAid.Contracts.Intake.IIntakeCoordinationClient>(sp => new SwiftAid.Client.Coordination.IntakeCoordinationHttpClient(
             sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
+        builder.Services.AddTransient<SwiftAid.Contracts.Cases.ICaseTimelineClient>(sp => new SwiftAid.Client.Cases.CaseTimelineHttpClient(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
 		var offlineDbFactory = new SwiftAidOfflineDbContextFactory(
 			FileSystem.AppDataDirectory,
 			gatewayBaseAddress);

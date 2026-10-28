@@ -1,0 +1,30 @@
+.case-timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.case-timeline__state {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1rem 0;
+}
+
+.case-timeline__header {
+    margin-bottom: 0.25rem;
+}
+
+.case-timeline__header .mud-card-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.case-timeline__list {
+    padding: 0.5rem 0;
+}
+
+.case-timeline__notice {
+    display: block;
+}

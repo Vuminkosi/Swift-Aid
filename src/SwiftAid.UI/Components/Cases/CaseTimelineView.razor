@@ -1,0 +1,147 @@
+@using SwiftAid.Contracts.Cases
+
+<section class="case-timeline" aria-label="Case history">
+    @if (_loading)
+    {
+        <div class="case-timeline__state" role="status" aria-live="polite">
+            <MudProgressCircular Indeterminate="true" Size="Size.Small" aria-label="Loading case history" />
+            <MudText Typo="Typo.body2">Loading case history…</MudText>
+        </div>
+    }
+    else if (_unavailable)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="status">
+            This case history is unavailable. It may not exist, or your account may not have permission to read this case.
+        </MudAlert>
+    }
+    else if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" role="alert">
+            @_error
+            <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="RefreshAsync" aria-label="Retry loading case history">Retry</MudButton>
+        </MudAlert>
+    }
+    else if (_timeline is not null)
+    {
+        <MudCard Class="case-timeline__header" Outlined="true">
+            <MudCardContent>
+                <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Managed case</MudText>
+                <MudText Typo="Typo.h6">@_timeline.Header.CaseId.ToString("D")</MudText>
+                <MudText Typo="Typo.body2">
+                    @_timeline.Header.OrganizationId · @_timeline.Header.WorkspaceId · @_timeline.Header.CountryCode
+                </MudText>
+                <MudText Typo="Typo.body2">
+                    Workflow: @_timeline.Header.Workflow · Owner: @_timeline.Header.AccountableOwnerActorId
+                </MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    Aggregate version @_timeline.Header.AggregateVersion · report revision @_timeline.Header.ReportRevision
+                </MudText>
+            </MudCardContent>
+        </MudCard>
+
+        @if (_timeline.Entries.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+                No history entries are recorded for this case yet.
+            </MudAlert>
+        }
+        else
+        {
+            <MudTimeline TimelinePosition="TimelinePosition.Start" Class="case-timeline__list">
+                @foreach (var entry in _timeline.Entries)
+                {
+                    <MudTimelineItem Color="@DotColor(entry)" Size="Size.Small">
+                        <ItemContent>
+                            <MudText Typo="Typo.body2"><strong>@entry.Label</strong></MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                @entry.ActorId · @entry.RecordedAtUtc.ToLocalTime().ToString("g")
+                                @if (entry.OccurredAtUtc.HasValue)
+                                {
+                                    <span> (occurred @entry.OccurredAtUtc.Value.ToLocalTime().ToString("g"))</span>
+                                }
+                            </MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                Version @entry.AggregateVersion
+                                @if (entry.Kind == CaseTimelineEntryKind.Derived)
+                                {
+                                    <span> · derived activity</span>
+                                }
+                            </MudText>
+                        </ItemContent>
+                    </MudTimelineItem>
+                }
+            </MudTimeline>
+            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="case-timeline__notice">
+                History is immutable: entries record what happened and never change. Report content stays sealed and is not shown here.
+            </MudText>
+        }
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public ICaseTimelineClient Client { get; set; } = null!;
+
+    [Parameter, EditorRequired] public Guid CaseId { get; set; }
+
+    [Parameter] public int? Limit { get; set; }
+
+    private bool _loading = true;
+    private bool _unavailable;
+    private string? _error;
+    private CaseTimeline? _timeline;
+    private Guid _loadedCaseId = Guid.Empty;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (CaseId != Guid.Empty && CaseId != _loadedCaseId)
+        {
+            _loadedCaseId = CaseId;
+            await RefreshAsync();
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        if (Client is null || CaseId == Guid.Empty)
+        {
+            return;
+        }
+
+        _loading = true;
+        _unavailable = false;
+        _error = null;
+        _timeline = null;
+
+        try
+        {
+            var result = await Client.GetAsync(CaseId, Limit);
+            if (result.Access == CaseTimelineAccess.Found && result.Timeline is not null)
+            {
+                _timeline = result.Timeline;
+            }
+            else
+            {
+                _unavailable = true;
+            }
+        }
+        catch (Exception)
+        {
+            _error = "The case history could not be loaded. Check your connection and try again.";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static Color DotColor(CaseTimelineEntry entry) => entry.Kind switch
+    {
+        CaseTimelineEntryKind.Derived => Color.Info,
+        _ => entry.EventType switch
+        {
+            "CaseResolved" => Color.Success,
+            "CaseReopened" => Color.Warning,
+            _ => Color.Primary
+        }
+    };
+}

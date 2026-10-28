@@ -37,6 +37,7 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddSwiftAidInfrastructure(builder.Configuration, builder.Environment);
 builder.Services.AddScoped<WebGuestIntakeService>();
 builder.Services.AddScoped<SwiftAid.Contracts.Intake.IIntakeCoordinationClient, SwiftAid.Gateway.Intake.IntakeCoordinationGatewayClient>();
+builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseTimelineClient, SwiftAid.Gateway.Cases.CaseTimelineGatewayClient>();
 builder.Services.AddScoped<INotificationApiService, NotificationApiService>();
 builder.Services.AddScoped<INotificationFeedClient, InteractiveServerNotificationFeedClient>();
 builder.Services.AddScoped<INotificationPlatformSettings, GatewayNotificationPlatformSettings>();
@@ -76,6 +77,7 @@ app.MapPublicIntakeEndpoints();
 app.MapIntakeDecisionEndpoints();
 app.MapIntakeCoordinationEndpoints();
 app.MapManagedCaseRegistrationEndpoints();
+app.MapCaseTimelineEndpoints();
 
 app.MapSwiftAidIdentityEndpoints(
     app.Services.GetRequiredService<FederationOptions>(),

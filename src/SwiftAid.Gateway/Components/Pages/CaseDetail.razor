@@ -1,0 +1,20 @@
+@page "/case/{CaseId:guid}"
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.UI.Components.Cases
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ICaseTimelineClient TimelineClient
+
+<PageTitle>Case history | SwiftAid</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="case-detail-page">
+    <SwiftAidPageHeading Eyebrow="Managed case"
+                         Title="Case history"
+                         Description="Immutable event history for one managed case. Content stays sealed; this view records what happened, when, and at which version."
+                         HeadingId="case-detail-heading" />
+
+    <CaseTimelineView Client="TimelineClient" CaseId="CaseId" />
+</MudContainer>
+
+@code {
+    [Parameter] public Guid CaseId { get; set; }
+}

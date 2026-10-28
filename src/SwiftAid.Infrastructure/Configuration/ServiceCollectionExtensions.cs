@@ -19,6 +19,7 @@ using NATS.Net;
 using SwiftAid.Application.Abstractions;
 using SwiftAid.Application.Attachments;
 using SwiftAid.Application.Authorization;
+using SwiftAid.Application.Cases;
 using SwiftAid.Application.Cases.Commands;
 using SwiftAid.Application.Cases.Registration;
 using SwiftAid.Application.Jobs;
@@ -35,6 +36,7 @@ using SwiftAid.Infrastructure.Persistence.Processing;
 using SwiftAid.Infrastructure.Persistence.Notifications;
 using SwiftAid.Infrastructure.Persistence.Protection;
 using SwiftAid.Infrastructure.Persistence.Registration;
+using SwiftAid.Infrastructure.Persistence.Repositories.Cases;
 using SwiftAid.Infrastructure.Persistence.Repositories.Intake;
 using SwiftAid.Infrastructure.Persistence.Transactions;
 using SwiftAid.Infrastructure.Storage;
@@ -376,6 +378,8 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<PostgresProtectedCaseEventPayloadStore>());
         services.AddScoped<ICaseCommandPersistence, PostgresCaseCommandPersistence>();
         services.AddScoped<ICaseCommandProcessor, CaseCommandProcessor>();
+        services.AddScoped<ICaseTimelineStore, PostgresCaseTimelineStore>();
+        services.AddScoped<ICaseTimelineQuery, CaseTimelineQuery>();
         services.AddHostedService<CaseCommandProcessingStartupValidator>();
     }
 

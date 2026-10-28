@@ -4,6 +4,7 @@
 @implements IAsyncDisposable
 @inject INotificationFeedClient NotificationClient
 @inject INotificationPlatformSettings PlatformSettings
+@inject NavigationManager Navigation
 
 <section class="mobile-notification-center" aria-label="Notifications and preferences">
     <div class="mobile-notification-center__heading">
@@ -123,7 +124,8 @@
                           ErrorMessage="_feedError"
                           OnRetry="RefreshFeedAsync"
                           OnMarkRead="MarkReadAsync"
-                          OnDismiss="DismissAsync" />
+                          OnDismiss="DismissAsync"
+                          OnOpen="OpenNotification" />
     }
 </section>
 
@@ -400,6 +402,16 @@
                     // Sound is optional; it must not prevent the authorized feed from updating.
                 }
             }
+        }
+    }
+
+    private void OpenNotification(NotificationItemView item)
+    {
+        if (item.Action == NotificationAction.OpenAssignedWork &&
+            Guid.TryParseExact(item.OpaqueResourceReference, "D", out var caseId) &&
+            caseId != Guid.Empty)
+        {
+            Navigation.NavigateTo($"/case/{caseId:D}");
         }
     }
 
