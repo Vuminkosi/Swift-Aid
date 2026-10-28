@@ -61,7 +61,7 @@
       "required": ["requestId", "requestedOperation", "reason", "evidenceEventIds"],
       "properties": {
         "requestId": { "type": "string", "format": "uuid" },
-        "requestedOperation": { "enum": ["Reassign", "Resolve", "Reopen"] },
+        "requestedOperation": { "enum": ["Reassign", "Assist", "Resolve", "Reopen"] },
         "reason": { "type": "string", "minLength": 1 },
         "evidenceEventIds": { "type": "array", "items": { "type": "string", "minLength": 1 } },
         "proposedOwnerId": { "type": ["string", "null"] }

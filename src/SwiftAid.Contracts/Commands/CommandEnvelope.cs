@@ -87,7 +87,8 @@ public enum CaseAction
 {
     Reassign,
     Resolve,
-    Reopen
+    Reopen,
+    Assist
 }
 
 [Flags]

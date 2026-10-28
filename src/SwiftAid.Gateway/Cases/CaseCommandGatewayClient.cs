@@ -218,7 +218,7 @@ public sealed class CaseCommandGatewayClient(
     private static string? RequireActionOwner(CaseCommandInput input)
     {
         var action = RequireAction(input.Action);
-        if (action == CaseAction.Reassign)
+        if (action is CaseAction.Reassign or CaseAction.Assist)
         {
             return RequireOwnerId(input.ProposedOwnerId);
         }

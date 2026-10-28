@@ -29,6 +29,7 @@ public sealed class CaseCommandAuthorizationMapTests
 
     [Theory]
     [InlineData(CaseAction.Reassign, CaseOperation.AssignCase, CaseCapability.AssignCase)]
+    [InlineData(CaseAction.Assist, CaseOperation.AssignCase, CaseCapability.AssignCase)]
     [InlineData(CaseAction.Resolve, CaseOperation.ResolveCase, CaseCapability.ResolveCase)]
     [InlineData(CaseAction.Reopen, CaseOperation.ReopenCase, CaseCapability.ReopenCase)]
     public void Approved_review_requires_review_and_the_authoritative_requested_action(
@@ -124,7 +125,7 @@ public sealed class CaseCommandAuthorizationMapTests
             new CaseReported(CaseId, 1, 1, acceptanceCommandId, actorId, null, Now, report, "workspace-a"),
             new CaseAssigned(CaseId, 2, 1, acceptanceCommandId, actorId, null, Now, actorId),
             new CaseActionRequested(CaseId, 3, 1, requestCommandId, actorId, null, Now, RequestId,
-                action, "synthetic request reason", [], action == CaseAction.Reassign ? "owner-target" : null)
+                action, "synthetic request reason", [], action is CaseAction.Reassign or CaseAction.Assist ? "owner-target" : null)
         ];
 
         return CaseAggregate.Replay(events);

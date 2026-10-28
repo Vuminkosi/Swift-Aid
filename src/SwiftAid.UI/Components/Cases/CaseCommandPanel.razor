@@ -5,7 +5,7 @@
         <MudCardContent>
             <MudText Typo="Typo.subtitle1">Case actions</MudText>
             <MudText Typo="Typo.body2" Color="Color.Secondary" Class="case-command-panel__hint">
-                Resolve, request reassignment, review a protected action, correct the report, or reopen this case.
+                Resolve, request reassignment, request assistance, review a protected action, correct the report, or reopen this case.
                 Every action needs a reason and a confirmation.
             </MudText>
 
@@ -57,6 +57,7 @@
                 <MudSelect T="string" Label="Action" @bind-Value="_operation" Class="case-command-panel__field">
                     <MudSelectItem Value="@("Resolve")">Resolve</MudSelectItem>
                     <MudSelectItem Value="@("RequestReassignment")">Request reassignment</MudSelectItem>
+                    <MudSelectItem Value="@("RequestAssistance")">Request assistance</MudSelectItem>
                     <MudSelectItem Value="@("ReviewAction")">Review action</MudSelectItem>
                     <MudSelectItem Value="@("CorrectReport")">Correct report</MudSelectItem>
                     <MudSelectItem Value="@("Reopen")">Reopen</MudSelectItem>
@@ -76,6 +77,11 @@
                 else if (_operation == "RequestReassignment")
                 {
                     <MudTextField T="string" Label="Proposed owner id" HelperText="Canonical accountable owner for the reassignment."
+                                  @bind-Value="_proposedOwnerId" Class="case-command-panel__field" />
+                }
+                else if (_operation == "RequestAssistance")
+                {
+                    <MudTextField T="string" Label="Proposed helper id" HelperText="Canonical accountable helper for the assistance request."
                                   @bind-Value="_proposedOwnerId" Class="case-command-panel__field" />
                 }
                 else if (_operation == "Reopen")
@@ -132,6 +138,7 @@
     private string OperationLabel => _operation switch
     {
         "RequestReassignment" => "Request reassignment",
+        "RequestAssistance" => "Request assistance",
         "ReviewAction" => "Review action",
         "CorrectReport" => "Correct report",
         "Reopen" => "Reopen",
@@ -154,7 +161,7 @@
             return Task.CompletedTask;
         }
 
-        if ((_operation == "RequestReassignment" || _operation == "Reopen") && string.IsNullOrWhiteSpace(_proposedOwnerId))
+        if ((_operation == "RequestReassignment" || _operation == "RequestAssistance" || _operation == "Reopen") && string.IsNullOrWhiteSpace(_proposedOwnerId))
         {
             _error = "An owner identifier is required for this action.";
             return Task.CompletedTask;
@@ -252,6 +259,8 @@
         {
             "RequestReassignment" => new CaseCommandInput(
                 "RequestProtectedAction", "Reassign", _reason, RequireOwner(_proposedOwnerId), null, null, null),
+            "RequestAssistance" => new CaseCommandInput(
+                "RequestProtectedAction", "Assist", _reason, RequireOwner(_proposedOwnerId), null, null, null),
             "ReviewAction" => new CaseCommandInput(
                 "ReviewProtectedAction", null, _reason, BlankToNull(_proposedOwnerId), ParseOptionalRequestId(_requestIdText), _outcome, null),
             "CorrectReport" => new CaseCommandInput(

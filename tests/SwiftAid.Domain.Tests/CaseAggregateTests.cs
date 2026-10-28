@@ -525,6 +525,50 @@ public sealed class CaseAggregateTests
         Assert.Equal(JsonValueKind.Null, payload.GetProperty("linkedAcceptedEventId").ValueKind);
     }
 
+    [Fact]
+    public void AssistRequest_RequiresAnAccountableHelper()
+    {
+        var aggregate = AcceptedCase();
+
+        Assert.Throws<ArgumentException>(() => aggregate.Decide(
+            new RequestCaseActionCommand(Guid.NewGuid(), aggregate.AggregateVersion, Guid.NewGuid(), CaseAction.Assist, "needs assistance", [], null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow),
+            new ActorCapabilities("worker-1", CaseCapability.RequestProtectedAction)));
+
+        var events = aggregate.Decide(
+            new RequestCaseActionCommand(Guid.NewGuid(), aggregate.AggregateVersion, Guid.NewGuid(), CaseAction.Assist, "needs assistance", [], "helper-2", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow),
+            new ActorCapabilities("worker-1", CaseCapability.RequestProtectedAction));
+        var requested = CaseAggregate.Replay(aggregate.Events.Concat(events));
+
+        Assert.Single(events);
+        var stored = Assert.IsType<CaseActionRequested>(events[0]);
+        Assert.Equal(CaseAction.Assist, stored.RequestedOperation);
+        Assert.Equal("helper-2", stored.ProposedOwnerId);
+        Assert.Equal("officer-1", requested.AccountableOwnerId);
+    }
+
+    [Fact]
+    public void AssistRequest_AssignsHelperOnlyWhenAuthorizedReviewExecutesIt()
+    {
+        var aggregate = AcceptedCase();
+        var request = aggregate.Decide(
+            new RequestCaseActionCommand(Guid.NewGuid(), aggregate.AggregateVersion, Guid.NewGuid(), CaseAction.Assist, "request assistance", [], "helper-2", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow),
+            new ActorCapabilities("worker-1", CaseCapability.RequestProtectedAction));
+        var requested = CaseAggregate.Replay(aggregate.Events.Concat(request));
+        var requestId = Assert.IsType<CaseActionRequested>(request.Single()).RequestId;
+
+        Assert.Equal("officer-1", requested.AccountableOwnerId);
+
+        var review = requested.Decide(
+            new ReviewCaseActionRequestCommand(Guid.NewGuid(), requested.AggregateVersion, requestId, CaseActionReviewOutcome.Approved, null, "assistance authorized", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow),
+            new ActorCapabilities("officer-1", CaseCapability.ReviewProtectedAction | CaseCapability.AssignCase));
+        var assisted = CaseAggregate.Replay(requested.Events.Concat(review));
+        var decision = Assert.IsType<CaseActionRequestReviewed>(review.Last());
+
+        Assert.Equal("helper-2", assisted.AccountableOwnerId);
+        Assert.Equal(CaseActionReviewOutcome.Approved, decision.Outcome);
+        Assert.Equal(Assert.IsType<CaseAssigned>(review[0]).EventId, decision.LinkedAcceptedEventId);
+    }
+
     private static CaseAggregate AcceptedCase() => CaseAggregate.Replay(CaseAggregate.Create(
         new AcceptCaseCommand(Guid.NewGuid(), Guid.NewGuid(), new ReportFacts(CaseKind.Human, Sector.HumanHealth, "reported narrative", []), "officer-1", "workspace-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow),
         new ActorCapabilities("officer-1", CaseCapability.AcceptReport)));

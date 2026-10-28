@@ -148,6 +148,42 @@ public sealed class CaseCommandEndpointTests
     }
 
     [Fact]
+    public async Task RequestAssistAction_WithOwner_IsAccepted()
+    {
+        await using var host = await TestCommandHost.StartAsync();
+        var commandId = Guid.NewGuid();
+        var requestId = Guid.NewGuid();
+        using var request = CreateRequest(FixedCaseId, new CaseCommandApiRequest(
+            1, "RequestProtectedAction", commandId, 3, null, "needs assistance", "helper-2", requestId, null, "Assist"));
+
+        using var response = await host.SendBearerAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var receipt = JsonSerializer.Deserialize<CaseCommandApiResponse>(body, JsonOptions);
+        Assert.NotNull(receipt);
+        Assert.Equal(FixedCaseId, receipt!.CaseId);
+        Assert.Equal(commandId, receipt.CommandId);
+        var command = Assert.IsType<RequestCaseActionCommand>(host.Processor.LastCommand);
+        Assert.Equal(requestId, command.RequestId);
+        Assert.Equal(CaseAction.Assist, command.Action);
+        Assert.Equal("helper-2", command.ProposedOwnerId);
+    }
+
+    [Fact]
+    public async Task RequestAssistAction_WithoutOwner_IsRejected()
+    {
+        await using var host = await TestCommandHost.StartAsync();
+        using var request = CreateRequest(FixedCaseId, new CaseCommandApiRequest(
+            1, "RequestProtectedAction", Guid.NewGuid(), 3, null, "needs assistance", null, Guid.NewGuid(), null, "Assist"));
+
+        using var response = await host.SendBearerAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, host.Processor.Calls);
+    }
+
+    [Fact]
     public async Task RequestUnknownAction_IsRejected()
     {
         await using var host = await TestCommandHost.StartAsync();

@@ -272,7 +272,7 @@ public sealed class CaseAggregate
 
         RequireText(assignment.AccountableOwnerId, nameof(assignment.AccountableOwnerId));
         var hasPendingReassignment = _events.OfType<CaseActionRequested>().Any(request =>
-            request.RequestedOperation == CaseAction.Reassign &&
+            request.RequestedOperation is CaseAction.Reassign or CaseAction.Assist &&
             !_events.OfType<CaseActionRequestReviewed>().Any(review => review.RequestId == request.RequestId && review.Outcome != CaseActionReviewOutcome.Pending));
         if (!hasPendingReassignment) throw new InvalidDataException("A reassignment must have a pending protected-action request.");
     }
@@ -291,7 +291,7 @@ public sealed class CaseAggregate
         }
 
         var request = _events.OfType<CaseActionRequested>().SingleOrDefault(item => item.RequestId == review.RequestId);
-        if (request is null || request.RequestedOperation != CaseAction.Reassign)
+        if (request is null || request.RequestedOperation is not (CaseAction.Reassign or CaseAction.Assist))
         {
             throw new InvalidDataException("The approved review must refer to a matching reassignment request.");
         }
@@ -329,7 +329,7 @@ public sealed class CaseAggregate
         RequireCapability(actor, CaseCapability.RequestProtectedAction);
         RequireText(command.Reason, nameof(command.Reason));
         if (!Enum.IsDefined(command.Action)) throw new ArgumentOutOfRangeException(nameof(command.Action));
-        if (command.Action == CaseAction.Reassign) RequireText(command.ProposedOwnerId, nameof(command.ProposedOwnerId));
+        if (command.Action is CaseAction.Reassign or CaseAction.Assist) RequireText(command.ProposedOwnerId, nameof(command.ProposedOwnerId));
         if (command.RequestId == Guid.Empty) throw new ArgumentException("An action request identifier is required.", nameof(command.RequestId));
         ArgumentNullException.ThrowIfNull(command.EvidenceEventIds);
         return Array.AsReadOnly<CaseEvent>([new CaseActionRequested(CaseId, version, ReportRevision, command.CommandId, actor.ActorId, command.OccurredAtUtc, command.RecordedAtUtc,
@@ -357,7 +357,7 @@ public sealed class CaseAggregate
         var acceptedVersion = version;
         CaseEvent acceptedEvent = request.RequestedOperation switch
         {
-            CaseAction.Reassign => CreateAcceptedAssignment(request, command, actor, acceptedVersion),
+            CaseAction.Reassign or CaseAction.Assist => CreateAcceptedAssignment(request, command, actor, acceptedVersion),
             CaseAction.Resolve => CreateAcceptedResolution(request, command, actor, acceptedVersion),
             CaseAction.Reopen => CreateAcceptedReopening(request, command, actor, acceptedVersion),
             _ => throw new InvalidDataException("The request contains an unknown protected operation.")
@@ -495,7 +495,7 @@ public sealed class CaseAggregate
             var request = _events.OfType<CaseActionRequested>().Single(item => item.RequestId == review.RequestId);
             var matchesOperation = request.RequestedOperation switch
             {
-                CaseAction.Reassign => linkedEvent is CaseAssigned,
+                CaseAction.Reassign or CaseAction.Assist => linkedEvent is CaseAssigned,
                 CaseAction.Resolve => linkedEvent is CaseResolved,
                 CaseAction.Reopen => linkedEvent is CaseReopened,
                 _ => false

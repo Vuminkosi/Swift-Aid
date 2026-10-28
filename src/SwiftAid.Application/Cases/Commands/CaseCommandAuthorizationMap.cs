@@ -58,7 +58,7 @@ public static class CaseCommandAuthorizationMap
 
         var actionRequirement = request.RequestedOperation switch
         {
-            CaseAction.Reassign => (CaseOperation.AssignCase, CaseCapability.AssignCase),
+            CaseAction.Reassign or CaseAction.Assist => (CaseOperation.AssignCase, CaseCapability.AssignCase),
             CaseAction.Resolve => (CaseOperation.ResolveCase, CaseCapability.ResolveCase),
             CaseAction.Reopen => (CaseOperation.ReopenCase, CaseCapability.ReopenCase),
             _ => throw new InvalidDataException("The approved request operation is outside the supported set.")

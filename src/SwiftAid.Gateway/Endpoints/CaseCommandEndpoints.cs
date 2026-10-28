@@ -297,7 +297,7 @@ public static class CaseCommandEndpoints
     private static string? RequireActionOwner(CaseCommandApiRequest request)
     {
         var action = RequireAction(request);
-        if (action == CaseAction.Reassign)
+        if (action is CaseAction.Reassign or CaseAction.Assist)
         {
             if (string.IsNullOrWhiteSpace(request.ProposedOwnerId) ||
                 !string.Equals(request.ProposedOwnerId, request.ProposedOwnerId.Trim(), StringComparison.Ordinal))
