@@ -66,6 +66,50 @@ public sealed class OrganizationsSurfaceTests
     }
 
     [Fact]
+    public async Task StaffSeesIssuanceSection()
+    {
+        var markup = await RenderAsync(new OrganizationsSnapshot(
+            OrganizationsViewState.Ready,
+            [new MembershipSnapshot("org-1", "Active", "Active", ["ws-1"])],
+            [],
+            [],
+            IsSaving: false));
+
+        Assert.Contains("Issue invitation codes", markup, StringComparison.Ordinal);
+        Assert.Contains("Create invitation code", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PlainMemberSeesNoIssuanceSection()
+    {
+        var markup = await RenderAsync(new OrganizationsSnapshot(
+            OrganizationsViewState.Ready,
+            [new MembershipSnapshot("org-1", "Active", "Active", [])],
+            [],
+            [],
+            IsSaving: false));
+
+        Assert.DoesNotContain("Issue invitation codes", markup, StringComparison.Ordinal);
+        Assert.Contains("Enter invitation code", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task IssuedCodeRendersOnce()
+    {
+        var snapshot = new OrganizationsSnapshot(
+            OrganizationsViewState.Ready,
+            [new MembershipSnapshot("org-1", "Active", "Active", ["ws-1"])],
+            [],
+            [],
+            IsSaving: false,
+            IssuedInvitation: new OrganizationInvitationIssue("ABCD-1234-EFGH", "org-1", null));
+        var markup = await RenderAsync(snapshot);
+
+        Assert.Contains("ABCD-1234-EFGH", markup, StringComparison.Ordinal);
+        Assert.Contains("shown only once", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RenderFaultShowsRecovery()
     {
         var markup = await RenderAsync(null!);

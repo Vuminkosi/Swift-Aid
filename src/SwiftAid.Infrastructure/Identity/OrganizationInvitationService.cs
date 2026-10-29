@@ -19,9 +19,31 @@ public enum InvitationRedeemStatus
 
 public sealed record InvitationRedeemResult(InvitationRedeemStatus Status, string? OrganizationId);
 
+public enum InvitationIssueStatus
+{
+    Issued,
+    NotStaff,
+    OrganizationUnavailable,
+    Invalid,
+    Unavailable
+}
+
+public sealed record InvitationIssueResult(
+    InvitationIssueStatus Status,
+    string? Code,
+    Guid? InvitationId,
+    DateTimeOffset? ExpiresAtUtc);
+
 public interface IOrganizationInvitationService
 {
     Task<InvitationRedeemResult> RedeemAsync(string actorId, string code, CancellationToken cancellationToken);
+
+    Task<InvitationIssueResult> CreateAsync(
+        string actorId,
+        string organizationId,
+        int maxUses,
+        DateTimeOffset? expiresAtUtc,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>Member-side invitation redemption. A valid code fast-tracks a membership
@@ -166,5 +188,109 @@ public sealed class OrganizationInvitationService(
         {
             return new InvitationRedeemResult(InvitationRedeemStatus.Unavailable, null);
         }
+    }
+
+    public async Task<InvitationIssueResult> CreateAsync(
+        string actorId,
+        string organizationId,
+        int maxUses,
+        DateTimeOffset? expiresAtUtc,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(actorId) || string.IsNullOrWhiteSpace(organizationId))
+        {
+            return new InvitationIssueResult(InvitationIssueStatus.Invalid, null, null, null);
+        }
+
+        if (maxUses < 1 || maxUses > 100)
+        {
+            return new InvitationIssueResult(InvitationIssueStatus.Invalid, null, null, null);
+        }
+
+        var now = _timeProvider.GetUtcNow();
+        if (expiresAtUtc.HasValue && expiresAtUtc.Value <= now)
+        {
+            return new InvitationIssueResult(InvitationIssueStatus.Invalid, null, null, null);
+        }
+
+        try
+        {
+            var target = await _dbContext.Organizations
+                .AsNoTracking()
+                .SingleOrDefaultAsync(
+                    candidate => candidate.OrganizationId == organizationId,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (target is null || target.Status != PersistentResourceStatus.Active)
+            {
+                return new InvitationIssueResult(InvitationIssueStatus.OrganizationUnavailable, null, null, null);
+            }
+
+            var memberships = await _membershipService.GetMineAsync(actorId, cancellationToken).ConfigureAwait(false);
+            var staff = memberships.Any(entry =>
+                string.Equals(entry.OrganizationId, organizationId, StringComparison.Ordinal) &&
+                string.Equals(
+                    entry.MembershipStatus, nameof(PersistentMembershipStatus.Active), StringComparison.Ordinal) &&
+                entry.WorkspaceIds.Count > 0);
+            if (!staff)
+            {
+                return new InvitationIssueResult(InvitationIssueStatus.NotStaff, null, null, null);
+            }
+
+            for (var attempt = 0; attempt < 5; attempt++)
+            {
+                var code = GenerateCode();
+                var hash = HashCode(code);
+                if (await _dbContext.OrganizationInvitations
+                    .AnyAsync(entry => entry.CodeHash == hash, cancellationToken)
+                    .ConfigureAwait(false))
+                {
+                    continue;
+                }
+
+                var invitation = new OrganizationInvitationEntity
+                {
+                    InvitationId = Guid.NewGuid(),
+                    OrganizationId = organizationId,
+                    CodeHash = hash,
+                    Status = "Active",
+                    ExpiresAtUtc = expiresAtUtc,
+                    MaxUses = maxUses,
+                    UseCount = 0,
+                    CreatedByActorId = actorId,
+                    CreatedAtUtc = now,
+                };
+                _dbContext.OrganizationInvitations.Add(invitation);
+                await _dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                return new InvitationIssueResult(
+                    InvitationIssueStatus.Issued, code, invitation.InvitationId, expiresAtUtc);
+            }
+
+            return new InvitationIssueResult(InvitationIssueStatus.Unavailable, null, null, null);
+        }
+        catch
+        {
+            return new InvitationIssueResult(InvitationIssueStatus.Unavailable, null, null, null);
+        }
+    }
+
+    private static string GenerateCode()
+    {
+        const string alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        var bytes = new byte[12];
+        RandomNumberGenerator.Fill(bytes);
+        var chars = new char[14];
+        var slot = 0;
+        for (var i = 0; i < bytes.Length; i++)
+        {
+            if (i == 4 || i == 8)
+            {
+                chars[slot++] = '-';
+            }
+
+            chars[slot++] = alphabet[bytes[i] % alphabet.Length];
+        }
+
+        return new string(chars);
     }
 }

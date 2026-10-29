@@ -76,6 +76,7 @@ public static class IdentityEndpoints
         group.MapGet("/organizations/requests/mine", GetMyMembershipRequests);
         group.MapPost("/organizations/requests", SubmitMembershipRequest);
         group.MapPost("/organizations/invitations/redeem", RedeemOrganizationInvitation);
+        group.MapPost("/organizations/invitations", IssueOrganizationInvitation);
 
         if (identityServerOptions.Enabled)
         {
@@ -2711,6 +2712,143 @@ private static async Task<IResult> GetNotificationPreferences(
     private sealed record MembershipRequestListResponse(IReadOnlyList<MembershipRequestResponse> Requests);
 
     private sealed record InvitationRedeemResponse(string OrganizationId, string Status);
+
+    private static async Task<IResult> IssueOrganizationInvitation(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        UserManager<SwiftAidUser> userManager,
+        IOrganizationInvitationService invitationService,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false);
+        }
+        catch (AntiforgeryValidationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The invitation request is invalid.");
+        }
+        catch (InvalidOperationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The invitation request is invalid.");
+        }
+
+        var bodyRead = await ReadInvitationIssueRequestAsync(context.Request, cancellationToken).ConfigureAwait(false);
+        if (bodyRead.Status != InvitationIssueBodyStatus.Valid || bodyRead.Request is null)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "Enter an organization and valid issue details.");
+        }
+
+        var organizationId = bodyRead.Request.OrganizationId?.Trim() ?? string.Empty;
+        var maxUses = bodyRead.Request.MaxUses ?? 5;
+        var expiresAtUtc = bodyRead.Request.ExpiresAtUtc;
+        if (string.IsNullOrWhiteSpace(organizationId) || organizationId.Length > 128)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "Enter an organization and valid issue details.");
+        }
+
+        return await RequireUserAsync(context, userManager, async user =>
+        {
+            var issued = await invitationService.CreateAsync(
+                    user.Id, organizationId, maxUses, expiresAtUtc, cancellationToken)
+                .ConfigureAwait(false);
+            SetNoStore(context);
+            return issued.Status switch
+            {
+                InvitationIssueStatus.Issued => Results.Ok(new InvitationIssueResponse(
+                    issued.Code ?? string.Empty, organizationId, issued.ExpiresAtUtc)),
+                InvitationIssueStatus.NotStaff => PasswordError(
+                    context,
+                    StatusCodes.Status403Forbidden,
+                    "Only workspace staff can issue invitation codes."),
+                InvitationIssueStatus.OrganizationUnavailable => PasswordError(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    "This organization is not available for invitations."),
+                InvitationIssueStatus.Invalid => PasswordError(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    "Enter an organization and valid issue details."),
+                _ => PasswordError(
+                    context,
+                    StatusCodes.Status503ServiceUnavailable,
+                    "Issuing invitations is temporarily unavailable. Try again later.")
+            };
+        });
+    }
+
+    private sealed record InvitationIssueRequest(string? OrganizationId, int? MaxUses, DateTimeOffset? ExpiresAtUtc);
+
+    private sealed record InvitationIssueResponse(string Code, string OrganizationId, DateTimeOffset? ExpiresAtUtc);
+
+    private enum InvitationIssueBodyStatus
+    {
+        Valid,
+        Invalid,
+        Oversized
+    }
+
+    private sealed record InvitationIssueBodyReadResult(InvitationIssueBodyStatus Status, InvitationIssueRequest? Request);
+
+    private static async Task<InvitationIssueBodyReadResult> ReadInvitationIssueRequestAsync(
+        HttpRequest request,
+        CancellationToken cancellationToken)
+    {
+        const int maximumBytes = 4096;
+        if (!IsJsonContentType(request.ContentType))
+        {
+            return new InvitationIssueBodyReadResult(InvitationIssueBodyStatus.Invalid, null);
+        }
+
+        if (request.ContentLength > maximumBytes)
+        {
+            return new InvitationIssueBodyReadResult(InvitationIssueBodyStatus.Oversized, null);
+        }
+
+        var buffer = new byte[maximumBytes + 1];
+        var total = 0;
+        try
+        {
+            while (true)
+            {
+                var remaining = maximumBytes + 1 - total;
+                if (remaining <= 0)
+                {
+                    return new InvitationIssueBodyReadResult(InvitationIssueBodyStatus.Oversized, null);
+                }
+
+                var read = await request.Body.ReadAsync(
+                    buffer.AsMemory(total, Math.Min(1024, remaining)),
+                    cancellationToken).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                total += read;
+            }
+
+            if (total > maximumBytes)
+            {
+                return new InvitationIssueBodyReadResult(InvitationIssueBodyStatus.Oversized, null);
+            }
+
+            var payload = JsonSerializer.Deserialize<InvitationIssueRequest>(
+                buffer.AsSpan(0, total),
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            return payload is null
+                ? new InvitationIssueBodyReadResult(InvitationIssueBodyStatus.Invalid, null)
+                : new InvitationIssueBodyReadResult(InvitationIssueBodyStatus.Valid, payload);
+        }
+        catch (JsonException)
+        {
+            return new InvitationIssueBodyReadResult(InvitationIssueBodyStatus.Invalid, null);
+        }
+        finally
+        {
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(buffer);
+        }
+    }
 
     private sealed record NotificationPreferencesResponse(bool WorkReminders, bool SessionUpdates);
 

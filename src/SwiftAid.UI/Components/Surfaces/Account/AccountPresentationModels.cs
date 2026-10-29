@@ -159,7 +159,8 @@ public sealed record OrganizationsSnapshot(
     IReadOnlyList<OrganizationOptionSnapshot> Directory,
     bool IsSaving,
     string? StatusMessage = null,
-    bool StatusIsError = false)
+    bool StatusIsError = false,
+    OrganizationInvitationIssue? IssuedInvitation = null)
 {
     public static OrganizationsSnapshot Loading { get; } = new(
         OrganizationsViewState.Loading, [], [], [], false);
@@ -174,6 +175,10 @@ public sealed record OrganizationsSnapshot(
 }
 
 public sealed record MembershipJoinRequest(string OrganizationId, string? Reason);
+
+public sealed record InvitationIssueRequest(string OrganizationId, int MaxUses, DateTimeOffset? ExpiresAtUtc);
+
+public sealed record OrganizationInvitationIssue(string Code, string OrganizationId, DateTimeOffset? ExpiresAtUtc);
 
 public enum NotificationsViewState
 {

@@ -192,6 +192,59 @@ public sealed class GatewayOrganizationMembershipClient(
         }
     }
 
+    public async Task<UiCapabilityResult<InvitationIssueView>> IssueAsync(
+        string organizationId,
+        int maxUses,
+        DateTimeOffset? expiresAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(organizationId);
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var actorId = await GetActorIdAsync().ConfigureAwait(false);
+            if (actorId is null)
+            {
+                return Denied<InvitationIssueView>();
+            }
+
+            var issued = await _invitationService.CreateAsync(
+                    actorId, organizationId, maxUses, expiresAtUtc, cancellationToken)
+                .ConfigureAwait(false);
+            return issued.Status switch
+            {
+                InvitationIssueStatus.Issued => Success(new InvitationIssueView(
+                    issued.Code ?? string.Empty, organizationId, issued.ExpiresAtUtc)),
+                InvitationIssueStatus.NotStaff => new UiCapabilityResult<InvitationIssueView>(
+                    UiCapabilityResultCode.Denied,
+                    null,
+                    Metadata(),
+                    "Only workspace staff can issue invitation codes."),
+                InvitationIssueStatus.OrganizationUnavailable => Invalid<InvitationIssueView>(
+                    "This organization is not available for invitations."),
+                InvitationIssueStatus.Invalid => Invalid<InvitationIssueView>(
+                    "Enter an organization and valid issue details."),
+                _ => Retryable<InvitationIssueView>("Issuing invitations is temporarily unavailable.")
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            return Retryable<InvitationIssueView>(ClientRequestFailure.MessageFor(ex, "Issuing an invitation"));
+        }
+        catch (Exception ex) when (ex is HttpRequestException)
+        {
+            return Retryable<InvitationIssueView>(ClientRequestFailure.MessageFor(ex, "Issuing an invitation"));
+        }
+        catch (Exception)
+        {
+            return Retryable<InvitationIssueView>("Issuing invitations is temporarily unavailable.");
+        }
+    }
+
     public async Task<UiCapabilityResult<IReadOnlyList<MembershipRequestView>>> GetMyRequestsAsync(
         CancellationToken cancellationToken = default)
     {

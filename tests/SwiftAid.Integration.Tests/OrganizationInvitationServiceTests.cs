@@ -249,6 +249,66 @@ public sealed class OrganizationInvitationServiceTests : IAsyncDisposable
         });
     }
 
+    [Fact]
+    public async Task Staff_member_can_issue_a_code_that_redeems()
+    {
+        SeedStaffWorkspace();
+        var service = _provider.GetRequiredService<IOrganizationInvitationService>();
+
+        var issued = await service.CreateAsync("actor-1", "org-1", 5, _timeProvider.GetUtcNow().AddDays(30), CancellationToken.None);
+
+        Assert.Equal(InvitationIssueStatus.Issued, issued.Status);
+        Assert.Matches(@"^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$", issued.Code);
+        Assert.NotNull(issued.InvitationId);
+
+        var stored = _dbContext.OrganizationInvitations.Single(entry => entry.InvitationId == issued.InvitationId);
+        Assert.Equal(OrganizationInvitationService.HashCode(OrganizationInvitationService.NormalizeCode(issued.Code)!), stored.CodeHash);
+        Assert.NotEqual(issued.Code, stored.CodeHash);
+        Assert.Equal("actor-1", stored.CreatedByActorId);
+
+        var redeemed = await service.RedeemAsync("actor-2", issued.Code!, CancellationToken.None);
+        Assert.Equal(InvitationRedeemStatus.Redeemed, redeemed.Status);
+        Assert.Equal("org-1", redeemed.OrganizationId);
+    }
+
+    [Fact]
+    public async Task Non_staff_member_cannot_issue()
+    {
+        SeedStaffWorkspace();
+        var service = _provider.GetRequiredService<IOrganizationInvitationService>();
+
+        var result = await service.CreateAsync("actor-2", "org-1", 5, null, CancellationToken.None);
+
+        Assert.Equal(InvitationIssueStatus.NotStaff, result.Status);
+        Assert.Null(result.Code);
+    }
+
+    [Fact]
+    public async Task Issue_rejects_unknown_organization_and_bad_input()
+    {
+        var service = _provider.GetRequiredService<IOrganizationInvitationService>();
+
+        Assert.Equal(InvitationIssueStatus.OrganizationUnavailable,
+            (await service.CreateAsync("actor-1", "org-nope", 5, null, CancellationToken.None)).Status);
+        Assert.Equal(InvitationIssueStatus.Invalid,
+            (await service.CreateAsync("actor-1", "org-1", 0, null, CancellationToken.None)).Status);
+        Assert.Equal(InvitationIssueStatus.Invalid,
+            (await service.CreateAsync("actor-1", "org-1", 5, _timeProvider.GetUtcNow().AddDays(-1), CancellationToken.None)).Status);
+        Assert.Equal(InvitationIssueStatus.Invalid,
+            (await service.CreateAsync(string.Empty, "org-1", 5, null, CancellationToken.None)).Status);
+    }
+
+    private void SeedStaffWorkspace()
+    {
+        _dbContext.Workspaces.Add(new WorkspaceEntity
+        {
+            WorkspaceId = "ws-1",
+            OrganizationId = "org-1",
+            Status = PersistentResourceStatus.Active
+        });
+        _dbContext.SaveChanges();
+    }
+
     private sealed class ManualInvitationTimeProvider(DateTimeOffset now) : TimeProvider
     {
         private DateTimeOffset _now = now;

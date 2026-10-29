@@ -53,6 +53,36 @@ public sealed class GatewayAccountPageTests
     }
 
     [Fact]
+    public async Task IssueMapsTimeoutToTimeoutCopy()
+    {
+        var client = new GatewayOrganizationMembershipClient(
+            new SignedInAuthStateProvider(),
+            TestUsers.Manager(),
+            new NeverCalledMembershipService(),
+            new TimeoutIssuanceService());
+
+        var result = await client.IssueAsync("org-1", 5, null);
+
+        Assert.Equal(UiCapabilityResultCode.Retryable, result.Code);
+        Assert.Contains("timed out", result.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task IssueReturnsCodeOnSuccess()
+    {
+        var client = new GatewayOrganizationMembershipClient(
+            new SignedInAuthStateProvider(),
+            TestUsers.Manager(),
+            new NeverCalledMembershipService(),
+            new SuccessfulIssuanceService());
+
+        var result = await client.IssueAsync("org-1", 5, null);
+
+        Assert.Equal(UiCapabilityResultCode.Success, result.Code);
+        Assert.Equal("NEW-CODE-1", result.Value!.Code);
+    }
+
+    [Fact]
     public async Task RedeemMapsUnreachableHostToUnreachableCopy()
     {
         var client = new GatewayOrganizationMembershipClient(
@@ -176,6 +206,13 @@ public sealed class GatewayAccountPageTests
         public Task<UiCapabilityResult<InvitationRedeemView>> RedeemAsync(
             string code, CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("probe failure");
+
+        public Task<UiCapabilityResult<InvitationIssueView>> IssueAsync(
+            string organizationId,
+            int maxUses,
+            DateTimeOffset? expiresAtUtc,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("probe failure");
     }
 
     private sealed class SignedInAuthStateProvider : AuthenticationStateProvider
@@ -265,6 +302,14 @@ public sealed class GatewayAccountPageTests
         public Task<InvitationRedeemResult> RedeemAsync(
             string actorId, string code, CancellationToken cancellationToken) =>
             throw new TaskCanceledException("probe timeout");
+
+        public Task<InvitationIssueResult> CreateAsync(
+            string actorId,
+            string organizationId,
+            int maxUses,
+            DateTimeOffset? expiresAtUtc,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("probe failure");
     }
 
     private sealed class UnreachableInvitationService : IOrganizationInvitationService
@@ -272,5 +317,44 @@ public sealed class GatewayAccountPageTests
         public Task<InvitationRedeemResult> RedeemAsync(
             string actorId, string code, CancellationToken cancellationToken) =>
             throw new System.Net.Http.HttpRequestException("probe unreachable");
+
+        public Task<InvitationIssueResult> CreateAsync(
+            string actorId,
+            string organizationId,
+            int maxUses,
+            DateTimeOffset? expiresAtUtc,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("probe failure");
+    }
+
+    private sealed class TimeoutIssuanceService : IOrganizationInvitationService
+    {
+        public Task<InvitationRedeemResult> RedeemAsync(
+            string actorId, string code, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("probe failure");
+
+        public Task<InvitationIssueResult> CreateAsync(
+            string actorId,
+            string organizationId,
+            int maxUses,
+            DateTimeOffset? expiresAtUtc,
+            CancellationToken cancellationToken) =>
+            throw new TaskCanceledException("probe timeout");
+    }
+
+    private sealed class SuccessfulIssuanceService : IOrganizationInvitationService
+    {
+        public Task<InvitationRedeemResult> RedeemAsync(
+            string actorId, string code, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("probe failure");
+
+        public Task<InvitationIssueResult> CreateAsync(
+            string actorId,
+            string organizationId,
+            int maxUses,
+            DateTimeOffset? expiresAtUtc,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new InvitationIssueResult(
+                InvitationIssueStatus.Issued, "NEW-CODE-1", Guid.NewGuid(), expiresAtUtc));
     }
 }

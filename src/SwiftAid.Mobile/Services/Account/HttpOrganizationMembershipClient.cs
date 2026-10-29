@@ -212,6 +212,71 @@ public sealed class HttpOrganizationMembershipClient(CookieSessionHttpClient ses
         }
     }
 
+    public async Task<UiCapabilityResult<InvitationIssueView>> IssueAsync(
+        string organizationId,
+        int maxUses,
+        DateTimeOffset? expiresAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(organizationId);
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var token = await _session.GetAntiforgeryTokenAsync(cancellationToken).ConfigureAwait(false);
+            using var response = await _session.PostJsonAsync(
+                "/auth/organizations/invitations",
+                new { organizationId, maxUses, expiresAtUtc },
+                token,
+                cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                return Denied<InvitationIssueView>();
+            }
+
+            if (response.StatusCode == HttpStatusCode.Forbidden)
+            {
+                var forbidden = await ReadMessageAsync(response, cancellationToken).ConfigureAwait(false)
+                    ?? "Only workspace staff can issue invitation codes.";
+                return new UiCapabilityResult<InvitationIssueView>(
+                    UiCapabilityResultCode.Denied, null, Metadata(), forbidden);
+            }
+
+            if (response.StatusCode == HttpStatusCode.BadRequest)
+            {
+                var message = await ReadMessageAsync(response, cancellationToken).ConfigureAwait(false)
+                    ?? "Enter an organization and valid issue details.";
+                return new UiCapabilityResult<InvitationIssueView>(
+                    UiCapabilityResultCode.InvalidRequest, null, Metadata(), message);
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return Retryable<InvitationIssueView>("Issuing invitations is temporarily unavailable.");
+            }
+
+            var payload = await ReadAsync<InvitationIssuePayload>(response, cancellationToken).ConfigureAwait(false);
+            return payload is null
+                ? Retryable<InvitationIssueView>("Issuing invitations is temporarily unavailable.")
+                : Success(new InvitationIssueView(payload.Code, payload.OrganizationId, payload.ExpiresAtUtc));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            return Retryable<InvitationIssueView>(ClientRequestFailure.MessageFor(ex, "Issuing an invitation"));
+        }
+        catch (Exception ex) when (ex is HttpRequestException)
+        {
+            return Retryable<InvitationIssueView>(ClientRequestFailure.MessageFor(ex, "Issuing an invitation"));
+        }
+        catch (Exception)
+        {
+            return Retryable<InvitationIssueView>("Issuing invitations is temporarily unavailable.");
+        }
+    }
+
     public async Task<UiCapabilityResult<IReadOnlyList<MembershipRequestView>>> GetMyRequestsAsync(
         CancellationToken cancellationToken = default)
     {
@@ -326,6 +391,8 @@ public sealed class HttpOrganizationMembershipClient(CookieSessionHttpClient ses
     private sealed record MembershipRequestListPayload(IReadOnlyList<MembershipRequestPayload> Requests);
 
     private sealed record InvitationRedeemPayload(string OrganizationId, string Status);
+
+    private sealed record InvitationIssuePayload(string Code, string OrganizationId, DateTimeOffset? ExpiresAtUtc);
 
     private sealed record MembershipRequestPayload(
         Guid RequestId,

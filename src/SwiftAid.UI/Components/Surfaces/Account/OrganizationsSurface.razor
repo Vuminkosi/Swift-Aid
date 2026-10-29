@@ -96,6 +96,36 @@ else
             Redeem code
         </MudButton>
     </MudPaper>
+    @if (Snapshot.Memberships.Any(IsStaffMember))
+    {
+        <MudPaper Class="pa-4 mb-4" Elevation="0">
+            <MudText Typo="Typo.subtitle1">Issue invitation codes</MudText>
+            <MudText Typo="Typo.body2">Workspace staff can create codes for their organization. A new code is shown once — save it before sharing.</MudText>
+            <MudSelect T="string" Label="Organization" Value="@_issueOrganizationId" ValueChanged="IssueOrganizationChanged"
+                       Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" aria-label="Organization to invite to">
+                @foreach (var entry in Snapshot.Memberships.Where(IsStaffMember))
+                {
+                    <MudSelectItem Value="@entry.OrganizationId">@entry.OrganizationId</MudSelectItem>
+                }
+            </MudSelect>
+            <MudNumericField T="int" Label="Maximum uses" Value="@_issueMaxUses" ValueChanged="IssueMaxUsesChanged"
+                             Min="1" Max="100" Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" />
+            <MudNumericField T="int" Label="Valid for (days)" Value="@_issueValidDays" ValueChanged="IssueValidDaysChanged"
+                             Min="1" Max="365" Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" />
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@Snapshot.IsSaving"
+                       OnClick="IssueAsync" StartIcon="@Icons.Material.Filled.Add" Class="auth-cta">
+                Create invitation code
+            </MudButton>
+            @if (Snapshot.IssuedInvitation is not null)
+            {
+                <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" role="status">
+                    New code for @Snapshot.IssuedInvitation.OrganizationId:
+                    <strong>@Snapshot.IssuedInvitation.Code</strong>.
+                    Save it now — it is shown only once.
+                </MudAlert>
+            }
+        </MudPaper>
+    }
 }
         </div>
     </ChildContent>
@@ -121,13 +151,54 @@ else
 
     [Parameter] public EventCallback<string> OnRedeem { get; set; }
 
+    [Parameter] public EventCallback<InvitationIssueRequest> OnIssue { get; set; }
+
     private string? _search;
 
     private string? _code;
 
+    private string? _issueOrganizationId;
+
+    private int _issueMaxUses = 5;
+
+    private int _issueValidDays = 30;
+
+    private static bool IsStaffMember(MembershipSnapshot entry) =>
+        string.Equals(entry.MembershipStatus, "Active", StringComparison.Ordinal) &&
+        entry.WorkspaceIds.Count > 0;
+
+    protected override void OnParametersSet()
+    {
+        if (Snapshot is null)
+        {
+            _issueOrganizationId = null;
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_issueOrganizationId))
+        {
+            _issueOrganizationId = Snapshot.Memberships
+                .Where(IsStaffMember)
+                .Select(entry => entry.OrganizationId)
+                .FirstOrDefault();
+        }
+    }
+
     private void CodeChanged(string value) => _code = value;
 
     private Task RedeemAsync() => OnRedeem.InvokeAsync(_code);
+
+    private void IssueOrganizationChanged(string value) => _issueOrganizationId = value;
+
+    private void IssueMaxUsesChanged(int value) => _issueMaxUses = Math.Clamp(value, 1, 100);
+
+    private void IssueValidDaysChanged(int value) => _issueValidDays = Math.Clamp(value, 1, 365);
+
+    private Task IssueAsync()
+    {
+        var expiresAtUtc = DateTimeOffset.UtcNow.AddDays(_issueValidDays);
+        return OnIssue.InvokeAsync(new InvitationIssueRequest(_issueOrganizationId ?? string.Empty, _issueMaxUses, expiresAtUtc));
+    }
 
     private Task SearchChangedAsync(string value)
     {

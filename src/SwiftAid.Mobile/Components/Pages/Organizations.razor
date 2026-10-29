@@ -10,7 +10,7 @@
 
 <ErrorBoundary @ref="_boundary">
     <ChildContent>
-        <OrganizationsSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OnSearch="SearchAsync" OnRequest="RequestAsync" OnRedeem="RedeemAsync" />
+        <OrganizationsSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OnSearch="SearchAsync" OnRequest="RequestAsync" OnRedeem="RedeemAsync" OnIssue="IssueAsync" />
     </ChildContent>
     <ErrorContent>
         <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert">
@@ -105,6 +105,24 @@
         _snapshot = result.Code == UiCapabilityResultCode.Success
             ? mapped with { StatusMessage = "Invitation accepted. Your request is pending review.", StatusIsError = false }
             : mapped with { StatusMessage = result.Message ?? "Redeeming the invitation failed.", StatusIsError = true };
+    }
+
+    private async Task IssueAsync(InvitationIssueRequest request)
+    {
+        _snapshot = _snapshot with { IsSaving = true, StatusMessage = null, StatusIsError = false, IssuedInvitation = null };
+        var result = await MembershipClient.IssueAsync(request.OrganizationId, request.MaxUses, request.ExpiresAtUtc);
+        var memberships = await MembershipClient.GetMineAsync();
+        var requests = await MembershipClient.GetMyRequestsAsync();
+        var mapped = Map(memberships, requests, _snapshot.Directory, _snapshot) with { IsSaving = false };
+        _snapshot = result.Code == UiCapabilityResultCode.Success && result.Value is not null
+            ? mapped with
+            {
+                StatusMessage = "Invitation code created. Save it now — it is shown only once.",
+                StatusIsError = false,
+                IssuedInvitation = new OrganizationInvitationIssue(
+                    result.Value.Code, result.Value.OrganizationId, result.Value.ExpiresAtUtc)
+            }
+            : mapped with { StatusMessage = result.Message ?? "Issuing the invitation failed.", StatusIsError = true };
     }
 
     private static OrganizationsSnapshot Map(

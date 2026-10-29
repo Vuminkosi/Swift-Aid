@@ -16,6 +16,8 @@ public sealed record MembershipRequestView(
 
 public sealed record InvitationRedeemView(string OrganizationId, string Status);
 
+public sealed record InvitationIssueView(string Code, string OrganizationId, DateTimeOffset? ExpiresAtUtc);
+
 /// <summary>Member-side organization access: my memberships, directory, join requests.</summary>
 public interface IOrganizationMembershipClient
 {
@@ -36,6 +38,12 @@ public interface IOrganizationMembershipClient
 
     Task<UiCapabilityResult<InvitationRedeemView>> RedeemAsync(
         string code,
+        CancellationToken cancellationToken = default);
+
+    Task<UiCapabilityResult<InvitationIssueView>> IssueAsync(
+        string organizationId,
+        int maxUses,
+        DateTimeOffset? expiresAtUtc,
         CancellationToken cancellationToken = default);
 }
 
@@ -69,6 +77,16 @@ public sealed class UnavailableOrganizationMembershipClient : IOrganizationMembe
     {
         ArgumentNullException.ThrowIfNull(code);
         return Unavailable<InvitationRedeemView>(cancellationToken);
+    }
+
+    public Task<UiCapabilityResult<InvitationIssueView>> IssueAsync(
+        string organizationId,
+        int maxUses,
+        DateTimeOffset? expiresAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(organizationId);
+        return Unavailable<InvitationIssueView>(cancellationToken);
     }
 
     private static Task<UiCapabilityResult<T>> Unavailable<T>(CancellationToken cancellationToken)
