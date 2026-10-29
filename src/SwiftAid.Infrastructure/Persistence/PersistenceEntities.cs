@@ -324,3 +324,28 @@ public sealed class UserProfileEntity
 
     public DateTimeOffset UpdatedAtUtc { get; set; }
 }
+/// <summary>Canonical geographic registry record. Stable curated IDs; coordinates only when verified.</summary>
+public sealed class GeographicLocationEntity
+{
+    public required string LocationId { get; set; }
+
+    public required string CountryCode { get; set; }
+
+    public required string Name { get; set; }
+
+    public required string LocationKind { get; set; }
+
+    public string? ParentId { get; set; }
+
+    public double? Latitude { get; set; }
+
+    public double? Longitude { get; set; }
+
+    public required string Source { get; set; }
+
+    public required string Verification { get; set; }
+
+    public bool IsActive { get; set; }
+
+    public DateTimeOffset ImportedAtUtc { get; set; }
+}

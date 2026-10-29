@@ -55,6 +55,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
     public DbSet<IntakeEvidenceLinkEntity> IntakeEvidenceLinks => Set<IntakeEvidenceLinkEntity>();
     public DbSet<IntakeCoordinationActionEntity> IntakeCoordinationActions => Set<IntakeCoordinationActionEntity>();
     public DbSet<ManagedCaseObservationEntity> ManagedCaseObservations => Set<ManagedCaseObservationEntity>();
+    public DbSet<GeographicLocationEntity> GeographicLocations => Set<GeographicLocationEntity>();
     public DbSet<ManagedCaseFollowUpEntity> ManagedCaseFollowUps => Set<ManagedCaseFollowUpEntity>();
     public DbSet<ManagedCaseEscalationEntity> ManagedCaseEscalations => Set<ManagedCaseEscalationEntity>();
     public DbSet<CommunitySessionEntity> CommunitySessions => Set<CommunitySessionEntity>();
@@ -83,6 +84,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         modelBuilder.ApplyConfiguration(new IntakePromotionEntityConfiguration());
         modelBuilder.ApplyConfiguration(new IntakeEvidenceLinkEntityConfiguration());
         modelBuilder.ApplyConfiguration(new IntakeCoordinationActionEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new GeographicLocationEntityConfiguration());
         modelBuilder.ApplyConfiguration(new ManagedCaseObservationEntityConfiguration());
         modelBuilder.ApplyConfiguration(new ManagedCaseFollowUpEntityConfiguration());
         modelBuilder.ApplyConfiguration(new ManagedCaseEscalationEntityConfiguration());

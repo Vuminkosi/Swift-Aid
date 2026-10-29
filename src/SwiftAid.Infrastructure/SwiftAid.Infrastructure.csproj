@@ -1,10 +1,12 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\SwiftAid.Application\SwiftAid.Application.csproj" />
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="..\..\resources\catalogues\location-registry.southern-africa.seed1.json"
+                          LogicalName="SwiftAid.Infrastructure.Resources.Catalogues.location-registry.southern-africa.seed1.json" />
     <EmbeddedResource Include="..\..\resources\catalogues\country-areas.m49.2026-10-27.1.json"
                       LogicalName="SwiftAid.Infrastructure.Resources.Catalogues.country-areas.m49.2026-10-27.1.json" />
   </ItemGroup>

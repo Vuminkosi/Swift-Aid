@@ -43,6 +43,7 @@ using SwiftAid.Infrastructure.Persistence.Transactions;
 using SwiftAid.Infrastructure.Storage;
 using SwiftAid.Infrastructure.Identity;
 using SwiftAid.Infrastructure.Intake;
+using SwiftAid.Infrastructure.Intake.Geography;
 using StackExchange.Redis;
 using SwiftAid.Domain.Intake;
 
@@ -116,6 +117,8 @@ public static class ServiceCollectionExtensions
         services.TryAddScoped<IIntakeService, IntakeService>();
         services.TryAddScoped<IIntakeSessionEndpointService, IntakeSessionEndpointService>();
         services.TryAddScoped<IIntakeCountryCatalogue, IntakeCountryCatalogue>();
+        services.TryAddScoped<IGeographicRegistryImporter, GeographicRegistryImporter>();
+        services.TryAddScoped<IGeographicRegistry, GeographicRegistryService>();
         services.TryAddScoped<IIntakeCoverageCatalog, PostgresIntakeCoverageCatalog>();
         services.TryAddScoped<IIntakeSubmissionStore, PostgresIntakeSubmissionStore>();
         services.TryAddScoped<IIntakeSessionAuthority, PostgresIntakeSessionAuthority>();

@@ -1791,6 +1791,74 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.GeographicLocationEntity", b =>
+                {
+                    b.Property<string>("LocationId")
+                        .HasColumnType("text")
+                        .HasColumnName("location_id");
+
+                    b.Property<string>("CountryCode")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("country_code");
+
+                    b.Property<DateTimeOffset>("ImportedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("imported_at_utc");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<double?>("Latitude")
+                        .HasColumnType("double precision")
+                        .HasColumnName("latitude");
+
+                    b.Property<string>("LocationKind")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("location_kind");
+
+                    b.Property<double?>("Longitude")
+                        .HasColumnType("double precision")
+                        .HasColumnName("longitude");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("name");
+
+                    b.Property<string>("ParentId")
+                        .HasColumnType("text")
+                        .HasColumnName("parent_id");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("source");
+
+                    b.Property<string>("Verification")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("verification");
+
+                    b.HasKey("LocationId")
+                        .HasName("pk_geo_locations");
+
+                    b.HasIndex("ParentId")
+                        .HasDatabaseName("ix_geo_locations_parent");
+
+                    b.HasIndex("CountryCode", "Name")
+                        .HasDatabaseName("ix_geo_locations_country_name");
+
+                    b.ToTable("locations", "swiftaid_geo", t =>
+                        {
+                            t.HasCheckConstraint("ck_geo_locations_ids_nonempty", "length(btrim(location_id)) > 0 AND length(btrim(name)) > 0 AND length(btrim(country_code)) = 2");
+
+                            t.HasCheckConstraint("ck_geo_locations_kind", "location_kind IN ('Country', 'Region', 'Province', 'Settlement')");
+                        });
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.ManagedCaseEntity", b =>
                 {
                     b.Property<Guid>("CaseId")
@@ -2214,6 +2282,67 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_organizations_lock_token_zero", "lock_token = 0");
 
                             t.HasCheckConstraint("ck_organizations_status", "status IN ('Active', 'Suspended', 'Revoked')");
+                        });
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.OrganizationInvitationEntity", b =>
+                {
+                    b.Property<Guid>("InvitationId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("invitation_id");
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("code_hash");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("CreatedByActorId")
+                        .HasColumnType("text")
+                        .HasColumnName("created_by_actor_id");
+
+                    b.Property<DateTimeOffset?>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at_utc");
+
+                    b.Property<int>("MaxUses")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_uses");
+
+                    b.Property<string>("OrganizationId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<int>("UseCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("use_count");
+
+                    b.HasKey("InvitationId")
+                        .HasName("pk_organization_invitations");
+
+                    b.HasIndex("CodeHash")
+                        .IsUnique()
+                        .HasDatabaseName("ux_organization_invitations_code_hash");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.ToTable("organization_invitations", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_invitations_ids_nonempty", "length(btrim(organization_id)) > 0 AND length(btrim(code_hash)) > 0");
+
+                            t.HasCheckConstraint("ck_invitations_status", "status IN ('Active', 'Revoked', 'Exhausted', 'Expired')");
+
+                            t.HasCheckConstraint("ck_invitations_uses_nonnegative", "use_count >= 0 AND max_uses > 0 AND use_count <= max_uses");
                         });
                 });
 
@@ -3171,6 +3300,15 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_intake_routes_organization");
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.GeographicLocationEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.GeographicLocationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ParentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_geo_locations_parent");
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.ManagedCaseEntity", b =>
                 {
                     b.HasOne("SwiftAid.Infrastructure.Persistence.ActorEntity", null)
@@ -3244,6 +3382,16 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_push_devices_actor");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.OrganizationInvitationEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.OrganizationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_invitations_organization");
                 });
 
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.OrganizationMembershipEntity", b =>

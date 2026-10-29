@@ -39,6 +39,12 @@ public static class PublicIntakeEndpoints
         routes.MapGet("/metadata/countries", GetCountriesAsync)
             .AllowAnonymous()
             .WithName("GetPublicIntakeCountries");
+        routes.MapGet("/geo/search", SearchGeoAsync)
+            .AllowAnonymous()
+            .WithName("SearchPublicGeoRegistry");
+        routes.MapGet("/geo/children", GetGeoChildrenAsync)
+            .AllowAnonymous()
+            .WithName("GetPublicGeoRegistryChildren");
     }
 
     private static IResult GetMetadata(HttpContext context)
@@ -302,6 +308,79 @@ public static class PublicIntakeEndpoints
         };
         options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
         return options;
+    }
+
+    private static async Task<IResult> SearchGeoAsync(HttpContext context, CancellationToken cancellationToken)
+    {
+        context.Response.Headers.CacheControl = "public, max-age=300";
+        var registry = context.RequestServices.GetService<IGeographicRegistry>();
+        if (registry is null)
+        {
+            return Unavailable();
+        }
+
+        var query = context.Request.Query["q"].ToString();
+        var country = context.Request.Query["country"].ToString();
+        if (string.IsNullOrWhiteSpace(query) || query.Trim().Length < 2)
+        {
+            return InvalidRequest();
+        }
+
+        var limit = 25;
+        var limitText = context.Request.Query["limit"].ToString();
+        if (!string.IsNullOrWhiteSpace(limitText) &&
+            (!int.TryParse(limitText, out limit) || limit < 1 || limit > 25))
+        {
+            return InvalidRequest();
+        }
+
+        try
+        {
+            var response = await registry.SearchAsync(
+                query.Trim(),
+                string.IsNullOrWhiteSpace(country) ? null : country.Trim(),
+                limit,
+                cancellationToken).ConfigureAwait(false);
+            return Results.Ok(response);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            return Unavailable();
+        }
+    }
+
+    private static async Task<IResult> GetGeoChildrenAsync(HttpContext context, CancellationToken cancellationToken)
+    {
+        context.Response.Headers.CacheControl = "public, max-age=300";
+        var registry = context.RequestServices.GetService<IGeographicRegistry>();
+        if (registry is null)
+        {
+            return Unavailable();
+        }
+
+        var parentId = context.Request.Query["parentId"].ToString();
+        if (string.IsNullOrWhiteSpace(parentId) || parentId.Length > 128)
+        {
+            return InvalidRequest();
+        }
+
+        try
+        {
+            var response = await registry.GetChildrenAsync(parentId.Trim(), cancellationToken).ConfigureAwait(false);
+            return Results.Ok(response);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            return Unavailable();
+        }
     }
 
     private static IResult NoStore(IResult result) => new NoStoreResult(result);
