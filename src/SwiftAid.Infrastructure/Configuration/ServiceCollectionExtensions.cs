@@ -429,9 +429,16 @@ public static class ServiceCollectionExtensions
             identity.SignIn.RequireConfirmedAccount = false;
             identity.Lockout.AllowedForNewUsers = true;
             identity.Stores.SchemaVersion = IdentitySchemaVersions.Version3;
+            identity.Password.RequiredLength = 8;
+            identity.Password.RequireDigit = true;
+            identity.Password.RequireLowercase = true;
+            identity.Password.RequireUppercase = false;
+            identity.Password.RequireNonAlphanumeric = true;
+            identity.Password.RequiredUniqueChars = 1;
         })
             .AddSignInManager()
-            .AddEntityFrameworkStores<SwiftAidDbContext>();
+            .AddEntityFrameworkStores<SwiftAidDbContext>()
+            .AddDefaultTokenProviders();
         services.AddScoped<IUserClaimsPrincipalFactory<SwiftAidUser>, SwiftAidUserClaimsPrincipalFactory>();
         services.AddAntiforgery(options => options.HeaderName = "X-CSRF-TOKEN");
 
@@ -459,6 +466,10 @@ public static class ServiceCollectionExtensions
             });
 
         FederationSetup.AddConfiguredProviders(authentication, federationOptions);
+        services.Configure<PublicSiteOptions>(configuration.GetSection("PublicSite"));
+        services.Configure<SmtpEmailOptions>(configuration.GetSection("Smtp"));
+        services.AddScoped<IEmailSender<SwiftAidUser>, SmtpEmailSender>();
+        services.AddScoped<IPasswordIdentityRegistrar, PasswordIdentityRegistrar>();
         services.AddSingleton<OrganizationSsoRegistry>();
         services.AddScoped<IExternalIdentityMappingStore, EfExternalIdentityMappingStore>();
         services.AddScoped<IExternalIdentityResolver, ExternalIdentityResolver>();

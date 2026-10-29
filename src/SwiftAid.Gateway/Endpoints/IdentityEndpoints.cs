@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using System.Text.Json;
 using System.Net.Http.Headers;
+using System.Net.Mail;
+using Microsoft.Extensions.Options;
 using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
@@ -48,6 +50,13 @@ public static class IdentityEndpoints
             group.MapPost("/identities/{providerId}/unlink", UnlinkExternalIdentity);
             group.MapPost("/logout", SignOutSwiftAid);
         }
+
+        group.MapGet("/password/policy", GetPasswordPolicy);
+        group.MapPost("/password/register", RegisterPasswordUser);
+        group.MapPost("/password/login", LoginPasswordUser);
+        group.MapPost("/password/change", ChangePasswordUser);
+        group.MapPost("/password/reset/request", RequestPasswordReset);
+        group.MapPost("/password/reset/confirm", ConfirmPasswordReset);
 
         if (identityServerOptions.Enabled)
         {
@@ -792,6 +801,512 @@ public static class IdentityEndpoints
         return Results.NoContent();
     }
 
+    private static IResult GetPasswordPolicy(IOptions<IdentityOptions> identityOptions, HttpContext context)
+    {
+        SetNoStore(context);
+        var password = identityOptions.Value.Password;
+        return Results.Ok(new PasswordPolicyResponse(
+            password.RequiredLength,
+            password.RequireDigit,
+            password.RequireLowercase,
+            password.RequireUppercase,
+            password.RequireNonAlphanumeric,
+            password.RequiredUniqueChars));
+    }
+
+    private static async Task<IResult> RegisterPasswordUser(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IPasswordIdentityRegistrar registrar,
+        UserManager<SwiftAidUser> userManager,
+        SignInManager<SwiftAidUser> signInManager,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false);
+        }
+        catch (AntiforgeryValidationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The registration request is invalid.");
+        }
+        catch (InvalidOperationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The registration request is invalid.");
+        }
+
+        if (context.User.Identity?.IsAuthenticated == true)
+        {
+            return PasswordError(context, StatusCodes.Status409Conflict, "You are already signed in.");
+        }
+
+        var bodyRead = await ReadPasswordRequestAsync(context.Request, cancellationToken).ConfigureAwait(false);
+        if (bodyRead.Status != PasswordBodyStatus.Valid || bodyRead.Request is null)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "Enter an email address and password.");
+        }
+
+        var email = bodyRead.Request.Email?.Trim() ?? string.Empty;
+        var password = bodyRead.Request.Password ?? string.Empty;
+        bodyRead.Request.Password = string.Empty;
+        if (!IsValidPasswordEmail(email) || string.IsNullOrEmpty(password) || password.Length > 256)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "Enter a valid email address and password.");
+        }
+
+        try
+        {
+            var registration = await registrar.RegisterAsync(email, password, cancellationToken)
+                .ConfigureAwait(false);
+            if (registration.Status == PasswordRegistrationStatus.DuplicateEmail)
+            {
+                return PasswordError(
+                    context,
+                    StatusCodes.Status409Conflict,
+                    "An account with this email already exists. Sign in instead.");
+            }
+
+            if (registration.Status == PasswordRegistrationStatus.Unavailable)
+            {
+                return PasswordError(context, StatusCodes.Status503ServiceUnavailable, "Registration is temporarily unavailable.");
+            }
+
+            if (registration.Status != PasswordRegistrationStatus.Registered ||
+                string.IsNullOrWhiteSpace(registration.ActorId))
+            {
+                return PasswordError(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    registration.Errors?.FirstOrDefault() ?? "The password does not meet the requirements.");
+            }
+
+            var user = await userManager.FindByIdAsync(registration.ActorId).ConfigureAwait(false);
+            if (user is null)
+            {
+                return PasswordError(context, StatusCodes.Status503ServiceUnavailable, "Registration is temporarily unavailable.");
+            }
+
+            await signInManager.SignInAsync(user, isPersistent: false).ConfigureAwait(false);
+            SetNoStore(context);
+            return Results.Ok(new PasswordAuthResponse(user.Email ?? email));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return PasswordError(context, StatusCodes.Status503ServiceUnavailable, "Registration is temporarily unavailable.");
+        }
+    }
+
+    private static async Task<IResult> LoginPasswordUser(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        UserManager<SwiftAidUser> userManager,
+        SignInManager<SwiftAidUser> signInManager,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false);
+        }
+        catch (AntiforgeryValidationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The sign-in request is invalid.");
+        }
+        catch (InvalidOperationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The sign-in request is invalid.");
+        }
+
+        if (context.User.Identity?.IsAuthenticated == true)
+        {
+            return PasswordError(context, StatusCodes.Status409Conflict, "You are already signed in.");
+        }
+
+        var bodyRead = await ReadPasswordRequestAsync(context.Request, cancellationToken).ConfigureAwait(false);
+        if (bodyRead.Status != PasswordBodyStatus.Valid || bodyRead.Request is null)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "Enter an email address and password.");
+        }
+
+        var email = bodyRead.Request.Email?.Trim() ?? string.Empty;
+        var password = bodyRead.Request.Password ?? string.Empty;
+        var rememberMe = bodyRead.Request.RememberMe;
+        bodyRead.Request.Password = string.Empty;
+        if (!IsValidPasswordEmail(email) || string.IsNullOrEmpty(password) || password.Length > 256)
+        {
+            return PasswordError(context, StatusCodes.Status401Unauthorized, "The email or password is incorrect.");
+        }
+
+        try
+        {
+            var user = await userManager.FindByEmailAsync(email).ConfigureAwait(false);
+            if (user is null)
+            {
+                return PasswordError(context, StatusCodes.Status401Unauthorized, "The email or password is incorrect.");
+            }
+
+            var check = await signInManager.CheckPasswordSignInAsync(user, password, lockoutOnFailure: true)
+                .ConfigureAwait(false);
+            if (!check.Succeeded)
+            {
+                return PasswordError(context, StatusCodes.Status401Unauthorized, "The email or password is incorrect.");
+            }
+
+            await signInManager.SignInAsync(user, isPersistent: rememberMe).ConfigureAwait(false);
+            SetNoStore(context);
+            return Results.Ok(new PasswordAuthResponse(user.Email ?? email));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return PasswordError(context, StatusCodes.Status503ServiceUnavailable, "Sign-in is temporarily unavailable.");
+        }
+    }
+
+    private static async Task<IResult> ChangePasswordUser(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        UserManager<SwiftAidUser> userManager,
+        SignInManager<SwiftAidUser> signInManager,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false);
+        }
+        catch (AntiforgeryValidationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The change-password request is invalid.");
+        }
+        catch (InvalidOperationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The change-password request is invalid.");
+        }
+
+        if (context.User.Identity?.IsAuthenticated != true)
+        {
+            return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to change your password.");
+        }
+
+        var bodyRead = await ReadPasswordRequestAsync(context.Request, cancellationToken).ConfigureAwait(false);
+        if (bodyRead.Status != PasswordBodyStatus.Valid || bodyRead.Request is null)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "Enter the current and a new password.");
+        }
+
+        var currentPassword = bodyRead.Request.CurrentPassword ?? string.Empty;
+        var newPassword = bodyRead.Request.NewPassword ?? string.Empty;
+        bodyRead.Request.CurrentPassword = string.Empty;
+        bodyRead.Request.NewPassword = string.Empty;
+        if (string.IsNullOrEmpty(currentPassword) || string.IsNullOrEmpty(newPassword) ||
+            currentPassword.Length > 256 || newPassword.Length > 256)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "Enter the current and a new password.");
+        }
+
+        try
+        {
+            var user = await userManager.GetUserAsync(context.User).ConfigureAwait(false);
+            if (user is null)
+            {
+                return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to change your password.");
+            }
+
+            var changed = await userManager.ChangePasswordAsync(user, currentPassword, newPassword)
+                .ConfigureAwait(false);
+            if (!changed.Succeeded)
+            {
+                var failure = changed.Errors.FirstOrDefault();
+                return PasswordError(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    string.IsNullOrWhiteSpace(failure?.Description)
+                        ? "The password could not be changed."
+                        : failure.Description);
+            }
+
+            await signInManager.RefreshSignInAsync(user).ConfigureAwait(false);
+            SetNoStore(context);
+            return Results.NoContent();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return PasswordError(context, StatusCodes.Status503ServiceUnavailable, "Changing the password is temporarily unavailable.");
+        }
+    }
+
+    private static async Task<IResult> RequestPasswordReset(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        UserManager<SwiftAidUser> userManager,
+        IEmailSender<SwiftAidUser> emailSender,
+        IOptions<SmtpEmailOptions> smtpOptions,
+        IOptions<PublicSiteOptions> siteOptions,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false);
+        }
+        catch (AntiforgeryValidationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The reset request is invalid.");
+        }
+        catch (InvalidOperationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The reset request is invalid.");
+        }
+
+        var bodyRead = await ReadPasswordRequestAsync(context.Request, cancellationToken).ConfigureAwait(false);
+        if (bodyRead.Status != PasswordBodyStatus.Valid || bodyRead.Request is null)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "Enter a valid email address.");
+        }
+
+        var email = bodyRead.Request.Email?.Trim() ?? string.Empty;
+        if (!IsValidPasswordEmail(email))
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "Enter a valid email address.");
+        }
+
+        try
+        {
+            var smtp = smtpOptions.Value;
+            if (!smtp.Enabled ||
+                string.IsNullOrWhiteSpace(smtp.Host) ||
+                string.IsNullOrWhiteSpace(smtp.FromAddress))
+            {
+                return PasswordError(
+                    context,
+                    StatusCodes.Status503ServiceUnavailable,
+                    "Password reset is temporarily unavailable. Try again later.");
+            }
+
+            var user = await userManager.FindByEmailAsync(email).ConfigureAwait(false);
+            if (user is not null && !string.IsNullOrWhiteSpace(user.Email))
+            {
+                var token = await userManager.GeneratePasswordResetTokenAsync(user).ConfigureAwait(false);
+                var code = WebEncoders.Base64UrlEncode(System.Text.Encoding.UTF8.GetBytes(token));
+                var resetLink = BuildPasswordResetLink(context, siteOptions.Value, user.Id, code);
+                await emailSender.SendPasswordResetLinkAsync(user, user.Email, resetLink).ConfigureAwait(false);
+            }
+
+            SetNoStore(context);
+            return Results.Ok(new PasswordResetRequestResponse(
+                "If an account matches this address, reset instructions have been sent."));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return PasswordError(
+                context,
+                StatusCodes.Status503ServiceUnavailable,
+                "Password reset is temporarily unavailable. Try again later.");
+        }
+    }
+
+    private static async Task<IResult> ConfirmPasswordReset(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        UserManager<SwiftAidUser> userManager,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false);
+        }
+        catch (AntiforgeryValidationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The reset request is invalid.");
+        }
+        catch (InvalidOperationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The reset request is invalid.");
+        }
+
+        var bodyRead = await ReadPasswordRequestAsync(context.Request, cancellationToken).ConfigureAwait(false);
+        if (bodyRead.Status != PasswordBodyStatus.Valid || bodyRead.Request is null)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The reset link is invalid or has expired.");
+        }
+
+        var userId = bodyRead.Request.UserId?.Trim() ?? string.Empty;
+        var code = bodyRead.Request.Code?.Trim() ?? string.Empty;
+        var newPassword = bodyRead.Request.NewPassword ?? string.Empty;
+        bodyRead.Request.Code = string.Empty;
+        bodyRead.Request.NewPassword = string.Empty;
+        if (string.IsNullOrWhiteSpace(userId) || userId.Length > 128 ||
+            string.IsNullOrWhiteSpace(code) || code.Length > 4096 ||
+            string.IsNullOrEmpty(newPassword) || newPassword.Length > 256)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The reset link is invalid or has expired.");
+        }
+
+        try
+        {
+            var user = await userManager.FindByIdAsync(userId).ConfigureAwait(false);
+            if (user is null)
+            {
+                return PasswordError(context, StatusCodes.Status400BadRequest, "The reset link is invalid or has expired.");
+            }
+
+            string token;
+            try
+            {
+                token = System.Text.Encoding.UTF8.GetString(WebEncoders.Base64UrlDecode(code));
+            }
+            catch (FormatException)
+            {
+                return PasswordError(context, StatusCodes.Status400BadRequest, "The reset link is invalid or has expired.");
+            }
+
+            var reset = await userManager.ResetPasswordAsync(user, token, newPassword).ConfigureAwait(false);
+            if (!reset.Succeeded)
+            {
+                var failure = reset.Errors.FirstOrDefault();
+                if (failure is not null &&
+                    !string.Equals(failure.Code, "InvalidToken", StringComparison.Ordinal) &&
+                    !string.IsNullOrWhiteSpace(failure.Description))
+                {
+                    return PasswordError(context, StatusCodes.Status400BadRequest, failure.Description);
+                }
+
+                return PasswordError(context, StatusCodes.Status400BadRequest, "The reset link is invalid or has expired.");
+            }
+
+            SetNoStore(context);
+            return Results.NoContent();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return PasswordError(context, StatusCodes.Status503ServiceUnavailable, "Password reset is temporarily unavailable. Try again later.");
+        }
+    }
+
+    private static bool IsValidPasswordEmail(string email)
+    {
+        if (string.IsNullOrWhiteSpace(email) || email.Length > 256)
+        {
+            return false;
+        }
+
+        try
+        {
+            _ = new MailAddress(email);
+            return true;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private static string BuildPasswordResetLink(
+        HttpContext context,
+        PublicSiteOptions siteOptions,
+        string userId,
+        string code)
+    {
+        var configured = siteOptions.BaseUrl?.Trim().TrimEnd('/');
+        var origin = string.IsNullOrWhiteSpace(configured)
+            ? $"{context.Request.Scheme}://{context.Request.Host}"
+            : configured;
+        return QueryHelpers.AddQueryString(
+            $"{origin}/reset-password",
+            new Dictionary<string, string?>
+            {
+                ["userId"] = userId,
+                ["code"] = code
+            });
+    }
+
+    private static async Task<PasswordBodyReadResult> ReadPasswordRequestAsync(
+        HttpRequest request,
+        CancellationToken cancellationToken)
+    {
+        const int maximumBytes = 4096;
+        if (!IsJsonContentType(request.ContentType))
+        {
+            return new PasswordBodyReadResult(PasswordBodyStatus.Invalid);
+        }
+
+        if (request.ContentLength > maximumBytes)
+        {
+            return new PasswordBodyReadResult(PasswordBodyStatus.Oversized);
+        }
+
+        var buffer = new byte[maximumBytes + 1];
+        var total = 0;
+        try
+        {
+            while (true)
+            {
+                var remaining = maximumBytes + 1 - total;
+                if (remaining <= 0)
+                {
+                    return new PasswordBodyReadResult(PasswordBodyStatus.Oversized);
+                }
+
+                var read = await request.Body.ReadAsync(
+                    buffer.AsMemory(total, Math.Min(1024, remaining)),
+                    cancellationToken).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                total += read;
+            }
+
+            if (total > maximumBytes)
+            {
+                return new PasswordBodyReadResult(PasswordBodyStatus.Oversized);
+            }
+
+            var payload = JsonSerializer.Deserialize<PasswordRequest>(
+                buffer.AsSpan(0, total),
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            return payload is null
+                ? new PasswordBodyReadResult(PasswordBodyStatus.Invalid)
+                : new PasswordBodyReadResult(PasswordBodyStatus.Valid, payload);
+        }
+        catch (JsonException)
+        {
+            return new PasswordBodyReadResult(PasswordBodyStatus.Invalid);
+        }
+        finally
+        {
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(buffer);
+        }
+    }
+
+    private static IResult PasswordError(HttpContext context, int statusCode, string message)
+    {
+        SetNoStore(context);
+        return Results.Json(new PasswordAuthError(message), statusCode: statusCode);
+    }
+
     private static async Task<IResult> AuthorizeClient(
         HttpContext context,
         SwiftAidDbContext dbContext,
@@ -1112,6 +1627,52 @@ public static class IdentityEndpoints
         !value.Contains('\\') &&
         !value.Contains('\r') &&
         !value.Contains('\n');
+
+    private sealed record PasswordPolicyResponse(
+        int MinimumLength,
+        bool RequireDigit,
+        bool RequireLowercase,
+        bool RequireUppercase,
+        bool RequireSymbol,
+        int RequiredUniqueChars);
+
+    private sealed record PasswordAuthResponse(string Email);
+
+    private sealed record PasswordResetRequestResponse(string Message);
+
+    private sealed record PasswordAuthError(string Error);
+
+    private sealed class PasswordRequest
+    {
+        public PasswordRequest()
+        {
+        }
+
+        public string? Email { get; set; }
+
+        public string? Password { get; set; }
+
+        public bool RememberMe { get; set; }
+
+        public string? CurrentPassword { get; set; }
+
+        public string? NewPassword { get; set; }
+
+        public string? UserId { get; set; }
+
+        public string? Code { get; set; }
+    }
+
+    private enum PasswordBodyStatus
+    {
+        Valid,
+        Invalid,
+        Oversized
+    }
+
+    private sealed record PasswordBodyReadResult(
+        PasswordBodyStatus Status,
+        PasswordRequest? Request = null);
 
     private sealed record ProviderAvailability(string Id, string DisplayName, bool Available);
 

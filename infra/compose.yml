@@ -95,6 +95,18 @@ services:
       Identity__PublicClients__0__RedirectUris__0: "${Identity__PublicClients__0__RedirectUris__0:-online.swiftaid.mobile:/oauth2redirect}"
       Identity__PublicClients__0__PostLogoutRedirectUris__0: "${Identity__PublicClients__0__PostLogoutRedirectUris__0:-online.swiftaid.mobile:/signout-callback}"
 
+      # SMTP delivery for account mail (password reset). Disabled until the
+      # operator provides relay credentials in .env; reset requests fail
+      # closed without them.
+      Smtp__Enabled: "${Smtp__Enabled:-false}"
+      Smtp__Host: "${Smtp__Host:-}"
+      Smtp__Port: "${Smtp__Port:-587}"
+      Smtp__EnableSsl: "${Smtp__EnableSsl:-true}"
+      Smtp__UserName: "${Smtp__UserName:-}"
+      Smtp__Password: "${Smtp__Password:-}"
+      Smtp__FromAddress: "${Smtp__FromAddress:-}"
+      Smtp__FromDisplayName: "${Smtp__FromDisplayName:-SwiftAid}"
+
       # Firebase Cloud Messaging
       Fcm__Enabled: "${FCM_ENABLED:-false}"
       Fcm__ProjectId: "${FCM_PROJECT_ID:-}"

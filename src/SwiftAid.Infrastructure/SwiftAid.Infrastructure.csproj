@@ -22,6 +22,8 @@
     <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" />
     <PackageReference Include="NATS.Net" />
     <PackageReference Include="FirebaseAdmin" />
+    <PackageReference Include="MailKit" VersionOverride="4.17.0" />
+    <PackageReference Include="System.Security.Cryptography.Pkcs" VersionOverride="10.0.14" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection.Extensions" />
     <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.Google" />
