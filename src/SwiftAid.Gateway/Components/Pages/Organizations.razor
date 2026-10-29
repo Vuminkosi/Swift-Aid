@@ -9,6 +9,8 @@
 
 <PageTitle>Organizations | SwiftAid</PageTitle>
 
+<AccountSettingsLayout>
+
 <ErrorBoundary @ref="_boundary">
     <ChildContent>
         <OrganizationsSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OnSearch="SearchAsync" OnRequest="RequestAsync" OnRedeem="RedeemAsync" OnIssue="IssueAsync" />
@@ -23,6 +25,8 @@
         </MudButton>
     </ErrorContent>
 </ErrorBoundary>
+
+</AccountSettingsLayout>
 
 @code {
     private ErrorBoundary? _boundary;

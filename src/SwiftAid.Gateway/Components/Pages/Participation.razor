@@ -9,7 +9,11 @@
 
 <PageTitle>Participation | SwiftAid</PageTitle>
 
+<AccountSettingsLayout>
+
 <ParticipationPreferenceSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OrganizationsHref="/organizations" />
+
+</AccountSettingsLayout>
 
 @code {
     private ParticipationPreferenceSnapshot _snapshot = ParticipationPreferenceSnapshot.Loading;

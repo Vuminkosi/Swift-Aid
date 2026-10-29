@@ -9,7 +9,11 @@
 
 <PageTitle>My profile | SwiftAid</PageTitle>
 
+<AccountSettingsLayout>
+
 <ProfileSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OnSave="SaveAsync" OnUploadAvatar="UploadAvatarAsync" OnDeleteAvatar="DeleteAvatarAsync" />
+
+</AccountSettingsLayout>
 
 @code {
     private ProfileSnapshot _snapshot = ProfileSnapshot.Loading;

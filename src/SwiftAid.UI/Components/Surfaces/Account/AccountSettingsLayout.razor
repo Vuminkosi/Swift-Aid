@@ -1,0 +1,17 @@
+<MudGrid Spacing="3" Class="account-settings-layout">
+    <MudItem xs="12" md="3">
+        <MudHidden Breakpoint="Breakpoint.SmAndDown">
+            <div class="account-settings-layout__rail">
+                <AccountSettingsNav />
+            </div>
+        </MudHidden>
+    </MudItem>
+    <MudItem xs="12" md="9">
+        @ChildContent
+    </MudItem>
+</MudGrid>
+
+@code {
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+}

@@ -9,7 +9,12 @@
 
 <PageTitle>Notifications | SwiftAid</PageTitle>
 
-<NotificationsSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OnSave="SaveAsync" />
+<AccountSettingsLayout>
+
+<NotificationsSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OnSave="SaveAsync"
+                        SessionsHref="/sessions" />
+
+</AccountSettingsLayout>
 
 @code {
     private NotificationsSnapshot _snapshot = NotificationsSnapshot.Loading;
