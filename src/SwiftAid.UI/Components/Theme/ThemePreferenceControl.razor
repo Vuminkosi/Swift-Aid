@@ -1,0 +1,84 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JSRuntime
+
+<MudPaper Class="theme-preference-card" Elevation="0">
+    <div>
+        <MudText Typo="Typo.subtitle1" HtmlTag="h2">Appearance</MudText>
+        <MudText Typo="Typo.body2">Choose how SwiftAid looks on this device.</MudText>
+    </div>
+
+    <MudSelect T="string" Label="Theme" Variant="Variant.Outlined" Margin="Margin.Dense"
+               Value="_preference" ValueChanged="PreferenceChangedAsync" Disabled="@_isLoading">
+        <MudSelectItem T="string" Value="@("light")">Light</MudSelectItem>
+        <MudSelectItem T="string" Value="@("dark")">Dark</MudSelectItem>
+        <MudSelectItem T="string" Value="@("system")">Use device setting</MudSelectItem>
+    </MudSelect>
+</MudPaper>
+
+@code {
+    private IJSObjectReference? _themeModule;
+    private string _preference = "system";
+    private bool _isLoading = true;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            _themeModule = await JSRuntime.InvokeAsync<IJSObjectReference>(
+                "import",
+                "./_content/SwiftAid.UI/Components/SwiftAidThemeProvider.razor.js");
+            _preference = await _themeModule.InvokeAsync<string>("getThemePreference");
+        }
+        catch (JSException)
+        {
+            _preference = "system";
+        }
+        catch (InvalidOperationException)
+        {
+            _preference = "system";
+        }
+        finally
+        {
+            _isLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task PreferenceChangedAsync(string preference)
+    {
+        try
+        {
+            _preference = _themeModule is null
+                ? "system"
+                : await _themeModule.InvokeAsync<string>("setThemePreference", preference);
+        }
+        catch (JSException)
+        {
+            _preference = "system";
+        }
+        catch (InvalidOperationException)
+        {
+            _preference = "system";
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_themeModule is not null)
+        {
+            try
+            {
+                await _themeModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // The browser circuit or native WebView is already closing.
+            }
+        }
+    }
+}

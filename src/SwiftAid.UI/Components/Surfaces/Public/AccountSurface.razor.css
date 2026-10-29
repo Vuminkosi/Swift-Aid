@@ -1,0 +1,45 @@
+.public-resource-surface {
+    display: grid;
+    gap: 1.25rem;
+    padding-block: 1.25rem;
+}
+
+.account-card {
+    padding: 1rem;
+    border: 1px solid var(--sa-border);
+    border-radius: 1rem;
+    background: var(--sa-surface);
+}
+
+.account-hero {
+    display: flex;
+    align-items: center;
+    gap: 0.875rem;
+    flex-wrap: wrap;
+}
+
+.account-hero__identity {
+    display: grid;
+    gap: 0.125rem;
+    min-width: 0;
+    flex: 1 1 10rem;
+    overflow-wrap: anywhere;
+}
+
+.account-hero__side {
+    margin-left: auto;
+}
+
+.account-hero__action {
+    flex-basis: 100%;
+    justify-content: flex-start;
+    padding-left: 0;
+}
+
+.account-status-item {
+    list-style: none;
+}
+
+.account-surface ::deep .mud-button-root {
+    min-height: 2.75rem;
+}

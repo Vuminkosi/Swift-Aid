@@ -1,0 +1,17 @@
+.theme-preference-card {
+    display: grid;
+    gap: 0.75rem;
+    padding: 1rem;
+    border: 1px solid var(--sa-border);
+    border-radius: 1rem;
+    background: var(--sa-surface);
+}
+
+.theme-preference-card ::deep .mud-input-control {
+    margin-top: 0;
+}
+
+.theme-preference-card ::deep .mud-input-control,
+.theme-preference-card ::deep .mud-select {
+    min-width: 0;
+}
