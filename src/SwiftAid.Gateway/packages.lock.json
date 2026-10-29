@@ -20,6 +20,15 @@
         "resolved": "10.0.14",
         "contentHash": "T1IOYbID1msKjQEh684HebnN+Xnq/pocMXDukOMZtzzPTf9c4/30+/JndM/1txrqwuSYqWvLiAQWzu4U93cshw=="
       },
+      "Microsoft.AspNetCore.Components.WebAssembly.Server": {
+        "type": "Direct",
+        "requested": "[10.0.14, )",
+        "resolved": "10.0.14",
+        "contentHash": "e2PlO/RdTYl1nQNOYbkZ+/a0r0RolKQZjR2X6PhqwGzW0f7OtO3GBAaX2X42DRur/Y/2Pn4A2Zhs+wwKnELC1g==",
+        "dependencies": {
+          "Microsoft.AspNetCore.Components.WebAssembly": "10.0.14"
+        }
+      },
       "MudBlazor": {
         "type": "Direct",
         "requested": "[9.11.0, )",
@@ -214,6 +223,16 @@
           "Microsoft.Bcl.Cryptography": "10.0.2",
           "Microsoft.IdentityModel.Logging": "8.19.2"
         }
+      },
+      "Microsoft.JSInterop.WebAssembly": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "wT8f5A9FJpTYem4X2O0DJJsw3Bdayy5X/64we6CYOYtw32khmerwXnmiVhmuLDDChq7cNWru8otHVY7XXWw1rg=="
+      },
+      "Microsoft.NET.Sdk.WebAssembly.Pack": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "kmmGbV2b97RTuBCVUUKB0wkaEuYn13O6TuCjqqe8+hrDxBkN1/yFTggSz7eqt70PsQbebsrHgUnirGzXsr0lzg=="
       },
       "Microsoft.OData.Core": {
         "type": "Transitive",
@@ -455,19 +474,37 @@
           "SwiftAid.Domain": "[1.0.0, )"
         }
       },
+      "swiftaid.browser": {
+        "type": "Project",
+        "dependencies": {
+          "Microsoft.AspNetCore.Components.WebAssembly": "[10.0.14, )",
+          "Microsoft.NET.Sdk.WebAssembly.Pack": "[10.0.14, )",
+          "MudBlazor": "[9.11.0, )",
+          "SwiftAid.Contracts": "[1.0.0, )",
+          "SwiftAid.GuestIntake": "[1.0.0, )",
+          "SwiftAid.UI": "[1.0.0, )"
+        }
+      },
       "swiftaid.client": {
         "type": "Project",
         "dependencies": {
           "CommunityToolkit.Datasync.Client": "[10.1.2, )",
           "Duende.IdentityModel.OidcClient": "[7.1.1, )",
           "Microsoft.EntityFrameworkCore.Sqlite": "[10.0.14, )",
-          "SwiftAid.Contracts": "[1.0.0, )"
+          "SwiftAid.Contracts": "[1.0.0, )",
+          "SwiftAid.GuestIntake": "[1.0.0, )"
         }
       },
       "swiftaid.contracts": {
         "type": "Project"
       },
       "swiftaid.domain": {
+        "type": "Project",
+        "dependencies": {
+          "SwiftAid.Contracts": "[1.0.0, )"
+        }
+      },
+      "swiftaid.guestintake": {
         "type": "Project",
         "dependencies": {
           "SwiftAid.Contracts": "[1.0.0, )"
@@ -577,6 +614,15 @@
         "contentHash": "W5g9xaWjPudw7GNwxCqP9uLxpwE1+LkRf4f8i0aF6Ga1AY3qU2UvBa4+41Opz15sO5oTCLwYYXcvb477Ry8NZQ==",
         "dependencies": {
           "Microsoft.IdentityModel.Protocols.OpenIdConnect": "8.19.2"
+        }
+      },
+      "Microsoft.AspNetCore.Components.WebAssembly": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.14, )",
+        "resolved": "10.0.14",
+        "contentHash": "svUQtruowkcELtgxYn290TjYJD0Ud7t1rIVHsb/7MCe5D7a+kWUTNSReHD8K4EFm6Ujr88D3dSsReuznh0je7A==",
+        "dependencies": {
+          "Microsoft.JSInterop.WebAssembly": "10.0.14"
         }
       },
       "Microsoft.AspNetCore.Identity.EntityFrameworkCore": {

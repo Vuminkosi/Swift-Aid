@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>SwiftAid.Browser</AssemblyName>
+    <RootNamespace>SwiftAid.Browser</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SwiftAid.Contracts\SwiftAid.Contracts.csproj" />
+    <ProjectReference Include="..\SwiftAid.GuestIntake\SwiftAid.GuestIntake.csproj" />
+    <ProjectReference Include="..\SwiftAid.UI\SwiftAid.UI.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" PrivateAssets="all" />
+    <PackageReference Include="MudBlazor" />
+  </ItemGroup>
+
+  <!-- Pin the workload-resolved WASM pack so locked restores agree across
+       machines regardless of the installed wasm-tools workload version. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Sdk.WebAssembly.Pack" VersionOverride="10.0.14" />
+  </ItemGroup>
+</Project>
