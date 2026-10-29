@@ -1,0 +1,119 @@
+@page "/verify-email"
+@using SwiftAid.Client.Authentication
+@using SwiftAid.Mobile.Services.Account
+@using SwiftAid.Mobile.Services.Http
+@inject IServiceProvider ServiceProvider
+@inject NavigationManager Navigation
+
+<PageTitle>Verify account | SwiftAid</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Small">
+    <MudPaper Class="pa-4" Elevation="0">
+        <MudText Typo="Typo.h5">Verify your account</MudText>
+        <MudText Typo="Typo.body2">We sent a verification code to your email address.</MudText>
+
+        @if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert">
+                @_error
+            </MudAlert>
+        }
+        @if (!string.IsNullOrWhiteSpace(_notice))
+        {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+                @_notice
+            </MudAlert>
+        }
+
+        <MudTextField T="string" Label="Verification code" @bind-Value="_code"
+                      Variant="Variant.Outlined" Required="true" Disabled="@_busy"
+                      InputType="InputType.Text" Immediate="true" MaxLength="32"
+                      aria-label="Verification code" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                   OnClick="ConfirmAsync" Disabled="@(!CanConfirm)">
+            @(_busy ? "Verifying…" : "Verify")
+        </MudButton>
+        <MudButton Variant="Variant.Text" Color="Color.Primary" FullWidth="true"
+                   OnClick="ResendAsync" Disabled="@_busy">
+            Didn't receive it? Resend code
+        </MudButton>
+    </MudPaper>
+</MudContainer>
+
+@code {
+    private string? _code;
+    private bool _busy;
+    private string? _error;
+    private string? _notice;
+
+    private HttpPasswordAuthClient AuthClient =>
+        (HttpPasswordAuthClient?)ServiceProvider.GetService(typeof(HttpPasswordAuthClient))
+        ?? CreateFallback();
+
+    private HttpPasswordAuthClient CreateFallback()
+    {
+        var options = (NativeSessionHttpOptions?)ServiceProvider.GetService(typeof(NativeSessionHttpOptions));
+        return new HttpPasswordAuthClient(
+            CookieSessionHttpClient.Shared(options?.GatewayBaseAddress?.ToString()));
+    }
+
+    private bool CanConfirm => !_busy && !string.IsNullOrWhiteSpace(_code);
+
+    private async Task ResendAsync()
+    {
+        _busy = true;
+        _error = null;
+        _notice = null;
+        try
+        {
+            var result = await AuthClient.RequestEmailCodeAsync();
+            if (result.Status == PasswordAuthStatus.Succeeded)
+            {
+                _notice = result.Message ?? "A verification code has been sent.";
+            }
+            else
+            {
+                _error = result.Message ?? "Requesting a code failed. Please try again.";
+            }
+        }
+        catch (Exception)
+        {
+            _error = "Verification codes are temporarily unavailable.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ConfirmAsync()
+    {
+        if (!CanConfirm)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        _notice = null;
+        try
+        {
+            var result = await AuthClient.ConfirmEmailCodeAsync(_code!.Trim());
+            if (result.Status == PasswordAuthStatus.Succeeded)
+            {
+                Navigation.NavigateTo("/account");
+                return;
+            }
+
+            _error = result.Message ?? "The code is invalid or has expired.";
+        }
+        catch (Exception)
+        {
+            _error = "Verification is temporarily unavailable.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

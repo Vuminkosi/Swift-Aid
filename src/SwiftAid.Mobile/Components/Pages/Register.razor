@@ -1,0 +1,123 @@
+@page "/register"
+@using SwiftAid.Client.Authentication
+@using SwiftAid.Mobile.Services.Account
+@using SwiftAid.Mobile.Services.Http
+@inject IServiceProvider ServiceProvider
+@inject NavigationManager Navigation
+
+<PageTitle>Create account | SwiftAid</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Small">
+    <MudPaper Class="pa-4" Elevation="0">
+        <MudText Typo="Typo.h5">Create an account</MudText>
+        <MudText Typo="Typo.body2">Join SwiftAid to support healthier communities.</MudText>
+
+        @if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert">
+                @_error
+            </MudAlert>
+        }
+
+        <MudTextField T="string" Label="Email address" @bind-Value="_email"
+                      Variant="Variant.Outlined" Required="true" Disabled="@_busy"
+                      InputType="InputType.Email" Immediate="true" aria-label="Email address" />
+        <MudTextField T="string" Label="Password" @bind-Value="_password"
+                      Variant="Variant.Outlined" Required="true" Disabled="@_busy"
+                      InputType="@(_showPassword ? InputType.Text : InputType.Password)"
+                      Adornment="Adornment.End" AdornmentIcon="@(_showPassword ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                      OnAdornmentClick="() => _showPassword = !_showPassword"
+                      Immediate="true" aria-label="Password" />
+        <MudText Typo="Typo.caption">@_policyHint</MudText>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                   OnClick="RegisterAsync" Disabled="@(!CanSubmit)">
+            @(_busy ? "Creating account…" : "Sign up")
+        </MudButton>
+        <MudDivider Class="my-2" />
+        <MudButton Href="/sign-in" Variant="Variant.Text" Color="Color.Primary" FullWidth="true">
+            Already have an account? Sign in
+        </MudButton>
+    </MudPaper>
+</MudContainer>
+
+@code {
+    private string? _email;
+    private string? _password;
+    private bool _showPassword;
+    private bool _busy;
+    private string? _error;
+    private string _policyHint = "Use at least 8 characters with a number and symbol.";
+
+    private HttpPasswordAuthClient AuthClient =>
+        (HttpPasswordAuthClient?)ServiceProvider.GetService(typeof(HttpPasswordAuthClient))
+        ?? CreateFallback();
+
+    private HttpPasswordAuthClient CreateFallback()
+    {
+        var options = (NativeSessionHttpOptions?)ServiceProvider.GetService(typeof(NativeSessionHttpOptions));
+        return new HttpPasswordAuthClient(
+            CookieSessionHttpClient.Shared(options?.GatewayBaseAddress?.ToString()));
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var policy = await AuthClient.GetPolicyAsync();
+            if (policy is not null)
+            {
+                var parts = new List<string> { $"at least {policy.MinimumLength} characters" };
+                if (policy.RequireDigit)
+                {
+                    parts.Add("a number");
+                }
+
+                if (policy.RequireSymbol)
+                {
+                    parts.Add("a symbol");
+                }
+
+                _policyHint = $"Use {string.Join(", ", parts)}. Signing up does not grant staff access.";
+            }
+        }
+        catch (Exception)
+        {
+            // Keep the static hint when the policy endpoint is unreachable.
+        }
+    }
+
+    private bool CanSubmit =>
+        !_busy &&
+        !string.IsNullOrWhiteSpace(_email) &&
+        !string.IsNullOrWhiteSpace(_password);
+
+    private async Task RegisterAsync()
+    {
+        if (!CanSubmit)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            var result = await AuthClient.RegisterAsync(_email!.Trim(), _password!);
+            if (result.Status == PasswordAuthStatus.Succeeded)
+            {
+                Navigation.NavigateTo("/account");
+                return;
+            }
+
+            _error = result.Message ?? "Registration failed. Please try again.";
+        }
+        catch (Exception)
+        {
+            _error = "Registration is temporarily unavailable.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

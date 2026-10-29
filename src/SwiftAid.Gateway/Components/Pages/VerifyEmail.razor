@@ -1,0 +1,158 @@
+@page "/verify-email"
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<PageTitle>Verify account | SwiftAid</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Small">
+    <MudPaper Class="pa-4" Elevation="0">
+        <SwiftAidPageHeading Eyebrow="Your SwiftAid account"
+                             Title="Verify your account"
+                             Description="Enter the code we sent to your email address."
+                             HeadingId="verify-email-heading" />
+
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div role="alert" aria-atomic="true">
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
+                    <MudText>@_errorMessage</MudText>
+                </MudAlert>
+            </div>
+        }
+        @if (!string.IsNullOrEmpty(_notice))
+        {
+            <div role="status" aria-atomic="true">
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+                    <MudText>@_notice</MudText>
+                </MudAlert>
+            </div>
+        }
+
+        <MudButton Variant="Variant.Text" Color="Color.Primary" FullWidth="true"
+                   OnClick="ResendAsync" Disabled="@_isBusy">
+            @(_isBusy ? "Working…" : "Send me a code")
+        </MudButton>
+        <MudTextField T="string" Label="Verification code" @bind-Value="_code"
+                      Variant="Variant.Outlined" Required="true" Disabled="@_isBusy"
+                      Immediate="true" MaxLength="32" aria-label="Verification code" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                   OnClick="ConfirmAsync" Disabled="@(!CanConfirm)">
+            @(_isBusy ? "Verifying…" : "Verify")
+        </MudButton>
+        <p role="status" aria-live="polite">@_liveMessage</p>
+    </MudPaper>
+</MudContainer>
+
+@code {
+    private IJSObjectReference? _module;
+    private bool _isBusy;
+    private string? _code;
+    private string? _errorMessage;
+    private string? _notice;
+    private string _liveMessage = string.Empty;
+
+    private bool CanConfirm => !_isBusy && !string.IsNullOrWhiteSpace(_code);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _module is not null)
+        {
+            return;
+        }
+
+        try
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>(
+                "import",
+                "./Components/Pages/VerifyEmail.razor.js");
+        }
+        catch (JSException)
+        {
+            _errorMessage = "Verification is temporarily unavailable. Please try again.";
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task ResendAsync()
+    {
+        if (_module is null || _isBusy)
+        {
+            return;
+        }
+
+        _isBusy = true;
+        _errorMessage = null;
+        _notice = null;
+        try
+        {
+            var result = await _module.InvokeAsync<EmailCodeResult>("requestEmailCode");
+            if (result.Ok)
+            {
+                _notice = result.Message ?? "A verification code has been sent to your email address.";
+            }
+            else
+            {
+                _errorMessage = result.Message ?? "Requesting a code failed. Please try again.";
+            }
+        }
+        catch (JSException)
+        {
+            _errorMessage = "Verification is temporarily unavailable. Please try again.";
+        }
+        finally
+        {
+            _isBusy = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task ConfirmAsync()
+    {
+        if (!CanConfirm || _module is null)
+        {
+            return;
+        }
+
+        _isBusy = true;
+        _errorMessage = null;
+        _notice = null;
+        try
+        {
+            var result = await _module.InvokeAsync<EmailCodeResult>("confirmEmailCode", _code?.Trim());
+            if (result.Ok)
+            {
+                _liveMessage = "Verified. Taking you to your account.";
+                Navigation.NavigateTo("/account", forceLoad: true);
+                return;
+            }
+
+            _errorMessage = result.Message ?? "The code is invalid or has expired.";
+        }
+        catch (JSException)
+        {
+            _errorMessage = "Verification is temporarily unavailable. Please try again.";
+        }
+        finally
+        {
+            _isBusy = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+    }
+
+    private sealed record EmailCodeResult(bool Ok, string? Message);
+}

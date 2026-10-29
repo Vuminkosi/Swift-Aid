@@ -9,7 +9,7 @@ namespace SwiftAid.Mobile.Services.Http;
 /// Cookie-session HTTP transport shared by cookie-authenticated mobile calls.
 /// One jar per gateway address; sign-out clears it via <see cref="ClearCookies"/>.
 /// </summary>
-public sealed class CookieSessionHttpClient : IDisposable
+public class CookieSessionHttpClient : IDisposable
 {
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, CookieSessionHttpClient> SharedByAddress = new(
         StringComparer.OrdinalIgnoreCase);
@@ -61,7 +61,7 @@ public sealed class CookieSessionHttpClient : IDisposable
         }
     }
 
-    public async Task<string?> GetAntiforgeryTokenAsync(CancellationToken cancellationToken = default)
+    public virtual async Task<string?> GetAntiforgeryTokenAsync(CancellationToken cancellationToken = default)
     {
         HttpClient client;
         lock (_sync)
@@ -88,7 +88,7 @@ public sealed class CookieSessionHttpClient : IDisposable
             : null;
     }
 
-    public async Task<HttpResponseMessage> GetAsync(string path, CancellationToken cancellationToken = default)
+    public virtual async Task<HttpResponseMessage> GetAsync(string path, CancellationToken cancellationToken = default)
     {
         HttpClient client;
         lock (_sync)
@@ -100,14 +100,14 @@ public sealed class CookieSessionHttpClient : IDisposable
         return await client.GetAsync(path, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<HttpResponseMessage> PostJsonAsync<T>(
+    public virtual async Task<HttpResponseMessage> PostJsonAsync<T>(
         string path,
         T body,
         string? antiforgeryToken,
         CancellationToken cancellationToken = default) =>
         await SendJsonAsync(HttpMethod.Post, path, body, antiforgeryToken, cancellationToken).ConfigureAwait(false);
 
-    public async Task<HttpResponseMessage> PutJsonAsync<T>(
+    public virtual async Task<HttpResponseMessage> PutJsonAsync<T>(
         string path,
         T body,
         string? antiforgeryToken,

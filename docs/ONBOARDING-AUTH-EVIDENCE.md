@@ -162,3 +162,7 @@ New first-party endpoints in `IdentityEndpoints` (all no-store, antiforgery-chec
 ## Notification preferences slice (29 October 2026)
 
 `notification_preferences` table (EF migration, applied to dev Postgres) with `INotificationPreferenceService` (defaults both on) plus `GET|PUT /auth/notifications/preferences`; presentation clients on both hosts, shared `NotificationsSurface` (MudSwitch toggles, saving state) with `/notifications` pages linked from the account overview. Verified: 3/3 new SQLite service tests; live defaults/PUT roundtrip/anonymous 401; Ui.Tests 40/40. NOT VERIFIED: push delivery permission state (device-side), session subscriptions (no backend).
+
+## Mobile password UI plus web recovery slice (29 October 2026)
+
+Native `HttpPasswordAuthClient` over the shared cookie jar (register, login with remember-me, logout, reset request, OTP request/confirm, live policy hint) with mobile `/sign-in`, `/register` and `/verify-email` pages; welcome Sign in now routes to `/sign-in`. Web: `/register` (live policy hint, JS fetch, redirects to `/sign-in`), `/verify-email` (request plus confirm), `/forgot-password` (neutral request) and `/reset-password` (link validation, mismatch guard, success to `/sign-in`). Verified: Gateway and Mobile-Android builds 0 warnings/errors; all eight new plus touched page routes return 200 live; every underlying endpoint was verified live in earlier slices. NOT VERIFIED: on-device round-trips (user device tests), web password login form (lane-owned SignIn.razor), mailbox delivery of reset/OTP mail.

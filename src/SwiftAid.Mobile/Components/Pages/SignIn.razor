@@ -1,0 +1,138 @@
+@page "/sign-in"
+@using SwiftAid.Client.Authentication
+@using SwiftAid.Mobile.Services.Account
+@using SwiftAid.Mobile.Services.Http
+@inject IServiceProvider ServiceProvider
+@inject NavigationManager Navigation
+
+<PageTitle>Sign in | SwiftAid</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Small">
+    <MudPaper Class="pa-4" Elevation="0">
+        <MudText Typo="Typo.h5">Welcome back</MudText>
+        <MudText Typo="Typo.body2">Sign in to your account</MudText>
+
+        @if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert">
+                @_error
+            </MudAlert>
+        }
+        @if (!string.IsNullOrWhiteSpace(_notice))
+        {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+                @_notice
+            </MudAlert>
+        }
+
+        <MudTextField T="string" Label="Email address" @bind-Value="_email"
+                      Variant="Variant.Outlined" Required="true" Disabled="@_busy"
+                      InputType="InputType.Email" Immediate="true" aria-label="Email address" />
+        <MudTextField T="string" Label="Password" @bind-Value="_password"
+                      Variant="Variant.Outlined" Required="true" Disabled="@_busy"
+                      InputType="@(_showPassword ? InputType.Text : InputType.Password)"
+                      Adornment="Adornment.End" AdornmentIcon="@(_showPassword ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                      OnAdornmentClick="() => _showPassword = !_showPassword"
+                      Immediate="true" aria-label="Password" />
+        <MudSwitch T="bool" @bind-Value="_rememberMe" Color="Color.Primary"
+                   Label="Remember me" Disabled="@_busy" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                   OnClick="SignInAsync" Disabled="@(!CanSubmit)">
+            @(_busy ? "Signing in…" : "Sign in")
+        </MudButton>
+        <MudButton Variant="Variant.Text" Color="Color.Primary" FullWidth="true"
+                   OnClick="ForgotAsync" Disabled="@_busy">
+            Forgot password?
+        </MudButton>
+        <MudDivider Class="my-2" />
+        <MudButton Href="/register" Variant="Variant.Text" Color="Color.Primary" FullWidth="true">
+            Don't have an account? Sign up
+        </MudButton>
+        <MudButton Href="/report" Variant="Variant.Text" Color="Color.Primary" FullWidth="true">
+            Continue without an account
+        </MudButton>
+    </MudPaper>
+</MudContainer>
+
+@code {
+    private string? _email;
+    private string? _password;
+    private bool _rememberMe;
+    private bool _showPassword;
+    private bool _busy;
+    private string? _error;
+    private string? _notice;
+
+    private HttpPasswordAuthClient AuthClient =>
+        (HttpPasswordAuthClient?)ServiceProvider.GetService(typeof(HttpPasswordAuthClient))
+        ?? CreateFallback();
+
+    private HttpPasswordAuthClient CreateFallback()
+    {
+        var options = (NativeSessionHttpOptions?)ServiceProvider.GetService(typeof(NativeSessionHttpOptions));
+        return new HttpPasswordAuthClient(
+            CookieSessionHttpClient.Shared(options?.GatewayBaseAddress?.ToString()));
+    }
+
+    private bool CanSubmit =>
+        !_busy &&
+        !string.IsNullOrWhiteSpace(_email) &&
+        !string.IsNullOrWhiteSpace(_password);
+
+    private async Task SignInAsync()
+    {
+        if (!CanSubmit)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        _notice = null;
+        try
+        {
+            var result = await AuthClient.LoginAsync(_email!.Trim(), _password!, _rememberMe);
+            if (result.Status == PasswordAuthStatus.Succeeded)
+            {
+                Navigation.NavigateTo("/account");
+                return;
+            }
+
+            _error = result.Message ?? "Sign-in failed. Please try again.";
+        }
+        catch (Exception)
+        {
+            _error = "Sign-in is temporarily unavailable.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ForgotAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_email))
+        {
+            _error = "Enter your email address first, then choose Forgot password.";
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        _notice = null;
+        try
+        {
+            var result = await AuthClient.RequestPasswordResetAsync(_email.Trim());
+            _notice = result.Message ?? "If an account matches this address, reset instructions have been sent.";
+        }
+        catch (Exception)
+        {
+            _error = "Password reset is temporarily unavailable.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}
