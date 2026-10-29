@@ -1,0 +1,12 @@
+.mobile-work-page {
+    display: grid;
+    gap: 1rem;
+    padding-block: 1.25rem;
+}
+
+.mobile-work-page ::deep .mud-table-container {
+    overflow-x: auto;
+    border: 1px solid var(--sa-border);
+    border-radius: 0.9rem;
+    background: var(--sa-surface);
+}

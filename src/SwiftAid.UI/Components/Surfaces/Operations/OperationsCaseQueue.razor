@@ -1,0 +1,537 @@
+@using SwiftAid.UI.Components.Theme
+
+<section class="operations-case-queue" aria-labelledby="case-queue-title">
+    <div class="operations-case-queue__header">
+        <div>
+            <MudText Typo="Typo.overline" Color="Color.Secondary" Class="operations-case-queue__eyebrow">Officer workspace</MudText>
+            <MudText Typo="Typo.h4" HtmlTag="h1" id="case-queue-title" Class="operations-case-queue__title">@Title</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="operations-case-queue__description">@Description</MudText>
+        </div>
+        <MudStack Row="true" Spacing="2">@Actions</MudStack>
+    </div>
+
+    <MudHidden Breakpoint="Breakpoint.MdAndDown">
+    <div class="operations-case-queue__filters" role="group" aria-label="Filter cases">
+        @if (FilterOptions?.CanFilterSearch != false)
+        {
+            <MudTextField T="string" Value="@Query.Search" ValueChanged="SearchChangedAsync" Immediate="true"
+                          Label="Search case reference, country or status" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Clearable="true" />
+        }
+        @if (FilterOptions?.CanFilterSector == true)
+        {
+            <MudSelect T="SectorKind?" Value="@Query.Sector" ValueChanged="SectorChangedAsync"
+                       Label="Human or animal" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                @foreach (var option in FilterOptions.Sectors)
+                {
+                    <MudSelectItem T="SectorKind?" Value="@ParseSector(option.Key)">@option.Label</MudSelectItem>
+                }
+            </MudSelect>
+        }
+        @if (FilterOptions?.CanFilterWorkflow == true)
+        {
+            <MudSelect T="string" Value="@Query.WorkflowKey" ValueChanged="WorkflowChangedAsync"
+                       Label="Status" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                @foreach (var option in FilterOptions.Workflows)
+                {
+                    <MudSelectItem Value="@option.Key">@option.Label</MudSelectItem>
+                }
+            </MudSelect>
+        }
+        @if (FilterOptions?.CanFilterCountry == true)
+        {
+            <MudSelect T="string" Value="@Query.CountryCode" ValueChanged="CountryChangedAsync"
+                       Label="Country" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                @foreach (var option in FilterOptions.Countries)
+                {
+                    <MudSelectItem Value="@option.Key">@option.Label</MudSelectItem>
+                }
+            </MudSelect>
+        }
+        @if (FilterOptions?.CanFilterRegion == true)
+        {
+            <MudSelect T="string" Value="@Query.RegionKey" ValueChanged="RegionChangedAsync"
+                       Label="Region" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                @foreach (var option in FilterOptions.Regions)
+                {
+                    <MudSelectItem Value="@option.Key">@option.Label</MudSelectItem>
+                }
+            </MudSelect>
+        }
+        @if (FilterOptions?.CanFilterAssignee == true)
+        {
+            <MudSelect T="string" Value="@Query.AssigneeKey" ValueChanged="AssigneeChangedAsync"
+                       Label="Assigned worker" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                @foreach (var option in FilterOptions.Assignees)
+                {
+                    <MudSelectItem Value="@option.Key">@option.Label</MudSelectItem>
+                }
+            </MudSelect>
+        }
+        @if (FilterOptions?.CanFilterReportedCategory == true)
+        {
+            <MudSelect T="string" Value="@Query.ReportedCategoryKey" ValueChanged="CategoryChangedAsync"
+                       Label="Reported category" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                @foreach (var option in FilterOptions.ReportedCategories)
+                {
+                    <MudSelectItem Value="@option.Key">@option.Label</MudSelectItem>
+                }
+            </MudSelect>
+        }
+        @if (FilterOptions?.CanFilterUpdatedDate == true)
+        {
+            <MudDatePicker Date="@UpdatedFromDate" DateChanged="UpdatedFromChangedAsync" Label="Updated from" Clearable="true" />
+            <MudDatePicker Date="@UpdatedToDate" DateChanged="UpdatedToChangedAsync" Label="Updated to" Clearable="true" />
+        }
+        <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="ToggleSort"
+                   StartIcon="@((Query.NewestFirst) ? Icons.Material.Filled.ArrowDownward : Icons.Material.Filled.ArrowUpward)"
+                   aria-label="Change case update sorting order">
+            @(Query.NewestFirst ? "Newest first" : "Oldest first")
+        </MudButton>
+        @if (HasActiveFilters)
+        {
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.FilterAltOff" OnClick="ClearFiltersAsync" aria-label="Clear case filters">Clear filters</MudButton>
+        }
+        @if (OnRetry.HasDelegate)
+        {
+            <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Primary" OnClick="OnRetry"
+                           aria-label="Refresh case queue" />
+        }
+    </div>
+    </MudHidden>
+
+    <MudHidden Breakpoint="Breakpoint.MdAndDown" Invert="true">
+        <div class="operations-case-queue__mobile-filters">
+            @if (FilterOptions?.CanFilterSearch != false)
+            {
+                <MudTextField T="string" Value="@Query.Search" ValueChanged="SearchChangedAsync" Immediate="true" DebounceInterval="250"
+                              Placeholder="Search cases..." Variant="Variant.Outlined" Margin="Margin.Dense"
+                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Clearable="true"
+                              aria-label="Search cases" />
+            }
+            <MudChipSet T="string" SelectedValue="@SelectedQuickFilter" SelectedValueChanged="QuickFilterChangedAsync"
+                        SelectionMode="SelectionMode.SingleSelection" CheckMark="false"
+                        Class="operations-case-queue__quick-filters" aria-label="Filter cases by type or status">
+                <MudChip T="string" Value="@("all")" Color="Color.Primary">All</MudChip>
+                @if (FilterOptions?.CanFilterSector == true)
+                {
+                    <MudChip T="string" Value="@("human")" Color="Color.Primary">Human</MudChip>
+                    <MudChip T="string" Value="@("animal")" Color="Color.Primary">Animal</MudChip>
+                }
+                @if (WorkflowFilter("Open") is not null)
+                {
+                    <MudChip T="string" Value="@("open")" Color="Color.Primary">Open</MudChip>
+                }
+                @if (WorkflowFilter("Assigned") is not null)
+                {
+                    <MudChip T="string" Value="@("assigned")" Color="Color.Primary">Assigned</MudChip>
+                }
+                @if (WorkflowFilter("Escalated") is not null)
+                {
+                    <MudChip T="string" Value="@("escalated")" Color="Color.Primary">Escalated</MudChip>
+                }
+            </MudChipSet>
+        </div>
+    </MudHidden>
+
+    @if (!string.IsNullOrWhiteSpace(StatusMessage))
+    {
+        <MudText Typo="Typo.caption" Color="Color.Secondary">@StatusMessage</MudText>
+    }
+
+    @if (State != OperationsSurfaceState.Populated)
+    {
+        <SwiftAidStatePanel State="State.ToSwiftAidViewState()" Title="@StateTitle" Description="@StateDescription" OnRetry="OnRetry" />
+    }
+    else if (Items.Count == 0)
+    {
+        <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="No matching cases" Description="No case in the authorized list matches these filters." />
+    }
+    else
+    {
+        <MudHidden Breakpoint="Breakpoint.MdAndDown">
+            <MudTable Items="Items" Hover="true" Dense="true" RowsPerPage="Query.PageSize" aria-label="Authorized cases">
+                <HeaderContent>
+                    <MudTh>Case</MudTh><MudTh>Type</MudTh><MudTh>Status</MudTh><MudTh>Country and region</MudTh><MudTh>Reported category</MudTh><MudTh>Assigned to</MudTh><MudTh>Updated</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Case">@CaseReference(context)</MudTd>
+                    <MudTd DataLabel="Type">@SectorLabel(context.Sector)</MudTd>
+                    <MudTd DataLabel="Status"><MudChip T="string" Size="Size.Small" Color="@WorkflowColor(context.Workflow)">@StatusLabel(context.Workflow)</MudChip></MudTd>
+                    <MudTd DataLabel="Country and region">@LocationLabel(context)</MudTd>
+                    <MudTd DataLabel="Reported category">@(context.ReportedCategoryLabel ?? "Not recorded")</MudTd>
+                    <MudTd DataLabel="Assigned to">@(context.AssigneeLabel ?? "Not recorded")</MudTd>
+                    <MudTd DataLabel="Updated">@context.UpdatedAtUtc.ToLocalTime().ToString("g")</MudTd>
+                </RowTemplate>
+            </MudTable>
+        </MudHidden>
+        <MudHidden Breakpoint="Breakpoint.MdAndDown" Invert="true">
+            <section class="operations-case-queue__rows" aria-label="Authorized cases">
+                @foreach (var item in Items)
+                {
+                    <article class="operations-case-queue__row" @key="item.CaseId">
+                        <div class="operations-case-queue__row-icon" aria-hidden="true">
+                            <MudIcon Icon="@SectorIcon(item.Sector)" Color="@SectorColor(item.Sector)" />
+                        </div>
+                        <div class="operations-case-queue__row-main">
+                            <h2 class="operations-case-queue__row-title">
+                                <MudLink Href="@($"/case/{item.CaseId:D}")"
+                                         aria-label="@($"Open {CaseReferenceLabel(item)} — {SectorLabel(item.Sector)} · {item.ReportedCategoryLabel ?? "category not recorded"}")">
+                                    @CaseReferenceLabel(item)
+                                </MudLink>
+                            </h2>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="operations-case-queue__row-classification">
+                                @SectorLabel(item.Sector) · @(item.ReportedCategoryLabel ?? "Category not recorded")
+                            </MudText>
+                            <div class="operations-case-queue__row-location">
+                                <MudIcon Icon="@Icons.Material.Filled.Place" aria-hidden="true" />
+                                <MudText Typo="Typo.caption">@LocationLabel(item)</MudText>
+                            </div>
+                        </div>
+                        <div class="operations-case-queue__row-status">
+                            <MudChip T="string" Size="Size.Small" Color="@WorkflowColor(item.Workflow)">@StatusLabel(item.Workflow)</MudChip>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary" title="@item.UpdatedAtUtc.ToLocalTime().ToString("g")">
+                                @RelativeTime(item.UpdatedAtUtc)
+                            </MudText>
+                        </div>
+                    </article>
+                }
+            </section>
+        </MudHidden>
+        @if (PageCount > 1)
+        {
+            <MudPagination Count="@PageCount" Selected="@Query.PageNumber" SelectedChanged="PageChangedAsync" aria-label="Case list pages" />
+        }
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="operations-case-queue__note">Showing @Items.Count of @TotalCount cases in this list.</MudText>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_copyStatus))
+    {
+        <MudText Typo="Typo.caption" Color="@(_copySucceeded ? Color.Success : Color.Error)" role="status" aria-live="polite">@_copyStatus</MudText>
+    }
+</section>
+
+@code {
+    public enum SectorKind
+    {
+        Unknown,
+        Human,
+        Animal
+    }
+
+    public sealed record FilterRequestView(
+        int PageNumber,
+        int PageSize,
+        string? Search,
+        SectorKind? Sector,
+        string? WorkflowKey,
+        string? CountryCode,
+        string? RegionKey,
+        string? AssigneeKey,
+        string? ReportedCategoryKey,
+        DateTimeOffset? UpdatedFromUtc,
+        DateTimeOffset? UpdatedToUtc,
+        bool NewestFirst);
+
+    public sealed record FilterOptionView(string Key, string Label);
+
+    public sealed record FilterOptionsView(
+        IReadOnlyList<FilterOptionView> Sectors,
+        IReadOnlyList<FilterOptionView> Workflows,
+        IReadOnlyList<FilterOptionView> Countries,
+        IReadOnlyList<FilterOptionView> Regions,
+        IReadOnlyList<FilterOptionView> Assignees,
+        IReadOnlyList<FilterOptionView> ReportedCategories,
+        bool CanFilterSearch,
+        bool CanFilterSector,
+        bool CanFilterWorkflow,
+        bool CanFilterCountry,
+        bool CanFilterRegion,
+        bool CanFilterAssignee,
+        bool CanFilterReportedCategory,
+        bool CanFilterUpdatedDate);
+
+    public sealed record QueueViewRow(
+        Guid CaseId,
+        string? PublicReference,
+        string Workflow,
+        string CountryLabel,
+        SectorKind Sector,
+        string? RegionLabel,
+        string? AssigneeLabel,
+        string? ReportedCategoryLabel,
+        DateTimeOffset UpdatedAtUtc);
+
+    private string? _copyStatus;
+    private bool _copySucceeded;
+
+    [Parameter] public string Title { get; set; } = "Case management";
+    [Parameter] public string Description { get; set; } = "Cases your account may read.";
+    [Parameter] public OperationsSurfaceState State { get; set; } = OperationsSurfaceState.Loading;
+    [Parameter] public FilterRequestView Query { get; set; } = new(1, 25, null, null, null, null, null, null, null, null, null, true);
+    [Parameter] public FilterOptionsView? FilterOptions { get; set; }
+    [Parameter] public IReadOnlyList<QueueViewRow> Items { get; set; } = Array.Empty<QueueViewRow>();
+    [Parameter] public int TotalCount { get; set; }
+    [Parameter] public string? StatusMessage { get; set; }
+    [Parameter] public EventCallback<FilterRequestView> OnQueryChanged { get; set; }
+    [Parameter] public EventCallback OnRetry { get; set; }
+    [Parameter] public Func<string, Task<bool>>? CopyReference { get; set; }
+    [Parameter] public RenderFragment? Actions { get; set; }
+
+    private DateTime? UpdatedFromDate => Query.UpdatedFromUtc?.ToLocalTime().DateTime;
+    private DateTime? UpdatedToDate => Query.UpdatedToUtc?.ToLocalTime().DateTime;
+    private int PageCount => Math.Max(1, (int)Math.Ceiling(TotalCount / (double)Math.Max(1, Query.PageSize)));
+    private bool HasActiveFilters => !string.IsNullOrWhiteSpace(Query.Search) || Query.Sector.HasValue ||
+        Query.WorkflowKey is not null || Query.CountryCode is not null || Query.RegionKey is not null ||
+        Query.AssigneeKey is not null || Query.ReportedCategoryKey is not null ||
+        Query.UpdatedFromUtc.HasValue || Query.UpdatedToUtc.HasValue;
+
+    private string SelectedQuickFilter
+    {
+        get
+        {
+            if (Query.Sector == SectorKind.Human) return "human";
+            if (Query.Sector == SectorKind.Animal) return "animal";
+            foreach (var status in new[] { "Open", "Assigned", "Escalated" })
+            {
+                if (WorkflowFilter(status) is { } filter && string.Equals(Query.WorkflowKey, filter.Key, StringComparison.OrdinalIgnoreCase))
+                {
+                    return status.ToLowerInvariant();
+                }
+            }
+            return "all";
+        }
+    }
+
+    private FilterOptionView? WorkflowFilter(string label) => FilterOptions?.Workflows.FirstOrDefault(option =>
+        string.Equals(option.Label, label, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(option.Key, label, StringComparison.OrdinalIgnoreCase));
+
+    private string StateTitle => State switch
+    {
+        OperationsSurfaceState.Loading => "Loading cases",
+        OperationsSurfaceState.Empty => "No matching cases",
+        OperationsSurfaceState.Offline => "Case list is offline",
+        OperationsSurfaceState.Denied => "Case access is unavailable",
+        OperationsSurfaceState.Error => "Cases could not be loaded",
+        OperationsSurfaceState.Unavailable => "Case list is not available right now",
+        _ => "Case list"
+    };
+
+    private string StateDescription => State switch
+    {
+        OperationsSurfaceState.Loading => "Checking the cases available to your account.",
+        OperationsSurfaceState.Empty => "No case in the authorized list matches these filters.",
+        OperationsSurfaceState.Offline => "Reconnect and try again to refresh this list.",
+        OperationsSurfaceState.Denied => "Your account does not have access to this case list.",
+        OperationsSurfaceState.Error => "Check your connection and try again.",
+        OperationsSurfaceState.Unavailable => "Some case details or filters are not available for this list.",
+        _ => "Case information is not available right now."
+    };
+
+    private Task SearchChangedAsync(string value) => PublishAsync(Query with { Search = NullIfEmpty(value), PageNumber = 1 });
+
+    private Task QuickFilterChangedAsync(string value)
+    {
+        var query = Query with { PageNumber = 1, Sector = null, WorkflowKey = null };
+        switch (value)
+        {
+            case "all":
+                query = query with
+                {
+                    AssigneeKey = null,
+                    CountryCode = null,
+                    RegionKey = null,
+                    ReportedCategoryKey = null,
+                    UpdatedFromUtc = null,
+                    UpdatedToUtc = null
+                };
+                break;
+            case "human":
+                query = query with { Sector = SectorKind.Human };
+                break;
+            case "animal":
+                query = query with { Sector = SectorKind.Animal };
+                break;
+            case "open":
+                query = query with { WorkflowKey = WorkflowFilter("Open")?.Key };
+                break;
+            case "assigned":
+                query = query with { WorkflowKey = WorkflowFilter("Assigned")?.Key };
+                break;
+            case "escalated":
+                query = query with { WorkflowKey = WorkflowFilter("Escalated")?.Key };
+                break;
+        }
+
+        return PublishAsync(query);
+    }
+    private Task SectorChangedAsync(SectorKind? value) => PublishAsync(Query with { Sector = value, PageNumber = 1 });
+    private Task WorkflowChangedAsync(string value) => PublishAsync(Query with { WorkflowKey = NullIfEmpty(value), PageNumber = 1 });
+    private Task CountryChangedAsync(string value) => PublishAsync(Query with { CountryCode = NullIfEmpty(value), PageNumber = 1 });
+    private Task RegionChangedAsync(string value) => PublishAsync(Query with { RegionKey = NullIfEmpty(value), PageNumber = 1 });
+    private Task AssigneeChangedAsync(string value) => PublishAsync(Query with { AssigneeKey = NullIfEmpty(value), PageNumber = 1 });
+    private Task CategoryChangedAsync(string value) => PublishAsync(Query with { ReportedCategoryKey = NullIfEmpty(value), PageNumber = 1 });
+    private Task UpdatedFromChangedAsync(DateTime? value) => PublishAsync(Query with { UpdatedFromUtc = ToUtcStart(value), PageNumber = 1 });
+    private Task UpdatedToChangedAsync(DateTime? value) => PublishAsync(Query with { UpdatedToUtc = ToUtcEnd(value), PageNumber = 1 });
+
+    private Task PublishAsync(FilterRequestView query) => OnQueryChanged.InvokeAsync(query);
+
+    private Task ClearFiltersAsync() => PublishAsync(Query with
+    {
+        PageNumber = 1,
+        Search = null,
+        Sector = null,
+        WorkflowKey = null,
+        CountryCode = null,
+        RegionKey = null,
+        AssigneeKey = null,
+        ReportedCategoryKey = null,
+        UpdatedFromUtc = null,
+        UpdatedToUtc = null
+    });
+
+    private Task PageChangedAsync(int page) => PublishAsync(Query with { PageNumber = Math.Clamp(page, 1, PageCount) });
+    private Task ToggleSort() => PublishAsync(Query with { NewestFirst = !Query.NewestFirst });
+
+    private async Task CopyPublicReferenceAsync(string reference)
+    {
+        _copyStatus = null;
+        _copySucceeded = false;
+        if (CopyReference is null)
+        {
+            _copyStatus = "Copy is not available. The full reference remains available above.";
+            return;
+        }
+
+        try
+        {
+            _copySucceeded = await CopyReference(reference);
+            _copyStatus = _copySucceeded
+                ? "Case reference copied."
+                : "Could not copy the reference. Select the full reference above to copy it manually.";
+        }
+        catch (Exception)
+        {
+            _copyStatus = "Could not copy the reference. Select the full reference above to copy it manually.";
+        }
+    }
+
+    private RenderFragment CaseReference(QueueViewRow item) => builder =>
+    {
+        var sequence = 0;
+        var label = item.PublicReference ?? "Open case";
+        var ariaLabel = $"Open case in {item.CountryLabel}, {StatusLabel(item.Workflow)}, updated {item.UpdatedAtUtc.ToLocalTime():g}";
+        builder.OpenElement(sequence++, "div");
+        builder.AddAttribute(sequence++, "class", "operations-case-queue__reference");
+        builder.OpenComponent<MudLink>(sequence++);
+        builder.AddAttribute(sequence++, "Href", $"/case/{item.CaseId:D}");
+        builder.AddAttribute(sequence++, "aria-label", ariaLabel);
+        builder.AddAttribute(sequence++, "ChildContent", (RenderFragment)(content => content.AddContent(0, label)));
+        builder.CloseComponent();
+        var publicReference = item.PublicReference;
+        if (!string.IsNullOrWhiteSpace(publicReference))
+        {
+            builder.OpenElement(sequence++, "details");
+            builder.OpenElement(sequence++, "summary");
+            builder.AddContent(sequence++, "Full reference");
+            builder.CloseElement();
+            builder.OpenElement(sequence++, "code");
+            builder.AddContent(sequence++, publicReference);
+            builder.CloseElement();
+            builder.CloseElement();
+            if (CopyReference is not null)
+            {
+                builder.OpenComponent<MudIconButton>(sequence++);
+                builder.AddAttribute(sequence++, "Icon", Icons.Material.Filled.ContentCopy);
+                builder.AddAttribute(sequence++, "Size", Size.Small);
+                builder.AddAttribute(sequence++, "OnClick", EventCallback.Factory.Create(this, () => CopyPublicReferenceAsync(publicReference)));
+                builder.AddAttribute(sequence++, "aria-label", $"Copy full reference for {item.CountryLabel} case");
+                builder.CloseComponent();
+            }
+        }
+
+        builder.CloseElement();
+    };
+
+    private static SectorKind? ParseSector(string key) => key switch
+    {
+        "human" => SectorKind.Human,
+        "animal" => SectorKind.Animal,
+        _ => null
+    };
+
+    private static string SectorLabel(SectorKind sector) => sector switch
+    {
+        SectorKind.Human => "Human",
+        SectorKind.Animal => "Animal",
+        _ => "Not recorded"
+    };
+
+    private static string LocationLabel(QueueViewRow item) => string.IsNullOrWhiteSpace(item.RegionLabel)
+        ? item.CountryLabel
+        : $"{item.RegionLabel}, {item.CountryLabel}";
+
+    private static string StatusLabel(string workflow) => workflow switch
+    {
+        "Open" => "Open",
+        "Assigned" => "Assigned",
+        "Escalated" => "Escalated",
+        "UnderInvestigation" => "Under investigation",
+        "Reported" => "Reported",
+        "UnderReview" => "Under review",
+        "Active" => "Active",
+        "AwaitingFollowUp" => "Follow-up due",
+        "Resolved" => "Resolved",
+        _ => "Status unavailable"
+    };
+
+    private static Color WorkflowColor(string workflow) => workflow switch
+    {
+        "Open" => Color.Success,
+        "Assigned" => Color.Info,
+        "Escalated" => Color.Error,
+        "UnderInvestigation" => Color.Warning,
+        "Reported" => Color.Info,
+        "UnderReview" => Color.Warning,
+        "Active" => Color.Primary,
+        "AwaitingFollowUp" => Color.Secondary,
+        "Resolved" => Color.Success,
+        _ => Color.Default
+    };
+
+    private static string SectorIcon(SectorKind sector) => sector switch
+    {
+        SectorKind.Human => Icons.Material.Filled.Person,
+        SectorKind.Animal => Icons.Material.Filled.Pets,
+        _ => Icons.Material.Filled.HelpOutline
+    };
+
+    private static Color SectorColor(SectorKind sector) => sector switch
+    {
+        SectorKind.Human => Color.Primary,
+        SectorKind.Animal => Color.Success,
+        _ => Color.Default
+    };
+
+    private static DateTimeOffset? ToUtcStart(DateTime? value) => value is null
+        ? null
+        : new DateTimeOffset(DateTime.SpecifyKind(value.Value.Date, DateTimeKind.Local)).ToUniversalTime();
+
+    private static DateTimeOffset? ToUtcEnd(DateTime? value) => value is null
+        ? null
+        : new DateTimeOffset(DateTime.SpecifyKind(value.Value.Date.AddDays(1).AddTicks(-1), DateTimeKind.Local)).ToUniversalTime();
+
+    private static string? NullIfEmpty(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string CaseReferenceLabel(QueueViewRow item) => item.PublicReference ?? "Open case";
+
+    private static string RelativeTime(DateTimeOffset updatedAtUtc)
+    {
+        var elapsed = DateTimeOffset.Now - updatedAtUtc.ToLocalTime();
+        if (elapsed < TimeSpan.FromMinutes(1)) return "Just now";
+        if (elapsed < TimeSpan.FromHours(1)) return $"{Math.Max(1, (int)elapsed.TotalMinutes)}m ago";
+        if (elapsed < TimeSpan.FromDays(1)) return $"{Math.Max(1, (int)elapsed.TotalHours)}h ago";
+        return $"{Math.Max(1, (int)elapsed.TotalDays)}d ago";
+    }
+}

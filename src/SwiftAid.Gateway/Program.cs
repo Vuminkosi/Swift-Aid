@@ -10,6 +10,7 @@ using SwiftAid.Application.Notifications;
 using SwiftAid.Client.Notifications;
 using SwiftAid.Client.Presentation;
 using SwiftAid.Client.Presentation.PublicWorkflows;
+using SwiftAid.Gateway.Cases;
 using SwiftAid.Gateway.Components;
 using SwiftAid.Gateway.Endpoints;
 using SwiftAid.Gateway.Intake;
@@ -41,6 +42,7 @@ builder.Services.AddScoped<IAccountPresentationClient, GatewayAccountPresentatio
 builder.Services.AddScoped<IWorkspaceAccessClient, GatewayUnavailableWorkspaceAccessClient>();
 builder.Services.AddScoped<IStaffSessionEditorClient, GatewayStaffSessionEditorClient>();
 builder.Services.AddScoped<IMapAggregateClient, UnavailableMapAggregateClient>();
+builder.Services.AddScoped<ICaseWorkspaceClient, CaseWorkspaceGatewayClient>();
 
 builder.Services.AddControllers();
 builder.Services.AddAuthentication();
