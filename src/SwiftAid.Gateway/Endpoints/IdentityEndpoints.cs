@@ -62,6 +62,10 @@ public static class IdentityEndpoints
         group.MapPost("/email/otp/confirm", ConfirmEmailOtp);
         group.MapGet("/profile", GetUserProfile);
         group.MapPut("/profile", SaveUserProfile);
+        group.MapGet("/organizations/mine", GetMyMemberships);
+        group.MapGet("/organizations/directory", SearchOrganizations);
+        group.MapGet("/organizations/requests/mine", GetMyMembershipRequests);
+        group.MapPost("/organizations/requests", SubmitMembershipRequest);
 
         if (identityServerOptions.Enabled)
         {
@@ -1609,6 +1613,152 @@ public static class IdentityEndpoints
         }
     }
 
+    private static async Task<IResult> RequireUserAsync(
+        HttpContext context,
+        UserManager<SwiftAidUser> userManager,
+        Func<SwiftAidUser, Task<IResult>> handle)
+    {
+        if (context.User.Identity?.IsAuthenticated != true)
+        {
+            return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to manage organization access.");
+        }
+
+        try
+        {
+            var user = await userManager.GetUserAsync(context.User).ConfigureAwait(false);
+            return user is null
+                ? PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to manage organization access.")
+                : await handle(user).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return PasswordError(
+                context,
+                StatusCodes.Status503ServiceUnavailable,
+                "Organization access is temporarily unavailable.");
+        }
+    }
+
+    private static async Task<IResult> GetMyMemberships(
+        HttpContext context,
+        UserManager<SwiftAidUser> userManager,
+        IOrganizationMembershipService membershipService,
+        CancellationToken cancellationToken) =>
+        await RequireUserAsync(context, userManager, async user =>
+        {
+            var memberships = await membershipService.GetMineAsync(user.Id, cancellationToken).ConfigureAwait(false);
+            SetNoStore(context);
+            return Results.Ok(new MembershipListResponse(memberships.Select(membership => new MembershipResponse(
+                membership.OrganizationId,
+                membership.OrganizationStatus,
+                membership.MembershipStatus,
+                membership.WorkspaceIds,
+                membership.ValidFromUtc,
+                membership.ExpiresAtUtc)).ToList()));
+        }).ConfigureAwait(false);
+
+    private static async Task<IResult> SearchOrganizations(
+        HttpContext context,
+        UserManager<SwiftAidUser> userManager,
+        IOrganizationMembershipService membershipService,
+        string? search,
+        CancellationToken cancellationToken) =>
+        await RequireUserAsync(context, userManager, async _ =>
+        {
+            var entries = await membershipService.SearchAsync(search, cancellationToken).ConfigureAwait(false);
+            SetNoStore(context);
+            return Results.Ok(new OrganizationDirectoryResponse(entries.Select(entry => new OrganizationDirectoryEntryResponse(
+                entry.OrganizationId,
+                entry.Status)).ToList()));
+        }).ConfigureAwait(false);
+
+    private static async Task<IResult> GetMyMembershipRequests(
+        HttpContext context,
+        UserManager<SwiftAidUser> userManager,
+        IOrganizationMembershipService membershipService,
+        CancellationToken cancellationToken) =>
+        await RequireUserAsync(context, userManager, async user =>
+        {
+            var requests = await membershipService.GetMyRequestsAsync(user.Id, cancellationToken).ConfigureAwait(false);
+            SetNoStore(context);
+            return Results.Ok(new MembershipRequestListResponse(requests.Select(request => new MembershipRequestResponse(
+                request.RequestId,
+                request.OrganizationId,
+                request.Status,
+                request.Reason,
+                request.CreatedAtUtc)).ToList()));
+        }).ConfigureAwait(false);
+
+    private static async Task<IResult> SubmitMembershipRequest(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        UserManager<SwiftAidUser> userManager,
+        IOrganizationMembershipService membershipService,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false);
+        }
+        catch (AntiforgeryValidationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The membership request is invalid.");
+        }
+        catch (InvalidOperationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The membership request is invalid.");
+        }
+
+        var bodyRead = await ReadPasswordRequestAsync(context.Request, cancellationToken).ConfigureAwait(false);
+        if (bodyRead.Status != PasswordBodyStatus.Valid || bodyRead.Request is null)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "Choose an organization to request access.");
+        }
+
+        return await RequireUserAsync(context, userManager, async user =>
+        {
+            var submitted = await membershipService.RequestAsync(
+                user.Id,
+                bodyRead.Request.OrganizationId ?? string.Empty,
+                bodyRead.Request.Reason,
+                cancellationToken).ConfigureAwait(false);
+            SetNoStore(context);
+            return submitted.Status switch
+            {
+                MembershipRequestSubmitStatus.Submitted => Results.Ok(new MembershipRequestResponse(
+                    submitted.Request!.RequestId,
+                    submitted.Request.OrganizationId,
+                    submitted.Request.Status,
+                    submitted.Request.Reason,
+                    submitted.Request.CreatedAtUtc)),
+                MembershipRequestSubmitStatus.DuplicatePending => PasswordError(
+                    context,
+                    StatusCodes.Status409Conflict,
+                    "You already have a pending request for this organization."),
+                MembershipRequestSubmitStatus.AlreadyMember => PasswordError(
+                    context,
+                    StatusCodes.Status409Conflict,
+                    "You are already a member of this organization."),
+                MembershipRequestSubmitStatus.OrganizationUnavailable => PasswordError(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    "Choose an organization from the directory."),
+                MembershipRequestSubmitStatus.Invalid => PasswordError(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    "Choose an organization to request access."),
+                _ => PasswordError(
+                    context,
+                    StatusCodes.Status503ServiceUnavailable,
+                    "Requesting access is temporarily unavailable.")
+            };
+        }).ConfigureAwait(false);
+    }
+
     private static IResult PasswordError(HttpContext context, int statusCode, string message)
     {
         SetNoStore(context);
@@ -1965,6 +2115,29 @@ public static class IdentityEndpoints
         string? Email,
         bool EmailVerified);
 
+    private sealed record MembershipResponse(
+        string OrganizationId,
+        string OrganizationStatus,
+        string MembershipStatus,
+        IReadOnlyList<string> WorkspaceIds,
+        DateTimeOffset ValidFromUtc,
+        DateTimeOffset? ExpiresAtUtc);
+
+    private sealed record MembershipListResponse(IReadOnlyList<MembershipResponse> Memberships);
+
+    private sealed record OrganizationDirectoryEntryResponse(string OrganizationId, string Status);
+
+    private sealed record OrganizationDirectoryResponse(IReadOnlyList<OrganizationDirectoryEntryResponse> Organizations);
+
+    private sealed record MembershipRequestResponse(
+        Guid RequestId,
+        string OrganizationId,
+        string Status,
+        string? Reason,
+        DateTimeOffset CreatedAtUtc);
+
+    private sealed record MembershipRequestListResponse(IReadOnlyList<MembershipRequestResponse> Requests);
+
     private sealed class PasswordRequest
     {
         public PasswordRequest()
@@ -1994,6 +2167,10 @@ public static class IdentityEndpoints
         public string? Region { get; set; }
 
         public string? Locality { get; set; }
+
+        public string? OrganizationId { get; set; }
+
+        public string? Reason { get; set; }
     }
 
     private enum PasswordBodyStatus

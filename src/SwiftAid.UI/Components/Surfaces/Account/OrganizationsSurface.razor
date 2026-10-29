@@ -1,0 +1,107 @@
+@using SwiftAid.UI.Components.Surfaces.Account
+@using SwiftAid.UI.Components.Theme
+
+@if (Snapshot.ViewState == OrganizationsViewState.Loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" aria-label="Loading your workspaces" />
+}
+else if (Snapshot.ViewState == OrganizationsViewState.SignedOut)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+        Sign in to view your workspaces.
+    </MudAlert>
+    <MudButton Href="/sign-in" Variant="Variant.Filled" Color="Color.Primary"
+               StartIcon="@Icons.Material.Filled.Login">
+        Sign in
+    </MudButton>
+}
+else if (Snapshot.ViewState == OrganizationsViewState.Unavailable && Snapshot.Memberships.Count == 0)
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert">
+        @(Snapshot.StatusMessage ?? "Your workspaces are temporarily unavailable.")
+    </MudAlert>
+    <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="OnRefresh"
+               StartIcon="@Icons.Material.Filled.Refresh">
+        Retry
+    </MudButton>
+}
+else
+{
+    @if (!string.IsNullOrWhiteSpace(Snapshot.StatusMessage))
+    {
+        <MudAlert Severity="@(Snapshot.StatusIsError ? Severity.Warning : Severity.Success)"
+                  Variant="Variant.Outlined" role="@(Snapshot.StatusIsError ? "alert" : "status")">
+            @Snapshot.StatusMessage
+        </MudAlert>
+    }
+    <MudPaper Class="pa-4 mb-4" Elevation="0">
+        <MudText Typo="Typo.subtitle1">Your workspaces</MudText>
+        @if (Snapshot.Memberships.Count == 0)
+        {
+            <MudText Typo="Typo.body2">No workspaces yet. If you join one, it will appear here.</MudText>
+        }
+        @foreach (var membership in Snapshot.Memberships)
+        {
+            <MudPaper Class="pa-3 mb-2" Elevation="0" Outlined="true">
+                <MudText Typo="Typo.subtitle2">@membership.OrganizationId</MudText>
+                <MudStack Row="true" Spacing="1">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@membership.MembershipStatus</MudChip>
+                    @foreach (var workspace in membership.WorkspaceIds)
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text">@workspace</MudChip>
+                    }
+                </MudStack>
+                <MudText Typo="Typo.caption">Workspace access comes from verified organizational grants.</MudText>
+            </MudPaper>
+        }
+    </MudPaper>
+    <MudPaper Class="pa-4 mb-4" Elevation="0">
+        <MudText Typo="Typo.subtitle1">Join an organization</MudText>
+        <MudTextField T="string" Label="Search organizations" Value="@_search" ValueChanged="SearchChangedAsync"
+                      Variant="Variant.Outlined" Immediate="true" DebounceInterval="400" Clearable="true"
+                      Disabled="@Snapshot.IsSaving" aria-label="Search organizations" />
+        @foreach (var option in Snapshot.Directory)
+        {
+            <SwiftAidSettingsRow @key="option.OrganizationId"
+                                 Title="@option.OrganizationId"
+                                 Description="@option.Status"
+                                 Icon="@Icons.Material.Outlined.Groups">
+                <Trailing>
+                    <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@Snapshot.IsSaving"
+                               OnClick="@(() => RequestAsync(option.OrganizationId))">
+                        Request access
+                    </MudButton>
+                </Trailing>
+            </SwiftAidSettingsRow>
+        }
+        @if (Snapshot.Requests.Count > 0)
+        {
+            <MudText Typo="Typo.subtitle2">Your requests</MudText>
+            @foreach (var request in Snapshot.Requests)
+            {
+                <MudText Typo="Typo.body2">@request.OrganizationId — @request.Status</MudText>
+            }
+        }
+    </MudPaper>
+}
+
+@code {
+    [Parameter] public OrganizationsSnapshot Snapshot { get; set; } = OrganizationsSnapshot.Loading;
+
+    [Parameter] public EventCallback OnRefresh { get; set; }
+
+    [Parameter] public EventCallback<string?> OnSearch { get; set; }
+
+    [Parameter] public EventCallback<MembershipJoinRequest> OnRequest { get; set; }
+
+    private string? _search;
+
+    private Task SearchChangedAsync(string value)
+    {
+        _search = value;
+        return OnSearch.InvokeAsync(value);
+    }
+
+    private Task RequestAsync(string organizationId) =>
+        OnRequest.InvokeAsync(new MembershipJoinRequest(organizationId, null));
+}

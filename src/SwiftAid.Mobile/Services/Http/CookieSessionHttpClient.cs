@@ -100,11 +100,26 @@ public sealed class CookieSessionHttpClient : IDisposable
         return await client.GetAsync(path, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<HttpResponseMessage> PostJsonAsync<T>(
+        string path,
+        T body,
+        string? antiforgeryToken,
+        CancellationToken cancellationToken = default) =>
+        await SendJsonAsync(HttpMethod.Post, path, body, antiforgeryToken, cancellationToken).ConfigureAwait(false);
+
     public async Task<HttpResponseMessage> PutJsonAsync<T>(
         string path,
         T body,
         string? antiforgeryToken,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        await SendJsonAsync(HttpMethod.Put, path, body, antiforgeryToken, cancellationToken).ConfigureAwait(false);
+
+    private async Task<HttpResponseMessage> SendJsonAsync<T>(
+        HttpMethod method,
+        string path,
+        T body,
+        string? antiforgeryToken,
+        CancellationToken cancellationToken)
     {
         HttpClient client;
         lock (_sync)
@@ -113,7 +128,7 @@ public sealed class CookieSessionHttpClient : IDisposable
             client = _client;
         }
 
-        using var request = new HttpRequestMessage(HttpMethod.Put, path)
+        using var request = new HttpRequestMessage(method, path)
         {
             Content = JsonContent.Create(body, MediaTypeHeaderValue.Parse("application/json"), JsonOptions)
         };

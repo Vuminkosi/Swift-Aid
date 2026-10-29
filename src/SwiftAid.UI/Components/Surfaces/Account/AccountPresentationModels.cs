@@ -90,3 +90,48 @@ public sealed record ProfileEditRequest(
     string? Country,
     string? Region,
     string? Locality);
+
+public enum OrganizationsViewState
+{
+    Loading,
+    Ready,
+    SignedOut,
+    Unavailable
+}
+
+public sealed record MembershipSnapshot(
+    string OrganizationId,
+    string OrganizationStatus,
+    string MembershipStatus,
+    IReadOnlyList<string> WorkspaceIds);
+
+public sealed record OrganizationOptionSnapshot(string OrganizationId, string Status);
+
+public sealed record MembershipRequestSnapshot(
+    string RequestId,
+    string OrganizationId,
+    string Status,
+    string? Reason);
+
+public sealed record OrganizationsSnapshot(
+    OrganizationsViewState ViewState,
+    IReadOnlyList<MembershipSnapshot> Memberships,
+    IReadOnlyList<MembershipRequestSnapshot> Requests,
+    IReadOnlyList<OrganizationOptionSnapshot> Directory,
+    bool IsSaving,
+    string? StatusMessage = null,
+    bool StatusIsError = false)
+{
+    public static OrganizationsSnapshot Loading { get; } = new(
+        OrganizationsViewState.Loading, [], [], [], false);
+
+    public static OrganizationsSnapshot SignedOut { get; } = new(
+        OrganizationsViewState.SignedOut, [], [], [], false,
+        "Sign in to view your workspaces.", true);
+
+    public static OrganizationsSnapshot Unavailable { get; } = new(
+        OrganizationsViewState.Unavailable, [], [], [], false,
+        "Your workspaces are temporarily unavailable.", true);
+}
+
+public sealed record MembershipJoinRequest(string OrganizationId, string? Reason);

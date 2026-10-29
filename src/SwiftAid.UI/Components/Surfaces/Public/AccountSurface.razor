@@ -164,6 +164,10 @@
             }
         </SwiftAidSettingsGroup>
         <MudText Typo="Typo.body2">Switching changes only what you view, never what you can access.</MudText>
+        @if (Snapshot.IsSignedIn && !string.IsNullOrWhiteSpace(OrganizationsHref))
+        {
+            <MudLink Href="@OrganizationsHref" aria-label="Manage organizations">Manage organizations</MudLink>
+        }
 
         <ThemePreferenceControl />
 
@@ -198,6 +202,12 @@
     /// renders, so hosts without that route stay clean.
     /// </summary>
     [Parameter] public string? EditProfileHref { get; set; }
+
+    /// <summary>
+    /// Optional deep link to the organizations page. When null or empty no
+    /// link renders, so hosts without that route stay clean.
+    /// </summary>
+    [Parameter] public string? OrganizationsHref { get; set; }
 
     /// <summary>
     /// Optional sign-out confirmation hook. Defaults to the shared

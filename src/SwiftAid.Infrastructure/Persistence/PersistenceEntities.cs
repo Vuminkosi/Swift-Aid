@@ -240,6 +240,32 @@ public sealed class EmailVerificationEntity
     public DateTimeOffset CreatedAtUtc { get; set; }
 }
 
+public enum MembershipRequestStatus
+{
+    Unspecified,
+    Pending,
+    Approved,
+    Declined
+}
+
+/// <summary>Member-initiated request to join an organization. Review stays with staff tooling.</summary>
+public sealed class MembershipRequestEntity
+{
+    public Guid RequestId { get; set; }
+
+    public required string ActorId { get; set; }
+
+    public required string OrganizationId { get; set; }
+
+    public MembershipRequestStatus Status { get; set; }
+
+    public string? Reason { get; set; }
+
+    public DateTimeOffset CreatedAtUtc { get; set; }
+
+    public DateTimeOffset UpdatedAtUtc { get; set; }
+}
+
 /// <summary>Self-asserted profile fields. Identity owns the email; authorization owns membership.</summary>
 public sealed class UserProfileEntity
 {

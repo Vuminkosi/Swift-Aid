@@ -22,6 +22,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
     public DbSet<ExternalIdentityMappingEntity> ExternalIdentityMappings => Set<ExternalIdentityMappingEntity>();
     public DbSet<EmailVerificationEntity> EmailVerifications => Set<EmailVerificationEntity>();
     public DbSet<UserProfileEntity> UserProfiles => Set<UserProfileEntity>();
+    public DbSet<MembershipRequestEntity> MembershipRequests => Set<MembershipRequestEntity>();
     public DbSet<ActorEntity> Actors => Set<ActorEntity>();
     public DbSet<ActorAccessStateEntity> ActorAccessStates => Set<ActorAccessStateEntity>();
     public DbSet<OrganizationEntity> Organizations => Set<OrganizationEntity>();
@@ -287,6 +288,29 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
             .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_memberships_grantor");
         membership.HasOne<ActorEntity>().WithMany().HasForeignKey(entity => entity.RevokedByActorId)
             .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_memberships_revoker");
+
+        var joinRequest = modelBuilder.Entity<MembershipRequestEntity>();
+        joinRequest.ToTable("membership_requests", table =>
+        {
+            table.HasCheckConstraint("ck_membership_requests_status", "status IN ('Pending', 'Approved', 'Declined')");
+            table.HasCheckConstraint("ck_membership_requests_ids_nonempty", "length(btrim(actor_id)) > 0 AND length(btrim(organization_id)) > 0");
+        });
+        joinRequest.HasKey(entity => entity.RequestId).HasName("pk_membership_requests");
+        joinRequest.HasIndex(entity => new { entity.ActorId, entity.OrganizationId, entity.Status })
+            .HasDatabaseName("ix_membership_requests_actor_organization_status");
+        joinRequest.Property(entity => entity.RequestId).HasColumnName("request_id");
+        joinRequest.Property(entity => entity.ActorId).HasColumnName("actor_id").HasColumnType("text");
+        joinRequest.Property(entity => entity.OrganizationId).HasColumnName("organization_id").HasColumnType("text");
+        joinRequest.Property(entity => entity.Status).HasColumnName("status").HasConversion<string>().HasColumnType("text");
+        joinRequest.Property(entity => entity.Reason).HasColumnName("reason").HasColumnType("text");
+        joinRequest.Property(entity => entity.CreatedAtUtc).HasColumnName("created_at_utc")
+            .HasColumnType("timestamp with time zone");
+        joinRequest.Property(entity => entity.UpdatedAtUtc).HasColumnName("updated_at_utc")
+            .HasColumnType("timestamp with time zone");
+        joinRequest.HasOne<ActorEntity>().WithMany().HasForeignKey(entity => entity.ActorId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_membership_requests_actor");
+        joinRequest.HasOne<OrganizationEntity>().WithMany().HasForeignKey(entity => entity.OrganizationId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_membership_requests_organization");
 
         var grant = modelBuilder.Entity<AccessGrantGroupEntity>();
         grant.ToTable("access_grant_groups", table =>

@@ -1967,6 +1967,56 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.MembershipRequestEntity", b =>
+                {
+                    b.Property<Guid>("RequestId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("request_id");
+
+                    b.Property<string>("ActorId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("actor_id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("OrganizationId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("Reason")
+                        .HasColumnType("text")
+                        .HasColumnName("reason");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.HasKey("RequestId")
+                        .HasName("pk_membership_requests");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.HasIndex("ActorId", "OrganizationId", "Status")
+                        .HasDatabaseName("ix_membership_requests_actor_organization_status");
+
+                    b.ToTable("membership_requests", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_membership_requests_ids_nonempty", "length(btrim(actor_id)) > 0 AND length(btrim(organization_id)) > 0");
+
+                            t.HasCheckConstraint("ck_membership_requests_status", "status IN ('Pending', 'Approved', 'Declined')");
+                        });
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Notifications.NotificationDeliveryOutboxEntity", b =>
                 {
                     b.Property<Guid>("OutboxId")
@@ -3107,6 +3157,23 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_managed_case_regions_case");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.MembershipRequestEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.ActorEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ActorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_membership_requests_actor");
+
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.OrganizationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_membership_requests_organization");
                 });
 
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Notifications.NotificationDeliveryOutboxEntity", b =>

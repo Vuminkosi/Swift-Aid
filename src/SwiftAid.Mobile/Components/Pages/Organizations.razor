@@ -1,0 +1,101 @@
+@page "/organizations"
+@using SwiftAid.Client.Authentication
+@using SwiftAid.Client.Presentation
+@using SwiftAid.Mobile.Services.Account
+@using SwiftAid.Mobile.Services.Http
+@using SwiftAid.UI.Components.Surfaces.Account
+@inject IServiceProvider ServiceProvider
+
+<PageTitle>Organizations | SwiftAid</PageTitle>
+
+<OrganizationsSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OnSearch="SearchAsync" OnRequest="RequestAsync" />
+
+@code {
+    private OrganizationsSnapshot _snapshot = OrganizationsSnapshot.Loading;
+
+    private IOrganizationMembershipClient MembershipClient =>
+        (IOrganizationMembershipClient?)ServiceProvider.GetService(typeof(IOrganizationMembershipClient))
+        ?? CreateFallback()
+        ?? new UnavailableOrganizationMembershipClient();
+
+    private IOrganizationMembershipClient? CreateFallback()
+    {
+        var options = (NativeSessionHttpOptions?)ServiceProvider.GetService(typeof(NativeSessionHttpOptions));
+        var address = options?.GatewayBaseAddress?.ToString();
+        return string.IsNullOrWhiteSpace(address)
+            ? null
+            : new HttpOrganizationMembershipClient(CookieSessionHttpClient.Shared(address));
+    }
+
+    protected override async Task OnInitializedAsync() => await RefreshAsync();
+
+    private async Task RefreshAsync()
+    {
+        var memberships = await MembershipClient.GetMineAsync();
+        var requests = await MembershipClient.GetMyRequestsAsync();
+        _snapshot = Map(memberships, requests, _snapshot.Directory, _snapshot);
+    }
+
+    private async Task SearchAsync(string? query)
+    {
+        var directory = await MembershipClient.SearchAsync(query);
+        _snapshot = _snapshot with
+        {
+            Directory = directory.Value?.Select(entry => new OrganizationOptionSnapshot(
+                entry.OrganizationId, entry.Status)).ToList() ?? [],
+            StatusMessage = directory.Message,
+            StatusIsError = directory.Code != UiCapabilityResultCode.Success
+        };
+    }
+
+    private async Task RequestAsync(MembershipJoinRequest request)
+    {
+        _snapshot = _snapshot with { IsSaving = true, StatusMessage = null, StatusIsError = false };
+        var result = await MembershipClient.RequestAsync(request.OrganizationId, request.Reason);
+        var memberships = await MembershipClient.GetMineAsync();
+        var requests = await MembershipClient.GetMyRequestsAsync();
+        var mapped = Map(memberships, requests, _snapshot.Directory, _snapshot) with { IsSaving = false };
+        _snapshot = result.Succeeded
+            ? mapped with { StatusMessage = "Request sent. The organization will review it.", StatusIsError = false }
+            : mapped with { StatusMessage = result.Message ?? "Requesting access failed.", StatusIsError = true };
+    }
+
+    private static OrganizationsSnapshot Map(
+        UiCapabilityResult<IReadOnlyList<MembershipView>> memberships,
+        UiCapabilityResult<IReadOnlyList<MembershipRequestView>> requests,
+        IReadOnlyList<OrganizationOptionSnapshot> directory,
+        OrganizationsSnapshot previous)
+    {
+        if (memberships.Code == UiCapabilityResultCode.Denied || requests.Code == UiCapabilityResultCode.Denied)
+        {
+            return OrganizationsSnapshot.SignedOut;
+        }
+
+        if (memberships.Value is null && requests.Value is null)
+        {
+            return OrganizationsSnapshot.Unavailable with
+            {
+                Directory = directory,
+                StatusMessage = memberships.Message ?? requests.Message ?? OrganizationsSnapshot.Unavailable.StatusMessage
+            };
+        }
+
+        return new OrganizationsSnapshot(
+            OrganizationsViewState.Ready,
+            memberships.Value?.Select(membership => new MembershipSnapshot(
+                membership.OrganizationId,
+                membership.OrganizationStatus,
+                membership.MembershipStatus,
+                membership.WorkspaceIds)).ToList() ?? previous.Memberships,
+            requests.Value?.Select(request => new MembershipRequestSnapshot(
+                request.RequestId,
+                request.OrganizationId,
+                request.Status,
+                request.Reason)).ToList() ?? previous.Requests,
+            directory,
+            previous.IsSaving,
+            memberships.Message ?? requests.Message,
+            memberships.Code is not (UiCapabilityResultCode.Success or UiCapabilityResultCode.Denied)
+                || requests.Code is not (UiCapabilityResultCode.Success or UiCapabilityResultCode.Denied));
+    }
+}
