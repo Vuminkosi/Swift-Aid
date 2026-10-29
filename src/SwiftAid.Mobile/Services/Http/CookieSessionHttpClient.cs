@@ -16,10 +16,45 @@ public class CookieSessionHttpClient : IDisposable
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    /// <summary>
+    /// Gateway auth cookie name. Must match the server cookie registration
+    /// (ServiceCollectionExtensions configures "__Host-SwiftAid.Auth").
+    /// </summary>
+    public const string GatewayAuthCookieName = "__Host-SwiftAid.Auth";
+
     private readonly object _sync = new();
     private HttpClientHandler _handler;
     private HttpClient _client;
     private bool _disposed;
+
+    /// <summary>True while the jar holds a live gateway auth cookie.</summary>
+    public bool HasAuthenticationCookie
+    {
+        get
+        {
+            lock (_sync)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                var baseAddress = _client.BaseAddress;
+                if (baseAddress is null)
+                {
+                    return false;
+                }
+
+                var cookies = _handler.CookieContainer.GetCookies(baseAddress);
+                foreach (System.Net.Cookie cookie in cookies)
+                {
+                    if (!cookie.Expired &&
+                        string.Equals(cookie.Name, GatewayAuthCookieName, StringComparison.Ordinal))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
+    }
 
     public CookieSessionHttpClient(string? baseAddress)
     {

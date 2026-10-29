@@ -3,6 +3,7 @@
 @using SwiftAid.Client.Authentication
 @using SwiftAid.Mobile.Services.Account
 @using SwiftAid.Mobile.Services.Http
+@using SwiftAid.Mobile.Services.Authentication
 @inject IServiceProvider ServiceProvider
 @inject NavigationManager Navigation
 
@@ -61,6 +62,15 @@
         var options = (NativeSessionHttpOptions?)ServiceProvider.GetService(typeof(NativeSessionHttpOptions));
         return new HttpPasswordAuthClient(
             CookieSessionHttpClient.Shared(options?.GatewayBaseAddress?.ToString()));
+    }
+
+
+    private Task RefreshShellAsync()
+    {
+        // Password sessions live in the gateway cookie jar; notify the shell
+        // so the gate and overview refresh without an app restart.
+        var session = (IMobileAuthenticationSession?)ServiceProvider.GetService(typeof(IMobileAuthenticationSession));
+        return session is null ? Task.CompletedTask : session.RefreshAsync();
     }
 
     private bool CanConfirm => !_busy && !string.IsNullOrWhiteSpace(_code);
@@ -172,6 +182,7 @@
             var result = await AuthClient.ConfirmEmailCodeAsync(_code!.Trim());
             if (result.Status == PasswordAuthStatus.Succeeded)
             {
+                await RefreshShellAsync();
                 Navigation.NavigateTo("/account");
                 return;
             }

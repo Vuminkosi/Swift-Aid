@@ -2,6 +2,7 @@
 @using SwiftAid.Client.Authentication
 @using SwiftAid.Mobile.Services.Account
 @using SwiftAid.Mobile.Services.Http
+@using SwiftAid.Mobile.Services.Authentication
 @inject IServiceProvider ServiceProvider
 @inject NavigationManager Navigation
 
@@ -89,6 +90,15 @@
         }
     }
 
+
+    private Task RefreshShellAsync()
+    {
+        // Password sessions live in the gateway cookie jar; notify the shell
+        // so the gate and overview refresh without an app restart.
+        var session = (IMobileAuthenticationSession?)ServiceProvider.GetService(typeof(IMobileAuthenticationSession));
+        return session is null ? Task.CompletedTask : session.RefreshAsync();
+    }
+
     private bool CanSubmit =>
         !_busy &&
         !string.IsNullOrWhiteSpace(_email) &&
@@ -108,6 +118,7 @@
             var result = await AuthClient.RegisterAsync(_email!.Trim(), _password!);
             if (result.Status == PasswordAuthStatus.Succeeded)
             {
+                await RefreshShellAsync();
                 Navigation.NavigateTo("/welcome-complete");
                 return;
             }

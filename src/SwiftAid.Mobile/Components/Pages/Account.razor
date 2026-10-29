@@ -1,5 +1,9 @@
 @page "/account"
+@using SwiftAid.Client.Authentication
 @using SwiftAid.Client.Presentation
+@using SwiftAid.Mobile.Services.Account
+@using SwiftAid.Mobile.Services.Authentication
+@using SwiftAid.Mobile.Services.Http
 @using SwiftAid.UI.Components.Surfaces.Account
 @using SwiftAid.UI.Components.Surfaces.Public
 @inject IServiceProvider ServiceProvider
@@ -60,7 +64,9 @@
 
     private async Task SignOutAsync()
     {
+        await SignOutPasswordCookieAsync();
         var result = await AccountClient.SignOutAsync();
+        await RefreshShellAsync();
         var workspaceResult = await WorkspaceClient.GetStateAsync();
         _snapshot = Map(result, workspaceResult);
         if (result.Value is null)
@@ -86,6 +92,31 @@
                 StatusIsError = false
             };
         }
+    }
+
+    private async Task SignOutPasswordCookieAsync()
+    {
+        // Native sign-out below does not know the password cookie jar; clear it
+        // here so a password session does not survive sign-out.
+        try
+        {
+            var options = (NativeSessionHttpOptions?)ServiceProvider.GetService(typeof(NativeSessionHttpOptions));
+            var jar = CookieSessionHttpClient.Shared(options?.GatewayBaseAddress?.ToString());
+            if (jar.HasAuthenticationCookie)
+            {
+                await new HttpPasswordAuthClient(jar).LogoutAsync();
+            }
+        }
+        catch (Exception)
+        {
+            // Fall through: the shell refresh below re-reads the jar state.
+        }
+    }
+
+    private Task RefreshShellAsync()
+    {
+        var session = (IMobileAuthenticationSession?)ServiceProvider.GetService(typeof(IMobileAuthenticationSession));
+        return session is null ? Task.CompletedTask : session.RefreshAsync();
     }
 
     private static AccountPresentationSnapshot Map(
