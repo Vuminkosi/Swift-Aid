@@ -166,6 +166,37 @@ public sealed record NotificationsSnapshot(
 
 public sealed record NotificationPreferenceChange(bool WorkReminders, bool SessionUpdates);
 
+public enum ChangePasswordViewState
+{
+    Loading,
+    Ready,
+    SignedOut,
+    Unavailable
+}
+
+/// <summary>Password change. Sessions stay device-local; no remote session list exists.</summary>
+public sealed record ChangePasswordSnapshot(
+    ChangePasswordViewState ViewState,
+    bool IsSaving,
+    string? StatusMessage = null,
+    bool StatusIsError = false)
+{
+    public static ChangePasswordSnapshot Loading { get; } = new(
+        ChangePasswordViewState.Loading, false);
+
+    public static ChangePasswordSnapshot SignedOut { get; } = new(
+        ChangePasswordViewState.SignedOut, false,
+        "Sign in to change your password.", true);
+
+    public static ChangePasswordSnapshot Unavailable { get; } = new(
+        ChangePasswordViewState.Unavailable, false,
+        "Password changes are temporarily unavailable.", true);
+}
+
+/// <summary>Null <see cref="ChangePasswordRequest.NewPassword"/> signals a confirmation
+/// mismatch; pages report it without calling the backend.</summary>
+public sealed record ChangePasswordRequest(string? CurrentPassword, string? NewPassword);
+
 public enum WelcomeCompleteViewState
 {
     Loading,

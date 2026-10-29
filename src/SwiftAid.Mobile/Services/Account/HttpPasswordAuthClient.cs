@@ -223,6 +223,42 @@ public sealed class HttpPasswordAuthClient(CookieSessionHttpClient session)
         }
     }
 
+    public async Task<PasswordAuthOutcome> ChangePasswordAsync(
+        string currentPassword,
+        string newPassword,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var token = await _session.GetAntiforgeryTokenAsync(cancellationToken).ConfigureAwait(false);
+            using var response = await _session.PostJsonAsync(
+                "/auth/password/change", new { currentPassword, newPassword }, token, cancellationToken)
+                .ConfigureAwait(false);
+            return response.StatusCode switch
+            {
+                HttpStatusCode.NoContent => new PasswordAuthOutcome(
+                    PasswordAuthStatus.Succeeded,
+                    Message: "Your password was changed."),
+                HttpStatusCode.Unauthorized => new PasswordAuthOutcome(
+                    PasswordAuthStatus.SignedOut,
+                    Message: "Sign in to change your password."),
+                HttpStatusCode.BadRequest => new PasswordAuthOutcome(
+                    PasswordAuthStatus.InvalidRequest,
+                    Message: await ReadMessageAsync(response, cancellationToken).ConfigureAwait(false)
+                        ?? "The password could not be changed."),
+                _ => Unavailable("Changing the password is temporarily unavailable.")
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            return TransportFailure(exception, cancellationToken, "Changing the password is temporarily unavailable.");
+        }
+    }
+
     public async Task<PasswordAuthOutcome> ConfirmEmailCodeAsync(
         string code,
         CancellationToken cancellationToken = default)

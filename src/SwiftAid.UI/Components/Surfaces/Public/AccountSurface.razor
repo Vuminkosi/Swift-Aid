@@ -117,6 +117,10 @@
         {
             <MudLink Href="@EditProfileHref" aria-label="View and edit profile">View and edit profile</MudLink>
         }
+        @if (Snapshot.IsSignedIn && !string.IsNullOrWhiteSpace(SecurityHref))
+        {
+            <MudLink Href="@SecurityHref" aria-label="Security and sign-in">Security &amp; sign-in</MudLink>
+        }
 
         <SwiftAidSettingsGroup Label="Workspace" HeadingId="account-workspace-heading">
             @if (!Snapshot.WorkspacesAvailable)
@@ -218,6 +222,12 @@
     /// link renders, so hosts without that route stay clean.
     /// </summary>
     [Parameter] public string? NotificationsHref { get; set; }
+
+    /// <summary>
+    /// Optional deep link to the security page. When null or empty no link
+    /// renders, so hosts without that route stay clean.
+    /// </summary>
+    [Parameter] public string? SecurityHref { get; set; }
 
     /// <summary>
     /// Optional sign-out confirmation hook. Defaults to the shared

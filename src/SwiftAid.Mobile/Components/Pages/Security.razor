@@ -1,0 +1,137 @@
+@page "/security"
+@using SwiftAid.Client.Authentication
+@using SwiftAid.Client.Presentation
+@using SwiftAid.Mobile.Services.Account
+@using SwiftAid.Mobile.Services.Http
+@using SwiftAid.UI.Components.Surfaces.Account
+@inject IServiceProvider ServiceProvider
+
+<PageTitle>Security &amp; sign-in | SwiftAid</PageTitle>
+
+<SwiftAidPageHeading Eyebrow="Account" Title="Security &amp; sign-in"
+                     Description="Change your password and review how you sign in."
+                     HeadingId="security-heading" />
+
+<ChangePasswordSurface Snapshot="_password" OnRefresh="RefreshAsync" OnSave="ChangePasswordAsync" />
+
+<MudPaper Class="pa-4 mb-4" Elevation="0">
+    <MudText Typo="Typo.subtitle1">Connected sign-in methods</MudText>
+    @if (_account is null)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" aria-label="Loading sign-in methods" />
+    }
+    else if (!_account.IsSignedIn)
+    {
+        <MudText Typo="Typo.body2">Sign in to review your sign-in methods.</MudText>
+    }
+    else
+    {
+        <SwiftAidSettingsGroup Label="Methods" HeadingId="security-methods-heading">
+            @foreach (var provider in _account.Providers)
+            {
+                <SwiftAidSettingsRow Title="@provider.Name"
+                                     Description="@provider.StatusMessage">
+                    <Trailing>
+                        <MudChip T="string" Size="Size.Small"
+                                 Color="@(provider.IsConnected ? Color.Success : Color.Default)"
+                                 Variant="Variant.Outlined">
+                            @(provider.IsConnected ? "Connected" : provider.IsAvailable ? "Available" : "Unavailable")
+                        </MudChip>
+                    </Trailing>
+                </SwiftAidSettingsRow>
+            }
+        </SwiftAidSettingsGroup>
+        <MudText Typo="Typo.caption">
+            Only this device session is shown here. Remote session management is not supported.
+        </MudText>
+    }
+</MudPaper>
+
+@code {
+    private ChangePasswordSnapshot _password = ChangePasswordSnapshot.Loading;
+    private AccountPresentationState? _account;
+
+    private HttpPasswordAuthClient AuthClient =>
+        (HttpPasswordAuthClient?)ServiceProvider.GetService(typeof(HttpPasswordAuthClient))
+        ?? CreateAuthFallback();
+
+    private IAccountPresentationClient AccountClient =>
+        (IAccountPresentationClient?)ServiceProvider.GetService(typeof(IAccountPresentationClient))
+        ?? new UnavailableAccountPresentationClient();
+
+    private IUserProfileClient ProfileClient =>
+        (IUserProfileClient?)ServiceProvider.GetService(typeof(IUserProfileClient))
+        ?? CreateProfileFallback();
+
+    private HttpPasswordAuthClient CreateAuthFallback()
+    {
+        var options = (NativeSessionHttpOptions?)ServiceProvider.GetService(typeof(NativeSessionHttpOptions));
+        return new HttpPasswordAuthClient(
+            CookieSessionHttpClient.Shared(options?.GatewayBaseAddress?.ToString()));
+    }
+
+    private IUserProfileClient CreateProfileFallback()
+    {
+        var options = (NativeSessionHttpOptions?)ServiceProvider.GetService(typeof(NativeSessionHttpOptions));
+        return new HttpUserProfileClient(
+            CookieSessionHttpClient.Shared(options?.GatewayBaseAddress?.ToString()));
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _account = (await AccountClient.GetStateAsync()).Value;
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        var profile = await ProfileClient.GetAsync();
+        if (profile.Value is null)
+        {
+            _password = profile.Code == UiCapabilityResultCode.Denied
+                ? ChangePasswordSnapshot.SignedOut
+                : ChangePasswordSnapshot.Unavailable with
+                {
+                    StatusMessage = profile.Message ?? ChangePasswordSnapshot.Unavailable.StatusMessage
+                };
+            return;
+        }
+
+        _password = profile.Value.IsSignedIn
+            ? new ChangePasswordSnapshot(ChangePasswordViewState.Ready, false)
+            : ChangePasswordSnapshot.SignedOut;
+    }
+
+    private async Task ChangePasswordAsync(ChangePasswordRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.NewPassword))
+        {
+            _password = new ChangePasswordSnapshot(
+                ChangePasswordViewState.Ready, false, "The new passwords do not match.", true);
+            return;
+        }
+
+        _password = new ChangePasswordSnapshot(ChangePasswordViewState.Ready, true);
+        try
+        {
+            var result = await AuthClient.ChangePasswordAsync(
+                request.CurrentPassword ?? string.Empty,
+                request.NewPassword);
+            _password = result.Status switch
+            {
+                PasswordAuthStatus.Succeeded => new ChangePasswordSnapshot(
+                    ChangePasswordViewState.Ready, false, result.Message ?? "Your password was changed.", false),
+                PasswordAuthStatus.SignedOut => ChangePasswordSnapshot.SignedOut,
+                _ => new ChangePasswordSnapshot(
+                    ChangePasswordViewState.Ready, false,
+                    result.Message ?? "The password could not be changed.", true)
+            };
+        }
+        catch (Exception)
+        {
+            _password = new ChangePasswordSnapshot(
+                ChangePasswordViewState.Ready, false,
+                "Changing the password is temporarily unavailable.", true);
+        }
+    }
+}
