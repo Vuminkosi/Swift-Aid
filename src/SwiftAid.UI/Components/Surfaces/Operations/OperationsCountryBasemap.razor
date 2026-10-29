@@ -1,0 +1,277 @@
+@using System.Text.Json
+@using SwiftAid.UI.Components.Theme
+@inject IJSRuntime JavaScript
+@implements IAsyncDisposable
+
+<div class="operations-country-map">
+    @if (_isLoading)
+    {
+        <div class="operations-country-map__status" role="status" aria-live="polite">Loading the country map…</div>
+    }
+    else if (!string.IsNullOrWhiteSpace(_loadError))
+    {
+        <div class="operations-country-map__status" role="alert">
+            <span>@_loadError</span>
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Size="Size.Small" OnClick="LoadGeometryAsync">Try again</MudButton>
+        </div>
+    }
+    else if (!_geometryLoaded)
+    {
+        <div class="operations-country-map__status" role="status">
+            The interactive map loads when the page is ready. Area totals remain available in the table.
+        </div>
+    }
+    else if (!HasCountryAggregates)
+    {
+        <div class="operations-country-map__status" role="status" aria-live="polite">No country totals are available to highlight. Region totals remain in the table.</div>
+    }
+    else
+    {
+        <svg class="operations-country-map__svg"
+             viewBox="0 0 960 480"
+             role="group"
+             aria-labelledby="@MapTitleId @MapDescriptionId"
+             preserveAspectRatio="xMidYMid meet">
+            <title id="@MapTitleId">Country totals map</title>
+            <desc id="@MapDescriptionId">Public country outlines. Shaded countries have totals for the selected report groups. The map does not show report locations. A data table follows this map.</desc>
+            <defs>
+                <linearGradient id="operations-map-human-animal" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stop-color="var(--mud-palette-primary)" />
+                    <stop offset="50%" stop-color="var(--mud-palette-primary)" />
+                    <stop offset="50%" stop-color="var(--mud-palette-secondary)" />
+                    <stop offset="100%" stop-color="var(--mud-palette-secondary)" />
+                </linearGradient>
+            </defs>
+            @foreach (var country in _countries)
+            {
+                var hasAggregate = TryFindCountryAggregate(country.Code, out var aggregate);
+                var layerClass = AggregateLayerClass(country.Code);
+                var selectedClass = string.Equals(country.Code, SelectedCountryCode, StringComparison.Ordinal)
+                    ? "operations-country-map__country--selected"
+                    : string.Empty;
+                <g class="operations-country-map__country-group @(hasAggregate ? "operations-country-map__country-group--selectable" : string.Empty)"
+                   role="@(hasAggregate ? "button" : null)"
+                   tabindex="@(hasAggregate ? "0" : null)"
+                   aria-label="@(hasAggregate ? CountryAccessibleLabel(country.Name, aggregate!) : null)"
+                   aria-pressed="@(hasAggregate ? string.Equals(country.Code, SelectedCountryCode, StringComparison.Ordinal) : null)"
+                   @onpointerdown:stopPropagation="true"
+                   @onclick="() => SelectCountryAsync(country.Code)"
+                   @onkeydown="args => SelectCountryOnKeyDownAsync(args, country.Code)">
+                    @foreach (var path in country.Paths)
+                    {
+                        <path class="operations-country-map__country @layerClass @selectedClass"
+                              d="@path"
+                              fill-rule="evenodd">
+                            <title>@country.Name</title>
+                        </path>
+                    }
+                </g>
+            }
+        </svg>
+        <div class="operations-country-map__legend" aria-hidden="true">
+            @if (ShowHuman)
+            {
+                <span><i class="operations-country-map__swatch operations-country-map__swatch--human"></i>Human reports</span>
+            }
+            @if (ShowAnimal)
+            {
+                <span><i class="operations-country-map__swatch operations-country-map__swatch--animal"></i>Animal reports</span>
+            }
+            @if (ShowHuman && ShowAnimal)
+            {
+                <span><i class="operations-country-map__swatch operations-country-map__swatch--both"></i>Both reporting sectors</span>
+            }
+            <span><i class="operations-country-map__swatch operations-country-map__swatch--base"></i>No totals shown</span>
+        </div>
+        <MudText Typo="Typo.caption" Color="Color.Secondary">
+            Country outlines from Natural Earth; public domain. Map reference only, not for legal boundaries.
+            <a href="_content/SwiftAid.UI/maps/natural-earth-countries-v1.provenance.txt">Map source and usage information</a>.
+        </MudText>
+    }
+</div>
+
+@code {
+    private const string ExpectedSourceCommit = "ca96624a56bd078437bca8184e78163e5039ad19";
+    private const string ExpectedSourceSha256 = "6866C877D39CBA9C357620878839B336D569F8C662D3CFAB4CB1DBE2D39C977F";
+    private const string GeometryModulePath = "./_content/SwiftAid.UI/maps/natural-earth-map-loader.js";
+    private static readonly TimeSpan GeometryLoadTimeout = TimeSpan.FromSeconds(15);
+    private readonly string _mapTitleId = $"country-map-title-{Guid.NewGuid():N}";
+    private readonly string _mapDescriptionId = $"country-map-description-{Guid.NewGuid():N}";
+    private IJSObjectReference? _module;
+    private IReadOnlyList<CountryFeature> _countries = Array.Empty<CountryFeature>();
+    private bool _isLoading;
+    private bool _geometryLoaded;
+    private string? _loadError;
+
+    [Parameter, EditorRequired] public IReadOnlyList<OperationsMapSurface.AreaAggregateView> Areas { get; set; } = Array.Empty<OperationsMapSurface.AreaAggregateView>();
+    [Parameter] public bool ShowHuman { get; set; } = true;
+    [Parameter] public bool ShowAnimal { get; set; } = true;
+    [Parameter] public string? SelectedCountryCode { get; set; }
+    [Parameter] public EventCallback<string> OnCountrySelected { get; set; }
+
+    private bool HasCountryAggregates => Areas.Any(area =>
+        area.Precision == OperationsMapSurface.AggregatePrecision.Country &&
+        !area.IsSuppressed &&
+        (area.HumanCount.HasValue || area.AnimalCount.HasValue));
+
+    private string MapTitleId => _mapTitleId;
+    private string MapDescriptionId => _mapDescriptionId;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        await LoadGeometryAsync();
+    }
+
+    private async Task LoadGeometryAsync()
+    {
+        _isLoading = true;
+        _loadError = null;
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            using var timeout = new CancellationTokenSource(GeometryLoadTimeout);
+            _module ??= await JavaScript.InvokeAsync<IJSObjectReference>("import", timeout.Token, GeometryModulePath);
+            var json = await _module.InvokeAsync<string>("loadCountryGeometry", timeout.Token);
+            _countries = ParseGeometry(json);
+            _geometryLoaded = true;
+        }
+        catch (Exception)
+        {
+            _geometryLoaded = false;
+            _loadError = "Country outlines could not be loaded. Area totals remain available in the table.";
+            _countries = Array.Empty<CountryFeature>();
+        }
+        finally
+        {
+            _isLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private string AggregateLayerClass(string countryCode)
+    {
+        TryFindCountryAggregate(countryCode, out var area);
+        if (area is null)
+        {
+            return "operations-country-map__country--base";
+        }
+
+        if (area.IsSuppressed)
+        {
+            return "operations-country-map__country--base";
+        }
+
+        var hasHuman = ShowHuman && area.HumanCount is > 0;
+        var hasAnimal = ShowAnimal && area.AnimalCount is > 0;
+        return (hasHuman, hasAnimal) switch
+        {
+            (true, true) => "operations-country-map__country--both",
+            (true, false) => "operations-country-map__country--human",
+            (false, true) => "operations-country-map__country--animal",
+            _ => "operations-country-map__country--base"
+        };
+    }
+
+    private bool TryFindCountryAggregate(string countryCode, out OperationsMapSurface.AreaAggregateView? aggregate)
+    {
+        aggregate = Areas.FirstOrDefault(item =>
+            item.Precision == OperationsMapSurface.AggregatePrecision.Country &&
+            string.Equals(item.AreaCode, countryCode, StringComparison.Ordinal));
+        return aggregate is not null;
+    }
+
+    private string CountryAccessibleLabel(string countryName, OperationsMapSurface.AreaAggregateView aggregate)
+    {
+        if (aggregate.IsSuppressed)
+        {
+            return $"{countryName}, values withheld to protect privacy.";
+        }
+
+        var parts = new List<string> { countryName };
+        if (ShowHuman && aggregate.HumanCount.HasValue)
+        {
+            parts.Add($"human reports {aggregate.HumanCount.Value:N0}");
+        }
+        if (ShowAnimal && aggregate.AnimalCount.HasValue)
+        {
+            parts.Add($"animal reports {aggregate.AnimalCount.Value:N0}");
+        }
+
+        return string.Join(", ", parts);
+    }
+
+    private Task SelectCountryAsync(string countryCode) => OnCountrySelected.InvokeAsync(countryCode);
+
+    private Task SelectCountryOnKeyDownAsync(KeyboardEventArgs args, string countryCode) =>
+        args.Key is "Enter" or " " or "Spacebar" ? SelectCountryAsync(countryCode) : Task.CompletedTask;
+
+    private static IReadOnlyList<CountryFeature> ParseGeometry(string json)
+    {
+        using var document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 8 });
+        var root = document.RootElement;
+        if (root.GetProperty("sourceCommit").GetString() != ExpectedSourceCommit ||
+            root.GetProperty("sourceSha256").GetString() != ExpectedSourceSha256 ||
+            root.GetProperty("viewBox").GetString() != "0 0 960 480")
+        {
+            throw new JsonException("Unexpected country geometry source or view box.");
+        }
+
+        var features = new List<CountryFeature>();
+        foreach (var feature in root.GetProperty("features").EnumerateArray())
+        {
+            var code = feature.GetProperty("code").GetString();
+            var name = feature.GetProperty("name").GetString();
+            if (!IsCountryCode(code) || string.IsNullOrWhiteSpace(name) || name.Length > 100)
+            {
+                continue;
+            }
+
+            var paths = feature.GetProperty("paths").EnumerateArray()
+                .Select(path => path.GetString())
+                .Where(IsSafePath)
+                .Cast<string>()
+                .ToArray();
+            if (paths.Length > 0)
+            {
+                features.Add(new CountryFeature(code!, name, paths));
+            }
+        }
+
+        if (features.Count is < 100 or > 200 ||
+            features.Select(feature => feature.Code).Distinct(StringComparer.Ordinal).Count() != features.Count)
+        {
+            throw new JsonException("Country geometry failed validation.");
+        }
+
+        return features;
+    }
+
+    private static bool IsCountryCode(string? code) => code is { Length: 2 } &&
+        code.All(character => character is >= 'A' and <= 'Z');
+
+    private static bool IsSafePath(string? path) => path is { Length: > 0 and < 100_000 } &&
+        path.All(character => character is 'M' or 'L' or 'Z' or ',' or '.' or '-' or ' ' or '\n' or '\r' ||
+            character is >= '0' and <= '9');
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // The host may already have disposed its browser circuit or WebView.
+            }
+        }
+    }
+
+    private sealed record CountryFeature(string Code, string Name, IReadOnlyList<string> Paths);
+}

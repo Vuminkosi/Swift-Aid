@@ -1,0 +1,24 @@
+@page "/more"
+
+<PageTitle>More | SwiftAid</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Small" Class="mobile-work-page">
+    <SwiftAidPageHeading Eyebrow="SwiftAid" Title="More" Description="Tasks, sessions, notifications, and account settings." HeadingId="more-heading" />
+
+    <nav class="mobile-destination-list" aria-label="More destinations">
+        <MudButton Href="/monitoring" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.EventNote">Follow-ups and tasks</MudButton>
+        <MudButton Href="/assistance" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.VolunteerActivism">Assistance requests</MudButton>
+        <MudButton Href="/follow-ups" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Schedule">Assigned follow-ups</MudButton>
+        <MudButton Href="/escalations" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.WarningAmber">Escalations</MudButton>
+        <MudButton Href="/surveillance" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Map">Surveillance</MudButton>
+        <MudButton Href="/education" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.School">Education</MudButton>
+        <MudButton Href="/sync" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.CloudSync">Synchronization</MudButton>
+        <MudButton Href="/account" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Settings">Settings</MudButton>
+    </nav>
+
+    <MudPaper Class="mobile-note-card" Elevation="0">
+        <MudText Typo="Typo.subtitle1" HtmlTag="h2">Notifications</MudText>
+        <MudText Typo="Typo.body2">Open the bell in the top bar to review notifications and device settings.</MudText>
+    </MudPaper>
+</MudContainer>
+
