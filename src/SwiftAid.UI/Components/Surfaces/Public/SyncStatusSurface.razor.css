@@ -1,0 +1,90 @@
+.public-resource-surface {
+    display: grid;
+    gap: 1rem;
+    padding-block: 1.25rem;
+}
+
+.sync-summary {
+    display: grid;
+    gap: 0.5rem;
+    padding: 1rem;
+    border: 1px solid var(--sa-border);
+    border-radius: 1rem;
+    background: var(--sa-surface);
+}
+
+.sync-count-list {
+    display: grid;
+    gap: 0.25rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.sync-count-list li {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 0.75rem;
+    align-items: center;
+    min-height: 3rem;
+}
+
+.sync-reports {
+    display: grid;
+    gap: 0.65rem;
+    min-width: 0;
+}
+
+.sync-report-list {
+    display: grid;
+    gap: 0.65rem;
+}
+
+.sync-report {
+    display: grid;
+    gap: 0.45rem;
+    min-width: 0;
+    padding: 0.85rem 1rem;
+    border: 1px solid var(--sa-border);
+    border-radius: 0.9rem;
+    background: var(--sa-surface);
+}
+
+.sync-report__heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+    min-width: 0;
+}
+
+.sync-report__reference,
+.sync-report__detail,
+.sync-report__timestamp {
+    display: block;
+    overflow-wrap: anywhere;
+    color: var(--sa-text-secondary);
+}
+
+.sync-report__receipt {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.public-resource-surface ::deep .mud-button-root {
+    min-height: 2.75rem;
+}
+
+@media (max-width: 30rem) {
+    .sync-report {
+        padding: 0.75rem;
+    }
+
+    .sync-report__heading {
+        flex-wrap: wrap;
+    }
+}
+
+.public-resource-surface ::deep .mud-button-root {
+    min-height: 2.75rem;
+}
