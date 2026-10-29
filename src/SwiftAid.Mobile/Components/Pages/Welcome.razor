@@ -1,0 +1,105 @@
+@page "/welcome"
+@using SwiftAid.Mobile.Services.Authentication
+@using SwiftAid.Mobile.Services.Welcome
+@using SwiftAid.UI.Components.Surfaces.Public
+@inject IMobileAuthenticationSession AuthenticationSession
+@inject IMobileWelcomePreferenceStore WelcomePreferenceStore
+@inject NavigationManager Navigation
+
+<PageTitle>Welcome to SwiftAid</PageTitle>
+
+<div class="mobile-welcome">
+    <MudCarousel TData="object" Class="mobile-welcome__carousel"
+                 ShowBullets="true"
+                 ShowArrows="true"
+                 EnableSwipeGesture="true"
+                 AutoCycle="false"
+                 Style="height: 26rem;"
+                 aria-roledescription="carousel"
+                 aria-label="Introduction to SwiftAid">
+        <MudCarouselItem Transition="Transition.Slide" aria-roledescription="slide" aria-label="1 of 4">
+            <div class="mobile-welcome__slide">
+                <img class="mobile-welcome__brand-mark" src="_content/SwiftAid.UI/assets/swiftaid-icon.png" alt="" width="64" height="64" />
+                <SwiftAidPageHeading Eyebrow="Healthier People. Safer Communities. Brighter Tomorrows."
+                                     Title="Community health. Stronger together."
+                                     HeadingId="welcome-heading" />
+            </div>
+        </MudCarouselItem>
+        <MudCarouselItem Transition="Transition.Slide" aria-roledescription="slide" aria-label="2 of 4">
+            <div class="mobile-welcome__slide">
+                <span class="mobile-welcome__medallion" aria-hidden="true">
+                    <MudIcon Icon="@Icons.Material.Filled.FolderOpen" Size="Size.Large" Color="Color.Primary" />
+                </span>
+                <SwiftAidPageHeading Title="Manage Cases"
+                                     Description="Track, follow up and coordinate community cases."
+                                     HeadingId="welcome-manage-heading" />
+            </div>
+        </MudCarouselItem>
+        <MudCarouselItem Transition="Transition.Slide" aria-roledescription="slide" aria-label="3 of 4">
+            <div class="mobile-welcome__slide">
+                <span class="mobile-welcome__medallion" aria-hidden="true">
+                    <MudIcon Icon="@Icons.Material.Filled.School" Size="Size.Large" Color="Color.Primary" />
+                </span>
+                <SwiftAidPageHeading Title="Educate Communities"
+                                     Description="Learn, share and join community health sessions."
+                                     HeadingId="welcome-educate-heading" />
+            </div>
+        </MudCarouselItem>
+        <MudCarouselItem Transition="Transition.Slide" aria-roledescription="slide" aria-label="4 of 4">
+            <div class="mobile-welcome__slide">
+                <span class="mobile-welcome__medallion" aria-hidden="true">
+                    <MudIcon Icon="@Icons.Material.Filled.AddCircleOutline" Size="Size.Large" Color="Color.Primary" />
+                </span>
+                <SwiftAidPageHeading Title="Report health concerns"
+                                     Description="Share a human or animal concern. No account required; drafts stay on this device."
+                                     HeadingId="welcome-report-heading" />
+            </div>
+        </MudCarouselItem>
+    </MudCarousel>
+
+    <div class="mobile-welcome__actions">
+        <MudButton Href="/"
+                   Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   FullWidth="true"
+                   StartIcon="@Icons.Material.Filled.ArrowForward">
+            Get Started
+        </MudButton>
+        <MudButton Href="/report"
+                   Variant="Variant.Text"
+                   Color="Color.Primary"
+                   FullWidth="true">
+            Continue as guest
+        </MudButton>
+    </div>
+</div>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        MobileWelcomePreferences? preferences = null;
+        try
+        {
+            preferences = WelcomePreferenceStore.Get();
+        }
+        catch (Exception)
+        {
+            preferences = null;
+        }
+
+        bool signedIn;
+        try
+        {
+            signedIn = await AuthenticationSession.IsSignedInAsync();
+        }
+        catch (Exception)
+        {
+            signedIn = false;
+        }
+
+        if (signedIn || preferences?.IsPublicWelcomeCompleted == true)
+        {
+            Navigation.NavigateTo("/");
+        }
+    }
+}

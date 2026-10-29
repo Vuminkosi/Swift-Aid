@@ -1,0 +1,46 @@
+.web-welcome {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    padding-top: 1.5rem;
+    padding-bottom: 2rem;
+}
+
+.web-welcome__carousel {
+    border-radius: 1.25rem;
+}
+
+.web-welcome__slide {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 0.75rem;
+    height: 100%;
+    padding: 1.5rem 2.5rem;
+    background-color: #F4F7FB;
+}
+
+.web-welcome__brand-mark {
+    width: 4rem;
+    height: 4rem;
+    border-radius: 1rem;
+}
+
+.web-welcome__medallion {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 4.5rem;
+    height: 4.5rem;
+    border-radius: 999px;
+    background-color: #E3EFFC;
+}
+
+.web-welcome__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: center;
+}
