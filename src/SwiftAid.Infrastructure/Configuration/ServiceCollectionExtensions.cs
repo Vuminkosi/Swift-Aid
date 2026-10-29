@@ -20,6 +20,7 @@ using SwiftAid.Application.Abstractions;
 using SwiftAid.Application.Attachments;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases;
+using SwiftAid.Application.Demo;
 using SwiftAid.Application.Cases.Commands;
 using SwiftAid.Application.Cases.Registration;
 using SwiftAid.Application.Jobs;
@@ -28,6 +29,7 @@ using SwiftAid.Application.Intake;
 using SwiftAid.Application.Serialization;
 using SwiftAid.Contracts.Jobs;
 using SwiftAid.Infrastructure.Authorization;
+using SwiftAid.Infrastructure.Demo;
 using SwiftAid.Infrastructure.Caching;
 using SwiftAid.Infrastructure.Messaging;
 using SwiftAid.Infrastructure.Notifications;
@@ -146,6 +148,14 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton(intakeMetadataOptions);
         services.TryAddSingleton<IIntakePublicMetadataProvider>(
             _ => new IntakePublicMetadataProvider(intakeMetadataOptions));
+        var demoDataOptions = ReadDemoDataOptions(configuration);
+        demoDataOptions.Validate();
+        services.TryAddSingleton(demoDataOptions);
+        services.AddScoped<IDemoCaseImporter, DemoCaseImporter>();
+        if (demoDataOptions.Enabled)
+        {
+            services.AddHostedService<DemoDataStartupImporter>();
+        }
         _ = RegisterOptions(services, new SwiftAidDatabaseOptions
         {
             ConnectionString = configuration.GetConnectionString("SwiftAid") ?? string.Empty
@@ -864,6 +874,16 @@ public static class ServiceCollectionExtensions
             AllowedDevelopmentHosts = configuredHosts.Length == 0
                 ? ["localhost", "127.0.0.1", "::1"]
                 : configuredHosts
+        };
+    }
+
+    private static DemoDataOptions ReadDemoDataOptions(IConfiguration configuration)
+    {
+        var section = configuration.GetSection(DemoDataOptions.SectionName);
+        return new DemoDataOptions
+        {
+            Enabled = ReadBool(section, nameof(DemoDataOptions.Enabled)),
+            MaxCases = ReadInt32(section, nameof(DemoDataOptions.MaxCases), 1000)
         };
     }
 

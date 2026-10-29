@@ -30,23 +30,37 @@ public sealed class PostgresMapAggregateStore(SwiftAidDbContext dbContext) : IMa
                 item.CaseId,
                 item.CountryCode,
                 item.Sector,
-                item.CreatedAtUtc,
-                RegionIds = _dbContext.ManagedCaseRegions.AsNoTracking()
-                    .Where(region => region.CaseId == item.CaseId)
-                    .Select(region => region.RegionId)
-                    .ToArray()
+                item.CreatedAtUtc
             })
             .Take(take)
             .ToArrayAsync(ct).ConfigureAwait(false);
+        if (rows.Length == 0)
+        {
+            return Array.Empty<MapAggregateCaseRow>();
+        }
+
+        var caseIds = rows.Select(item => item.CaseId).ToArray();
+        var regionRows = await _dbContext.ManagedCaseRegions.AsNoTracking()
+            .Where(region => caseIds.Contains(region.CaseId))
+            .Select(region => new { region.CaseId, region.RegionId })
+            .ToArrayAsync(ct).ConfigureAwait(false);
+        var regionsByCase = regionRows
+            .GroupBy(region => region.CaseId)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .Select(region => region.RegionId)
+                    .Where(regionId => !string.IsNullOrWhiteSpace(regionId))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray());
 
         return rows
             .Select(item => new MapAggregateCaseRow(
                 item.CaseId,
                 item.CountryCode,
-                item.RegionIds
-                    .Where(regionId => !string.IsNullOrWhiteSpace(regionId))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToArray(),
+                regionsByCase.TryGetValue(item.CaseId, out var regionIds)
+                    ? regionIds
+                    : Array.Empty<string>(),
                 item.Sector,
                 item.CreatedAtUtc))
             .ToArray();
