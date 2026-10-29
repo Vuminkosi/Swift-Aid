@@ -40,6 +40,26 @@ public sealed class ProfileSurfaceTests
     }
 
     [Fact]
+    public async Task ProfileSurface_ExposesPasswordManagerAndKeyboardHints()
+    {
+        var markup = await RenderAsync(new ProfileSnapshot(
+            ProfileViewState.Ready,
+            "Amina Yusuf",
+            "+265991234567",
+            "MW",
+            "Lilongwe",
+            "Area 25",
+            "amina@example.invalid",
+            EmailVerified: true,
+            IsSaving: false));
+
+        Assert.Contains("autocomplete=\"name\"", markup, StringComparison.Ordinal);
+        Assert.Contains("autocomplete=\"tel\"", markup, StringComparison.Ordinal);
+        Assert.Contains("inputmode=\"tel\"", markup, StringComparison.Ordinal);
+        Assert.Contains("autocomplete=\"country\"", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ProfileSurface_SavingDisablesSubmit()
     {
         var markup = await RenderAsync(new ProfileSnapshot(

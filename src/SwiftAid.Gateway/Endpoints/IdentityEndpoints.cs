@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Net.Http.Headers;
@@ -1382,11 +1383,9 @@ public static class IdentityEndpoints
             return outcome.Status switch
             {
                 EmailVerificationStatus.Sent => Results.Ok(new EmailOtpRequestResponse(
-                    "A verification code has been sent to your email address.")),
-                EmailVerificationStatus.Throttled => PasswordError(
-                    context,
-                    StatusCodes.Status429TooManyRequests,
-                    "A code was sent recently. Wait before requesting a new one."),
+                    "A verification code has been sent to your email address.",
+                    outcome.RetryAfterSeconds)),
+                EmailVerificationStatus.Throttled => ThrottledEmailOtp(context, outcome),
                 _ => PasswordError(
                     context,
                     StatusCodes.Status503ServiceUnavailable,
@@ -1863,6 +1862,18 @@ public static class IdentityEndpoints
         return Results.Json(new PasswordAuthError(message), statusCode: statusCode);
     }
 
+    private static IResult ThrottledEmailOtp(HttpContext context, EmailVerificationOutcome outcome)
+    {
+        var retryAfterSeconds = Math.Max(0, outcome.RetryAfterSeconds);
+        context.Response.Headers.RetryAfter = retryAfterSeconds.ToString(CultureInfo.InvariantCulture);
+        SetNoStore(context);
+        return Results.Json(
+            new EmailOtpThrottledResponse(
+                "A code was sent recently. Wait before requesting a new one.",
+                retryAfterSeconds),
+            statusCode: StatusCodes.Status429TooManyRequests);
+    }
+
     private static async Task<IResult> AuthorizeClient(
         HttpContext context,
         SwiftAidDbContext dbContext,
@@ -2200,7 +2211,9 @@ public static class IdentityEndpoints
 
     private sealed record EmailVerificationStatusResponse(bool Verified, string? Email);
 
-    private sealed record EmailOtpRequestResponse(string Message);
+    private sealed record EmailOtpRequestResponse(string Message, int RetryAfterSeconds);
+
+    private sealed record EmailOtpThrottledResponse(string Error, int RetryAfterSeconds);
 
     private sealed record EmailOtpConfirmResponse(bool Verified);
 

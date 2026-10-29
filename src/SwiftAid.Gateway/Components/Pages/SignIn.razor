@@ -46,13 +46,15 @@
             <div class="sign-in-password" role="group" aria-label="Sign in with email">
                 <MudTextField T="string" Label="Email address" @bind-Value="_email"
                               Variant="Variant.Outlined" Required="true" Disabled="@_passwordBusy"
-                              InputType="InputType.Email" Immediate="true" aria-label="Email address" />
+                              InputType="InputType.Email" Immediate="true" autocomplete="email"
+                              aria-label="Email address" />
                 <MudTextField T="string" Label="Password" @bind-Value="_password"
                               Variant="Variant.Outlined" Required="true" Disabled="@_passwordBusy"
                               InputType="@(_showPassword ? InputType.Text : InputType.Password)"
                               Adornment="Adornment.End" AdornmentIcon="@(_showPassword ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
                               OnAdornmentClick="() => _showPassword = !_showPassword"
-                              Immediate="true" aria-label="Password" />
+                              Immediate="true" MaxLength="256" autocomplete="current-password"
+                              aria-label="Password" />
                 @if (!string.IsNullOrEmpty(_passwordError))
                 {
                     <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert" Dense="true">
@@ -66,7 +68,7 @@
                 </MudStack>
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
                            OnClick="PasswordSignInAsync" Disabled="@(!CanPasswordSignIn)"
-                           Class="sign-in-provider-button" StartIcon="@Icons.Material.Filled.Login">
+                           Class="sign-in-provider-button auth-cta" StartIcon="@Icons.Material.Filled.Login">
                     @(_passwordBusy ? "Signing in…" : "Sign in")
                 </MudButton>
                 <MudLink Href="/register">Don't have an account? Sign up</MudLink>

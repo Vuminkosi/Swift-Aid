@@ -1,4 +1,5 @@
 @page "/verify-email"
+@implements IDisposable
 @using SwiftAid.Client.Authentication
 @using SwiftAid.Mobile.Services.Account
 @using SwiftAid.Mobile.Services.Http
@@ -27,15 +28,17 @@
 
         <MudTextField T="string" Label="Verification code" @bind-Value="_code"
                       Variant="Variant.Outlined" Required="true" Disabled="@_busy"
-                      InputType="InputType.Text" Immediate="true" MaxLength="32"
-                      aria-label="Verification code" />
+                      InputType="InputType.Text" Immediate="true" MaxLength="6"
+                      autocomplete="one-time-code" InputMode="InputMode.numeric"
+                      aria-label="6-digit verification code" />
         <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
-                   OnClick="ConfirmAsync" Disabled="@(!CanConfirm)">
+                   OnClick="ConfirmAsync" Disabled="@(!CanConfirm)"
+                   Class="auth-cta">
             @(_busy ? "Verifying…" : "Verify")
         </MudButton>
         <MudButton Variant="Variant.Text" Color="Color.Primary" FullWidth="true"
-                   OnClick="ResendAsync" Disabled="@_busy">
-            Didn't receive it? Resend code
+                   OnClick="ResendAsync" Disabled="@(!CanResend)">
+            @(ResendLabel)
         </MudButton>
     </MudPaper>
 </MudContainer>
@@ -45,6 +48,9 @@
     private bool _busy;
     private string? _error;
     private string? _notice;
+    private int _resendCountdown;
+    private CancellationTokenSource? _countdownLifetime;
+    private bool _disposed;
 
     private HttpPasswordAuthClient AuthClient =>
         (HttpPasswordAuthClient?)ServiceProvider.GetService(typeof(HttpPasswordAuthClient))
@@ -59,6 +65,12 @@
 
     private bool CanConfirm => !_busy && !string.IsNullOrWhiteSpace(_code);
 
+    private bool CanResend => !_busy && _resendCountdown <= 0;
+
+    private string ResendLabel => _resendCountdown > 0
+        ? $"Resend code ({_resendCountdown / 60:00}:{_resendCountdown % 60:00})"
+        : "Didn't receive it? Resend code";
+
     private async Task ResendAsync()
     {
         _busy = true;
@@ -70,6 +82,12 @@
             if (result.Status == PasswordAuthStatus.Succeeded)
             {
                 _notice = result.Message ?? "A verification code has been sent.";
+                StartResendCountdown(result.RetryAfterSeconds);
+            }
+            else if (result.Status == PasswordAuthStatus.Throttled)
+            {
+                _error = result.Message ?? "Requesting a code failed. Please try again.";
+                StartResendCountdown(result.RetryAfterSeconds);
             }
             else
             {
@@ -84,6 +102,59 @@
         {
             _busy = false;
         }
+    }
+
+    private void StartResendCountdown(int seconds)
+    {
+        StopResendCountdown();
+        if (seconds <= 0 || _disposed)
+        {
+            return;
+        }
+
+        _resendCountdown = seconds;
+        var lifetime = new CancellationTokenSource();
+        _countdownLifetime = lifetime;
+        _ = RunResendCountdownAsync(lifetime.Token);
+    }
+
+    private async Task RunResendCountdownAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+            while (_resendCountdown > 0 && await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+            {
+                _resendCountdown--;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void StopResendCountdown()
+    {
+        try
+        {
+            _countdownLifetime?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        finally
+        {
+            _countdownLifetime?.Dispose();
+            _countdownLifetime = null;
+            _resendCountdown = 0;
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        StopResendCountdown();
     }
 
     private async Task ConfirmAsync()

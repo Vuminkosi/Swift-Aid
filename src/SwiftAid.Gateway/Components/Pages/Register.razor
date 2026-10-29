@@ -31,16 +31,19 @@
         {
             <MudTextField T="string" Label="Email address" @bind-Value="_email"
                           Variant="Variant.Outlined" Required="true" Disabled="@_isSubmitting"
-                          InputType="InputType.Email" Immediate="true" aria-label="Email address" />
+                          InputType="InputType.Email" Immediate="true" autocomplete="email"
+                          aria-label="Email address" />
             <MudTextField T="string" Label="Password" @bind-Value="_password"
                           Variant="Variant.Outlined" Required="true" Disabled="@_isSubmitting"
                           InputType="@(_showPassword ? InputType.Text : InputType.Password)"
                           Adornment="Adornment.End" AdornmentIcon="@(_showPassword ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
                           OnAdornmentClick="() => _showPassword = !_showPassword"
-                          Immediate="true" aria-label="Password" />
+                          Immediate="true" MaxLength="256" autocomplete="new-password"
+                          aria-label="Password" />
             <MudText Typo="Typo.caption">@_policyHint</MudText>
             <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
-                       OnClick="RegisterAsync" Disabled="@(!CanSubmit)">
+                       OnClick="RegisterAsync" Disabled="@(!CanSubmit)"
+                       Class="auth-cta">
                 @(_isSubmitting ? "Creating account…" : "Sign up")
             </MudButton>
             <MudDivider Class="my-2" />

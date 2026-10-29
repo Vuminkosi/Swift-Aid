@@ -43,7 +43,8 @@ else
     </MudPaper>
     @if (Snapshot.HasActiveWorkspace)
     {
-        <MudButton Href="/" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true">
+        <MudButton Href="/" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                   Class="auth-cta">
             Continue to your workspace
         </MudButton>
         <MudButton Href="/organizations" Variant="Variant.Text" Color="Color.Primary" FullWidth="true">
@@ -55,7 +56,8 @@ else
         <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
             Your organization request is pending review. Your workspace will appear here once it is approved.
         </MudAlert>
-        <MudButton Href="/organizations" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true">
+        <MudButton Href="/organizations" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                   Class="auth-cta">
             View request status
         </MudButton>
         <MudButton Href="/" Variant="Variant.Text" Color="Color.Primary" FullWidth="true">
@@ -64,7 +66,8 @@ else
     }
     else
     {
-        <MudButton Href="/" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true">
+        <MudButton Href="/" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                   Class="auth-cta">
             Continue to SwiftAid
         </MudButton>
         <MudButton Href="/organizations" Variant="Variant.Text" Color="Color.Primary" FullWidth="true">

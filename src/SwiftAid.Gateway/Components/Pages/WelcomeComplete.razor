@@ -67,8 +67,11 @@
             return;
         }
 
-        var memberships = await MembershipClient.GetMineAsync();
-        var requests = await MembershipClient.GetMyRequestsAsync();
+        var membershipsTask = MembershipClient.GetMineAsync();
+        var requestsTask = MembershipClient.GetMyRequestsAsync();
+        await Task.WhenAll(membershipsTask, requestsTask).ConfigureAwait(false);
+        var memberships = await membershipsTask;
+        var requests = await requestsTask;
         if (memberships.Value is null || requests.Value is null)
         {
             _snapshot = WelcomeCompleteSnapshot.Unavailable;

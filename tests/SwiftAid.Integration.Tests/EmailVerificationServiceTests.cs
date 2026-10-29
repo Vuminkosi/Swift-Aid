@@ -94,9 +94,12 @@ public sealed class EmailVerificationServiceTests : IAsyncDisposable
         var user = await CreateUserAsync("otp-throttle@example.invalid");
         var service = Scope();
 
-        Assert.Equal(EmailVerificationStatus.Sent, (await service.RequestCodeAsync(user, CancellationToken.None)).Status);
+        var first = await service.RequestCodeAsync(user, CancellationToken.None);
+        Assert.Equal(EmailVerificationStatus.Sent, first.Status);
+        Assert.Equal(30, first.RetryAfterSeconds);
         var throttled = await service.RequestCodeAsync(user, CancellationToken.None);
         Assert.Equal(EmailVerificationStatus.Throttled, throttled.Status);
+        Assert.InRange(throttled.RetryAfterSeconds, 1, 30);
         Assert.Single(_mailer.SentTo);
 
         _timeProvider.Advance(TimeSpan.FromSeconds(31));

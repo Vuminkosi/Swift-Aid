@@ -200,3 +200,11 @@ button:focus-visible,
         min-height: 44px;
     }
 }
+
+/* Touch-sized primary calls to action on coarse pointers (mobile, touch laptops).
+   Scoped to .auth-cta so desktop density elsewhere is unchanged. */
+@media (pointer: coarse) {
+    .auth-cta.mud-button {
+        min-height: 48px;
+    }
+}

@@ -15,7 +15,11 @@ public enum PasswordAuthStatus
     SignedOut
 }
 
-public sealed record PasswordAuthOutcome(PasswordAuthStatus Status, string? Email = null, string? Message = null);
+public sealed record PasswordAuthOutcome(
+    PasswordAuthStatus Status,
+    string? Email = null,
+    string? Message = null,
+    int RetryAfterSeconds = 0);
 
 public sealed record PasswordPolicyInfo(
     int MinimumLength,
@@ -81,9 +85,9 @@ public sealed class HttpPasswordAuthClient(CookieSessionHttpClient session)
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
-            return Unavailable("Registration is temporarily unavailable.");
+            return TransportFailure(exception, cancellationToken, "Registration is temporarily unavailable.");
         }
     }
 
@@ -119,9 +123,9 @@ public sealed class HttpPasswordAuthClient(CookieSessionHttpClient session)
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
-            return Unavailable("Sign-in is temporarily unavailable.");
+            return TransportFailure(exception, cancellationToken, "Sign-in is temporarily unavailable.");
         }
     }
 
@@ -141,9 +145,9 @@ public sealed class HttpPasswordAuthClient(CookieSessionHttpClient session)
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
-            return Unavailable("Sign-out is temporarily unavailable.");
+            return TransportFailure(exception, cancellationToken, "Sign-out is temporarily unavailable.");
         }
         finally
         {
@@ -177,9 +181,9 @@ public sealed class HttpPasswordAuthClient(CookieSessionHttpClient session)
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
-            return Unavailable("Password reset is temporarily unavailable.");
+            return TransportFailure(exception, cancellationToken, "Password reset is temporarily unavailable.");
         }
     }
 
@@ -194,10 +198,15 @@ public sealed class HttpPasswordAuthClient(CookieSessionHttpClient session)
             {
                 HttpStatusCode.OK => new PasswordAuthOutcome(
                     PasswordAuthStatus.Succeeded,
-                    Message: "A verification code has been sent to your email address."),
+                    Message: "A verification code has been sent to your email address.",
+                    RetryAfterSeconds: await ReadRetryAfterSecondsAsync(response, cancellationToken)
+                        .ConfigureAwait(false)),
                 HttpStatusCode.TooManyRequests => new PasswordAuthOutcome(
                     PasswordAuthStatus.Throttled,
-                    Message: "A code was sent recently. Wait before requesting a new one."),
+                    Message: await ReadMessageAsync(response, cancellationToken).ConfigureAwait(false)
+                        ?? "A code was sent recently. Wait before requesting a new one.",
+                    RetryAfterSeconds: await ReadRetryAfterSecondsAsync(response, cancellationToken)
+                        .ConfigureAwait(false)),
                 HttpStatusCode.Unauthorized => new PasswordAuthOutcome(
                     PasswordAuthStatus.SignedOut,
                     Message: "Sign in to verify your email address."),
@@ -208,9 +217,9 @@ public sealed class HttpPasswordAuthClient(CookieSessionHttpClient session)
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
-            return Unavailable("Verification codes are temporarily unavailable.");
+            return TransportFailure(exception, cancellationToken, "Verification codes are temporarily unavailable.");
         }
     }
 
@@ -239,9 +248,9 @@ public sealed class HttpPasswordAuthClient(CookieSessionHttpClient session)
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
-            return Unavailable("Verification is temporarily unavailable.");
+            return TransportFailure(exception, cancellationToken, "Verification is temporarily unavailable.");
         }
     }
 
@@ -250,6 +259,42 @@ public sealed class HttpPasswordAuthClient(CookieSessionHttpClient session)
 
     private static PasswordAuthOutcome Unavailable(string message) =>
         new(PasswordAuthStatus.Unavailable, Message: message);
+
+    private static PasswordAuthOutcome TransportFailure(
+        Exception exception,
+        CancellationToken cancellationToken,
+        string serverMessage)
+    {
+        if (!cancellationToken.IsCancellationRequested &&
+            (exception is HttpRequestException || exception is TaskCanceledException))
+        {
+            return Unavailable("Check your connection and try again.");
+        }
+
+        return Unavailable(serverMessage);
+    }
+
+    private static async Task<int> ReadRetryAfterSecondsAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            if (document.RootElement.TryGetProperty("retryAfterSeconds", out var seconds) &&
+                seconds.TryGetInt32(out var value))
+            {
+                return Math.Max(0, value);
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return 0;
+    }
 
     private static async Task<T?> ReadAsync<T>(
         HttpResponseMessage response,

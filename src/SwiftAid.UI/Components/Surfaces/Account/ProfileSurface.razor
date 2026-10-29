@@ -38,23 +38,26 @@ else
         <MudTextField T="string" Label="Full name" @bind-Value="_displayName"
                       Variant="Variant.Outlined" Required="true" RequiredError="Enter a display name."
                       Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="128"
-                      aria-label="Full name" />
+                      autocomplete="name" aria-label="Full name" />
         <MudTextField T="string" Label="Phone number (optional)" @bind-Value="_phone"
                       Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="24"
+                      autocomplete="tel" InputMode="InputMode.tel"
                       HelperText="Starts with + and your country code." aria-label="Phone number" />
         <MudStack Row="true" Spacing="2">
             <MudTextField T="string" Label="Country (optional)" @bind-Value="_country"
                           Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="2"
+                          autocomplete="country"
                           HelperText="Two-letter code." aria-label="Country" />
             <MudTextField T="string" Label="Region (optional)" @bind-Value="_region"
                           Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="128"
-                          aria-label="Region" />
+                          autocomplete="address-level1" aria-label="Region" />
         </MudStack>
         <MudTextField T="string" Label="Locality (optional)" @bind-Value="_locality"
                       Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="128"
-                      aria-label="Locality" />
+                      autocomplete="address-level2" aria-label="Locality" />
         <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync"
-                   Disabled="@(!CanSave)" StartIcon="@Icons.Material.Filled.Save">
+                   Disabled="@(!CanSave)" StartIcon="@Icons.Material.Filled.Save"
+                   Class="auth-cta">
             @(Snapshot.IsSaving ? "Saving…" : "Save changes")
         </MudButton>
     </MudPaper>

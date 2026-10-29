@@ -16,7 +16,7 @@ public enum EmailVerificationStatus
     TooManyAttempts
 }
 
-public sealed record EmailVerificationOutcome(EmailVerificationStatus Status);
+public sealed record EmailVerificationOutcome(EmailVerificationStatus Status, int RetryAfterSeconds = 0);
 
 /// <summary>Delivers account verification codes. Implemented by the SMTP sender.</summary>
 public interface IAccountVerificationMailer
@@ -75,7 +75,10 @@ public sealed class EmailVerificationService(
             .ConfigureAwait(false);
         if (existing is not null && now - existing.LastSentAtUtc < ResendInterval)
         {
-            return new EmailVerificationOutcome(EmailVerificationStatus.Throttled);
+            var remaining = ResendInterval - (now - existing.LastSentAtUtc);
+            return new EmailVerificationOutcome(
+                EmailVerificationStatus.Throttled,
+                Math.Max(1, (int)Math.Ceiling(remaining.TotalSeconds)));
         }
 
         var code = RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6", CultureInfo.InvariantCulture);
@@ -110,7 +113,9 @@ public sealed class EmailVerificationService(
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        return new EmailVerificationOutcome(EmailVerificationStatus.Sent);
+        return new EmailVerificationOutcome(
+            EmailVerificationStatus.Sent,
+            (int)ResendInterval.TotalSeconds);
     }
 
     public async Task<EmailVerificationOutcome> ConfirmCodeAsync(SwiftAidUser user, string code, CancellationToken cancellationToken)

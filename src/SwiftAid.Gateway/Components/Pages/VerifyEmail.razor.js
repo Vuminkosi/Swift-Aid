@@ -25,11 +25,22 @@ export async function requestEmailCode() {
 
     if (response.ok) {
         const payload = await safeJson(response);
-        return { ok: true, message: payload?.message ?? "A verification code has been sent to your email address." };
+        return {
+            ok: true,
+            message: payload?.message ?? "A verification code has been sent to your email address.",
+            retryAfterSeconds: toNonNegativeInt(payload?.retryAfterSeconds)
+        };
     }
 
     if (response.status === 429) {
-        return { ok: false, message: "A code was sent recently. Wait before requesting a new one." };
+        const payload = await safeJson(response);
+        return {
+            ok: false,
+            message: (typeof payload?.error === "string" && payload.error.trim().length > 0)
+                ? payload.error
+                : "A code was sent recently. Wait before requesting a new one.",
+            retryAfterSeconds: toNonNegativeInt(payload?.retryAfterSeconds)
+        };
     }
 
     if (response.status === 401) {
@@ -106,4 +117,9 @@ async function safeJson(response) {
     } catch {
         return null;
     }
+}
+
+function toNonNegativeInt(value) {
+    const parsed = typeof value === "number" ? Math.floor(value) : Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
