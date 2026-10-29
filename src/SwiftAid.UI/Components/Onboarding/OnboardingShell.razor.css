@@ -1,0 +1,54 @@
+.onboarding-shell {
+    display: flex;
+    min-height: 100dvh;
+    background-color: #F4F7FB;
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    padding-bottom: env(safe-area-inset-bottom);
+}
+
+.onboarding-shell__illustration {
+    display: none;
+}
+
+.onboarding-shell__main {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    padding: 1.25rem;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.onboarding-shell__card {
+    width: 100%;
+    max-width: 28rem;
+    margin: auto 0;
+    background-color: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 1.5rem;
+    padding: 1.5rem;
+    box-shadow: 0 1px 3px rgba(16, 42, 67, 0.08);
+}
+
+.onboarding-shell__legal {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    margin-top: 1.5rem;
+}
+
+@media (min-width: 60rem) {
+    .onboarding-shell__illustration {
+        display: flex;
+        flex: 1;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem;
+    }
+
+    .onboarding-shell__main {
+        flex: 1;
+        align-items: center;
+    }
+}

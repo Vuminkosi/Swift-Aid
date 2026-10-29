@@ -1,0 +1,17 @@
+.onboarding-brand-header {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+}
+
+.onboarding-brand-header__mark {
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 0.625rem;
+}
+
+.onboarding-brand-header__name {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #102A43;
+}
