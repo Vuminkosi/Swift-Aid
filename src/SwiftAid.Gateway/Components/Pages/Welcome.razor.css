@@ -6,6 +6,53 @@
     padding-bottom: 2rem;
 }
 
+.web-welcome__split {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+
+.web-welcome__brand-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 1rem;
+    padding: 2.5rem;
+    border-radius: 1.25rem;
+    background-color: #F4F7FB;
+    border: 1px solid #E2E8F0;
+}
+
+.web-welcome__brand-mark {
+    width: 4.5rem;
+    height: 4.5rem;
+    border-radius: 1rem;
+}
+
+.web-welcome__tagline {
+    margin: 0;
+    font-size: 1.75rem;
+    line-height: 1.25;
+    font-weight: 700;
+    color: #102A43;
+}
+
+.web-welcome__lede {
+    margin: 0;
+    font-size: 1rem;
+    line-height: 1.5;
+    color: #475569;
+}
+
+.web-welcome__main {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    min-width: 0;
+    flex: 1;
+}
+
 .web-welcome__carousel {
     border-radius: 1.25rem;
 }
@@ -20,12 +67,6 @@
     height: 100%;
     padding: 1.5rem 2.5rem;
     background-color: #F4F7FB;
-}
-
-.web-welcome__brand-mark {
-    width: 4rem;
-    height: 4rem;
-    border-radius: 1rem;
 }
 
 .web-welcome__medallion {
@@ -43,4 +84,16 @@
     flex-wrap: wrap;
     gap: 0.5rem;
     justify-content: center;
+}
+
+@media (min-width: 60rem) {
+    .web-welcome__split {
+        flex-direction: row;
+        align-items: stretch;
+    }
+
+    .web-welcome__brand-panel,
+    .web-welcome__main {
+        flex: 1;
+    }
 }

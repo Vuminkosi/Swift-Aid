@@ -6,7 +6,16 @@
 
 <PageTitle>Welcome to SwiftAid</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.Medium" Class="web-welcome">
+<MudContainer MaxWidth="MaxWidth.Large" Class="web-welcome">
+    <div class="web-welcome__split">
+    <MudHidden Breakpoint="Breakpoint.SmAndDown">
+        <aside class="web-welcome__brand-panel" aria-label="About SwiftAid">
+            <img class="web-welcome__brand-mark" src="_content/SwiftAid.UI/assets/swiftaid-icon.png" alt="" width="72" height="72" />
+            <p class="web-welcome__tagline">Healthier People.<br />Safer Communities.<br />Brighter Tomorrows.</p>
+            <p class="web-welcome__lede">Report concerns, support communities and coordinate accountable follow-through.</p>
+        </aside>
+    </MudHidden>
+    <div class="web-welcome__main">
     <MudCarousel TData="object" Class="web-welcome__carousel"
                  ShowBullets="true"
                  ShowArrows="true"
@@ -67,6 +76,8 @@
                    Color="Color.Primary">
             Continue as guest
         </MudButton>
+    </div>
+    </div>
     </div>
 </MudContainer>
 
