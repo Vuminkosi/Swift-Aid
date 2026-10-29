@@ -170,6 +170,8 @@ public static class MauiProgram
         builder.Services.AddTransient<SwiftAid.Contracts.Cases.IMonitoringQueueClient>(sp => new SwiftAid.Client.Cases.MonitoringQueueHttpClient(
                 sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
         builder.Services.AddTransient<SwiftAid.Client.Presentation.IWorkManagementClient, SwiftAid.Client.Presentation.CommandBackedWorkManagementClient>();
+        builder.Services.AddTransient<SwiftAid.Client.Presentation.IIntakeReviewClient>(sp => new SwiftAid.Client.Presentation.HttpIntakeReviewClient(
+                sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
         builder.Services.AddTransient<SwiftAid.Client.Sessions.CommunitySessionHttpClient>(sp => new SwiftAid.Client.Sessions.CommunitySessionHttpClient(
                 sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
 

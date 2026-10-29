@@ -1,0 +1,337 @@
+@using SwiftAid.UI.Components.Coordination
+@using SwiftAid.UI.Components.Theme
+
+<section class="organization-intake-review" aria-labelledby="organization-intake-review-title">
+    <header class="organization-intake-review__header">
+        <div>
+            <MudText Typo="Typo.overline" Color="Color.Secondary">Organization</MudText>
+            <MudText Typo="Typo.h5" HtmlTag="h1" id="organization-intake-review-title">Report review</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                Review the submitted facts and choose a supported next step. Unknown details can remain unknown.
+            </MudText>
+        </div>
+        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh"
+                   Disabled="@Busy" OnClick="OnRefresh">Refresh</MudButton>
+    </header>
+
+    @if (!string.IsNullOrWhiteSpace(StatusMessage))
+    {
+        <MudAlert Severity="StatusSeverity" Variant="Variant.Outlined" Dense="true" role="status">
+            @StatusMessage
+        </MudAlert>
+    }
+
+    <MudGrid Spacing="2" Class="organization-intake-review__layout">
+        <MudItem xs="12" lg="5">
+            <section class="organization-intake-review__panel" aria-labelledby="organization-review-queue-title">
+                <div class="organization-intake-review__section-heading">
+                    <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="organization-review-queue-title">Review queue</MudText>
+                    @if (PageNumber > 1 || HasNextPage)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Page @PageNumber</MudText>
+                    }
+                </div>
+
+                @if (QueueState is OrganizationIntakeReviewState.Loading or OrganizationIntakeReviewState.Offline
+                    or OrganizationIntakeReviewState.Unavailable or OrganizationIntakeReviewState.Denied
+                    or OrganizationIntakeReviewState.Error)
+                {
+                    <SwiftAidStatePanel State="QueueState.ToViewState()" Title="Review queue unavailable"
+                                        Description="@QueueMessage" OnRetry="OnRefresh" />
+                }
+                else if (QueueItems.Count == 0)
+                {
+                    <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="No reports to review"
+                                        Description="There are no reports in this review queue." />
+                }
+                else
+                {
+                    <div class="organization-intake-review__queue-list" role="list" aria-label="Reports awaiting review">
+                        @foreach (var item in QueueItems)
+                        {
+                            <article class="organization-intake-review__queue-item" role="listitem" @key="item.ReceiptId">
+                                <div class="organization-intake-review__queue-copy">
+                                    <MudText Typo="Typo.subtitle2">@SubjectLabel(item.SubjectScope)</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                        @StatusLabel(item.Status) · @item.ReceivedAtUtc.ToLocalTime().ToString("g")
+                                    </MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                        @LocationLabel(item.CountryLabel, item.RegionLabel)
+                                    </MudText>
+                                </div>
+                                <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.RateReview"
+                                           Disabled="@(Busy || !OnSelect.HasDelegate || item.ReceiptId == SelectedReceiptId)"
+                                           OnClick="@(() => SelectAsync(item.ReceiptId))"
+                                           aria-label="Open report for review">
+                                    @(item.ReceiptId == SelectedReceiptId ? "Selected" : "Review")
+                                </MudButton>
+                            </article>
+                        }
+                    </div>
+                    <nav class="organization-intake-review__paging" aria-label="Review queue pages">
+                        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack" Size="Size.Small" Disabled="@(Busy || PageNumber <= 1 || !OnPreviousPage.HasDelegate)"
+                                   OnClick="OnPreviousPage">Previous</MudButton>
+                        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowForward" Size="Size.Small" Disabled="@(Busy || !HasNextPage || !OnNextPage.HasDelegate)"
+                                   OnClick="OnNextPage">Next</MudButton>
+                    </nav>
+                }
+            </section>
+        </MudItem>
+
+        <MudItem xs="12" lg="7">
+            <section class="organization-intake-review__panel" aria-labelledby="organization-review-detail-title">
+                <div class="organization-intake-review__section-heading">
+                    <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="organization-review-detail-title">Report details</MudText>
+                    @if (Detail is not null && DetailState == OrganizationIntakeReviewState.Populated)
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@StatusLabel(Detail.Status)</MudChip>
+                    }
+                </div>
+
+                @if (DetailState is OrganizationIntakeReviewState.Loading or OrganizationIntakeReviewState.Offline
+                    or OrganizationIntakeReviewState.Unavailable or OrganizationIntakeReviewState.Denied
+                    or OrganizationIntakeReviewState.Error)
+                {
+                    <SwiftAidStatePanel State="DetailState.ToViewState()" Title="Report details unavailable"
+                                        Description="@DetailMessage" OnRetry="OnRetryDetail" />
+                }
+                else if (DetailState == OrganizationIntakeReviewState.Empty || Detail is null)
+                {
+                    <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="Choose a report"
+                                        Description="Select a report from the queue to review its submitted information." />
+                }
+                else
+                {
+                    <dl class="organization-intake-review__facts">
+                        <div><dt>Subject</dt><dd>@SubjectLabel(Detail.SubjectScope)</dd></div>
+                        <div><dt>Received</dt><dd>@Detail.ReceivedAtUtc.ToLocalTime().ToString("g")</dd></div>
+                        <div><dt>Country</dt><dd>@SafeLabel(Detail.CountryLabel)</dd></div>
+                        <div><dt>Region or area</dt><dd>@SafeLabel(Detail.RegionLabel)</dd></div>
+                        <div><dt>Routing</dt><dd>@RoutingLabel(Detail.RoutingStatus)</dd></div>
+                    </dl>
+
+                    <div class="organization-intake-review__narrative">
+                        <MudText Typo="Typo.subtitle2" HtmlTag="h3">Submitted description</MudText>
+                        <MudText Typo="Typo.body2" Class="organization-intake-review__text">@SafeLabel(Detail.Narrative)</MudText>
+                    </div>
+
+                    <div class="organization-intake-review__observations">
+                        <MudText Typo="Typo.subtitle2" HtmlTag="h3">Additional observations</MudText>
+                        @if (Detail.Observations.Count == 0)
+                        {
+                            <MudText Typo="Typo.body2" Color="Color.Secondary">No additional observations were submitted.</MudText>
+                        }
+                        else
+                        {
+                            <ul>
+                                @foreach (var observation in Detail.Observations)
+                                {
+                                    <li>@SafeLabel(observation)</li>
+                                }
+                            </ul>
+                        }
+                    </div>
+
+                    @if (DecisionMessage is not null)
+                    {
+                        <MudAlert Severity="DecisionSeverity" Variant="Variant.Outlined" Dense="true" role="status">
+                            @DecisionMessage
+                        </MudAlert>
+                    }
+
+                    @if (Detail.Capabilities.CanRouteForReview || Detail.Capabilities.CanAcceptIntoCase || Detail.Capabilities.CanDecline)
+                    {
+                        <div class="organization-intake-review__decision">
+                            <MudTextField T="string" Label="Review note (optional)" Value="_reviewReason"
+                                          ValueChanged="SetReviewReason" MaxLength="500" Lines="2" Disabled="@Busy" />
+                            <div class="organization-intake-review__actions">
+                                @if (Detail.Capabilities.CanRouteForReview)
+                                {
+                                    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.RateReview" Disabled="@(!CanSubmit)"
+                                               OnClick="@(() => StageDecision(OrganizationIntakeReviewDecision.RouteForReview))">
+                                        Route for review
+                                    </MudButton>
+                                }
+                                @if (Detail.Capabilities.CanAcceptIntoCase)
+                                {
+                                    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.AddTask" Color="Color.Primary" Disabled="@(!CanSubmit)"
+                                               OnClick="@(() => StageDecision(OrganizationIntakeReviewDecision.AcceptIntoCase))">
+                                        Accept into a new case
+                                    </MudButton>
+                                }
+                                @if (Detail.Capabilities.CanDecline)
+                                {
+                                    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Block" Color="Color.Error" Disabled="@(!CanSubmit)"
+                                               OnClick="@(() => StageDecision(OrganizationIntakeReviewDecision.Decline))">
+                                        Decline report
+                                    </MudButton>
+                                }
+                            </div>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                Accepting creates a new managed case. This review does not link a report to an existing case.
+                            </MudText>
+                            @if (_pendingDecision.HasValue)
+                            {
+                                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+                                    Confirm: @DecisionLabel(_pendingDecision.Value). The report will be updated using the version currently shown.
+                                    <div class="organization-intake-review__actions mt-2">
+                                        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.CheckCircle" Color="Color.Primary" Disabled="@(!CanConfirmDecision)" OnClick="ConfirmDecisionAsync">Confirm decision</MudButton>
+                                        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Close" Disabled="@Busy" OnClick="CancelDecision">Cancel</MudButton>
+                                    </div>
+                                </MudAlert>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                            No review decision is available for this report in your current access.
+                        </MudAlert>
+                    }
+                }
+            </section>
+        </MudItem>
+    </MudGrid>
+</section>
+
+@code {
+    private string _reviewReason = string.Empty;
+    private OrganizationIntakeReviewDecision? _pendingDecision;
+    private Guid? _pendingReceiptId;
+    private long? _pendingVersion;
+
+    [Parameter] public IReadOnlyList<OrganizationIntakeReviewQueueItem> QueueItems { get; set; } = Array.Empty<OrganizationIntakeReviewQueueItem>();
+    [Parameter] public OrganizationIntakeReviewState QueueState { get; set; } = OrganizationIntakeReviewState.Loading;
+    [Parameter] public string QueueMessage { get; set; } = "The review queue is not available right now.";
+    [Parameter] public int PageNumber { get; set; } = 1;
+    [Parameter] public bool HasNextPage { get; set; }
+    [Parameter] public Guid? SelectedReceiptId { get; set; }
+    [Parameter] public OrganizationIntakeReviewState DetailState { get; set; } = OrganizationIntakeReviewState.Empty;
+    [Parameter] public string DetailMessage { get; set; } = "Select a report to view its submitted information.";
+    [Parameter] public OrganizationIntakeReviewDetail? Detail { get; set; }
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public string? StatusMessage { get; set; }
+    [Parameter] public Severity StatusSeverity { get; set; } = Severity.Info;
+    [Parameter] public string? DecisionMessage { get; set; }
+    [Parameter] public Severity DecisionSeverity { get; set; } = Severity.Info;
+    [Parameter] public EventCallback OnRefresh { get; set; }
+    [Parameter] public EventCallback OnPreviousPage { get; set; }
+    [Parameter] public EventCallback OnNextPage { get; set; }
+    [Parameter] public EventCallback<Guid> OnSelect { get; set; }
+    [Parameter] public EventCallback OnRetryDetail { get; set; }
+    [Parameter] public EventCallback<OrganizationIntakeReviewCommand> OnReview { get; set; }
+
+    private bool CanSubmit => !Busy && DetailState == OrganizationIntakeReviewState.Populated
+        && Detail is { ReceiptId: var id, Version: > 0 } && id != Guid.Empty
+        && SelectedReceiptId == Detail.ReceiptId && OnReview.HasDelegate;
+
+    private bool CanConfirmDecision => CanSubmit && _pendingDecision.HasValue
+        && _pendingReceiptId == Detail?.ReceiptId && _pendingVersion == Detail?.Version
+        && IsAllowed(Detail!, _pendingDecision.Value);
+
+    protected override void OnParametersSet()
+    {
+        if (_pendingDecision.HasValue && (!CanSubmit || _pendingReceiptId != Detail?.ReceiptId || _pendingVersion != Detail?.Version))
+        {
+            CancelDecision();
+        }
+    }
+
+    private async Task SelectAsync(Guid receiptId)
+    {
+        _reviewReason = string.Empty;
+        if (!Busy && receiptId != Guid.Empty && OnSelect.HasDelegate)
+        {
+            await OnSelect.InvokeAsync(receiptId);
+        }
+    }
+
+    private void SetReviewReason(string? value) => _reviewReason = value ?? string.Empty;
+
+    private void StageDecision(OrganizationIntakeReviewDecision decision)
+    {
+        if (!CanSubmit || Detail is null || !IsAllowed(Detail, decision))
+        {
+            return;
+        }
+
+        _pendingDecision = decision;
+        _pendingReceiptId = Detail.ReceiptId;
+        _pendingVersion = Detail.Version;
+    }
+
+    private async Task ConfirmDecisionAsync()
+    {
+        if (!CanConfirmDecision || Detail is null || !_pendingDecision.HasValue || !_pendingVersion.HasValue)
+        {
+            CancelDecision();
+            return;
+        }
+
+        var decision = _pendingDecision.Value;
+        var receiptId = _pendingReceiptId!.Value;
+        var expectedVersion = _pendingVersion.Value;
+        CancelDecision();
+        await OnReview.InvokeAsync(new OrganizationIntakeReviewCommand(
+            receiptId,
+            expectedVersion,
+            decision,
+            string.IsNullOrWhiteSpace(_reviewReason) ? null : _reviewReason.Trim()));
+    }
+
+    private static bool IsAllowed(OrganizationIntakeReviewDetail detail, OrganizationIntakeReviewDecision decision) => decision switch
+    {
+        OrganizationIntakeReviewDecision.RouteForReview => detail.Capabilities.CanRouteForReview,
+        OrganizationIntakeReviewDecision.AcceptIntoCase => detail.Capabilities.CanAcceptIntoCase,
+        OrganizationIntakeReviewDecision.Decline => detail.Capabilities.CanDecline,
+        _ => false
+    };
+
+    private void CancelDecision()
+    {
+        _pendingDecision = null;
+        _pendingReceiptId = null;
+        _pendingVersion = null;
+    }
+
+    private static string DecisionLabel(OrganizationIntakeReviewDecision decision) => decision switch
+    {
+        OrganizationIntakeReviewDecision.RouteForReview => "route this report for review",
+        OrganizationIntakeReviewDecision.AcceptIntoCase => "accept this report into a new case",
+        OrganizationIntakeReviewDecision.Decline => "decline this report",
+        _ => "update this report"
+    };
+
+    private static string SubjectLabel(string? value)
+    {
+        if (string.Equals(value?.Trim(), "Human", StringComparison.OrdinalIgnoreCase)) return "Human";
+        if (string.Equals(value?.Trim(), "Animal", StringComparison.OrdinalIgnoreCase)) return "Animal";
+        if (string.Equals(value?.Trim(), "Environment", StringComparison.OrdinalIgnoreCase)) return "Environment";
+        return "Subject not specified";
+    }
+
+    private static string StatusLabel(string? value)
+    {
+        if (string.Equals(value?.Trim(), "AwaitingReview", StringComparison.OrdinalIgnoreCase)) return "Awaiting review";
+        if (string.Equals(value?.Trim(), "NeedsRouting", StringComparison.OrdinalIgnoreCase)) return "Needs routing";
+        if (string.Equals(value?.Trim(), "AcceptedIntoCase", StringComparison.OrdinalIgnoreCase)) return "Accepted into a case";
+        if (string.Equals(value?.Trim(), "Declined", StringComparison.OrdinalIgnoreCase)) return "Declined";
+        if (string.Equals(value?.Trim(), "ReceivedUnverified", StringComparison.OrdinalIgnoreCase)) return "Received";
+        if (string.Equals(value?.Trim(), "LinkedAsEvidence", StringComparison.OrdinalIgnoreCase)) return "Linked as evidence";
+        return "Status unavailable";
+    }
+
+    private static string RoutingLabel(string? value)
+    {
+        if (string.Equals(value?.Trim(), "NeedsRouting", StringComparison.OrdinalIgnoreCase)) return "Needs routing";
+        if (string.Equals(value?.Trim(), "NoServiceCoverage", StringComparison.OrdinalIgnoreCase)) return "No service coverage";
+        if (string.Equals(value?.Trim(), "RoutedForReview", StringComparison.OrdinalIgnoreCase)) return "Routed for review";
+        return "Routing status unavailable";
+    }
+
+    private static string LocationLabel(string? country, string? region) =>
+        string.IsNullOrWhiteSpace(region) ? SafeLabel(country) : $"{SafeLabel(country)} · {SafeLabel(region)}";
+
+    private static string SafeLabel(string? value) => string.IsNullOrWhiteSpace(value) ? "Not provided" : value.Trim();
+}

@@ -1,16 +1,377 @@
 @page "/intake-coordination"
 @using SwiftAid.Contracts.Intake
 @using SwiftAid.UI.Components.Coordination
+@using Microsoft.Extensions.DependencyInjection
+@using Client = SwiftAid.Client.Presentation
+@using ReviewUi = SwiftAid.UI.Components.Coordination
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject IIntakeCoordinationClient CoordinationClient
+@inject IServiceProvider Services
 
-<PageTitle>Intake coordination | SwiftAid</PageTitle>
+<PageTitle>Report routing and review | SwiftAid</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.Large" Class="intake-coordination-page">
-    <SwiftAidPageHeading Eyebrow="Platform intake coordination"
-                         Title="Coordination queue"
-                         Description="Restricted review for public reports that no organization queue could receive. Coordinators assess routing only; report content stays with organization reviewers."
+    <SwiftAidPageHeading Eyebrow="Public report handling"
+                         Title="Report routing and review"
+                         Description="Route reports that need an organization queue, then review reports assigned to your organization. Access to each step is checked separately."
                          HeadingId="intake-coordination-heading" />
 
-    <IntakeCoordinationQueue Client="CoordinationClient" />
+    <MudTabs Rounded="true" KeepPanelsAlive="true" ApplyEffectsToContainer="true">
+        <MudTabPanel Text="Coordination" Icon="@Icons.Material.Outlined.Route">
+            <IntakeCoordinationQueue Client="CoordinationClient" />
+        </MudTabPanel>
+        <MudTabPanel Text="Organization review" Icon="@Icons.Material.Outlined.FactCheck">
+            <OrganizationIntakeReviewSurface QueueItems="_reviewItems" QueueState="_reviewQueueState"
+                                             QueueMessage="_reviewQueueMessage" PageNumber="_reviewPage"
+                                             HasNextPage="_hasNextReviewPage" SelectedReceiptId="_selectedReviewReceiptId"
+                                             DetailState="_reviewDetailState" DetailMessage="_reviewDetailMessage"
+                                             Detail="_reviewDetail" Busy="_reviewBusy" StatusMessage="_reviewMessage"
+                                             StatusSeverity="_reviewMessageSeverity" OnRefresh="RefreshReviewQueueAsync"
+                                             OnPreviousPage="PreviousReviewPageAsync" OnNextPage="NextReviewPageAsync"
+                                             OnSelect="SelectReviewAsync" OnRetryDetail="RetrySelectedReviewAsync"
+                                             OnReview="SubmitReviewAsync" />
+        </MudTabPanel>
+    </MudTabs>
 </MudContainer>
+
+@code {
+    private IReadOnlyList<ReviewUi.OrganizationIntakeReviewQueueItem> _reviewItems = Array.Empty<ReviewUi.OrganizationIntakeReviewQueueItem>();
+    private ReviewUi.OrganizationIntakeReviewDetail? _reviewDetail;
+    private ReviewUi.OrganizationIntakeReviewState _reviewQueueState = ReviewUi.OrganizationIntakeReviewState.Loading;
+    private ReviewUi.OrganizationIntakeReviewState _reviewDetailState = ReviewUi.OrganizationIntakeReviewState.Empty;
+    private string _reviewQueueMessage = "The review queue is not available right now.";
+    private string _reviewDetailMessage = "Choose a report to review its submitted information.";
+    private bool _hasNextReviewPage;
+    private int _reviewPage = 1;
+    private Guid? _selectedReviewReceiptId;
+    private string? _reviewMessage;
+    private Severity _reviewMessageSeverity = Severity.Info;
+    private bool _reviewBusy;
+    private long _reviewListGeneration;
+    private long _reviewDetailGeneration;
+
+    private Client.IIntakeReviewClient? ReviewClient => Services.GetService<Client.IIntakeReviewClient>();
+
+    protected override Task OnInitializedAsync() => RefreshReviewQueueAsync();
+
+    private async Task RefreshReviewQueueAsync()
+    {
+        var generation = ++_reviewListGeneration;
+        InvalidateReviewDetail();
+        _reviewBusy = true;
+        _reviewQueueState = ReviewUi.OrganizationIntakeReviewState.Loading;
+        var client = ReviewClient;
+        if (client is null)
+        {
+            ClearReviewQueue(ReviewUi.OrganizationIntakeReviewState.Unavailable, "Organization review is not available in this environment.");
+            _reviewBusy = false;
+            return;
+        }
+
+        try
+        {
+            var result = await client.ListAsync(new Client.IntakeReviewQuery(new Client.PageRequest(_reviewPage, 50)));
+            if (generation != _reviewListGeneration)
+            {
+                return;
+            }
+
+            if (result.Code != Client.UiCapabilityResultCode.Success || !result.Metadata.IsAvailable || result.Value is null ||
+                !IsValidPage(result.Value, _reviewPage))
+            {
+                var state = MapState(result.Code, result.Metadata.IsAvailable);
+                ClearReviewQueue(state, MessageFor(result.Code, "The review queue could not be loaded."));
+                return;
+            }
+
+            _reviewItems = result.Value.Items.Select(ToQueueView).ToArray();
+            _hasNextReviewPage = result.Value.HasMore;
+            _reviewQueueState = _reviewItems.Count == 0
+                ? ReviewUi.OrganizationIntakeReviewState.Empty
+                : ReviewUi.OrganizationIntakeReviewState.Populated;
+            _reviewQueueMessage = string.Empty;
+        }
+        catch (Exception)
+        {
+            if (generation == _reviewListGeneration)
+            {
+                ClearReviewQueue(ReviewUi.OrganizationIntakeReviewState.Error, "The review queue could not be loaded. Try again.");
+            }
+        }
+        finally
+        {
+            if (generation == _reviewListGeneration)
+            {
+                _reviewBusy = false;
+            }
+        }
+    }
+
+    private async Task SelectReviewAsync(Guid receiptId)
+    {
+        var client = ReviewClient;
+        if (_reviewBusy || _reviewQueueState != ReviewUi.OrganizationIntakeReviewState.Populated ||
+            receiptId == Guid.Empty || !_reviewItems.Any(item => item.ReceiptId == receiptId) || client is null)
+        {
+            return;
+        }
+
+        var generation = ++_reviewDetailGeneration;
+        _selectedReviewReceiptId = receiptId;
+        _reviewDetail = null;
+        _reviewDetailState = ReviewUi.OrganizationIntakeReviewState.Loading;
+        _reviewDetailMessage = "Loading report details.";
+        _reviewBusy = true;
+        try
+        {
+            var result = await client.GetAsync(receiptId);
+            if (generation != _reviewDetailGeneration || _selectedReviewReceiptId != receiptId)
+            {
+                return;
+            }
+
+            if (result.Code != Client.UiCapabilityResultCode.Success || !result.Metadata.IsAvailable || result.Value is null ||
+                !IsValidDetail(result.Value, receiptId))
+            {
+                ClearReviewDetail(MapState(result.Code, result.Metadata.IsAvailable), MessageFor(result.Code, "The report details could not be loaded."));
+                if (result.Code == Client.UiCapabilityResultCode.Denied)
+                {
+                    ClearReviewQueue(ReviewUi.OrganizationIntakeReviewState.Denied, "This review is restricted to authorized organization reviewers.");
+                }
+                return;
+            }
+
+            var listItem = _reviewItems.FirstOrDefault(item => item.ReceiptId == receiptId);
+            if (listItem is null || listItem.Version != result.Value.Item.ExpectedVersion)
+            {
+                ClearReviewDetail(ReviewUi.OrganizationIntakeReviewState.Error, "This report changed. Refresh the review queue and try again.");
+                return;
+            }
+
+            _reviewDetail = ToDetailView(result.Value);
+            _reviewDetailState = ReviewUi.OrganizationIntakeReviewState.Populated;
+            _reviewDetailMessage = string.Empty;
+        }
+        catch (Exception)
+        {
+            if (generation == _reviewDetailGeneration && _selectedReviewReceiptId == receiptId)
+            {
+                ClearReviewDetail(ReviewUi.OrganizationIntakeReviewState.Error, "The report details could not be loaded. Try again.");
+            }
+        }
+        finally
+        {
+            if (generation == _reviewDetailGeneration)
+            {
+                _reviewBusy = false;
+            }
+        }
+    }
+
+    private Task RetrySelectedReviewAsync() => _selectedReviewReceiptId is Guid receiptId
+        ? SelectReviewAsync(receiptId)
+        : Task.CompletedTask;
+
+    private async Task SubmitReviewAsync(ReviewUi.OrganizationIntakeReviewCommand request)
+    {
+        var client = ReviewClient;
+        var current = _reviewItems.FirstOrDefault(item => item.ReceiptId == request.ReceiptId);
+        if (_reviewBusy || client is null || _reviewQueueState != ReviewUi.OrganizationIntakeReviewState.Populated ||
+            _reviewDetailState != ReviewUi.OrganizationIntakeReviewState.Populated || _reviewDetail is null ||
+            current is null || current.ReceiptId != _reviewDetail.ReceiptId ||
+            current.Version != request.ExpectedVersion || _reviewDetail.Version != request.ExpectedVersion ||
+            !IsAllowed(_reviewDetail.Capabilities, request.Decision))
+        {
+            _reviewMessage = "This report changed or is no longer available for that decision. Refresh the review queue.";
+            _reviewMessageSeverity = Severity.Warning;
+            InvalidateReviewDetail();
+            return;
+        }
+
+        var generation = _reviewDetailGeneration;
+        var decision = ToClientDecision(request.Decision);
+        _reviewBusy = true;
+        _reviewMessage = null;
+        try
+        {
+            var result = await client.ReviewAsync(new Client.IntakeReviewCommand(
+                request.ReceiptId, request.ExpectedVersion, decision, request.ReviewReason));
+            if (generation != _reviewDetailGeneration || _selectedReviewReceiptId != request.ReceiptId)
+            {
+                return;
+            }
+
+            if (result.Code == Client.UiCapabilityResultCode.Denied)
+            {
+                ClearReviewQueue(ReviewUi.OrganizationIntakeReviewState.Denied, "This review is restricted to authorized organization reviewers.");
+                _reviewMessage = "This review is no longer available to your account.";
+                _reviewMessageSeverity = Severity.Warning;
+                return;
+            }
+
+            if (result.Code == Client.UiCapabilityResultCode.Conflict)
+            {
+                _reviewMessage = "This report changed before the decision was recorded. The review queue is being refreshed.";
+                _reviewMessageSeverity = Severity.Warning;
+                await RefreshReviewQueueAsync();
+                return;
+            }
+
+            if (result.Code != Client.UiCapabilityResultCode.Success || !result.Metadata.IsAvailable || result.Value is null ||
+                !IsValidOutcome(result.Value, request))
+            {
+                var state = MapState(result.Code, result.Metadata.IsAvailable);
+                _reviewMessage = MessageFor(result.Code, "The review result could not be confirmed. Refresh to check the latest status.");
+                _reviewMessageSeverity = state is ReviewUi.OrganizationIntakeReviewState.Denied
+                    ? Severity.Warning
+                    : Severity.Error;
+                ClearReviewQueue(state, _reviewMessage);
+                return;
+            }
+
+            _reviewMessage = SuccessMessage(request.Decision);
+            _reviewMessageSeverity = Severity.Success;
+            await RefreshReviewQueueAsync();
+        }
+        catch (Exception)
+        {
+            if (generation == _reviewDetailGeneration && _selectedReviewReceiptId == request.ReceiptId)
+            {
+                _reviewMessage = "The review result could not be confirmed. Refresh to check the latest status.";
+                _reviewMessageSeverity = Severity.Error;
+                await RefreshReviewQueueAsync();
+            }
+        }
+        finally
+        {
+            _reviewBusy = false;
+        }
+    }
+
+    private async Task PreviousReviewPageAsync()
+    {
+        if (_reviewPage <= 1 || _reviewBusy) return;
+        _reviewPage--;
+        await RefreshReviewQueueAsync();
+    }
+
+    private async Task NextReviewPageAsync()
+    {
+        if (!_hasNextReviewPage || _reviewBusy) return;
+        _reviewPage++;
+        await RefreshReviewQueueAsync();
+    }
+
+    private void ClearReviewQueue(ReviewUi.OrganizationIntakeReviewState state, string message)
+    {
+        _reviewItems = Array.Empty<ReviewUi.OrganizationIntakeReviewQueueItem>();
+        _hasNextReviewPage = false;
+        _reviewQueueState = state;
+        _reviewQueueMessage = message;
+        InvalidateReviewDetail();
+    }
+
+    private void ClearReviewDetail(ReviewUi.OrganizationIntakeReviewState state, string message)
+    {
+        _reviewDetail = null;
+        _reviewDetailState = state;
+        _reviewDetailMessage = message;
+    }
+
+    private void InvalidateReviewDetail()
+    {
+        _reviewDetailGeneration++;
+        _selectedReviewReceiptId = null;
+        _reviewDetail = null;
+        _reviewDetailState = ReviewUi.OrganizationIntakeReviewState.Empty;
+        _reviewDetailMessage = "Choose a report to review its submitted information.";
+    }
+
+    private static bool IsValidPage(Client.Page<Client.IntakeReviewQueueItem> page, int expectedPage) =>
+        page.PageNumber == expectedPage && page.PageSize is > 0 and <= 100 && page.TotalCount >= 0 &&
+        page.Items is not null && page.Items.Count <= page.PageSize &&
+        page.Items.All(item => item is not null && item.ReceiptId != Guid.Empty && item.ExpectedVersion > 0 && item.Capabilities is not null) &&
+        page.Items.Select(item => item.ReceiptId).Distinct().Count() == page.Items.Count;
+
+    private static bool IsValidDetail(Client.IntakeReviewDetail detail, Guid receiptId) =>
+        detail.Item is not null && detail.Item.ReceiptId == receiptId && detail.Item.ExpectedVersion > 0 &&
+        detail.Item.Capabilities is not null && detail.Narrative is not null && detail.Narrative.Length <= 6000 &&
+        detail.Observations is not null && detail.Observations.Count <= 20 && detail.Observations.All(item => item is not null && item.Length <= 1000);
+
+    private bool IsValidOutcome(Client.IntakeReviewOutcome outcome, ReviewUi.OrganizationIntakeReviewCommand request)
+    {
+        if (outcome.ReceiptId != request.ReceiptId)
+        {
+            return false;
+        }
+
+        var expectedStatus = request.Decision switch
+        {
+            ReviewUi.OrganizationIntakeReviewDecision.RouteForReview => "AwaitingReview",
+            ReviewUi.OrganizationIntakeReviewDecision.AcceptIntoCase => "AcceptedIntoCase",
+            ReviewUi.OrganizationIntakeReviewDecision.Decline => "Declined",
+            _ => string.Empty
+        };
+        var statusMatches = string.Equals(outcome.Status, expectedStatus, StringComparison.OrdinalIgnoreCase);
+        var routingMatches = string.Equals(outcome.RoutingStatus, "RoutedForReview", StringComparison.OrdinalIgnoreCase);
+        var versionMatches = outcome.ResultingVersion is null || outcome.ResultingVersion > request.ExpectedVersion;
+        var acceptedCaseExists = request.Decision != ReviewUi.OrganizationIntakeReviewDecision.AcceptIntoCase || outcome.PromotedCaseId is { } id && id != Guid.Empty;
+        return statusMatches && routingMatches && versionMatches && acceptedCaseExists;
+    }
+
+    private static ReviewUi.OrganizationIntakeReviewQueueItem ToQueueView(Client.IntakeReviewQueueItem item) => new(
+        item.ReceiptId, item.Status, item.RoutingStatus, item.SubjectScope, item.CountryCode, item.RegionLabel,
+        item.ReceivedAtUtc, item.ExpectedVersion);
+
+    private static ReviewUi.OrganizationIntakeReviewDetail ToDetailView(Client.IntakeReviewDetail detail) => new(
+        detail.Item.ReceiptId, detail.Item.Status, detail.Item.RoutingStatus, detail.Item.SubjectScope,
+        detail.Item.CountryCode, detail.Item.RegionLabel, detail.Item.ReceivedAtUtc, detail.Item.ExpectedVersion,
+        detail.Narrative, detail.Observations.ToArray(), new ReviewUi.OrganizationIntakeReviewCapabilities(
+            detail.Item.Capabilities.CanRouteForReview,
+            detail.Item.Capabilities.CanAcceptIntoCase,
+            detail.Item.Capabilities.CanDecline));
+
+    private static bool IsAllowed(ReviewUi.OrganizationIntakeReviewCapabilities capabilities, ReviewUi.OrganizationIntakeReviewDecision decision) => decision switch
+    {
+        ReviewUi.OrganizationIntakeReviewDecision.RouteForReview => capabilities.CanRouteForReview,
+        ReviewUi.OrganizationIntakeReviewDecision.AcceptIntoCase => capabilities.CanAcceptIntoCase,
+        ReviewUi.OrganizationIntakeReviewDecision.Decline => capabilities.CanDecline,
+        _ => false
+    };
+
+    private static Client.IntakeReviewDecision ToClientDecision(ReviewUi.OrganizationIntakeReviewDecision decision) => decision switch
+    {
+        ReviewUi.OrganizationIntakeReviewDecision.RouteForReview => Client.IntakeReviewDecision.RouteForReview,
+        ReviewUi.OrganizationIntakeReviewDecision.AcceptIntoCase => Client.IntakeReviewDecision.AcceptIntoCase,
+        ReviewUi.OrganizationIntakeReviewDecision.Decline => Client.IntakeReviewDecision.Decline,
+        _ => throw new ArgumentOutOfRangeException(nameof(decision))
+    };
+
+    private static ReviewUi.OrganizationIntakeReviewState MapState(Client.UiCapabilityResultCode code, bool isAvailable) =>
+        code switch
+        {
+            Client.UiCapabilityResultCode.Denied => ReviewUi.OrganizationIntakeReviewState.Denied,
+            Client.UiCapabilityResultCode.Unavailable => ReviewUi.OrganizationIntakeReviewState.Unavailable,
+            Client.UiCapabilityResultCode.Retryable => ReviewUi.OrganizationIntakeReviewState.Offline,
+            Client.UiCapabilityResultCode.Success when isAvailable => ReviewUi.OrganizationIntakeReviewState.Populated,
+            Client.UiCapabilityResultCode.Success => ReviewUi.OrganizationIntakeReviewState.Unavailable,
+            _ => ReviewUi.OrganizationIntakeReviewState.Error
+        };
+
+    private static string MessageFor(Client.UiCapabilityResultCode code, string fallback) => code switch
+    {
+        Client.UiCapabilityResultCode.Denied => "This review is restricted to authorized organization reviewers.",
+        Client.UiCapabilityResultCode.Unavailable => "Organization review is not available in this environment.",
+        Client.UiCapabilityResultCode.Retryable => "The review service could not be reached. Try again.",
+        Client.UiCapabilityResultCode.Conflict => "This report changed. Refresh the review queue and try again.",
+        _ => fallback
+    };
+
+    private static string SuccessMessage(ReviewUi.OrganizationIntakeReviewDecision decision) => decision switch
+    {
+        ReviewUi.OrganizationIntakeReviewDecision.RouteForReview => "The report is awaiting organization review.",
+        ReviewUi.OrganizationIntakeReviewDecision.AcceptIntoCase => "The report was accepted into a new case.",
+        ReviewUi.OrganizationIntakeReviewDecision.Decline => "The report was declined.",
+        _ => "The report review was updated."
+    };
+}
