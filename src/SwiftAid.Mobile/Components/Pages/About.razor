@@ -1,0 +1,15 @@
+@page "/about"
+@using SwiftAid.UI.Components.Surfaces.Public
+
+<PageTitle>About | SwiftAid</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Small" Class="mobile-work-page">
+    <AboutSurface AppVersion="@AppVersion"
+                  PrivacyHref="/privacy"
+                  EducationHref="/education" />
+</MudContainer>
+
+@code {
+    private string AppVersion =>
+        typeof(About).Assembly.GetName().Version?.ToString(3) ?? "unknown";
+}

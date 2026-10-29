@@ -1,0 +1,43 @@
+@using SwiftAid.UI.Components.Surfaces.Public
+@using SwiftAid.UI.Components.Theme
+
+<SwiftAidPageHeading Eyebrow="SwiftAid" Title="About" HeadingId="about-heading"
+                     Description="@($"Version {AppVersion}. Community reporting and public information.")" />
+
+<MudPaper Class="pa-4 mb-4" Elevation="0">
+    <MudStack AlignItems="AlignItems.Center" Spacing="2">
+        <MudAvatar Size="Size.Large" Color="Color.Primary">
+            <MudIcon Icon="@Icons.Material.Filled.VolunteerActivism" />
+        </MudAvatar>
+        <MudText Typo="Typo.h6" Align="Align.Center">@AppName</MudText>
+        <MudText Typo="Typo.body2" Align="Align.Center">Healthier people. Safer communities. Brighter tomorrows.</MudText>
+    </MudStack>
+</MudPaper>
+
+<SwiftAidSettingsGroup Label="Learn more" HeadingId="about-links-heading">
+    @if (!string.IsNullOrWhiteSpace(PrivacyHref))
+    {
+        <SwiftAidSettingsRow Title="Privacy" Href="@PrivacyHref" AriaLabel="Privacy notice" />
+    }
+    @if (!string.IsNullOrWhiteSpace(TermsHref))
+    {
+        <SwiftAidSettingsRow Title="Terms" Href="@TermsHref" AriaLabel="Terms of use" />
+    }
+    @if (!string.IsNullOrWhiteSpace(EducationHref))
+    {
+        <SwiftAidSettingsRow Title="Education" Href="@EducationHref" AriaLabel="Community education" />
+    }
+</SwiftAidSettingsGroup>
+
+@code {
+    [Parameter] public string AppName { get; set; } = "SwiftAid";
+
+    [Parameter] public string AppVersion { get; set; } = "unknown";
+
+    /// <summary>Optional deep links. Rows render only for the destinations the host provides.</summary>
+    [Parameter] public string? PrivacyHref { get; set; }
+
+    [Parameter] public string? TermsHref { get; set; }
+
+    [Parameter] public string? EducationHref { get; set; }
+}

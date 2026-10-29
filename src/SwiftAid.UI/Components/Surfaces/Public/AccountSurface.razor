@@ -108,19 +108,7 @@
                 }
             }
         </SwiftAidSettingsGroup>
-        @if (!string.IsNullOrWhiteSpace(ManageMethodsHref))
-        {
-            <MudLink Href="@ManageMethodsHref" aria-label="Manage sign-in methods">Manage sign-in methods</MudLink>
-        }
         <MudText Typo="Typo.body2">Signing in never grants workspace access by itself.</MudText>
-        @if (Snapshot.IsSignedIn && !string.IsNullOrWhiteSpace(EditProfileHref))
-        {
-            <MudLink Href="@EditProfileHref" aria-label="View and edit profile">View and edit profile</MudLink>
-        }
-        @if (Snapshot.IsSignedIn && !string.IsNullOrWhiteSpace(SecurityHref))
-        {
-            <MudLink Href="@SecurityHref" aria-label="Security and sign-in">Security &amp; sign-in</MudLink>
-        }
 
         <SwiftAidSettingsGroup Label="Workspace" HeadingId="account-workspace-heading">
             @if (!Snapshot.WorkspacesAvailable)
@@ -168,16 +156,75 @@
             }
         </SwiftAidSettingsGroup>
         <MudText Typo="Typo.body2">Switching changes only what you view, never what you can access.</MudText>
-        @if (Snapshot.IsSignedIn && !string.IsNullOrWhiteSpace(OrganizationsHref))
+
+        @if (Snapshot.IsSignedIn)
         {
-            <MudLink Href="@OrganizationsHref" aria-label="Manage organizations">Manage organizations</MudLink>
+            <SwiftAidSettingsGroup Label="Account" HeadingId="account-account-heading">
+                @if (!string.IsNullOrWhiteSpace(EditProfileHref))
+                {
+                    <SwiftAidSettingsRow Title="Personal information" Href="@EditProfileHref"
+                                         AriaLabel="View and edit profile"
+                                         Icon="@Icons.Material.Outlined.Person" />
+                }
+                @if (!string.IsNullOrWhiteSpace(SecurityHref))
+                {
+                    <SwiftAidSettingsRow Title="Security &amp; sign-in" Href="@SecurityHref"
+                                         AriaLabel="Security and sign-in"
+                                         Icon="@Icons.Material.Outlined.Lock" />
+                }
+                @if (!string.IsNullOrWhiteSpace(ManageMethodsHref))
+                {
+                    <SwiftAidSettingsRow Title="Connected sign-in methods" Href="@ManageMethodsHref"
+                                         AriaLabel="Manage sign-in methods"
+                                         Icon="@Icons.Material.Outlined.Link" />
+                }
+                @if (!string.IsNullOrWhiteSpace(OrganizationsHref))
+                {
+                    <SwiftAidSettingsRow Title="Organizations" Href="@OrganizationsHref"
+                                         AriaLabel="Manage organizations"
+                                         Icon="@Icons.Material.Outlined.Groups" />
+                }
+                @if (!string.IsNullOrWhiteSpace(NotificationsHref))
+                {
+                    <SwiftAidSettingsRow Title="Notification preferences" Href="@NotificationsHref"
+                                         AriaLabel="Notification preferences"
+                                         Icon="@Icons.Material.Outlined.Notifications" />
+                }
+            </SwiftAidSettingsGroup>
         }
 
-        <ThemePreferenceControl />
-        @if (Snapshot.IsSignedIn && !string.IsNullOrWhiteSpace(NotificationsHref))
-        {
-            <MudLink Href="@NotificationsHref" aria-label="Notification preferences">Notification preferences</MudLink>
-        }
+        <SwiftAidSettingsGroup Label="Preferences" HeadingId="account-preferences-heading">
+            <li class="account-status-item">
+                <ThemePreferenceControl />
+            </li>
+        </SwiftAidSettingsGroup>
+
+        <SwiftAidSettingsGroup Label="Data &amp; sync" HeadingId="account-data-heading">
+            @if (!string.IsNullOrWhiteSpace(SyncHref))
+            {
+                <SwiftAidSettingsRow Title="Offline reports &amp; sync" Href="@SyncHref"
+                                     AriaLabel="Offline reports and sync"
+                                     Icon="@Icons.Material.Outlined.CloudSync" />
+            }
+            @if (!string.IsNullOrWhiteSpace(PrivacyHref))
+            {
+                <SwiftAidSettingsRow Title="Privacy &amp; data" Href="@PrivacyHref"
+                                     AriaLabel="Privacy and data"
+                                     Icon="@Icons.Material.Outlined.Policy" />
+            }
+        </SwiftAidSettingsGroup>
+
+        <SwiftAidSettingsGroup Label="Help" HeadingId="account-help-heading">
+            @if (!string.IsNullOrWhiteSpace(AboutHref))
+            {
+                <SwiftAidSettingsRow Title="About SwiftAid" Href="@AboutHref"
+                                     AriaLabel="About SwiftAid"
+                                     Icon="@Icons.Material.Outlined.Info" />
+            }
+            <SwiftAidSettingsRow Title="Education" Href="/education"
+                                 AriaLabel="Community education"
+                                 Icon="@Icons.Material.Outlined.School" />
+        </SwiftAidSettingsGroup>
 
         @if (!string.IsNullOrWhiteSpace(Snapshot.StatusMessage) || !string.IsNullOrWhiteSpace(_actionError))
         {
@@ -228,6 +275,24 @@
     /// renders, so hosts without that route stay clean.
     /// </summary>
     [Parameter] public string? SecurityHref { get; set; }
+
+    /// <summary>
+    /// Optional deep link to the offline reports and sync page. When null
+    /// or empty no link renders, so hosts without that route stay clean.
+    /// </summary>
+    [Parameter] public string? SyncHref { get; set; }
+
+    /// <summary>
+    /// Optional deep link to the privacy page. When null or empty no link
+    /// renders, so hosts without that route stay clean.
+    /// </summary>
+    [Parameter] public string? PrivacyHref { get; set; }
+
+    /// <summary>
+    /// Optional deep link to the about page. When null or empty no link
+    /// renders, so hosts without that route stay clean.
+    /// </summary>
+    [Parameter] public string? AboutHref { get; set; }
 
     /// <summary>
     /// Optional sign-out confirmation hook. Defaults to the shared

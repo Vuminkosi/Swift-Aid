@@ -6,16 +6,39 @@
 
 <PageTitle>Account | SwiftAid</PageTitle>
 
-<AccountSurface Snapshot="_snapshot"
-                OnSignIn="SignInAsync"
-                OnSignOut="SignOutAsync"
-                OnSelectWorkspace="SelectWorkspaceAsync"
-                OnRefresh="RefreshAsync"
-                ManageMethodsHref="/sign-in-methods"
-                EditProfileHref="/profile"
-                OrganizationsHref="/organizations"
-                NotificationsHref="/notifications"
-                SecurityHref="/security" />
+<MudGrid Spacing="3">
+    <MudItem xs="12" md="3">
+        <MudHidden Breakpoint="Breakpoint.SmAndDown">
+            <MudPaper Class="pa-2" Elevation="0">
+                <MudNavMenu Dense="true" aria-label="Account and settings">
+                    <MudNavLink Href="/account" Icon="@Icons.Material.Outlined.Home">Overview</MudNavLink>
+                    <MudNavLink Href="/profile" Icon="@Icons.Material.Outlined.Person">My profile</MudNavLink>
+                    <MudNavLink Href="/organizations" Icon="@Icons.Material.Outlined.Groups">Organizations</MudNavLink>
+                    <MudNavLink Href="/security" Icon="@Icons.Material.Outlined.Lock">Security &amp; sign-in</MudNavLink>
+                    <MudNavLink Href="/notifications" Icon="@Icons.Material.Outlined.Notifications">Notifications</MudNavLink>
+                    <MudNavLink Href="/sync" Icon="@Icons.Material.Outlined.CloudSync">Offline &amp; sync</MudNavLink>
+                    <MudNavLink Href="/privacy" Icon="@Icons.Material.Outlined.Policy">Privacy &amp; data</MudNavLink>
+                    <MudNavLink Href="/about" Icon="@Icons.Material.Outlined.Info">Help &amp; about</MudNavLink>
+                </MudNavMenu>
+            </MudPaper>
+        </MudHidden>
+    </MudItem>
+    <MudItem xs="12" md="9">
+        <AccountSurface Snapshot="_snapshot"
+                        OnSignIn="SignInAsync"
+                        OnSignOut="SignOutAsync"
+                        OnSelectWorkspace="SelectWorkspaceAsync"
+                        OnRefresh="RefreshAsync"
+                        ManageMethodsHref="/sign-in-methods"
+                        EditProfileHref="/profile"
+                        OrganizationsHref="/organizations"
+                        NotificationsHref="/notifications"
+                        SecurityHref="/security"
+                        SyncHref="/sync"
+                        PrivacyHref="/privacy"
+                        AboutHref="/about" />
+    </MudItem>
+</MudGrid>
 
 @code {
     private AccountPresentationSnapshot _snapshot = AccountPresentationSnapshot.Unavailable;
