@@ -239,3 +239,21 @@ public sealed class EmailVerificationEntity
 
     public DateTimeOffset CreatedAtUtc { get; set; }
 }
+
+/// <summary>Self-asserted profile fields. Identity owns the email; authorization owns membership.</summary>
+public sealed class UserProfileEntity
+{
+    public required string UserId { get; set; }
+
+    public string? DisplayName { get; set; }
+
+    public string? Phone { get; set; }
+
+    public string? Country { get; set; }
+
+    public string? Region { get; set; }
+
+    public string? Locality { get; set; }
+
+    public DateTimeOffset UpdatedAtUtc { get; set; }
+}

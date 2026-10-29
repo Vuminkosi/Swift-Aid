@@ -21,6 +21,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
 {
     public DbSet<ExternalIdentityMappingEntity> ExternalIdentityMappings => Set<ExternalIdentityMappingEntity>();
     public DbSet<EmailVerificationEntity> EmailVerifications => Set<EmailVerificationEntity>();
+    public DbSet<UserProfileEntity> UserProfiles => Set<UserProfileEntity>();
     public DbSet<ActorEntity> Actors => Set<ActorEntity>();
     public DbSet<ActorAccessStateEntity> ActorAccessStates => Set<ActorAccessStateEntity>();
     public DbSet<OrganizationEntity> Organizations => Set<OrganizationEntity>();
@@ -169,6 +170,20 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
             .HasColumnType("timestamp with time zone");
         verification.HasOne<SwiftAidUser>().WithMany().HasForeignKey(entity => entity.UserId)
             .OnDelete(DeleteBehavior.Cascade).HasConstraintName("fk_email_verifications_user");
+
+        var profile = modelBuilder.Entity<UserProfileEntity>();
+        profile.ToTable("user_profiles", "swiftaid_identity");
+        profile.HasKey(entity => entity.UserId).HasName("pk_user_profiles");
+        profile.Property(entity => entity.UserId).HasColumnName("user_id").HasColumnType("text");
+        profile.Property(entity => entity.DisplayName).HasColumnName("display_name").HasColumnType("text");
+        profile.Property(entity => entity.Phone).HasColumnName("phone").HasColumnType("text");
+        profile.Property(entity => entity.Country).HasColumnName("country").HasColumnType("text");
+        profile.Property(entity => entity.Region).HasColumnName("region").HasColumnType("text");
+        profile.Property(entity => entity.Locality).HasColumnName("locality").HasColumnType("text");
+        profile.Property(entity => entity.UpdatedAtUtc).HasColumnName("updated_at_utc")
+            .HasColumnType("timestamp with time zone");
+        profile.HasOne<SwiftAidUser>().WithMany().HasForeignKey(entity => entity.UserId)
+            .OnDelete(DeleteBehavior.Cascade).HasConstraintName("fk_user_profiles_user");
     }
 
     private static void ConfigureActors(ModelBuilder modelBuilder)

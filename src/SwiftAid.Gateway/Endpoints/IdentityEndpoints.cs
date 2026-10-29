@@ -60,6 +60,8 @@ public static class IdentityEndpoints
         group.MapGet("/email/status", GetEmailVerificationStatus);
         group.MapPost("/email/otp/request", RequestEmailOtp);
         group.MapPost("/email/otp/confirm", ConfirmEmailOtp);
+        group.MapGet("/profile", GetUserProfile);
+        group.MapPut("/profile", SaveUserProfile);
 
         if (identityServerOptions.Enabled)
         {
@@ -1481,6 +1483,132 @@ public static class IdentityEndpoints
         }
     }
 
+    private static async Task<IResult> GetUserProfile(
+        HttpContext context,
+        UserManager<SwiftAidUser> userManager,
+        IUserProfileService profileService,
+        IEmailVerificationService verificationService,
+        CancellationToken cancellationToken)
+    {
+        if (context.User.Identity?.IsAuthenticated != true)
+        {
+            return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to view your profile.");
+        }
+
+        try
+        {
+            var user = await userManager.GetUserAsync(context.User).ConfigureAwait(false);
+            if (user is null)
+            {
+                return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to view your profile.");
+            }
+
+            var profile = await profileService.GetAsync(user.Id, cancellationToken).ConfigureAwait(false);
+            var verified = await verificationService.IsVerifiedAsync(user, cancellationToken).ConfigureAwait(false);
+            SetNoStore(context);
+            return Results.Ok(new UserProfileResponse(
+                profile?.DisplayName,
+                profile?.Phone,
+                profile?.Country,
+                profile?.Region,
+                profile?.Locality,
+                user.Email,
+                verified));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return PasswordError(context, StatusCodes.Status503ServiceUnavailable, "Your profile is temporarily unavailable.");
+        }
+    }
+
+    private static async Task<IResult> SaveUserProfile(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        UserManager<SwiftAidUser> userManager,
+        IUserProfileService profileService,
+        IEmailVerificationService verificationService,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false);
+        }
+        catch (AntiforgeryValidationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The profile request is invalid.");
+        }
+        catch (InvalidOperationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The profile request is invalid.");
+        }
+
+        if (context.User.Identity?.IsAuthenticated != true)
+        {
+            return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to save your profile.");
+        }
+
+        var bodyRead = await ReadPasswordRequestAsync(context.Request, cancellationToken).ConfigureAwait(false);
+        if (bodyRead.Status != PasswordBodyStatus.Valid || bodyRead.Request is null)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "Enter your profile details.");
+        }
+
+        try
+        {
+            var user = await userManager.GetUserAsync(context.User).ConfigureAwait(false);
+            if (user is null)
+            {
+                return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to save your profile.");
+            }
+
+            var saved = await profileService.SaveAsync(
+                user.Id,
+                new UserProfileData(
+                    bodyRead.Request.DisplayName,
+                    bodyRead.Request.Phone,
+                    bodyRead.Request.Country,
+                    bodyRead.Request.Region,
+                    bodyRead.Request.Locality),
+                cancellationToken).ConfigureAwait(false);
+            if (saved.Status == UserProfileSaveStatus.Invalid)
+            {
+                return PasswordError(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    saved.Errors?.FirstOrDefault() ?? "Check your profile details and try again.");
+            }
+
+            if (saved.Status != UserProfileSaveStatus.Saved)
+            {
+                return PasswordError(context, StatusCodes.Status503ServiceUnavailable, "Saving your profile is temporarily unavailable.");
+            }
+
+            var profile = await profileService.GetAsync(user.Id, cancellationToken).ConfigureAwait(false);
+            var verified = await verificationService.IsVerifiedAsync(user, cancellationToken).ConfigureAwait(false);
+            SetNoStore(context);
+            return Results.Ok(new UserProfileResponse(
+                profile?.DisplayName,
+                profile?.Phone,
+                profile?.Country,
+                profile?.Region,
+                profile?.Locality,
+                user.Email,
+                verified));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return PasswordError(context, StatusCodes.Status503ServiceUnavailable, "Saving your profile is temporarily unavailable.");
+        }
+    }
+
     private static IResult PasswordError(HttpContext context, int statusCode, string message)
     {
         SetNoStore(context);
@@ -1828,6 +1956,15 @@ public static class IdentityEndpoints
 
     private sealed record EmailOtpConfirmResponse(bool Verified);
 
+    private sealed record UserProfileResponse(
+        string? DisplayName,
+        string? Phone,
+        string? Country,
+        string? Region,
+        string? Locality,
+        string? Email,
+        bool EmailVerified);
+
     private sealed class PasswordRequest
     {
         public PasswordRequest()
@@ -1847,6 +1984,16 @@ public static class IdentityEndpoints
         public string? UserId { get; set; }
 
         public string? Code { get; set; }
+
+        public string? DisplayName { get; set; }
+
+        public string? Phone { get; set; }
+
+        public string? Country { get; set; }
+
+        public string? Region { get; set; }
+
+        public string? Locality { get; set; }
     }
 
     private enum PasswordBodyStatus

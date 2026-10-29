@@ -1,0 +1,117 @@
+@using SwiftAid.UI.Components.Surfaces.Account
+
+@if (Snapshot.ViewState == ProfileViewState.Loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" aria-label="Loading your profile" />
+}
+else if (Snapshot.ViewState == ProfileViewState.SignedOut)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+        Sign in to view your profile.
+    </MudAlert>
+    <MudButton Href="/sign-in" Variant="Variant.Filled" Color="Color.Primary"
+               StartIcon="@Icons.Material.Filled.Login">
+        Sign in
+    </MudButton>
+}
+else if (Snapshot.ViewState == ProfileViewState.Unavailable)
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert">
+        @(Snapshot.StatusMessage ?? "Your profile is temporarily unavailable.")
+    </MudAlert>
+    <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="OnRefresh"
+               StartIcon="@Icons.Material.Filled.Refresh">
+        Retry
+    </MudButton>
+}
+else
+{
+    @if (!string.IsNullOrWhiteSpace(Snapshot.StatusMessage))
+    {
+        <MudAlert Severity="@(Snapshot.StatusIsError ? Severity.Warning : Severity.Success)"
+                  Variant="Variant.Outlined" role="@(Snapshot.StatusIsError ? "alert" : "status")">
+            @Snapshot.StatusMessage
+        </MudAlert>
+    }
+    <MudPaper Class="pa-4 mb-4" Elevation="0">
+        <MudText Typo="Typo.subtitle1">Personal information</MudText>
+        <MudTextField T="string" Label="Full name" @bind-Value="_displayName"
+                      Variant="Variant.Outlined" Required="true" RequiredError="Enter a display name."
+                      Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="128"
+                      aria-label="Full name" />
+        <MudTextField T="string" Label="Phone number (optional)" @bind-Value="_phone"
+                      Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="24"
+                      HelperText="Starts with + and your country code." aria-label="Phone number" />
+        <MudStack Row="true" Spacing="2">
+            <MudTextField T="string" Label="Country (optional)" @bind-Value="_country"
+                          Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="2"
+                          HelperText="Two-letter code." aria-label="Country" />
+            <MudTextField T="string" Label="Region (optional)" @bind-Value="_region"
+                          Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="128"
+                          aria-label="Region" />
+        </MudStack>
+        <MudTextField T="string" Label="Locality (optional)" @bind-Value="_locality"
+                      Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="128"
+                      aria-label="Locality" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync"
+                   Disabled="@(!CanSave)" StartIcon="@Icons.Material.Filled.Save">
+            @(Snapshot.IsSaving ? "Saving…" : "Save changes")
+        </MudButton>
+    </MudPaper>
+    <MudPaper Class="pa-4 mb-4" Elevation="0">
+        <MudText Typo="Typo.subtitle1">Contact details</MudText>
+        <MudText Typo="Typo.body2">@(Snapshot.Email ?? "No email address")</MudText>
+        <MudText Typo="Typo.caption" Color="@(Snapshot.EmailVerified ? Color.Success : Color.Warning)">
+            @(Snapshot.EmailVerified ? "Verified" : "Verification required")
+        </MudText>
+        @if (!Snapshot.EmailVerified)
+        {
+            <MudButton Href="/verify-email" Variant="Variant.Text" Color="Color.Primary">
+                Verify email address
+            </MudButton>
+        }
+    </MudPaper>
+}
+
+@code {
+    [Parameter] public ProfileSnapshot Snapshot { get; set; } = ProfileSnapshot.Loading;
+
+    [Parameter] public EventCallback OnRefresh { get; set; }
+
+    [Parameter] public EventCallback<ProfileEditRequest> OnSave { get; set; }
+
+    private string? _displayName;
+    private string? _phone;
+    private string? _country;
+    private string? _region;
+    private string? _locality;
+    private string? _loadedFor;
+
+    protected override void OnParametersSet()
+    {
+        var key = string.Join("|",
+            Snapshot.DisplayName, Snapshot.Phone, Snapshot.Country,
+            Snapshot.Region, Snapshot.Locality, Snapshot.ViewState);
+        if (!string.Equals(key, _loadedFor, StringComparison.Ordinal))
+        {
+            _loadedFor = key;
+            _displayName = Snapshot.DisplayName;
+            _phone = Snapshot.Phone;
+            _country = Snapshot.Country;
+            _region = Snapshot.Region;
+            _locality = Snapshot.Locality;
+        }
+    }
+
+    private bool CanSave =>
+        Snapshot.ViewState == ProfileViewState.Ready &&
+        !Snapshot.IsSaving &&
+        !string.IsNullOrWhiteSpace(_displayName);
+
+    private Task SaveAsync() => OnSave.InvokeAsync(new ProfileEditRequest(
+        _displayName?.Trim(),
+        string.IsNullOrWhiteSpace(_phone) ? null : _phone.Trim(),
+        string.IsNullOrWhiteSpace(_country) ? null : _country.Trim(),
+        string.IsNullOrWhiteSpace(_region) ? null : _region.Trim(),
+        string.IsNullOrWhiteSpace(_locality) ? null : _locality.Trim()));
+}

@@ -2580,6 +2580,42 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.UserProfileEntity", b =>
+                {
+                    b.Property<string>("UserId")
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
+                    b.Property<string>("Country")
+                        .HasColumnType("text")
+                        .HasColumnName("country");
+
+                    b.Property<string>("DisplayName")
+                        .HasColumnType("text")
+                        .HasColumnName("display_name");
+
+                    b.Property<string>("Locality")
+                        .HasColumnType("text")
+                        .HasColumnName("locality");
+
+                    b.Property<string>("Phone")
+                        .HasColumnType("text")
+                        .HasColumnName("phone");
+
+                    b.Property<string>("Region")
+                        .HasColumnType("text")
+                        .HasColumnName("region");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.HasKey("UserId")
+                        .HasName("pk_user_profiles");
+
+                    b.ToTable("user_profiles", "swiftaid_identity");
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.WorkspaceEntity", b =>
                 {
                     b.Property<string>("WorkspaceId")
@@ -3141,6 +3177,16 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_session_reminder_occurrences_session");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.UserProfileEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Identity.SwiftAidUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_user_profiles_user");
                 });
 
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.WorkspaceEntity", b =>

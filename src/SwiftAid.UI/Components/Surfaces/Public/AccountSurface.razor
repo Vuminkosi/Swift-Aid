@@ -113,6 +113,10 @@
             <MudLink Href="@ManageMethodsHref" aria-label="Manage sign-in methods">Manage sign-in methods</MudLink>
         }
         <MudText Typo="Typo.body2">Signing in never grants workspace access by itself.</MudText>
+        @if (Snapshot.IsSignedIn && !string.IsNullOrWhiteSpace(EditProfileHref))
+        {
+            <MudLink Href="@EditProfileHref" aria-label="View and edit profile">View and edit profile</MudLink>
+        }
 
         <SwiftAidSettingsGroup Label="Workspace" HeadingId="account-workspace-heading">
             @if (!Snapshot.WorkspacesAvailable)
@@ -188,6 +192,12 @@
     /// or empty no link renders, so native hosts without that route stay clean.
     /// </summary>
     [Parameter] public string? ManageMethodsHref { get; set; }
+
+    /// <summary>
+    /// Optional deep link to the profile editor. When null or empty no link
+    /// renders, so hosts without that route stay clean.
+    /// </summary>
+    [Parameter] public string? EditProfileHref { get; set; }
 
     /// <summary>
     /// Optional sign-out confirmation hook. Defaults to the shared

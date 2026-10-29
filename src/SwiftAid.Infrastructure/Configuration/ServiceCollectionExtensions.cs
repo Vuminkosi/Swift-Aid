@@ -472,6 +472,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAccountVerificationMailer, SmtpEmailSender>();
         services.AddScoped<IPasswordIdentityRegistrar, PasswordIdentityRegistrar>();
         services.AddScoped<IEmailVerificationService, EmailVerificationService>();
+        services.AddScoped<IUserProfileService, UserProfileService>();
         services.AddSingleton<OrganizationSsoRegistry>();
         services.AddScoped<IExternalIdentityMappingStore, EfExternalIdentityMappingStore>();
         services.AddScoped<IExternalIdentityResolver, ExternalIdentityResolver>();
