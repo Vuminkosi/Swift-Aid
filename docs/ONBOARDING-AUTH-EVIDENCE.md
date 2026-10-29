@@ -134,3 +134,7 @@ backend). D15 tour selection belongs to the Ellai lane, not onboarding.
   and build-green.
 - Host filtering is active: non-allowlisted `Host` values get 400, so emulator
   access needs the host in `AllowedHosts`; no app change was required.
+
+## Mobile welcome live sign-in (29 October 2026)
+
+The committed mobile welcome linked Sign in to /account, which has no page at HEAD (other-lane work, uncommitted). The button now calls the real native session (IMobileAuthenticationSession.SignInAsync): success completes intro and routes to /; cancel or error stays on welcome with a generic message and the guest options intact. Mobile net10.0-android build 0 warnings and 0 errors; Ui.Tests 21/21; Debug APK on emulator-5556 cold-launched to fullscreen welcome with no crash through keyboard interaction. No maintained component test: the Mobile project targets android/ios only (net10.0 test project cannot reference it) and HtmlRenderer cannot dispatch clicks; message-pixel confirmation NOT VERIFIED (no image tool in this environment).
