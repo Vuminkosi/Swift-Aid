@@ -82,6 +82,9 @@ public sealed class GeographicRegistryTests : IAsyncDisposable
         Assert.Equal("Eswatini", hit.CountryName);
         Assert.Contains("Hhohho", hit.Ancestry, StringComparison.Ordinal);
         Assert.Contains("Eswatini", hit.Ancestry, StringComparison.Ordinal);
+        Assert.Equal(
+            ["country:SZ", "SZ:adm1:hhohho"],
+            hit.Ancestors.Select(ancestor => ancestor.Id));
         Assert.Null(hit.Latitude);
         Assert.Null(hit.Longitude);
     }

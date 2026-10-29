@@ -13,10 +13,12 @@ namespace SwiftAid.Ui.Tests;
 public sealed class LocationPickerTests
 {
     private static readonly GeoPlaceOption Mbabane = new(
-        "SZ:place:mbabane", "Mbabane", "Settlement", "SZ", "Eswatini", "Mbabane, Hhohho, Eswatini", true);
+        "SZ:place:mbabane", "Mbabane", "Settlement", "SZ", "Eswatini", "Mbabane, Hhohho, Eswatini", true,
+        [new GeoPlaceAncestor("country:SZ", "Eswatini", "Country"), new GeoPlaceAncestor("SZ:adm1:hhohho", "Hhohho", "Region")]);
 
     private static readonly GeoPlaceOption ManziniRegion = new(
-        "SZ:adm1:manzini", "Manzini", "Region", "SZ", "Eswatini", "Manzini, Eswatini", true);
+        "SZ:adm1:manzini", "Manzini", "Region", "SZ", "Eswatini", "Manzini, Eswatini", true,
+        [new GeoPlaceAncestor("country:SZ", "Eswatini", "Country")]);
 
     [Fact]
     public async Task Picker_renders_search_browse_and_provisional_entry()

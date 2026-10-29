@@ -48,6 +48,9 @@ public sealed class GeoRegistryEndpointTests
         Assert.NotNull(payload);
         Assert.Single(payload!.Results);
         Assert.Equal("SZ:place:mbabane", payload.Results[0].Id);
+        Assert.Equal(
+            ["country:SZ", "SZ:adm1:hhohho"],
+            payload.Results[0].Ancestors.Select(ancestor => ancestor.Id));
         Assert.Equal(1, host.Service.SearchCalls);
     }
 
@@ -78,7 +81,11 @@ public sealed class GeoRegistryEndpointTests
     {
         private static readonly GeoSearchResult Mbabane = new(
             "SZ:place:mbabane", "Mbabane", GeoLocationKind.Settlement, "SZ", "Eswatini",
-            "Mbabane, Hhohho, Eswatini", null, null, true);
+            "Mbabane, Hhohho, Eswatini", null, null, true,
+            [
+                new GeoAdminAncestor("country:SZ", "Eswatini", GeoLocationKind.Country),
+                new GeoAdminAncestor("SZ:adm1:hhohho", "Hhohho", GeoLocationKind.Region)
+            ]);
 
         public int SearchCalls { get; private set; }
         public int ChildrenCalls { get; private set; }

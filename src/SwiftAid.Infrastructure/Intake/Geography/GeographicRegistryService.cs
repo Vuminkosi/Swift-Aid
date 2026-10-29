@@ -72,7 +72,10 @@ public sealed class GeographicRegistryService(
             var kind = GeographicRegistryMapper.TryParseKind(item.LocationKind, out var parsed)
                 ? parsed
                 : GeoLocationKind.Unknown;
-            var ancestry = await BuildAncestryAsync(item, matches, cancellationToken).ConfigureAwait(false);
+            var ancestors = await GetAncestorsAsync(item, matches, cancellationToken).ConfigureAwait(false);
+            var names = new[] { item.Name }.Concat(ancestors.Reverse().Select(ancestor => ancestor.Name)).ToArray();
+            var countryName = ancestors.FirstOrDefault(ancestor => ancestor.Kind == GeoLocationKind.Country)?.Name
+                ?? item.CountryCode;
             var hasChildren = await _dbContext.GeographicLocations
                 .AsNoTracking()
                 .AnyAsync(child => child.IsActive && child.ParentId == item.LocationId, cancellationToken)
@@ -82,11 +85,12 @@ public sealed class GeographicRegistryService(
                 item.Name,
                 kind,
                 item.CountryCode,
-                ancestry.CountryName ?? item.CountryCode,
-                ancestry.Display,
+                countryName,
+                string.Join(", ", names),
                 item.Latitude,
                 item.Longitude,
-                hasChildren));
+                hasChildren,
+                ancestors.Select(ancestor => new GeoAdminAncestor(ancestor.Id, ancestor.Name, ancestor.Kind)).ToArray()));
         }
 
         return new GeoSearchResponse(GeographicRegistryImporter.RegistryVersion, total, results);
@@ -114,6 +118,18 @@ public sealed class GeographicRegistryService(
             .ToArrayAsync(cancellationToken)
             .ConfigureAwait(false);
 
+        var parentAncestors = await GetAncestorsAsync(
+            parent,
+            new Dictionary<string, GeographicLocationEntity>(StringComparer.Ordinal),
+            cancellationToken).ConfigureAwait(false);
+        var parentKind = GeographicRegistryMapper.TryParseKind(parent.LocationKind, out var parsedParentKind)
+            ? parsedParentKind
+            : GeoLocationKind.Unknown;
+        var parentChain = parentAncestors
+            .Select(ancestor => new GeoAdminAncestor(ancestor.Id, ancestor.Name, ancestor.Kind))
+            .Append(new GeoAdminAncestor(parent.LocationId, parent.Name, parentKind))
+            .ToArray();
+
         var results = new List<GeoSearchResult>(children.Length);
         foreach (var child in children)
         {
@@ -125,11 +141,13 @@ public sealed class GeographicRegistryService(
                 child.Name,
                 kind,
                 child.CountryCode,
-                parent.CountryCode,
+                parentChain.FirstOrDefault(ancestor => ancestor.Kind == GeoLocationKind.Country)?.Name
+                    ?? child.CountryCode,
                 $"{child.Name}, {parent.Name}",
                 child.Latitude,
                 child.Longitude,
-                false));
+                false,
+                parentChain));
         }
 
         return new GeoChildrenResponse(GeographicRegistryImporter.RegistryVersion, parentId, results);
@@ -163,13 +181,15 @@ public sealed class GeographicRegistryService(
         }
     }
 
-    private async Task<(string Display, string? CountryName)> BuildAncestryAsync(
+    private sealed record ResolvedAncestor(string Id, string Name, GeoLocationKind Kind);
+
+    /// <summary>Administrative chain above the item, root first (country before region).</summary>
+    private async Task<IReadOnlyList<ResolvedAncestor>> GetAncestorsAsync(
         GeographicLocationEntity item,
         IReadOnlyDictionary<string, GeographicLocationEntity> preloaded,
         CancellationToken cancellationToken)
     {
-        var names = new List<string> { item.Name };
-        string? countryName = null;
+        var chain = new List<ResolvedAncestor>();
         var current = item;
         for (var depth = 0; depth < 4; depth++)
         {
@@ -196,18 +216,15 @@ public sealed class GeographicRegistryService(
                 break;
             }
 
-            names.Add(parent.Name);
-            if (GeographicRegistryMapper.TryParseKind(parent.LocationKind, out var parentKind) &&
-                parentKind == GeoLocationKind.Country)
-            {
-                countryName = parent.Name;
-            }
-
+            var kind = GeographicRegistryMapper.TryParseKind(parent.LocationKind, out var parentKind)
+                ? parentKind
+                : GeoLocationKind.Unknown;
+            chain.Add(new ResolvedAncestor(parent.LocationId, parent.Name, kind));
             current = parent;
         }
 
-        names.Reverse();
-        return (string.Join(", ", names), countryName);
+        chain.Reverse();
+        return chain;
     }
 
     private static int Rank(string name, string query) =>

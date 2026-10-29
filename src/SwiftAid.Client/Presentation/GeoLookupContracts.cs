@@ -2,6 +2,8 @@ using SwiftAid.Contracts.Geography;
 
 namespace SwiftAid.Client.Presentation;
 
+public sealed record GeoLookupAncestor(string Id, string Name, GeoLocationKind Kind);
+
 public sealed record GeoLookupOption(
     string Id,
     string Name,
@@ -9,7 +11,8 @@ public sealed record GeoLookupOption(
     string CountryCode,
     string CountryName,
     string Ancestry,
-    bool HasChildren);
+    bool HasChildren,
+    IReadOnlyList<GeoLookupAncestor> Ancestors);
 
 public sealed record GeoLookupCountry(string Code, string Name);
 

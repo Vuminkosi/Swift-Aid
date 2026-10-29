@@ -27,10 +27,16 @@ public sealed class PublicReportDraft : IValidatableObject
     public bool CountryConfirmed { get; set; }
     public PresenceState RegionPresence { get; set; } = PresenceState.Unknown;
     public string? Region { get; set; }
+    /// <summary>Stable registry ID for the region, when chosen from the place registry.</summary>
+    public string? RegionId { get; set; }
     public PresenceState AreaPresence { get; set; } = PresenceState.Unknown;
     public string? Area { get; set; }
+    /// <summary>Stable registry ID for the area, when chosen from the place registry.</summary>
+    public string? AreaId { get; set; }
     public PresenceState LocalityPresence { get; set; } = PresenceState.Unknown;
     public string? Locality { get; set; }
+    /// <summary>Stable registry ID for the locality, when chosen from the place registry.</summary>
+    public string? LocalityId { get; set; }
     public bool ReportReviewConfirmed { get; set; }
     public bool ProcessingConfirmed { get; set; }
 
@@ -103,10 +109,13 @@ public sealed class PublicReportDraft : IValidatableObject
             CountryConfirmed = confirmations.OccurrenceCountryConfirmed,
             RegionPresence = location.Region.Presence,
             Region = location.Region.ReportedName,
+            RegionId = location.Region.NormalizedId,
             AreaPresence = location.Area.Presence,
             Area = location.Area.ReportedName,
+            AreaId = location.Area.NormalizedId,
             LocalityPresence = location.Locality.Presence,
             Locality = location.Locality.ReportedName,
+            LocalityId = location.Locality.NormalizedId,
             ReportReviewConfirmed = confirmations.ReportReviewConfirmed,
             ProcessingConfirmed = confirmations.ProcessingConfirmed
         };
@@ -115,13 +124,33 @@ public sealed class PublicReportDraft : IValidatableObject
     public IntakeSubmission ToSubmission(
         string? countryCatalogueVersion,
         string? processingPolicyReference,
-        string? processingPolicyVersion)
+        string? processingPolicyVersion,
+        IReadOnlyList<PublicCountryOption> countries,
+        bool countryCatalogueIsCurrent)
     {
+        ArgumentNullException.ThrowIfNull(countries);
+
         if (SubjectScope is null)
             throw new InvalidOperationException("Choose whether the concern is about a person or an animal before saving.");
 
         if (Narrative?.Length > 6000)
             throw new InvalidOperationException("Keep the description under 6,000 characters.");
+
+        var selectedCountry = string.IsNullOrWhiteSpace(CountryCode)
+            ? null
+            : countries.FirstOrDefault(country => string.Equals(
+                country.Code,
+                CountryCode.Trim(),
+                StringComparison.OrdinalIgnoreCase));
+
+        if (!string.IsNullOrWhiteSpace(CountryCode) &&
+            (!countryCatalogueIsCurrent ||
+             string.IsNullOrWhiteSpace(countryCatalogueVersion) ||
+             selectedCountry is null))
+        {
+            throw new InvalidOperationException(
+                "The selected country is not in the current country list. Choose a current country or mark the location unknown.");
+        }
 
         var observations = GetObservations();
         if (observations.Count > 20 || observations.Any(value => value.Length > 1000))
@@ -162,7 +191,13 @@ public sealed class PublicReportDraft : IValidatableObject
                 OccurrencePrecision)
         };
 
-        var location = LocationUnknown
+        var hasReportedLocation =
+            !string.IsNullOrWhiteSpace(CountryCode) ||
+            RegionPresence == PresenceState.Known ||
+            AreaPresence == PresenceState.Known ||
+            LocalityPresence == PresenceState.Known;
+
+        var location = LocationUnknown && !hasReportedLocation
             ? new LocationContext(
                 string.Empty,
                 new OptionalPlace(null, null, PresenceState.Unknown),
@@ -175,10 +210,10 @@ public sealed class PublicReportDraft : IValidatableObject
                 LocationPrecision.Unknown,
                 null)
             : new LocationContext(
-                CountryCode ?? string.Empty,
-                ToOptionalPlace(RegionPresence, Region),
-                ToOptionalPlace(AreaPresence, Area),
-                ToOptionalPlace(LocalityPresence, Locality),
+                selectedCountry?.Code ?? string.Empty,
+                ToOptionalPlace(RegionPresence, Region, RegionId),
+                ToOptionalPlace(AreaPresence, Area, AreaId),
+                ToOptionalPlace(LocalityPresence, Locality, LocalityId),
                 null,
                 null,
                 null,
@@ -286,8 +321,10 @@ public sealed class PublicReportDraft : IValidatableObject
         return true;
     }
 
-    private static OptionalPlace ToOptionalPlace(PresenceState presence, string? name) =>
-        new(presence == PresenceState.Known ? name?.Trim() : null, null, presence);
+    private static OptionalPlace ToOptionalPlace(PresenceState presence, string? name, string? normalizedId = null) =>
+        new(presence == PresenceState.Known ? name?.Trim() : null,
+            presence == PresenceState.Known && !string.IsNullOrWhiteSpace(normalizedId) ? normalizedId.Trim() : null,
+            presence);
 
     private static string? SafeLocalZoneId()
     {

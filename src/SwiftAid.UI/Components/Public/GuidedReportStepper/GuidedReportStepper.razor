@@ -1,0 +1,1277 @@
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Components.Forms
+@using SwiftAid.Contracts.Geography
+@using SwiftAid.Contracts.Intake
+@using SwiftAid.UI.Components.Geography
+@using SwiftAid.UI.Components.Public
+@implements IDisposable
+
+<section class="guided-report" aria-labelledby="guided-report-title">
+    <MudText id="guided-report-title" Typo="Typo.h5" HtmlTag="h1">Report a concern</MudText>
+    @if (_step == 0)
+    {
+        <MudText Typo="Typo.body2" Class="guided-report__intro">
+            Share what you observed about a person or animal. Unknown details can stay unknown. This form does not provide a diagnosis.
+        </MudText>
+    }
+    else
+    {
+        <MudText Typo="Typo.body2" Class="guided-report__intro">
+            Leave uncertain details blank. SwiftAid does not provide a diagnosis.
+        </MudText>
+    }
+
+    <ol class="guided-report__progress" aria-label="Report progress">
+        @for (var index = 0; index < StepNames.Length; index++)
+        {
+            var stepIndex = index;
+            <li class="@(stepIndex == _step ? "is-current" : stepIndex < _step ? "is-complete" : null)"
+                aria-current="@(stepIndex == _step ? "step" : null)">
+                <span class="guided-report__step-number" aria-hidden="true">@(stepIndex + 1)</span>
+                <span>@StepNames[stepIndex]</span>
+            </li>
+        }
+    </ol>
+
+    <EditForm EditContext="_editContext" OnSubmit="HandleSubmitAsync">
+        <DataAnnotationsValidator />
+        <ValidationSummary class="guided-report__validation" />
+
+        @if (_step == 0)
+        {
+            <section class="guided-report__panel" aria-labelledby="report-type-title">
+                <h2 id="report-type-title" class="mud-typography mud-typography-h6 guided-report__step-heading" tabindex="-1" @ref="_stepHeading">Who or what is the concern about?</h2>
+                <div class="guided-report__subject-selector">
+                    <MudRadioGroup T="ReportSubjectCategory?" Value="_subjectCategory" ValueChanged="SubjectCategoryChangedAsync" Class="guided-report__subject-group" aria-label="Report subject">
+                        <div class="guided-report__choices">
+                            <div class="@GetSubjectChoiceClass(ReportSubjectCategory.HumanHealth)">
+                                <MudRadio T="ReportSubjectCategory?" Value="@((ReportSubjectCategory?)ReportSubjectCategory.HumanHealth)" Color="Color.Primary" aria-label="Human health — a person or people">
+                                    <span class="guided-report__choice-content"><MudIcon Icon="@Icons.Material.Filled.HealthAndSafety" aria-hidden="true" /><span><strong>Human health</strong><small>A person or people</small></span></span>
+                                </MudRadio>
+                            </div>
+                            <div class="@GetSubjectChoiceClass(ReportSubjectCategory.AnimalHealth)">
+                                <MudRadio T="ReportSubjectCategory?" Value="@((ReportSubjectCategory?)ReportSubjectCategory.AnimalHealth)" Color="Color.Primary" aria-label="Animal health — an animal or group of animals">
+                                    <span class="guided-report__choice-content"><MudIcon Icon="@Icons.Material.Filled.Pets" aria-hidden="true" /><span><strong>Animal health</strong><small>An animal or group of animals</small></span></span>
+                                </MudRadio>
+                            </div>
+                        </div>
+                    </MudRadioGroup>
+                </div>
+                @if (_subjectCategory == ReportSubjectCategory.AnimalHealth)
+                {
+                    <div class="guided-report__animal-scope-group">
+                        <MudText Typo="Typo.body2" id="animal-scope-label">What is the concern about?</MudText>
+                        <MudRadioGroup T="IntakeSubjectScope?" Value="Draft.SubjectScope" ValueChanged="AnimalScopeChangedAsync" aria-labelledby="animal-scope-label">
+                            <div class="guided-report__animal-scope-options">
+                                <MudRadio T="IntakeSubjectScope?" Value="@((IntakeSubjectScope?)IntakeSubjectScope.Individual)" Color="Color.Primary" aria-label="Individual animal">Individual</MudRadio>
+                                <MudRadio T="IntakeSubjectScope?" Value="@((IntakeSubjectScope?)IntakeSubjectScope.Herd)" Color="Color.Primary" aria-label="Herd">Herd</MudRadio>
+                                <MudRadio T="IntakeSubjectScope?" Value="@((IntakeSubjectScope?)IntakeSubjectScope.Flock)" Color="Color.Primary" aria-label="Flock">Flock</MudRadio>
+                                <MudRadio T="IntakeSubjectScope?" Value="@((IntakeSubjectScope?)IntakeSubjectScope.OtherGroup)" Color="Color.Primary" aria-label="Other animal group">Other group</MudRadio>
+                            </div>
+                        </MudRadioGroup>
+                    </div>
+                }
+                @if (!HasCompleteSubject)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" role="status">
+                        @(_subjectCategory == ReportSubjectCategory.AnimalHealth
+                            ? "Choose an animal type or group to continue."
+                            : "Choose Human health or Animal health to continue.")
+                    </MudText>
+                }
+                @if (_stepError is not null)
+                {
+                    <MudText Color="Color.Error" Typo="Typo.body2" role="alert">@_stepError</MudText>
+                }
+                <div class="guided-report__actions">
+                    <MudButton ButtonType="ButtonType.Button" Color="Color.Primary" Variant="Variant.Text" Disabled="@(!HasCompleteSubject)" OnClick="ContinueFromTypeAsync" StartIcon="@Icons.Material.Filled.ArrowForward">
+                        Continue to details
+                    </MudButton>
+                    @if (OnSaveDraft.HasDelegate)
+                    {
+                        <MudButton ButtonType="ButtonType.Button" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Save" Disabled="@(!CanSaveDraft || _saving)" OnClick="SaveDraftAsync">
+                            @(_saving ? DraftSavingLabel : DraftSaveButtonLabel)
+                        </MudButton>
+                    }
+                </div>
+            </section>
+        }
+        else if (_step == 1)
+        {
+            <section class="guided-report__panel" aria-labelledby="report-details-title">
+                <h2 id="report-details-title" class="mud-typography mud-typography-h6 guided-report__step-heading" tabindex="-1" @ref="_stepHeading">What did you notice?</h2>
+                @DetailsLeadContent
+                <MudTextField T="string" Label="Describe what happened" Variant="Variant.Outlined" Lines="4" MaxLength="6000"
+                              @bind-Value="Draft.Narrative" For="@(() => Draft.Narrative)" />
+                <div class="guided-report__observation-input">
+                    <MudText Typo="Typo.subtitle2" id="reported-observations-heading">Reported observations (optional)</MudText>
+                    <MudText Typo="Typo.body2" Class="guided-report__observation-guidance">
+                        Select only what was reported. Unselected choices do not mean absent.
+                    </MudText>
+                    @if (Draft.SubjectScope == IntakeSubjectScope.Human)
+                    {
+                        <div class="guided-report__observation-groups" aria-labelledby="reported-observations-heading">
+                            @foreach (var group in HumanObservationGroups)
+                            {
+                                <details class="guided-report__observation-group" open="@(group.Heading == "Core symptoms")">
+                                    <summary>@group.Heading</summary>
+                                    <div class="guided-report__observation-choices" role="group" aria-label="@group.Heading">
+                                        @foreach (var observation in group.Choices)
+                                        {
+                                            var choice = observation;
+                                            var isSelected = IsObservationSelected(choice);
+                                            <MudButton ButtonType="ButtonType.Button"
+                                                       Variant="Variant.Text"
+                                                       StartIcon="@(isSelected ? Icons.Material.Filled.Check : Icons.Material.Filled.Add)"
+                                                       Class="guided-report__observation-choice"
+                                                       aria-pressed="@isSelected"
+                                                       OnClick="@(() => ToggleObservationAsync(choice))">
+                                                @choice
+                                            </MudButton>
+                                        }
+                                    </div>
+                                </details>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="guided-report__observation-groups" aria-labelledby="reported-observations-heading">
+                            @foreach (var group in AnimalObservationGroups)
+                            {
+                                <details class="guided-report__observation-group" open="@(group.Heading == "Eating and activity")">
+                                    <summary>@group.Heading</summary>
+                                    <div class="guided-report__observation-choices" role="group" aria-label="@group.Heading">
+                                        @foreach (var observation in group.Choices)
+                                        {
+                                            var choice = observation;
+                                            var isSelected = IsObservationSelected(choice);
+                                            <MudButton ButtonType="ButtonType.Button"
+                                                       Variant="Variant.Text"
+                                                       StartIcon="@(isSelected ? Icons.Material.Filled.Check : Icons.Material.Filled.Add)"
+                                                       Class="guided-report__observation-choice"
+                                                       aria-pressed="@isSelected"
+                                                       OnClick="@(() => ToggleObservationAsync(choice))">
+                                                @choice
+                                            </MudButton>
+                                        }
+                                    </div>
+                                </details>
+                            }
+                        </div>
+                    }
+                    <MudButton ButtonType="ButtonType.Button"
+                               Variant="Variant.Text"
+                               StartIcon="@Icons.Material.Filled.Edit"
+                               Class="guided-report__observation-choice guided-report__observation-choice--other"
+                               OnClick="FocusObservationInputAsync">
+                        Other
+                    </MudButton>
+                    @if (!string.IsNullOrWhiteSpace(_observationChoiceMessage))
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Error" role="alert">@_observationChoiceMessage</MudText>
+                    }
+                </div>
+                <MudTextField @ref="_observationsField" T="string" Label="Add other observations (optional)"
+                              HelperText="Selected choices appear here. Add other reported observations one per line."
+                              Variant="Variant.Outlined" Lines="3" MaxLength="20000" @bind-Value="Draft.ObservationsText"
+                              For="@(() => Draft.ObservationsText)" />
+
+                <MudSelect T="ReportedTimePrecision" Label="When did this happen?" Variant="Variant.Outlined" @bind-Value="Draft.OccurrencePrecision">
+                    <MudSelectItem Value="ReportedTimePrecision.Unknown">Unknown</MudSelectItem>
+                    <MudSelectItem Value="ReportedTimePrecision.Approximate">Approximate date</MudSelectItem>
+                    <MudSelectItem Value="ReportedTimePrecision.DateOnly">Date only</MudSelectItem>
+                    <MudSelectItem Value="ReportedTimePrecision.Exact">Exact time</MudSelectItem>
+                </MudSelect>
+                @if (Draft.OccurrencePrecision != ReportedTimePrecision.Unknown)
+                {
+                    <MudTextField T="DateTime?" Label="Reported date" InputType="InputType.Date" Variant="Variant.Outlined"
+                                  @bind-Value="Draft.OccurrenceDate" For="@(() => Draft.OccurrenceDate)" />
+                }
+                @if (Draft.OccurrencePrecision == ReportedTimePrecision.Exact)
+                {
+                    <div class="guided-report__grid">
+                        <MudTextField T="string" Label="Reported time" InputType="InputType.Time" Variant="Variant.Outlined"
+                                      @bind-Value="Draft.OccurrenceTime" For="@(() => Draft.OccurrenceTime)" />
+                        <MudTextField T="string" Label="Time difference from UTC" Placeholder="+02:00" HelperText="Enter the time difference that was reported."
+                                      Variant="Variant.Outlined" @bind-Value="Draft.OccurrenceOffset" For="@(() => Draft.OccurrenceOffset)" />
+                    </div>
+                }
+
+                <MudSelect T="string" Label="Country where the event happened" Variant="Variant.Outlined"
+                           Value="Draft.CountryCode" ValueChanged="CountryChangedAsync" Disabled="@(!HasCountryCatalogue)" Clearable="true">
+                    @foreach (var country in Countries)
+                    {
+                        <MudSelectItem Value="@country.Code">@country.Name</MudSelectItem>
+                    }
+                </MudSelect>
+                @if (!HasCountryCatalogue)
+                {
+                    <MudText Typo="Typo.body2">Current country choices are unavailable. This report cannot be sent until the list is available.</MudText>
+                    @if (CanSaveDraft)
+                    {
+                        <MudText Typo="Typo.caption">You can save a draft and return when the list is available.</MudText>
+                    }
+                }
+                else if (!string.IsNullOrWhiteSpace(Draft.CountryCode) && !IsCountrySupported(Draft.CountryCode))
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+                        This saved country is no longer on the list. Choose a listed country before sending.
+                    </MudAlert>
+                }
+                @if (ShowRegistryPicker)
+                {
+                    <SwiftAidLocationPicker Label="Search for the place"
+                                            HelperText="Type a town, village, or area. The region is filled in for you."
+                                            SearchFunc="PlaceSearchFunc!"
+                                            ChildrenFunc="PlaceChildrenFunc!"
+                                            Countries="GeoCountries"
+                                            CountryCode="@Draft.CountryCode"
+                                            Selected="CurrentPlaceSelection"
+                                            SelectedChanged="ApplyPlaceSelectionAsync"
+                                            OnProvisionalRequested="ShowManualPlaceFields" />
+                }
+                @if (ShowManualPlaceFieldsGrid)
+                {
+                    <MudText Typo="Typo.subtitle2">Reported place names</MudText>
+                    <div class="guided-report__grid">
+                        <MudTextField T="string" Label="Region" Variant="Variant.Outlined" @bind-Value="Draft.Region" For="@(() => Draft.Region)" />
+                        <MudSelect T="PresenceState" Label="Region certainty" Variant="Variant.Outlined" @bind-Value="Draft.RegionPresence">
+                            <MudSelectItem Value="PresenceState.Unknown">Unknown</MudSelectItem>
+                            <MudSelectItem Value="PresenceState.Known">Known</MudSelectItem>
+                        </MudSelect>
+                        <MudTextField T="string" Label="Area or district" Variant="Variant.Outlined" @bind-Value="Draft.Area" For="@(() => Draft.Area)" />
+                        <MudSelect T="PresenceState" Label="Area certainty" Variant="Variant.Outlined" @bind-Value="Draft.AreaPresence">
+                            <MudSelectItem Value="PresenceState.Unknown">Unknown</MudSelectItem>
+                            <MudSelectItem Value="PresenceState.Known">Known</MudSelectItem>
+                        </MudSelect>
+                        <MudTextField T="string" Label="Locality" Variant="Variant.Outlined" @bind-Value="Draft.Locality" For="@(() => Draft.Locality)" />
+                        <MudSelect T="PresenceState" Label="Locality certainty" Variant="Variant.Outlined" @bind-Value="Draft.LocalityPresence">
+                            <MudSelectItem Value="PresenceState.Unknown">Unknown</MudSelectItem>
+                            <MudSelectItem Value="PresenceState.Known">Known</MudSelectItem>
+                        </MudSelect>
+                    </div>
+                }
+                <MudText Typo="Typo.caption">Leave uncertain place names unknown. No device location is collected by this form.</MudText>
+
+                @DetailsContent
+
+                @if (_stepError is not null)
+                {
+                    <MudText Color="Color.Error" Typo="Typo.body2" role="alert">@_stepError</MudText>
+                }
+            </section>
+            <div class="guided-report__actions">
+                <MudButton ButtonType="ButtonType.Button" Variant="Variant.Text" OnClick="GoBack" StartIcon="@Icons.Material.Filled.ArrowBack">Back</MudButton>
+                <MudButton ButtonType="ButtonType.Button" Color="Color.Primary" Variant="Variant.Text" OnClick="ContinueToReviewAsync" StartIcon="@Icons.Material.Filled.FactCheck">
+                    Review report
+                </MudButton>
+                @if (OnSaveDraft.HasDelegate)
+                {
+                    <MudButton ButtonType="ButtonType.Button" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Save" Disabled="@(!CanSaveDraft || _saving)" OnClick="SaveDraftAsync">
+                        @(_saving ? DraftSavingLabel : DraftSaveButtonLabel)
+                    </MudButton>
+                }
+            </div>
+        }
+        else
+        {
+            <section class="guided-report__panel" aria-labelledby="report-review-title">
+                <h2 id="report-review-title" class="mud-typography mud-typography-h6 guided-report__step-heading" tabindex="-1" @ref="_stepHeading">Review your report</h2>
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                    Check the details you entered. Nothing has been added, rewritten, or diagnosed for you. Use Back to make changes; unknowns remain unknown.
+                </MudAlert>
+                <dl class="guided-report__summary">
+                    <div><dt>Subject</dt><dd>@SubjectLabel</dd></div>
+                    <div><dt>Original statement</dt><dd>@UnknownIfEmpty(Draft.Narrative)</dd><dd class="guided-report__provenance">Your words, shown as entered</dd></div>
+                    <div><dt>Separate observations</dt><dd>@ObservationSummary</dd><dd class="guided-report__provenance">You entered these details. No others were added.</dd></div>
+                    <div><dt>Reported time</dt><dd>@TimeSummary</dd><dd class="guided-report__provenance">@(Draft.OccurrencePrecision == ReportedTimePrecision.Unknown ? "Not provided; remains unknown" : "From the time you entered")</dd></div>
+                    <div><dt>Country</dt><dd>@CountrySummary</dd><dd class="guided-report__provenance">@(string.IsNullOrWhiteSpace(Draft.CountryCode) ? "Not provided; remains unknown" : "You selected this")</dd></div>
+                    <div><dt>Location</dt><dd>@LocationSummary</dd><dd class="guided-report__provenance">@LocationProvenance</dd></div>
+                    <div><dt>Animal type or group</dt><dd>Unknown</dd><dd class="guided-report__provenance">Not asked here; remains unknown.</dd></div>
+                    <div><dt>Affected, deceased, and at-risk counts</dt><dd>Unknown</dd><dd class="guided-report__provenance">Not entered; remains unknown.</dd></div>
+                </dl>
+                <MudCheckBox T="bool" Label="I reviewed the original statement and the known or unknown details above." @bind-Value="Draft.ReportReviewConfirmed" Color="Color.Primary" />
+                <MudCheckBox T="bool" Label="I confirm the selected event country." @bind-Value="Draft.CountryConfirmed" Color="Color.Primary"
+                             Disabled="@(!CanConfirmCountry)" />
+                @if (HasPrivacyNotice)
+                {
+                    <MudLink Href="@PrivacyNoticeReference" Target="_blank" rel="noopener noreferrer">Read SwiftAid’s privacy notice</MudLink>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2">SwiftAid’s privacy notice is unavailable right now. Sending is not available.</MudText>
+                    @if (CanSaveDraft)
+                    {
+                        <MudText Typo="Typo.caption">You can still save a draft.</MudText>
+                    }
+                }
+                @if (!string.IsNullOrWhiteSpace(ProcessingPolicyNoticeText))
+                {
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" role="note">
+                        @ProcessingPolicyNoticeText
+                    </MudAlert>
+                }
+                @if (!string.IsNullOrWhiteSpace(ProcessingPolicyNotice))
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" role="note">
+                        @ProcessingPolicyNotice
+                    </MudText>
+                }
+                @if (HasProcessingPolicy)
+                {
+                    @if (IsSafePolicyLink)
+                    {
+                        <MudLink Href="@ProcessingPolicyReference" Target="_blank" rel="noopener noreferrer">Read how this report is handled</MudLink>
+                    }
+                    <MudCheckBox T="bool" Label="@ProcessingAcknowledgementLabel" @bind-Value="Draft.ProcessingConfirmed"
+                                 Color="Color.Primary" />
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2">Details about how this report is handled are unavailable. Sending is not available.</MudText>
+                    @if (CanSaveDraft)
+                    {
+                        <MudText Typo="Typo.caption">You can save a draft.</MudText>
+                    }
+                }
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                    This report records observations. It does not provide a diagnosis or treatment, promise a service, or assign a worker.
+                </MudAlert>
+                @if (_stepError is not null)
+                {
+                    <MudText Color="Color.Error" Typo="Typo.body2" role="alert">@_stepError</MudText>
+                }
+                @if (_submitError is not null)
+                {
+                    <MudText Color="Color.Error" Typo="Typo.body2" role="alert">@_submitError</MudText>
+                }
+                @if (_submitComplete)
+                {
+                    @if (!string.IsNullOrWhiteSpace(SubmitCompleteMessage))
+                    {
+                        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status" aria-live="polite">
+                            @SubmitCompleteMessage
+                        </MudAlert>
+                    }
+                }
+            </section>
+            <div class="guided-report__actions">
+                <MudButton ButtonType="ButtonType.Button" Variant="Variant.Text" OnClick="GoBack" StartIcon="@Icons.Material.Filled.ArrowBack">Back</MudButton>
+                @if (OnSaveDraft.HasDelegate)
+                {
+                    <MudButton ButtonType="ButtonType.Button" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Save" Disabled="@(!CanSaveDraft || _saving)" OnClick="SaveDraftAsync">
+                        @(_saving ? DraftSavingLabel : DraftSaveButtonLabel)
+                    </MudButton>
+                }
+                <MudButton ButtonType="ButtonType.Button" Color="Color.Primary" Variant="Variant.Text" Disabled="@(!CanSubmit || _submitting)" OnClick="SubmitAsync" StartIcon="@Icons.Material.Filled.Cancel">
+                    @(_submitting ? SubmitProgressLabel : SubmitButtonLabel)
+                </MudButton>
+                @if (!CanSubmit)
+                {
+                    <MudText Typo="Typo.caption" Class="guided-report__submit-hint">
+                        @if (!HasProcessingPolicy)
+                        {
+                            <span>Sending is unavailable until details about how reports are handled are available.</span>
+                            @if (CanSaveDraft)
+                            {
+                                <span> You can save this report as a draft.</span>
+                            }
+                        }
+                        else
+                        {
+                            <span>To send, current country choices and privacy information must be available. Choose and confirm the event country, then review the details.</span>
+                            @if (CanSaveDraft)
+                            {
+                                <span> You can still save this draft.</span>
+                            }
+                        }
+                    </MudText>
+                }
+            </div>
+        }
+        <div class="guided-report__save-state" role="status" aria-live="polite">
+            @if (_saving)
+            {
+                <span>@DraftSavingLabel</span>
+            }
+            else if (_saveState == DraftSaveState.Saved)
+            {
+                <span>@DraftSavedMessage</span>
+            }
+            else if (_saveState == DraftSaveState.Failed)
+            {
+                <span>Your draft could not be saved. Your entries remain on this screen.</span>
+            }
+            else if (_saveState == DraftSaveState.Unsaved)
+            {
+                <span>Changes are not saved yet.</span>
+            }
+        </div>
+    </EditForm>
+</section>
+
+@code {
+    private static readonly string[] StepNames = ["Type", "Details", "Review"];
+    private EditContext _editContext = default!;
+    private ValidationMessageStore _messageStore = default!;
+    private PublicReportDraft? _observedDraft;
+    private ElementReference _stepHeading;
+    private MudTextField<string>? _observationsField;
+    private bool _focusStepHeadingAfterRender;
+    private int _step;
+    private string? _stepError;
+    private bool _showManualPlaces;
+    private string? _observationChoiceMessage;
+    private string? _submitError;
+    private bool _saving;
+    private bool _submitting;
+    private bool _submitComplete;
+    private DraftSaveState _saveState = DraftSaveState.Unsaved;
+    private ReportSubjectCategory? _subjectCategory;
+
+    private sealed record ObservationGroup(string Heading, IReadOnlyList<string> Choices);
+
+    private static readonly ObservationGroup[] HumanObservationGroups =
+    [
+        new("Core symptoms",
+        [
+            "Acute watery diarrhea (rice-water stools)",
+            "Vomiting",
+            "Leg/muscle cramps",
+            "Restlessness or irritability (especially children)"
+        ]),
+        new("Signs of dehydration",
+        [
+            "Thirst, dry mouth",
+            "Sunken eyes",
+            "Little or no urine",
+            "Dizziness or lightheadedness",
+            "Weak/fast pulse",
+            "Low blood pressure",
+            "Cool/clammy skin",
+            "Poor skin turgor"
+        ]),
+        new("Additional symptoms and signs",
+        [
+            "Profuse watery diarrhea",
+            "Persistent vomiting",
+            "Lethargy or confusion",
+            "Very weak pulse or very low blood pressure (shock)",
+            "In children: extreme drowsiness or convulsions",
+            "Fever",
+            "Rash",
+            "Headache",
+            "Muscle weakness",
+            "Fatigue",
+            "Cough",
+            "Chills",
+            "Joint pain",
+            "Stomach pain",
+            "Nausea",
+            "Diarrhea",
+            "Sweating",
+            "Loss of appetite",
+            "Sore throat",
+            "Difficulty breathing"
+        ])
+    ];
+
+    private static readonly ObservationGroup[] AnimalObservationGroups =
+    [
+        new("Eating and activity",
+        [
+            "Animal diarrhoea",
+            "Reduced appetite or drinking",
+            "Unusual weakness or reduced activity",
+            "Animal died"
+        ]),
+        new("Movement and breathing",
+        [
+            "Difficulty walking or standing",
+            "Coughing or sneezing",
+            "Difficulty breathing"
+        ]),
+        new("Visible changes",
+        [
+            "Discharge from eyes, nose, or mouth",
+            "Changes to skin, coat, or feathers",
+            "Visible wounds or injuries",
+            "Swelling or unusual lumps"
+        ]),
+        new("Other changes noticed",
+        [
+            "Unusual droppings",
+            "Multiple animals affected"
+        ])
+    ];
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusStepHeadingAfterRender)
+        {
+            _focusStepHeadingAfterRender = false;
+            await _stepHeading.FocusAsync();
+        }
+    }
+
+    private string GetSubjectChoiceClass(ReportSubjectCategory category) =>
+        _subjectCategory == category ? "guided-report__choice is-selected" : "guided-report__choice";
+
+    [Parameter, EditorRequired]
+    public PublicReportDraft Draft { get; set; } = default!;
+
+    [Parameter]
+    public EventCallback<PublicReportSaveRequest> OnSaveDraft { get; set; }
+
+    [Parameter]
+    public EventCallback<PublicReportDraft> OnContinue { get; set; }
+
+    [Parameter]
+    public EventCallback<PublicReportDraft> OnReview { get; set; }
+
+    [Parameter]
+    public EventCallback<IntakeSubmission> OnSubmit { get; set; }
+
+    [Parameter]
+    public string SubmitButtonLabel { get; set; } = "Submit report";
+
+    [Parameter]
+    public string SubmitProgressLabel { get; set; } = "Sending…";
+
+    [Parameter]
+    public string SubmitCompleteMessage { get; set; } = "Sending has finished. Check the status shown on this page.";
+
+    [Parameter]
+    public string DraftSaveButtonLabel { get; set; } = "Save draft";
+
+    [Parameter]
+    public string DraftSavingLabel { get; set; } = "Saving draft…";
+
+    [Parameter]
+    public string DraftSavedMessage { get; set; } = "Your draft save action completed. It has not been submitted.";
+
+    [Parameter]
+    public IReadOnlyList<PublicCountryOption> Countries { get; set; } = [];
+
+    [Parameter]
+    public Func<string, string?, CancellationToken, Task<GeoPlaceQueryResult>>? PlaceSearchFunc { get; set; }
+
+    [Parameter]
+    public Func<string, CancellationToken, Task<GeoPlaceQueryResult>>? PlaceChildrenFunc { get; set; }
+
+    [Parameter]
+    public IReadOnlyList<GeoPlaceCountry> GeoCountries { get; set; } = [];
+
+    [Parameter]
+    public string? CountryCatalogueVersion { get; set; }
+
+    [Parameter]
+    public bool CountryCatalogueIsCurrent { get; set; }
+
+    [Parameter]
+    public string? PrivacyNoticeReference { get; set; }
+
+    [Parameter]
+    public string? ProcessingPolicyReference { get; set; }
+
+    [Parameter]
+    public string? ProcessingPolicyVersion { get; set; }
+
+    [Parameter]
+    public string? ProcessingPolicyNoticeText { get; set; }
+
+    [Parameter]
+    public string? ProcessingPolicyAcknowledgementLabel { get; set; }
+
+    [Parameter]
+    public string? ProcessingPolicyNotice { get; set; }
+
+    [Parameter]
+    public bool PrivacyNoticeIsCurrent { get; set; }
+
+    [Parameter]
+    public int AttachmentSelectionCount { get; set; }
+
+    [Parameter]
+    public Guid? CurrentDraftId { get; set; }
+
+    [Parameter]
+    public RenderFragment? DetailsLeadContent { get; set; }
+
+    [Parameter]
+    public RenderFragment? DetailsContent { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        ArgumentNullException.ThrowIfNull(Draft);
+        if (ReferenceEquals(Draft, _observedDraft))
+        {
+            if (Draft.SubjectScope is not null)
+            {
+                _subjectCategory = GetSubjectCategory(Draft.SubjectScope);
+            }
+
+            return;
+        }
+
+        if (_editContext is not null)
+        {
+            if (!ReferenceEquals(Draft, _observedDraft))
+            {
+                _editContext.OnFieldChanged -= HandleFieldChanged;
+            }
+        }
+
+        if (!ReferenceEquals(Draft, _observedDraft))
+        {
+            _observedDraft = Draft;
+            _editContext = new EditContext(Draft);
+            _messageStore = new ValidationMessageStore(_editContext);
+            _editContext.OnFieldChanged += HandleFieldChanged;
+            _step = 0;
+            _subjectCategory = GetSubjectCategory(Draft.SubjectScope);
+            _stepError = null;
+            _submitError = null;
+            _submitComplete = false;
+        }
+
+        if (HasCountryCatalogue &&
+            !IsCountrySupported(Draft.CountryCode) &&
+            Draft.CountryConfirmed)
+        {
+            Draft.CountryConfirmed = false;
+        }
+    }
+
+    private string SubjectLabel => Draft.SubjectScope switch
+    {
+        IntakeSubjectScope.Human => "Human health",
+        IntakeSubjectScope.Individual => "Animal health — individual",
+        IntakeSubjectScope.Herd => "Animal health — herd",
+        IntakeSubjectScope.Flock => "Animal health — flock",
+        IntakeSubjectScope.OtherGroup => "Animal health — other group",
+        _ => "Unknown"
+    };
+
+    private string ObservationSummary
+    {
+        get
+        {
+            var observations = Draft.GetObservations();
+            return observations.Count == 0 ? "Unknown" : string.Join("; ", observations);
+        }
+    }
+
+    private string TimeSummary => Draft.OccurrencePrecision switch
+    {
+        ReportedTimePrecision.Unknown => "Unknown",
+        ReportedTimePrecision.Exact => $"{Draft.OccurrenceDate?.ToString("d") ?? "Unknown date"} {Draft.OccurrenceTime ?? "Unknown time"} {Draft.OccurrenceOffset ?? "Unknown offset"}",
+        ReportedTimePrecision.DateOnly => Draft.OccurrenceDate?.ToString("d") ?? "Date unknown",
+        _ => Draft.OccurrenceDate is { } date ? $"Approximately {date:d}" : "Approximately; date unknown"
+    };
+
+    private string CountrySummary => string.IsNullOrWhiteSpace(Draft.CountryCode)
+        ? "Unknown"
+        : Countries.FirstOrDefault(country => string.Equals(country.Code, Draft.CountryCode, StringComparison.OrdinalIgnoreCase))?.Name
+            ?? (HasCountryCatalogue ? "Country choice unavailable — choose again" : "Previously selected; country list unavailable");
+
+    private bool HasCountryCatalogue => CountryCatalogueIsCurrent &&
+        Countries.Count > 0 && !string.IsNullOrWhiteSpace(CountryCatalogueVersion);
+
+    private bool CanConfirmCountry => HasCountryCatalogue && IsCountrySupported(Draft.CountryCode);
+
+    private bool HasPrivacyNotice => PrivacyNoticeIsCurrent &&
+        !string.IsNullOrWhiteSpace(PrivacyNoticeReference);
+
+    private bool HasProcessingPolicy =>
+        !string.IsNullOrWhiteSpace(ProcessingPolicyReference) &&
+        !string.IsNullOrWhiteSpace(ProcessingPolicyVersion);
+
+    private string ProcessingAcknowledgementLabel =>
+        string.IsNullOrWhiteSpace(ProcessingPolicyAcknowledgementLabel)
+            ? "I have reviewed the report-handling information shown here."
+            : ProcessingPolicyAcknowledgementLabel;
+
+    private bool IsSafePolicyLink
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(ProcessingPolicyReference) ||
+                ProcessingPolicyReference.Any(char.IsControl) ||
+                ProcessingPolicyReference.Contains('\\'))
+            {
+                return false;
+            }
+
+            if (ProcessingPolicyReference.StartsWith("/", StringComparison.Ordinal))
+            {
+                return !ProcessingPolicyReference.StartsWith("//", StringComparison.Ordinal) &&
+                    !ProcessingPolicyReference.Contains("..", StringComparison.Ordinal);
+            }
+
+            return Uri.TryCreate(ProcessingPolicyReference, UriKind.Absolute, out var policyUri) &&
+                string.Equals(policyUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(policyUri.Host) &&
+                string.IsNullOrEmpty(policyUri.UserInfo);
+        }
+    }
+
+    private bool HasCompleteSubject => _subjectCategory switch
+    {
+        ReportSubjectCategory.HumanHealth => Draft.SubjectScope == IntakeSubjectScope.Human,
+        ReportSubjectCategory.AnimalHealth => Draft.SubjectScope is IntakeSubjectScope.Individual or
+            IntakeSubjectScope.Herd or IntakeSubjectScope.Flock or IntakeSubjectScope.OtherGroup,
+        _ => false
+    };
+
+    private bool CanSaveDraft => OnSaveDraft.HasDelegate && AttachmentSelectionCount == 0 && HasCompleteSubject;
+
+    private static ReportSubjectCategory? GetSubjectCategory(IntakeSubjectScope? scope) => scope switch
+    {
+        IntakeSubjectScope.Human => ReportSubjectCategory.HumanHealth,
+        IntakeSubjectScope.Individual or IntakeSubjectScope.Herd or IntakeSubjectScope.Flock or IntakeSubjectScope.OtherGroup => ReportSubjectCategory.AnimalHealth,
+        _ => null
+    };
+
+    private Task SubjectCategoryChangedAsync(ReportSubjectCategory? category)
+    {
+        var previousScope = Draft.SubjectScope;
+        _subjectCategory = category;
+        Draft.SubjectScope = category switch
+        {
+            ReportSubjectCategory.HumanHealth => IntakeSubjectScope.Human,
+            ReportSubjectCategory.AnimalHealth when previousScope is IntakeSubjectScope.Individual or
+                IntakeSubjectScope.Herd or IntakeSubjectScope.Flock or IntakeSubjectScope.OtherGroup => previousScope,
+            _ => null
+        };
+        NotifySubjectScopeChanged();
+        return Task.CompletedTask;
+    }
+
+    private Task AnimalScopeChangedAsync(IntakeSubjectScope? scope)
+    {
+        if (scope is IntakeSubjectScope.Individual or IntakeSubjectScope.Herd or
+            IntakeSubjectScope.Flock or IntakeSubjectScope.OtherGroup)
+        {
+            _subjectCategory = ReportSubjectCategory.AnimalHealth;
+            Draft.SubjectScope = scope;
+            NotifySubjectScopeChanged();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void NotifySubjectScopeChanged()
+    {
+        var field = new FieldIdentifier(Draft, nameof(Draft.SubjectScope));
+        if (Draft.SubjectScope is null)
+        {
+            _messageStore.Clear(field);
+            _stepError = null;
+            _submitError = null;
+            _submitComplete = false;
+            _saveState = DraftSaveState.Unsaved;
+            _editContext.NotifyValidationStateChanged();
+            return;
+        }
+
+        _editContext.NotifyFieldChanged(field);
+    }
+
+    private bool CanSubmit => OnSubmit.HasDelegate && AttachmentSelectionCount == 0 && HasCountryCatalogue && HasPrivacyNotice && HasProcessingPolicy &&
+        CanConfirmCountry && Draft.CountryConfirmed &&
+        Draft.ProcessingConfirmed && Draft.ReportReviewConfirmed;
+
+    private bool IsCountrySupported(string? countryCode) =>
+        !string.IsNullOrWhiteSpace(countryCode) &&
+        Countries.Any(country => string.Equals(country.Code, countryCode.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    private string LocationSummary
+    {
+        get
+        {
+            if (Draft.LocationUnknown &&
+                string.IsNullOrWhiteSpace(Draft.CountryCode) &&
+                Draft.RegionPresence != PresenceState.Known &&
+                Draft.AreaPresence != PresenceState.Known &&
+                Draft.LocalityPresence != PresenceState.Known)
+            {
+                return "Unknown";
+            }
+
+            var place = string.Join(", ", new[] { Draft.Locality, Draft.Area, Draft.Region }
+                .Where(value => !string.IsNullOrWhiteSpace(value)));
+            return string.IsNullOrWhiteSpace(place) ? "Unknown" : place;
+        }
+    }
+
+    private string LocationProvenance =>
+        string.IsNullOrWhiteSpace(Draft.CountryCode) &&
+        Draft.RegionPresence != PresenceState.Known &&
+        Draft.AreaPresence != PresenceState.Known &&
+        Draft.LocalityPresence != PresenceState.Known
+            ? "Not provided; remains unknown"
+            : !string.IsNullOrWhiteSpace(Draft.RegionId) ||
+              !string.IsNullOrWhiteSpace(Draft.AreaId) ||
+              !string.IsNullOrWhiteSpace(Draft.LocalityId)
+                ? "You selected this place from the registry"
+                : "From the place names and country you entered";
+
+    private static string UnknownIfEmpty(string? value) => string.IsNullOrWhiteSpace(value) ? "Unknown" : value.Trim();
+
+    private Task CountryChangedAsync(string? countryCode)
+    {
+        Draft.CountryCode = IsCountrySupported(countryCode)
+            ? Countries.First(country => string.Equals(country.Code, countryCode!.Trim(), StringComparison.OrdinalIgnoreCase)).Code
+            : null;
+        Draft.CountryConfirmed = false;
+        Draft.LocationUnknown = string.IsNullOrWhiteSpace(Draft.CountryCode);
+        GeoPlaceDraftMapper.ClearSubCountryPlace(Draft);
+        _showManualPlaces = false;
+        _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.CountryCode)));
+        return Task.CompletedTask;
+    }
+
+    private bool ShowRegistryPicker =>
+        PlaceSearchFunc is not null &&
+        PlaceChildrenFunc is not null &&
+        !string.IsNullOrWhiteSpace(Draft.CountryCode) &&
+        GeoCountries.Any(country => string.Equals(country.Code, Draft.CountryCode.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    private bool ShowManualPlaceFieldsGrid => !ShowRegistryPicker || _showManualPlaces;
+
+    private void ShowManualPlaceFields()
+    {
+        _showManualPlaces = true;
+    }
+
+    private GeoPlaceOption? CurrentPlaceSelection
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(Draft.CountryCode))
+            {
+                return null;
+            }
+
+            var hasPlace = Draft.RegionPresence == PresenceState.Known ||
+                Draft.AreaPresence == PresenceState.Known ||
+                Draft.LocalityPresence == PresenceState.Known;
+            if (!hasPlace)
+            {
+                return null;
+            }
+
+            var name = Draft.LocalityPresence == PresenceState.Known && !string.IsNullOrWhiteSpace(Draft.Locality)
+                ? Draft.Locality.Trim()
+                : Draft.AreaPresence == PresenceState.Known && !string.IsNullOrWhiteSpace(Draft.Area)
+                    ? Draft.Area.Trim()
+                    : Draft.Region;
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return null;
+            }
+
+            return new GeoPlaceOption(
+                Draft.LocalityId ?? Draft.AreaId ?? Draft.RegionId ?? string.Empty,
+                name.Trim(),
+                Draft.LocalityPresence == PresenceState.Known ? "Settlement" : "Region",
+                Draft.CountryCode,
+                CountrySummary,
+                LocationSummary,
+                false,
+                []);
+        }
+    }
+
+    private Task ApplyPlaceSelectionAsync(GeoPlaceOption? option)
+    {
+        GeoPlaceDraftMapper.ApplySelection(Draft, option, Countries);
+        _showManualPlaces = false;
+        NotifyPlaceFieldsChanged();
+        return Task.CompletedTask;
+    }
+
+    private void NotifyPlaceFieldsChanged()
+    {
+        var countryField = new FieldIdentifier(Draft, nameof(Draft.CountryCode));
+        _editContext.NotifyFieldChanged(countryField);
+        _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.Region)));
+        _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.Area)));
+        _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.Locality)));
+        HandleFieldChanged(this, new FieldChangedEventArgs(countryField));
+    }
+
+    private async Task ContinueFromTypeAsync()
+    {
+        ClearStepValidation();
+        if (!HasCompleteSubject)
+        {
+            _stepError = _subjectCategory == ReportSubjectCategory.AnimalHealth
+                ? "Choose an animal type or group before continuing."
+                : "Choose whether this concern is about a person or an animal.";
+            return;
+        }
+
+        await RunStepCallbackAsync(OnContinue, 1);
+    }
+
+    private async Task ContinueToReviewAsync()
+    {
+        ClearStepValidation();
+        if (!ValidateDetails())
+        {
+            return;
+        }
+
+        try
+        {
+            await OnReview.InvokeAsync(Draft);
+            await OnContinue.InvokeAsync(Draft);
+            _step = 2;
+            _focusStepHeadingAfterRender = true;
+        }
+        catch
+        {
+            _stepError = "The review step could not be opened. Your entries remain on this screen.";
+        }
+    }
+
+    private async Task RunStepCallbackAsync(EventCallback<PublicReportDraft> callback, int nextStep)
+    {
+        try
+        {
+            await callback.InvokeAsync(Draft);
+            _step = nextStep;
+            _focusStepHeadingAfterRender = true;
+            _stepError = null;
+        }
+        catch
+        {
+            _stepError = "The next step could not be opened. Your entries remain on this screen.";
+        }
+    }
+
+    private bool ValidateDetails()
+    {
+        var hasNarrative = !string.IsNullOrWhiteSpace(Draft.Narrative);
+        var observations = Draft.GetObservations();
+        var isValid = true;
+
+        if (!hasNarrative && observations.Count == 0)
+        {
+            AddError(nameof(Draft.Narrative), "Describe what happened or add an observation.");
+            isValid = false;
+        }
+
+        if ((Draft.Narrative?.Length ?? 0) > 6000)
+        {
+            AddError(nameof(Draft.Narrative), "Keep the description under 6,000 characters.");
+            isValid = false;
+        }
+
+        if (observations.Count > 20 || observations.Any(value => value.Length > 1000))
+        {
+            AddError(nameof(Draft.ObservationsText), "Use no more than 20 observations, with each under 1,000 characters.");
+            isValid = false;
+        }
+
+        if (Draft.OccurrencePrecision != ReportedTimePrecision.Unknown && !Draft.OccurrenceDate.HasValue)
+        {
+            AddError(nameof(Draft.OccurrenceDate), "Add the reported date or choose that the time is unknown.");
+            isValid = false;
+        }
+
+        if (Draft.OccurrencePrecision == ReportedTimePrecision.Exact && !HasValidExactTime())
+        {
+            AddError(nameof(Draft.OccurrenceTime), "For an exact time, enter the local time and its offset from UTC.");
+            isValid = false;
+        }
+
+        if (Draft.RegionPresence == PresenceState.Known && string.IsNullOrWhiteSpace(Draft.Region) ||
+             Draft.AreaPresence == PresenceState.Known && string.IsNullOrWhiteSpace(Draft.Area) ||
+             Draft.LocalityPresence == PresenceState.Known && string.IsNullOrWhiteSpace(Draft.Locality))
+        {
+            AddError(string.Empty, "Enter each place name marked as known, or leave it unknown.");
+            isValid = false;
+        }
+
+        if (!Draft.LocationUnknown &&
+            string.IsNullOrWhiteSpace(Draft.CountryCode) &&
+            Draft.RegionPresence != PresenceState.Known &&
+            Draft.AreaPresence != PresenceState.Known &&
+            Draft.LocalityPresence != PresenceState.Known)
+        {
+            AddError(string.Empty, "Add a reported place or mark the location unknown.");
+            isValid = false;
+        }
+
+        if (!isValid)
+        {
+            _stepError = "Review the highlighted information before continuing.";
+        }
+
+        _editContext.NotifyValidationStateChanged();
+        return isValid;
+    }
+
+    private void AddError(string fieldName, string message) =>
+        _messageStore.Add(new FieldIdentifier(Draft, fieldName), message);
+
+    private bool HasValidExactTime()
+    {
+        if (!TimeOnly.TryParse(Draft.OccurrenceTime, out _) ||
+            Draft.OccurrenceOffset is not { Length: 6 } offset ||
+            offset[0] is not ('+' or '-') || offset[3] != ':' ||
+            !int.TryParse(offset.AsSpan(1, 2), out var hours) ||
+            !int.TryParse(offset.AsSpan(4, 2), out var minutes) ||
+            hours > 14 || minutes > 59 || (hours == 14 && minutes != 0))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private void ClearStepValidation()
+    {
+        _messageStore.Clear();
+        _stepError = null;
+        _editContext.NotifyValidationStateChanged();
+    }
+
+    private void HandleFieldChanged(object? sender, FieldChangedEventArgs args)
+    {
+        _messageStore.Clear(args.FieldIdentifier);
+        _stepError = null;
+        _observationChoiceMessage = null;
+        _submitError = null;
+        _submitComplete = false;
+        _saveState = DraftSaveState.Unsaved;
+        if (args.FieldIdentifier.FieldName != nameof(PublicReportDraft.ReportReviewConfirmed))
+        {
+            Draft.ReportReviewConfirmed = false;
+            _messageStore.Clear(new FieldIdentifier(Draft, nameof(PublicReportDraft.ReportReviewConfirmed)));
+        }
+
+        _editContext.NotifyValidationStateChanged();
+    }
+
+    private bool IsObservationSelected(string observation) =>
+        (Draft.ObservationsText ?? string.Empty)
+            .Split(["\r\n", "\r", "\n"], StringSplitOptions.None)
+            .Any(line => string.Equals(line, observation, StringComparison.Ordinal));
+
+    private Task ToggleObservationAsync(string observation)
+    {
+        var currentText = Draft.ObservationsText ?? string.Empty;
+        var isSelected = IsObservationSelected(observation);
+
+        if (isSelected)
+        {
+            Draft.ObservationsText = RemoveExactObservationLines(currentText, observation);
+        }
+        else
+        {
+            var existingObservations = Draft.GetObservations();
+            var separator = currentText.Length == 0 || currentText.EndsWith('\n') || currentText.EndsWith('\r')
+                ? string.Empty
+                : Environment.NewLine;
+            var updatedText = string.Concat(currentText, separator, observation);
+
+            if (existingObservations.Count >= 20 || updatedText.Length > 20000)
+            {
+                _observationChoiceMessage = existingObservations.Count >= 20
+                    ? "You can add up to 20 separate observations. Remove one before adding another."
+                    : "There is not enough space for another observation. Shorten or remove one first.";
+                return Task.CompletedTask;
+            }
+
+            Draft.ObservationsText = updatedText;
+        }
+
+        _observationChoiceMessage = null;
+        _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.ObservationsText)));
+        return Task.CompletedTask;
+    }
+
+    private static string RemoveExactObservationLines(string text, string observation)
+    {
+        var removalRanges = new List<(int Start, int End)>();
+        var lineStart = 0;
+
+        for (var index = 0; index < text.Length; index++)
+        {
+            if (text[index] is not ('\r' or '\n'))
+            {
+                continue;
+            }
+
+            var delimiterLength = text[index] == '\r' &&
+                index + 1 < text.Length &&
+                text[index + 1] == '\n'
+                ? 2
+                : 1;
+            var line = text.Substring(lineStart, index - lineStart);
+            if (string.Equals(line, observation, StringComparison.Ordinal))
+            {
+                AddRemovalRange(lineStart, index + delimiterLength);
+            }
+
+            lineStart = index + delimiterLength;
+            index += delimiterLength - 1;
+        }
+
+        var finalLine = text.Substring(lineStart);
+        if (string.Equals(finalLine, observation, StringComparison.Ordinal))
+        {
+            AddRemovalRange(lineStart, text.Length);
+        }
+
+        for (var index = removalRanges.Count - 1; index >= 0; index--)
+        {
+            var range = removalRanges[index];
+            text = text.Remove(range.Start, range.End - range.Start);
+        }
+
+        return text;
+
+        void AddRemovalRange(int start, int end)
+        {
+            if (removalRanges.Count > 0 && removalRanges[^1].End >= start)
+            {
+                var previous = removalRanges[^1];
+                removalRanges[^1] = (previous.Start, Math.Max(previous.End, end));
+                return;
+            }
+
+            removalRanges.Add((start, end));
+        }
+    }
+
+    private async Task FocusObservationInputAsync()
+    {
+        _observationChoiceMessage = null;
+        if (_observationsField is not null)
+        {
+            await _observationsField.FocusAsync();
+        }
+    }
+
+    private void GoBack()
+    {
+        if (_step > 0)
+        {
+            _step--;
+            _stepError = null;
+            _focusStepHeadingAfterRender = true;
+        }
+    }
+
+    private async Task SaveDraftAsync()
+    {
+        if (!CanSaveDraft || _saving)
+        {
+            return;
+        }
+
+        _saving = true;
+        _saveState = DraftSaveState.Saving;
+        try
+        {
+            var submission = Draft.ToSubmission(
+                CountryCatalogueVersion,
+                ProcessingPolicyReference,
+                ProcessingPolicyVersion,
+                Countries,
+                CountryCatalogueIsCurrent);
+            await OnSaveDraft.InvokeAsync(new PublicReportSaveRequest(CurrentDraftId, submission));
+            _saveState = DraftSaveState.Saved;
+        }
+        catch
+        {
+            _saveState = DraftSaveState.Failed;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task HandleSubmitAsync(EditContext _)
+    {
+        if (_step == 0)
+        {
+            await ContinueFromTypeAsync();
+        }
+        else if (_step == 1)
+        {
+            await ContinueToReviewAsync();
+        }
+        else
+        {
+            await SubmitAsync();
+        }
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (!CanSubmit || _submitting)
+        {
+            return;
+        }
+
+        ClearStepValidation();
+        if (!_editContext.Validate())
+        {
+            _stepError = "Review the highlighted information and confirm your report before submitting.";
+            return;
+        }
+
+        _submitting = true;
+        _submitComplete = false;
+        _submitError = null;
+        try
+        {
+            var submission = Draft.ToSubmission(
+                CountryCatalogueVersion,
+                ProcessingPolicyReference,
+                ProcessingPolicyVersion,
+                Countries,
+                CountryCatalogueIsCurrent);
+            await OnSubmit.InvokeAsync(submission);
+            _submitComplete = true;
+        }
+        catch
+        {
+            _submitError = "The submission action could not be completed. Your entries remain on this screen.";
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_editContext is not null)
+        {
+            _editContext.OnFieldChanged -= HandleFieldChanged;
+        }
+    }
+
+    private enum DraftSaveState
+    {
+        Unsaved,
+        Saving,
+        Saved,
+        Failed
+    }
+
+    private enum ReportSubjectCategory
+    {
+        HumanHealth,
+        AnimalHealth
+    }
+}

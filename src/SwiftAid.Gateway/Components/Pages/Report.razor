@@ -1,73 +1,171 @@
 @page "/report"
 @using SwiftAid.Application.Intake
+@using SwiftAid.Contracts.Geography
 @using SwiftAid.Contracts.Intake
-@using SwiftAid.Gateway.Intake
+@using SwiftAid.Client.Presentation
+@using SwiftAid.Client.Presentation.PublicWorkflows
+@using SwiftAid.Gateway.Presentation
+@using SwiftAid.UI.Components.Geography
 @using SwiftAid.UI.Components.Public
-@inject IIntakePublicMetadataProvider IntakeMetadataProvider
-@inject WebGuestIntakeService GuestIntake
+@using SwiftAid.UI.Components.Surfaces.Public
+@inject IPublicIntakeMetadataClient IntakeMetadataClient
+@inject IPublicIntakeSubmissionClient IntakeSubmissionClient
+@inject IPublicIntakeProcessingPolicyClient ProcessingPolicyClient
+@inject IGeographicRegistry GeographicRegistry
+@inject IServiceProvider ServiceProvider
 
 <PageTitle>Report a concern | SwiftAid</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.Medium" Class="status-page">
-    <SwiftAidPageHeading Eyebrow="Private community reporting"
-                         Title="Report a concern"
-                         Description="Share a human or animal concern without creating an account. You can leave details unknown when you are unsure."
-                         HeadingId="public-report-heading" />
-    <PublicReportForm Countries="_countries"
-                      CountryCatalogueVersion="_countryCatalogueVersion"
-                      CountryCatalogueIsCurrent="_countryCatalogueIsCurrent"
-                      PrivacyNoticeReference="_privacyNoticeReference"
-                      ProcessingPolicyReference="_privacyNoticeReference"
-                      ProcessingPolicyVersion="_privacyNoticeVersion"
-                      SubmitAvailable="true"
-                      OnSendReport="SendReportAsync" />
-    @if (_sendError is not null)
-    {
-        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-3">
-            @_sendError
-        </MudAlert>
-    }
-    @if (_receipt is not null)
-    {
-        <PublicReportReceipt Receipt="_receipt" />
-    }
-</MudContainer>
+<PublicReportSurface Countries="_countries"
+                     CountryCatalogueVersion="_countryCatalogueVersion"
+                     CountryCatalogueIsCurrent="_countryCatalogueIsCurrent"
+                     PlaceSearchFunc="SearchPlacesAsync"
+                     PlaceChildrenFunc="SearchPlaceChildrenAsync"
+                     GeoCountries="_geoCountries"
+                     PrivacyNoticeReference="_privacyNoticeReference"
+                     ProcessingPolicyReference="@_processingPolicyReference"
+                     ProcessingPolicyVersion="@_processingPolicyVersion"
+                     ProcessingPolicyNotice="@_processingPolicyNotice"
+                     ProcessingPolicyNoticeText="@_processingPolicyNoticeText"
+                     ProcessingPolicyAcknowledgementLabel="@_processingPolicyAcknowledgementLabel"
+                     PrivacyNoticeIsCurrent="@(!string.IsNullOrWhiteSpace(_privacyNoticeReference) && !string.IsNullOrWhiteSpace(_privacyNoticeVersion))"
+                     SubmitAvailable="@CanSubmitReport"
+                     Draft="_mobileDraft"
+                     OnSendReport="SendReportAsync"
+                     Feedback="@_sendError"
+                     FeedbackIsError="@_sendErrorIsError"
+                     Receipt="_receipt" />
 
 @code {
     private IntakeReceipt? _receipt;
-    private string? _sendError;
+    private string? _sendError { get; set; }
     private bool _sending;
     private IReadOnlyList<PublicCountryOption> _countries = [];
+    private IReadOnlyList<GeoPlaceCountry> _geoCountries = [];
     private string? _countryCatalogueVersion;
     private bool _countryCatalogueIsCurrent;
+    private bool _metadataAvailable;
     private string? _privacyNoticeReference;
     private string? _privacyNoticeVersion;
+    private string? _processingPolicyReference;
+    private string? _processingPolicyVersion;
+    private string? _processingPolicyNotice;
+    private string? _processingPolicyNoticeText;
+    private string? _processingPolicyAcknowledgementLabel;
+    private bool _processingPolicyIsLive;
+    private PublicReportDraft _mobileDraft = new() { CapturedAt = DateTimeOffset.Now };
+    private bool CanSubmitReport => _countryCatalogueIsCurrent &&
+        !string.IsNullOrWhiteSpace(_privacyNoticeReference) &&
+        !string.IsNullOrWhiteSpace(_privacyNoticeVersion) &&
+        _metadataAvailable &&
+        _processingPolicyIsLive &&
+        !string.IsNullOrWhiteSpace(_processingPolicyReference) &&
+        !string.IsNullOrWhiteSpace(_processingPolicyVersion);
 
     protected override async Task OnInitializedAsync()
     {
+        await LoadProcessingPolicyAsync();
         try
         {
-            var metadata = IntakeMetadataProvider.GetMetadata();
-            _privacyNoticeReference = metadata.PrivacyNoticeReference;
-            _privacyNoticeVersion = metadata.PrivacyNoticeVersion;
-
-            var catalogue = await IntakeMetadataProvider.GetCountriesAsync(CancellationToken.None);
-            if (!string.Equals(metadata.CountryCatalogueVersion, catalogue.Version, StringComparison.Ordinal))
+            var metadataResult = await IntakeMetadataClient.GetMetadataAsync();
+            var catalogueResult = await IntakeMetadataClient.GetCountriesAsync();
+            if (metadataResult.Code != UiCapabilityResultCode.Success || metadataResult.Value is not { } metadata ||
+                catalogueResult.Code != UiCapabilityResultCode.Success || catalogueResult.Value is not { } catalogue ||
+                !string.Equals(metadata.CountryCatalogueVersion, catalogue.Version, StringComparison.Ordinal))
+            {
                 return;
+            }
 
             _countryCatalogueVersion = catalogue.Version;
             _countries = catalogue.Countries
                 .Select(country => new PublicCountryOption(country.Code, country.Label))
                 .ToArray();
-            _countryCatalogueIsCurrent = _countries.Count > 0;
+            _geoCountries = _countries
+                .Where(country => GeoRegistryCoverage.CountryCodes.Contains(country.Code))
+                .Select(country => new GeoPlaceCountry(country.Code, country.Name))
+                .ToList();
+            _metadataAvailable = metadataResult.Metadata.IsAvailable && catalogueResult.Metadata.IsAvailable;
+            _countryCatalogueIsCurrent = _countries.Count > 0 && _metadataAvailable;
+            if (!_metadataAvailable)
+            {
+                _countries = [];
+                _geoCountries = [];
+                _countryCatalogueVersion = null;
+                _countryCatalogueIsCurrent = false;
+                return;
+            }
+
+            _privacyNoticeReference = metadata.PrivacyNoticeReference;
+            _privacyNoticeVersion = metadata.PrivacyNoticeVersion;
         }
-        catch
+        catch (Exception)
         {
             _countries = [];
+            _geoCountries = [];
             _countryCatalogueVersion = null;
             _countryCatalogueIsCurrent = false;
+            _metadataAvailable = false;
             _privacyNoticeReference = null;
             _privacyNoticeVersion = null;
+        }
+    }
+
+    private IGeoLookupClient GeoLookup =>
+        (IGeoLookupClient?)ServiceProvider.GetService(typeof(IGeoLookupClient))
+        ?? new GatewayGeoLookupClient(GeographicRegistry);
+
+    private async Task<GeoPlaceQueryResult> SearchPlacesAsync(
+        string query,
+        string? countryCode,
+        CancellationToken cancellationToken) =>
+        MapGeoLookupResult(await GeoLookup.SearchAsync(query, countryCode, cancellationToken).ConfigureAwait(false));
+
+    private async Task<GeoPlaceQueryResult> SearchPlaceChildrenAsync(
+        string parentId,
+        CancellationToken cancellationToken) =>
+        MapGeoLookupResult(await GeoLookup.GetChildrenAsync(parentId, cancellationToken).ConfigureAwait(false));
+
+    private static GeoPlaceQueryResult MapGeoLookupResult(UiCapabilityResult<IReadOnlyList<GeoLookupOption>> result) =>
+        result.Code == UiCapabilityResultCode.Success && result.Value is { } options
+            ? new GeoPlaceQueryResult(true, options.Select(ToPlaceOption).ToList(), null)
+            : new GeoPlaceQueryResult(false, [], result.Message ?? "Place search is temporarily unavailable.");
+
+    private static GeoPlaceOption ToPlaceOption(GeoLookupOption option) => new(
+        option.Id,
+        option.Name,
+        option.Kind.ToString(),
+        option.CountryCode,
+        option.CountryName,
+        option.Ancestry,
+        option.HasChildren,
+        option.Ancestors.Select(ancestor => new GeoPlaceAncestor(ancestor.Id, ancestor.Name, ancestor.Kind.ToString())).ToList());
+
+    private async Task LoadProcessingPolicyAsync()
+    {
+        try
+        {
+            var result = await ProcessingPolicyClient.GetPolicyAsync();
+            if (result.Code != UiCapabilityResultCode.Success || result.Value is not { } policy)
+            {
+                return;
+            }
+
+            _processingPolicyReference = policy.Reference;
+            _processingPolicyVersion = policy.Version;
+            _processingPolicyNotice = result.Metadata.Notice;
+            _processingPolicyNoticeText = policy.NoticeText;
+            _processingPolicyAcknowledgementLabel = policy.AcknowledgementLabel;
+            _processingPolicyIsLive = result.Metadata.IsAvailable &&
+                result.Metadata.Provenance == UiCapabilityProvenance.LiveService;
+        }
+        catch (Exception)
+        {
+            _processingPolicyReference = null;
+            _processingPolicyVersion = null;
+            _processingPolicyNotice = null;
+            _processingPolicyNoticeText = null;
+            _processingPolicyAcknowledgementLabel = null;
+            _processingPolicyIsLive = false;
         }
     }
 
@@ -81,42 +179,62 @@
         _sending = true;
         try
         {
-            _receipt = await GuestIntake.SubmitAsync(submission);
-            _sendError = null;
+            var result = await IntakeSubmissionClient.SubmitAsync(submission);
+            if (result.Code == UiCapabilityResultCode.Success && result.Value is { } outcome)
+            {
+                if (outcome.Kind == IntakeSubmissionOutcomeKind.Received)
+                {
+                    if (outcome.Receipt is { } receipt)
+                    {
+                        _receipt = receipt;
+                        _sendError = null;
+                        _sendErrorIsError = false;
+                        return;
+                    }
+
+                    _receipt = null;
+                    _sendError = "The intake service did not return a receipt, so receipt confirmation is unavailable.";
+                    _sendErrorIsError = true;
+                    return;
+                }
+
+                _receipt = null;
+                _sendError = outcome.Message;
+                _sendErrorIsError = false;
+                return;
+            }
+
+            _receipt = null;
+            _sendErrorIsError = true;
+            _sendError = result.Code switch
+            {
+                UiCapabilityResultCode.InvalidRequest => "Your report needs review before it can be sent. Check the highlighted entries and try again.",
+                UiCapabilityResultCode.Conflict => "This report could not be received because its current state changed. Your entries remain on this screen.",
+                UiCapabilityResultCode.Retryable => "The report service is temporarily unavailable. Your entries remain on this screen — try again shortly.",
+                UiCapabilityResultCode.Cancelled => "The report was not sent. Your entries remain on this screen.",
+                UiCapabilityResultCode.Denied => "Report submission is unavailable for this request. Your entries remain on this screen.",
+                UiCapabilityResultCode.Success => "We couldn’t confirm your report. Check its status before trying again.",
+                _ => "Report submission is unavailable in this environment. Your entries remain on this screen."
+            };
         }
-        catch (IntakeSubmissionException exception) when (exception.Code == IntakeErrorCode.InvalidReport)
+        catch (OperationCanceledException)
         {
             _receipt = null;
-            _sendError = "Your report needs review before it can be sent. Check the highlighted entries and try again.";
-        }
-        catch (IntakeSubmissionException exception) when (exception.Code == IntakeErrorCode.PayloadTooLarge)
-        {
-            _receipt = null;
-            _sendError = "Your report is too large to send. Shorten the narrative or remove recordings and try again.";
-        }
-        catch (IntakeSubmissionException exception) when (exception.Code == IntakeErrorCode.RateLimited)
-        {
-            _receipt = null;
-            _sendError = "Too many reports have been sent recently. Wait a little while and try again.";
-        }
-        catch (IntakeSubmissionException exception) when (exception.Code is IntakeErrorCode.SubmissionConflict or IntakeErrorCode.AlreadyPromoted)
-        {
-            _receipt = null;
-            _sendError = "This report has already been received. Your earlier receipt remains the record of it.";
-        }
-        catch (IntakeSubmissionException)
-        {
-            _receipt = null;
-            _sendError = "Your report could not be sent right now. Your entries remain on this screen — try again shortly.";
+            _sendError = "The report request was cancelled. Your entries remain on this screen.";
+            _sendErrorIsError = true;
         }
         catch
         {
             _receipt = null;
             _sendError = "Your report could not be sent. Your entries remain on this screen.";
+            _sendErrorIsError = true;
         }
         finally
         {
             _sending = false;
         }
     }
+
+    private bool _sendErrorIsError = true;
+
 }

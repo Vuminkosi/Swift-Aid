@@ -6,14 +6,14 @@ using SwiftAid.Mobile.Services.Http;
 
 namespace SwiftAid.Mobile.Services.Account;
 
-/// <summary>Registry location lookup through the gateway cookie session. Works for signed-out guests.</summary>
-public sealed class HttpGeoLookupClient(CookieSessionHttpClient session) : IGeoLookupClient
+/// <summary>Registry location lookup through the anonymous gateway endpoints. Works for signed-out guests.</summary>
+public sealed class HttpGeoLookupClient(HttpClient httpClient) : IGeoLookupClient
 {
     private const string Capability = "geo-lookup";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    private readonly CookieSessionHttpClient _session = session ?? throw new ArgumentNullException(nameof(session));
+    private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
 
     public async Task<UiCapabilityResult<IReadOnlyList<GeoLookupOption>>> SearchAsync(
         string query,
@@ -34,7 +34,7 @@ public sealed class HttpGeoLookupClient(CookieSessionHttpClient session) : IGeoL
                 path += $"&country={Uri.EscapeDataString(countryCode.Trim())}";
             }
 
-            using var response = await _session.GetAsync(path, cancellationToken).ConfigureAwait(false);
+            using var response = await _httpClient.GetAsync(path, cancellationToken).ConfigureAwait(false);
             if (response.StatusCode == HttpStatusCode.BadRequest)
             {
                 return Invalid<IReadOnlyList<GeoLookupOption>>("Type at least two characters to search places.");
@@ -76,7 +76,7 @@ public sealed class HttpGeoLookupClient(CookieSessionHttpClient session) : IGeoL
         cancellationToken.ThrowIfCancellationRequested();
         try
         {
-            using var response = await _session.GetAsync(
+            using var response = await _httpClient.GetAsync(
                 $"/public/v1/intake/geo/children?parentId={Uri.EscapeDataString(parentId)}",
                 cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
@@ -114,7 +114,8 @@ public sealed class HttpGeoLookupClient(CookieSessionHttpClient session) : IGeoL
         result.CountryCode,
         result.CountryName,
         result.Ancestry,
-        result.HasChildren);
+        result.HasChildren,
+        result.Ancestors.Select(ancestor => new GeoLookupAncestor(ancestor.Id, ancestor.Name, ancestor.Kind)).ToList());
 
     private static async Task<T?> ReadAsync<T>(
         HttpResponseMessage response,

@@ -1,5 +1,8 @@
 namespace SwiftAid.Contracts.Geography;
 
+/// <summary>One administrative ancestor, root first (country before region).</summary>
+public sealed record GeoAdminAncestor(string Id, string Name, GeoLocationKind Kind);
+
 /// <summary>Registry classification for a geographic record. Mirrors the curated seed vocabulary.</summary>
 public enum GeoLocationKind
 {
@@ -20,7 +23,8 @@ public sealed record GeoSearchResult(
     string Ancestry,
     double? Latitude,
     double? Longitude,
-    bool HasChildren);
+    bool HasChildren,
+    IReadOnlyList<GeoAdminAncestor> Ancestors);
 
 /// <summary>Bounded search response; never the whole registry.</summary>
 public sealed record GeoSearchResponse(

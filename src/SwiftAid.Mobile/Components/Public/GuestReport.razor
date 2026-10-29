@@ -1,121 +1,189 @@
 @page "/report"
 @using SwiftAid.Client.Intake
 @using SwiftAid.Contracts.Intake
+@using SwiftAid.Client.Presentation
+@using SwiftAid.Client.Presentation.PublicWorkflows
+@using SwiftAid.Contracts.Geography
+@using SwiftAid.UI.Components.Geography
 @using SwiftAid.UI.Components.Public
+@using SwiftAid.UI.Components.Surfaces.Public
+@using System.Security.Cryptography
+@using System.Text.Json
+@using Microsoft.AspNetCore.Components.Routing
+@inject IGeoLookupClient GeoLookup
 @inject IGuestSubmissionStore SubmissionStore
 @inject IGuestSubmissionCoordinator SubmissionCoordinator
+@inject IGuestIntakeTransport IntakeTransport
+@inject IGuestAudioStore AudioStore
+@inject IPublicIntakeProcessingPolicyClient ProcessingPolicyClient
+@inject IAudioCaptureService AudioCapture
+@inject IAudioPlaybackService AudioPlayback
+@inject IJSRuntime JSRuntime
+@inject NavigationManager Navigation
+@implements IAsyncDisposable
 
-<PageTitle>Report a concern | SwiftAid</PageTitle>
+<NavigationLock OnBeforeInternalNavigation="ConfirmInternalNavigationAsync"
+                ConfirmExternalNavigation="@HasUnsavedChanges" />
 
-<MudContainer MaxWidth="MaxWidth.Medium" Class="mobile-public-report">
-    <SwiftAidPageHeading Eyebrow="Private community reporting"
-                         Title="Report a concern"
-                         Description="Share a human or animal concern without creating an account. You can leave details unknown when you are unsure."
-                         HeadingId="mobile-public-report-heading" />
-
-    @if (_loading)
-    {
-        <div class="guest-report__loading" role="status" aria-live="polite">
-            <MudProgressCircular Indeterminate="true" Color="Color.Primary" Size="Size.Small" />
-            <span>Opening saved reports on this device…</span>
-        </div>
-    }
-    else if (!_storageAvailable)
-    {
-        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
-            Saved reports on this device could not be opened. Your entries will remain on this screen only until saving is available.
-        </MudAlert>
-    }
-
-    @if (_drafts.Count > 0)
-    {
-        <section class="guest-report__saved" aria-labelledby="saved-drafts-title">
-            <MudText id="saved-drafts-title" Typo="Typo.h6" HtmlTag="h2">Saved drafts on this device</MudText>
-            @foreach (var draft in _drafts)
+@if (_showUnsavedExitPrompt)
+{
+    <div class="mobile-report-exit-backdrop" @onclick="DismissUnsavedExitPromptAsync">
+        <section class="mobile-report-exit-prompt"
+                 role="dialog"
+                 aria-modal="true"
+                 aria-labelledby="mobile-report-exit-title"
+                 aria-describedby="mobile-report-exit-description"
+                 tabindex="-1"
+                 @ref="_exitPromptDialog"
+                 @onkeyup="HandleExitPromptKeyUpAsync"
+                 @onclick:stopPropagation="true">
+            <h2 class="mobile-report-exit-prompt__title"
+                id="mobile-report-exit-title"
+                >Save this report?</h2>
+            <MudText Typo="Typo.body2" Class="mobile-report-exit-prompt__copy" id="mobile-report-exit-description">
+                Your report has changes that are not saved on this device.
+            </MudText>
+            @if (!CanSaveCurrentDraft)
             {
-                <MudPaper Class="guest-report__draft-row" Elevation="0" @key="draft.ClientSubmissionId">
-                    <div>
-                        <MudText Typo="Typo.subtitle1">
-                            @(draft.State == GuestSubmissionLocalState.NeedsAttention ? "Review before sending" : "Report draft")
-                        </MudText>
-                        <MudText Typo="Typo.body2" Class="guest-report__muted">
-                            Saved @draft.CreatedAtUtc.ToLocalTime().ToString("g") on this device. It has not been sent.
-                        </MudText>
-                    </div>
-                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => OpenDraftAsync(draft.ClientSubmissionId))">
-                        Open draft
-                    </MudButton>
-                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_sending" OnClick="@(() => SendDraftAsync(draft.ClientSubmissionId))">
-                        Send report
-                    </MudButton>
-                </MudPaper>
+                <MudText Typo="Typo.caption" Class="mobile-report-exit-prompt__copy">
+                    @if (!_storageAvailable)
+                    {
+                        <span>Saving a draft is unavailable right now.</span>
+                    }
+                    else if (_recordingSaveFailed)
+                    {
+                        <span>The recording could not be saved. Keep editing, or choose Leave to continue without it.</span>
+                    }
+                    else
+                    {
+                        <span>Choose whether this report is about a person or an animal before saving it.</span>
+                    }
+                </MudText>
             }
-        </section>
-    }
-
-    @if (_queued.Count > 0)
-    {
-        <section class="guest-report__saved" aria-labelledby="queued-reports-title">
-            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Spacing="2">
-                <MudText id="queued-reports-title" Typo="Typo.h6" HtmlTag="h2">Waiting to send</MudText>
-                <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@_sending" OnClick="SendPendingAsync">
-                    Try sending now
-                </MudButton>
-            </MudStack>
-            @foreach (var queued in _queued)
+            @if (_exitPromptError is not null)
             {
-                <MudPaper Class="guest-report__draft-row" Elevation="0" @key="queued.ClientSubmissionId">
-                    <div>
-                        <MudText Typo="Typo.subtitle1">Queued report</MudText>
-                        <MudText Typo="Typo.body2" Class="guest-report__muted">
-                            Saved @queued.CreatedAtUtc.ToLocalTime().ToString("g") on this device. It has not been sent yet.
-                        </MudText>
-                    </div>
-                </MudPaper>
+                <div class="mobile-report-exit-prompt__error" role="alert">
+                    <MudIcon Icon="@Icons.Material.Filled.WarningAmber" aria-hidden="true" />
+                    <span>@_exitPromptError</span>
+                </div>
             }
+            <div class="mobile-report-exit-prompt__actions">
+                <button type="button"
+                        class="mobile-report-exit-prompt__action mud-button-root mud-button mud-button-text mud-button-text-primary"
+                        @ref="_saveDraftButton"
+                        disabled="@(_savingBeforeExit || !CanSaveCurrentDraft)"
+                        @onclick="SaveDraftAndContinueAsync">
+                    <MudIcon Icon="@Icons.Material.Filled.Save" />
+                    @(_savingBeforeExit ? "Saving draft…" : "Save draft")
+                </button>
+                <button type="button"
+                        class="mobile-report-exit-prompt__action mud-button-root mud-button mud-button-text mud-button-text-primary"
+                        @ref="_leaveButton"
+                        disabled="@_savingBeforeExit"
+                        @onclick="LeaveWithoutSavingAsync">
+                    <MudIcon Icon="@Icons.Material.Filled.ExitToApp" />
+                    Leave
+                </button>
+            </div>
         </section>
-    }
+    </div>
+}
 
-    @if (_receipts.Count > 0)
+<PageTitle>@(IsTrackingView ? "My reports | SwiftAid" : "Report a concern | SwiftAid")</PageTitle>
+
+<div id="mobile-public-report" class="mobile-public-report">
+<MudContainer MaxWidth="MaxWidth.Medium">
+    @if (IsTrackingView)
     {
-        <section class="guest-report__receipts" aria-labelledby="received-reports-title">
-            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Spacing="2">
-                <MudText id="received-reports-title" Typo="Typo.h6" HtmlTag="h2">Reports with a receipt</MudText>
-                <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@_refreshingReceipts" OnClick="RefreshReceiptsAsync">
-                    Check for updates
-                </MudButton>
-            </MudStack>
-            @foreach (var report in _receipts)
-            {
-                <PublicReportReceipt Receipt="@(report.Receipt!)" @key="report.ClientSubmissionId" />
-            }
-        </section>
+        <SwiftAidPageHeading Eyebrow="Private report history"
+                             Title="My reports"
+                             Description="Review drafts and receipts saved on this device. Report details are not shown in this list."
+                             HeadingId="mobile-public-report-heading" />
+        <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="StartNewReportFromTrackingAsync"
+                   StartIcon="@Icons.Material.Filled.AddCircleOutline" Class="mb-3">
+            Start a report
+        </MudButton>
     }
-
-    @if (_pageMessage is not null)
+    @if (IsTrackingView)
     {
-        <div role="status" aria-live="polite">
-            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">@_pageMessage</MudAlert>
-        </div>
+        <PublicReportHistorySurface Items="HistoryItems"
+                                    Loading="_loading"
+                                    StoreAvailable="_storageAvailable"
+                                    Busy="_sending"
+                                    RefreshingReceipts="_refreshingReceipts"
+                                    StatusMessage="@_pageMessage"
+                                    StatusIsError="false"
+                                    OnRetryLoad="ReloadSavedReportsAsync"
+                                    OnRetryQueued="SendPendingAsync"
+                                    OnRefreshReceipts="RefreshReceiptsAsync"
+                                    OnOpenDraft="OpenDraftAsync"
+                                    OnRetryDraft="SendDraftAsync"
+                                    SendAvailable="@CanSendHistoryReports"
+                                    SendUnavailableMessage="@HistorySendUnavailableReason" />
     }
 
-    @if (_storageAvailable)
+    @if (_storageAvailable && _activeDraftId.HasValue && !IsTrackingView)
     {
         <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="StartNewReport">
             Start a new report
         </MudButton>
     }
 
-    <PublicReportForm DraftSavingAvailable="@_storageAvailable"
-                      CurrentDraftId="@_activeDraftId"
-                      InitialSubmission="@_activeSubmission"
-                      OnSaveDraft="SaveDraftAsync" />
+    @if (!IsTrackingView)
+    {
+        <MudHidden Breakpoint="Breakpoint.MdAndUp">
+            <div class="mobile-report__header">
+                <MudIconButton Icon="@Icons.Material.Filled.ArrowBack"
+                               Color="Color.Inherit"
+                               OnClick="NavigateHome"
+                               aria-label="Back to home" />
+                <MudText Typo="Typo.subtitle1" HtmlTag="h2">New Case</MudText>
+            </div>
+        </MudHidden>
+        <PublicReportSurface Countries="_countries"
+                             CountryCatalogueVersion="@_countryCatalogueVersion"
+                             CountryCatalogueIsCurrent="_countryCatalogueIsCurrent"
+                             PlaceSearchFunc="SearchPlacesAsync"
+                             PlaceChildrenFunc="SearchPlaceChildrenAsync"
+                             GeoCountries="_geoCountries"
+                             PrivacyNoticeReference="@_privacyNoticeReference"
+                             PrivacyNoticeIsCurrent="@(!string.IsNullOrWhiteSpace(_privacyNoticeReference) && !string.IsNullOrWhiteSpace(_privacyNoticeVersion))"
+                             ProcessingPolicyReference="@_processingPolicyReference"
+                             ProcessingPolicyVersion="@_processingPolicyVersion"
+                             ProcessingPolicyNotice="@_processingPolicyNotice"
+                             ProcessingPolicyNoticeText="@_processingPolicyNoticeText"
+                             ProcessingPolicyAcknowledgementLabel="@_processingPolicyAcknowledgementLabel"
+                             DraftSavingAvailable="_storageAvailable"
+                             SubmitAvailable="@CanSubmitReport"
+                             CurrentDraftId="_activeDraftId"
+                             Draft="_reportDraft"
+                             OnSaveDraft="SaveDraftAsync"
+                             OnSendReport="SendNewReportAsync"
+                             Feedback="@ReportFeedback"
+                             FeedbackIsError="false"
+                             Receipt="ActiveReceipt"
+                             ShowVoiceCapture="true"
+                             VoiceState="AudioViewState"
+                             VoiceElapsed="_audioState.Elapsed"
+                             VoiceMessage="@AudioMessage"
+                             VoiceSaved="_voiceSaved"
+                             TemporaryCleanupPending="_audioState.TemporaryCleanupPending"
+                             OnRetryTemporaryCleanup="RetryTemporaryCleanupAsync"
+                             OnStartRecording="StartRecordingAsync"
+                             OnStopRecording="StopRecordingAsync"
+                             OnPlayRecording="PlayRecordingAsync"
+                             OnStopPlayback="StopPlaybackAsync"
+                             OnSaveRecording="SaveAudioToDraftAsync" />
+    }
 </MudContainer>
+</div>
 
 @code {
-    private IReadOnlyList<GuestSubmissionSummary> _drafts = [];
-    private IReadOnlyList<GuestSubmissionSummary> _queued = [];
-    private IReadOnlyList<GuestSubmissionSummary> _receipts = [];
+    [SupplyParameterFromQuery(Name = "view")]
+    public string? View { get; set; }
+
+    private bool IsTrackingView => string.Equals(View, "tracking", StringComparison.OrdinalIgnoreCase);
+    private IReadOnlyList<GuestSubmissionSummary> _history = [];
     private Guid? _activeDraftId;
     private IntakeSubmission? _activeSubmission;
     private bool _loading = true;
@@ -123,8 +191,236 @@
     private bool _refreshingReceipts;
     private bool _sending;
     private string? _pageMessage;
+    private AudioCaptureState _audioState = new(AudioCaptureStatus.Idle, TimeSpan.Zero);
+    private string? _savedDraftSnapshot;
+    private bool _allowNextNavigation;
+    private bool _showUnsavedExitPrompt;
+    private bool _savingBeforeExit;
+    private bool _focusExitPrompt;
+    private bool _focusDialogWhileSaving;
+    private bool _recordingSaveFailed;
+    private string? _exitPromptError;
+    private string? _pendingNavigationTarget;
+    private PendingExitKind _pendingExitKind;
+    private IJSObjectReference? _exitFocusModule;
+    private bool _exitFocusTrapActive;
+    private bool _deactivateExitFocusTrapAfterRender;
+    private ElementReference _exitPromptDialog;
+    private ElementReference _saveDraftButton;
+    private ElementReference _leaveButton;
+    private string? _audioMessage;
+    private Guid? _pendingAudioAttachmentId;
+    private PublicReportDraft _reportDraft = new() { CapturedAt = DateTimeOffset.Now };
+    private bool _voiceSaved;
+    private Guid? _savedAudioAttachmentId;
+    private IReadOnlyList<PublicCountryOption> _countries = [];
+    private IReadOnlyList<GeoPlaceCountry> _geoCountries = [];
+    private string? _countryCatalogueVersion;
+    private string? _privacyNoticeReference;
+    private string? _privacyNoticeVersion;
+    private string? _processingPolicyReference;
+    private string? _processingPolicyVersion;
+    private string? _processingPolicyNotice;
+    private string? _processingPolicyNoticeText;
+    private string? _processingPolicyAcknowledgementLabel;
+    private bool _countryCatalogueIsCurrent;
+    private bool _processingPolicyIsAvailable;
+    private bool _historyAudioCheckComplete;
+    private bool _historyAudioCheckFailed;
+    private readonly Dictionary<Guid, HistorySendEligibility> _historySendEligibility = [];
+    private string _sendUnavailableReason = "Sending is unavailable until current report-handling information is available. You can still save your report on this device.";
+    private bool HasRequiredReportMetadata => _storageAvailable && _countryCatalogueIsCurrent &&
+        !string.IsNullOrWhiteSpace(_privacyNoticeReference) && !string.IsNullOrWhiteSpace(_privacyNoticeVersion) &&
+        _processingPolicyIsAvailable;
+    private bool CanSubmitReport => HasRequiredReportMetadata && !HasLocalAudio(_activeSubmission) &&
+        _audioState.Status is not (AudioCaptureStatus.Recording or AudioCaptureStatus.ReadyToSave);
+    private bool CanSendHistoryReports => HasRequiredReportMetadata;
+    private string HistorySendUnavailableReason => _sendUnavailableReason;
+    private string? ReportFeedback => _pageMessage ??
+        (HasLocalAudio(_activeSubmission)
+            ? "This report has a voice note saved on this device. Voice upload is not available yet, so it remains here."
+            : _audioState.Status is AudioCaptureStatus.Recording or AudioCaptureStatus.ReadyToSave
+                ? "Save or discard the current recording before queuing this report."
+                : null);
+    private bool HasUnsavedChanges =>
+        (_savedDraftSnapshot is not null && !string.Equals(_savedDraftSnapshot, DraftSnapshot(), StringComparison.Ordinal)) ||
+        _recordingSaveFailed ||
+        (!_voiceSaved && (_audioState.Status is AudioCaptureStatus.Recording or AudioCaptureStatus.ReadyToSave));
 
-    protected override async Task OnInitializedAsync() => await ReloadSavedReportsAsync();
+    private IReadOnlyList<PublicReportHistorySurface.HistoryItem> HistoryItems => _history
+        .Select(report =>
+        {
+            var eligibility = GetHistorySendEligibility(report);
+            return new PublicReportHistorySurface.HistoryItem(
+                report.ClientSubmissionId,
+                report.State switch
+                {
+                    GuestSubmissionLocalState.Draft => PublicReportHistorySurface.HistoryState.Draft,
+                    GuestSubmissionLocalState.Queued => PublicReportHistorySurface.HistoryState.Queued,
+                    GuestSubmissionLocalState.Received => PublicReportHistorySurface.HistoryState.Received,
+                    GuestSubmissionLocalState.NeedsAttention => PublicReportHistorySurface.HistoryState.NeedsAttention,
+                    GuestSubmissionLocalState.Superseded => PublicReportHistorySurface.HistoryState.Superseded,
+                    _ => PublicReportHistorySurface.HistoryState.NeedsAttention
+                },
+                report.CreatedAtUtc,
+                report.Receipt,
+                eligibility.CanSend,
+                eligibility.Message);
+        })
+        .ToArray();
+
+    private IntakeReceipt? ActiveReceipt => _activeDraftId is { } activeDraftId
+        ? _history.FirstOrDefault(report => report.ClientSubmissionId == activeDraftId)?.Receipt
+        : null;
+
+    private void NavigateHome() => Navigation.NavigateTo("/");
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusExitPrompt && _showUnsavedExitPrompt)
+        {
+            _focusExitPrompt = false;
+            await ActivateExitPromptAsync();
+        }
+        else if (_focusDialogWhileSaving && _showUnsavedExitPrompt)
+        {
+            _focusDialogWhileSaving = false;
+            await FocusExitPromptDialogAsync();
+        }
+        else if (_deactivateExitFocusTrapAfterRender)
+        {
+            _deactivateExitFocusTrapAfterRender = false;
+            await DeactivateExitPromptAsync();
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        AudioCapture.StateChanged += AudioStateChanged;
+        _audioState = AudioCapture.CurrentState;
+        await LoadProcessingPolicyAsync();
+        await LoadSubmissionMetadataAsync();
+        await ReloadSavedReportsAsync();
+        await RetryPendingAudioCleanupAsync();
+        RememberDraftSnapshot();
+    }
+
+    private async Task LoadSubmissionMetadataAsync()
+    {
+        try
+        {
+            var metadata = await IntakeTransport.GetMetadataAsync(CancellationToken.None);
+            _privacyNoticeReference = metadata.PrivacyNoticeReference;
+            _privacyNoticeVersion = metadata.PrivacyNoticeVersion;
+
+            var catalogue = await IntakeTransport.GetCountriesAsync(CancellationToken.None);
+            if (!string.Equals(metadata.CountryCatalogueVersion, catalogue.Version, StringComparison.Ordinal) ||
+                !string.Equals(metadata.CountryCatalogueReference, catalogue.Reference, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _countryCatalogueVersion = catalogue.Version;
+            _countries = catalogue.Countries
+                .Select(country => new PublicCountryOption(country.Code, country.Label))
+                .ToArray();
+            _geoCountries = _countries
+                .Where(country => GeoRegistryCoverage.CountryCodes.Contains(country.Code))
+                .Select(country => new GeoPlaceCountry(country.Code, country.Name))
+                .ToList();
+            _countryCatalogueIsCurrent = _countries.Count > 0;
+        }
+        catch (Exception)
+        {
+            _countries = [];
+            _geoCountries = [];
+            _countryCatalogueVersion = null;
+            _countryCatalogueIsCurrent = false;
+            _privacyNoticeReference = null;
+            _privacyNoticeVersion = null;
+        }
+
+        UpdateSendUnavailableReason();
+    }
+
+    private async Task<GeoPlaceQueryResult> SearchPlacesAsync(
+        string query,
+        string? countryCode,
+        CancellationToken cancellationToken) =>
+        MapGeoLookupResult(await GeoLookup.SearchAsync(query, countryCode, cancellationToken).ConfigureAwait(false));
+
+    private async Task<GeoPlaceQueryResult> SearchPlaceChildrenAsync(
+        string parentId,
+        CancellationToken cancellationToken) =>
+        MapGeoLookupResult(await GeoLookup.GetChildrenAsync(parentId, cancellationToken).ConfigureAwait(false));
+
+    private static GeoPlaceQueryResult MapGeoLookupResult(UiCapabilityResult<IReadOnlyList<GeoLookupOption>> result) =>
+        result.Code == UiCapabilityResultCode.Success && result.Value is { } options
+            ? new GeoPlaceQueryResult(true, options.Select(ToPlaceOption).ToList(), null)
+            : new GeoPlaceQueryResult(false, [], result.Message ?? "Place search is temporarily unavailable.");
+
+    private static GeoPlaceOption ToPlaceOption(GeoLookupOption option) => new(
+        option.Id,
+        option.Name,
+        option.Kind.ToString(),
+        option.CountryCode,
+        option.CountryName,
+        option.Ancestry,
+        option.HasChildren,
+        option.Ancestors.Select(ancestor => new GeoPlaceAncestor(ancestor.Id, ancestor.Name, ancestor.Kind.ToString())).ToList());
+
+    private async Task LoadProcessingPolicyAsync()
+    {
+        try
+        {
+            var result = await ProcessingPolicyClient.GetPolicyAsync(CancellationToken.None);
+            if (!result.Succeeded || !result.Metadata.IsAvailable || result.Value is null ||
+                string.IsNullOrWhiteSpace(result.Value.Reference) ||
+                string.IsNullOrWhiteSpace(result.Value.Version) ||
+                string.IsNullOrWhiteSpace(result.Metadata.Notice))
+            {
+                _processingPolicyIsAvailable = false;
+                _processingPolicyReference = null;
+                _processingPolicyVersion = null;
+                _processingPolicyNotice = null;
+                _processingPolicyNoticeText = null;
+                _processingPolicyAcknowledgementLabel = null;
+                UpdateSendUnavailableReason();
+                return;
+            }
+
+            _processingPolicyReference = result.Value.Reference;
+            _processingPolicyVersion = result.Value.Version;
+            _processingPolicyNotice = result.Metadata.Notice;
+            _processingPolicyNoticeText = result.Value.NoticeText;
+            _processingPolicyAcknowledgementLabel = result.Value.AcknowledgementLabel;
+            _processingPolicyIsAvailable = true;
+        }
+        catch (Exception)
+        {
+            _processingPolicyIsAvailable = false;
+            _processingPolicyReference = null;
+            _processingPolicyVersion = null;
+            _processingPolicyNotice = null;
+            _processingPolicyNoticeText = null;
+            _processingPolicyAcknowledgementLabel = null;
+        }
+
+        UpdateSendUnavailableReason();
+    }
+
+    private void UpdateSendUnavailableReason()
+    {
+        _sendUnavailableReason = !_processingPolicyIsAvailable
+            ? "Sending is unavailable until current report-handling information is available. You can still save your report on this device."
+            : !_countryCatalogueIsCurrent
+                ? "Sending is unavailable until the current location list can be checked. You can still save your report on this device."
+                : string.IsNullOrWhiteSpace(_privacyNoticeReference) || string.IsNullOrWhiteSpace(_privacyNoticeVersion)
+                    ? "Sending is unavailable until current privacy information can be checked. You can still save your report on this device."
+                    : HasLocalAudio(_activeSubmission)
+                        ? "This report includes a voice note saved on this device. Voice upload is not available yet, so the report stays here."
+                : "Reports can be queued on this device.";
+    }
 
     private async Task ReloadSavedReportsAsync()
     {
@@ -132,27 +428,17 @@
         try
         {
             var reports = await SubmissionStore.GetAllAsync();
-            _drafts = reports
-                .Where(report => report.State is GuestSubmissionLocalState.Draft or GuestSubmissionLocalState.NeedsAttention)
-                .OrderByDescending(report => report.CreatedAtUtc)
-                .ToArray();
-            _queued = reports
-                .Where(report => report.State == GuestSubmissionLocalState.Queued)
-                .OrderBy(report => report.CreatedAtUtc)
-                .ToArray();
-            _receipts = reports
-                .Where(report => report.Receipt is not null)
-                .OrderByDescending(report => report.Receipt!.ReceivedAtUtc)
-                .ToArray();
+            _history = reports;
             _storageAvailable = true;
+            await CheckHistoryAudioAsync(reports);
             _pageMessage = null;
         }
         catch
         {
-            _drafts = [];
-            _queued = [];
-            _receipts = [];
+            _history = [];
             _storageAvailable = false;
+            _historyAudioCheckComplete = false;
+            _historyAudioCheckFailed = true;
             _pageMessage = "Saved reports could not be opened. Try again before leaving this page.";
         }
         finally
@@ -175,7 +461,14 @@
 
             _activeDraftId = draft.ClientSubmissionId;
             _activeSubmission = draft.Submission;
+            _reportDraft = PublicReportDraft.FromSubmission(draft.Submission);
+            await RefreshSavedVoiceAsync(draft.ClientSubmissionId, draft.Submission);
+            RememberDraftSnapshot();
             _pageMessage = "Draft opened. Changes remain on this device until you save them.";
+            if (IsTrackingView)
+            {
+                Navigation.NavigateTo("/report");
+            }
         }
         catch
         {
@@ -191,7 +484,9 @@
 
         _activeDraftId = saved.ClientSubmissionId;
         _activeSubmission = request.Submission with { ClientSubmissionId = saved.ClientSubmissionId };
-        _pageMessage = "Your draft is saved on this device. It has not been sent. Choose Send report to send it.";
+        _reportDraft = PublicReportDraft.FromSubmission(_activeSubmission);
+        RememberDraftSnapshot();
+        _pageMessage = "Your draft is saved on this device. It has not been sent.";
         await ReloadSavedReportsAsync();
     }
 
@@ -200,15 +495,77 @@
         if (_sending)
             return;
 
+        if (!CanSendHistoryReports)
+        {
+            _pageMessage = HistorySendUnavailableReason;
+            return;
+        }
+
+        if (!_historySendEligibility.TryGetValue(clientSubmissionId, out var eligibility) || !eligibility.CanSend)
+        {
+            _pageMessage = eligibility?.Message ?? "This report is not ready to queue. Refresh your saved reports and try again.";
+            return;
+        }
+
         _sending = true;
         try
         {
+            var draft = await SubmissionStore.GetDraftAsync(clientSubmissionId);
+            if (draft is null)
+            {
+                _pageMessage = "This report is no longer available to send. Refresh your saved reports and try again.";
+                await ReloadSavedReportsAsync();
+                return;
+            }
+
+            if (HasLocalAudio(draft.Submission))
+            {
+                _pageMessage = "This report has an original voice note saved on this device. Voice upload is not available yet; the note remains saved here and the report was not queued.";
+                return;
+            }
+
             await SubmissionStore.QueueAsync(clientSubmissionId);
             await SubmitQueuedAsync();
         }
         catch (InvalidOperationException)
         {
             _pageMessage = "This report is not ready to send. Open the draft to review it.";
+            await ReloadSavedReportsAsync();
+        }
+        finally
+        {
+            _sending = false;
+        }
+    }
+
+    private async Task SendNewReportAsync(IntakeSubmission submission)
+    {
+        if (_sending || !CanSubmitReport)
+        {
+            return;
+        }
+
+        _sending = true;
+        try
+        {
+            var saved = _activeDraftId is { } draftId
+                ? await SubmissionStore.CreateRevisionAsync(draftId, submission)
+                : await SubmissionStore.CreateDraftAsync(submission);
+            _activeDraftId = saved.ClientSubmissionId;
+            _activeSubmission = submission with { ClientSubmissionId = saved.ClientSubmissionId };
+            _reportDraft = PublicReportDraft.FromSubmission(_activeSubmission);
+            RememberDraftSnapshot();
+            await SubmissionStore.QueueAsync(saved.ClientSubmissionId);
+            await SubmitQueuedAsync();
+        }
+        catch (InvalidOperationException)
+        {
+            _pageMessage = "The report could not be sent yet. Check the current location catalogue, required confirmation, and saved draft, then retry.";
+            await ReloadSavedReportsAsync();
+        }
+        catch (Exception)
+        {
+            _pageMessage = "The report could not be sent. Your draft remains on this device and can be retried.";
             await ReloadSavedReportsAsync();
         }
         finally
@@ -244,7 +601,7 @@
                 : result.NeedsAttention > 0
                     ? "A report needs review before it can be sent. Open the draft to fix it."
                     : result.RetryPending > 0 || result.Queued > 0
-                        ? "Sending is not possible right now. Your report stays queued on this device and will be retried."
+                    ? "Your report remains queued on this device. No receipt has confirmed that SwiftAid received it."
                         : "There is nothing waiting to send.";
         }
         catch
@@ -281,10 +638,583 @@
         }
     }
 
-    private void StartNewReport()
+    private async Task StartNewReport()
     {
+        if (HasUnsavedChanges)
+        {
+            ShowUnsavedExitPrompt(PendingExitKind.StartNewReport);
+            return;
+        }
+
+        await BeginNewReportAsync();
+    }
+
+    private async Task BeginNewReportAsync()
+    {
+        _recordingSaveFailed = false;
+#if ANDROID
+        if (AudioCapture is SwiftAid.Mobile.Services.Audio.AndroidAudioCaptureService androidAudio)
+        {
+            _audioState = await androidAudio.ResetForNewReportAsync();
+        }
+#endif
         _activeDraftId = null;
         _activeSubmission = null;
+        _reportDraft = new PublicReportDraft { CapturedAt = DateTimeOffset.Now };
+        _pendingAudioAttachmentId = null;
+        _voiceSaved = false;
+        _savedAudioAttachmentId = null;
+        _audioMessage = null;
         _pageMessage = "Enter a new report. It is not saved until you choose Save draft.";
+        RememberDraftSnapshot();
     }
+
+    private async Task StartNewReportFromTrackingAsync()
+    {
+        if (HasUnsavedChanges)
+        {
+            ShowUnsavedExitPrompt(PendingExitKind.StartNewReportFromTracking);
+            return;
+        }
+
+        await BeginNewReportAsync();
+        Navigation.NavigateTo("/report");
+    }
+
+    private async Task StartRecordingAsync()
+    {
+        _audioMessage = null;
+        _recordingSaveFailed = false;
+        _voiceSaved = false;
+        _audioState = await AudioCapture.StartAsync();
+    }
+
+    private async Task StopRecordingAsync()
+    {
+        try
+        {
+            _audioState = await AudioCapture.StopAsync();
+            _recordingSaveFailed = _audioState.Status != AudioCaptureStatus.ReadyToSave;
+        }
+        catch
+        {
+            _recordingSaveFailed = true;
+            throw;
+        }
+    }
+
+    private async Task PlayRecordingAsync()
+    {
+        _audioState = _voiceSaved && _activeDraftId is { } draftId && _savedAudioAttachmentId is { } attachmentId
+            ? await AudioPlayback.PlaySavedAsync(draftId, attachmentId)
+            : await AudioPlayback.PlayAsync();
+    }
+
+    private async Task StopPlaybackAsync() => _audioState = await AudioPlayback.StopPlaybackAsync();
+
+    private async Task RetryTemporaryCleanupAsync() =>
+        _audioState = await AudioCapture.RetryTemporaryCleanupAsync();
+
+    private async Task RetryPendingAudioCleanupAsync()
+    {
+        try
+        {
+            var result = await SubmissionStore.RetryPendingAudioCleanupAsync();
+            if (result.Pending > 0 || result.Failed > 0)
+            {
+                _pageMessage = "Removal of an earlier voice note is still pending. Your saved reports remain on this device.";
+            }
+            else if (result.RetainedForHistory > 0)
+            {
+                _pageMessage = "An earlier voice note remains available with another saved report.";
+            }
+        }
+        catch (Exception)
+        {
+            _pageMessage = "Earlier voice-note cleanup could not be checked. Your saved reports remain on this device.";
+        }
+    }
+
+    private async Task SaveAudioToDraftAsync()
+    {
+        if (_activeDraftId is not { } currentDraftId)
+        {
+            _audioMessage = "Save the report details as a draft before attaching a voice note.";
+            return;
+        }
+
+        _pendingAudioAttachmentId ??= Guid.NewGuid();
+        try
+        {
+            var current = await SubmissionStore.GetDraftAsync(currentDraftId);
+            if (current is null)
+            {
+                _audioMessage = "This draft is no longer editable. Open a saved draft and try again.";
+                return;
+            }
+
+            var attachmentIds = current.Submission.OriginalAudioAttachmentIds;
+            if (!attachmentIds.Contains(_pendingAudioAttachmentId.Value))
+            {
+                var revisedSubmission = current.Submission with
+                {
+                    OriginalAudioAttachmentIds = attachmentIds.Append(_pendingAudioAttachmentId.Value).ToArray()
+                };
+                var revision = await SubmissionStore.CreateRevisionAsync(currentDraftId, revisedSubmission);
+                _activeDraftId = revision.ClientSubmissionId;
+                _activeSubmission = revisedSubmission with { ClientSubmissionId = revision.ClientSubmissionId };
+                _reportDraft = PublicReportDraft.FromSubmission(_activeSubmission);
+            }
+
+            var result = await AudioCapture.SaveToDraftAsync(_activeDraftId.Value, _pendingAudioAttachmentId.Value);
+            _audioState = AudioCapture.CurrentState;
+            _audioMessage = result.Message;
+            _voiceSaved = result.Saved;
+            if (result.Saved)
+            {
+                _savedAudioAttachmentId = _pendingAudioAttachmentId;
+                await ReloadSavedReportsAsync();
+            }
+        }
+        catch (Exception)
+        {
+            _audioMessage = "The recording could not be saved. Your report draft remains on this device; retry while this screen is open.";
+        }
+    }
+
+    private void AudioStateChanged(object? sender, AudioCaptureState state)
+    {
+        _ = InvokeAsync(() =>
+        {
+            _audioState = state;
+            StateHasChanged();
+        });
+    }
+
+    private async Task RefreshSavedVoiceAsync(Guid clientSubmissionId, IntakeSubmission submission)
+    {
+        _voiceSaved = false;
+        _savedAudioAttachmentId = null;
+        foreach (var attachmentId in submission.OriginalAudioAttachmentIds)
+        {
+            try
+            {
+                var audio = await AudioStore.ReadOriginalAsync(clientSubmissionId, attachmentId);
+                CryptographicOperations.ZeroMemory(audio);
+                _savedAudioAttachmentId = attachmentId;
+                _voiceSaved = true;
+                return;
+            }
+            catch (Exception)
+            {
+                // An identifier without a locally readable original is not presented as a saved recording.
+            }
+        }
+    }
+
+    private async Task CheckHistoryAudioAsync(IReadOnlyList<GuestSubmissionSummary> reports)
+    {
+        _historyAudioCheckComplete = false;
+        _historyAudioCheckFailed = false;
+        _historySendEligibility.Clear();
+        try
+        {
+            foreach (var report in reports.Where(report => report.State is GuestSubmissionLocalState.Draft or GuestSubmissionLocalState.NeedsAttention))
+            {
+                var draft = await SubmissionStore.GetDraftAsync(report.ClientSubmissionId);
+                if (draft is null)
+                {
+                    _historyAudioCheckFailed = true;
+                    _historySendEligibility[report.ClientSubmissionId] = new(
+                        false,
+                        "This report could not be checked. Refresh your saved reports before trying to send it.");
+                }
+                else if (HasLocalAudio(draft.Submission))
+                {
+                    _historySendEligibility[report.ClientSubmissionId] = new(
+                        false,
+                        "This report has an original voice note saved on this device. Voice upload is not available yet; the note remains saved here.");
+                }
+                else
+                {
+                    _historySendEligibility[report.ClientSubmissionId] = HasRequiredReportMetadata
+                        ? new(true, null)
+                        : new(false, null);
+                }
+            }
+
+            _historyAudioCheckComplete = true;
+        }
+        catch (Exception)
+        {
+            _historyAudioCheckComplete = false;
+            _historyAudioCheckFailed = true;
+        }
+    }
+
+    private HistorySendEligibility GetHistorySendEligibility(GuestSubmissionSummary report)
+    {
+        if (report.State is not (GuestSubmissionLocalState.Draft or GuestSubmissionLocalState.NeedsAttention))
+        {
+            return new(false, null);
+        }
+
+        if (!HasRequiredReportMetadata)
+        {
+            return new(false, null);
+        }
+
+        if (!_historyAudioCheckComplete)
+        {
+            return new(false, _historyAudioCheckFailed
+                ? "This report could not be checked. Refresh your saved reports before trying to send it."
+                : "This report is being checked before it can be queued.");
+        }
+
+        return _historySendEligibility.TryGetValue(report.ClientSubmissionId, out var eligibility)
+            ? eligibility
+            : new(false, "This report could not be checked. Refresh your saved reports before trying to send it.");
+    }
+
+    private sealed record HistorySendEligibility(bool CanSend, string? Message);
+
+    private static bool HasLocalAudio(IntakeSubmission? submission) =>
+        submission is not null && submission.OriginalAudioAttachmentIds.Count > 0;
+
+    private PublicVoiceCaptureState AudioViewState => _voiceSaved && _audioState.Status is not (AudioCaptureStatus.Recording or AudioCaptureStatus.Playing)
+        ? PublicVoiceCaptureState.ReadyToSave
+        : _audioState.Status switch
+    {
+        AudioCaptureStatus.Idle => PublicVoiceCaptureState.Idle,
+        AudioCaptureStatus.Recording => PublicVoiceCaptureState.Recording,
+        AudioCaptureStatus.ReadyToSave => PublicVoiceCaptureState.ReadyToSave,
+        AudioCaptureStatus.Saved => PublicVoiceCaptureState.ReadyToSave,
+        AudioCaptureStatus.Playing => PublicVoiceCaptureState.Playing,
+        AudioCaptureStatus.PermissionDenied => PublicVoiceCaptureState.PermissionDenied,
+        AudioCaptureStatus.Failed => PublicVoiceCaptureState.Failed,
+        _ => PublicVoiceCaptureState.Unsupported
+    };
+
+    private string? AudioMessage => _audioMessage ?? _audioState.Message;
+
+    private string DraftSnapshot() => JsonSerializer.Serialize(_reportDraft);
+
+    private void RememberDraftSnapshot() => _savedDraftSnapshot = DraftSnapshot();
+
+    private bool CanSaveCurrentDraft => _storageAvailable &&
+        _reportDraft.SubjectScope is not null &&
+        !_recordingSaveFailed;
+
+    private void ShowUnsavedExitPrompt(PendingExitKind exitKind, string? navigationTarget = null)
+    {
+        _pendingExitKind = exitKind;
+        _pendingNavigationTarget = navigationTarget;
+        _exitPromptError = null;
+        _showUnsavedExitPrompt = true;
+        _focusExitPrompt = true;
+    }
+
+    private async Task DismissUnsavedExitPromptAsync()
+    {
+        if (!_savingBeforeExit)
+        {
+            await CloseUnsavedExitPromptAsync();
+        }
+    }
+
+    private async Task ActivateExitPromptAsync()
+    {
+        try
+        {
+            _exitFocusModule ??= await JSRuntime.InvokeAsync<IJSObjectReference>(
+                "import",
+                "./js/mobile-report-exit-focus.js");
+            await _exitFocusModule.InvokeVoidAsync("activate", _exitPromptDialog, GetInitialExitAction());
+            _exitFocusTrapActive = true;
+        }
+        catch (Exception exception) when (exception is JSException or InvalidOperationException)
+        {
+            try
+            {
+                await GetInitialExitAction().FocusAsync();
+            }
+            catch (InvalidOperationException)
+            {
+                // Keep the current focus if the prompt cannot be focused.
+            }
+        }
+    }
+
+    private ElementReference GetInitialExitAction() =>
+        CanSaveCurrentDraft ? _saveDraftButton : _leaveButton;
+
+    private async Task FocusExitPromptDialogAsync()
+    {
+        if (_exitFocusModule is not null && _exitFocusTrapActive)
+        {
+            try
+            {
+                await _exitFocusModule.InvokeVoidAsync("focusDialog", _exitPromptDialog);
+                return;
+            }
+            catch (Exception exception) when (exception is JSException or InvalidOperationException)
+            {
+                // Fall back to the dialog's native focus target if interop is unavailable.
+            }
+        }
+
+        await _exitPromptDialog.FocusAsync();
+    }
+
+    private Task HandleExitPromptKeyUpAsync(KeyboardEventArgs args) =>
+        args.Key == "Escape" ? DismissUnsavedExitPromptAsync() : Task.CompletedTask;
+
+    private async Task DeactivateExitPromptAsync()
+    {
+        if (_exitFocusModule is null || !_exitFocusTrapActive)
+        {
+            return;
+        }
+
+        try
+        {
+            await _exitFocusModule.InvokeVoidAsync("deactivate", _exitPromptDialog);
+        }
+        catch (Exception exception) when (exception is JSException or InvalidOperationException)
+        {
+            // Focus restoration is best effort if the WebView has already disconnected.
+        }
+        finally
+        {
+            _exitFocusTrapActive = false;
+        }
+    }
+
+    private Task CloseUnsavedExitPromptAsync()
+    {
+        _showUnsavedExitPrompt = false;
+        _exitPromptError = null;
+        _pendingNavigationTarget = null;
+        _focusDialogWhileSaving = false;
+        _deactivateExitFocusTrapAfterRender = true;
+        return Task.CompletedTask;
+    }
+
+    private async Task LeaveWithoutSavingAsync()
+    {
+        if (_savingBeforeExit)
+        {
+            return;
+        }
+
+        var exitKind = _pendingExitKind;
+        var navigationTarget = _pendingNavigationTarget;
+        await CloseUnsavedExitPromptAsync();
+        await DiscardCurrentUnsavedStateAsync();
+        await ContinueAfterExitAsync(exitKind, navigationTarget);
+    }
+
+    private async Task SaveDraftAndContinueAsync()
+    {
+        if (_savingBeforeExit || !CanSaveCurrentDraft)
+        {
+            return;
+        }
+
+        _savingBeforeExit = true;
+        _focusDialogWhileSaving = true;
+        _exitPromptError = null;
+        var draftSaved = false;
+        var voiceCaptureAttempted = false;
+        var voiceNoteWasPending = !_voiceSaved &&
+            (_audioState.Status is AudioCaptureStatus.Recording or AudioCaptureStatus.ReadyToSave);
+        try
+        {
+            var submission = _reportDraft.ToSubmission(
+                _countryCatalogueVersion,
+                _processingPolicyReference,
+                _processingPolicyVersion,
+                _countries,
+                _countryCatalogueIsCurrent);
+            if (_activeDraftId.HasValue && _activeSubmission is not null)
+            {
+                submission = submission with
+                {
+                    OriginalAudioAttachmentIds = _activeSubmission.OriginalAudioAttachmentIds.ToArray()
+                };
+            }
+
+            await SaveDraftAsync(new PublicReportSaveRequest(_activeDraftId, submission));
+            draftSaved = true;
+
+            if (_audioState.Status == AudioCaptureStatus.Recording)
+            {
+                voiceCaptureAttempted = true;
+                await StopRecordingAsync();
+            }
+
+            if (voiceNoteWasPending && _audioState.Status != AudioCaptureStatus.ReadyToSave)
+            {
+                _recordingSaveFailed = true;
+                throw new InvalidOperationException("The recording is not ready to save.");
+            }
+
+            if (_audioState.Status == AudioCaptureStatus.ReadyToSave && !_voiceSaved)
+            {
+                voiceCaptureAttempted = true;
+                await SaveAudioToDraftAsync();
+                if (!_voiceSaved)
+                {
+                    throw new InvalidOperationException("The voice note could not be saved.");
+                }
+            }
+
+            var exitKind = _pendingExitKind;
+            var navigationTarget = _pendingNavigationTarget;
+            await CloseUnsavedExitPromptAsync();
+            await ContinueAfterExitAsync(exitKind, navigationTarget);
+        }
+        catch
+        {
+            var voiceNoteCouldNotBeSaved = voiceNoteWasPending &&
+                voiceCaptureAttempted &&
+                !_voiceSaved &&
+                _audioState.Status != AudioCaptureStatus.ReadyToSave;
+            if (voiceNoteCouldNotBeSaved)
+            {
+                _recordingSaveFailed = true;
+                _exitPromptError = draftSaved
+                    ? "The report draft was saved, but the recording could not be saved. Your report stays here; choose Leave to continue without the recording."
+                    : "The recording could not be saved. Your report stays here; choose Leave to continue without the recording.";
+            }
+            else if (draftSaved)
+            {
+                _exitPromptError = "The draft was saved, but the voice note could not be saved. Your entries are still here; try again or choose Leave.";
+            }
+            else
+            {
+                _exitPromptError = "The draft could not be saved. Your entries are still here; try again or choose Leave.";
+            }
+        }
+        finally
+        {
+            _savingBeforeExit = false;
+        }
+    }
+
+    private async Task ContinueAfterExitAsync(PendingExitKind exitKind, string? navigationTarget)
+    {
+        switch (exitKind)
+        {
+            case PendingExitKind.Navigate:
+                if (!string.IsNullOrWhiteSpace(navigationTarget))
+                {
+                    _allowNextNavigation = true;
+                    Navigation.NavigateTo(navigationTarget);
+                }
+                break;
+            case PendingExitKind.StartNewReport:
+                await BeginNewReportAsync();
+                break;
+            case PendingExitKind.StartNewReportFromTracking:
+                await BeginNewReportAsync();
+                Navigation.NavigateTo("/report");
+                break;
+        }
+    }
+
+    private async Task DiscardCurrentUnsavedStateAsync()
+    {
+#if ANDROID
+        if (AudioCapture is SwiftAid.Mobile.Services.Audio.AndroidAudioCaptureService androidAudio)
+        {
+            _audioState = await androidAudio.CancelCaptureAsync();
+        }
+#endif
+        _reportDraft = _activeSubmission is null
+            ? new PublicReportDraft { CapturedAt = DateTimeOffset.Now }
+            : PublicReportDraft.FromSubmission(_activeSubmission);
+        _pendingAudioAttachmentId = null;
+        _audioMessage = null;
+        if (_activeDraftId is { } draftId && _activeSubmission is not null)
+        {
+            await RefreshSavedVoiceAsync(draftId, _activeSubmission);
+        }
+        else
+        {
+            _voiceSaved = false;
+            _savedAudioAttachmentId = null;
+        }
+
+        RememberDraftSnapshot();
+    }
+
+    private async Task ConfirmInternalNavigationAsync(LocationChangingContext context)
+    {
+        if (_allowNextNavigation)
+        {
+            _allowNextNavigation = false;
+            return;
+        }
+
+        if (!HasUnsavedChanges)
+        {
+            return;
+        }
+
+        context.PreventNavigation();
+        ShowUnsavedExitPrompt(PendingExitKind.Navigate, context.TargetLocation);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        AudioCapture.StateChanged -= AudioStateChanged;
+        await DeactivateExitPromptAsync();
+        if (_exitFocusModule is not null)
+        {
+            try
+            {
+                await _exitFocusModule.DisposeAsync();
+            }
+            catch (Exception exception) when (exception is JSException or InvalidOperationException)
+            {
+                // The page can be disposed after its WebView has disconnected.
+            }
+            finally
+            {
+                _exitFocusModule = null;
+            }
+        }
+
+        try
+        {
+#if ANDROID
+            if (AudioCapture is SwiftAid.Mobile.Services.Audio.AndroidAudioCaptureService androidAudio)
+            {
+                await androidAudio.CancelCaptureAsync();
+                return;
+            }
+#endif
+            if (_audioState.Status == AudioCaptureStatus.Recording)
+            {
+                await AudioCapture.StopAsync();
+            }
+            else if (_audioState.Status == AudioCaptureStatus.Playing)
+            {
+                await AudioPlayback.StopPlaybackAsync();
+            }
+        }
+        catch (Exception)
+        {
+            // Navigation must not retain the page even if native cleanup reports a device error.
+        }
+    }
+
+    private enum PendingExitKind
+    {
+        Navigate,
+        StartNewReport,
+        StartNewReportFromTracking
+    }
+
 }

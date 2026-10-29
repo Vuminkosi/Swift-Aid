@@ -68,7 +68,8 @@ public sealed class GatewayGeoLookupClient(IGeographicRegistry registry) : IGeoL
         result.CountryCode,
         result.CountryName,
         result.Ancestry,
-        result.HasChildren);
+        result.HasChildren,
+        result.Ancestors.Select(ancestor => new GeoLookupAncestor(ancestor.Id, ancestor.Name, ancestor.Kind)).ToList());
 
     private static UiCapabilityResult<T> Invalid<T>(string message) => new(
         UiCapabilityResultCode.InvalidRequest,
