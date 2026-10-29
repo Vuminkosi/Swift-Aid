@@ -7,5 +7,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\SwiftAid.UI\SwiftAid.UI.csproj" />
+    <ProjectReference Include="..\..\src\SwiftAid.Contracts\SwiftAid.Contracts.csproj" />
   </ItemGroup>
 </Project>

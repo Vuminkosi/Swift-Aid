@@ -6,11 +6,13 @@
     <ProjectReference Include="..\SwiftAid.Infrastructure\SwiftAid.Infrastructure.csproj" />
     <ProjectReference Include="..\SwiftAid.Intelligence\SwiftAid.Intelligence.csproj" />
     <ProjectReference Include="..\SwiftAid.Client\SwiftAid.Client.csproj" />
+    <ProjectReference Include="..\SwiftAid.Browser\SwiftAid.Browser.csproj" />
     <ProjectReference Include="..\SwiftAid.UI\SwiftAid.UI.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="MudBlazor" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" />
     <PackageReference Include="CommunityToolkit.Datasync.Server" />
     <PackageReference Include="NATS.Net" />
   </ItemGroup>

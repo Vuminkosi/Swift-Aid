@@ -52,6 +52,11 @@
           "NATS.Extensions.Microsoft.DependencyInjection": "3.3.1"
         }
       },
+      "BouncyCastle.Cryptography": {
+        "type": "Transitive",
+        "resolved": "2.6.2",
+        "contentHash": "7oWOcvnntmMKNzDLsdxAYqApt+AjpRpP2CShjMfIa3umZ42UQMvH0tl1qAliYPNYO6vTdcGMqnRrCPmsfzTI1w=="
+      },
       "CommunityToolkit.Datasync.Server.Abstractions": {
         "type": "Transitive",
         "resolved": "10.1.2",
@@ -112,6 +117,14 @@
         "contentHash": "vSc7CY4KCP7HE4QTElDx/ExnGLbg9kXb89MS6cdvI+0D4sxvTYb16vGtXmF2jSDMV3iDmykSXdIUPTz8TDS6gg==",
         "dependencies": {
           "Newtonsoft.Json": "13.0.4"
+        }
+      },
+      "MailKit": {
+        "type": "Transitive",
+        "resolved": "4.17.0",
+        "contentHash": "1nUAVLxM9fhT/78we6/AGsCesnpn5dRNLLeRqOfr52Wnk87pzVwo5YMTMyqnmoXrYc7piGhmayiMA/OgDluIjg==",
+        "dependencies": {
+          "MimeKit": "4.17.0"
         }
       },
       "Microsoft.AspNetCore.OData": {
@@ -263,6 +276,15 @@
         "type": "Transitive",
         "resolved": "8.4.3",
         "contentHash": "+HjBpfUSS6pxC607cz6BAW1w6bxpTjurZ7x0Chvjcksg2eXPyj5BMPla068zAn/ZZtpIDaaNFNDyUcJ3kQkUfA=="
+      },
+      "MimeKit": {
+        "type": "Transitive",
+        "resolved": "4.17.0",
+        "contentHash": "h/KXsCreJf8RpR/PSAtlbvYtZFndp9N8Wn1Bs248AL7ITyhn+AiIY5bLTvt60tbN2mu6g8KadtBNWygTji2lqg==",
+        "dependencies": {
+          "BouncyCastle.Cryptography": "2.6.2",
+          "System.Security.Cryptography.Pkcs": "10.0.0"
+        }
       },
       "NATS.Client.Abstractions": {
         "type": "Transitive",
@@ -467,6 +489,11 @@
         "resolved": "6.0.1",
         "contentHash": "rHaWtKDwCi9qJ3ObKo8LHPMuuwv33YbmQi7TcUK1C264V3MFnOr5Im7QgCTdLniztP3GJyeiSg5x8NqYJFqRmg=="
       },
+      "System.Security.Cryptography.Pkcs": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "Wz+IgL2xpg8KJ4i2VWj6uz1PmZNu4Q0Ljlwd73P9Vze5NcOBtctLii3itV0PB2MpOqwqDEGfB6RCdv94A4E5yQ=="
+      },
       "swiftaid.application": {
         "type": "Project",
         "dependencies": {
@@ -515,6 +542,7 @@
         "dependencies": {
           "CommunityToolkit.Datasync.Server.EntityFrameworkCore": "[10.1.2, )",
           "FirebaseAdmin": "[3.7.0, )",
+          "MailKit": "[4.17.0, )",
           "Microsoft.AspNetCore.Authentication.Facebook": "[10.0.14, )",
           "Microsoft.AspNetCore.Authentication.Google": "[10.0.14, )",
           "Microsoft.AspNetCore.Authentication.OpenIdConnect": "[10.0.14, )",
@@ -529,7 +557,8 @@
           "OpenIddict.Validation.AspNetCore": "[7.7.2, )",
           "OpenIddict.Validation.ServerIntegration": "[7.7.2, )",
           "StackExchange.Redis": "[3.4.20, )",
-          "SwiftAid.Application": "[1.0.0, )"
+          "SwiftAid.Application": "[1.0.0, )",
+          "System.Security.Cryptography.Pkcs": "[10.0.14, )"
         }
       },
       "swiftaid.intelligence": {
