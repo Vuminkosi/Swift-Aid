@@ -41,12 +41,14 @@ public sealed class GuestIntakeTests
                     ?? Enumerable.Empty<string>())
                 + $" {endpoint.RoutePattern.RawText}");
 
-        Assert.Equal(5, routes.Count);
+        Assert.Equal(7, routes.Count);
         AssertRoute(routes, "POST", "/public/v1/intake/sessions", 64 * 1024);
         AssertRoute(routes, "POST", "/public/v1/intake/reports", 64 * 1024);
         AssertRoute(routes, "POST", "/public/v1/intake/receipt", 4096);
         AssertRoute(routes, "GET", "/public/v1/intake/metadata", null);
         AssertRoute(routes, "GET", "/public/v1/intake/metadata/countries", null);
+        AssertRoute(routes, "GET", "/public/v1/intake/geo/search", null);
+        AssertRoute(routes, "GET", "/public/v1/intake/geo/children", null);
 
         static void AssertRoute(
             Dictionary<string, RouteEndpoint> endpoints, string method, string path, long? maxBody)

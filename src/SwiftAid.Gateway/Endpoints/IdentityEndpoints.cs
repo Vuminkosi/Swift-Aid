@@ -8,6 +8,7 @@ using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using OpenIddict.Abstractions;
@@ -837,7 +838,7 @@ public static class IdentityEndpoints
     private static async Task<IResult> RegisterPasswordUser(
         HttpContext context,
         IAntiforgery antiforgery,
-        IPasswordIdentityRegistrar registrar,
+        [FromServices] IPasswordIdentityRegistrar registrar,
         UserManager<SwiftAidUser> userManager,
         SignInManager<SwiftAidUser> signInManager,
         CancellationToken cancellationToken)
@@ -1324,7 +1325,7 @@ public static class IdentityEndpoints
     private static async Task<IResult> GetEmailVerificationStatus(
         HttpContext context,
         UserManager<SwiftAidUser> userManager,
-        IEmailVerificationService verificationService,
+        [FromServices] IEmailVerificationService verificationService,
         CancellationToken cancellationToken)
     {
         if (context.User.Identity?.IsAuthenticated != true)
@@ -1358,7 +1359,7 @@ public static class IdentityEndpoints
         HttpContext context,
         IAntiforgery antiforgery,
         UserManager<SwiftAidUser> userManager,
-        IEmailVerificationService verificationService,
+        [FromServices] IEmailVerificationService verificationService,
         CancellationToken cancellationToken)
     {
         try
@@ -1418,7 +1419,7 @@ public static class IdentityEndpoints
         HttpContext context,
         IAntiforgery antiforgery,
         UserManager<SwiftAidUser> userManager,
-        IEmailVerificationService verificationService,
+        [FromServices] IEmailVerificationService verificationService,
         CancellationToken cancellationToken)
     {
         try
@@ -1502,7 +1503,7 @@ public static class IdentityEndpoints
         IAntiforgery antiforgery,
         UserManager<SwiftAidUser> userManager,
         SignInManager<SwiftAidUser> signInManager,
-        IEmailVerificationService verificationService,
+        [FromServices] IEmailVerificationService verificationService,
         CancellationToken cancellationToken)
     {
         try
@@ -1589,7 +1590,7 @@ public static class IdentityEndpoints
         HttpContext context,
         IAntiforgery antiforgery,
         UserManager<SwiftAidUser> userManager,
-        IEmailVerificationService verificationService,
+        [FromServices] IEmailVerificationService verificationService,
         CancellationToken cancellationToken)
     {
         try
@@ -1675,9 +1676,9 @@ public static class IdentityEndpoints
     private static async Task<IResult> GetUserProfile(
         HttpContext context,
         UserManager<SwiftAidUser> userManager,
-        IUserProfileService profileService,
-        IEmailVerificationService verificationService,
-        IProfileAvatarService avatarService,
+        [FromServices] IUserProfileService profileService,
+        [FromServices] IEmailVerificationService verificationService,
+        [FromServices] IProfileAvatarService avatarService,
         CancellationToken cancellationToken)
     {
         if (context.User.Identity?.IsAuthenticated != true)
@@ -1721,9 +1722,9 @@ public static class IdentityEndpoints
         HttpContext context,
         IAntiforgery antiforgery,
         UserManager<SwiftAidUser> userManager,
-        IUserProfileService profileService,
-        IEmailVerificationService verificationService,
-        IProfileAvatarService avatarService,
+        [FromServices] IUserProfileService profileService,
+        [FromServices] IEmailVerificationService verificationService,
+        [FromServices] IProfileAvatarService avatarService,
         CancellationToken cancellationToken)
     {
         try
@@ -1809,7 +1810,7 @@ public static class IdentityEndpoints
         HttpContext context,
         IAntiforgery antiforgery,
         UserManager<SwiftAidUser> userManager,
-        IProfileAvatarService avatarService,
+        [FromServices] IProfileAvatarService avatarService,
         CancellationToken cancellationToken)
     {
         try
@@ -1894,7 +1895,7 @@ public static class IdentityEndpoints
     private static async Task<IResult> GetProfileAvatar(
         HttpContext context,
         UserManager<SwiftAidUser> userManager,
-        IProfileAvatarService avatarService,
+        [FromServices] IProfileAvatarService avatarService,
         CancellationToken cancellationToken)
     {
         if (context.User.Identity?.IsAuthenticated != true)
@@ -1944,7 +1945,7 @@ public static class IdentityEndpoints
         HttpContext context,
         IAntiforgery antiforgery,
         UserManager<SwiftAidUser> userManager,
-        IProfileAvatarService avatarService,
+        [FromServices] IProfileAvatarService avatarService,
         CancellationToken cancellationToken)
     {
         try
@@ -2031,7 +2032,7 @@ public static class IdentityEndpoints
     private static async Task<IResult> GetMyMemberships(
         HttpContext context,
         UserManager<SwiftAidUser> userManager,
-        IOrganizationMembershipService membershipService,
+        [FromServices] IOrganizationMembershipService membershipService,
         CancellationToken cancellationToken) =>
         await RequireUserAsync(context, userManager, async user =>
         {
@@ -2049,7 +2050,7 @@ public static class IdentityEndpoints
     private static async Task<IResult> SearchOrganizations(
         HttpContext context,
         UserManager<SwiftAidUser> userManager,
-        IOrganizationMembershipService membershipService,
+        [FromServices] IOrganizationMembershipService membershipService,
         string? search,
         CancellationToken cancellationToken) =>
         await RequireUserAsync(context, userManager, async _ =>
@@ -2064,7 +2065,7 @@ public static class IdentityEndpoints
     private static async Task<IResult> GetMyMembershipRequests(
         HttpContext context,
         UserManager<SwiftAidUser> userManager,
-        IOrganizationMembershipService membershipService,
+        [FromServices] IOrganizationMembershipService membershipService,
         CancellationToken cancellationToken) =>
         await RequireUserAsync(context, userManager, async user =>
         {
@@ -2082,7 +2083,7 @@ public static class IdentityEndpoints
         HttpContext context,
         IAntiforgery antiforgery,
         UserManager<SwiftAidUser> userManager,
-        IOrganizationMembershipService membershipService,
+        [FromServices] IOrganizationMembershipService membershipService,
         CancellationToken cancellationToken)
     {
         try
@@ -2149,7 +2150,7 @@ public static class IdentityEndpoints
         HttpContext context,
         IAntiforgery antiforgery,
         UserManager<SwiftAidUser> userManager,
-        IOrganizationInvitationService invitationService,
+        [FromServices] IOrganizationInvitationService invitationService,
         CancellationToken cancellationToken)
     {
         try
@@ -2220,7 +2221,7 @@ public static class IdentityEndpoints
 private static async Task<IResult> GetNotificationPreferences(
         HttpContext context,
         UserManager<SwiftAidUser> userManager,
-        INotificationPreferenceService preferenceService,
+        [FromServices] INotificationPreferenceService preferenceService,
         CancellationToken cancellationToken)
     {
         if (context.User.Identity?.IsAuthenticated != true)
@@ -2254,7 +2255,7 @@ private static async Task<IResult> GetNotificationPreferences(
         HttpContext context,
         IAntiforgery antiforgery,
         UserManager<SwiftAidUser> userManager,
-        INotificationPreferenceService preferenceService,
+        [FromServices] INotificationPreferenceService preferenceService,
         CancellationToken cancellationToken)
     {
         try
@@ -2717,7 +2718,7 @@ private static async Task<IResult> GetNotificationPreferences(
         HttpContext context,
         IAntiforgery antiforgery,
         UserManager<SwiftAidUser> userManager,
-        IOrganizationInvitationService invitationService,
+        [FromServices] IOrganizationInvitationService invitationService,
         CancellationToken cancellationToken)
     {
         try
