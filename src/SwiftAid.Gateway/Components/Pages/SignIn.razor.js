@@ -219,6 +219,64 @@ export function wireFacebookLogin(buttonId, statusId, refreshButtonId, initialRe
     }
 }
 
+export async function passwordSignIn(email, password, rememberMe, returnUrl) {
+    let requestToken;
+    try {
+        requestToken = await fetchRequestToken();
+    } catch {
+        return { ok: false, error: "Sign-in is temporarily unavailable. Please try again." };
+    }
+
+    let response;
+    try {
+        response = await fetch("/auth/password/login", {
+            method: "POST",
+            credentials: "same-origin",
+            cache: "no-store",
+            headers: {
+                Accept: "application/json",
+                "Content-Type": "application/json",
+                "X-CSRF-TOKEN": requestToken
+            },
+            body: JSON.stringify({ email, password, rememberMe: rememberMe === true })
+        });
+    } catch {
+        return { ok: false, error: "Check your connection and try again." };
+    }
+
+    if (response.ok) {
+        if (!isSafeLocalReturnUrl(returnUrl)) {
+            return { ok: false, error: "Sign-in completed, but the return destination is invalid." };
+        }
+
+        return { ok: true, error: null };
+    }
+
+    if (response.status === 401) {
+        return { ok: false, error: "The email or password is incorrect." };
+    }
+
+    if (response.status === 409) {
+        return { ok: false, error: "You are already signed in. Your current account is unchanged." };
+    }
+
+    const payload = await safeJson(response);
+    return {
+        ok: false,
+        error: typeof payload?.error === "string" && payload.error.trim().length > 0
+            ? payload.error
+            : "Sign-in is temporarily unavailable. Please try again."
+    };
+}
+
+async function safeJson(response) {
+    try {
+        return await response.json();
+    } catch {
+        return null;
+    }
+}
+
 export function focusPrimaryOption() {
     const primaryOption = document.getElementById("facebook-sign-in-button") ??
         document.querySelector(".sign-in-provider-option form button[type='submit']");
