@@ -24,6 +24,16 @@ public sealed class AppearanceAboutSurfaceTests
     }
 
     [Fact]
+    public async Task AccessibilityPreferenceControl_OffersReduceMotionAndTextSizeNote()
+    {
+        var markup = await RenderAsync<AccessibilityPreferenceControl>();
+
+        Assert.Contains("Reduce motion", markup, StringComparison.Ordinal);
+        Assert.Contains("Motion follows your device setting.", markup, StringComparison.Ordinal);
+        Assert.Contains("Text size follows your device setting.", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AboutSurface_ShowsVersionAndOnlyProvidedLinks()
     {
         var markup = await RenderComponentAsync<AboutSurface>(new Dictionary<string, object?>

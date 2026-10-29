@@ -35,44 +35,57 @@ else
     }
     <MudPaper Class="pa-4 mb-4" Elevation="0">
         <MudText Typo="Typo.subtitle1">Personal information</MudText>
-        <MudTextField T="string" Label="Full name" @bind-Value="_displayName"
-                      Variant="Variant.Outlined" Required="true" RequiredError="Enter a display name."
-                      Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="128"
-                      autocomplete="name" aria-label="Full name" />
-        <MudTextField T="string" Label="Phone number (optional)" @bind-Value="_phone"
-                      Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="24"
-                      autocomplete="tel" InputMode="InputMode.tel"
-                      HelperText="Starts with + and your country code." aria-label="Phone number" />
-        <MudStack Row="true" Spacing="2">
-            <MudTextField T="string" Label="Country (optional)" @bind-Value="_country"
-                          Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="2"
-                          autocomplete="country"
-                          HelperText="Two-letter code." aria-label="Country" />
-            <MudTextField T="string" Label="Region (optional)" @bind-Value="_region"
-                          Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="128"
-                          autocomplete="address-level1" aria-label="Region" />
-        </MudStack>
-        <MudTextField T="string" Label="Locality (optional)" @bind-Value="_locality"
-                      Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="128"
-                      autocomplete="address-level2" aria-label="Locality" />
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync"
-                   Disabled="@(!CanSave)" StartIcon="@Icons.Material.Filled.Save"
-                   Class="auth-cta">
-            @(Snapshot.IsSaving ? "Saving…" : "Save changes")
-        </MudButton>
-    </MudPaper>
-    <MudPaper Class="pa-4 mb-4" Elevation="0">
-        <MudText Typo="Typo.subtitle1">Contact details</MudText>
-        <MudText Typo="Typo.body2">@(Snapshot.Email ?? "No email address")</MudText>
-        <MudText Typo="Typo.caption" Color="@(Snapshot.EmailVerified ? Color.Success : Color.Warning)">
-            @(Snapshot.EmailVerified ? "Verified" : "Verification required")
-        </MudText>
-        @if (!Snapshot.EmailVerified)
-        {
-            <MudButton Href="/verify-email" Variant="Variant.Text" Color="Color.Primary">
-                Verify email address
-            </MudButton>
-        }
+        <MudGrid Spacing="2">
+            <MudItem xs="12" md="6">
+                <MudTextField T="string" Label="Full name" @bind-Value="_displayName"
+                              Variant="Variant.Outlined" Required="true" RequiredError="Enter a display name."
+                              Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="128"
+                              autocomplete="name" aria-label="Full name" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudTextField T="string" Label="Email address" Value="@(Snapshot.Email ?? "No email address")"
+                              Variant="Variant.Outlined" ReadOnly="true" Disabled="@Snapshot.IsSaving"
+                              autocomplete="email" aria-label="Email address (verified contact, read-only)" />
+                <MudText Typo="Typo.caption" Color="@(Snapshot.EmailVerified ? Color.Success : Color.Warning)">
+                    @(Snapshot.EmailVerified ? "Verified" : "Verification required")
+                </MudText>
+                @if (!Snapshot.EmailVerified)
+                {
+                    <MudButton Href="/verify-email" Variant="Variant.Text" Color="Color.Primary">
+                        Verify email address
+                    </MudButton>
+                }
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudTextField T="string" Label="Phone number (optional)" @bind-Value="_phone"
+                              Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="24"
+                              autocomplete="tel" InputMode="InputMode.tel"
+                              HelperText="Starts with + and your country code." aria-label="Phone number" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudTextField T="string" Label="Country (optional)" @bind-Value="_country"
+                              Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="2"
+                              autocomplete="country"
+                              HelperText="Two-letter code." aria-label="Country" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudTextField T="string" Label="Region (optional)" @bind-Value="_region"
+                              Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="128"
+                              autocomplete="address-level1" aria-label="Region" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudTextField T="string" Label="Locality (optional)" @bind-Value="_locality"
+                              Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="128"
+                              autocomplete="address-level2" aria-label="Locality" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync"
+                           Disabled="@(!CanSave)" StartIcon="@Icons.Material.Filled.Save"
+                           Class="auth-cta">
+                    @(Snapshot.IsSaving ? "Saving…" : "Save changes")
+                </MudButton>
+            </MudItem>
+        </MudGrid>
     </MudPaper>
 }
 
