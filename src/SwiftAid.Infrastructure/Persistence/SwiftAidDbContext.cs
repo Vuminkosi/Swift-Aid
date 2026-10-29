@@ -20,6 +20,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
     : IdentityUserContext<SwiftAidUser>(options)
 {
     public DbSet<ExternalIdentityMappingEntity> ExternalIdentityMappings => Set<ExternalIdentityMappingEntity>();
+    public DbSet<EmailVerificationEntity> EmailVerifications => Set<EmailVerificationEntity>();
     public DbSet<ActorEntity> Actors => Set<ActorEntity>();
     public DbSet<ActorAccessStateEntity> ActorAccessStates => Set<ActorAccessStateEntity>();
     public DbSet<OrganizationEntity> Organizations => Set<OrganizationEntity>();
@@ -148,6 +149,26 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
             .IsUnique().HasDatabaseName("ux_external_identities_provider_issuer_subject");
         mapping.HasOne<ActorEntity>().WithMany().HasForeignKey(entity => entity.ActorId)
             .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_external_identities_actor");
+
+        var verification = modelBuilder.Entity<EmailVerificationEntity>();
+        verification.ToTable("email_verifications", "swiftaid_identity", table =>
+        {
+            table.HasCheckConstraint(
+                "ck_email_verifications_attempts_nonnegative",
+                "attempt_count >= 0");
+        });
+        verification.HasKey(entity => entity.UserId).HasName("pk_email_verifications");
+        verification.Property(entity => entity.UserId).HasColumnName("user_id").HasColumnType("text");
+        verification.Property(entity => entity.CodeHash).HasColumnName("code_hash").HasColumnType("text");
+        verification.Property(entity => entity.ExpiresAtUtc).HasColumnName("expires_at_utc")
+            .HasColumnType("timestamp with time zone");
+        verification.Property(entity => entity.AttemptCount).HasColumnName("attempt_count");
+        verification.Property(entity => entity.LastSentAtUtc).HasColumnName("last_sent_at_utc")
+            .HasColumnType("timestamp with time zone");
+        verification.Property(entity => entity.CreatedAtUtc).HasColumnName("created_at_utc")
+            .HasColumnType("timestamp with time zone");
+        verification.HasOne<SwiftAidUser>().WithMany().HasForeignKey(entity => entity.UserId)
+            .OnDelete(DeleteBehavior.Cascade).HasConstraintName("fk_email_verifications_user");
     }
 
     private static void ConfigureActors(ModelBuilder modelBuilder)

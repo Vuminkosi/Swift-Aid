@@ -57,6 +57,9 @@ public static class IdentityEndpoints
         group.MapPost("/password/change", ChangePasswordUser);
         group.MapPost("/password/reset/request", RequestPasswordReset);
         group.MapPost("/password/reset/confirm", ConfirmPasswordReset);
+        group.MapGet("/email/status", GetEmailVerificationStatus);
+        group.MapPost("/email/otp/request", RequestEmailOtp);
+        group.MapPost("/email/otp/confirm", ConfirmEmailOtp);
 
         if (identityServerOptions.Enabled)
         {
@@ -1301,6 +1304,183 @@ public static class IdentityEndpoints
         }
     }
 
+    private static async Task<IResult> GetEmailVerificationStatus(
+        HttpContext context,
+        UserManager<SwiftAidUser> userManager,
+        IEmailVerificationService verificationService,
+        CancellationToken cancellationToken)
+    {
+        if (context.User.Identity?.IsAuthenticated != true)
+        {
+            return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to view verification status.");
+        }
+
+        try
+        {
+            var user = await userManager.GetUserAsync(context.User).ConfigureAwait(false);
+            if (user is null)
+            {
+                return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to view verification status.");
+            }
+
+            var verified = await verificationService.IsVerifiedAsync(user, cancellationToken).ConfigureAwait(false);
+            SetNoStore(context);
+            return Results.Ok(new EmailVerificationStatusResponse(verified, user.Email));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return PasswordError(context, StatusCodes.Status503ServiceUnavailable, "Verification status is temporarily unavailable.");
+        }
+    }
+
+    private static async Task<IResult> RequestEmailOtp(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        UserManager<SwiftAidUser> userManager,
+        IEmailVerificationService verificationService,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false);
+        }
+        catch (AntiforgeryValidationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The verification request is invalid.");
+        }
+        catch (InvalidOperationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The verification request is invalid.");
+        }
+
+        if (context.User.Identity?.IsAuthenticated != true)
+        {
+            return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to verify your email address.");
+        }
+
+        try
+        {
+            var user = await userManager.GetUserAsync(context.User).ConfigureAwait(false);
+            if (user is null)
+            {
+                return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to verify your email address.");
+            }
+
+            var outcome = await verificationService.RequestCodeAsync(user, cancellationToken).ConfigureAwait(false);
+            return outcome.Status switch
+            {
+                EmailVerificationStatus.Sent => Results.Ok(new EmailOtpRequestResponse(
+                    "A verification code has been sent to your email address.")),
+                EmailVerificationStatus.Throttled => PasswordError(
+                    context,
+                    StatusCodes.Status429TooManyRequests,
+                    "A code was sent recently. Wait before requesting a new one."),
+                _ => PasswordError(
+                    context,
+                    StatusCodes.Status503ServiceUnavailable,
+                    "Verification codes are temporarily unavailable. Try again later.")
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return PasswordError(context, StatusCodes.Status503ServiceUnavailable, "Verification codes are temporarily unavailable. Try again later.");
+        }
+        finally
+        {
+            SetNoStore(context);
+        }
+    }
+
+    private static async Task<IResult> ConfirmEmailOtp(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        UserManager<SwiftAidUser> userManager,
+        IEmailVerificationService verificationService,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false);
+        }
+        catch (AntiforgeryValidationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The verification request is invalid.");
+        }
+        catch (InvalidOperationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The verification request is invalid.");
+        }
+
+        if (context.User.Identity?.IsAuthenticated != true)
+        {
+            return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to verify your email address.");
+        }
+
+        var bodyRead = await ReadPasswordRequestAsync(context.Request, cancellationToken).ConfigureAwait(false);
+        if (bodyRead.Status != PasswordBodyStatus.Valid || bodyRead.Request is null)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "Enter the verification code.");
+        }
+
+        var code = bodyRead.Request.Code?.Trim() ?? string.Empty;
+        bodyRead.Request.Code = string.Empty;
+        if (string.IsNullOrWhiteSpace(code) || code.Length > 32)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "Enter the verification code.");
+        }
+
+        try
+        {
+            var user = await userManager.GetUserAsync(context.User).ConfigureAwait(false);
+            if (user is null)
+            {
+                return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to verify your email address.");
+            }
+
+            var outcome = await verificationService.ConfirmCodeAsync(user, code, cancellationToken).ConfigureAwait(false);
+            return outcome.Status switch
+            {
+                EmailVerificationStatus.Verified => Results.Ok(new EmailOtpConfirmResponse(true)),
+                EmailVerificationStatus.InvalidCode => PasswordError(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    "The code is incorrect. Check the latest email and try again."),
+                EmailVerificationStatus.TooManyAttempts => PasswordError(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    "Too many incorrect attempts. Request a new code."),
+                EmailVerificationStatus.Unavailable => PasswordError(
+                    context,
+                    StatusCodes.Status503ServiceUnavailable,
+                    "Verification is temporarily unavailable. Try again later."),
+                _ => PasswordError(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    "The code is invalid or has expired. Request a new one.")
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return PasswordError(context, StatusCodes.Status503ServiceUnavailable, "Verification is temporarily unavailable. Try again later.");
+        }
+        finally
+        {
+            SetNoStore(context);
+        }
+    }
+
     private static IResult PasswordError(HttpContext context, int statusCode, string message)
     {
         SetNoStore(context);
@@ -1641,6 +1821,12 @@ public static class IdentityEndpoints
     private sealed record PasswordResetRequestResponse(string Message);
 
     private sealed record PasswordAuthError(string Error);
+
+    private sealed record EmailVerificationStatusResponse(bool Verified, string? Email);
+
+    private sealed record EmailOtpRequestResponse(string Message);
+
+    private sealed record EmailOtpConfirmResponse(bool Verified);
 
     private sealed class PasswordRequest
     {

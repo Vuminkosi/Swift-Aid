@@ -1047,6 +1047,42 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.EmailVerificationEntity", b =>
+                {
+                    b.Property<string>("UserId")
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempt_count");
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("code_hash");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<DateTimeOffset>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at_utc");
+
+                    b.Property<DateTimeOffset>("LastSentAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_sent_at_utc");
+
+                    b.HasKey("UserId")
+                        .HasName("pk_email_verifications");
+
+                    b.ToTable("email_verifications", "swiftaid_identity", t =>
+                        {
+                            t.HasCheckConstraint("ck_email_verifications_attempts_nonnegative", "attempt_count >= 0");
+                        });
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Cases.ManagedCaseEscalationEntity", b =>
                 {
                     b.Property<Guid>("EscalationId")
@@ -2873,6 +2909,16 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_domain_outbox_event");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.EmailVerificationEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Identity.SwiftAidUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_email_verifications_user");
                 });
 
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Cases.ManagedCaseEscalationEntity", b =>

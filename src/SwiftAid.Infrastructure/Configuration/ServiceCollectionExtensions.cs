@@ -469,7 +469,9 @@ public static class ServiceCollectionExtensions
         services.Configure<PublicSiteOptions>(configuration.GetSection("PublicSite"));
         services.Configure<SmtpEmailOptions>(configuration.GetSection("Smtp"));
         services.AddScoped<IEmailSender<SwiftAidUser>, SmtpEmailSender>();
+        services.AddScoped<IAccountVerificationMailer, SmtpEmailSender>();
         services.AddScoped<IPasswordIdentityRegistrar, PasswordIdentityRegistrar>();
+        services.AddScoped<IEmailVerificationService, EmailVerificationService>();
         services.AddSingleton<OrganizationSsoRegistry>();
         services.AddScoped<IExternalIdentityMappingStore, EfExternalIdentityMappingStore>();
         services.AddScoped<IExternalIdentityResolver, ExternalIdentityResolver>();

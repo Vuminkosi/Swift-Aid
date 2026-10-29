@@ -223,3 +223,19 @@ public sealed class SecurityAuditEntryEntity
     public DateTimeOffset RecordedAtUtc { get; set; }
     public string? ReasonCode { get; set; }
 }
+
+/// <summary>Single active email-verification code per user. Codes are stored hashed, expire quickly and allow few attempts.</summary>
+public sealed class EmailVerificationEntity
+{
+    public required string UserId { get; set; }
+
+    public required string CodeHash { get; set; }
+
+    public DateTimeOffset ExpiresAtUtc { get; set; }
+
+    public int AttemptCount { get; set; }
+
+    public DateTimeOffset LastSentAtUtc { get; set; }
+
+    public DateTimeOffset CreatedAtUtc { get; set; }
+}
