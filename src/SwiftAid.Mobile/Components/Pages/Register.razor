@@ -105,7 +105,7 @@
             var result = await AuthClient.RegisterAsync(_email!.Trim(), _password!);
             if (result.Status == PasswordAuthStatus.Succeeded)
             {
-                Navigation.NavigateTo("/account");
+                Navigation.NavigateTo("/welcome-complete");
                 return;
             }
 

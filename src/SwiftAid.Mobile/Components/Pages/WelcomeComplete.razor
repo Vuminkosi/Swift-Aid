@@ -1,0 +1,84 @@
+@page "/welcome-complete"
+@using SwiftAid.Client.Authentication
+@using SwiftAid.Client.Presentation
+@using SwiftAid.Mobile.Services.Account
+@using SwiftAid.Mobile.Services.Http
+@using SwiftAid.UI.Components.Surfaces.Account
+@inject IServiceProvider ServiceProvider
+
+<PageTitle>Welcome to SwiftAid | SwiftAid</PageTitle>
+
+<WelcomeCompleteSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" />
+
+@code {
+    private WelcomeCompleteSnapshot _snapshot = WelcomeCompleteSnapshot.Loading;
+
+    private IUserProfileClient ProfileClient =>
+        (IUserProfileClient?)ServiceProvider.GetService(typeof(IUserProfileClient))
+        ?? CreateProfileFallback()
+        ?? new UnavailableUserProfileClient();
+
+    private IOrganizationMembershipClient MembershipClient =>
+        (IOrganizationMembershipClient?)ServiceProvider.GetService(typeof(IOrganizationMembershipClient))
+        ?? CreateMembershipFallback()
+        ?? new UnavailableOrganizationMembershipClient();
+
+    private IUserProfileClient? CreateProfileFallback()
+    {
+        var address = GatewayAddress();
+        return string.IsNullOrWhiteSpace(address)
+            ? null
+            : new HttpUserProfileClient(CookieSessionHttpClient.Shared(address));
+    }
+
+    private IOrganizationMembershipClient? CreateMembershipFallback()
+    {
+        var address = GatewayAddress();
+        return string.IsNullOrWhiteSpace(address)
+            ? null
+            : new HttpOrganizationMembershipClient(CookieSessionHttpClient.Shared(address));
+    }
+
+    private string? GatewayAddress()
+    {
+        var options = (NativeSessionHttpOptions?)ServiceProvider.GetService(typeof(NativeSessionHttpOptions));
+        return options?.GatewayBaseAddress?.ToString();
+    }
+
+    protected override async Task OnInitializedAsync() => await RefreshAsync();
+
+    private async Task RefreshAsync()
+    {
+        var profile = await ProfileClient.GetAsync();
+        if (profile.Value is null)
+        {
+            _snapshot = profile.Code == UiCapabilityResultCode.Denied
+                ? WelcomeCompleteSnapshot.SignedOut
+                : WelcomeCompleteSnapshot.Unavailable with
+                {
+                    StatusMessage = profile.Message ?? WelcomeCompleteSnapshot.Unavailable.StatusMessage
+                };
+            return;
+        }
+
+        if (!profile.Value.IsSignedIn)
+        {
+            _snapshot = WelcomeCompleteSnapshot.SignedOut;
+            return;
+        }
+
+        var memberships = await MembershipClient.GetMineAsync();
+        var requests = await MembershipClient.GetMyRequestsAsync();
+        if (memberships.Value is null || requests.Value is null)
+        {
+            _snapshot = WelcomeCompleteSnapshot.Unavailable;
+            return;
+        }
+
+        _snapshot = new WelcomeCompleteSnapshot(
+            WelcomeCompleteViewState.Ready,
+            profile.Value.DisplayName,
+            memberships.Value.Any(entry => entry.WorkspaceIds.Count > 0),
+            requests.Value.Any(entry => string.Equals(entry.Status, "Pending", StringComparison.OrdinalIgnoreCase)));
+    }
+}

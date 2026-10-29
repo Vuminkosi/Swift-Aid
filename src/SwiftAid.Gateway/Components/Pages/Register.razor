@@ -117,8 +117,8 @@
                 _password);
             if (result.Ok)
             {
-                _liveMessage = "Account created. Taking you to sign in.";
-                Navigation.NavigateTo("/sign-in", forceLoad: true);
+                _liveMessage = "Account created. Taking you to SwiftAid.";
+                Navigation.NavigateTo("/welcome-complete", forceLoad: true);
                 return;
             }
 

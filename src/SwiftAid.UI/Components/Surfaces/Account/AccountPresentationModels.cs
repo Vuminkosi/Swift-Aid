@@ -165,3 +165,32 @@ public sealed record NotificationsSnapshot(
 }
 
 public sealed record NotificationPreferenceChange(bool WorkReminders, bool SessionUpdates);
+
+public enum WelcomeCompleteViewState
+{
+    Loading,
+    Ready,
+    SignedOut,
+    Unavailable
+}
+
+/// <summary>Account-ready completion. Destinations derive from verified state only.</summary>
+public sealed record WelcomeCompleteSnapshot(
+    WelcomeCompleteViewState ViewState,
+    string? DisplayName,
+    bool HasActiveWorkspace,
+    bool HasPendingRequest,
+    string? StatusMessage = null,
+    bool StatusIsError = false)
+{
+    public static WelcomeCompleteSnapshot Loading { get; } = new(
+        WelcomeCompleteViewState.Loading, null, false, false);
+
+    public static WelcomeCompleteSnapshot SignedOut { get; } = new(
+        WelcomeCompleteViewState.SignedOut, null, false, false,
+        "Sign in to view this page.", true);
+
+    public static WelcomeCompleteSnapshot Unavailable { get; } = new(
+        WelcomeCompleteViewState.Unavailable, null, false, false,
+        "Your account details are temporarily unavailable.", true);
+}

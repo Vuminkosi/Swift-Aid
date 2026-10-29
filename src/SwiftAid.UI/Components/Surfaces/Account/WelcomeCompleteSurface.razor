@@ -1,0 +1,83 @@
+@using SwiftAid.UI.Components.Surfaces.Account
+
+@if (Snapshot.ViewState == WelcomeCompleteViewState.Loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" aria-label="Loading your account status" />
+}
+else if (Snapshot.ViewState == WelcomeCompleteViewState.SignedOut)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+        Sign in to view this page.
+    </MudAlert>
+    <MudButton Href="/sign-in" Variant="Variant.Filled" Color="Color.Primary"
+               StartIcon="@Icons.Material.Filled.Login">
+        Sign in
+    </MudButton>
+}
+else if (Snapshot.ViewState == WelcomeCompleteViewState.Unavailable)
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert">
+        @(Snapshot.StatusMessage ?? "Your account details are temporarily unavailable.")
+    </MudAlert>
+    <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="OnRefresh"
+               StartIcon="@Icons.Material.Filled.Refresh">
+        Retry
+    </MudButton>
+}
+else
+{
+    <MudPaper Class="pa-4 mb-4" Elevation="0">
+        <MudStack AlignItems="AlignItems.Center" Spacing="3">
+            <MudAvatar Color="Color.Success" Size="Size.Large">
+                <MudIcon Icon="@Icons.Material.Filled.Check" />
+            </MudAvatar>
+            <MudText Typo="Typo.h6" Align="Align.Center">
+                @(string.IsNullOrWhiteSpace(Snapshot.DisplayName)
+                    ? "Welcome to SwiftAid!"
+                    : $"Welcome to SwiftAid, {Snapshot.DisplayName}!")
+            </MudText>
+            <MudText Typo="Typo.body2" Align="Align.Center">
+                Your account is ready. Let's keep healthier communities together.
+            </MudText>
+        </MudStack>
+    </MudPaper>
+    @if (Snapshot.HasActiveWorkspace)
+    {
+        <MudButton Href="/" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true">
+            Continue to your workspace
+        </MudButton>
+        <MudButton Href="/organizations" Variant="Variant.Text" Color="Color.Primary" FullWidth="true">
+            View organizations
+        </MudButton>
+    }
+    else if (Snapshot.HasPendingRequest)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+            Your organization request is pending review. Your workspace will appear here once it is approved.
+        </MudAlert>
+        <MudButton Href="/organizations" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true">
+            View request status
+        </MudButton>
+        <MudButton Href="/" Variant="Variant.Text" Color="Color.Primary" FullWidth="true">
+            Continue to SwiftAid
+        </MudButton>
+    }
+    else
+    {
+        <MudButton Href="/" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true">
+            Continue to SwiftAid
+        </MudButton>
+        <MudButton Href="/organizations" Variant="Variant.Text" Color="Color.Primary" FullWidth="true">
+            Join an organization
+        </MudButton>
+    }
+    <MudText Typo="Typo.caption" Align="Align.Center">
+        Signing in does not by itself provide access to an organization's records.
+    </MudText>
+}
+
+@code {
+    [Parameter] public WelcomeCompleteSnapshot Snapshot { get; set; } = WelcomeCompleteSnapshot.Loading;
+
+    [Parameter] public EventCallback OnRefresh { get; set; }
+}
