@@ -1,0 +1,137 @@
+@using SwiftAid.UI.Components.Theme
+@using SwiftAid.UI.Components
+
+<MudContainer MaxWidth="MaxWidth.Small" Class="linked-identity-surface">
+    <SwiftAidPageHeading Eyebrow="Your SwiftAid account"
+                         Title="Sign-in methods"
+                         Description="See which providers can sign you in, link a new one, or remove one you no longer use. Removing a method never deletes reports saved on this device."
+                         HeadingId="linked-identity-heading" />
+
+    @if (ViewState == LinkedIdentityViewState.Loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" aria-hidden="true" />
+        <MudText Typo="Typo.body2">Checking your linked sign-in methods…</MudText>
+    }
+    else if (ViewState == LinkedIdentityViewState.Unavailable)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert">
+            <MudText>Linked sign-in methods are unavailable right now. Your saved guest drafts remain on this device.</MudText>
+        </MudAlert>
+        <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="OnRefresh" StartIcon="@Icons.Material.Filled.Refresh">
+            Try again
+        </MudButton>
+    }
+    else if (ViewState == LinkedIdentityViewState.SignedOut)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+            <MudText>Sign in to see your linked sign-in methods. Signing in does not by itself grant organization or case access.</MudText>
+        </MudAlert>
+        <MudButton Href="/sign-in" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Login">
+            Sign in
+        </MudButton>
+    }
+    else
+    {
+        @if (!string.IsNullOrWhiteSpace(StatusMessage))
+        {
+            <MudAlert Severity="@(StatusIsError ? Severity.Warning : Severity.Info)"
+                      Variant="Variant.Outlined" Dense="true" role="status" aria-live="polite">
+                @StatusMessage
+            </MudAlert>
+        }
+
+        <MudPaper Class="pa-4 mb-4" Elevation="0">
+            <MudText Typo="Typo.subtitle1" HtmlTag="h2">Linked to your account</MudText>
+            @if (Linked.Count == 0)
+            {
+                <MudText Typo="Typo.body2">No sign-in methods are linked yet. Link one below to have a spare way in.</MudText>
+            }
+            else
+            {
+                <ul class="linked-identity-list" aria-label="Linked sign-in methods">
+                    @foreach (var row in Linked)
+                    {
+                        <li @key="row.Id">
+                            <div>
+                                <MudText Typo="Typo.body1">@row.DisplayName</MudText>
+                                @if (!row.CurrentlyAvailable)
+                                {
+                                    <MudText Typo="Typo.caption">Currently unavailable for sign-in.</MudText>
+                                }
+                            </div>
+                            <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">Linked</MudChip>
+                            <MudButton Variant="Variant.Text" Color="Color.Primary"
+                                       Disabled="@UnlinkInProgress"
+                                       OnClick="@(() => OnUnlink.InvokeAsync(row.Id))"
+                                       StartIcon="@Icons.Material.Filled.LinkOff"
+                                       aria-label="@($"Remove {row.DisplayName} sign-in")">
+                                Remove
+                            </MudButton>
+                        </li>
+                    }
+                </ul>
+            }
+        </MudPaper>
+
+        @if (ReauthenticationRequired)
+        {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+                <MudText>Confirm it is you before changing sign-in methods. This proof lasts a few minutes.</MudText>
+            </MudAlert>
+            <form method="post" action="@ReauthenticateAction">
+                <input type="hidden" name="__RequestVerificationToken" value="@RequestToken" />
+                <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Outlined" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.VerifiedUser">
+                    Confirm with @(ReauthenticationDisplayName ?? ReauthenticationProviderId)
+                </MudButton>
+            </form>
+        }
+
+        <MudPaper Class="pa-4" Elevation="0">
+            <MudText Typo="Typo.subtitle1" HtmlTag="h2">Link a new method</MudText>
+            @if (AvailableToLink.Count == 0)
+            {
+                <MudText Typo="Typo.body2">No other verified providers are available right now.</MudText>
+            }
+            else
+            {
+                <ul class="linked-identity-list" aria-label="Providers available to link">
+                    @foreach (var provider in AvailableToLink)
+                    {
+                        <li @key="provider.Id">
+                            <MudText Typo="Typo.body1">@provider.DisplayName</MudText>
+                            <form method="post" action="@LinkAction(provider.Id)">
+                                <input type="hidden" name="__RequestVerificationToken" value="@RequestToken" />
+                                <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Text" Color="Color.Primary"
+                                           StartIcon="@Icons.Material.Filled.AddLink">
+                                    Link @provider.DisplayName
+                                </MudButton>
+                            </form>
+                        </li>
+                    }
+                </ul>
+            }
+        </MudPaper>
+    }
+</MudContainer>
+
+@code {
+    [Parameter] public LinkedIdentityViewState ViewState { get; set; } = LinkedIdentityViewState.Loading;
+    [Parameter] public IReadOnlyList<LinkedIdentityRow> Linked { get; set; } = [];
+    [Parameter] public IReadOnlyList<LinkableProviderRow> AvailableToLink { get; set; } = [];
+    [Parameter] public string RequestToken { get; set; } = string.Empty;
+    [Parameter] public bool UnlinkInProgress { get; set; }
+    [Parameter] public bool ReauthenticationRequired { get; set; }
+    [Parameter] public string? ReauthenticationProviderId { get; set; }
+    [Parameter] public string? ReauthenticationDisplayName { get; set; }
+    [Parameter] public string? StatusMessage { get; set; }
+    [Parameter] public bool StatusIsError { get; set; }
+    [Parameter] public EventCallback OnRefresh { get; set; }
+    [Parameter] public EventCallback<string> OnUnlink { get; set; }
+
+    private string LinkAction(string providerId) =>
+        $"/auth/identities/{System.Uri.EscapeDataString(providerId)}/link?returnUrl={System.Uri.EscapeDataString($"/sign-in-methods?linked={System.Uri.EscapeDataString(providerId)}")}";
+
+    private string ReauthenticateAction =>
+        $"/auth/reauthenticate/{System.Uri.EscapeDataString(ReauthenticationProviderId ?? string.Empty)}?returnUrl={System.Uri.EscapeDataString($"/sign-in-methods?reauthenticated={System.Uri.EscapeDataString(ReauthenticationProviderId ?? string.Empty)}")}";
+}

@@ -42,6 +42,7 @@ public static class IdentityEndpoints
             group.MapGet("/external/callback", CompleteExternalLogin);
             group.MapPost("/reauthenticate/{providerId}", ReauthenticateProvider);
             group.MapGet("/reauthenticate/callback", CompleteReauthentication);
+            group.MapGet("/identities", GetLinkedIdentities);
             group.MapPost("/identities/{providerId}/link", LinkExternalIdentity);
             group.MapGet("/identities/link/callback", CompleteExternalIdentityLink);
             group.MapPost("/identities/{providerId}/unlink", UnlinkExternalIdentity);
@@ -555,6 +556,29 @@ public static class IdentityEndpoints
         {
             await context.SignOutAsync(IdentityConstants.ExternalScheme).ConfigureAwait(false);
         }
+    }
+
+    private static async Task<IResult> GetLinkedIdentities(
+        HttpContext context,
+        SwiftAidDbContext dbContext,
+        TimeProvider timeProvider,
+        CancellationToken cancellationToken)
+    {
+        SetNoStore(context);
+        if (!TryGetCurrentActor(context, out var actor) ||
+            !await IsCurrentActorAsync(actor, dbContext, timeProvider, cancellationToken).ConfigureAwait(false))
+        {
+            return Results.Unauthorized();
+        }
+
+        var providers = await dbContext.ExternalIdentityMappings.AsNoTracking()
+            .Where(mapping => mapping.ActorId == actor.ActorId)
+            .Select(mapping => mapping.Provider)
+            .Distinct()
+            .OrderBy(provider => provider)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        return Results.Ok(providers);
     }
 
     private static async Task<IResult> LinkExternalIdentity(
