@@ -47,6 +47,17 @@ else
         </MudButton>
         <MudText Typo="Typo.caption">External channels follow your device settings.</MudText>
     </MudPaper>
+    <MudPaper Class="pa-4 mb-4" Elevation="0">
+        <MudText Typo="Typo.subtitle1">My subscriptions</MudText>
+        <MudText Typo="Typo.body2">Session subscriptions are not available in this service yet. Turn on Session updates above to hear about new sessions.</MudText>
+        @if (!string.IsNullOrWhiteSpace(SessionsHref))
+        {
+            <MudButton Href="@SessionsHref" Variant="Variant.Text" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.EventNote">
+                Browse community sessions
+            </MudButton>
+        }
+    </MudPaper>
 }
 
 @code {
@@ -55,6 +66,12 @@ else
     [Parameter] public EventCallback OnRefresh { get; set; }
 
     [Parameter] public EventCallback<NotificationPreferenceChange> OnSave { get; set; }
+
+    /// <summary>
+    /// Optional deep link to community sessions. When null or empty no link
+    /// renders, so hosts without that route stay clean.
+    /// </summary>
+    [Parameter] public string? SessionsHref { get; set; }
 
     private bool _workReminders = true;
     private bool _sessionUpdates = true;
