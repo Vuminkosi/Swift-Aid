@@ -71,24 +71,16 @@
                    FullWidth="true">
             Continue as guest
         </MudButton>
-        <MudButton OnClick="SignInAsync"
+        <MudButton Href="/account"
                    Variant="Variant.Text"
                    Color="Color.Primary"
-                   FullWidth="true"
-                   Disabled="_signInWorking">
-            @(_signInWorking ? "Opening sign-in…" : "Sign in")
+                   FullWidth="true">
+            Sign in
         </MudButton>
-        @if (_signInMessage is not null)
-        {
-            <MudText Typo="Typo.body2" role="status" aria-live="polite">@_signInMessage</MudText>
-        }
     </div>
 </div>
 
 @code {
-    private bool _signInWorking;
-    private string? _signInMessage;
-
     protected override async Task OnInitializedAsync()
     {
         MobileWelcomePreferences? preferences = null;
@@ -130,37 +122,5 @@
         new IntroCompletionStore().MarkCompleted();
         Navigation.NavigateTo("/report");
         return Task.CompletedTask;
-    }
-
-    private async Task SignInAsync()
-    {
-        if (_signInWorking)
-        {
-            return;
-        }
-
-        _signInWorking = true;
-        _signInMessage = null;
-        try
-        {
-            bool signedIn = await AuthenticationSession.SignInAsync();
-            if (signedIn)
-            {
-                new IntroCompletionStore().MarkCompleted();
-                Navigation.NavigateTo("/");
-            }
-            else
-            {
-                _signInMessage = "Sign-in was not completed. You can continue as a guest.";
-            }
-        }
-        catch (Exception)
-        {
-            _signInMessage = "Sign-in could not be completed. Try again or continue as a guest.";
-        }
-        finally
-        {
-            _signInWorking = false;
-        }
     }
 }
