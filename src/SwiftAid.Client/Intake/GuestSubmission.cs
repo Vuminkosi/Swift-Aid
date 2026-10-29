@@ -56,6 +56,18 @@ public sealed record GuestDraftDetails(
     DateTimeOffset UpdatedAtUtc,
     long Version = 1);
 
+/// <summary>A guest submission write guarded by the version the caller previously read.</summary>
+/// <param name="Record">The complete protected record to persist.</param>
+/// <param name="ExpectedVersion">Null requires a new record; a positive value must match the current version.</param>
+public sealed record GuestSubmissionWrite(GuestSubmissionRecord Record, long? ExpectedVersion);
+
+/// <summary>Raised when a versioned guest write no longer matches the stored record.</summary>
+public sealed class GuestSubmissionPersistenceConflictException(Guid clientSubmissionId)
+    : Exception("The saved report changed. Refresh it before trying again.")
+{
+    public Guid ClientSubmissionId { get; } = clientSubmissionId;
+}
+
 public sealed record GuestSyncSummary(int Queued, int Received, int RetryPending, int NeedsAttention);
 
 public sealed record GuestReceiptRefreshSummary(int Updated, int RetryPending);
@@ -69,6 +81,22 @@ public interface IGuestSubmissionPersistence
     Task SaveAsync(GuestSubmissionRecord submission, CancellationToken cancellationToken);
 
     Task SaveBatchAsync(IReadOnlyList<GuestSubmissionRecord> submissions, CancellationToken cancellationToken);
+
+    async Task SaveVersionedAsync(
+        GuestSubmissionRecord submission,
+        long? expectedVersion,
+        CancellationToken cancellationToken)
+    {
+        await SaveAsync(submission, cancellationToken).ConfigureAwait(false);
+    }
+
+    async Task SaveBatchVersionedAsync(
+        IReadOnlyList<GuestSubmissionWrite> writes,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(writes);
+        await SaveBatchAsync(writes.Select(write => write.Record).ToArray(), cancellationToken).ConfigureAwait(false);
+    }
 }
 
 public interface IGuestSubmissionStore
