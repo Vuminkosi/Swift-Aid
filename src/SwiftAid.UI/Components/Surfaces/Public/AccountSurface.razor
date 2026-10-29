@@ -170,6 +170,10 @@
         }
 
         <ThemePreferenceControl />
+        @if (Snapshot.IsSignedIn && !string.IsNullOrWhiteSpace(NotificationsHref))
+        {
+            <MudLink Href="@NotificationsHref" aria-label="Notification preferences">Notification preferences</MudLink>
+        }
 
         @if (!string.IsNullOrWhiteSpace(Snapshot.StatusMessage) || !string.IsNullOrWhiteSpace(_actionError))
         {
@@ -208,6 +212,12 @@
     /// link renders, so hosts without that route stay clean.
     /// </summary>
     [Parameter] public string? OrganizationsHref { get; set; }
+
+    /// <summary>
+    /// Optional deep link to the notifications page. When null or empty no
+    /// link renders, so hosts without that route stay clean.
+    /// </summary>
+    [Parameter] public string? NotificationsHref { get; set; }
 
     /// <summary>
     /// Optional sign-out confirmation hook. Defaults to the shared

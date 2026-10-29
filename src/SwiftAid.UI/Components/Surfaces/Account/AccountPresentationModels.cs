@@ -135,3 +135,33 @@ public sealed record OrganizationsSnapshot(
 }
 
 public sealed record MembershipJoinRequest(string OrganizationId, string? Reason);
+
+public enum NotificationsViewState
+{
+    Loading,
+    Ready,
+    SignedOut,
+    Unavailable
+}
+
+public sealed record NotificationsSnapshot(
+    NotificationsViewState ViewState,
+    bool WorkReminders,
+    bool SessionUpdates,
+    bool IsSaving,
+    string? StatusMessage = null,
+    bool StatusIsError = false)
+{
+    public static NotificationsSnapshot Loading { get; } = new(
+        NotificationsViewState.Loading, true, true, false);
+
+    public static NotificationsSnapshot SignedOut { get; } = new(
+        NotificationsViewState.SignedOut, true, true, false,
+        "Sign in to view notification preferences.", true);
+
+    public static NotificationsSnapshot Unavailable { get; } = new(
+        NotificationsViewState.Unavailable, true, true, false,
+        "Notification preferences are temporarily unavailable.", true);
+}
+
+public sealed record NotificationPreferenceChange(bool WorkReminders, bool SessionUpdates);

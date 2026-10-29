@@ -248,6 +248,18 @@ public enum MembershipRequestStatus
     Declined
 }
 
+/// <summary>In-app notification preferences. Channel delivery consent stays with device settings.</summary>
+public sealed class NotificationPreferenceEntity
+{
+    public required string UserId { get; set; }
+
+    public bool WorkReminders { get; set; }
+
+    public bool SessionUpdates { get; set; }
+
+    public DateTimeOffset UpdatedAtUtc { get; set; }
+}
+
 /// <summary>Member-initiated request to join an organization. Review stays with staff tooling.</summary>
 public sealed class MembershipRequestEntity
 {

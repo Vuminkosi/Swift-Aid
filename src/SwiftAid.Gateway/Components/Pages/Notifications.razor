@@ -1,0 +1,75 @@
+@page "/notifications"
+@using SwiftAid.Client.Presentation
+@using SwiftAid.Gateway.Presentation
+@using SwiftAid.Infrastructure.Identity
+@using SwiftAid.UI.Components.Surfaces.Account
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Identity
+@inject IServiceProvider ServiceProvider
+
+<PageTitle>Notifications | SwiftAid</PageTitle>
+
+<NotificationsSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OnSave="SaveAsync" />
+
+@code {
+    private NotificationsSnapshot _snapshot = NotificationsSnapshot.Loading;
+
+    private INotificationPreferenceClient PreferenceClient =>
+        (INotificationPreferenceClient?)ServiceProvider.GetService(typeof(INotificationPreferenceClient))
+        ?? CreateFallback()
+        ?? new UnavailableNotificationPreferenceClient();
+
+    private INotificationPreferenceClient? CreateFallback()
+    {
+        var auth = (AuthenticationStateProvider?)ServiceProvider.GetService(typeof(AuthenticationStateProvider));
+        var users = (UserManager<SwiftAidUser>?)ServiceProvider.GetService(typeof(UserManager<SwiftAidUser>));
+        var preferences = (INotificationPreferenceService?)ServiceProvider.GetService(typeof(INotificationPreferenceService));
+        return auth is null || users is null || preferences is null
+            ? null
+            : new GatewayNotificationPreferenceClient(auth, users, preferences);
+    }
+
+    protected override async Task OnInitializedAsync() => await RefreshAsync();
+
+    private async Task RefreshAsync()
+    {
+        var result = await PreferenceClient.GetAsync();
+        _snapshot = Map(result, result.Value);
+    }
+
+    private async Task SaveAsync(NotificationPreferenceChange change)
+    {
+        _snapshot = _snapshot with { IsSaving = true, StatusMessage = null, StatusIsError = false };
+        var result = await PreferenceClient.SaveAsync(
+            new NotificationPreferenceEdit(change.WorkReminders, change.SessionUpdates));
+        _snapshot = Map(result, result.Value);
+    }
+
+    private static NotificationsSnapshot Map(
+        UiCapabilityResult<NotificationPreferenceState> result,
+        NotificationPreferenceState? value)
+    {
+        if (value is null)
+        {
+            return result.Code == UiCapabilityResultCode.Denied
+                ? NotificationsSnapshot.SignedOut
+                : NotificationsSnapshot.Unavailable with
+                {
+                    StatusMessage = result.Message ?? NotificationsSnapshot.Unavailable.StatusMessage
+                };
+        }
+
+        if (!value.IsSignedIn)
+        {
+            return NotificationsSnapshot.SignedOut;
+        }
+
+        return new NotificationsSnapshot(
+            NotificationsViewState.Ready,
+            value.WorkReminders,
+            value.SessionUpdates,
+            IsSaving: false,
+            value.StatusMessage,
+            value.StatusIsError);
+    }
+}

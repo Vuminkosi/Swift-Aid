@@ -62,6 +62,8 @@ public static class IdentityEndpoints
         group.MapPost("/email/otp/confirm", ConfirmEmailOtp);
         group.MapGet("/profile", GetUserProfile);
         group.MapPut("/profile", SaveUserProfile);
+        group.MapGet("/notifications/preferences", GetNotificationPreferences);
+        group.MapPut("/notifications/preferences", SaveNotificationPreferences);
         group.MapGet("/organizations/mine", GetMyMemberships);
         group.MapGet("/organizations/directory", SearchOrganizations);
         group.MapGet("/organizations/requests/mine", GetMyMembershipRequests);
@@ -1759,6 +1761,102 @@ public static class IdentityEndpoints
         }).ConfigureAwait(false);
     }
 
+    private static async Task<IResult> GetNotificationPreferences(
+        HttpContext context,
+        UserManager<SwiftAidUser> userManager,
+        INotificationPreferenceService preferenceService,
+        CancellationToken cancellationToken)
+    {
+        if (context.User.Identity?.IsAuthenticated != true)
+        {
+            return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to view notification preferences.");
+        }
+
+        try
+        {
+            var user = await userManager.GetUserAsync(context.User).ConfigureAwait(false);
+            if (user is null)
+            {
+                return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to view notification preferences.");
+            }
+
+            var preferences = await preferenceService.GetAsync(user.Id, cancellationToken).ConfigureAwait(false);
+            SetNoStore(context);
+            return Results.Ok(new NotificationPreferencesResponse(preferences.WorkReminders, preferences.SessionUpdates));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return PasswordError(context, StatusCodes.Status503ServiceUnavailable, "Notification preferences are temporarily unavailable.");
+        }
+    }
+
+    private static async Task<IResult> SaveNotificationPreferences(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        UserManager<SwiftAidUser> userManager,
+        INotificationPreferenceService preferenceService,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false);
+        }
+        catch (AntiforgeryValidationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The preferences request is invalid.");
+        }
+        catch (InvalidOperationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The preferences request is invalid.");
+        }
+
+        if (context.User.Identity?.IsAuthenticated != true)
+        {
+            return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to save notification preferences.");
+        }
+
+        var bodyRead = await ReadPasswordRequestAsync(context.Request, cancellationToken).ConfigureAwait(false);
+        if (bodyRead.Status != PasswordBodyStatus.Valid || bodyRead.Request is null)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "Choose your notification preferences.");
+        }
+
+        try
+        {
+            var user = await userManager.GetUserAsync(context.User).ConfigureAwait(false);
+            if (user is null)
+            {
+                return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to save notification preferences.");
+            }
+
+            var saved = await preferenceService.SaveAsync(
+                user.Id,
+                new NotificationPreferenceData(
+                    bodyRead.Request.WorkReminders,
+                    bodyRead.Request.SessionUpdates),
+                cancellationToken).ConfigureAwait(false);
+            if (saved is null)
+            {
+                return PasswordError(context, StatusCodes.Status503ServiceUnavailable, "Saving preferences is temporarily unavailable.");
+            }
+
+            SetNoStore(context);
+            return Results.Ok(new NotificationPreferencesResponse(saved.WorkReminders, saved.SessionUpdates));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return PasswordError(context, StatusCodes.Status503ServiceUnavailable, "Saving preferences is temporarily unavailable.");
+        }
+    }
+
     private static IResult PasswordError(HttpContext context, int statusCode, string message)
     {
         SetNoStore(context);
@@ -2138,6 +2236,8 @@ public static class IdentityEndpoints
 
     private sealed record MembershipRequestListResponse(IReadOnlyList<MembershipRequestResponse> Requests);
 
+    private sealed record NotificationPreferencesResponse(bool WorkReminders, bool SessionUpdates);
+
     private sealed class PasswordRequest
     {
         public PasswordRequest()
@@ -2171,6 +2271,10 @@ public static class IdentityEndpoints
         public string? OrganizationId { get; set; }
 
         public string? Reason { get; set; }
+
+        public bool WorkReminders { get; set; } = true;
+
+        public bool SessionUpdates { get; set; } = true;
     }
 
     private enum PasswordBodyStatus

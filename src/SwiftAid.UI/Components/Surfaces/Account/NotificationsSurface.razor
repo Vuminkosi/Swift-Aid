@@ -1,0 +1,76 @@
+@using SwiftAid.UI.Components.Surfaces.Account
+
+@if (Snapshot.ViewState == NotificationsViewState.Loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" aria-label="Loading notification preferences" />
+}
+else if (Snapshot.ViewState == NotificationsViewState.SignedOut)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+        Sign in to view notification preferences.
+    </MudAlert>
+    <MudButton Href="/sign-in" Variant="Variant.Filled" Color="Color.Primary"
+               StartIcon="@Icons.Material.Filled.Login">
+        Sign in
+    </MudButton>
+}
+else if (Snapshot.ViewState == NotificationsViewState.Unavailable)
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert">
+        @(Snapshot.StatusMessage ?? "Notification preferences are temporarily unavailable.")
+    </MudAlert>
+    <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="OnRefresh"
+               StartIcon="@Icons.Material.Filled.Refresh">
+        Retry
+    </MudButton>
+}
+else
+{
+    @if (!string.IsNullOrWhiteSpace(Snapshot.StatusMessage))
+    {
+        <MudAlert Severity="@(Snapshot.StatusIsError ? Severity.Warning : Severity.Success)"
+                  Variant="Variant.Outlined" role="@(Snapshot.StatusIsError ? "alert" : "status")">
+            @Snapshot.StatusMessage
+        </MudAlert>
+    }
+    <MudPaper Class="pa-4 mb-4" Elevation="0">
+        <MudText Typo="Typo.subtitle1">In-app preferences</MudText>
+        <MudSwitch T="bool" @bind-Value="_workReminders" Color="Color.Primary"
+                   Label="Work reminders" Disabled="@Snapshot.IsSaving"
+                   aria-label="Work reminders" />
+        <MudSwitch T="bool" @bind-Value="_sessionUpdates" Color="Color.Primary"
+                   Label="Session updates" Disabled="@Snapshot.IsSaving"
+                   aria-label="Session updates" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync"
+                   Disabled="@Snapshot.IsSaving" StartIcon="@Icons.Material.Filled.Save">
+            @(Snapshot.IsSaving ? "Saving…" : "Save preferences")
+        </MudButton>
+        <MudText Typo="Typo.caption">External channels follow your device settings.</MudText>
+    </MudPaper>
+}
+
+@code {
+    [Parameter] public NotificationsSnapshot Snapshot { get; set; } = NotificationsSnapshot.Loading;
+
+    [Parameter] public EventCallback OnRefresh { get; set; }
+
+    [Parameter] public EventCallback<NotificationPreferenceChange> OnSave { get; set; }
+
+    private bool _workReminders = true;
+    private bool _sessionUpdates = true;
+    private string? _loadedFor;
+
+    protected override void OnParametersSet()
+    {
+        var key = string.Join("|", Snapshot.WorkReminders, Snapshot.SessionUpdates, Snapshot.ViewState);
+        if (!string.Equals(key, _loadedFor, StringComparison.Ordinal))
+        {
+            _loadedFor = key;
+            _workReminders = Snapshot.WorkReminders;
+            _sessionUpdates = Snapshot.SessionUpdates;
+        }
+    }
+
+    private Task SaveAsync() => OnSave.InvokeAsync(
+        new NotificationPreferenceChange(_workReminders, _sessionUpdates));
+}

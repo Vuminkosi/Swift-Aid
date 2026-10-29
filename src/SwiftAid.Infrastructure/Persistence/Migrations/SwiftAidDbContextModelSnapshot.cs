@@ -2017,6 +2017,30 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.NotificationPreferenceEntity", b =>
+                {
+                    b.Property<string>("UserId")
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
+                    b.Property<bool>("SessionUpdates")
+                        .HasColumnType("boolean")
+                        .HasColumnName("session_updates");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<bool>("WorkReminders")
+                        .HasColumnType("boolean")
+                        .HasColumnName("work_reminders");
+
+                    b.HasKey("UserId")
+                        .HasName("pk_notification_preferences");
+
+                    b.ToTable("notification_preferences", "swiftaid_identity");
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Notifications.NotificationDeliveryOutboxEntity", b =>
                 {
                     b.Property<Guid>("OutboxId")
@@ -3174,6 +3198,16 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_membership_requests_organization");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.NotificationPreferenceEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Identity.SwiftAidUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_notification_preferences_user");
                 });
 
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Notifications.NotificationDeliveryOutboxEntity", b =>

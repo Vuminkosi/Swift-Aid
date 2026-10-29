@@ -23,6 +23,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
     public DbSet<EmailVerificationEntity> EmailVerifications => Set<EmailVerificationEntity>();
     public DbSet<UserProfileEntity> UserProfiles => Set<UserProfileEntity>();
     public DbSet<MembershipRequestEntity> MembershipRequests => Set<MembershipRequestEntity>();
+    public DbSet<NotificationPreferenceEntity> NotificationPreferences => Set<NotificationPreferenceEntity>();
     public DbSet<ActorEntity> Actors => Set<ActorEntity>();
     public DbSet<ActorAccessStateEntity> ActorAccessStates => Set<ActorAccessStateEntity>();
     public DbSet<OrganizationEntity> Organizations => Set<OrganizationEntity>();
@@ -311,6 +312,17 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
             .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_membership_requests_actor");
         joinRequest.HasOne<OrganizationEntity>().WithMany().HasForeignKey(entity => entity.OrganizationId)
             .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_membership_requests_organization");
+
+        var preferences = modelBuilder.Entity<NotificationPreferenceEntity>();
+        preferences.ToTable("notification_preferences", "swiftaid_identity");
+        preferences.HasKey(entity => entity.UserId).HasName("pk_notification_preferences");
+        preferences.Property(entity => entity.UserId).HasColumnName("user_id").HasColumnType("text");
+        preferences.Property(entity => entity.WorkReminders).HasColumnName("work_reminders");
+        preferences.Property(entity => entity.SessionUpdates).HasColumnName("session_updates");
+        preferences.Property(entity => entity.UpdatedAtUtc).HasColumnName("updated_at_utc")
+            .HasColumnType("timestamp with time zone");
+        preferences.HasOne<SwiftAidUser>().WithMany().HasForeignKey(entity => entity.UserId)
+            .OnDelete(DeleteBehavior.Cascade).HasConstraintName("fk_notification_preferences_user");
 
         var grant = modelBuilder.Entity<AccessGrantGroupEntity>();
         grant.ToTable("access_grant_groups", table =>
