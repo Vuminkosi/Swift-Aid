@@ -464,3 +464,6 @@ swiftaid-fcm-service-account.json
 /.codex-temp
 /.codex
 /designs
+/docs/ellai
+/design
+infra/.env-backup
