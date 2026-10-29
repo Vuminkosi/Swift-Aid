@@ -293,5 +293,9 @@ public sealed class UserProfileEntity
 
     public string? Locality { get; set; }
 
+    public Guid? AvatarObjectId { get; set; }
+
+    public string? AvatarContentType { get; set; }
+
     public DateTimeOffset UpdatedAtUtc { get; set; }
 }

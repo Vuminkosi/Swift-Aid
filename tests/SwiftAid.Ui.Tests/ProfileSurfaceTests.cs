@@ -60,6 +60,42 @@ public sealed class ProfileSurfaceTests
     }
 
     [Fact]
+    public async Task ProfileSurface_ReadyShowsInitialsWhenNoPhoto()
+    {
+        var markup = await RenderAsync(new ProfileSnapshot(
+            ProfileViewState.Ready,
+            "Amina Yusuf",
+            null, null, null, null,
+            "amina@example.invalid",
+            EmailVerified: true,
+            IsSaving: false));
+
+        Assert.Contains("Profile photo", markup, StringComparison.Ordinal);
+        Assert.Contains("Choose photo", markup, StringComparison.Ordinal);
+        Assert.Contains("JPEG, PNG, or WebP up to 2 MB", markup, StringComparison.Ordinal);
+        Assert.Contains(">AY<", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProfileSurface_ReadyShowsPhotoAndRemoveWhenAvatarSet()
+    {
+        var markup = await RenderAsync(new ProfileSnapshot(
+            ProfileViewState.Ready,
+            "Amina Yusuf",
+            null, null, null, null,
+            "amina@example.invalid",
+            EmailVerified: true,
+            IsSaving: false,
+            StatusMessage: null,
+            StatusIsError: false,
+            AvatarUrl: "/auth/profile/avatar"));
+
+        Assert.Contains("/auth/profile/avatar", markup, StringComparison.Ordinal);
+        Assert.Contains("Your profile photo", markup, StringComparison.Ordinal);
+        Assert.Contains("Remove", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ProfileSurface_SavingDisablesSubmit()
     {
         var markup = await RenderAsync(new ProfileSnapshot(

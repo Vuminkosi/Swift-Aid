@@ -182,6 +182,8 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         profile.Property(entity => entity.Country).HasColumnName("country").HasColumnType("text");
         profile.Property(entity => entity.Region).HasColumnName("region").HasColumnType("text");
         profile.Property(entity => entity.Locality).HasColumnName("locality").HasColumnType("text");
+        profile.Property(entity => entity.AvatarObjectId).HasColumnName("avatar_object_id").HasColumnType("uuid");
+        profile.Property(entity => entity.AvatarContentType).HasColumnName("avatar_content_type").HasColumnType("text");
         profile.Property(entity => entity.UpdatedAtUtc).HasColumnName("updated_at_utc")
             .HasColumnType("timestamp with time zone");
         profile.HasOne<SwiftAidUser>().WithMany().HasForeignKey(entity => entity.UserId)

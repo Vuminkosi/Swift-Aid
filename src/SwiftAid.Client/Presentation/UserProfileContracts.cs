@@ -10,7 +10,8 @@ public sealed record UserProfileState(
     string? Email,
     bool EmailVerified,
     string? StatusMessage = null,
-    bool StatusIsError = false);
+    bool StatusIsError = false,
+    string? AvatarUrl = null);
 
 public sealed record UserProfileEdit(
     string? DisplayName,
@@ -19,6 +20,8 @@ public sealed record UserProfileEdit(
     string? Region,
     string? Locality);
 
+public sealed record UserProfileAvatarUpload(string ContentType, Stream Content);
+
 /// <summary>Self-asserted profile fields; email verification and membership stay with their owners.</summary>
 public interface IUserProfileClient
 {
@@ -26,6 +29,13 @@ public interface IUserProfileClient
 
     Task<UiCapabilityResult<UserProfileState>> SaveAsync(
         UserProfileEdit edit,
+        CancellationToken cancellationToken = default);
+
+    Task<UiCapabilityResult<UserProfileState>> UploadAvatarAsync(
+        UserProfileAvatarUpload upload,
+        CancellationToken cancellationToken = default);
+
+    Task<UiCapabilityResult<UserProfileState>> DeleteAvatarAsync(
         CancellationToken cancellationToken = default);
 }
 
@@ -41,6 +51,18 @@ public sealed class UnavailableUserProfileClient : IUserProfileClient
         ArgumentNullException.ThrowIfNull(edit);
         return Unavailable(cancellationToken);
     }
+
+    public Task<UiCapabilityResult<UserProfileState>> UploadAvatarAsync(
+        UserProfileAvatarUpload upload,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(upload);
+        return Unavailable(cancellationToken);
+    }
+
+    public Task<UiCapabilityResult<UserProfileState>> DeleteAvatarAsync(
+        CancellationToken cancellationToken = default) =>
+        Unavailable(cancellationToken);
 
     private static Task<UiCapabilityResult<UserProfileState>> Unavailable(CancellationToken cancellationToken)
     {

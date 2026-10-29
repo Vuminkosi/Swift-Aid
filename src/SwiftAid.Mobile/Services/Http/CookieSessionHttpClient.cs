@@ -123,6 +123,66 @@ public class CookieSessionHttpClient : IDisposable
             : null;
     }
 
+    /// <summary>Gateway base address used for absolute same-origin links.</summary>
+    public string? BaseAddress
+    {
+        get
+        {
+            lock (_sync)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                return _client.BaseAddress?.ToString();
+            }
+        }
+    }
+
+    public virtual async Task<HttpResponseMessage> DeleteAsync(
+        string path,
+        string? antiforgeryToken,
+        CancellationToken cancellationToken = default)
+    {
+        HttpClient client;
+        lock (_sync)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            client = _client;
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Delete, path);
+        if (!string.IsNullOrWhiteSpace(antiforgeryToken))
+        {
+            request.Headers.TryAddWithoutValidation("X-CSRF-TOKEN", antiforgeryToken);
+        }
+
+        return await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+
+    public virtual async Task<HttpResponseMessage> PutFormAsync(
+        string path,
+        MultipartFormDataContent form,
+        string? antiforgeryToken,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(form);
+        HttpClient client;
+        lock (_sync)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            client = _client;
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Put, path)
+        {
+            Content = form
+        };
+        if (!string.IsNullOrWhiteSpace(antiforgeryToken))
+        {
+            request.Headers.TryAddWithoutValidation("X-CSRF-TOKEN", antiforgeryToken);
+        }
+
+        return await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+
     public virtual async Task<HttpResponseMessage> GetAsync(string path, CancellationToken cancellationToken = default)
     {
         HttpClient client;

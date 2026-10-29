@@ -94,6 +94,8 @@ public sealed class UserProfileServiceTests : IAsyncDisposable
                 country TEXT,
                 region TEXT,
                 locality TEXT,
+                avatar_object_id TEXT,
+                avatar_content_type TEXT,
                 updated_at_utc TEXT NOT NULL
             );
             PRAGMA foreign_keys = ON;

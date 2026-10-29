@@ -10,7 +10,8 @@ public sealed class GatewayUserProfileClient(
     AuthenticationStateProvider authenticationStateProvider,
     UserManager<SwiftAidUser> userManager,
     IUserProfileService profileService,
-    IEmailVerificationService verificationService) : IUserProfileClient
+    IEmailVerificationService verificationService,
+    IProfileAvatarService avatarService) : IUserProfileClient
 {
     private const string Capability = "user-profile";
 
@@ -22,6 +23,8 @@ public sealed class GatewayUserProfileClient(
         profileService ?? throw new ArgumentNullException(nameof(profileService));
     private readonly IEmailVerificationService _verificationService =
         verificationService ?? throw new ArgumentNullException(nameof(verificationService));
+    private readonly IProfileAvatarService _avatarService =
+        avatarService ?? throw new ArgumentNullException(nameof(avatarService));
 
     public async Task<UiCapabilityResult<UserProfileState>> GetAsync(CancellationToken cancellationToken = default)
     {
@@ -99,6 +102,76 @@ public sealed class GatewayUserProfileClient(
             : null;
     }
 
+    public async Task<UiCapabilityResult<UserProfileState>> UploadAvatarAsync(
+        UserProfileAvatarUpload upload,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(upload);
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var user = await GetUserAsync().ConfigureAwait(false);
+            if (user is null)
+            {
+                return SignedOut();
+            }
+
+            var saved = await _avatarService.SaveAsync(
+                user.Id, upload.ContentType, upload.Content, cancellationToken).ConfigureAwait(false);
+            return saved.Status switch
+            {
+                ProfileAvatarStatus.Saved => Success(
+                    await StateAsync(user, "Photo saved.", cancellationToken).ConfigureAwait(false)),
+                ProfileAvatarStatus.UnsupportedType or ProfileAvatarStatus.TooLarge or ProfileAvatarStatus.Invalid =>
+                    Invalid(await StateAsync(user, null, cancellationToken).ConfigureAwait(false),
+                        "Use a JPEG, PNG, or WebP photo up to 2 MB."),
+                ProfileAvatarStatus.NotConfigured => Retryable("Photo uploads are not available right now."),
+                _ => Retryable("Saving your photo is temporarily unavailable.")
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return Retryable("Saving your photo is temporarily unavailable.");
+        }
+    }
+
+    public async Task<UiCapabilityResult<UserProfileState>> DeleteAvatarAsync(
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var user = await GetUserAsync().ConfigureAwait(false);
+            if (user is null)
+            {
+                return SignedOut();
+            }
+
+            var deleted = await _avatarService.DeleteAsync(user.Id, cancellationToken).ConfigureAwait(false);
+            return deleted.Status switch
+            {
+                ProfileAvatarStatus.Deleted => Success(
+                    await StateAsync(user, "Photo removed.", cancellationToken).ConfigureAwait(false)),
+                ProfileAvatarStatus.NotFound => Invalid(
+                    await StateAsync(user, null, cancellationToken).ConfigureAwait(false),
+                    "No photo is set for this account."),
+                _ => Retryable("Removing your photo is temporarily unavailable.")
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return Retryable("Removing your photo is temporarily unavailable.");
+        }
+    }
+
     private async Task<UserProfileState> StateAsync(
         SwiftAidUser user,
         string? status,
@@ -106,6 +179,7 @@ public sealed class GatewayUserProfileClient(
     {
         var profile = await _profileService.GetAsync(user.Id, cancellationToken).ConfigureAwait(false);
         var verified = await _verificationService.IsVerifiedAsync(user, cancellationToken).ConfigureAwait(false);
+        var hasAvatar = await _avatarService.HasAvatarAsync(user.Id, cancellationToken).ConfigureAwait(false);
         return new UserProfileState(
             true,
             profile?.DisplayName,
@@ -116,8 +190,15 @@ public sealed class GatewayUserProfileClient(
             user.Email,
             verified,
             status,
-            StatusIsError: false);
+            StatusIsError: false,
+            AvatarUrl: hasAvatar ? "/auth/profile/avatar" : null);
     }
+
+    private static UiCapabilityResult<UserProfileState> Invalid(UserProfileState state, string message) => new(
+        UiCapabilityResultCode.InvalidRequest,
+        state with { StatusMessage = message, StatusIsError = true },
+        Metadata(),
+        message);
 
     private static UiCapabilityResult<UserProfileState> SignedOut() => new(
         UiCapabilityResultCode.Denied,

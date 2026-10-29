@@ -2660,6 +2660,14 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("user_id");
 
+                    b.Property<string>("AvatarContentType")
+                        .HasColumnType("text")
+                        .HasColumnName("avatar_content_type");
+
+                    b.Property<Guid?>("AvatarObjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("avatar_object_id");
+
                     b.Property<string>("Country")
                         .HasColumnType("text")
                         .HasColumnName("country");

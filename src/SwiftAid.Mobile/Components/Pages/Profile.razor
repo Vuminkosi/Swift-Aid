@@ -8,7 +8,7 @@
 
 <PageTitle>My profile | SwiftAid</PageTitle>
 
-<ProfileSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OnSave="SaveAsync" />
+<ProfileSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OnSave="SaveAsync" OnUploadAvatar="UploadAvatarAsync" OnDeleteAvatar="DeleteAvatarAsync" />
 
 @code {
     private ProfileSnapshot _snapshot = ProfileSnapshot.Loading;
@@ -43,6 +43,22 @@
         _snapshot = Map(result, result.Value);
     }
 
+    private async Task UploadAvatarAsync(ProfileAvatarUploadRequest request)
+    {
+        _snapshot = _snapshot with { IsSavingAvatar = true, StatusMessage = null, StatusIsError = false };
+        using var content = request.Content;
+        var result = await ProfileClient.UploadAvatarAsync(
+            new UserProfileAvatarUpload(request.ContentType, content));
+        _snapshot = Map(result, result.Value);
+    }
+
+    private async Task DeleteAvatarAsync()
+    {
+        _snapshot = _snapshot with { IsSavingAvatar = true, StatusMessage = null, StatusIsError = false };
+        var result = await ProfileClient.DeleteAvatarAsync();
+        _snapshot = Map(result, result.Value);
+    }
+
     private static ProfileSnapshot Map(UiCapabilityResult<UserProfileState> result, UserProfileState? value)
     {
         if (value is null)
@@ -71,6 +87,7 @@
             value.EmailVerified,
             IsSaving: false,
             value.StatusMessage,
-            value.StatusIsError);
+            value.StatusIsError,
+            value.AvatarUrl);
     }
 }

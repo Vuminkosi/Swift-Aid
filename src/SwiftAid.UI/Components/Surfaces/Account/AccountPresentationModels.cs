@@ -70,7 +70,9 @@ public sealed record ProfileSnapshot(
     bool EmailVerified,
     bool IsSaving,
     string? StatusMessage = null,
-    bool StatusIsError = false)
+    bool StatusIsError = false,
+    string? AvatarUrl = null,
+    bool IsSavingAvatar = false)
 {
     public static ProfileSnapshot Loading { get; } = new(
         ProfileViewState.Loading, null, null, null, null, null, null, false, false);
@@ -90,6 +92,8 @@ public sealed record ProfileEditRequest(
     string? Country,
     string? Region,
     string? Locality);
+
+public sealed record ProfileAvatarUploadRequest(string ContentType, Stream Content);
 
 public enum OrganizationsViewState
 {

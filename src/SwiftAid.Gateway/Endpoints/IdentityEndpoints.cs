@@ -62,6 +62,9 @@ public static class IdentityEndpoints
         group.MapPost("/email/otp/request", RequestEmailOtp);
         group.MapPost("/email/otp/confirm", ConfirmEmailOtp);
         group.MapGet("/profile", GetUserProfile);
+        group.MapPut("/profile/avatar", SaveProfileAvatar);
+        group.MapGet("/profile/avatar", GetProfileAvatar);
+        group.MapDelete("/profile/avatar", DeleteProfileAvatar);
         group.MapPut("/profile", SaveUserProfile);
         group.MapGet("/notifications/preferences", GetNotificationPreferences);
         group.MapPut("/notifications/preferences", SaveNotificationPreferences);
@@ -1493,6 +1496,7 @@ public static class IdentityEndpoints
         UserManager<SwiftAidUser> userManager,
         IUserProfileService profileService,
         IEmailVerificationService verificationService,
+        IProfileAvatarService avatarService,
         CancellationToken cancellationToken)
     {
         if (context.User.Identity?.IsAuthenticated != true)
@@ -1510,6 +1514,7 @@ public static class IdentityEndpoints
 
             var profile = await profileService.GetAsync(user.Id, cancellationToken).ConfigureAwait(false);
             var verified = await verificationService.IsVerifiedAsync(user, cancellationToken).ConfigureAwait(false);
+            var hasAvatar = await avatarService.HasAvatarAsync(user.Id, cancellationToken).ConfigureAwait(false);
             SetNoStore(context);
             return Results.Ok(new UserProfileResponse(
                 profile?.DisplayName,
@@ -1518,7 +1523,8 @@ public static class IdentityEndpoints
                 profile?.Region,
                 profile?.Locality,
                 user.Email,
-                verified));
+                verified,
+                hasAvatar));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -1536,6 +1542,7 @@ public static class IdentityEndpoints
         UserManager<SwiftAidUser> userManager,
         IUserProfileService profileService,
         IEmailVerificationService verificationService,
+        IProfileAvatarService avatarService,
         CancellationToken cancellationToken)
     {
         try
@@ -1594,6 +1601,7 @@ public static class IdentityEndpoints
 
             var profile = await profileService.GetAsync(user.Id, cancellationToken).ConfigureAwait(false);
             var verified = await verificationService.IsVerifiedAsync(user, cancellationToken).ConfigureAwait(false);
+            var hasAvatar = await avatarService.HasAvatarAsync(user.Id, cancellationToken).ConfigureAwait(false);
             SetNoStore(context);
             return Results.Ok(new UserProfileResponse(
                 profile?.DisplayName,
@@ -1602,7 +1610,8 @@ public static class IdentityEndpoints
                 profile?.Region,
                 profile?.Locality,
                 user.Email,
-                verified));
+                verified,
+                hasAvatar));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -1611,6 +1620,200 @@ public static class IdentityEndpoints
         catch
         {
             return PasswordError(context, StatusCodes.Status503ServiceUnavailable, "Saving your profile is temporarily unavailable.");
+        }
+    }
+
+
+    private static async Task<IResult> SaveProfileAvatar(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        UserManager<SwiftAidUser> userManager,
+        IProfileAvatarService avatarService,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false);
+        }
+        catch (AntiforgeryValidationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The photo request is invalid.");
+        }
+        catch (InvalidOperationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The photo request is invalid.");
+        }
+
+        if (context.User.Identity?.IsAuthenticated != true)
+        {
+            return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to manage your photo.");
+        }
+
+        IFormFile? file;
+        try
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken).ConfigureAwait(false);
+            file = form.Files.GetFile("avatar") ?? form.Files.FirstOrDefault(static entry => entry.Length > 0);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "Choose a photo to upload.");
+        }
+
+        if (file is null || file.Length == 0)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "Choose a photo to upload.");
+        }
+
+        try
+        {
+            var user = await userManager.GetUserAsync(context.User).ConfigureAwait(false);
+            if (user is null)
+            {
+                return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to manage your photo.");
+            }
+
+            using var upload = file.OpenReadStream();
+            var saved = await avatarService.SaveAsync(user.Id, file.ContentType, upload, cancellationToken)
+                .ConfigureAwait(false);
+            return saved.Status switch
+            {
+                ProfileAvatarStatus.Saved => Results.Ok(new ProfileAvatarResponse(true, saved.ContentType)),
+                ProfileAvatarStatus.UnsupportedType => PasswordError(
+                    context, StatusCodes.Status400BadRequest, "Use a JPEG, PNG, or WebP photo up to 2 MB."),
+                ProfileAvatarStatus.TooLarge or ProfileAvatarStatus.Invalid => PasswordError(
+                    context, StatusCodes.Status400BadRequest, "Use a JPEG, PNG, or WebP photo up to 2 MB."),
+                ProfileAvatarStatus.NotConfigured => PasswordError(
+                    context,
+                    StatusCodes.Status503ServiceUnavailable,
+                    "Photo uploads are not available right now."),
+                _ => PasswordError(
+                    context,
+                    StatusCodes.Status503ServiceUnavailable,
+                    "Saving your photo is temporarily unavailable.")
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return PasswordError(
+                context,
+                StatusCodes.Status503ServiceUnavailable,
+                "Saving your photo is temporarily unavailable.");
+        }
+    }
+
+    private static async Task<IResult> GetProfileAvatar(
+        HttpContext context,
+        UserManager<SwiftAidUser> userManager,
+        IProfileAvatarService avatarService,
+        CancellationToken cancellationToken)
+    {
+        if (context.User.Identity?.IsAuthenticated != true)
+        {
+            return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to view your photo.");
+        }
+
+        try
+        {
+            var user = await userManager.GetUserAsync(context.User).ConfigureAwait(false);
+            if (user is null)
+            {
+                return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to view your photo.");
+            }
+
+            var (result, data) = await avatarService.ReadAsync(user.Id, cancellationToken).ConfigureAwait(false);
+            if (result.Status == ProfileAvatarStatus.NotFound || data is null)
+            {
+                return PasswordError(context, StatusCodes.Status404NotFound, "No photo is set for this account.");
+            }
+
+            if (result.Status == ProfileAvatarStatus.NotConfigured)
+            {
+                return PasswordError(
+                    context,
+                    StatusCodes.Status503ServiceUnavailable,
+                    "Photo downloads are not available right now.");
+            }
+
+            SetNoStore(context);
+            return Results.File(data.Content, data.ContentType);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return PasswordError(
+                context,
+                StatusCodes.Status503ServiceUnavailable,
+                "Your photo is temporarily unavailable.");
+        }
+    }
+
+    private static async Task<IResult> DeleteProfileAvatar(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        UserManager<SwiftAidUser> userManager,
+        IProfileAvatarService avatarService,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false);
+        }
+        catch (AntiforgeryValidationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The photo request is invalid.");
+        }
+        catch (InvalidOperationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The photo request is invalid.");
+        }
+
+        if (context.User.Identity?.IsAuthenticated != true)
+        {
+            return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to manage your photo.");
+        }
+
+        try
+        {
+            var user = await userManager.GetUserAsync(context.User).ConfigureAwait(false);
+            if (user is null)
+            {
+                return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to manage your photo.");
+            }
+
+            var deleted = await avatarService.DeleteAsync(user.Id, cancellationToken).ConfigureAwait(false);
+            return deleted.Status switch
+            {
+                ProfileAvatarStatus.Deleted => Results.Ok(new ProfileAvatarResponse(false, null)),
+                ProfileAvatarStatus.NotFound => PasswordError(
+                    context, StatusCodes.Status404NotFound, "No photo is set for this account."),
+                _ => PasswordError(
+                    context,
+                    StatusCodes.Status503ServiceUnavailable,
+                    "Removing your photo is temporarily unavailable.")
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return PasswordError(
+                context,
+                StatusCodes.Status503ServiceUnavailable,
+                "Removing your photo is temporarily unavailable.");
         }
     }
 
@@ -2224,7 +2427,8 @@ public static class IdentityEndpoints
         string? Region,
         string? Locality,
         string? Email,
-        bool EmailVerified);
+        bool EmailVerified,
+        bool HasAvatar);
 
     private sealed record MembershipResponse(
         string OrganizationId,
@@ -2250,6 +2454,8 @@ public static class IdentityEndpoints
     private sealed record MembershipRequestListResponse(IReadOnlyList<MembershipRequestResponse> Requests);
 
     private sealed record NotificationPreferencesResponse(bool WorkReminders, bool SessionUpdates);
+
+    private sealed record ProfileAvatarResponse(bool HasAvatar, string? ContentType);
 
     private sealed class PasswordRequest
     {

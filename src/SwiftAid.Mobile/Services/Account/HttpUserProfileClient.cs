@@ -94,17 +94,121 @@ public sealed class HttpUserProfileClient(CookieSessionHttpClient session) : IUs
         }
     }
 
-    private static UserProfileState ToState(UserProfilePayload payload, string? status) => new(
-        true,
-        payload.DisplayName,
-        payload.Phone,
-        payload.Country,
-        payload.Region,
-        payload.Locality,
-        payload.Email,
-        payload.EmailVerified,
-        status,
-        StatusIsError: false);
+    public async Task<UiCapabilityResult<UserProfileState>> UploadAvatarAsync(
+        UserProfileAvatarUpload upload,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(upload);
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var token = await _session.GetAntiforgeryTokenAsync(cancellationToken).ConfigureAwait(false);
+            using var fileContent = new StreamContent(upload.Content);
+            fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(upload.ContentType);
+            using var form = new MultipartFormDataContent
+            {
+                { fileContent, "avatar", "avatar" }
+            };
+            using var response = await _session.PutFormAsync("/auth/profile/avatar", form, token, cancellationToken)
+                .ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                return SignedOut();
+            }
+
+            if (response.StatusCode == HttpStatusCode.BadRequest)
+            {
+                return await InvalidStateAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var message = await ReadMessageAsync(response, cancellationToken).ConfigureAwait(false)
+                    ?? "Saving your photo is temporarily unavailable.";
+                return Retryable(message);
+            }
+
+            var current = await GetAsync(cancellationToken).ConfigureAwait(false);
+            var state = (current.Value ?? EmptySignedIn()) with
+            {
+                StatusMessage = "Photo saved.",
+                StatusIsError = false
+            };
+            return Success(state);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return Retryable("Saving your photo is temporarily unavailable.");
+        }
+    }
+
+    public async Task<UiCapabilityResult<UserProfileState>> DeleteAvatarAsync(
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var token = await _session.GetAntiforgeryTokenAsync(cancellationToken).ConfigureAwait(false);
+            using var response = await _session.DeleteAsync("/auth/profile/avatar", token, cancellationToken)
+                .ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                return SignedOut();
+            }
+
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return await InvalidStateAsync(cancellationToken, "No photo is set for this account.")
+                    .ConfigureAwait(false);
+            }
+
+            if (response.StatusCode == HttpStatusCode.BadRequest)
+            {
+                return await InvalidStateAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var message = await ReadMessageAsync(response, cancellationToken).ConfigureAwait(false)
+                    ?? "Removing your photo is temporarily unavailable.";
+                return Retryable(message);
+            }
+
+            var current = await GetAsync(cancellationToken).ConfigureAwait(false);
+            var state = (current.Value ?? EmptySignedIn()) with
+            {
+                StatusMessage = "Photo removed.",
+                StatusIsError = false
+            };
+            return Success(state);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return Retryable("Removing your photo is temporarily unavailable.");
+        }
+    }
+
+    private async Task<UiCapabilityResult<UserProfileState>> InvalidStateAsync(
+        CancellationToken cancellationToken,
+        string? fallback = null)
+    {
+        var message = fallback ?? "Use a JPEG, PNG, or WebP photo up to 2 MB.";
+        var current = await GetAsync(cancellationToken).ConfigureAwait(false);
+        var state = (current.Value ?? EmptySignedIn()) with { StatusMessage = message, StatusIsError = true };
+        return new UiCapabilityResult<UserProfileState>(
+            UiCapabilityResultCode.InvalidRequest,
+            state,
+            Metadata(),
+            message);
+    }
 
     private static UserProfileState EmptySignedIn() =>
         new(true, null, null, null, null, null, null, false);
@@ -166,6 +270,25 @@ public sealed class HttpUserProfileClient(CookieSessionHttpClient session) : IUs
         DateTimeOffset.UtcNow,
         IsAvailable: true);
 
+    private UserProfileState ToState(UserProfilePayload payload, string? status)
+    {
+        var baseAddress = _session.BaseAddress?.TrimEnd('/');
+        return new UserProfileState(
+            true,
+            payload.DisplayName,
+            payload.Phone,
+            payload.Country,
+            payload.Region,
+            payload.Locality,
+            payload.Email,
+            payload.EmailVerified,
+            status,
+            StatusIsError: false,
+            AvatarUrl: payload.HasAvatar
+                ? (baseAddress is null ? "/auth/profile/avatar" : baseAddress + "/auth/profile/avatar")
+                : null);
+    }
+
     private sealed record UserProfilePayload(
         string? DisplayName,
         string? Phone,
@@ -173,5 +296,6 @@ public sealed class HttpUserProfileClient(CookieSessionHttpClient session) : IUs
         string? Region,
         string? Locality,
         string? Email,
-        bool EmailVerified);
+        bool EmailVerified,
+        bool HasAvatar);
 }
