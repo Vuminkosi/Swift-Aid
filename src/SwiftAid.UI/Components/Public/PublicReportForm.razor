@@ -364,7 +364,9 @@
             var submission = _draft.ToSubmission(
                 CountryCatalogueVersion,
                 ProcessingPolicyReference,
-                ProcessingPolicyVersion);
+                ProcessingPolicyVersion,
+                Countries,
+                CountryCatalogueIsCurrent);
             await OnSaveDraft.InvokeAsync(new PublicReportSaveRequest(CurrentDraftId, submission));
             _draftSaved = true;
             _saveError = null;
@@ -401,7 +403,9 @@
             var submission = _draft.ToSubmission(
                 CountryCatalogueVersion,
                 ProcessingPolicyReference,
-                ProcessingPolicyVersion);
+                ProcessingPolicyVersion,
+                Countries,
+                CountryCatalogueIsCurrent);
             await OnSendReport.InvokeAsync(submission);
             _sendError = null;
         }
