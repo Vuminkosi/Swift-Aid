@@ -18,7 +18,7 @@
     {
         <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" role="alert">
             @_error
-            <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="RefreshAsync" aria-label="Retry loading monitoring queue">Retry</MudButton>
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Color="Color.Error" OnClick="RefreshAsync" aria-label="Retry loading monitoring queue">Retry</MudButton>
         </MudAlert>
     }
     else if (_items.Count == 0)

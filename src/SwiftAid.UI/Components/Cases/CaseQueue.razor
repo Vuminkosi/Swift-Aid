@@ -11,20 +11,20 @@
     else if (_denied)
     {
         <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="status">
-            Your account is not authorized to view assigned cases.
+            Your account cannot show assigned cases right now.
         </MudAlert>
     }
     else if (_error is not null)
     {
         <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" role="alert">
             @_error
-            <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="RefreshAsync" aria-label="Retry loading assigned cases">Retry</MudButton>
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Color="Color.Error" OnClick="RefreshAsync" aria-label="Retry loading assigned cases">Retry</MudButton>
         </MudAlert>
     }
     else if (_items.Count == 0)
     {
         <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" role="status">
-            No cases are currently assigned to you.
+            No assigned cases yet.
         </MudAlert>
     }
     else
@@ -32,25 +32,24 @@
         <MudTable Items="_items" Hover="true" Dense="true" aria-label="Assigned cases">
             <HeaderContent>
                 <MudTh>Case</MudTh>
-                <MudTh>Workflow</MudTh>
+                <MudTh>Status</MudTh>
                 <MudTh>Country</MudTh>
-                <MudTh>Version</MudTh>
                 <MudTh>Updated</MudTh>
             </HeaderContent>
             <RowTemplate>
                 <MudTd DataLabel="Case">
-                    <MudLink Href="@($"/case/{context.CaseId:D}")" aria-label="@($"Open case {context.CaseId:D}")">
-                        @context.CaseId.ToString("D")[..8]…
+                    <MudLink Href="@($"/case/{context.CaseId:D}")"
+                             aria-label="@($"Open {DisplayWorkflow(context.Workflow)} case from {context.CountryCode}, updated {context.UpdatedAtUtc.ToLocalTime():g}")">
+                        Open case
                     </MudLink>
                 </MudTd>
-                <MudTd DataLabel="Workflow"><MudChip T="string" Size="Size.Small" Color="@WorkflowColor(context.Workflow)">@context.Workflow</MudChip></MudTd>
+                <MudTd DataLabel="Status"><MudChip T="string" Size="Size.Small" Color="@WorkflowColor(context.Workflow)">@DisplayWorkflow(context.Workflow)</MudChip></MudTd>
                 <MudTd DataLabel="Country">@context.CountryCode</MudTd>
-                <MudTd DataLabel="Version">@context.AggregateVersion</MudTd>
                 <MudTd DataLabel="Updated">@context.UpdatedAtUtc.ToLocalTime().ToString("g")</MudTd>
             </RowTemplate>
         </MudTable>
         <MudText Typo="Typo.caption" Color="Color.Secondary" Class="case-queue__notice">
-            Newest activity first. Only cases you own and may read are listed.
+            Newest activity first. Only cases assigned to you and available to view appear here.
         </MudText>
     }
 </section>
@@ -59,6 +58,23 @@
     [Parameter, EditorRequired] public ICaseQueueClient Client { get; set; } = null!;
 
     [Parameter] public int? Limit { get; set; }
+
+    private static string DisplayWorkflow(string? workflow) => workflow?.Trim() switch
+    {
+        "Open" => "Open",
+        "Under review" or "UnderReview" => "Under review",
+        "Resolved" => "Resolved",
+        "Follow-up due" or "AwaitingFollowUp" => "Follow-up due",
+        _ => "In progress"
+    };
+
+    private static Color WorkflowColor(string? workflow) => DisplayWorkflow(workflow) switch
+    {
+        "Resolved" => Color.Success,
+        "Follow-up due" => Color.Warning,
+        "Open" => Color.Primary,
+        _ => Color.Default
+    };
 
     private IReadOnlyList<CaseQueueItem> _items = Array.Empty<CaseQueueItem>();
     private bool _loading = true;
@@ -117,10 +133,4 @@
         }
     }
 
-    private static Color WorkflowColor(string workflow) => workflow switch
-    {
-        "Resolved" => Color.Success,
-        "Reopened" => Color.Warning,
-        _ => Color.Primary
-    };
 }

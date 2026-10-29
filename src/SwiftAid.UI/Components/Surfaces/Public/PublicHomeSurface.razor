@@ -1,0 +1,345 @@
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.UI.Components
+@using SwiftAid.UI.Components.Cases
+@using SwiftAid.UI.Components.Public
+@inject ISnackbar Snackbar
+
+<div class="public-home-surface @(IsWelcomeExperience ? "public-home-surface--welcome" : null)">
+    <MudContainer MaxWidth="MaxWidth.Large" Class="public-home-container">
+    @if (!IsSignedIn && (!ShowWelcome || !OnWelcomeContinue.HasDelegate))
+    {
+        <SwiftAidPageHeading Eyebrow="Community health support"
+                             Title="@(IsSignedIn ? "Your SwiftAid workspace" : "Support that follows through.")"
+                             Description="@(IsSignedIn ? "Review the cases assigned to your account and keep track of next steps." : GuestDataDescription)"
+                             HeadingId="start-heading" />
+    }
+
+    @if (IsSignedIn)
+    {
+        <MudHidden Breakpoint="Breakpoint.MdAndUp">
+            <section class="signed-home-mobile" aria-labelledby="signed-home-title">
+                <header class="signed-home-greeting">
+                    <MudText Typo="Typo.h5" HtmlTag="h1" id="signed-home-title">
+                        @(string.IsNullOrWhiteSpace(HomeOverview?.VerifiedDisplayName)
+                            ? "Welcome back" : $"Welcome back, {HomeOverview.VerifiedDisplayName}")
+                    </MudText>
+                    @if (!string.IsNullOrWhiteSpace(HomeOverview?.AuthorizedWorkspaceLabel) ||
+                         !string.IsNullOrWhiteSpace(HomeOverview?.AuthorizedRegionLabel))
+                    {
+                        <MudText Typo="Typo.body2" Class="signed-home-context">
+                            @HomeOverview?.AuthorizedWorkspaceLabel
+                            @if (!string.IsNullOrWhiteSpace(HomeOverview?.AuthorizedWorkspaceLabel) && !string.IsNullOrWhiteSpace(HomeOverview?.AuthorizedRegionLabel))
+                            {<span> · </span>}
+                            @HomeOverview?.AuthorizedRegionLabel
+                        </MudText>
+                    }
+                </header>
+
+                @if (HomeOverview?.State == PublicHomeOverviewState.Loading)
+                {
+                    <MudProgressLinear Indeterminate="true" Color="Color.Primary" aria-label="Loading your work summary" />
+                }
+                else if (HomeOverview?.State == PublicHomeOverviewState.Unavailable)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="signed-home-state">
+                        Your work summary is unavailable right now.
+                        <MudButton Variant="Variant.Text" OnClick="OnHomeOverviewRetry" StartIcon="@Icons.Material.Filled.Refresh">Try again</MudButton>
+                    </MudAlert>
+                }
+                else if (HomeOverview?.State == PublicHomeOverviewState.Denied)
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true" Class="signed-home-state">Your account cannot view this work summary.</MudAlert>
+                }
+                else
+                {
+                    @if (HomeOverview?.State is PublicHomeOverviewState.Stale or PublicHomeOverviewState.Partial or PublicHomeOverviewState.FreshnessUnknown)
+                    {
+                        <MudText Typo="Typo.caption" Class="signed-home-freshness" role="status">
+                            @(HomeOverview.State switch
+                            {
+                                PublicHomeOverviewState.Stale => "This information may be out of date.",
+                                PublicHomeOverviewState.FreshnessUnknown => "We can’t confirm how recent this information is.",
+                                _ => "Some work information is unavailable."
+                            })
+                        </MudText>
+                    }
+                }
+
+                <section class="signed-home-actions" aria-label="Quick actions">
+                    <MudPaper Class="signed-home-action signed-home-action--blue" Elevation="0">
+                        <MudIcon Icon="@Icons.Material.Filled.AddCircle" Color="Color.Primary" aria-hidden="true" />
+                        <MudText Typo="Typo.subtitle2" HtmlTag="h2">Report Case</MudText>
+                        <MudButton Href="@WorkerReportHref" aria-label="Report a case" Class="signed-home-action-link" Variant="Variant.Text" />
+                    </MudPaper>
+                    <MudPaper Class="signed-home-action signed-home-action--green" Elevation="0">
+                        <MudIcon Icon="@Icons.Material.Filled.Assignment" Color="Color.Primary" aria-hidden="true" />
+                        <MudText Typo="Typo.subtitle2" HtmlTag="h2">My Cases</MudText>
+                        <MudText Typo="Typo.caption">@CountText(PublicHomeCountKind.Cases)</MudText>
+                        <MudButton Href="/my-cases" aria-label="Open my cases" Class="signed-home-action-link" Variant="Variant.Text" />
+                    </MudPaper>
+                    <MudPaper Class="signed-home-action signed-home-action--teal" Elevation="0">
+                        <MudIcon Icon="@Icons.Material.Filled.EventNote" Color="Color.Primary" aria-hidden="true" />
+                        <MudText Typo="Typo.subtitle2" HtmlTag="h2">Follow-ups</MudText>
+                        <MudText Typo="Typo.caption">@CountText(PublicHomeCountKind.FollowUps)</MudText>
+                        <MudButton Href="/follow-ups" aria-label="Open follow-ups" Class="signed-home-action-link" Variant="Variant.Text" />
+                    </MudPaper>
+                    <MudPaper Class="signed-home-action signed-home-action--orange" Elevation="0">
+                        <MudIcon Icon="@Icons.Material.Filled.Groups" Color="Color.Primary" aria-hidden="true" />
+                        <MudText Typo="Typo.subtitle2" HtmlTag="h2">Community</MudText>
+                        <MudButton Href="/sessions" aria-label="Open community sessions" Class="signed-home-action-link" Variant="Variant.Text" />
+                    </MudPaper>
+                </section>
+
+                @if (HomeOverview?.State is not (PublicHomeOverviewState.Loading or PublicHomeOverviewState.Unavailable or PublicHomeOverviewState.Denied))
+                {
+                    <section class="signed-home-activity" aria-labelledby="signed-activity-title">
+                        <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="signed-activity-title">Recent Activity</MudText>
+                        @if (HomeOverview?.RecentActivity.Count > 0)
+                        {
+                            <MudList T="string" Dense="true" Class="signed-home-activity-list">
+                                @foreach (var activity in HomeOverview.RecentActivity)
+                                {
+                                    <MudListItem T="string" Href="@ActivityHref(activity.Destination)" Icon="@ActivityIcon(activity.Kind)">
+                                        <div class="signed-home-activity-row">
+                                            <MudText Typo="Typo.body2">@ActivityLabel(activity.Kind)</MudText>
+                                            <MudText Typo="Typo.caption">@ActivityTime(activity.OccurredAtUtc)</MudText>
+                                        </div>
+                                    </MudListItem>
+                                }
+                            </MudList>
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.body2" Class="signed-home-empty-activity">No recent activity.</MudText>
+                        }
+                        @if (HomeOverview?.State == PublicHomeOverviewState.Empty)
+                        {
+                            <MudText Typo="Typo.body2" Class="signed-home-empty-activity">You have no assigned work right now.</MudText>
+                        }
+                    </section>
+                }
+            </section>
+        </MudHidden>
+
+        <MudHidden Breakpoint="Breakpoint.SmAndDown">
+            <SwiftAidPageHeading Eyebrow="Community health support"
+                                 Title="Your SwiftAid workspace"
+                                 Description="Review the cases assigned to your account and keep track of next steps."
+                                 HeadingId="start-heading" />
+        <div class="worker-home-content">
+            <section class="worker-home-actions" aria-label="Quick actions">
+                <MudPaper Class="worker-home-card" Elevation="0">
+                    <MudIcon Icon="@Icons.Material.Filled.AddCircleOutline" Color="Color.Primary" aria-hidden="true" />
+                    <MudText Typo="Typo.subtitle1" HtmlTag="h2">Report a concern</MudText>
+                    <MudText Typo="Typo.body2">Share a human or animal health concern.</MudText>
+                    <MudButton Href="@WorkerReportHref" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Send">Start a report</MudButton>
+                </MudPaper>
+                <MudPaper Class="worker-home-card" Elevation="0">
+                    <MudIcon Icon="@Icons.Material.Filled.Assignment" Color="Color.Primary" aria-hidden="true" />
+                    <MudText Typo="Typo.subtitle1" HtmlTag="h2">My cases</MudText>
+                    <MudText Typo="Typo.body2">Review cases assigned to your account.</MudText>
+                    <MudButton Href="/my-cases" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FolderOpen">Open cases</MudButton>
+                </MudPaper>
+                <MudPaper Class="worker-home-card" Elevation="0">
+                    <MudIcon Icon="@Icons.Material.Filled.EventNote" Color="Color.Primary" aria-hidden="true" />
+                    <MudText Typo="Typo.subtitle1" HtmlTag="h2">Follow-ups</MudText>
+                    <MudText Typo="Typo.body2">Check scheduled follow-up work.</MudText>
+                    <MudButton Href="/follow-ups" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.EventNote">View follow-ups</MudButton>
+                </MudPaper>
+                <MudPaper Class="worker-home-card" Elevation="0">
+                    <MudIcon Icon="@Icons.Material.Filled.Groups" Color="Color.Primary" aria-hidden="true" />
+                    <MudText Typo="Typo.subtitle1" HtmlTag="h2">Community</MudText>
+                    <MudText Typo="Typo.body2">Find published community sessions.</MudText>
+                    <MudButton Href="/sessions" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Event">View sessions</MudButton>
+                </MudPaper>
+            </section>
+
+            <MudPaper Class="status-card" Elevation="0">
+                <div class="worker-home-summary__heading">
+                    <div>
+                        <MudText Typo="Typo.h6" HtmlTag="h2">Assigned cases</MudText>
+                        <SwiftAidBodyText>You’ll see only cases you’re allowed to view.</SwiftAidBodyText>
+                    </div>
+                    <MudButton Href="/my-cases" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.ArrowForward">View all</MudButton>
+                </div>
+                <CaseQueue Client="CaseQueueClient" Limit="5" />
+            </MudPaper>
+        </div>
+        </MudHidden>
+    }
+    else if (ShowWelcome && OnWelcomeContinue.HasDelegate)
+    {
+        <WelcomeSurface CountryOptions="@WelcomeCountryOptions"
+                        SelectedCountryCode="@WelcomeSelectedCountryCode"
+                        SelectedIntent="@WelcomeSelectedIntent"
+                        IsCountryLoading="@WelcomeCountryLoading"
+                        WelcomeInteractionDisabled="@WelcomeInteractionDisabled"
+                        CountryErrorMessage="@WelcomeCountryErrorMessage"
+                        OnSelectionChanged="@OnWelcomeSelectionChanged"
+                        OnContinue="@OnWelcomeContinue" />
+    }
+    else
+    {
+        <section class="mobile-home-actions" aria-label="Get started">
+            <MudButton Href="/report" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AddCircleOutline" Class="mobile-home-primary">
+                Report a concern
+            </MudButton>
+            <div class="mobile-home-grid">
+                <MudPaper Class="mobile-home-card" Elevation="0">
+                    <MudIcon Icon="@Icons.Material.Filled.ReceiptLong" Color="Color.Primary" aria-hidden="true" />
+                    <MudText Typo="Typo.subtitle1" HtmlTag="h2">Track a report</MudText>
+                    <MudText Typo="Typo.body2">@GuestReportsDescription</MudText>
+                    <MudButton Href="@GuestReportsHref" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Send">My reports</MudButton>
+                </MudPaper>
+                <MudPaper Class="mobile-home-card" Elevation="0">
+                    <MudIcon Icon="@Icons.Material.Filled.Groups" Color="Color.Primary" aria-hidden="true" />
+                    <MudText Typo="Typo.subtitle1" HtmlTag="h2">Community</MudText>
+                    <MudText Typo="Typo.body2">Browse published community sessions.</MudText>
+                    <MudButton Href="/sessions" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Event">View sessions</MudButton>
+                </MudPaper>
+            </div>
+        </section>
+    }
+
+    @if (!IsWelcomeExperience)
+    {
+        <div class="public-home-fab-menu">
+            <MudFabMenu Class="public-home-fab-menu__control"
+                        ButtonClass="public-home-fab-menu__button"
+                        @bind-Open="_ellaiMenuOpen"
+                        StartIcon="@Icons.Material.Outlined.AutoAwesome"
+                        Color="Color.Primary"
+                        AlignItems="AlignItems.End"
+                        Direction="Direction.Top"
+                        DropShadow="false"
+                        OpenOnMouseHover="false"
+                        DampenItemsBackgroundColor="false"
+                        aria-label="Open Ellai actions"
+                        title="Ellai actions">
+                <MudFabMenuItem OnClick="NotifyEllaiUnavailable"
+                                Size="Size.Small"
+                                Variant="Variant.Filled"
+                                Label="Ask"
+                                StartIcon="@Icons.Material.Outlined.QuestionAnswer"
+                                Color="Color.Primary"
+                                DropShadow="false" />
+                <MudFabMenuItem OnClick="NotifyEllaiUnavailable"
+                                Size="Size.Small"
+                                Variant="Variant.Filled"
+                                Label="Show Me"
+                                StartIcon="@Icons.Material.Outlined.Visibility"
+                                Color="Color.Primary"
+                                DropShadow="false" />
+                <MudFabMenuItem OnClick="NotifyEllaiUnavailable"
+                                Size="Size.Small"
+                                Variant="Variant.Filled"
+                                Label="Guide Me"
+                                StartIcon="@Icons.Material.Outlined.Explore"
+                                Color="Color.Primary"
+                                DropShadow="false" />
+                <MudFabMenuItem OnClick="NotifyEllaiUnavailable"
+                                Size="Size.Small"
+                                Variant="Variant.Filled"
+                                Label="Help Me Work"
+                                StartIcon="@Icons.Material.Outlined.BuildCircle"
+                                Color="Color.Primary"
+                                DropShadow="false" />
+                <MudFabMenuItem OnClick="NotifyEllaiUnavailable"
+                                Size="Size.Small"
+                                Variant="Variant.Filled"
+                                Label="Explore Branch"
+                                StartIcon="@Icons.Material.Outlined.AccountTree"
+                                Color="Color.Primary"
+                                DropShadow="false" />
+                <MudFabMenuItem OnClick="NotifyEllaiUnavailable"
+                                Size="Size.Small"
+                                Variant="Variant.Filled"
+                                Label="Review Evidence"
+                                StartIcon="@Icons.Material.Outlined.FactCheck"
+                                Color="Color.Primary"
+                                DropShadow="false" />
+            </MudFabMenu>
+        </div>
+    }
+
+    @if (!IsWelcomeExperience)
+    {
+        <SwiftAidServiceBoundaryNotice />
+    }
+</MudContainer>
+</div>
+
+@code {
+    private bool _ellaiMenuOpen;
+
+    private void NotifyEllaiUnavailable() => Snackbar.Add("Ellai is unavailable right now.", Severity.Info);
+
+    private bool IsWelcomeExperience => ShowWelcome && OnWelcomeContinue.HasDelegate && !IsSignedIn;
+
+    [Parameter] public bool IsSignedIn { get; set; }
+    [Parameter, EditorRequired] public ICaseQueueClient CaseQueueClient { get; set; } = null!;
+    [Parameter] public PublicHomeOverview? HomeOverview { get; set; }
+    [Parameter] public EventCallback OnHomeOverviewRetry { get; set; }
+    [Parameter] public string WorkerReportHref { get; set; } = "/report";
+    [Parameter] public string GuestReportsHref { get; set; } = "/report?view=tracking";
+    [Parameter] public string GuestDataDescription { get; set; } =
+        "Share a human or animal concern without creating an account. Saved drafts stay private on this device.";
+    [Parameter] public string GuestReportsDescription { get; set; } =
+        "Open reports and receipts saved on this device.";
+    [Parameter] public bool ShowWelcome { get; set; }
+    [Parameter] public IReadOnlyList<PublicCountryOption> WelcomeCountryOptions { get; set; } = Array.Empty<PublicCountryOption>();
+    [Parameter] public string? WelcomeSelectedCountryCode { get; set; }
+    [Parameter] public WelcomeNavigationIntent? WelcomeSelectedIntent { get; set; }
+    [Parameter] public bool WelcomeCountryLoading { get; set; }
+    [Parameter] public bool WelcomeInteractionDisabled { get; set; }
+    [Parameter] public string? WelcomeCountryErrorMessage { get; set; }
+    [Parameter] public EventCallback<WelcomeContinueRequest> OnWelcomeSelectionChanged { get; set; }
+    [Parameter] public EventCallback<WelcomeContinueRequest> OnWelcomeContinue { get; set; }
+
+    private string CountText(PublicHomeCountKind kind)
+    {
+        var count = HomeOverview?.Counts.FirstOrDefault(item => item.Kind == kind);
+        return count?.State switch
+        {
+            PublicHomeCountState.Available when count.Value.HasValue => count.Value.Value.ToString(),
+            PublicHomeCountState.Suppressed => "Withheld",
+            PublicHomeCountState.Unavailable => "Unavailable",
+            _ => "—"
+        };
+    }
+
+    private static string ActivityLabel(PublicHomeActivityKind kind) => kind switch
+    {
+        PublicHomeActivityKind.CaseReported => "Case reported",
+        PublicHomeActivityKind.FollowUpCompleted => "Follow-up completed",
+        PublicHomeActivityKind.AssignmentReceived => "New assignment",
+        PublicHomeActivityKind.AssistanceProvided => "Assistance provided",
+        _ => "Escalation opened"
+    };
+
+    private static string ActivityIcon(PublicHomeActivityKind kind) => kind switch
+    {
+        PublicHomeActivityKind.FollowUpCompleted => Icons.Material.Filled.CheckCircle,
+        PublicHomeActivityKind.AssignmentReceived => Icons.Material.Filled.Assignment,
+        PublicHomeActivityKind.AssistanceProvided => Icons.Material.Filled.Support,
+        PublicHomeActivityKind.EscalationOpened => Icons.Material.Filled.NotificationsActive,
+        _ => Icons.Material.Filled.FiberManualRecord
+    };
+
+    private static string ActivityHref(PublicHomeActivityDestination destination) => destination switch
+    {
+        PublicHomeActivityDestination.FollowUps => "/follow-ups",
+        PublicHomeActivityDestination.Assistance => "/assistance",
+        _ => "/my-cases"
+    };
+
+    private static string ActivityTime(DateTimeOffset occurredAtUtc)
+    {
+        var age = DateTimeOffset.UtcNow - occurredAtUtc;
+        if (age < TimeSpan.FromMinutes(1)) return "Just now";
+        if (age < TimeSpan.FromHours(1)) return $"{(int)age.TotalMinutes}m ago";
+        if (age < TimeSpan.FromDays(1)) return $"{(int)age.TotalHours}h ago";
+        if (age < TimeSpan.FromDays(7)) return $"{(int)age.TotalDays}d ago";
+        return occurredAtUtc.ToLocalTime().ToString("d MMM");
+    }
+}
