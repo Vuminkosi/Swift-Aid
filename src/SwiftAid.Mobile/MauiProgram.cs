@@ -91,7 +91,8 @@ public static class MauiProgram
         builder.Services.AddSingleton<IOrganizationClient, UnavailableOrganizationClient>();
         builder.Services.AddSingleton<IAiInvestigationClient, UnavailableInvestigationClient>();
         builder.Services.AddSingleton<IMobileHomeOverviewClient, UnavailableMobileHomeOverviewClient>();
-        builder.Services.AddSingleton<IMapAggregateClient, UnavailableMapAggregateClient>();
+        builder.Services.AddTransient<SwiftAid.Client.Presentation.IMapAggregateClient>(sp => new SwiftAid.Client.Presentation.MapAggregateHttpClient(
+                sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
         builder.Services.AddSingleton<IOrganizationManagementClient, UnavailableOrganizationManagementClient>();
         builder.Services.AddSingleton<ICaseWorkspaceClient, MobileCaseWorkspaceClient>();
         builder.Services.AddSingleton<ICaseDiscussionClient, UnavailableCaseDiscussionClient>();

@@ -7,7 +7,7 @@
 <PageTitle>Surveillance | SwiftAid</PageTitle>
 <OperationsMapSurface Title="Regional activity"
                       Eyebrow="Operations"
-                      Description="Review country and region totals by report group. The map places country totals only; it does not show report locations or health patterns."
+                      Description="Totals for cases assigned to you that you may still read, grouped by country and region. The map places country totals only; it does not show report locations or health patterns."
                       State="_state" Areas="_areas"
                       UpdatedAtUtc="_updatedAtUtc" ContractVersion="_contractVersion"
                       PeriodLabel="@PeriodDescription" StatusMessage="@_message"
@@ -36,7 +36,7 @@
     private string? _message;
     private long _requestGeneration;
 
-    private string PeriodDescription => _period == MapAggregatePeriod.Days90 ? "the last 90 days" : "the last 30 days";
+    private string PeriodDescription => _period == MapAggregatePeriod.Days90 ? "the last 90 days (by record creation)" : "the last 30 days (by record creation)";
 
     protected override Task OnInitializedAsync() => LoadAsync();
 

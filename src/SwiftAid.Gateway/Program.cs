@@ -41,7 +41,7 @@ builder.Services.AddScoped<IOrganizationManagementClient, UnavailableOrganizatio
 builder.Services.AddScoped<IAccountPresentationClient, GatewayAccountPresentationClient>();
 builder.Services.AddScoped<IWorkspaceAccessClient, GatewayUnavailableWorkspaceAccessClient>();
 builder.Services.AddScoped<IStaffSessionEditorClient, GatewayStaffSessionEditorClient>();
-builder.Services.AddScoped<IMapAggregateClient, UnavailableMapAggregateClient>();
+builder.Services.AddScoped<IMapAggregateClient, MapAggregateGatewayClient>();
 builder.Services.AddScoped<ICaseWorkspaceClient, CaseWorkspaceGatewayClient>();
 builder.Services.AddScoped<IWorkManagementClient, CommandBackedWorkManagementClient>();
 builder.Services.AddScoped<IIntakeReviewClient, GatewayIntakeReviewClient>();
@@ -110,6 +110,7 @@ app.MapIntakeCoordinationEndpoints();
 app.MapManagedCaseRegistrationEndpoints();
 app.MapCaseTimelineEndpoints();
 app.MapCaseQueueEndpoints();
+app.MapMapAggregateEndpoints();
 app.MapMonitoringQueueEndpoints();
 app.MapCaseCommandEndpoints();
 app.MapCommunitySessionEndpoints();

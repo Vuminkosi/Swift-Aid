@@ -386,6 +386,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICaseTimelineQuery, CaseTimelineQuery>();
         services.AddScoped<ICaseQueueStore, PostgresCaseQueueStore>();
         services.AddScoped<ICaseQueueQuery, CaseQueueQuery>();
+        services.AddScoped<IMapAggregateStore, PostgresMapAggregateStore>();
+        services.AddScoped<IMapAggregateQuery, SurveillanceMapAggregateQuery>();
         services.AddScoped<ICaseMonitoringSummaryStore, PostgresCaseMonitoringSummaryStore>();
         services.AddScoped<ICaseMonitoringSummaryQuery, CaseMonitoringSummaryQuery>();
         services.AddScoped<ICaseMonitoringQueueStore, PostgresCaseMonitoringQueueStore>();
