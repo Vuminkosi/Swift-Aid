@@ -1,0 +1,73 @@
+@page "/participation"
+@using SwiftAid.Client.Presentation
+@using SwiftAid.Gateway.Presentation
+@using SwiftAid.Infrastructure.Identity
+@using SwiftAid.UI.Components.Surfaces.Account
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Identity
+@inject IServiceProvider ServiceProvider
+
+<PageTitle>Participation | SwiftAid</PageTitle>
+
+<ParticipationPreferenceSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OrganizationsHref="/organizations" />
+
+@code {
+    private ParticipationPreferenceSnapshot _snapshot = ParticipationPreferenceSnapshot.Loading;
+
+    private IOrganizationMembershipClient MembershipClient =>
+        (IOrganizationMembershipClient?)ServiceProvider.GetService(typeof(IOrganizationMembershipClient))
+        ?? CreateFallback()
+        ?? new UnavailableOrganizationMembershipClient();
+
+    private IOrganizationMembershipClient? CreateFallback()
+    {
+        var auth = (AuthenticationStateProvider?)ServiceProvider.GetService(typeof(AuthenticationStateProvider));
+        var users = (UserManager<SwiftAidUser>?)ServiceProvider.GetService(typeof(UserManager<SwiftAidUser>));
+        var memberships = (IOrganizationMembershipService?)ServiceProvider.GetService(typeof(IOrganizationMembershipService));
+        return auth is null || users is null || memberships is null
+            ? null
+            : new GatewayOrganizationMembershipClient(auth, users, memberships);
+    }
+
+    protected override async Task OnInitializedAsync() => await RefreshAsync();
+
+    private async Task RefreshAsync()
+    {
+        // Sequential: concurrent service awaits would share one scoped data context on the server circuit.
+        var memberships = await MembershipClient.GetMineAsync();
+        var requests = await MembershipClient.GetMyRequestsAsync();
+        _snapshot = Map(memberships, requests);
+    }
+
+    private static ParticipationPreferenceSnapshot Map(
+        UiCapabilityResult<IReadOnlyList<MembershipView>> memberships,
+        UiCapabilityResult<IReadOnlyList<MembershipRequestView>> requests)
+    {
+        if (memberships.Code == UiCapabilityResultCode.Denied || requests.Code == UiCapabilityResultCode.Denied)
+        {
+            return ParticipationPreferenceSnapshot.SignedOut;
+        }
+
+        if (memberships.Value is null && requests.Value is null)
+        {
+            return ParticipationPreferenceSnapshot.Unavailable with
+            {
+                StatusMessage = memberships.Message ?? requests.Message
+                    ?? ParticipationPreferenceSnapshot.Unavailable.StatusMessage
+            };
+        }
+
+        var hasActive = memberships.Value?.Any(entry =>
+            string.Equals(entry.MembershipStatus, "Active", StringComparison.OrdinalIgnoreCase) &&
+            entry.WorkspaceIds.Count > 0) == true;
+        var hasPending = !hasActive && (requests.Value?.Any(entry =>
+            string.Equals(entry.Status, "Pending", StringComparison.OrdinalIgnoreCase)) == true);
+
+        return new ParticipationPreferenceSnapshot(
+            ParticipationPreferenceViewState.Ready,
+            SelectedKey: null,
+            HasActiveMembership: hasActive,
+            HasPendingRequest: hasPending,
+            StatusMessage: memberships.Message ?? requests.Message);
+    }
+}

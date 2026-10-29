@@ -184,6 +184,12 @@
                                          AriaLabel="Manage organizations"
                                          Icon="@Icons.Material.Outlined.Groups" />
                 }
+                @if (!string.IsNullOrWhiteSpace(ParticipationHref))
+                {
+                    <SwiftAidSettingsRow Title="Participation preference" Href="@ParticipationHref"
+                                         AriaLabel="Participation preference"
+                                         Icon="@Icons.Material.Outlined.Badge" />
+                }
                 @if (!string.IsNullOrWhiteSpace(NotificationsHref))
                 {
                     <SwiftAidSettingsRow Title="Notification preferences" Href="@NotificationsHref"
@@ -196,6 +202,9 @@
         <SwiftAidSettingsGroup Label="Preferences" HeadingId="account-preferences-heading">
             <li class="account-status-item">
                 <ThemePreferenceControl />
+            </li>
+            <li class="account-status-item">
+                <AccessibilityPreferenceControl />
             </li>
         </SwiftAidSettingsGroup>
 
@@ -263,6 +272,12 @@
     /// link renders, so hosts without that route stay clean.
     /// </summary>
     [Parameter] public string? OrganizationsHref { get; set; }
+
+    /// <summary>
+    /// Optional deep link to the participation preference page. When null
+    /// or empty no link renders, so hosts without that route stay clean.
+    /// </summary>
+    [Parameter] public string? ParticipationHref { get; set; }
 
     /// <summary>
     /// Optional deep link to the notifications page. When null or empty no

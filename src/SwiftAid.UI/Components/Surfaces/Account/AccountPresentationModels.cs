@@ -225,3 +225,56 @@ public sealed record WelcomeCompleteSnapshot(
         WelcomeCompleteViewState.Unavailable, null, false, false,
         "Your account details are temporarily unavailable.", true);
 }
+
+public enum ParticipationPreferenceViewState
+{
+    Loading,
+    Ready,
+    SignedOut,
+    Unavailable
+}
+
+public sealed record ParticipationOptionSnapshot(
+    string Key,
+    string Title,
+    string Description);
+
+/// <summary>Participation preference. A device-local personalization choice;
+/// never proof of membership and never a source of staff permissions.</summary>
+public sealed record ParticipationPreferenceSnapshot(
+    ParticipationPreferenceViewState ViewState,
+    string? SelectedKey,
+    bool HasActiveMembership,
+    bool HasPendingRequest,
+    string? StatusMessage = null,
+    bool StatusIsError = false)
+{
+    public static IReadOnlyList<ParticipationOptionSnapshot> Options { get; } =
+    [
+        new("community-health-worker", "Community Health Worker",
+            "Fieldwork, case coordination, community education"),
+        new("nurse-clinician", "Nurse / Clinician",
+            "Clinical or health services"),
+        new("community-leader", "Community Leader",
+            "Outreach and engagement"),
+        new("program-coordinator", "Program Coordinator",
+            "Planning and reporting"),
+        new("community-member", "Community Member",
+            "Public information and events")
+    ];
+
+    public static bool IsKnownKey(string? key) =>
+        !string.IsNullOrWhiteSpace(key) &&
+        Options.Any(option => string.Equals(option.Key, key, StringComparison.Ordinal));
+
+    public static ParticipationPreferenceSnapshot Loading { get; } = new(
+        ParticipationPreferenceViewState.Loading, null, false, false);
+
+    public static ParticipationPreferenceSnapshot SignedOut { get; } = new(
+        ParticipationPreferenceViewState.SignedOut, null, false, false,
+        "Sign in to choose how you participate.", true);
+
+    public static ParticipationPreferenceSnapshot Unavailable { get; } = new(
+        ParticipationPreferenceViewState.Unavailable, null, false, false,
+        "Participation choices are temporarily unavailable.", true);
+}

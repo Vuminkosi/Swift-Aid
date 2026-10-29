@@ -1,0 +1,70 @@
+@page "/participation"
+@using SwiftAid.Client.Authentication
+@using SwiftAid.Client.Presentation
+@using SwiftAid.Mobile.Services.Account
+@using SwiftAid.Mobile.Services.Http
+@using SwiftAid.UI.Components.Surfaces.Account
+@inject IServiceProvider ServiceProvider
+
+<PageTitle>Participation | SwiftAid</PageTitle>
+
+<ParticipationPreferenceSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OrganizationsHref="/organizations" />
+
+@code {
+    private ParticipationPreferenceSnapshot _snapshot = ParticipationPreferenceSnapshot.Loading;
+
+    private IOrganizationMembershipClient MembershipClient =>
+        (IOrganizationMembershipClient?)ServiceProvider.GetService(typeof(IOrganizationMembershipClient))
+        ?? CreateFallback()
+        ?? new UnavailableOrganizationMembershipClient();
+
+    private IOrganizationMembershipClient? CreateFallback()
+    {
+        var options = (NativeSessionHttpOptions?)ServiceProvider.GetService(typeof(NativeSessionHttpOptions));
+        var address = options?.GatewayBaseAddress?.ToString();
+        return string.IsNullOrWhiteSpace(address)
+            ? null
+            : new HttpOrganizationMembershipClient(CookieSessionHttpClient.Shared(address));
+    }
+
+    protected override async Task OnInitializedAsync() => await RefreshAsync();
+
+    private async Task RefreshAsync()
+    {
+        var memberships = await MembershipClient.GetMineAsync();
+        var requests = await MembershipClient.GetMyRequestsAsync();
+        _snapshot = Map(memberships, requests);
+    }
+
+    private static ParticipationPreferenceSnapshot Map(
+        UiCapabilityResult<IReadOnlyList<MembershipView>> memberships,
+        UiCapabilityResult<IReadOnlyList<MembershipRequestView>> requests)
+    {
+        if (memberships.Code == UiCapabilityResultCode.Denied || requests.Code == UiCapabilityResultCode.Denied)
+        {
+            return ParticipationPreferenceSnapshot.SignedOut;
+        }
+
+        if (memberships.Value is null && requests.Value is null)
+        {
+            return ParticipationPreferenceSnapshot.Unavailable with
+            {
+                StatusMessage = memberships.Message ?? requests.Message
+                    ?? ParticipationPreferenceSnapshot.Unavailable.StatusMessage
+            };
+        }
+
+        var hasActive = memberships.Value?.Any(entry =>
+            string.Equals(entry.MembershipStatus, "Active", StringComparison.OrdinalIgnoreCase) &&
+            entry.WorkspaceIds.Count > 0) == true;
+        var hasPending = !hasActive && (requests.Value?.Any(entry =>
+            string.Equals(entry.Status, "Pending", StringComparison.OrdinalIgnoreCase)) == true);
+
+        return new ParticipationPreferenceSnapshot(
+            ParticipationPreferenceViewState.Ready,
+            SelectedKey: null,
+            HasActiveMembership: hasActive,
+            HasPendingRequest: hasPending,
+            StatusMessage: memberships.Message ?? requests.Message);
+    }
+}
