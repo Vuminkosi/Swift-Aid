@@ -1,0 +1,28 @@
+@if (State == CaseDetailPanelState.Loading)
+{
+    <div class="case-detail-unavailable" role="status" aria-live="polite">
+        <MudProgressCircular Indeterminate="true" Size="Size.Small" aria-label="Loading case information" />
+        <div>
+            <MudText Typo="Typo.subtitle2">@Title</MudText>
+            <MudText Typo="Typo.body2">@Description</MudText>
+        </div>
+    </div>
+}
+else
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="case-detail-unavailable" role="status">
+        <MudText Typo="Typo.subtitle2">@Title</MudText>
+        <MudText Typo="Typo.body2">@Description</MudText>
+        @if (OnRetry.HasDelegate)
+        {
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Color="Color.Primary" OnClick="OnRetry" Class="mt-1">Try again</MudButton>
+        }
+    </MudAlert>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Description { get; set; } = string.Empty;
+    [Parameter] public EventCallback OnRetry { get; set; }
+    [Parameter] public CaseDetailPanelState State { get; set; } = CaseDetailPanelState.Unavailable;
+}

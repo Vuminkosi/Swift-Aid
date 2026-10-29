@@ -11,34 +11,18 @@
     else if (_unavailable)
     {
         <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="status">
-            This case history is unavailable. It may not exist, or your account may not have permission to read this case.
+            We couldn't find this case, or you can't view its history.
         </MudAlert>
     }
     else if (_error is not null)
     {
         <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" role="alert">
             @_error
-            <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="RefreshAsync" aria-label="Retry loading case history">Retry</MudButton>
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Color="Color.Error" OnClick="RefreshAsync" aria-label="Try loading case history again">Try again</MudButton>
         </MudAlert>
     }
     else if (_timeline is not null)
     {
-        <MudCard Class="case-timeline__header" Outlined="true">
-            <MudCardContent>
-                <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Managed case</MudText>
-                <MudText Typo="Typo.h6">@_timeline.Header.CaseId.ToString("D")</MudText>
-                <MudText Typo="Typo.body2">
-                    @_timeline.Header.OrganizationId · @_timeline.Header.WorkspaceId · @_timeline.Header.CountryCode
-                </MudText>
-                <MudText Typo="Typo.body2">
-                    Workflow: @_timeline.Header.Workflow · Owner: @_timeline.Header.AccountableOwnerActorId
-                </MudText>
-                <MudText Typo="Typo.caption" Color="Color.Secondary">
-                    Aggregate version @_timeline.Header.AggregateVersion · report revision @_timeline.Header.ReportRevision
-                </MudText>
-            </MudCardContent>
-        </MudCard>
-
         @if (_timeline.Entries.Count == 0)
         {
             <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
@@ -47,38 +31,131 @@
         }
         else
         {
-            <MudTimeline TimelinePosition="TimelinePosition.Start" Class="case-timeline__list">
-                @foreach (var entry in _timeline.Entries)
-                {
-                    <MudTimelineItem Color="@DotColor(entry)" Size="Size.Small">
-                        <ItemContent>
-                            <MudText Typo="Typo.body2"><strong>@entry.Label</strong></MudText>
-                            <MudText Typo="Typo.caption" Color="Color.Secondary">
-                                @entry.ActorId · @entry.RecordedAtUtc.ToLocalTime().ToString("g")
-                                @if (entry.OccurredAtUtc.HasValue)
-                                {
-                                    <span> (occurred @entry.OccurredAtUtc.Value.ToLocalTime().ToString("g"))</span>
-                                }
-                            </MudText>
-                            <MudText Typo="Typo.caption" Color="Color.Secondary">
-                                Version @entry.AggregateVersion
-                                @if (entry.Kind == CaseTimelineEntryKind.Derived)
-                                {
-                                    <span> · derived activity</span>
-                                }
-                            </MudText>
-                        </ItemContent>
-                    </MudTimelineItem>
-                }
-            </MudTimeline>
+            <div class="case-timeline__toolbar">
+                <MudSelect T="string"
+                           Label="Filter history"
+                           Value="_selectedEventType"
+                           ValueChanged="SetEventFilterAsync"
+                           Variant="Variant.Text"
+                           Dense="true"
+                           Class="case-timeline__filter">
+                    <MudSelectItem T="string" Value="@AllEventsFilter">All Events</MudSelectItem>
+                    @foreach (var option in EventTypeOptions)
+                    {
+                        <MudSelectItem T="string" Value="@option.FilterValue">@option.Label</MudSelectItem>
+                    }
+                </MudSelect>
+            </div>
+
+            @if (FilteredEntries.Count == 0)
+            {
+                <div class="case-timeline__filtered-empty" role="status">
+                    <MudText Typo="Typo.body2">No history entries match this filter.</MudText>
+                    <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="ClearEventFilter">Show all events</MudButton>
+                </div>
+            }
+            else
+            {
+                <MudTimeline TimelinePosition="TimelinePosition.Start" Class="case-timeline__list">
+                    @foreach (var entry in FilteredEntries)
+                    {
+                        <MudTimelineItem Color="@DotColor(entry)" Size="Size.Small">
+                            <ItemContent>
+                                <button type="button"
+                                        class="case-timeline__entry"
+                                        aria-haspopup="dialog"
+                                        aria-controls="case-history-event-drawer-title"
+                                        aria-label="@($"View details for {SafeEventLabel(entry.EventType, entry.Kind)} recorded {entry.RecordedAtUtc.ToLocalTime():g}")"
+                                        @onclick="() => OpenDetails(entry)">
+                                    <span class="case-timeline__entry-heading">
+                                        <span class="case-timeline__entry-title">@SafeEventLabel(entry.EventType, entry.Kind)</span>
+                                        <time datetime="@entry.RecordedAtUtc.ToString("O")">@entry.RecordedAtUtc.ToLocalTime().ToString("g")</time>
+                                    </span>
+                                    <span class="case-timeline__entry-actor">@ActorLabel(entry)</span>
+                                </button>
+                            </ItemContent>
+                        </MudTimelineItem>
+                    }
+                </MudTimeline>
+            }
+
             <MudText Typo="Typo.caption" Color="Color.Secondary" Class="case-timeline__notice">
-                History is immutable: entries record what happened and never change. Report content stays sealed and is not shown here.
+                History entries stay as recorded. Sealed report details are protected.
             </MudText>
         }
+    }
+
+    @if (_selectedEntry is { } selected)
+    {
+        <MudDialog @bind-Visible="_detailsOpen"
+                   Options="@EventDetailsDialogOptions"
+                   Class="case-timeline__event-drawer"
+                   TitleClass="case-timeline__event-drawer-title"
+                   ContentClass="case-timeline__event-drawer-content">
+            <TitleContent>
+                <div class="case-timeline__drawer-heading">
+                    <div>
+                        <MudText Typo="Typo.overline" Color="Color.Secondary">History event</MudText>
+                        <MudText Typo="Typo.h6" HtmlTag="h2" id="case-history-event-drawer-title">@SafeEntryLabel(selected)</MudText>
+                    </div>
+                    <MudButton Variant="Variant.Text"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Close"
+                               aria-label="Close event details"
+                               OnClick="CloseDetailsAsync">Close</MudButton>
+                </div>
+            </TitleContent>
+            <DialogContent>
+                <dl class="case-timeline__event-facts">
+                    <div>
+                        <dt>Recorded by</dt>
+                        <dd>@ActorLabel(selected)</dd>
+                    </div>
+                    <div>
+                        <dt>Recorded</dt>
+                        <dd><time datetime="@selected.RecordedAtUtc.ToString("O")">@selected.RecordedAtUtc.ToLocalTime().ToString("f")</time></dd>
+                    </div>
+                    @if (selected.OccurredAtUtc is { } occurredAt)
+                    {
+                        <div>
+                            <dt>Occurred</dt>
+                            <dd><time datetime="@occurredAt.ToString("O")">@occurredAt.ToLocalTime().ToString("f")</time></dd>
+                        </div>
+                    }
+                    <div>
+                        <dt>Event category</dt>
+                        <dd>@EventCategory(selected.EventType, selected.Kind)</dd>
+                    </div>
+                    <div>
+                        <dt>Case version</dt>
+                        <dd>@selected.AggregateVersion</dd>
+                    </div>
+                    <div>
+                        <dt>Report revision</dt>
+                        <dd>@selected.ReportRevision</dd>
+                    </div>
+                </dl>
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="case-timeline__drawer-notice">
+                    This record is read-only. Sealed reasons and report content are not shown here.
+                </MudText>
+            </DialogContent>
+        </MudDialog>
     }
 </section>
 
 @code {
+    private const string AllEventsFilter = "*";
+    private const string RelatedActivityFilter = "kind:derived";
+
+    private static readonly DialogOptions EventDetailsDialogOptions = new()
+    {
+        Position = DialogPosition.CenterRight,
+        MaxWidth = MaxWidth.Small,
+        FullWidth = true,
+        CloseOnEscapeKey = true,
+        BackdropClick = true
+    };
+
     [Parameter, EditorRequired] public ICaseTimelineClient Client { get; set; } = null!;
 
     [Parameter, EditorRequired] public Guid CaseId { get; set; }
@@ -90,12 +167,52 @@
     private string? _error;
     private CaseTimeline? _timeline;
     private Guid _loadedCaseId = Guid.Empty;
+    private string _selectedEventType = AllEventsFilter;
+    private CaseTimelineEntry? _selectedEntry;
+    private bool _detailsOpen;
+
+    private IReadOnlyList<(string FilterValue, string Label)> EventTypeOptions
+    {
+        get
+        {
+            if (_timeline is null)
+            {
+                return Array.Empty<(string FilterValue, string Label)>();
+            }
+
+            var options = _timeline.Entries
+                .Where(entry => entry.Kind == CaseTimelineEntryKind.Authoritative)
+                .Select(entry => (FilterValue: entry.EventType, Label: SafeEventLabel(entry.EventType, entry.Kind)))
+                .DistinctBy(option => option.FilterValue, StringComparer.Ordinal)
+                .OrderBy(option => option.Label, StringComparer.CurrentCulture)
+                .ToList();
+
+            if (_timeline.Entries.Any(entry => entry.Kind == CaseTimelineEntryKind.Derived))
+            {
+                options.Insert(0, (RelatedActivityFilter, "Related activity"));
+            }
+
+            return options;
+        }
+    }
+
+    private IReadOnlyList<CaseTimelineEntry> FilteredEntries =>
+        _timeline?.Entries
+            .Where(entry => _selectedEventType == AllEventsFilter ||
+                (_selectedEventType == RelatedActivityFilter && entry.Kind == CaseTimelineEntryKind.Derived) ||
+                string.Equals(entry.EventType, _selectedEventType, StringComparison.Ordinal))
+            .OrderBy(entry => entry.RecordedAtUtc)
+            .ThenBy(entry => entry.AggregateVersion)
+            .ToArray() ?? Array.Empty<CaseTimelineEntry>();
 
     protected override async Task OnParametersSetAsync()
     {
         if (CaseId != Guid.Empty && CaseId != _loadedCaseId)
         {
             _loadedCaseId = CaseId;
+            _selectedEventType = AllEventsFilter;
+            _selectedEntry = null;
+            _detailsOpen = false;
             await RefreshAsync();
         }
     }
@@ -119,6 +236,7 @@
             if (result.Access == CaseTimelineAccess.Found && result.Timeline is not null)
             {
                 _timeline = result.Timeline;
+                _selectedEventType = AllEventsFilter;
             }
             else
             {
@@ -135,6 +253,27 @@
         }
     }
 
+    private Task SetEventFilterAsync(string? eventType)
+    {
+        _selectedEventType = string.IsNullOrWhiteSpace(eventType) ? AllEventsFilter : eventType;
+        return Task.CompletedTask;
+    }
+
+    private void ClearEventFilter() => _selectedEventType = AllEventsFilter;
+
+    private void OpenDetails(CaseTimelineEntry entry)
+    {
+        _selectedEntry = entry;
+        _detailsOpen = true;
+    }
+
+    private Task CloseDetailsAsync()
+    {
+        _detailsOpen = false;
+        _selectedEntry = null;
+        return Task.CompletedTask;
+    }
+
     private static Color DotColor(CaseTimelineEntry entry) => entry.Kind switch
     {
         CaseTimelineEntryKind.Derived => Color.Info,
@@ -145,4 +284,57 @@
             _ => Color.Primary
         }
     };
+
+    private static string ActorLabel(CaseTimelineEntry entry) =>
+        entry.SafeActorDisplayLabel ?? "Attribution unavailable";
+
+    private static string SafeEntryLabel(CaseTimelineEntry entry) =>
+        string.IsNullOrWhiteSpace(entry.Label) ? SafeEventLabel(entry.EventType, entry.Kind) : entry.Label;
+
+    private static string EventCategory(string? eventType, CaseTimelineEntryKind kind)
+    {
+        if (kind == CaseTimelineEntryKind.Derived)
+        {
+            return "Related activity";
+        }
+
+        return eventType switch
+        {
+            "CaseCreated" or "CaseReported" or "ReportCorrected" => "Reporting",
+            "CaseResolved" or "CaseReopened" => "Case status",
+            "CaseObservationRecorded" => "Observation",
+            "CaseFollowUpScheduled" or "CaseFollowUpOutcomeRecorded" => "Follow-up",
+            "CaseAssistanceRequested" => "Assistance",
+            "CaseActionRequested" or "CaseActionRequestReviewed" => "Action review",
+            "CaseEscalationRaised" or "CaseEscalationAcknowledged" or "CaseEscalationClosed" => "Escalation",
+            _ => "Case activity"
+        };
+    }
+
+    private static string SafeEventLabel(string? eventType, CaseTimelineEntryKind kind)
+    {
+        if (kind == CaseTimelineEntryKind.Derived)
+        {
+            return "Related activity";
+        }
+
+        return eventType switch
+        {
+            "CaseCreated" => "Case opened",
+            "CaseReported" => "Report received",
+            "CaseResolved" => "Case resolved",
+            "CaseReopened" => "Case reopened",
+            "ReportCorrected" => "Report details updated",
+            "CaseObservationRecorded" => "Observation recorded",
+            "CaseFollowUpScheduled" => "Follow-up scheduled",
+            "CaseFollowUpOutcomeRecorded" => "Follow-up updated",
+            "CaseAssistanceRequested" => "Assistance requested",
+            "CaseActionRequested" => "Action review requested",
+            "CaseActionRequestReviewed" => "Action review completed",
+            "CaseEscalationRaised" => "Escalation raised",
+            "CaseEscalationAcknowledged" => "Escalation acknowledged",
+            "CaseEscalationClosed" => "Escalation closed",
+            _ => "Case activity recorded"
+        };
+    }
 }

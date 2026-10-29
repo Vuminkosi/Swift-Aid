@@ -1,0 +1,998 @@
+@using SwiftAid.UI.Components.Theme
+@using System.Globalization
+
+<section class="operations-work-management" aria-labelledby="work-management-title">
+    <header class="operations-work-management__header">
+        <div>
+            <MudText Typo="Typo.overline" Color="Color.Secondary">Work management</MudText>
+            <MudText Typo="Typo.h4" HtmlTag="h1" id="work-management-title">@Title</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@Description</MudText>
+        </div>
+        @if (OnRetry.HasDelegate)
+        {
+            <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Primary" OnClick="OnRetry" Disabled="@IsBusy" aria-label="Refresh work queue" />
+        }
+    </header>
+
+    @if (!string.IsNullOrWhiteSpace(StatusMessage))
+    {
+        <MudAlert Severity="@(StatusIsError ? Severity.Error : Severity.Info)" Variant="Variant.Outlined" Dense="true" role="status">@StatusMessage</MudAlert>
+    }
+    @if (IsBusy)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" aria-label="Updating work" />
+        <MudText Typo="Typo.caption" Color="Color.Secondary" role="status" aria-live="polite">Updating work. Please wait.</MudText>
+    }
+
+    @if (OnFilterChanged.HasDelegate)
+    {
+        <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap" Class="operations-work-management__filters" aria-label="Work filters">
+            <MudSelect T="OperationsWorkKind?" Value="@Filter.Kind" ValueChanged="SetKindFilterAsync" Label="Work type" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Disabled="@IsBusy" Class="operations-work-management__filter">
+                @foreach (var kind in Enum.GetValues<OperationsWorkKind>())
+                {
+                    <MudSelectItem T="OperationsWorkKind?" Value="@((OperationsWorkKind?)kind)">@WorkTypeLabel(kind)</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect T="OperationsWorkStatus?" Value="@Filter.Status" ValueChanged="SetStatusFilterAsync" Label="Status" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Disabled="@IsBusy" Class="operations-work-management__filter">
+                @foreach (var status in FilterableStatuses)
+                {
+                    <MudSelectItem T="OperationsWorkStatus?" Value="@((OperationsWorkStatus?)status)">@StatusLabel(status)</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect T="bool?" Value="@Filter.OverdueOnly" ValueChanged="SetOverdueFilterAsync" Label="Due date" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Disabled="@IsBusy" Class="operations-work-management__filter">
+                <MudSelectItem T="bool?" Value="@((bool?)true)">Overdue only</MudSelectItem>
+                <MudSelectItem T="bool?" Value="@((bool?)false)">Not overdue</MudSelectItem>
+            </MudSelect>
+            <MudSelect T="int" Value="@Filter.PageSize" ValueChanged="SetPageSizeAsync" Label="Items per page" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="@IsBusy" Class="operations-work-management__filter">
+                <MudSelectItem T="int" Value="10">10</MudSelectItem>
+                <MudSelectItem T="int" Value="25">25</MudSelectItem>
+                <MudSelectItem T="int" Value="50">50</MudSelectItem>
+                <MudSelectItem T="int" Value="100">100</MudSelectItem>
+            </MudSelect>
+        </MudStack>
+    }
+
+    @if (State != OperationsSurfaceState.Populated)
+    {
+        <SwiftAidStatePanel State="State.ToSwiftAidViewState()" Title="@StateTitle" Description="@StateDescription" OnRetry="OnRetry" />
+    }
+    else if (Items.Count == 0)
+    {
+        <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="No work items" Description="There are no work items to show for these filters." />
+    }
+    else
+    {
+        <MudGrid Spacing="2" Class="operations-work-management__grid">
+            <MudItem xs="12" md="4">
+                <MudPaper Outlined="true" Elevation="0" Class="operations-work-management__queue" aria-label="Work queue">
+                    <MudText Typo="Typo.subtitle1" HtmlTag="h2">Work queue</MudText>
+                    <MudStack Spacing="1" Class="operations-work-management__queue-items">
+                        @foreach (var item in OrderedItems)
+                        {
+                            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Assignment"
+                                       Color="@(_selectedWorkKey == ItemKey(item) ? Color.Primary : Color.Default)"
+                                       FullWidth="true" Class="operations-work-management__queue-item"
+                                       OnClick="@(() => SelectWork(item))"
+                                       aria-pressed="@(_selectedWorkKey == ItemKey(item))">
+                                <MudStack Spacing="1" Class="operations-work-management__queue-copy">
+                                    <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
+                                        <MudText Typo="Typo.subtitle2">@SafeDisplayReference(item.DisplayReference)</MudText>
+                                        <MudChip T="string" Size="Size.Small" Color="StatusColor(item.Status)">@StatusLabel(item.Status)</MudChip>
+                                    </MudStack>
+                                    <MudText Typo="Typo.caption">@WorkTypeLabel(item.Kind) · @AssignmentLabel(item.Assignment)</MudText>
+                                    <MudText Typo="Typo.body2">@item.Summary</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">Updated @item.UpdatedAtUtc.ToLocalTime().ToString("g")</MudText>
+                                </MudStack>
+                            </MudButton>
+                        }
+                    </MudStack>
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" md="8">
+                @if (SelectedItem is { } item)
+                {
+                    <MudPaper Outlined="true" Elevation="0" Class="operations-work-management__detail" aria-label="Selected work details">
+                        <div class="operations-work-management__detail-header">
+                            <div>
+                                <MudText Typo="Typo.overline" Color="Color.Secondary">@WorkTypeLabel(item.Kind)</MudText>
+                                <MudText Typo="Typo.h6" HtmlTag="h2">@SafeDisplayReference(item.DisplayReference)</MudText>
+                            </div>
+                            <MudChip T="string" Size="Size.Small" Color="StatusColor(item.Status)">@StatusLabel(item.Status)</MudChip>
+                        </div>
+                        <MudText Typo="Typo.body2">@item.Summary</MudText>
+                        <MudGrid Spacing="1" Class="operations-work-management__context">
+                            <MudItem xs="6" sm="4"><MudText Typo="Typo.caption" Color="Color.Secondary">Assignment</MudText><MudText Typo="Typo.body2">@AssignmentLabel(item.Assignment)</MudText></MudItem>
+                            <MudItem xs="6" sm="4"><MudText Typo="Typo.caption" Color="Color.Secondary">Due</MudText><MudText Typo="Typo.body2">@DueLabel(item.DueAtUtc)</MudText></MudItem>
+                            <MudItem xs="12" sm="4"><MudText Typo="Typo.caption" Color="Color.Secondary">Last updated</MudText><MudText Typo="Typo.body2">@item.UpdatedAtUtc.ToLocalTime().ToString("g")</MudText></MudItem>
+                        </MudGrid>
+
+                        <MudText Typo="Typo.subtitle1" HtmlTag="h3" Class="operations-work-management__section-title">Activity</MudText>
+                        @if (item.History.Count == 0)
+                        {
+                            <MudText Typo="Typo.body2" Color="Color.Secondary">No activity history is available for this item.</MudText>
+                        }
+                        else
+                        {
+                            <MudList T="string" Dense="true" aria-label="Work activity history">
+                                @foreach (var entry in item.History.OrderByDescending(value => value.OccurredAtUtc))
+                                {
+                                    <MudListItem T="string" Text="@HistoryLabel(entry)" SecondaryText="@entry.OccurredAtUtc.ToLocalTime().ToString("g")" />
+                                }
+                            </MudList>
+                        }
+
+                        @if (item.AvailableActions.Count == 0 || !OnAction.HasDelegate)
+                        {
+                            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-3">
+                                @UnavailableActionsMessage
+                            </MudAlert>
+                        }
+                        else
+                        {
+                            <MudDivider Class="my-3" />
+                            <MudText Typo="Typo.subtitle1" HtmlTag="h3">Available action</MudText>
+                            <MudSelect T="OperationsWorkAction?" Value="@_selectedAction" ValueChanged="SetAction" Label="Choose an available action" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" Clearable="true" Disabled="@IsBusy">
+                                @foreach (var action in AvailableActions(item))
+                                {
+                                    <MudSelectItem T="OperationsWorkAction?" Value="@((OperationsWorkAction?)action)">@ActionLabel(action)</MudSelectItem>
+                                }
+                            </MudSelect>
+
+                            @if (_selectedAction is { } action && AvailableActions(item).Contains(action))
+                            {
+                                @if (action is OperationsWorkAction.AssignWorker or OperationsWorkAction.ReassignWorker)
+                                {
+                                    <MudSelect T="int?" Value="@_workerOptionIndex" ValueChanged="@SetWorker" Label="Eligible worker" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" Disabled="@IsBusy">
+                                        @foreach (var option in WorkerOptions(item).Select((worker, index) => (worker, index)))
+                                        {
+                                            <MudSelectItem T="int?" Value="@((int?)option.index)">@SafeWorkerLabel(option.worker.DisplayName)</MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                }
+
+                                @if (action is OperationsWorkAction.RequestAssistance or OperationsWorkAction.RecordAssistanceProvided or OperationsWorkAction.RecordAssistanceUnmet)
+                                {
+                                    <MudSelect T="AssistanceNeed?" Value="@_assistanceNeed" ValueChanged="SetAssistanceNeed" Label="Assistance need" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" Disabled="@IsBusy">
+                                        @foreach (var need in Enum.GetValues<AssistanceNeed>())
+                                        {
+                                            <MudSelectItem T="AssistanceNeed?" Value="@((AssistanceNeed?)need)">@AssistanceNeedLabel(need)</MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                }
+
+                                @if (action == OperationsWorkAction.ConfirmAssistanceReceived)
+                                {
+                                    <MudCheckBox T="bool" @bind-Value="_confirmedReceived" Color="Color.Primary" Label="I confirm the assistance was received" Disabled="@IsBusy" />
+                                }
+
+                                @if (action is OperationsWorkAction.ScheduleFollowUp or OperationsWorkAction.RescheduleFollowUp)
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">Enter the local follow-up date and time, then choose the time zone. UTC is calculated only after you confirm.</MudText>
+                                    @if (action == OperationsWorkAction.RescheduleFollowUp)
+                                    {
+                                        <MudAlert Severity="Severity.Info" Dense="true">Current due time: @DueLabel(item.DueAtUtc). This value will remain visible in the reschedule history.</MudAlert>
+                                    }
+                                    <div class="operations-work-management__date-fields">
+                                        <MudDatePicker Date="@_followUpDate" DateChanged="@SetFollowUpDate" Label="Follow-up date" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="@IsBusy" />
+                                        <MudTimePicker Time="@_followUpTime" TimeChanged="@SetFollowUpTime" Label="Follow-up time" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="@IsBusy" />
+                                    </div>
+                                    <MudSelect T="string" Value="@_timeZoneId" ValueChanged="SetTimeZone" Label="Time zone" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" Disabled="@IsBusy">
+                                        @foreach (var timeZone in TimeZones)
+                                        {
+                                            <MudSelectItem Value="@timeZone.Id">@TimeZoneLabel(timeZone)</MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                    @if (SelectedLocalDateTime is { } localDateTime && SelectedTimeZone is { } selectedZone && selectedZone.IsAmbiguousTime(localDateTime))
+                                    {
+                                        <MudSelect T="string" Value="@_selectedUtcOffset" ValueChanged="SetSelectedUtcOffset" Label="Choose the time offset" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" Disabled="@IsBusy">
+                                            @foreach (var offset in selectedZone.GetAmbiguousTimeOffsets(localDateTime))
+                                            {
+                                                <MudSelectItem Value="@OffsetValue(offset)">@OffsetLabel(offset)</MudSelectItem>
+                                            }
+                                        </MudSelect>
+                                    }
+                                }
+
+                                @if (action == OperationsWorkAction.RecordFollowUpOutcome)
+                                {
+                                    <MudSelect T="FollowUpOutcome?" Value="@_followUpOutcome" ValueChanged="SetFollowUpOutcome" Label="Follow-up outcome" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" Disabled="@IsBusy">
+                                        @foreach (var outcome in Enum.GetValues<FollowUpOutcome>())
+                                        {
+                                            <MudSelectItem T="FollowUpOutcome?" Value="@((FollowUpOutcome?)outcome)">@FollowUpOutcomeLabel(outcome)</MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                }
+
+                                @if (action == OperationsWorkAction.RequestEscalation)
+                                {
+                                    <MudSelect T="EscalationReason?" Value="@_escalationReason" ValueChanged="SetEscalationReason" Label="Reason for escalation" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" Disabled="@IsBusy">
+                                        @foreach (var reason in Enum.GetValues<EscalationReason>())
+                                        {
+                                            <MudSelectItem T="EscalationReason?" Value="@((EscalationReason?)reason)">@EscalationReasonLabel(reason)</MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                    <MudTextField T="string" Value="@_escalationReasonText" ValueChanged="SetEscalationReasonText" Label="Reason" Lines="2" MaxLength="300" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" HelperText="Describe the operational reason for this escalation." Disabled="@IsBusy" />
+                                }
+
+                                @if (action == OperationsWorkAction.CancelFollowUp)
+                                {
+                                    <MudTextField T="string" Value="@_cancellationReason" ValueChanged="SetCancellationReason" Label="Reason for cancelling the follow-up" Lines="2" MaxLength="300" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" Disabled="@IsBusy" />
+                                }
+
+                                @if (action == OperationsWorkAction.ResolveEscalation)
+                                {
+                                    <MudTextField T="string" Value="@_resolutionSummary" ValueChanged="SetResolutionSummary" Label="Resolution summary" Lines="2" MaxLength="300" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" Disabled="@IsBusy" />
+                                    <MudTextField T="string" Value="@_resolutionReason" ValueChanged="SetResolutionReason" Label="Reason for resolution" Lines="2" MaxLength="300" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" Disabled="@IsBusy" />
+                                }
+
+                                @if (action == OperationsWorkAction.RecordEscalationAction)
+                                {
+                                    <MudSelect T="EscalationActionKind?" Value="@_escalationAction" ValueChanged="SetEscalationAction" Label="Administrative action recorded" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" Disabled="@IsBusy">
+                                        @foreach (var type in Enum.GetValues<EscalationActionKind>())
+                                        {
+                                            <MudSelectItem T="EscalationActionKind?" Value="@((EscalationActionKind?)type)">@EscalationActionLabel(type)</MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                }
+
+                                @if (NeedsDetails(action))
+                                {
+                                    <MudTextField T="string" Value="@_details" ValueChanged="SetDetails" Label="@DetailsLabel(action)" Lines="2" MaxLength="300" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" HelperText="Enter only the details needed for this action." Disabled="@IsBusy" />
+                                }
+
+                                @if (_validationMessage is not null)
+                                {
+                                    <MudAlert Severity="Severity.Warning" Dense="true" role="alert">@_validationMessage</MudAlert>
+                                }
+
+                                @if (_reviewing)
+                                {
+                                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">@ReviewMessage(action, item)</MudAlert>
+                                    <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap">
+                                        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.CheckCircle" Color="Color.Primary" Disabled="@IsBusy" OnClick="@(() => ConfirmActionAsync(item))">Confirm action</MudButton>
+                                        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Edit" Disabled="@IsBusy" OnClick="EditAction">Edit</MudButton>
+                                    </MudStack>
+                                }
+                                else
+                                {
+                                    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.RateReview" Color="Color.Primary" Disabled="@IsBusy" OnClick="@(() => ReviewAction(item))">Review action</MudButton>
+                                }
+                            }
+                        }
+                    </MudPaper>
+                }
+                else
+                {
+                    <SwiftAidStatePanel State="SwiftAidViewState.Information" Title="Choose a work item" Description="Select an assignment, assistance request, follow-up or escalation to review its context and available actions." />
+                }
+            </MudItem>
+        </MudGrid>
+    }
+
+    @if (HasPreviousPage || HasNextPage)
+    {
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="operations-work-management__pagination">
+            <MudText Typo="Typo.caption">Page @Filter.PageNumber</MudText>
+            <MudStack Row="true" Spacing="1">
+                <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack" Disabled="@(!HasPreviousPage || IsBusy)" OnClick="PreviousPageAsync">Previous</MudButton>
+                <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowForward" Disabled="@(!HasNextPage || IsBusy)" OnClick="NextPageAsync">Next</MudButton>
+            </MudStack>
+        </MudStack>
+    }
+</section>
+
+@code {
+    [Parameter] public string Title { get; set; } = "Work management";
+    [Parameter] public string Description { get; set; } = "Review assigned work and the next available steps.";
+    [Parameter] public OperationsSurfaceState State { get; set; } = OperationsSurfaceState.Unavailable;
+    [Parameter] public IReadOnlyList<OperationsWorkItem> Items { get; set; } = Array.Empty<OperationsWorkItem>();
+    [Parameter] public WorkFilter Filter { get; set; } = new(null, null, null, 1, 25);
+    [Parameter] public bool HasPreviousPage { get; set; }
+    [Parameter] public bool HasNextPage { get; set; }
+    [Parameter] public bool IsBusy { get; set; }
+    [Parameter] public string? StatusMessage { get; set; }
+    [Parameter] public bool StatusIsError { get; set; }
+    [Parameter] public EventCallback<OperationsWorkActionRequest> OnAction { get; set; }
+    [Parameter] public EventCallback<WorkFilter> OnFilterChanged { get; set; }
+    [Parameter] public EventCallback OnRetry { get; set; }
+
+    private string? _selectedWorkKey;
+    private long? _selectedVersion;
+    private OperationsWorkAction? _selectedAction;
+    private int? _workerOptionIndex;
+    private AssistanceNeed? _assistanceNeed;
+    private string? _details;
+    private DateTime? _followUpDate;
+    private TimeSpan? _followUpTime;
+    private string? _timeZoneId;
+    private string? _selectedUtcOffset;
+    private FollowUpOutcome? _followUpOutcome;
+    private EscalationReason? _escalationReason;
+    private string? _escalationReasonText;
+    private string? _cancellationReason;
+    private string? _resolutionSummary;
+    private string? _resolutionReason;
+    private EscalationActionKind? _escalationAction;
+    private bool _confirmedReceived;
+    private bool _reviewing;
+    private string? _validationMessage;
+
+    private static readonly IReadOnlyList<TimeZoneInfo> TimeZones = TimeZoneInfo.GetSystemTimeZones()
+        .OrderBy(zone => zone.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+        .ToArray();
+
+    private DateTime? SelectedLocalDateTime => _followUpDate is { } date && _followUpTime is { } time
+        ? DateTime.SpecifyKind(date.Date.Add(time), DateTimeKind.Unspecified)
+        : null;
+
+    private TimeZoneInfo? SelectedTimeZone => _timeZoneId is null
+        ? null
+        : TimeZones.FirstOrDefault(zone => string.Equals(zone.Id, _timeZoneId, StringComparison.Ordinal));
+
+    private OperationsWorkItem? SelectedItem => _selectedWorkKey is null
+        ? null
+        : Items.FirstOrDefault(item => string.Equals(ItemKey(item), _selectedWorkKey, StringComparison.Ordinal));
+
+    private static string ItemKey(OperationsWorkItem item) => $"{item.CaseId:N}|{item.WorkKey}";
+    private static IReadOnlyList<OperationsWorkStatus> FilterableStatuses =>
+        Enum.GetValues<OperationsWorkStatus>().Where(status => status != OperationsWorkStatus.Unavailable).ToArray();
+    private IEnumerable<OperationsWorkItem> OrderedItems => Items
+        .OrderBy(item => item.DueAtUtc ?? DateTimeOffset.MaxValue)
+        .ThenByDescending(item => item.UpdatedAtUtc);
+
+    private string StateTitle => State switch
+    {
+        OperationsSurfaceState.Loading => "Loading work",
+        OperationsSurfaceState.Offline => "Work queue is offline",
+        OperationsSurfaceState.Denied => "Work access is unavailable",
+        OperationsSurfaceState.Error => "Work could not be loaded",
+        _ => "Work is unavailable"
+    };
+
+    private string StateDescription => StatusMessage ?? State switch
+    {
+        OperationsSurfaceState.Loading => "Checking for work you can view.",
+        OperationsSurfaceState.Offline => "Reconnect and retry to refresh this work queue.",
+        OperationsSurfaceState.Denied => "You do not have access to this work queue.",
+        OperationsSurfaceState.Error => "Check your connection and try again.",
+        _ => "Work actions are unavailable here."
+    };
+
+    private string UnavailableActionsMessage => "Actions are unavailable for this item.";
+
+    private Task SetKindFilterAsync(OperationsWorkKind? kind) => ChangeFilterAsync(Filter with { Kind = kind, PageNumber = 1 });
+    private Task SetStatusFilterAsync(OperationsWorkStatus? status) => ChangeFilterAsync(Filter with { Status = status, PageNumber = 1 });
+    private Task SetOverdueFilterAsync(bool? overdueOnly) => ChangeFilterAsync(Filter with { OverdueOnly = overdueOnly, PageNumber = 1 });
+    private Task SetPageSizeAsync(int pageSize) => ChangeFilterAsync(Filter with { PageSize = Math.Clamp(pageSize, 10, 100), PageNumber = 1 });
+    private Task PreviousPageAsync() => ChangeFilterAsync(Filter with { PageNumber = Math.Max(1, Filter.PageNumber - 1) });
+    private Task NextPageAsync() => ChangeFilterAsync(Filter with { PageNumber = Filter.PageNumber + 1 });
+
+    private Task ChangeFilterAsync(WorkFilter filter)
+    {
+        if (!OnFilterChanged.HasDelegate || IsBusy)
+        {
+            return Task.CompletedTask;
+        }
+
+        return OnFilterChanged.InvokeAsync(filter);
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (Items.Count == 0)
+        {
+            _selectedWorkKey = null;
+            _selectedVersion = null;
+            _selectedAction = null;
+            ResetForm();
+            return;
+        }
+
+        if (SelectedItem is null)
+        {
+            _selectedWorkKey = ItemKey(Items[0]);
+            _selectedVersion = Items[0].Version;
+            ResetForm();
+        }
+        else if (SelectedItem is { } selected && _selectedVersion != selected.Version)
+        {
+            if (_selectedVersion is not null)
+            {
+                ResetForm();
+            }
+
+            _selectedVersion = selected.Version;
+        }
+
+        if (SelectedItem is { } item && _selectedAction is { } action && !AvailableActions(item).Contains(action))
+        {
+            _selectedAction = null;
+            ResetForm();
+        }
+    }
+
+    private static IReadOnlyList<OperationsWorkAction> AvailableActions(OperationsWorkItem item) => item.AvailableActions
+        .Where(action => Enum.IsDefined(action))
+        .Where(action => action is not (OperationsWorkAction.AssignWorker or OperationsWorkAction.ReassignWorker) || item.EligibleWorkers is { Count: > 0 })
+        .Distinct()
+        .ToArray();
+
+    private static IReadOnlyList<WorkOption> WorkerOptions(OperationsWorkItem item) =>
+        item.EligibleWorkers ?? Array.Empty<WorkOption>();
+
+    private WorkOption? SelectedWorker(OperationsWorkItem item) => _workerOptionIndex is { } index
+        ? WorkerOptions(item).ElementAtOrDefault(index)
+        : null;
+
+    private void SelectWork(OperationsWorkItem item)
+    {
+        _selectedWorkKey = ItemKey(item);
+        _selectedVersion = item.Version;
+        _selectedAction = null;
+        ResetForm();
+    }
+
+    private void SetAction(OperationsWorkAction? action)
+    {
+        _selectedAction = action;
+        ResetForm();
+    }
+
+    private void SetWorker(int? index) { _workerOptionIndex = index; _reviewing = false; _validationMessage = null; }
+    private void SetAssistanceNeed(AssistanceNeed? need) { _assistanceNeed = need; _reviewing = false; _validationMessage = null; }
+    private void SetDetails(string? details) { _details = details; _reviewing = false; _validationMessage = null; }
+    private void SetFollowUpDate(DateTime? date) { _followUpDate = date; _selectedUtcOffset = null; _reviewing = false; _validationMessage = null; }
+    private void SetFollowUpTime(TimeSpan? time) { _followUpTime = time; _selectedUtcOffset = null; _reviewing = false; _validationMessage = null; }
+    private void SetTimeZone(string? timeZoneId) { _timeZoneId = timeZoneId; _selectedUtcOffset = null; _reviewing = false; _validationMessage = null; }
+    private void SetSelectedUtcOffset(string? offset) { _selectedUtcOffset = offset; _reviewing = false; _validationMessage = null; }
+    private void SetFollowUpOutcome(FollowUpOutcome? outcome) { _followUpOutcome = outcome; _reviewing = false; _validationMessage = null; }
+    private void SetEscalationReason(EscalationReason? reason) { _escalationReason = reason; _reviewing = false; _validationMessage = null; }
+    private void SetEscalationReasonText(string? reason) { _escalationReasonText = reason; _reviewing = false; _validationMessage = null; }
+    private void SetCancellationReason(string? reason) { _cancellationReason = reason; _reviewing = false; _validationMessage = null; }
+    private void SetResolutionSummary(string? summary) { _resolutionSummary = summary; _reviewing = false; _validationMessage = null; }
+    private void SetResolutionReason(string? reason) { _resolutionReason = reason; _reviewing = false; _validationMessage = null; }
+    private void SetEscalationAction(EscalationActionKind? action) { _escalationAction = action; _reviewing = false; _validationMessage = null; }
+
+    private void ReviewAction(OperationsWorkItem item)
+    {
+        _validationMessage = null;
+        if (_selectedAction is not { } action || !AvailableActions(item).Contains(action))
+        {
+            _validationMessage = "Choose an action that is available for this work item.";
+            return;
+        }
+
+        if ((action is OperationsWorkAction.AssignWorker or OperationsWorkAction.ReassignWorker) && SelectedWorker(item) is null)
+        {
+            _validationMessage = "Select an eligible worker before reviewing the assignment.";
+            return;
+        }
+
+        if ((action is OperationsWorkAction.RequestAssistance or OperationsWorkAction.RecordAssistanceProvided or OperationsWorkAction.RecordAssistanceUnmet) && _assistanceNeed is null)
+        {
+            _validationMessage = "Select the assistance need before reviewing this request.";
+            return;
+        }
+
+        if (NeedsDetails(action) && string.IsNullOrWhiteSpace(_details))
+        {
+            _validationMessage = $"Enter {DetailsLabel(action).ToLowerInvariant()} before reviewing.";
+            return;
+        }
+
+        if (action is OperationsWorkAction.ScheduleFollowUp or OperationsWorkAction.RescheduleFollowUp)
+        {
+            if (action == OperationsWorkAction.RescheduleFollowUp && item.DueAtUtc is null)
+            {
+                _validationMessage = "The current due time is unavailable, so this item cannot be rescheduled from this view.";
+                return;
+            }
+
+            if (SelectedLocalDateTime is not { } localDateTime)
+            {
+                _validationMessage = "Select a follow-up date and time.";
+                return;
+            }
+
+            if (SelectedTimeZone is not { } timeZone)
+            {
+                _validationMessage = "Choose the time zone for the selected date and time.";
+                return;
+            }
+
+            if (timeZone.IsInvalidTime(localDateTime))
+            {
+                _validationMessage = "This local time does not exist in the selected time zone. Choose another time.";
+                return;
+            }
+
+            if (GetSelectedOffset(timeZone, localDateTime) is null)
+            {
+                _validationMessage = "This time occurs twice when clocks change. Choose the correct time offset.";
+                return;
+            }
+
+            if (timeZone.IsAmbiguousTime(localDateTime) && GetSelectedOffset(timeZone, localDateTime) is null)
+            {
+                _validationMessage = "Choose which UTC offset applies to this repeated local time.";
+                return;
+            }
+        }
+
+        if (action == OperationsWorkAction.CancelFollowUp && item.DueAtUtc is null)
+        {
+            _validationMessage = "The current due time is unavailable, so this item cannot be cancelled from this view.";
+            return;
+        }
+
+        if (action == OperationsWorkAction.RecordFollowUpOutcome && _followUpOutcome is null)
+        {
+            _validationMessage = "Select a follow-up outcome.";
+            return;
+        }
+
+        if (action == OperationsWorkAction.RequestEscalation && _escalationReason is null)
+        {
+            _validationMessage = "Select a reason for escalation.";
+            return;
+        }
+
+        if (action == OperationsWorkAction.RequestEscalation && string.IsNullOrWhiteSpace(_escalationReasonText))
+        {
+            _validationMessage = "Enter the operational reason for escalation.";
+            return;
+        }
+
+        if (action == OperationsWorkAction.CancelFollowUp && string.IsNullOrWhiteSpace(_cancellationReason))
+        {
+            _validationMessage = "Enter a reason for cancelling the follow-up.";
+            return;
+        }
+
+        if (action == OperationsWorkAction.CancelFollowUp && item.DueAtUtc is null)
+        {
+            _validationMessage = "The current due time is unavailable, so this follow-up cannot be cancelled from this view.";
+            return;
+        }
+
+        if (action == OperationsWorkAction.ResolveEscalation && string.IsNullOrWhiteSpace(_resolutionSummary))
+        {
+            _validationMessage = "Enter a resolution summary.";
+            return;
+        }
+
+        if (action == OperationsWorkAction.ResolveEscalation && string.IsNullOrWhiteSpace(_resolutionReason))
+        {
+            _validationMessage = "Enter the reason for resolving the escalation.";
+            return;
+        }
+
+        if (action == OperationsWorkAction.RecordEscalationAction && _escalationAction is null)
+        {
+            _validationMessage = "Select the administrative action being recorded.";
+            return;
+        }
+
+        if (action == OperationsWorkAction.ConfirmAssistanceReceived && !_confirmedReceived)
+        {
+            _validationMessage = "Confirm that the assistance was received.";
+            return;
+        }
+
+        _reviewing = true;
+    }
+
+    private async Task ConfirmActionAsync(OperationsWorkItem item)
+    {
+        if (!_reviewing || _selectedAction is not { } action || !OnAction.HasDelegate || IsBusy)
+        {
+            return;
+        }
+
+        _reviewing = false;
+        var scheduledAt = action is OperationsWorkAction.ScheduleFollowUp or OperationsWorkAction.RescheduleFollowUp
+            ? ConfirmedFollowUpDueAtUtc()
+            : null;
+        if ((action is OperationsWorkAction.ScheduleFollowUp or OperationsWorkAction.RescheduleFollowUp) && scheduledAt is null)
+        {
+            _validationMessage = "This date and time do not match the selected time zone. Choose a valid time and offset.";
+            return;
+        }
+
+        var isReschedule = action == OperationsWorkAction.RescheduleFollowUp;
+        await OnAction.InvokeAsync(new OperationsWorkActionRequest(
+            item.CaseId,
+            item.WorkKey,
+            item.Version,
+            action,
+            SelectedWorker(item)?.Key,
+            _assistanceNeed,
+            _details?.Trim(),
+            _followUpOutcome,
+            _escalationReason,
+            _escalationAction,
+            _confirmedReceived,
+            DueAtUtc: isReschedule || action == OperationsWorkAction.CancelFollowUp ? item.DueAtUtc : scheduledAt,
+            NewDueAtUtc: isReschedule ? scheduledAt : null,
+            LocalTimeZoneId: action is OperationsWorkAction.ScheduleFollowUp or OperationsWorkAction.RescheduleFollowUp ? _timeZoneId : null,
+            LocalOffset: (action is OperationsWorkAction.ScheduleFollowUp or OperationsWorkAction.RescheduleFollowUp) && SelectedTimeZone is { } selectedZone && SelectedLocalDateTime is { } localDateTime
+                ? GetSelectedOffset(selectedZone, localDateTime)
+                : null,
+            CancellationReason: action == OperationsWorkAction.CancelFollowUp ? _cancellationReason?.Trim() : null,
+            Reason: action switch
+            {
+                OperationsWorkAction.RequestEscalation => _escalationReasonText?.Trim(),
+                OperationsWorkAction.ResolveEscalation => _resolutionReason?.Trim(),
+                _ => null
+            },
+            ResolutionSummary: action == OperationsWorkAction.ResolveEscalation ? _resolutionSummary?.Trim() : null));
+    }
+
+    private void EditAction() => _reviewing = false;
+
+    private void ResetForm()
+    {
+        _workerOptionIndex = null;
+        _assistanceNeed = null;
+        _details = null;
+        _followUpDate = null;
+        _followUpTime = null;
+        _timeZoneId = null;
+        _selectedUtcOffset = null;
+        _followUpOutcome = null;
+        _escalationReason = null;
+        _escalationReasonText = null;
+        _cancellationReason = null;
+        _resolutionSummary = null;
+        _resolutionReason = null;
+        _escalationAction = null;
+        _confirmedReceived = false;
+        _reviewing = false;
+        _validationMessage = null;
+    }
+
+    private DateTimeOffset? ConfirmedFollowUpDueAtUtc()
+    {
+        if (SelectedLocalDateTime is not { } localDateTime || SelectedTimeZone is not { } timeZone ||
+            timeZone.IsInvalidTime(localDateTime) || GetSelectedOffset(timeZone, localDateTime) is not { } offset)
+        {
+            return null;
+        }
+
+        return new DateTimeOffset(localDateTime, offset).ToUniversalTime();
+    }
+
+    private TimeSpan? GetSelectedOffset(TimeZoneInfo timeZone, DateTime localDateTime)
+    {
+        if (!timeZone.IsAmbiguousTime(localDateTime))
+        {
+            return timeZone.GetUtcOffset(localDateTime);
+        }
+
+        if (!TimeSpan.TryParse(_selectedUtcOffset, CultureInfo.InvariantCulture, out var selectedOffset))
+        {
+            return null;
+        }
+
+        return timeZone.GetAmbiguousTimeOffsets(localDateTime).Contains(selectedOffset) ? selectedOffset : null;
+    }
+
+    private static bool NeedsDetails(OperationsWorkAction action) => action is
+        OperationsWorkAction.RequestAssistance or
+        OperationsWorkAction.RecordAssistanceProvided or
+        OperationsWorkAction.RecordAssistanceUnmet or
+        OperationsWorkAction.RecordFollowUpOutcome or
+        OperationsWorkAction.RecordEscalationAction;
+
+    private static string DetailsLabel(OperationsWorkAction action) => action switch
+    {
+        OperationsWorkAction.RequestAssistance => "Describe the requested assistance",
+        OperationsWorkAction.RecordAssistanceProvided => "Describe the assistance provided",
+        OperationsWorkAction.RecordAssistanceUnmet => "Describe what remains unmet",
+        OperationsWorkAction.RecordFollowUpOutcome => "Follow-up details",
+        OperationsWorkAction.RecordEscalationAction => "Administrative action details",
+        _ => "Additional details"
+    };
+
+    private string ReviewMessage(OperationsWorkAction action, OperationsWorkItem item)
+    {
+        var message = $"Review {ActionLabel(action).ToLowerInvariant()} for {SafeDisplayReference(item.DisplayReference)}.";
+        if (action is OperationsWorkAction.ScheduleFollowUp or OperationsWorkAction.RescheduleFollowUp)
+        {
+            var zone = SelectedTimeZone;
+            var newLocal = SelectedLocalDateTime;
+            if (zone is not null && newLocal.HasValue)
+            {
+                var localOffset = GetSelectedOffset(zone, newLocal.Value);
+                var selectedOffsetText = localOffset is { } offset ? OffsetLabel(offset) : "offset pending";
+                message += action == OperationsWorkAction.RescheduleFollowUp
+                    ? $" Current due time: {FormatInTimeZone(item.DueAtUtc!.Value, zone)}. New due time: {newLocal.Value:g} {selectedOffsetText} ({zone.DisplayName})."
+                    : $" Due time: {newLocal.Value:g} {selectedOffsetText} ({zone.DisplayName}).";
+            }
+        }
+        else if (action == OperationsWorkAction.CancelFollowUp)
+        {
+            message += $" Cancellation reason: {_cancellationReason?.Trim()}";
+        }
+        else if (action == OperationsWorkAction.RequestEscalation)
+        {
+            message += $" Category: {(_escalationReason is { } reason ? EscalationReasonLabel(reason) : "Not selected")}. Reason: {_escalationReasonText?.Trim()}";
+        }
+        else if (action == OperationsWorkAction.ResolveEscalation)
+        {
+            message += $" Resolution summary: {_resolutionSummary?.Trim()}. Reason: {_resolutionReason?.Trim()}";
+        }
+
+        return $"{message} Confirm submits this request.";
+    }
+
+    private static string SafeDisplayReference(string? value) => string.IsNullOrWhiteSpace(value) || LooksLikeInternalIdentifier(value)
+        ? "Work item reference unavailable"
+        : value;
+
+    private static string SafeWorkerLabel(string displayName) => LooksLikeInternalIdentifier(displayName)
+        ? "Worker name unavailable"
+        : displayName;
+
+    private static bool LooksLikeInternalIdentifier(string value) => Guid.TryParse(value, out _) ||
+        value.Length >= 20 && value.All(character => Uri.IsHexDigit(character) || character == '-');
+
+    private static string WorkTypeLabel(OperationsWorkKind kind) => kind switch
+    {
+        OperationsWorkKind.Assignment => "Assignment",
+        OperationsWorkKind.Assistance => "Assistance",
+        OperationsWorkKind.FollowUp => "Follow-up",
+        OperationsWorkKind.Escalation => "Escalation",
+        _ => "Operational work"
+    };
+
+    private static string StatusLabel(OperationsWorkStatus status) => status switch
+    {
+        OperationsWorkStatus.Open => "Open",
+        OperationsWorkStatus.Pending => "Pending",
+        OperationsWorkStatus.AcknowledgementPending => "Waiting for acknowledgement",
+        OperationsWorkStatus.Accepted => "Accepted",
+        OperationsWorkStatus.InProgress => "In progress",
+        OperationsWorkStatus.Provided => "Assistance provided",
+        OperationsWorkStatus.ReceiptConfirmed => "Receipt confirmed",
+        OperationsWorkStatus.Unfulfilled => "Assistance not fulfilled",
+        OperationsWorkStatus.Assigned => "Assigned",
+        OperationsWorkStatus.Acknowledged => "Acknowledged",
+        OperationsWorkStatus.Requested => "Requested",
+        OperationsWorkStatus.Scheduled => "Scheduled",
+        OperationsWorkStatus.Rescheduled => "Rescheduled",
+        OperationsWorkStatus.Missed => "Follow-up missed",
+        OperationsWorkStatus.Unreachable => "Unable to reach",
+        OperationsWorkStatus.Cancelled => "Cancelled",
+        OperationsWorkStatus.Completed => "Completed",
+        OperationsWorkStatus.Resolved => "Resolved",
+        OperationsWorkStatus.NeedsReview => "Needs review",
+        OperationsWorkStatus.Unavailable => "Unavailable",
+        _ => "Status unavailable"
+    };
+
+    private static Color StatusColor(OperationsWorkStatus status) => status switch
+    {
+        OperationsWorkStatus.Completed or OperationsWorkStatus.Resolved or OperationsWorkStatus.ReceiptConfirmed => Color.Success,
+        OperationsWorkStatus.NeedsReview or OperationsWorkStatus.Unfulfilled or OperationsWorkStatus.Missed => Color.Warning,
+        OperationsWorkStatus.Unavailable => Color.Default,
+        _ => Color.Info
+    };
+
+    private static string AssignmentLabel(OperationsAssignmentStatus status) => status switch
+    {
+        OperationsAssignmentStatus.Unassigned => "Unassigned",
+        OperationsAssignmentStatus.AcknowledgementPending => "Waiting for acknowledgement",
+        OperationsAssignmentStatus.AssignedToYou => "Assigned to you",
+        OperationsAssignmentStatus.Assigned => "Assigned",
+        _ => "Assignment unavailable"
+    };
+
+    private static string DueLabel(DateTimeOffset? due) => due is null
+        ? "No due date"
+        : $"{due.Value.ToUniversalTime():yyyy-MM-dd HH:mm} UTC";
+
+    private static string TimeZoneLabel(TimeZoneInfo timeZone) => timeZone.DisplayName;
+
+    private static string OffsetValue(TimeSpan offset) => offset.ToString("c", CultureInfo.InvariantCulture);
+
+    private static string OffsetLabel(TimeSpan offset) => $"UTC{(offset < TimeSpan.Zero ? "−" : "+")}{offset.Duration():hh\\:mm}";
+
+    private static string FormatInTimeZone(DateTimeOffset value, TimeZoneInfo timeZone) =>
+        TimeZoneInfo.ConvertTime(value, timeZone).ToString("g");
+
+    private static string HistoryLabel(WorkHistoryEntry entry)
+    {
+        var timeZone = entry.LocalTimeZoneId is null
+            ? null
+            : TimeZones.FirstOrDefault(zone => string.Equals(zone.Id, entry.LocalTimeZoneId, StringComparison.Ordinal));
+
+        if (entry.Action == OperationsWorkAction.RequestAssistance && entry.AssistanceNeed is { } requestedNeed)
+        {
+            return $"Assistance requested: {AssistanceNeedLabel(requestedNeed)}";
+        }
+
+        if (entry.Action == OperationsWorkAction.RecordAssistanceProvided && entry.AssistanceNeed is { } providedNeed)
+        {
+            return $"Assistance provided: {AssistanceNeedLabel(providedNeed)}";
+        }
+
+        if (entry.Action == OperationsWorkAction.RecordAssistanceUnmet && entry.AssistanceNeed is { } unmetNeed)
+        {
+            return $"Assistance need remains unmet: {AssistanceNeedLabel(unmetNeed)}";
+        }
+
+        if (entry.Action == OperationsWorkAction.ConfirmAssistanceReceived && entry.AssistanceReceiptConfirmed)
+        {
+            return "Assistance receipt confirmed";
+        }
+
+        if (entry.Action == OperationsWorkAction.RecordFollowUpOutcome && entry.FollowUpOutcome is { } outcome)
+        {
+            return $"Follow-up outcome: {FollowUpOutcomeLabel(outcome)}";
+        }
+
+        if (entry.Action == OperationsWorkAction.ScheduleFollowUp && entry.DueAtUtc is { } scheduledDue)
+        {
+            return $"Follow-up scheduled for {HistoryDueLabel(scheduledDue, timeZone, entry.LocalOffset)}";
+        }
+
+        if (entry.Action == OperationsWorkAction.RescheduleFollowUp && entry.DueAtUtc is { } oldDue && entry.NewDueAtUtc is { } newDue)
+        {
+            return $"Follow-up changed from {HistoryDueLabel(oldDue, timeZone, null)} to {HistoryDueLabel(newDue, timeZone, entry.LocalOffset)}";
+        }
+
+        if (entry.Action == OperationsWorkAction.CancelFollowUp && !string.IsNullOrWhiteSpace(entry.CancellationReason))
+        {
+            var previousDue = entry.DueAtUtc is { } cancelledDue ? $" (was due {HistoryDueLabel(cancelledDue, timeZone, null)})" : string.Empty;
+            return $"Follow-up cancelled{previousDue}: {entry.CancellationReason}";
+        }
+
+        if (entry.Action == OperationsWorkAction.RequestEscalation && !string.IsNullOrWhiteSpace(entry.Reason))
+        {
+            var category = entry.EscalationReason is { } reason ? $"{EscalationReasonLabel(reason)}. " : string.Empty;
+            return $"Escalation requested: {category}{entry.Reason}";
+        }
+
+        if (entry.Action == OperationsWorkAction.RecordEscalationAction && entry.EscalationAction is { } escalationAction)
+        {
+            return EscalationActionLabel(escalationAction);
+        }
+
+        if (entry.Action == OperationsWorkAction.ResolveEscalation)
+        {
+            var details = new[] { entry.ResolutionSummary, entry.Reason }.Where(value => !string.IsNullOrWhiteSpace(value));
+            if (details.Any())
+            {
+                return $"Escalation resolved: {string.Join(" · ", details)}";
+            }
+        }
+
+        return ActionLabel(entry.Action);
+    }
+
+    private static string HistoryDueLabel(DateTimeOffset dueAtUtc, TimeZoneInfo? timeZone, TimeSpan? offset) =>
+        timeZone is null
+            ? dueAtUtc.ToUniversalTime().ToString("g") + " UTC"
+            : $"{FormatInTimeZone(dueAtUtc, timeZone)} {OffsetLabel(offset ?? TimeZoneInfo.ConvertTime(dueAtUtc, timeZone).Offset)} ({timeZone.DisplayName})";
+
+    private static string ActionLabel(OperationsWorkAction action) => action switch
+    {
+        OperationsWorkAction.AssignWorker => "Assign worker",
+        OperationsWorkAction.ReassignWorker => "Reassign worker",
+        OperationsWorkAction.RequestAssistance => "Request assistance",
+        OperationsWorkAction.RecordAssistanceProvided => "Record assistance provided",
+        OperationsWorkAction.ConfirmAssistanceReceived => "Confirm assistance received",
+        OperationsWorkAction.RecordAssistanceUnmet => "Record unmet assistance need",
+        OperationsWorkAction.ScheduleFollowUp => "Schedule follow-up",
+        OperationsWorkAction.RescheduleFollowUp => "Reschedule follow-up",
+        OperationsWorkAction.CancelFollowUp => "Cancel follow-up",
+        OperationsWorkAction.RecordFollowUpOutcome => "Record follow-up outcome",
+        OperationsWorkAction.RequestEscalation => "Request escalation",
+        OperationsWorkAction.AcknowledgeEscalation => "Acknowledge escalation",
+        OperationsWorkAction.RecordEscalationAction => "Record administrative action",
+        OperationsWorkAction.ResolveEscalation => "Resolve escalation",
+        _ => "Work action"
+    };
+
+    private static string AssistanceNeedLabel(AssistanceNeed need) => need switch
+    {
+        AssistanceNeed.Transport => "Transport coordination",
+        AssistanceNeed.Supplies => "Supplies coordination",
+        AssistanceNeed.SpecialistSupport => "Specialist support coordination",
+        AssistanceNeed.Other => "Other operational support",
+        _ => "Assistance type unavailable"
+    };
+
+    private static string FollowUpOutcomeLabel(FollowUpOutcome outcome) => outcome switch
+    {
+        FollowUpOutcome.ContactMade => "Contact recorded",
+        FollowUpOutcome.NoContact => "No contact recorded",
+        FollowUpOutcome.NeedsAnotherFollowUp => "Another follow-up needed",
+        FollowUpOutcome.ReferredForReview => "Referred for review",
+        _ => "Outcome unavailable"
+    };
+
+    private static string EscalationReasonLabel(EscalationReason reason) => reason switch
+    {
+        EscalationReason.NeedsSupervisorReview => "Supervisor review requested",
+        EscalationReason.ServiceBarrier => "Service barrier recorded",
+        EscalationReason.TimeSensitive => "Time-sensitive coordination requested",
+        EscalationReason.Other => "Other operational reason",
+        _ => "Reason unavailable"
+    };
+
+    private static string EscalationActionLabel(EscalationActionKind action) => action switch
+    {
+        EscalationActionKind.Reviewed => "Reviewed",
+        EscalationActionKind.CoordinatedWithTeam => "Team coordination recorded",
+        EscalationActionKind.ResourceRequestRecorded => "Resource request recorded",
+        EscalationActionKind.NoActionTaken => "No action taken",
+        _ => "Administrative action unavailable"
+    };
+
+    public enum OperationsWorkKind { Assignment, Assistance, FollowUp, Escalation }
+    public enum OperationsWorkStatus { Open, Pending, AcknowledgementPending, Accepted, InProgress, Provided, ReceiptConfirmed, Unfulfilled, Assigned, Acknowledged, Requested, Scheduled, Rescheduled, Missed, Unreachable, Cancelled, Completed, Resolved, NeedsReview, Unavailable }
+    public enum OperationsAssignmentStatus { Unassigned, AcknowledgementPending, AssignedToYou, Assigned, Unavailable }
+    public enum OperationsWorkAction { AssignWorker, ReassignWorker, RequestAssistance, RecordAssistanceProvided, ConfirmAssistanceReceived, RecordAssistanceUnmet, ScheduleFollowUp, RescheduleFollowUp, CancelFollowUp, RecordFollowUpOutcome, RequestEscalation, AcknowledgeEscalation, RecordEscalationAction, ResolveEscalation }
+    public enum AssistanceNeed { Transport, Supplies, SpecialistSupport, Other }
+    public enum FollowUpOutcome { ContactMade, NoContact, NeedsAnotherFollowUp, ReferredForReview }
+    public enum EscalationReason { NeedsSupervisorReview, ServiceBarrier, TimeSensitive, Other }
+    public enum EscalationActionKind { Reviewed, CoordinatedWithTeam, ResourceRequestRecorded, NoActionTaken }
+    public sealed record WorkFilter(
+        OperationsWorkKind? Kind,
+        OperationsWorkStatus? Status,
+        bool? OverdueOnly,
+        int PageNumber,
+        int PageSize);
+    public sealed record WorkOption(string Key, string DisplayName);
+    public sealed record WorkHistoryEntry(
+        OperationsWorkAction Action,
+        DateTimeOffset OccurredAtUtc,
+        DateTimeOffset? DueAtUtc = null,
+        DateTimeOffset? NewDueAtUtc = null,
+        string? LocalTimeZoneId = null,
+        TimeSpan? LocalOffset = null,
+        string? CancellationReason = null,
+        string? Reason = null,
+        string? ResolutionSummary = null,
+        AssistanceNeed? AssistanceNeed = null,
+        bool AssistanceReceiptConfirmed = false,
+        FollowUpOutcome? FollowUpOutcome = null,
+        EscalationReason? EscalationReason = null,
+        EscalationActionKind? EscalationAction = null);
+    public sealed record OperationsWorkItem(
+        Guid CaseId,
+        string WorkKey,
+        long Version,
+        string DisplayReference,
+        OperationsWorkKind Kind,
+        OperationsWorkStatus Status,
+        OperationsAssignmentStatus Assignment,
+        string Summary,
+        DateTimeOffset UpdatedAtUtc,
+        DateTimeOffset? DueAtUtc,
+        IReadOnlyList<OperationsWorkAction> AvailableActions,
+        IReadOnlyList<WorkHistoryEntry> History,
+        IReadOnlyList<WorkOption>? EligibleWorkers = null);
+    public sealed record OperationsWorkActionRequest(
+        Guid CaseId,
+        string WorkKey,
+        long ExpectedVersion,
+        OperationsWorkAction Action,
+        string? WorkerKey,
+        AssistanceNeed? AssistanceNeed,
+        string? Details,
+        FollowUpOutcome? FollowUpOutcome,
+        EscalationReason? EscalationReason,
+        EscalationActionKind? EscalationAction,
+        bool AssistanceReceiptConfirmed,
+        DateTimeOffset? DueAtUtc = null,
+        DateTimeOffset? NewDueAtUtc = null,
+        string? LocalTimeZoneId = null,
+        TimeSpan? LocalOffset = null,
+        string? CancellationReason = null,
+        string? Reason = null,
+        string? ResolutionSummary = null);
+}

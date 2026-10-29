@@ -1,33 +1,670 @@
 @page "/case/{CaseId:guid}"
+@using Microsoft.Extensions.DependencyInjection
 @using SwiftAid.Contracts.Cases
-@using SwiftAid.UI.Components.Cases
+@using SwiftAid.Client.Presentation
+@using SwiftAid.UI.Components.Surfaces.Operations
+@using SwiftAid.UI.Components.Surfaces.Operations.WorkManagement
+@using SwiftAid.UI.Components.Surfaces.Operations.CaseDetail
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ICaseTimelineClient TimelineClient
-@inject ICaseCommandClient CommandClient
+@inject ICaseDiscussionClient DiscussionClient
+@inject ICaseEvidenceClient EvidenceClient
+@inject IJSRuntime JS
+@inject IServiceProvider ServiceProvider
 
-<PageTitle>Case history | SwiftAid</PageTitle>
-
-<MudContainer MaxWidth="MaxWidth.Large" Class="case-detail-page">
-    <SwiftAidPageHeading Eyebrow="Managed case"
-                         Title="Case history"
-                         Description="Immutable event history for one managed case. Content stays sealed; this view records what happened, when, and at which version."
-                         HeadingId="case-detail-heading" />
-
-    <CaseTimelineView @ref="_timeline" Client="TimelineClient" CaseId="CaseId" />
-
-    <CaseCommandPanel Client="CommandClient" CaseId="CaseId" OnCommandSucceeded="HandleCommandSucceededAsync" />
-</MudContainer>
+<PageTitle>Case details | SwiftAid</PageTitle>
+<OperationsCaseDetailSurface CaseId="CaseId" TimelineClient="TimelineClient"
+                             OverviewData="_overview" OnRefreshOverview="LoadOverviewAsync"
+                             DiscussionData="_discussion" MentionTargetsData="_mentionTargets" OnRefreshDiscussion="LoadDiscussionAsync" AppendDiscussionAsync="AppendDiscussionAsync"
+                             EvidenceData="_evidence" OnRefreshEvidence="LoadEvidenceAsync"
+                             OnDownloadEvidence="DownloadEvidenceAsync" UploadEvidenceAsyncCallback="UploadEvidenceAsync"
+                             ObservationsData="_observations" OnRefreshObservations="LoadObservationsAsync" RecordObservationAsyncCallback="RecordObservationAsync"
+                             WorkState="_workState" WorkItems="_workItems" WorkIsBusy="_workBusy"
+                             WorkStatusMessage="@_workStatusMessage" WorkStatusIsError="_workStatusIsError"
+                             OnWorkAction="ExecuteWorkActionAsync" OnWorkRetry="LoadWorkAsync" />
 
 @code {
     [Parameter] public Guid CaseId { get; set; }
+    private Guid _loadedCaseId;
+    private long _overviewRequest;
+    private CaseDetailOverviewView? _overview;
+    private CaseDetailMentionTargetsView? _mentionTargets;
+    private CaseDetailObservationsView? _observations;
+    private long _discussionRequest;
+    private CaseDetailDiscussionView? _discussion;
+    private long _evidenceRequest;
+    private CaseDetailEvidenceView? _evidence;
+    private long _downloadRequest;
+    private long _workRequest;
+    private WorkManagementSnapshot? _workSnapshot;
+    private IReadOnlyList<OperationsWorkManagementSurface.OperationsWorkItem> _workItems = Array.Empty<OperationsWorkManagementSurface.OperationsWorkItem>();
+    private OperationsSurfaceState _workState = OperationsSurfaceState.Loading;
+    private string? _workStatusMessage;
+    private bool _workStatusIsError;
+    private bool _workBusy;
 
-    private CaseTimelineView? _timeline;
-
-    private async Task HandleCommandSucceededAsync(CaseCommandResult _)
+    protected override async Task OnParametersSetAsync()
     {
-        if (_timeline is not null)
+        if (CaseId != Guid.Empty && CaseId != _loadedCaseId)
         {
-            await _timeline.RefreshAsync();
+            _loadedCaseId = CaseId;
+            _discussionRequest++;
+            _evidenceRequest++;
+            _downloadRequest++;
+            _workRequest++;
+            await Task.WhenAll(LoadOverviewAsync(), LoadDiscussionAsync(), LoadEvidenceAsync(), LoadObservationsAsync(), LoadWorkAsync());
+        }
+        else if (CaseId == Guid.Empty)
+        {
+            _loadedCaseId = Guid.Empty;
+            _overviewRequest++;
+            _overview = null;
+            _discussionRequest++;
+            _discussion = null;
+            _evidenceRequest++;
+            _evidence = null;
+            _downloadRequest++;
+            _workRequest++;
+            ClearWorkProjection(OperationsSurfaceState.Unavailable, "Open a case to review its coordination work.");
         }
     }
+
+    private async Task LoadOverviewAsync()
+    {
+        var caseId = CaseId;
+        var request = ++_overviewRequest;
+        _overview = new CaseDetailOverviewView(CaseDetailPanelState.Loading, null);
+        if (caseId == Guid.Empty)
+        {
+            _overview = new CaseDetailOverviewView(CaseDetailPanelState.Unavailable, null);
+            return;
+        }
+
+        try
+        {
+            var client = ServiceProvider.GetService<ICaseDetailSummaryClient>();
+            if (client is null) { _overview = new CaseDetailOverviewView(CaseDetailPanelState.Unavailable, null); return; }
+            var result = await client.GetAsync(caseId);
+            if (request != _overviewRequest || caseId != CaseId)
+            {
+                return;
+            }
+
+            _overview = result.Succeeded && result.Metadata.IsAvailable && result.Value is { IsValid: true } summary && summary.CaseId == caseId
+                ? new CaseDetailOverviewView(CaseDetailPanelState.Populated, ProjectSummary(summary))
+                : new CaseDetailOverviewView(ResultPanelState(result.Code), null);
+        }
+        catch (Exception)
+        {
+            if (request == _overviewRequest && caseId == CaseId)
+            {
+                _overview = new CaseDetailOverviewView(CaseDetailPanelState.Error, null);
+            }
+        }
+    }
+
+    private async Task LoadWorkAsync()
+    {
+        var caseId = CaseId;
+        var request = ++_workRequest;
+        _workState = OperationsSurfaceState.Loading;
+        _workItems = Array.Empty<OperationsWorkManagementSurface.OperationsWorkItem>();
+        _workSnapshot = null;
+        _workStatusMessage = null;
+        _workStatusIsError = false;
+        if (caseId == Guid.Empty)
+        {
+            ClearWorkProjection(OperationsSurfaceState.Unavailable, "Open a case to review its coordination work.");
+            return;
+        }
+
+        var client = ServiceProvider.GetService<IWorkManagementClient>();
+        if (client is null)
+        {
+            ClearWorkProjection(OperationsSurfaceState.Unavailable, "Coordination work is not available here.");
+            return;
+        }
+
+        _workBusy = true;
+        try
+        {
+            var result = await client.GetAsync(caseId, CreateWorkQuery());
+            if (request != _workRequest || caseId != CaseId)
+            {
+                return;
+            }
+
+            if (result.Succeeded && result.Metadata.IsAvailable && result.Value is { } snapshot &&
+                snapshot.CaseId == caseId && TryMapWorkSnapshot(snapshot, out var items))
+            {
+                _workSnapshot = snapshot;
+                _workItems = items;
+                _workState = items.Count == 0 ? OperationsSurfaceState.Empty : OperationsSurfaceState.Populated;
+            }
+            else
+            {
+                ClearWorkProjection(WorkResultState(result.Code), WorkResultMessage(result.Code, "load"));
+            }
+        }
+        catch (HttpRequestException)
+        {
+            if (request == _workRequest && caseId == CaseId)
+            {
+                ClearWorkProjection(OperationsSurfaceState.Offline, "Check your connection, then refresh coordination work.");
+            }
+        }
+        catch (Exception)
+        {
+            if (request == _workRequest && caseId == CaseId)
+            {
+                ClearWorkProjection(OperationsSurfaceState.Error, "Coordination work could not be loaded. Try again.");
+            }
+        }
+        finally
+        {
+            if (request == _workRequest)
+            {
+                _workBusy = false;
+            }
+        }
+    }
+
+    private async Task ExecuteWorkActionAsync(OperationsWorkManagementSurface.OperationsWorkActionRequest request)
+    {
+        var client = ServiceProvider.GetService<IWorkManagementClient>();
+        var snapshot = _workSnapshot;
+        var current = _workItems.FirstOrDefault(item => string.Equals(item.WorkKey, request.WorkKey, StringComparison.Ordinal));
+        if (client is null || _workBusy || _workState != OperationsSurfaceState.Populated || snapshot is null ||
+            request.CaseId != CaseId || snapshot.CaseId != CaseId || request.ExpectedVersion != snapshot.Version ||
+            current is null || current.CaseId != CaseId || current.Version != snapshot.Version || !current.AvailableActions.Contains(request.Action) ||
+            !Enum.TryParse<WorkManagementAction>(request.Action.ToString(), out var action) || !Enum.IsDefined(action))
+        {
+            _workStatusMessage = "This action is no longer available. Refresh coordination work and try again.";
+            _workStatusIsError = true;
+            return;
+        }
+
+        _workBusy = true;
+        _workStatusIsError = false;
+        try
+        {
+            var command = new WorkManagementCommand(
+                CaseId: request.CaseId,
+                WorkKey: request.WorkKey,
+                Action: action,
+                ExpectedVersion: request.ExpectedVersion,
+                WorkerKey: request.WorkerKey,
+                AssistanceNeed: ParseNullable<WorkManagementAssistanceNeed>(request.AssistanceNeed),
+                Details: request.Details,
+                FollowUpOutcome: ParseNullable<WorkManagementFollowUpOutcome>(request.FollowUpOutcome),
+                EscalationReason: ParseNullable<WorkManagementEscalationReason>(request.EscalationReason),
+                EscalationAction: ParseNullable<WorkManagementEscalationAction>(request.EscalationAction),
+                AssistanceReceiptConfirmed: request.AssistanceReceiptConfirmed,
+                DueAtUtc: request.DueAtUtc,
+                NewDueAtUtc: request.NewDueAtUtc,
+                LocalTimeZoneId: request.LocalTimeZoneId,
+                LocalOffset: request.LocalOffset,
+                CancellationReason: request.CancellationReason,
+                Reason: request.Reason,
+                ResolutionSummary: request.ResolutionSummary);
+            if (!command.IsValid)
+            {
+                _workStatusMessage = "Check the action details and try again.";
+                _workStatusIsError = true;
+                return;
+            }
+
+            var result = await client.ExecuteAsync(command, CreateWorkQuery());
+            if (CaseId != request.CaseId || !ReferenceEquals(snapshot, _workSnapshot) || snapshot.Version != request.ExpectedVersion)
+            {
+                return;
+            }
+
+            if (result.Succeeded && result.Metadata.IsAvailable && result.Value is { } updated &&
+                updated.CaseId == request.CaseId && updated.Version > request.ExpectedVersion && TryMapWorkSnapshot(updated, out _))
+            {
+                await LoadWorkAsync();
+                _workStatusMessage = "Action completed. Coordination work is refreshed.";
+                _workStatusIsError = false;
+                return;
+            }
+
+            if (result.Code is UiCapabilityResultCode.Denied or UiCapabilityResultCode.Unavailable)
+            {
+                ClearWorkProjection(WorkResultState(result.Code), WorkResultMessage(result.Code, "change"));
+                return;
+            }
+
+            if (result.Succeeded)
+            {
+                ClearWorkProjection(OperationsSurfaceState.Error, "The action could not be confirmed. Refresh coordination work before trying again.");
+                await LoadWorkAsync();
+                _workStatusMessage = "The action could not be confirmed. Refresh coordination work before trying again.";
+                _workStatusIsError = true;
+                return;
+            }
+
+            _workStatusMessage = result.Code == UiCapabilityResultCode.Conflict
+                ? "Coordination work changed. Refresh and try again."
+                : "The action could not be completed. Refresh coordination work before trying again.";
+            _workStatusIsError = true;
+            if (result.Code == UiCapabilityResultCode.Conflict)
+            {
+                await LoadWorkAsync();
+                _workStatusMessage = "Coordination work changed. Refresh and try again.";
+                _workStatusIsError = true;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            if (CaseId != request.CaseId || !ReferenceEquals(snapshot, _workSnapshot))
+            {
+                return;
+            }
+            _workStatusMessage = "The action could not reach the service. Check your connection and refresh.";
+            _workStatusIsError = true;
+            await LoadWorkAsync();
+            _workStatusMessage = "The action could not reach the service. Check your connection and refresh.";
+            _workStatusIsError = true;
+        }
+        catch (Exception)
+        {
+            if (CaseId != request.CaseId || !ReferenceEquals(snapshot, _workSnapshot))
+            {
+                return;
+            }
+            _workStatusMessage = "The action could not be completed. Refresh coordination work before trying again.";
+            _workStatusIsError = true;
+        }
+        finally
+        {
+            _workBusy = false;
+        }
+    }
+
+    private WorkManagementQuery CreateWorkQuery() => new(new PageRequest(1, 100));
+
+    private static bool TryMapWorkSnapshot(
+        WorkManagementSnapshot snapshot,
+        out IReadOnlyList<OperationsWorkManagementSurface.OperationsWorkItem> items)
+    {
+        items = Array.Empty<OperationsWorkManagementSurface.OperationsWorkItem>();
+        if (snapshot.CaseId == Guid.Empty || snapshot.Version <= 0 || snapshot.Items is null || snapshot.Items.Items is null ||
+            snapshot.Items.PageNumber != 1 || snapshot.Items.PageSize is < 1 or > 100 ||
+            snapshot.Items.Items.Count > snapshot.Items.PageSize || snapshot.Items.TotalCount < snapshot.Items.Items.Count)
+        {
+            return false;
+        }
+
+        var page = snapshot.Items;
+        var mapped = new List<OperationsWorkManagementSurface.OperationsWorkItem>(page.Items.Count);
+        foreach (var item in page.Items)
+        {
+            if (!TryMapWorkItem(snapshot, item, out var mappedItem))
+            {
+                return false;
+            }
+            mapped.Add(mappedItem);
+        }
+
+        items = mapped;
+        return true;
+    }
+
+    private static bool TryMapWorkItem(
+        WorkManagementSnapshot snapshot,
+        WorkManagementItem item,
+        out OperationsWorkManagementSurface.OperationsWorkItem mapped)
+    {
+        mapped = default!;
+        if (item is null || string.IsNullOrWhiteSpace(item.WorkKey) || item.WorkKey.Length > 120 ||
+            string.IsNullOrWhiteSpace(item.DisplayReference) || string.IsNullOrWhiteSpace(item.Summary) ||
+            !Enum.TryParse<OperationsWorkManagementSurface.OperationsWorkKind>(item.Kind.ToString(), out var kind) || !Enum.IsDefined(kind) ||
+            !Enum.TryParse<OperationsWorkManagementSurface.OperationsWorkStatus>(item.Status.ToString(), out var status) || !Enum.IsDefined(status) ||
+            !Enum.TryParse<OperationsWorkManagementSurface.OperationsAssignmentStatus>(item.Assignment.ToString(), out var assignment) || !Enum.IsDefined(assignment) ||
+            item.AvailableActions is null || item.History is null || item.EligibleWorkers is null)
+        {
+            return false;
+        }
+
+        if (item.AvailableActions.Any(action => !Enum.TryParse<OperationsWorkManagementSurface.OperationsWorkAction>(action.ToString(), out var parsed) || !Enum.IsDefined(parsed)) ||
+            item.History.Any(entry => !Enum.TryParse<OperationsWorkManagementSurface.OperationsWorkAction>(entry.Action.ToString(), out var parsed) || !Enum.IsDefined(parsed)))
+        {
+            return false;
+        }
+
+        var actions = item.AvailableActions.Select(action => Enum.Parse<OperationsWorkManagementSurface.OperationsWorkAction>(action.ToString())).ToArray();
+        var history = item.History.Select(entry => new OperationsWorkManagementSurface.WorkHistoryEntry(
+            Enum.Parse<OperationsWorkManagementSurface.OperationsWorkAction>(entry.Action.ToString()), entry.OccurredAtUtc,
+            entry.DueAtUtc, entry.NewDueAtUtc, entry.LocalTimeZoneId, entry.LocalOffset, entry.CancellationReason,
+            entry.Reason, entry.ResolutionSummary, ParseNullable<OperationsWorkManagementSurface.AssistanceNeed>(entry.AssistanceNeed),
+            entry.AssistanceReceiptConfirmed, ParseNullable<OperationsWorkManagementSurface.FollowUpOutcome>(entry.FollowUpOutcome),
+            ParseNullable<OperationsWorkManagementSurface.EscalationReason>(entry.EscalationReason),
+            ParseNullable<OperationsWorkManagementSurface.EscalationActionKind>(entry.EscalationAction))).ToArray();
+        var workers = item.EligibleWorkers.Select(worker => new OperationsWorkManagementSurface.WorkOption(worker.Key, worker.DisplayName)).ToArray();
+        if (workers.Any(worker => string.IsNullOrWhiteSpace(worker.Key) || string.IsNullOrWhiteSpace(worker.DisplayName)))
+        {
+            return false;
+        }
+
+        mapped = new OperationsWorkManagementSurface.OperationsWorkItem(snapshot.CaseId, item.WorkKey, snapshot.Version,
+            item.DisplayReference, kind, status, assignment, item.Summary, item.UpdatedAtUtc, item.DueAtUtc, actions, history, workers);
+        return true;
+    }
+
+    private void ClearWorkProjection(OperationsSurfaceState state, string message)
+    {
+        _workSnapshot = null;
+        _workItems = Array.Empty<OperationsWorkManagementSurface.OperationsWorkItem>();
+        _workState = state;
+        _workStatusMessage = message;
+        _workStatusIsError = state is OperationsSurfaceState.Denied or OperationsSurfaceState.Error or OperationsSurfaceState.Offline;
+        _workBusy = false;
+    }
+
+    private static OperationsSurfaceState WorkResultState(UiCapabilityResultCode code) => code switch
+    {
+        UiCapabilityResultCode.Denied => OperationsSurfaceState.Denied,
+        UiCapabilityResultCode.Unavailable => OperationsSurfaceState.Unavailable,
+        UiCapabilityResultCode.Cancelled => OperationsSurfaceState.Offline,
+        _ => OperationsSurfaceState.Error
+    };
+
+    private static string WorkResultMessage(UiCapabilityResultCode code, string operation) => code switch
+    {
+        UiCapabilityResultCode.Denied => "You do not have permission to view or change this work.",
+        UiCapabilityResultCode.Unavailable => "Coordination work is not available here.",
+        UiCapabilityResultCode.Conflict => "Coordination work changed. Refresh and try again.",
+        UiCapabilityResultCode.Cancelled => "Coordination work is unavailable offline.",
+        _ => $"Coordination work could not {operation} right now. Refresh and try again."
+    };
+
+    private static TEnum? ParseNullable<TEnum>(object? value) where TEnum : struct, Enum =>
+        value is Enum enumValue && Enum.TryParse<TEnum>(enumValue.ToString(), out var parsed) && Enum.IsDefined(parsed) ? parsed : null;
+
+    private async Task LoadDiscussionAsync()
+    {
+        var caseId = CaseId;
+        var request = ++_discussionRequest;
+        _discussion = new CaseDetailDiscussionView(CaseDetailPanelState.Loading, Array.Empty<CaseDetailDiscussionMessage>());
+        if (caseId == Guid.Empty)
+        {
+            _discussion = new CaseDetailDiscussionView(CaseDetailPanelState.Unavailable, Array.Empty<CaseDetailDiscussionMessage>());
+            return;
+        }
+
+        try
+        {
+            var result = await DiscussionClient.GetAsync(caseId, new CaseDiscussionQuery(new PageRequest(1, 50)));
+            if (request != _discussionRequest || caseId != CaseId)
+            {
+                return;
+            }
+
+            if (result.Succeeded && result.Metadata.IsAvailable && result.Value is { IsValid: true } snapshot && snapshot.CaseId == caseId)
+            {
+            _discussion = new CaseDetailDiscussionView(CaseDetailPanelState.Populated,
+                    snapshot.Messages.Items.Select(message => new CaseDetailDiscussionMessage(
+                    message.AuthorLabel, message.Message, message.RecordedAtUtc,
+                    message.MentionReferences, message.EvidenceKeys)).ToArray(), snapshot.AggregateVersion);
+            var commandClient = ServiceProvider.GetService<ICaseDiscussionCommandClient>();
+            if (commandClient is not null)
+            {
+                var targets = await commandClient.GetMentionTargetsAsync(caseId);
+                if (request != _discussionRequest || caseId != CaseId) return;
+                var targetsAvailable = targets.Succeeded && targets.Metadata.IsAvailable && targets.Value is not null;
+                _mentionTargets = new CaseDetailMentionTargetsView(targetsAvailable ? CaseDetailPanelState.Populated : ResultPanelState(targets.Code), targetsAvailable ? targets.Value!.Select(target => new CaseDetailMentionTarget(target.Reference, target.DisplayLabel)).ToArray() : Array.Empty<CaseDetailMentionTarget>());
+            }
+            }
+            else
+            {
+                _discussion = new CaseDetailDiscussionView(ResultState(result.Code), Array.Empty<CaseDetailDiscussionMessage>());
+            }
+        }
+        catch (Exception)
+        {
+            if (request == _discussionRequest && caseId == CaseId)
+            {
+                _discussion = new CaseDetailDiscussionView(CaseDetailPanelState.Error, Array.Empty<CaseDetailDiscussionMessage>());
+            }
+        }
+    }
+
+    private async Task LoadObservationsAsync()
+    {
+        var caseId = CaseId;
+        if (caseId == Guid.Empty) { _observations = new CaseDetailObservationsView(CaseDetailPanelState.Unavailable, Array.Empty<CaseDetailObservationRecord>()); return; }
+        var client = ServiceProvider.GetService<ICaseObservationClient>();
+        if (client is null) { _observations = new CaseDetailObservationsView(CaseDetailPanelState.Unavailable, Array.Empty<CaseDetailObservationRecord>()); return; }
+        _observations = new CaseDetailObservationsView(CaseDetailPanelState.Loading, Array.Empty<CaseDetailObservationRecord>());
+        try
+        {
+            var result = await client.GetAsync(caseId, new PageRequest(1, 50));
+            if (caseId != CaseId) return;
+            _observations = result.Succeeded && result.Metadata.IsAvailable && result.Value is { IsValid: true } snapshot && snapshot.CaseId == caseId
+                ? new CaseDetailObservationsView(snapshot.Items.Items.Count == 0 ? CaseDetailPanelState.Empty : CaseDetailPanelState.Populated, snapshot.Items.Items.Select(item => new CaseDetailObservationRecord(item.ObservationKey, (CaseDetailObservationCategory)item.Category, item.Observation, item.SourceLabel, item.EvidenceKeys, item.OccurredAtUtc, item.RecordedAtUtc, item.ActorDisplayLabel, item.AggregateVersion)).ToArray(), snapshot.AggregateVersion)
+                : new CaseDetailObservationsView(ResultPanelState(result.Code), Array.Empty<CaseDetailObservationRecord>());
+        }
+        catch (Exception) { if (caseId == CaseId) _observations = new CaseDetailObservationsView(CaseDetailPanelState.Error, Array.Empty<CaseDetailObservationRecord>()); }
+    }
+
+    private async Task<CaseDetailCommandOutcome> AppendDiscussionAsync(CaseDetailDiscussionPostRequest request)
+    {
+        var client = ServiceProvider.GetService<ICaseDiscussionCommandClient>();
+        if (client is null) return new CaseDetailCommandOutcome(CaseDetailOperationStatus.Unavailable);
+        try
+        {
+            var command = new CaseDiscussionPostCommand(request.CaseId, request.SubmissionId, request.ExpectedVersion, request.Message, request.MentionReferences, request.EvidenceKeys);
+            var result = await client.AppendAsync(command);
+            return result.Succeeded && result.Metadata.IsAvailable && result.Value is { IsValid: true } accepted && accepted.CaseId == request.CaseId && accepted.SubmissionId == request.SubmissionId
+                ? new CaseDetailCommandOutcome(CaseDetailOperationStatus.Accepted, accepted.AggregateVersion)
+                : OperationOutcome(result.Code);
+        }
+        catch (Exception) { return new CaseDetailCommandOutcome(CaseDetailOperationStatus.Failed); }
+    }
+
+    private async Task<CaseDetailCommandOutcome> UploadEvidenceAsync(CaseDetailEvidenceUploadRequest request, Stream content)
+    {
+        var client = ServiceProvider.GetService<ICaseEvidenceUploadClient>();
+        if (client is null) return new CaseDetailCommandOutcome(CaseDetailOperationStatus.Unavailable);
+        try
+        {
+            var command = new CaseEvidenceUploadRequest(request.CaseId, request.SubmissionId, request.ExpectedVersion, request.FileName, request.ContentType, request.ContentLength);
+            var result = await client.UploadAsync(command, content);
+            return result.Succeeded && result.Metadata.IsAvailable && result.Value is { IsValid: true } accepted && accepted.CaseId == request.CaseId && accepted.SubmissionId == request.SubmissionId
+                ? new CaseDetailCommandOutcome(CaseDetailOperationStatus.Accepted, accepted.AggregateVersion)
+                : OperationOutcome(result.Code);
+        }
+        catch (Exception) { return new CaseDetailCommandOutcome(CaseDetailOperationStatus.Failed); }
+    }
+
+    private async Task<CaseDetailCommandOutcome> RecordObservationAsync(CaseDetailObservationRequest request)
+    {
+        var client = ServiceProvider.GetService<ICaseObservationClient>();
+        if (client is null) return new CaseDetailCommandOutcome(CaseDetailOperationStatus.Unavailable);
+        try
+        {
+            var command = new CaseObservationCommand(request.CaseId, request.SubmissionId, request.ExpectedVersion, (CaseObservationCategory)request.Category, request.Observation, request.SourceLabel, request.EvidenceKeys, request.OccurredAtUtc);
+            var result = await client.RecordAsync(command);
+            return result.Succeeded && result.Metadata.IsAvailable && result.Value is { IsValid: true } accepted && accepted.CaseId == request.CaseId && accepted.SubmissionId == request.SubmissionId
+                ? new CaseDetailCommandOutcome(CaseDetailOperationStatus.Accepted, accepted.AggregateVersion)
+                : OperationOutcome(result.Code);
+        }
+        catch (Exception) { return new CaseDetailCommandOutcome(CaseDetailOperationStatus.Failed); }
+    }
+
+    private static SwiftAid.UI.Components.Surfaces.Operations.CaseDetail.CaseDetailSummary ProjectSummary(SwiftAid.Client.Presentation.CaseDetailSummary summary) => new(
+        summary.CaseId, summary.PublicReference,
+        summary.SubjectType switch { CaseWorkspaceSector.Human => CaseDetailSubjectType.Human, CaseWorkspaceSector.Animal => CaseDetailSubjectType.Animal, _ => CaseDetailSubjectType.Unknown },
+        summary.Summary, summary.ClassificationLabel, summary.Workflow, summary.PriorityLabel, summary.CountryLabel,
+        summary.LocationLabel, summary.OwnerDisplayLabel, summary.OpenedAtUtc, summary.UpdatedAtUtc);
+
+    private static CaseDetailCommandOutcome OperationOutcome(UiCapabilityResultCode code) => new(code switch
+    {
+        UiCapabilityResultCode.Conflict => CaseDetailOperationStatus.Conflict,
+        UiCapabilityResultCode.Denied => CaseDetailOperationStatus.Denied,
+        UiCapabilityResultCode.Cancelled => CaseDetailOperationStatus.Offline,
+        UiCapabilityResultCode.Unavailable => CaseDetailOperationStatus.Unavailable,
+        _ => CaseDetailOperationStatus.Failed
+    });
+
+    private static CaseDetailPanelState ResultPanelState(UiCapabilityResultCode code) => code switch
+    {
+        UiCapabilityResultCode.Denied => CaseDetailPanelState.Denied,
+        UiCapabilityResultCode.Unavailable => CaseDetailPanelState.Unavailable,
+        UiCapabilityResultCode.Cancelled => CaseDetailPanelState.Offline,
+        _ => CaseDetailPanelState.Error
+    };
+
+    private async Task LoadEvidenceAsync()
+    {
+        var caseId = CaseId;
+        var request = ++_evidenceRequest;
+        _evidence = new CaseDetailEvidenceView(CaseDetailPanelState.Loading, Array.Empty<CaseDetailEvidenceItem>());
+        if (caseId == Guid.Empty)
+        {
+            _evidence = new CaseDetailEvidenceView(CaseDetailPanelState.Unavailable, Array.Empty<CaseDetailEvidenceItem>());
+            return;
+        }
+
+        try
+        {
+            var result = await EvidenceClient.GetAsync(caseId, new CaseEvidenceQuery(new PageRequest(1, 50)));
+            if (request != _evidenceRequest || caseId != CaseId)
+            {
+                return;
+            }
+
+            if (result.Succeeded && result.Metadata.IsAvailable && result.Value is { IsValid: true } snapshot && snapshot.CaseId == caseId)
+            {
+                _evidence = new CaseDetailEvidenceView(CaseDetailPanelState.Populated,
+                    snapshot.Items.Items.Select(item => new CaseDetailEvidenceItem(
+                        item.EvidenceKey, item.DisplayName, ToUiKind(item.Kind), item.RecordedAtUtc,
+                        ToUiLocalMedia(item.LocalMediaState), ToUiUpload(item.UploadState))).ToArray(),
+                    AggregateVersion: snapshot.AggregateVersion);
+            }
+            else
+            {
+                _evidence = new CaseDetailEvidenceView(ResultState(result.Code), Array.Empty<CaseDetailEvidenceItem>());
+            }
+        }
+        catch (Exception)
+        {
+            if (request == _evidenceRequest && caseId == CaseId)
+            {
+                _evidence = new CaseDetailEvidenceView(CaseDetailPanelState.Error, Array.Empty<CaseDetailEvidenceItem>());
+            }
+        }
+    }
+
+    private async Task DownloadEvidenceAsync(string evidenceKey)
+    {
+        if (CaseId == Guid.Empty || string.IsNullOrWhiteSpace(evidenceKey) || _evidence is not { State: CaseDetailPanelState.Populated } current ||
+            !current.Items.Any(item => string.Equals(item.EvidenceKey, evidenceKey, StringComparison.Ordinal)))
+        {
+            return;
+        }
+
+        var caseId = CaseId;
+        var request = ++_downloadRequest;
+        var expectedVersion = current.AggregateVersion;
+        _evidence = current with { DownloadingEvidenceKey = evidenceKey, DownloadMessage = null, DownloadFailed = false };
+        try
+        {
+            var contentClient = ServiceProvider.GetService<ICaseEvidenceContentClient>();
+            if (contentClient is null)
+            {
+                _evidence = current with { DownloadingEvidenceKey = null, DownloadMessage = "File downloads are not available here.", DownloadFailed = true };
+                return;
+            }
+            await using var content = new MemoryStream();
+            var result = await contentClient.DownloadToAsync(caseId, evidenceKey, content);
+            if (request != _downloadRequest || caseId != CaseId || _evidence is not { State: CaseDetailPanelState.Populated } latest ||
+                latest.AggregateVersion != expectedVersion || !latest.Items.Any(item => string.Equals(item.EvidenceKey, evidenceKey, StringComparison.Ordinal)))
+            {
+                return;
+            }
+
+            if (!result.Succeeded || !result.Metadata.IsAvailable || result.Value is not { IsValid: true } download ||
+                download.CaseId != caseId || download.AggregateVersion != expectedVersion ||
+                !string.Equals(download.EvidenceKey, evidenceKey, StringComparison.Ordinal) || content.Length != download.ByteLength)
+            {
+                _evidence = latest with { DownloadingEvidenceKey = null, DownloadMessage = "This file could not be downloaded. Try again.", DownloadFailed = true };
+                return;
+            }
+
+            await using var module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/SwiftAid.UI/js/swiftaid-download.js");
+            var bytes = content.ToArray();
+            var sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));
+            if (!string.Equals(sha256, download.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                _evidence = latest with { DownloadingEvidenceKey = null, DownloadMessage = "The downloaded file could not be verified.", DownloadFailed = true };
+                return;
+            }
+            var handedOff = await module.InvokeAsync<bool>("downloadFile", download.FileName, download.ContentType, bytes);
+            if (request == _downloadRequest && caseId == CaseId && _evidence is { } afterHandoff)
+            {
+                _evidence = afterHandoff with
+                {
+                    DownloadingEvidenceKey = null,
+                    DownloadMessage = handedOff ? "Download started." : "This file could not be downloaded. Try again.",
+                    DownloadFailed = !handedOff
+                };
+            }
+        }
+        catch (Exception)
+        {
+            if (request == _downloadRequest && caseId == CaseId && _evidence is { } latest)
+            {
+                _evidence = latest with { DownloadingEvidenceKey = null, DownloadMessage = "This file could not be downloaded. Try again.", DownloadFailed = true };
+            }
+        }
+    }
+
+    private static CaseDetailPanelState ResultState(UiCapabilityResultCode code) => code switch
+    {
+        UiCapabilityResultCode.Denied => CaseDetailPanelState.Denied,
+        UiCapabilityResultCode.Unavailable => CaseDetailPanelState.Unavailable,
+        UiCapabilityResultCode.Cancelled => CaseDetailPanelState.Offline,
+        _ => CaseDetailPanelState.Error
+    };
+
+    private static CaseDetailEvidenceKind ToUiKind(CaseEvidenceKind kind) => kind switch
+    {
+        CaseEvidenceKind.Audio => CaseDetailEvidenceKind.Audio,
+        _ => CaseDetailEvidenceKind.File
+    };
+
+    private static CaseDetailLocalMediaState ToUiLocalMedia(CaseEvidenceLocalMediaState state) => state switch
+    {
+        CaseEvidenceLocalMediaState.AvailableOnDevice => CaseDetailLocalMediaState.AvailableOnDevice,
+        CaseEvidenceLocalMediaState.StoredOnDevice => CaseDetailLocalMediaState.StoredOnDevice,
+        CaseEvidenceLocalMediaState.NotAvailableOnDevice => CaseDetailLocalMediaState.NotAvailableOnDevice,
+        _ => CaseDetailLocalMediaState.Unknown
+    };
+
+    private static CaseDetailUploadState ToUiUpload(CaseEvidenceUploadState state) => state switch
+    {
+        CaseEvidenceUploadState.NotStarted => CaseDetailUploadState.NotStarted,
+        CaseEvidenceUploadState.Uploading => CaseDetailUploadState.Uploading,
+        CaseEvidenceUploadState.Uploaded => CaseDetailUploadState.Uploaded,
+        CaseEvidenceUploadState.Failed => CaseDetailUploadState.Failed,
+        _ => CaseDetailUploadState.Unavailable
+    };
+
+    private static string WorkflowLabel(string value) => value switch
+    {
+        "Open" => "Open",
+        "Resolved" => "Resolved",
+        "Closed" => "Closed",
+        "UnderReview" => "Under review",
+        _ => "In progress"
+    };
+
+    private static string CountryLabel(string value) => value.ToUpperInvariant() switch
+    {
+        "ZW" => "Zimbabwe",
+        "SZ" => "Eswatini",
+        _ => "Country recorded"
+    };
 }

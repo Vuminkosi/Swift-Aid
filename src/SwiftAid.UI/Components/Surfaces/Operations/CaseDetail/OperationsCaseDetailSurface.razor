@@ -1,0 +1,305 @@
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.UI.Components.Cases
+@using SwiftAid.UI.Components.Surfaces.Operations
+@using SwiftAid.UI.Components.Surfaces.Operations.WorkManagement
+@using Microsoft.AspNetCore.Components.Forms
+
+<section class="case-detail" aria-labelledby="case-detail-title">
+    <header class="case-detail__header">
+        <MudText Typo="Typo.overline" Color="Color.Secondary">Cases</MudText>
+        @if (OverviewData?.Summary is { } summary)
+        {
+            <div class="case-detail__title-row">
+                <MudText id="case-detail-title" Typo="Typo.h5" HtmlTag="h1">Case #@summary.PublicReference</MudText>
+                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">@WorkflowDisplayLabel(summary.Workflow)</MudChip>
+            </div>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@summary.ClassificationLabel · @summary.LocationLabel</MudText>
+        }
+        else
+        {
+            <MudText id="case-detail-title" Typo="Typo.h5" HtmlTag="h1">Case details</MudText>
+        }
+        <nav class="case-detail__quick-actions" aria-label="Case quick actions">
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.Event" OnClick="@(() => SelectTab(2))">Add follow-up</MudButton>
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.NoteAdd" OnClick="OpenObservation">Add observation</MudButton>
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.AttachFile" OnClick="@(() => SelectTab(5))">Attachments</MudButton>
+        </nav>
+    </header>
+
+    <MudTabs @ref="_tabs" Rounded="false" ApplyEffectsToContainer="false" Class="case-detail__tabs">
+        <MudTabPanel Text="Overview" Icon="@Icons.Material.Outlined.FolderOpen">
+            @if (OverviewData is { State: CaseDetailPanelState.Populated, Summary: { } overview })
+            {
+                <section class="case-detail__section" aria-labelledby="summary-heading">
+                    <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="summary-heading">Case summary</MudText>
+                    <p>@overview.Summary</p>
+                    <dl class="case-detail__facts">
+                        <div><dt>Type</dt><dd>@SubjectTypeLabel(overview.SubjectType)</dd></div>
+                        <div><dt>Classification</dt><dd>@overview.ClassificationLabel</dd></div>
+                        <div><dt>Priority</dt><dd>@overview.PriorityLabel</dd></div>
+                        <div><dt>Location</dt><dd>@overview.LocationLabel, @overview.CountryLabel</dd></div>
+                        <div><dt>Owner</dt><dd>@SafeLabel(overview.OwnerDisplayLabel)</dd></div>
+                        <div><dt>Reported</dt><dd>@overview.OpenedAtUtc.ToLocalTime().ToString("g")</dd></div>
+                        <div><dt>Updated</dt><dd>@overview.UpdatedAtUtc.ToLocalTime().ToString("g")</dd></div>
+                    </dl>
+                </section>
+            }
+            else
+            {
+                var state = OverviewData?.State ?? CaseDetailPanelState.Unavailable;
+                <CaseDetailUnavailable State="state" Title="@(PanelTitle(state, "Case summary"))" Description="@(PanelDescription(state, "case summary"))" OnRetry="OnRefreshOverview" />
+            }
+            <section class="case-detail__section">
+                <MudText Typo="Typo.subtitle1" HtmlTag="h2">Current work</MudText>
+                <div class="case-detail__work-summary">
+                    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.EventNote" OnClick="@(() => SelectTab(2))">Follow-ups (@CountWork(OperationsWorkManagementSurface.OperationsWorkKind.FollowUp))</MudButton>
+                    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.VolunteerActivism" OnClick="@(() => SelectTab(3))">Assistance (@CountWork(OperationsWorkManagementSurface.OperationsWorkKind.Assistance))</MudButton>
+                </div>
+            </section>
+        </MudTabPanel>
+        <MudTabPanel Text="History" Icon="@Icons.Material.Outlined.History">
+            @if (TimelineClient is not null && CaseId != Guid.Empty)
+            {
+                <CaseTimelineView @ref="_timelineView" Client="TimelineClient" CaseId="CaseId" />
+            }
+            else { <CaseDetailUnavailable Title="History unavailable" Description="Case history is not available here." /> }
+        </MudTabPanel>
+        <MudTabPanel Text="Follow-ups" Icon="@Icons.Material.Outlined.EventNote">
+            <OperationsWorkManagementSurface Title="Follow-ups" Description="Schedule visits, manage deadlines, and record completion outcomes." State="WorkState" Items="FollowUpItems" IsBusy="WorkIsBusy" StatusMessage="@WorkStatusMessage" StatusIsError="WorkStatusIsError" OnAction="HandleWorkActionAsync" OnRetry="OnWorkRetry" />
+        </MudTabPanel>
+        <MudTabPanel Text="Assistance" Icon="@Icons.Material.Outlined.VolunteerActivism">
+            <OperationsWorkManagementSurface Title="Assistance" Description="Track referrals, resource requests, and receipt confirmation." State="WorkState" Items="AssistanceItems" IsBusy="WorkIsBusy" StatusMessage="@WorkStatusMessage" StatusIsError="WorkStatusIsError" OnAction="HandleWorkActionAsync" OnRetry="OnWorkRetry" />
+        </MudTabPanel>
+        <MudTabPanel Text="Discussion" Icon="@Icons.Material.Outlined.Forum">
+            <section class="case-detail__section" aria-label="Internal case discussion">
+                @if (DiscussionData is { State: CaseDetailPanelState.Populated } discussion)
+                {
+                    @if (discussion.Messages.Count == 0) { <MudText Typo="Typo.body2">No internal notes have been recorded.</MudText> }
+                    @foreach (var message in discussion.Messages.OrderByDescending(item => item.RecordedAtUtc))
+                    {
+                        var mentionLabels = ResolveMentionLabels(message.MentionReferences);
+                        var evidenceLabels = ResolveEvidenceLabels(message.EvidenceKeys);
+                        <article class="case-detail__message"><div class="case-detail__message-meta"><strong>@SafeLabel(message.AuthorLabel)</strong><time>@message.RecordedAtUtc.ToLocalTime().ToString("g")</time></div><p>@message.Message</p>
+                            @if (mentionLabels.Count > 0) { <small class="case-detail__message-references">Mentioned: @string.Join(", ", mentionLabels)</small> }
+                            @if (evidenceLabels.Count > 0) { <small class="case-detail__message-references">Attachments: @string.Join(", ", evidenceLabels)</small> }
+                        </article>
+                    }
+                }
+                else
+                {
+                    var state = DiscussionData?.State ?? CaseDetailPanelState.Unavailable;
+                    <CaseDetailUnavailable State="state" Title="@(PanelTitle(state, "Discussion"))" Description="@(PanelDescription(state, "internal notes"))" OnRetry="OnRefreshDiscussion" />
+                }
+                @if (_showDiscussionForm)
+                {
+                    <div class="case-detail__form">
+                        <MudTextField T="string" Label="Internal note" Lines="4" MaxLength="4000" @bind-Value="_message" aria-describedby="discussion-help" />
+                        <MudText id="discussion-help" Typo="Typo.caption">Visible to authorized case staff only.</MudText>
+                        @if (MentionTargetsData?.Targets.Count > 0)
+                        {
+                            <MudSelect T="string" Label="Mention staff (optional)" MultiSelection="true" @bind-SelectedValues="_selectedMentions">
+                                @foreach (var target in MentionTargetsData.Targets) { <MudSelectItem T="string" Value="@target.Reference">@target.DisplayLabel</MudSelectItem> }
+                            </MudSelect>
+                        }
+                        @if (EvidenceData?.Items.Count > 0)
+                        {
+                            <MudSelect T="string" Label="Attach evidence reference (optional)" MultiSelection="true" @bind-SelectedValues="_selectedEvidence">
+                                @foreach (var item in EvidenceData.Items) { <MudSelectItem T="string" Value="@item.EvidenceKey">@item.DisplayName</MudSelectItem> }
+                            </MudSelect>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(_discussionError)) { <MudAlert Severity="Severity.Error" Variant="Variant.Text" role="alert">@_discussionError</MudAlert> }
+                        <div class="case-detail__actions"><MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.Send" Color="Color.Primary" Disabled="@_savingDiscussion" OnClick="SubmitDiscussionAsync">@(_savingDiscussion ? "Sending…" : "Send note")</MudButton><MudButton Variant="Variant.Text" OnClick="CloseDiscussionForm">Cancel</MudButton></div>
+                    </div>
+                }
+                else { <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.AddComment" Color="Color.Primary" OnClick="ShowDiscussionForm">Add internal note</MudButton> }
+            </section>
+        </MudTabPanel>
+        <MudTabPanel Text="Attachments" Icon="@Icons.Material.Outlined.AttachFile">
+            <section class="case-detail__section" aria-labelledby="attachments-heading">
+                <div class="case-detail__section-heading"><MudText Typo="Typo.subtitle1" HtmlTag="h2" id="attachments-heading">Case attachments</MudText><label class="case-detail__upload-label">Upload<InputFile OnChange="UploadEvidenceAsync" accept=".jpg,.jpeg,.png,.pdf,.txt" /></label></div>
+                @if (EvidenceData is { State: CaseDetailPanelState.Populated } evidence)
+                {
+                    var fileItems = evidence.Items.Where(item => item.Kind == CaseDetailEvidenceKind.File).ToArray();
+                    @if (fileItems.Length == 0) { <MudText Typo="Typo.body2">No attachments have been added.</MudText> }
+                    @foreach (var item in fileItems)
+                    {
+                        <div class="case-detail__evidence-row"><div><strong>@item.DisplayName</strong><small>@item.RecordedAtUtc?.ToLocalTime().ToString("g") · @UploadLabel(item.UploadState)</small></div><MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.Download" Disabled="@(!string.IsNullOrEmpty(evidence.DownloadingEvidenceKey))" OnClick="@(() => OnDownloadEvidence.InvokeAsync(item.EvidenceKey))">Download</MudButton></div>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(evidence.DownloadMessage)) { <MudAlert Severity="@(evidence.DownloadFailed ? Severity.Warning : Severity.Success)" Variant="Variant.Text" role="status">@evidence.DownloadMessage</MudAlert> }
+                }
+                else { var state = EvidenceData?.State ?? CaseDetailPanelState.Unavailable; <CaseDetailUnavailable State="state" Title="@(PanelTitle(state, "Attachments"))" Description="@(PanelDescription(state, "attachments"))" OnRetry="OnRefreshEvidence" /> }
+                @if (!string.IsNullOrWhiteSpace(_uploadMessage)) { <MudAlert Severity="@(_uploadFailed ? Severity.Error : Severity.Info)" Variant="Variant.Text" role="status">@_uploadMessage</MudAlert> }
+            </section>
+        </MudTabPanel>
+        <MudTabPanel Text="Observations" Icon="@Icons.Material.Outlined.Visibility">
+            <section class="case-detail__section" aria-label="Case observations">
+                <div class="case-detail__section-heading"><MudText Typo="Typo.subtitle1" HtmlTag="h2">Recorded observations</MudText><MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.Add" Color="Color.Primary" OnClick="OpenObservation">Add observation</MudButton></div>
+                @if (ObservationsData is { State: CaseDetailPanelState.Populated } observations)
+                {
+                    @if (observations.Records.Count == 0) { <MudText Typo="Typo.body2">No observations have been recorded.</MudText> }
+                    @foreach (var record in observations.Records.OrderByDescending(item => item.RecordedAtUtc))
+                    {
+                        <article class="case-detail__observation"><div class="case-detail__message-meta"><strong>@CategoryLabel(record.Category)</strong><time>@record.RecordedAtUtc.ToLocalTime().ToString("g")</time></div><p>@record.Observation</p><small>Source: @record.SourceLabel · Recorded by @record.ActorDisplayLabel</small></article>
+                    }
+                }
+                else { var state = ObservationsData?.State ?? CaseDetailPanelState.Unavailable; <CaseDetailUnavailable State="state" Title="@(PanelTitle(state, "Observations"))" Description="@(PanelDescription(state, "observations"))" OnRetry="OnRefreshObservations" /> }
+                @if (_showObservationForm)
+                {
+                    <div class="case-detail__form">
+                        <MudSelect T="CaseDetailObservationCategory" Label="Observation type" @bind-Value="_category"><MudSelectItem Value="@CaseDetailObservationCategory.Clinical">Clinical</MudSelectItem><MudSelectItem Value="@CaseDetailObservationCategory.Environmental">Environmental</MudSelectItem><MudSelectItem Value="@CaseDetailObservationCategory.Community">Community</MudSelectItem></MudSelect>
+                        <MudTextField T="string" Label="Observation" Lines="4" MaxLength="4000" @bind-Value="_observationText" HelperText="Record what was observed. Do not add a diagnosis or urgency assessment." />
+                        <MudTextField T="string" Label="Source" MaxLength="160" @bind-Value="_observationSource" />
+                        @if (EvidenceData?.Items.Count > 0) { <MudSelect T="string" Label="Evidence (optional)" MultiSelection="true" @bind-SelectedValues="_observationEvidence">@foreach (var item in EvidenceData.Items) { <MudSelectItem T="string" Value="@item.EvidenceKey">@item.DisplayName</MudSelectItem> }</MudSelect> }
+                        @if (!string.IsNullOrWhiteSpace(_observationError)) { <MudAlert Severity="Severity.Error" Variant="Variant.Text" role="alert">@_observationError</MudAlert> }
+                        <div class="case-detail__actions"><MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.Save" Color="Color.Primary" Disabled="@_savingObservation" OnClick="SubmitObservationAsync">@(_savingObservation ? "Saving…" : "Save observation")</MudButton><MudButton Variant="Variant.Text" OnClick="CloseObservationForm">Cancel</MudButton></div>
+                    </div>
+                }
+            </section>
+        </MudTabPanel>
+    </MudTabs>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public Guid CaseId { get; set; }
+    [Parameter] public ICaseTimelineClient? TimelineClient { get; set; }
+    [Parameter] public CaseDetailOverviewView? OverviewData { get; set; }
+    [Parameter] public EventCallback OnRefreshOverview { get; set; }
+    [Parameter] public CaseDetailDiscussionView? DiscussionData { get; set; }
+    [Parameter] public CaseDetailMentionTargetsView? MentionTargetsData { get; set; }
+    [Parameter] public EventCallback OnRefreshDiscussion { get; set; }
+    [Parameter] public Func<CaseDetailDiscussionPostRequest, Task<CaseDetailCommandOutcome>>? AppendDiscussionAsync { get; set; }
+    [Parameter] public CaseDetailEvidenceView? EvidenceData { get; set; }
+    [Parameter] public EventCallback OnRefreshEvidence { get; set; }
+    [Parameter] public EventCallback<string> OnDownloadEvidence { get; set; }
+    [Parameter] public Func<CaseDetailEvidenceUploadRequest, Stream, Task<CaseDetailCommandOutcome>>? UploadEvidenceAsyncCallback { get; set; }
+    [Parameter] public CaseDetailObservationsView? ObservationsData { get; set; }
+    [Parameter] public EventCallback OnRefreshObservations { get; set; }
+    [Parameter] public Func<CaseDetailObservationRequest, Task<CaseDetailCommandOutcome>>? RecordObservationAsyncCallback { get; set; }
+    [Parameter] public OperationsSurfaceState WorkState { get; set; } = OperationsSurfaceState.Unavailable;
+    [Parameter] public IReadOnlyList<OperationsWorkManagementSurface.OperationsWorkItem> WorkItems { get; set; } = Array.Empty<OperationsWorkManagementSurface.OperationsWorkItem>();
+    [Parameter] public bool WorkIsBusy { get; set; }
+    [Parameter] public string? WorkStatusMessage { get; set; }
+    [Parameter] public bool WorkStatusIsError { get; set; }
+    [Parameter] public EventCallback<OperationsWorkManagementSurface.OperationsWorkActionRequest> OnWorkAction { get; set; }
+    [Parameter] public EventCallback OnWorkRetry { get; set; }
+
+    private MudTabs? _tabs;
+    private CaseTimelineView? _timelineView;
+    private long _caseVersion;
+    private bool _showDiscussionForm, _showObservationForm, _savingDiscussion, _savingObservation, _uploadFailed;
+    private string? _message, _discussionError, _observationText, _observationSource, _observationError, _uploadMessage;
+    private CaseDetailObservationCategory _category = CaseDetailObservationCategory.Clinical;
+    private IReadOnlyCollection<string> _selectedMentions = Array.Empty<string>();
+    private IReadOnlyCollection<string> _selectedEvidence = Array.Empty<string>();
+    private IReadOnlyCollection<string> _observationEvidence = Array.Empty<string>();
+    private Guid _boundCaseId;
+
+    private IReadOnlyList<OperationsWorkManagementSurface.OperationsWorkItem> FollowUpItems => WorkItems.Where(item => item.Kind == OperationsWorkManagementSurface.OperationsWorkKind.FollowUp).ToArray();
+    private IReadOnlyList<OperationsWorkManagementSurface.OperationsWorkItem> AssistanceItems => WorkItems.Where(item => item.Kind == OperationsWorkManagementSurface.OperationsWorkKind.Assistance).ToArray();
+    private int CountWork(OperationsWorkManagementSurface.OperationsWorkKind kind) => WorkItems.Count(item => item.Kind == kind);
+
+    protected override void OnParametersSet()
+    {
+        if (CaseId != _boundCaseId) { _boundCaseId = CaseId; _caseVersion = 0; CloseDiscussionForm(); CloseObservationForm(); }
+        _caseVersion = Math.Max(_caseVersion, Math.Max(DiscussionData?.AggregateVersion ?? 0, EvidenceData?.AggregateVersion ?? 0));
+    }
+
+    private async Task HandleWorkActionAsync(OperationsWorkManagementSurface.OperationsWorkActionRequest request)
+    {
+        await OnWorkAction.InvokeAsync(request);
+        if (_timelineView is not null) await _timelineView.RefreshAsync();
+        await OnRefreshOverview.InvokeAsync();
+    }
+
+    private async Task SelectTab(int index) { if (_tabs is not null) await _tabs.ActivatePanelAsync(index, ignoreDisabledState: false); }
+    private void OpenObservation() { _showObservationForm = true; _ = SelectTab(6); }
+    private void ShowDiscussionForm() { _discussionError = null; _showDiscussionForm = true; }
+    private void CloseDiscussionForm() { _showDiscussionForm = false; _message = null; _discussionError = null; _selectedMentions = Array.Empty<string>(); _selectedEvidence = Array.Empty<string>(); }
+    private void CloseObservationForm() { _showObservationForm = false; _observationText = null; _observationSource = null; _observationError = null; _observationEvidence = Array.Empty<string>(); }
+
+    private async Task SubmitDiscussionAsync()
+    {
+        if (_savingDiscussion || AppendDiscussionAsync is null || CaseId == Guid.Empty) return;
+        if (string.IsNullOrWhiteSpace(_message)) { _discussionError = "Enter a note before sending."; return; }
+        _savingDiscussion = true; _discussionError = null;
+        try
+        {
+            var result = await AppendDiscussionAsync(new CaseDetailDiscussionPostRequest(CaseId, Guid.NewGuid(), Math.Max(_caseVersion, DiscussionData?.AggregateVersion ?? 0), _message.Trim(), _selectedMentions.ToArray(), _selectedEvidence.ToArray()));
+            if (result.Status == CaseDetailOperationStatus.Accepted)
+            {
+                _caseVersion = result.AggregateVersion; CloseDiscussionForm(); await OnRefreshDiscussion.InvokeAsync();
+            }
+            else _discussionError = OperationMessage(result.Status, "note");
+        }
+        catch (Exception) { _discussionError = "The note could not be sent. Check your connection and try again."; }
+        finally { _savingDiscussion = false; }
+    }
+
+    private async Task UploadEvidenceAsync(InputFileChangeEventArgs args)
+    {
+        _uploadMessage = null; _uploadFailed = false;
+        if (UploadEvidenceAsyncCallback is null || CaseId == Guid.Empty) { _uploadMessage = "Uploads are not available here."; _uploadFailed = true; return; }
+        var file = args.File;
+        if (file.Size is <= 0 or > 10 * 1024 * 1024) { _uploadMessage = "Choose a file smaller than 10 MB."; _uploadFailed = true; return; }
+        try
+        {
+            await using var stream = file.OpenReadStream(10 * 1024 * 1024);
+            var upload = new CaseDetailEvidenceUploadRequest(CaseId, Guid.NewGuid(), Math.Max(_caseVersion, EvidenceData?.AggregateVersion ?? 0), file.Name, file.ContentType, file.Size);
+            if (!upload.IsValid) { _uploadMessage = "This file type or size is not supported."; _uploadFailed = true; return; }
+            var result = await UploadEvidenceAsyncCallback(upload, stream);
+            if (result.Status == CaseDetailOperationStatus.Accepted)
+            {
+                _caseVersion = result.AggregateVersion; _uploadMessage = "Attachment uploaded."; await OnRefreshEvidence.InvokeAsync();
+            }
+            else { _uploadMessage = OperationMessage(result.Status, "attachment"); _uploadFailed = true; }
+        }
+        catch (Exception) { _uploadMessage = "This attachment could not be uploaded. Check the file and connection, then try again."; _uploadFailed = true; }
+    }
+
+    private async Task SubmitObservationAsync()
+    {
+        if (_savingObservation || RecordObservationAsyncCallback is null || CaseId == Guid.Empty) return;
+        if (string.IsNullOrWhiteSpace(_observationText) || string.IsNullOrWhiteSpace(_observationSource)) { _observationError = "Enter the observation and its source."; return; }
+        _savingObservation = true; _observationError = null;
+        try
+        {
+            var result = await RecordObservationAsyncCallback(new CaseDetailObservationRequest(CaseId, Guid.NewGuid(), Math.Max(_caseVersion, ObservationsData?.AggregateVersion ?? 0), _category, _observationText.Trim(), _observationSource.Trim(), _observationEvidence.ToArray(), null));
+            if (result.Status == CaseDetailOperationStatus.Accepted)
+            {
+                _caseVersion = result.AggregateVersion; CloseObservationForm(); await OnRefreshObservations.InvokeAsync(); if (_timelineView is not null) await _timelineView.RefreshAsync();
+            }
+            else _observationError = OperationMessage(result.Status, "observation");
+        }
+        catch (Exception) { _observationError = "The observation could not be saved. Check your connection and try again."; }
+        finally { _savingObservation = false; }
+    }
+
+    private static string SafeLabel(string? label) => string.IsNullOrWhiteSpace(label) ? "Not assigned" : label.Trim();
+    private static string WorkflowDisplayLabel(string workflow) => workflow switch
+    {
+        "Reported" => "Reported",
+        "UnderReview" => "Under review",
+        "Active" => "Active",
+        "AwaitingFollowUp" => "Awaiting follow-up",
+        "Resolved" => "Resolved",
+        "Closed" => "Closed",
+        _ => "Status unavailable"
+    };
+    private IReadOnlyList<string> ResolveMentionLabels(IReadOnlyList<string>? references) =>
+        (references ?? Array.Empty<string>()).Select(reference => MentionTargetsData?.Targets.FirstOrDefault(target => string.Equals(target.Reference, reference, StringComparison.Ordinal))?.DisplayLabel ?? "Mention unavailable").ToArray();
+    private IReadOnlyList<string> ResolveEvidenceLabels(IReadOnlyList<string>? evidenceKeys) =>
+        (evidenceKeys ?? Array.Empty<string>()).Select(key => EvidenceData?.Items.FirstOrDefault(item => string.Equals(item.EvidenceKey, key, StringComparison.Ordinal))?.DisplayName ?? "Attachment unavailable").ToArray();
+    private static string PanelTitle(CaseDetailPanelState state, string name) => state switch { CaseDetailPanelState.Loading => $"Loading {name.ToLowerInvariant()}", CaseDetailPanelState.Empty => $"No {name.ToLowerInvariant()} yet", CaseDetailPanelState.Denied => $"You can't view {name.ToLowerInvariant()}", CaseDetailPanelState.Offline => $"{name} isn't available offline", CaseDetailPanelState.Error => $"We couldn't load {name.ToLowerInvariant()}", _ => $"{name} unavailable" };
+    private static string PanelDescription(CaseDetailPanelState state, string name) => state switch { CaseDetailPanelState.Loading => $"Checking the available {name}.", CaseDetailPanelState.Empty => $"There are no {name} to display.", CaseDetailPanelState.Denied => $"You don't have access to {name}.", CaseDetailPanelState.Offline => $"Reconnect to check {name}.", CaseDetailPanelState.Error => $"We couldn't load {name}. Try again.", _ => $"{name} is not available for this case here." };
+    private static string UploadLabel(CaseDetailUploadState state) => state switch { CaseDetailUploadState.Uploaded => "Uploaded", CaseDetailUploadState.Uploading => "Uploading", CaseDetailUploadState.Failed => "Upload failed", CaseDetailUploadState.NotStarted => "Not uploaded", _ => "Status unknown" };
+    private static string CategoryLabel(CaseDetailObservationCategory category) => category.ToString();
+    private static string SubjectTypeLabel(CaseDetailSubjectType type) => type switch { CaseDetailSubjectType.Human => "Human health", CaseDetailSubjectType.Animal => "Animal health", _ => "Not recorded" };
+    private static string OperationMessage(CaseDetailOperationStatus status, string item) => status switch
+    {
+        CaseDetailOperationStatus.Conflict => $"The case changed. Refresh and try the {item} again.",
+        CaseDetailOperationStatus.Denied => $"You don't have permission to add this {item}.",
+        CaseDetailOperationStatus.Offline => $"This {item} couldn't be sent while offline. Reconnect and try again.",
+        CaseDetailOperationStatus.Unavailable => $"This {item} action isn't available here.",
+        _ => $"This {item} couldn't be completed. Check the details and connection, then try again."
+    };
+}

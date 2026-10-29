@@ -43,6 +43,7 @@ builder.Services.AddScoped<IWorkspaceAccessClient, GatewayUnavailableWorkspaceAc
 builder.Services.AddScoped<IStaffSessionEditorClient, GatewayStaffSessionEditorClient>();
 builder.Services.AddScoped<IMapAggregateClient, UnavailableMapAggregateClient>();
 builder.Services.AddScoped<ICaseWorkspaceClient, CaseWorkspaceGatewayClient>();
+builder.Services.AddScoped<IWorkManagementClient, CommandBackedWorkManagementClient>();
 
 builder.Services.AddControllers();
 builder.Services.AddAuthentication();

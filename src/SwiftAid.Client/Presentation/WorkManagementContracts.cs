@@ -31,7 +31,8 @@ public enum WorkManagementStatus
     Completed,
     Resolved,
     NeedsReview,
-    Unavailable
+    Unavailable,
+    ActionRecorded
 }
 
 /// <summary>Assignment relationship for a practice work item.</summary>
@@ -60,7 +61,8 @@ public enum WorkManagementAction
     RequestEscalation,
     AcknowledgeEscalation,
     RecordEscalationAction,
-    ResolveEscalation
+    ResolveEscalation,
+    AcknowledgeAssignment
 }
 
 public enum WorkManagementAssistanceNeed
@@ -125,7 +127,10 @@ public sealed record WorkManagementHistoryEntry(
     bool AssistanceReceiptConfirmed = false,
     WorkManagementFollowUpOutcome? FollowUpOutcome = null,
     WorkManagementEscalationReason? EscalationReason = null,
-    WorkManagementEscalationAction? EscalationAction = null);
+    WorkManagementEscalationAction? EscalationAction = null,
+    string? AssignedWorkerKey = null,
+    string? AssignedWorkerLabel = null,
+    string? ActorLabel = null);
 
 /// <summary>Minimum-necessary work item for a case coordination view.</summary>
 public sealed record WorkManagementItem(
@@ -139,7 +144,10 @@ public sealed record WorkManagementItem(
     DateTimeOffset? DueAtUtc,
     IReadOnlyList<WorkManagementAction> AvailableActions,
     IReadOnlyList<WorkManagementHistoryEntry> History,
-    IReadOnlyList<WorkManagementWorkerOption> EligibleWorkers);
+    IReadOnlyList<WorkManagementWorkerOption> EligibleWorkers,
+    string? AssignedWorkerKey = null,
+    string? AssignedWorkerLabel = null,
+    bool CanAcknowledgeAssignment = false);
 
 public sealed record WorkManagementSnapshot(
     Guid CaseId,
@@ -179,6 +187,7 @@ public sealed record WorkManagementCommand(
     {
         WorkManagementAction.AssignWorker or WorkManagementAction.ReassignWorker =>
             HasText(WorkerKey, 100) && IsEmptyExcept(nameof(WorkerKey)),
+        WorkManagementAction.AcknowledgeAssignment => IsEmptyExcept(),
         WorkManagementAction.RequestAssistance =>
             AssistanceNeed is { } need && Enum.IsDefined(need) && HasText(Details, 300) && IsEmptyExcept(nameof(AssistanceNeed), nameof(Details)),
         WorkManagementAction.RecordAssistanceProvided or WorkManagementAction.RecordAssistanceUnmet =>
