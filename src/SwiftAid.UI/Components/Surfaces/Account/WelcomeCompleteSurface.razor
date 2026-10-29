@@ -10,7 +10,7 @@ else if (Snapshot.ViewState == WelcomeCompleteViewState.SignedOut)
         Sign in to view this page.
     </MudAlert>
     <MudButton Href="/sign-in" Variant="Variant.Filled" Color="Color.Primary"
-               StartIcon="@Icons.Material.Filled.Login">
+               StartIcon="@Icons.Material.Filled.Login" Class="auth-cta">
         Sign in
     </MudButton>
 }
@@ -20,7 +20,7 @@ else if (Snapshot.ViewState == WelcomeCompleteViewState.Unavailable)
         @(Snapshot.StatusMessage ?? "Your account details are temporarily unavailable.")
     </MudAlert>
     <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="OnRefresh"
-               StartIcon="@Icons.Material.Filled.Refresh">
+               StartIcon="@Icons.Material.Filled.Refresh" Class="auth-cta">
         Retry
     </MudButton>
 }
@@ -47,7 +47,7 @@ else
                    Class="auth-cta">
             Continue to your workspace
         </MudButton>
-        <MudButton Href="/organizations" Variant="Variant.Text" Color="Color.Primary" FullWidth="true">
+        <MudButton Href="/organizations" Variant="Variant.Text" Color="Color.Primary" FullWidth="true" Class="auth-cta">
             View organizations
         </MudButton>
     }
@@ -60,7 +60,7 @@ else
                    Class="auth-cta">
             View request status
         </MudButton>
-        <MudButton Href="/" Variant="Variant.Text" Color="Color.Primary" FullWidth="true">
+        <MudButton Href="/" Variant="Variant.Text" Color="Color.Primary" FullWidth="true" Class="auth-cta">
             Continue to SwiftAid
         </MudButton>
     }
@@ -70,7 +70,7 @@ else
                    Class="auth-cta">
             Continue to SwiftAid
         </MudButton>
-        <MudButton Href="/organizations" Variant="Variant.Text" Color="Color.Primary" FullWidth="true">
+        <MudButton Href="/organizations" Variant="Variant.Text" Color="Color.Primary" FullWidth="true" Class="auth-cta">
             Join an organization
         </MudButton>
     }

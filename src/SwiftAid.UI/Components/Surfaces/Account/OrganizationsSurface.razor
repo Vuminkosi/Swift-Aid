@@ -1,6 +1,9 @@
 @using SwiftAid.UI.Components.Surfaces.Account
 @using SwiftAid.UI.Components.Theme
 
+<ErrorBoundary @ref="_boundary">
+    <ChildContent>
+        <div class="organizations-surface">
 @if (Snapshot.ViewState == OrganizationsViewState.Loading)
 {
     <MudProgressLinear Indeterminate="true" Color="Color.Primary" aria-label="Loading your workspaces" />
@@ -11,7 +14,7 @@ else if (Snapshot.ViewState == OrganizationsViewState.SignedOut)
         Sign in to view your workspaces.
     </MudAlert>
     <MudButton Href="/sign-in" Variant="Variant.Filled" Color="Color.Primary"
-               StartIcon="@Icons.Material.Filled.Login">
+               StartIcon="@Icons.Material.Filled.Login" Class="auth-cta">
         Sign in
     </MudButton>
 }
@@ -21,7 +24,7 @@ else if (Snapshot.ViewState == OrganizationsViewState.Unavailable && Snapshot.Me
         @(Snapshot.StatusMessage ?? "Your workspaces are temporarily unavailable.")
     </MudAlert>
     <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="OnRefresh"
-               StartIcon="@Icons.Material.Filled.Refresh">
+               StartIcon="@Icons.Material.Filled.Refresh" Class="auth-cta">
         Retry
     </MudButton>
 }
@@ -68,7 +71,7 @@ else
                                  Icon="@Icons.Material.Outlined.Groups">
                 <Trailing>
                     <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@Snapshot.IsSaving"
-                               OnClick="@(() => RequestAsync(option.OrganizationId))">
+                               OnClick="@(() => RequestAsync(option.OrganizationId))" Class="auth-cta">
                         Request access
                     </MudButton>
                 </Trailing>
@@ -89,11 +92,23 @@ else
         <MudTextField T="string" Label="Invitation code" Value="@_code" ValueChanged="CodeChanged"
                       Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" aria-label="Invitation code" />
         <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@Snapshot.IsSaving"
-                   OnClick="RedeemAsync" StartIcon="@Icons.Material.Filled.ConfirmationNumber">
+                   OnClick="RedeemAsync" StartIcon="@Icons.Material.Filled.ConfirmationNumber" Class="auth-cta">
             Redeem code
         </MudButton>
     </MudPaper>
 }
+        </div>
+    </ChildContent>
+    <ErrorContent>
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert">
+            Workspaces failed to load. Your access is unchanged.
+        </MudAlert>
+        <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="RecoverAsync" Class="auth-cta"
+                   StartIcon="@Icons.Material.Filled.Refresh">
+            Retry
+        </MudButton>
+    </ErrorContent>
+</ErrorBoundary>
 
 @code {
     [Parameter] public OrganizationsSnapshot Snapshot { get; set; } = OrganizationsSnapshot.Loading;
@@ -122,4 +137,14 @@ else
 
     private Task RequestAsync(string organizationId) =>
         OnRequest.InvokeAsync(new MembershipJoinRequest(organizationId, null));
+
+    private ErrorBoundary? _boundary;
+
+    private async Task RecoverAsync()
+    {
+        _boundary?.Recover();
+        await OnRefresh.InvokeAsync();
+    }
+
+
 }

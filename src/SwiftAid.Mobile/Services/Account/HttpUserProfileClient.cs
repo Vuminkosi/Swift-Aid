@@ -225,6 +225,14 @@ public sealed class HttpUserProfileClient(CookieSessionHttpClient session) : IUs
         {
             throw;
         }
+        catch (Exception ex) when (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            return Retryable(ClientRequestFailure.MessageFor(ex, "Email change"));
+        }
+        catch (Exception ex) when (ex is HttpRequestException)
+        {
+            return Retryable(ClientRequestFailure.MessageFor(ex, "Email change"));
+        }
         catch (Exception)
         {
             return Retryable("Email changes are temporarily unavailable. Try again later.");
@@ -257,6 +265,14 @@ public sealed class HttpUserProfileClient(CookieSessionHttpClient session) : IUs
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
+        }
+        catch (Exception ex) when (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            return Retryable(ClientRequestFailure.MessageFor(ex, "Email change"));
+        }
+        catch (Exception ex) when (ex is HttpRequestException)
+        {
+            return Retryable(ClientRequestFailure.MessageFor(ex, "Email change"));
         }
         catch (Exception)
         {

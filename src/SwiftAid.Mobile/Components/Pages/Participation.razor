@@ -27,13 +27,27 @@
             : new HttpOrganizationMembershipClient(CookieSessionHttpClient.Shared(address));
     }
 
-    protected override async Task OnInitializedAsync() => await RefreshAsync();
+    protected override async Task OnInitializedAsync() => await SafeRefreshAsync();
+
+    private async Task SafeRefreshAsync()
+    {
+        try
+        {
+            await RefreshAsync();
+        }
+        catch (Exception)
+        {
+            _snapshot = ParticipationPreferenceSnapshot.Unavailable;
+        }
+    }
 
     private async Task RefreshAsync()
     {
-        var memberships = await MembershipClient.GetMineAsync();
-        var requests = await MembershipClient.GetMyRequestsAsync();
-        _snapshot = Map(memberships, requests);
+        // Concurrent: independent HTTP calls with no shared data context on the native path.
+        var membershipsTask = MembershipClient.GetMineAsync();
+        var requestsTask = MembershipClient.GetMyRequestsAsync();
+        await Task.WhenAll(membershipsTask, requestsTask).ConfigureAwait(false);
+        _snapshot = Map(membershipsTask.Result, requestsTask.Result);
     }
 
     private static ParticipationPreferenceSnapshot Map(

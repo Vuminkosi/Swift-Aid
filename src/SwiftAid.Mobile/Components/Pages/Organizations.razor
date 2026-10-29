@@ -8,9 +8,24 @@
 
 <PageTitle>Organizations | SwiftAid</PageTitle>
 
-<OrganizationsSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OnSearch="SearchAsync" OnRequest="RequestAsync" OnRedeem="RedeemAsync" />
+<ErrorBoundary @ref="_boundary">
+    <ChildContent>
+        <OrganizationsSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OnSearch="SearchAsync" OnRequest="RequestAsync" OnRedeem="RedeemAsync" />
+    </ChildContent>
+    <ErrorContent>
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert">
+            Workspaces failed to load. Your access is unchanged.
+        </MudAlert>
+        <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="RecoverAsync" Class="auth-cta"
+                   StartIcon="@Icons.Material.Filled.Refresh">
+            Retry
+        </MudButton>
+    </ErrorContent>
+</ErrorBoundary>
 
 @code {
+    private ErrorBoundary? _boundary;
+
     private OrganizationsSnapshot _snapshot = OrganizationsSnapshot.Loading;
 
     private IOrganizationMembershipClient MembershipClient =>
@@ -27,13 +42,33 @@
             : new HttpOrganizationMembershipClient(CookieSessionHttpClient.Shared(address));
     }
 
-    protected override async Task OnInitializedAsync() => await RefreshAsync();
+    protected override async Task OnInitializedAsync() => await SafeRefreshAsync();
+
+    private async Task SafeRefreshAsync()
+    {
+        try
+        {
+            await RefreshAsync();
+        }
+        catch (Exception)
+        {
+            _snapshot = OrganizationsSnapshot.Unavailable;
+        }
+    }
+
+    private async Task RecoverAsync()
+    {
+        _boundary?.Recover();
+        await RefreshAsync();
+    }
 
     private async Task RefreshAsync()
     {
-        var memberships = await MembershipClient.GetMineAsync();
-        var requests = await MembershipClient.GetMyRequestsAsync();
-        _snapshot = Map(memberships, requests, _snapshot.Directory, _snapshot);
+        // Concurrent: independent HTTP calls with no shared data context on the native path.
+        var membershipsTask = MembershipClient.GetMineAsync();
+        var requestsTask = MembershipClient.GetMyRequestsAsync();
+        await Task.WhenAll(membershipsTask, requestsTask).ConfigureAwait(false);
+        _snapshot = Map(membershipsTask.Result, requestsTask.Result, _snapshot.Directory, _snapshot);
     }
 
     private async Task SearchAsync(string? query)

@@ -8,9 +8,24 @@
 
 <PageTitle>Change email | SwiftAid</PageTitle>
 
-<ChangeEmailSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OnRequest="RequestAsync" OnConfirm="ConfirmAsync" OnStartOver="StartOver" ProfileHref="/profile" />
+<ErrorBoundary @ref="_boundary">
+    <ChildContent>
+        <ChangeEmailSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OnRequest="RequestAsync" OnConfirm="ConfirmAsync" OnStartOver="StartOver" ProfileHref="/profile" />
+    </ChildContent>
+    <ErrorContent>
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert">
+            This page failed to load. Your email address is unchanged.
+        </MudAlert>
+        <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="RecoverAsync" Class="auth-cta"
+                   StartIcon="@Icons.Material.Filled.Refresh">
+            Retry
+        </MudButton>
+    </ErrorContent>
+</ErrorBoundary>
 
 @code {
+    private ErrorBoundary? _boundary;
+
     private ChangeEmailSnapshot _snapshot = ChangeEmailSnapshot.Loading;
     private string? _pendingEmail;
 
@@ -28,7 +43,25 @@
             : new HttpUserProfileClient(CookieSessionHttpClient.Shared(address));
     }
 
-    protected override async Task OnInitializedAsync() => await RefreshAsync();
+    protected override async Task OnInitializedAsync() => await SafeRefreshAsync();
+
+    private async Task SafeRefreshAsync()
+    {
+        try
+        {
+            await RefreshAsync();
+        }
+        catch (Exception)
+        {
+            _snapshot = ChangeEmailSnapshot.Unavailable;
+        }
+    }
+
+    private async Task RecoverAsync()
+    {
+        _boundary?.Recover();
+        await RefreshAsync();
+    }
 
     private async Task RefreshAsync()
     {

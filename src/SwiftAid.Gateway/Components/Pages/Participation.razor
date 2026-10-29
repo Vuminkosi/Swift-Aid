@@ -30,7 +30,19 @@
             : new GatewayOrganizationMembershipClient(auth, users, memberships, invitations);
     }
 
-    protected override async Task OnInitializedAsync() => await RefreshAsync();
+    protected override async Task OnInitializedAsync() => await SafeRefreshAsync();
+
+    private async Task SafeRefreshAsync()
+    {
+        try
+        {
+            await RefreshAsync();
+        }
+        catch (Exception)
+        {
+            _snapshot = ParticipationPreferenceSnapshot.Unavailable;
+        }
+    }
 
     private async Task RefreshAsync()
     {

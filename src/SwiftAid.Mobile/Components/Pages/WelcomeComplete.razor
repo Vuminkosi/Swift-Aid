@@ -45,7 +45,19 @@
         return options?.GatewayBaseAddress?.ToString();
     }
 
-    protected override async Task OnInitializedAsync() => await RefreshAsync();
+    protected override async Task OnInitializedAsync() => await SafeRefreshAsync();
+
+    private async Task SafeRefreshAsync()
+    {
+        try
+        {
+            await RefreshAsync();
+        }
+        catch (Exception)
+        {
+            _snapshot = WelcomeCompleteSnapshot.Unavailable;
+        }
+    }
 
     private async Task RefreshAsync()
     {
@@ -67,9 +79,12 @@
             return;
         }
 
-        // Sequential: concurrent service awaits would share one scoped data context on the server circuit.
-        var memberships = await MembershipClient.GetMineAsync();
-        var requests = await MembershipClient.GetMyRequestsAsync();
+        // Concurrent: independent HTTP calls with no shared data context on the native path.
+        var membershipsTask = MembershipClient.GetMineAsync();
+        var requestsTask = MembershipClient.GetMyRequestsAsync();
+        await Task.WhenAll(membershipsTask, requestsTask).ConfigureAwait(false);
+        var memberships = membershipsTask.Result;
+        var requests = requestsTask.Result;
         if (memberships.Value is null || requests.Value is null)
         {
             _snapshot = WelcomeCompleteSnapshot.Unavailable;

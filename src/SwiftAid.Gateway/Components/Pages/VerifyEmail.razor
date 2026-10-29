@@ -30,7 +30,7 @@
         }
 
         <MudButton Variant="Variant.Text" Color="Color.Primary" FullWidth="true"
-                   OnClick="ResendAsync" Disabled="@(!CanResend)">
+                   OnClick="ResendAsync" Disabled="@(!CanResend)" Class="auth-cta">
             @(_isBusy ? "Working…" : ResendLabel)
         </MudButton>
         <MudTextField T="string" Label="Verification code" @bind-Value="_code"

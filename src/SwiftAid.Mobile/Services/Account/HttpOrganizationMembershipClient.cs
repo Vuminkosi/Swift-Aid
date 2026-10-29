@@ -198,6 +198,14 @@ public sealed class HttpOrganizationMembershipClient(CookieSessionHttpClient ses
         {
             throw;
         }
+        catch (Exception ex) when (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            return Retryable<InvitationRedeemView>(ClientRequestFailure.MessageFor(ex, "Redeeming the invitation"));
+        }
+        catch (Exception ex) when (ex is HttpRequestException)
+        {
+            return Retryable<InvitationRedeemView>(ClientRequestFailure.MessageFor(ex, "Redeeming the invitation"));
+        }
         catch (Exception)
         {
             return Retryable<InvitationRedeemView>("Redeeming invitations is temporarily unavailable.");

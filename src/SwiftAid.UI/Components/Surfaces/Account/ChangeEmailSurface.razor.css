@@ -1,0 +1,4 @@
+/* Primary and secondary actions stay at a comfortable touch target (WCAG 2.2 target size). */
+.auth-cta {
+    min-height: 44px;
+}

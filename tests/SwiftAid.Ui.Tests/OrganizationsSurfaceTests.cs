@@ -55,6 +55,25 @@ public sealed class OrganizationsSurfaceTests
         Assert.Contains("Redeem code", markup, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ReadyActionsMeetTouchTargetClass()
+    {
+        var markup = await RenderAsync(new OrganizationsSnapshot(
+            OrganizationsViewState.Ready, [], [], [], IsSaving: false));
+
+        Assert.Contains("auth-cta", markup, StringComparison.Ordinal);
+        Assert.Contains("Enter invitation code", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RenderFaultShowsRecovery()
+    {
+        var markup = await RenderAsync(null!);
+
+        Assert.Contains("failed to load", markup, StringComparison.Ordinal);
+        Assert.Contains("Retry", markup, StringComparison.Ordinal);
+    }
+
     private static async Task<string> RenderAsync(OrganizationsSnapshot snapshot)
     {
         await using var services = CreateServices();
@@ -83,12 +102,16 @@ public sealed class OrganizationsSurfaceTests
         services.AddMudServices();
         services.AddSingleton<IJSRuntime>(NoOpJsRuntime.Instance);
         services.AddSingleton<NavigationManager>(new TestNavigationManager());
+        services.AddSingleton<IErrorBoundaryLogger>(NoOpErrorBoundaryLogger.Instance);
         return services.BuildServiceProvider();
     }
 
     private sealed class TestNavigationManager : NavigationManager
     {
         public TestNavigationManager() => Initialize("http://localhost/", "http://localhost/");
+
+        protected override void NavigateToCore(string uri, NavigationOptions options) =>
+            Uri = ToAbsoluteUri(uri).ToString();
     }
 
     private sealed class NoOpJsRuntime : JSRuntime
@@ -109,6 +132,13 @@ public sealed class OrganizationsSurfaceTests
             in DotNetInvocationResult result)
         {
         }
+    }
+
+    private sealed class NoOpErrorBoundaryLogger : IErrorBoundaryLogger
+    {
+        public static readonly NoOpErrorBoundaryLogger Instance = new();
+
+        public ValueTask LogErrorAsync(Exception exception) => ValueTask.CompletedTask;
     }
 
     private static HtmlRenderer CreateRenderer(IServiceProvider services) =>
