@@ -100,8 +100,10 @@
     private bool _signedIn;
     private bool _authenticationResolved;
     private bool _publicWelcomeCompleted;
-    private bool ShowAppChrome => !IsActivePublicReportWizard &&
+    private bool ShowAppChrome => !IsActivePublicReportWizard && !IsActiveWelcome &&
         (_signedIn || !IsAtLandingRoute || _publicWelcomeCompleted);
+    private bool IsActiveWelcome =>
+        CurrentPath.Equals("/welcome", StringComparison.OrdinalIgnoreCase);
     private bool IsAtLandingRoute => string.Equals(CurrentPath, "/", StringComparison.OrdinalIgnoreCase);
     private bool IsActivePublicReportWizard =>
         CurrentPath.Equals("/report", StringComparison.OrdinalIgnoreCase) && !IsTrackingView;
@@ -136,12 +138,17 @@
         }
     }
     private bool IsPublicSafeRoute => CurrentPath.Equals("/", StringComparison.OrdinalIgnoreCase) ||
+        CurrentPath.Equals("/welcome", StringComparison.OrdinalIgnoreCase) ||
         CurrentPath.Equals("/report", StringComparison.OrdinalIgnoreCase) ||
         CurrentPath.Equals("/education", StringComparison.OrdinalIgnoreCase) ||
         CurrentPath.Equals("/sessions", StringComparison.OrdinalIgnoreCase) ||
         CurrentPath.Equals("/account", StringComparison.OrdinalIgnoreCase) ||
         CurrentPath.Equals("/more", StringComparison.OrdinalIgnoreCase) ||
-        CurrentPath.Equals("/not-found", StringComparison.OrdinalIgnoreCase);
+        CurrentPath.Equals("/not-found", StringComparison.OrdinalIgnoreCase) ||
+        CurrentPath.Equals("/sign-in", StringComparison.OrdinalIgnoreCase) ||
+        CurrentPath.Equals("/register", StringComparison.OrdinalIgnoreCase) ||
+        CurrentPath.Equals("/verify-email", StringComparison.OrdinalIgnoreCase) ||
+        CurrentPath.Equals("/welcome-complete", StringComparison.OrdinalIgnoreCase);
     private string CasesHref => _signedIn ? "/my-cases" : "/report?view=tracking";
     private readonly CancellationTokenSource _lifetime = new();
     private long _authenticationRevision;
