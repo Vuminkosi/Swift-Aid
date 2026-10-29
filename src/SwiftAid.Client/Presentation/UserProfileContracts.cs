@@ -37,6 +37,15 @@ public interface IUserProfileClient
 
     Task<UiCapabilityResult<UserProfileState>> DeleteAvatarAsync(
         CancellationToken cancellationToken = default);
+
+    Task<UiCapabilityResult<UserProfileState>> RequestEmailChangeAsync(
+        string newEmail,
+        string currentPassword,
+        CancellationToken cancellationToken = default);
+
+    Task<UiCapabilityResult<UserProfileState>> ConfirmEmailChangeAsync(
+        string code,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class UnavailableUserProfileClient : IUserProfileClient
@@ -61,6 +70,17 @@ public sealed class UnavailableUserProfileClient : IUserProfileClient
     }
 
     public Task<UiCapabilityResult<UserProfileState>> DeleteAvatarAsync(
+        CancellationToken cancellationToken = default) =>
+        Unavailable(cancellationToken);
+
+    public Task<UiCapabilityResult<UserProfileState>> RequestEmailChangeAsync(
+        string newEmail,
+        string currentPassword,
+        CancellationToken cancellationToken = default) =>
+        Unavailable(cancellationToken);
+
+    public Task<UiCapabilityResult<UserProfileState>> ConfirmEmailChangeAsync(
+        string code,
         CancellationToken cancellationToken = default) =>
         Unavailable(cancellationToken);
 

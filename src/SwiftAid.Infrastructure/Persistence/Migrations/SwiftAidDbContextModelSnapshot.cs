@@ -1074,6 +1074,10 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_sent_at_utc");
 
+                    b.Property<string>("PendingEmail")
+                        .HasColumnType("text")
+                        .HasColumnName("pending_email");
+
                     b.HasKey("UserId")
                         .HasName("pk_email_verifications");
 

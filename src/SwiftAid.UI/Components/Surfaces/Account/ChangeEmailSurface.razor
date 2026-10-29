@@ -1,0 +1,150 @@
+@using SwiftAid.UI.Components.Surfaces.Account
+
+@if (Snapshot.ViewState == ChangeEmailViewState.Loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" aria-label="Loading email change" />
+}
+else if (Snapshot.ViewState == ChangeEmailViewState.SignedOut)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+        @(Snapshot.StatusMessage ?? "Sign in to change your email address.")
+    </MudAlert>
+    <MudButton Href="/sign-in" Variant="Variant.Filled" Color="Color.Primary"
+               StartIcon="@Icons.Material.Filled.Login">
+        Sign in
+    </MudButton>
+}
+else if (Snapshot.ViewState == ChangeEmailViewState.Unavailable)
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert">
+        @(Snapshot.StatusMessage ?? "Email changes are temporarily unavailable.")
+    </MudAlert>
+    <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="OnRefresh"
+               StartIcon="@Icons.Material.Filled.Refresh">
+        Retry
+    </MudButton>
+}
+else if (Snapshot.ViewState == ChangeEmailViewState.Done)
+{
+    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" role="status">
+        @(Snapshot.StatusMessage ?? "Your email address has been updated.")
+    </MudAlert>
+    @if (!string.IsNullOrWhiteSpace(ProfileHref))
+    {
+        <MudButton Href="@ProfileHref" Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Person">
+            Return to profile
+        </MudButton>
+    }
+}
+else
+{
+    @if (!string.IsNullOrWhiteSpace(Snapshot.StatusMessage))
+    {
+        <MudAlert Severity="@(Snapshot.StatusIsError ? Severity.Warning : Severity.Success)"
+                  Variant="Variant.Outlined" role="@(Snapshot.StatusIsError ? "alert" : "status")">
+            @Snapshot.StatusMessage
+        </MudAlert>
+    }
+    @if (Snapshot.ViewState == ChangeEmailViewState.CodeSent)
+    {
+        <MudPaper Class="pa-4 mb-4" Elevation="0">
+            <MudText Typo="Typo.subtitle1">Check your new inbox</MudText>
+            <MudText Typo="Typo.body2">
+                @(string.IsNullOrWhiteSpace(Snapshot.PendingEmail)
+                    ? "A verification code has been sent to your new email address."
+                    : $"A verification code has been sent to {Snapshot.PendingEmail}.")
+            </MudText>
+            <MudTextField T="string" Label="Verification code" @bind-Value="_code"
+                          Variant="Variant.Outlined" Required="true" RequiredError="Enter the verification code."
+                          Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="32"
+                          autocomplete="one-time-code" InputMode="InputMode.numeric" aria-label="Verification code" />
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ConfirmAsync"
+                       Disabled="@(!CanConfirm)" StartIcon="@Icons.Material.Filled.MarkEmailRead"
+                       Class="auth-cta">
+                @(Snapshot.IsSaving ? "Confirming…" : "Confirm new email")
+            </MudButton>
+            <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="OnStartOver"
+                       Disabled="@Snapshot.IsSaving">
+                Request a new code
+            </MudButton>
+            <MudText Typo="Typo.caption">Your sign-in stays on the old address until you confirm.</MudText>
+        </MudPaper>
+    }
+    else
+    {
+        <MudPaper Class="pa-4 mb-4" Elevation="0">
+            <MudText Typo="Typo.subtitle1">Change email address</MudText>
+            @if (!string.IsNullOrWhiteSpace(Snapshot.CurrentEmail))
+            {
+                <MudText Typo="Typo.body2">Current address: @Snapshot.CurrentEmail</MudText>
+            }
+            <MudTextField T="string" Label="New email address" @bind-Value="_newEmail"
+                          Variant="Variant.Outlined" Required="true" RequiredError="Enter the new email address."
+                          Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="256"
+                          autocomplete="email" InputMode="InputMode.email" aria-label="New email address" />
+            <MudTextField T="string" Label="Current password" @bind-Value="_password" InputType="@PasswordInputType"
+                          Variant="Variant.Outlined" Required="true" RequiredError="Enter your current password."
+                          Disabled="@Snapshot.IsSaving" Immediate="true" MaxLength="256"
+                          autocomplete="current-password" Adornment="Adornment.End" AdornmentIcon="@PasswordIcon"
+                          OnAdornmentClick="TogglePasswordVisibility" aria-label="Current password" />
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="RequestAsync"
+                       Disabled="@(!CanRequest)" StartIcon="@Icons.Material.Filled.Send"
+                       Class="auth-cta">
+                @(Snapshot.IsSaving ? "Sending…" : "Send verification code")
+            </MudButton>
+            <MudText Typo="Typo.caption">We will send a verification code to the new address. Your sign-in stays on the old address until you confirm.</MudText>
+        </MudPaper>
+    }
+}
+
+@code {
+    [Parameter] public ChangeEmailSnapshot Snapshot { get; set; } = ChangeEmailSnapshot.Loading;
+
+    [Parameter] public EventCallback OnRefresh { get; set; }
+
+    [Parameter] public EventCallback<ChangeEmailRequest> OnRequest { get; set; }
+
+    [Parameter] public EventCallback<string> OnConfirm { get; set; }
+
+    [Parameter] public EventCallback OnStartOver { get; set; }
+
+    /// <summary>
+    /// Optional deep link back to the profile page. When null or empty the
+    /// return button is omitted so hosts without that route stay clean.
+    /// </summary>
+    [Parameter] public string? ProfileHref { get; set; }
+
+    private string? _newEmail;
+    private string? _password;
+    private string? _code;
+    private bool _showPassword;
+
+    private InputType PasswordInputType => _showPassword ? InputType.Text : InputType.Password;
+
+    private string PasswordIcon => _showPassword
+        ? Icons.Material.Filled.VisibilityOff
+        : Icons.Material.Filled.Visibility;
+
+    private void TogglePasswordVisibility() => _showPassword = !_showPassword;
+
+    private bool CanRequest =>
+        Snapshot.ViewState == ChangeEmailViewState.Details &&
+        !Snapshot.IsSaving &&
+        !string.IsNullOrWhiteSpace(_newEmail) &&
+        !string.IsNullOrWhiteSpace(_password);
+
+    private bool CanConfirm =>
+        Snapshot.ViewState == ChangeEmailViewState.CodeSent &&
+        !Snapshot.IsSaving &&
+        !string.IsNullOrWhiteSpace(_code);
+
+    private Task RequestAsync()
+    {
+        var request = new ChangeEmailRequest(_newEmail?.Trim() ?? string.Empty, _password ?? string.Empty);
+        _password = null;
+        return OnRequest.InvokeAsync(request);
+    }
+
+    private Task ConfirmAsync() => OnConfirm.InvokeAsync(_code?.Trim() ?? string.Empty);
+}

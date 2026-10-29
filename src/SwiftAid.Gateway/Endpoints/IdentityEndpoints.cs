@@ -61,6 +61,9 @@ public static class IdentityEndpoints
         group.MapGet("/email/status", GetEmailVerificationStatus);
         group.MapPost("/email/otp/request", RequestEmailOtp);
         group.MapPost("/email/otp/confirm", ConfirmEmailOtp);
+        group.MapPost("/email/change/request", RequestEmailChange);
+        group.MapPost("/email/change/confirm", ConfirmEmailChange);
+
         group.MapGet("/profile", GetUserProfile);
         group.MapPut("/profile/avatar", SaveProfileAvatar);
         group.MapGet("/profile/avatar", GetProfileAvatar);
@@ -1491,6 +1494,182 @@ public static class IdentityEndpoints
         }
     }
 
+
+    private static async Task<IResult> RequestEmailChange(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        UserManager<SwiftAidUser> userManager,
+        SignInManager<SwiftAidUser> signInManager,
+        IEmailVerificationService verificationService,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false);
+        }
+        catch (AntiforgeryValidationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The email change request is invalid.");
+        }
+        catch (InvalidOperationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The email change request is invalid.");
+        }
+
+        if (context.User.Identity?.IsAuthenticated != true)
+        {
+            return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to change your email address.");
+        }
+
+        var bodyRead = await ReadPasswordRequestAsync(context.Request, cancellationToken).ConfigureAwait(false);
+        if (bodyRead.Status != PasswordBodyStatus.Valid || bodyRead.Request is null)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "Enter a new email address and your current password.");
+        }
+
+        var email = bodyRead.Request.Email?.Trim() ?? string.Empty;
+        var password = bodyRead.Request.CurrentPassword ?? bodyRead.Request.Password ?? string.Empty;
+        bodyRead.Request.Email = string.Empty;
+        bodyRead.Request.Password = string.Empty;
+        if (!IsValidPasswordEmail(email) || string.IsNullOrEmpty(password) || password.Length > 256)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "Enter a new email address and your current password.");
+        }
+
+        try
+        {
+            var user = await userManager.GetUserAsync(context.User).ConfigureAwait(false);
+            if (user is null)
+            {
+                return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to change your email address.");
+            }
+
+            var check = await signInManager.CheckPasswordSignInAsync(user, password, lockoutOnFailure: true)
+                .ConfigureAwait(false);
+            if (!check.Succeeded)
+            {
+                return PasswordError(context, StatusCodes.Status401Unauthorized, "The current password is incorrect.");
+            }
+
+            var outcome = await verificationService.RequestEmailChangeAsync(user, email, cancellationToken)
+                .ConfigureAwait(false);
+            return outcome.Status switch
+            {
+                EmailVerificationStatus.Sent => Results.Ok(new EmailOtpRequestResponse(
+                    "A verification code has been sent to your new email address.",
+                    outcome.RetryAfterSeconds)),
+                EmailVerificationStatus.Throttled => ThrottledEmailOtp(context, outcome),
+                EmailVerificationStatus.DuplicateEmail => PasswordError(
+                    context,
+                    StatusCodes.Status409Conflict,
+                    "This email address is already associated with another account."),
+                _ => PasswordError(
+                    context,
+                    StatusCodes.Status503ServiceUnavailable,
+                    "Email changes are temporarily unavailable. Try again later.")
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return PasswordError(context, StatusCodes.Status503ServiceUnavailable, "Email changes are temporarily unavailable. Try again later.");
+        }
+        finally
+        {
+            SetNoStore(context);
+        }
+    }
+
+    private static async Task<IResult> ConfirmEmailChange(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        UserManager<SwiftAidUser> userManager,
+        IEmailVerificationService verificationService,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false);
+        }
+        catch (AntiforgeryValidationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The email change request is invalid.");
+        }
+        catch (InvalidOperationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The email change request is invalid.");
+        }
+
+        if (context.User.Identity?.IsAuthenticated != true)
+        {
+            return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to change your email address.");
+        }
+
+        var bodyRead = await ReadPasswordRequestAsync(context.Request, cancellationToken).ConfigureAwait(false);
+        if (bodyRead.Status != PasswordBodyStatus.Valid || bodyRead.Request is null)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "Enter the verification code.");
+        }
+
+        var code = bodyRead.Request.Code?.Trim() ?? string.Empty;
+        bodyRead.Request.Code = string.Empty;
+        if (string.IsNullOrWhiteSpace(code) || code.Length > 32)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "Enter the verification code.");
+        }
+
+        try
+        {
+            var user = await userManager.GetUserAsync(context.User).ConfigureAwait(false);
+            if (user is null)
+            {
+                return PasswordError(context, StatusCodes.Status401Unauthorized, "Sign in to change your email address.");
+            }
+
+            var outcome = await verificationService.ConfirmEmailChangeAsync(user, code, cancellationToken)
+                .ConfigureAwait(false);
+            return outcome.Status switch
+            {
+                EmailVerificationStatus.Verified => Results.Ok(new EmailChangeConfirmResponse(true, outcome.AppliedEmail)),
+                EmailVerificationStatus.InvalidCode => PasswordError(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    "The code is incorrect. Check the latest email and try again."),
+                EmailVerificationStatus.TooManyAttempts => PasswordError(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    "Too many incorrect attempts. Request a new code."),
+                EmailVerificationStatus.Unavailable => PasswordError(
+                    context,
+                    StatusCodes.Status503ServiceUnavailable,
+                    "Email changes are temporarily unavailable. Try again later."),
+                EmailVerificationStatus.DuplicateEmail => PasswordError(
+                    context,
+                    StatusCodes.Status409Conflict,
+                    "This email address is already associated with another account."),
+                _ => PasswordError(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    "The code is invalid or has expired. Request a new one.")
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return PasswordError(context, StatusCodes.Status503ServiceUnavailable, "Email changes are temporarily unavailable. Try again later.");
+        }
+        finally
+        {
+            SetNoStore(context);
+        }
+    }
+
     private static async Task<IResult> GetUserProfile(
         HttpContext context,
         UserManager<SwiftAidUser> userManager,
@@ -2419,6 +2598,10 @@ public static class IdentityEndpoints
     private sealed record EmailOtpThrottledResponse(string Error, int RetryAfterSeconds);
 
     private sealed record EmailOtpConfirmResponse(bool Verified);
+
+    private sealed record EmailChangeConfirmResponse(bool Verified, string? Email);
+
+
 
     private sealed record UserProfileResponse(
         string? DisplayName,

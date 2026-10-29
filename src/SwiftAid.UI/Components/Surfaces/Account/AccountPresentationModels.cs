@@ -95,6 +95,41 @@ public sealed record ProfileEditRequest(
 
 public sealed record ProfileAvatarUploadRequest(string ContentType, Stream Content);
 
+public enum ChangeEmailViewState
+{
+    Loading,
+    Details,
+    CodeSent,
+    Done,
+    SignedOut,
+    Unavailable
+}
+
+public sealed record ChangeEmailRequest(string NewEmail, string CurrentPassword);
+
+public sealed record ChangeEmailSnapshot(
+    ChangeEmailViewState ViewState,
+    string? CurrentEmail,
+    string? PendingEmail,
+    bool IsSaving,
+    string? StatusMessage = null,
+    bool StatusIsError = false)
+{
+    public static ChangeEmailSnapshot Loading { get; } = new(
+        ChangeEmailViewState.Loading, null, null, false);
+
+    public static ChangeEmailSnapshot Details(string? currentEmail) => new(
+        ChangeEmailViewState.Details, currentEmail, null, false);
+
+    public static ChangeEmailSnapshot SignedOut { get; } = new(
+        ChangeEmailViewState.SignedOut, null, null, false,
+        "Sign in to change your email address.", true);
+
+    public static ChangeEmailSnapshot Unavailable { get; } = new(
+        ChangeEmailViewState.Unavailable, null, null, false,
+        "Email changes are temporarily unavailable.", true);
+}
+
 public enum OrganizationsViewState
 {
     Loading,

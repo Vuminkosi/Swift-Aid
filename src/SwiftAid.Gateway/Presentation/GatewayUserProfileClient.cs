@@ -11,7 +11,8 @@ public sealed class GatewayUserProfileClient(
     UserManager<SwiftAidUser> userManager,
     IUserProfileService profileService,
     IEmailVerificationService verificationService,
-    IProfileAvatarService avatarService) : IUserProfileClient
+    IProfileAvatarService avatarService,
+    SignInManager<SwiftAidUser> signInManager) : IUserProfileClient
 {
     private const string Capability = "user-profile";
 
@@ -25,6 +26,8 @@ public sealed class GatewayUserProfileClient(
         verificationService ?? throw new ArgumentNullException(nameof(verificationService));
     private readonly IProfileAvatarService _avatarService =
         avatarService ?? throw new ArgumentNullException(nameof(avatarService));
+    private readonly SignInManager<SwiftAidUser> _signInManager =
+        signInManager ?? throw new ArgumentNullException(nameof(signInManager));
 
     public async Task<UiCapabilityResult<UserProfileState>> GetAsync(CancellationToken cancellationToken = default)
     {
@@ -170,6 +173,125 @@ public sealed class GatewayUserProfileClient(
         {
             return Retryable("Removing your photo is temporarily unavailable.");
         }
+    }
+
+    public async Task<UiCapabilityResult<UserProfileState>> RequestEmailChangeAsync(
+        string newEmail,
+        string currentPassword,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(newEmail) || string.IsNullOrWhiteSpace(currentPassword))
+        {
+            return Invalid(
+                await SignedOutStateAsync(cancellationToken).ConfigureAwait(false),
+                "Enter a new email address and your current password.");
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var user = await GetUserAsync().ConfigureAwait(false);
+            if (user is null)
+            {
+                return SignedOut();
+            }
+
+            var check = await _signInManager.CheckPasswordSignInAsync(user, currentPassword, lockoutOnFailure: true)
+                .ConfigureAwait(false);
+            if (!check.Succeeded)
+            {
+                return Invalid(
+                    await StateAsync(user, null, cancellationToken).ConfigureAwait(false),
+                    "The current password is incorrect.");
+            }
+
+            var outcome = await _verificationService.RequestEmailChangeAsync(
+                user, newEmail.Trim(), cancellationToken).ConfigureAwait(false);
+            return outcome.Status switch
+            {
+                EmailVerificationStatus.Sent => Success(await StateAsync(
+                    user,
+                    "A verification code has been sent to your new email address.",
+                    cancellationToken).ConfigureAwait(false)),
+                EmailVerificationStatus.Throttled => Invalid(
+                    await StateAsync(user, null, cancellationToken).ConfigureAwait(false),
+                    "A code was sent recently. Wait before requesting a new one."),
+                EmailVerificationStatus.DuplicateEmail => Invalid(
+                    await StateAsync(user, null, cancellationToken).ConfigureAwait(false),
+                    "This email address is already associated with another account."),
+                _ => Retryable("Email changes are temporarily unavailable. Try again later.")
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return Retryable("Email changes are temporarily unavailable. Try again later.");
+        }
+    }
+
+    public async Task<UiCapabilityResult<UserProfileState>> ConfirmEmailChangeAsync(
+        string code,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            return Invalid(
+                await SignedOutStateAsync(cancellationToken).ConfigureAwait(false),
+                "Enter the verification code.");
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var user = await GetUserAsync().ConfigureAwait(false);
+            if (user is null)
+            {
+                return SignedOut();
+            }
+
+            var outcome = await _verificationService.ConfirmEmailChangeAsync(
+                user, code.Trim(), cancellationToken).ConfigureAwait(false);
+            return outcome.Status switch
+            {
+                EmailVerificationStatus.Verified => Success(await StateAsync(
+                    user,
+                    "Your email address has been updated.",
+                    cancellationToken).ConfigureAwait(false)),
+                EmailVerificationStatus.InvalidCode => Invalid(
+                    await StateAsync(user, null, cancellationToken).ConfigureAwait(false),
+                    "The code is incorrect. Check the latest email and try again."),
+                EmailVerificationStatus.TooManyAttempts => Invalid(
+                    await StateAsync(user, null, cancellationToken).ConfigureAwait(false),
+                    "Too many incorrect attempts. Request a new code."),
+                EmailVerificationStatus.DuplicateEmail => Invalid(
+                    await StateAsync(user, null, cancellationToken).ConfigureAwait(false),
+                    "This email address is already associated with another account."),
+                EmailVerificationStatus.Expired => Invalid(
+                    await StateAsync(user, null, cancellationToken).ConfigureAwait(false),
+                    "The code is invalid or has expired. Request a new one."),
+                _ => Retryable("Email changes are temporarily unavailable. Try again later.")
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return Retryable("Email changes are temporarily unavailable. Try again later.");
+        }
+    }
+
+    private async Task<UserProfileState> SignedOutStateAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var user = await GetUserAsync().ConfigureAwait(false);
+        return user is null
+            ? new UserProfileState(false, null, null, null, null, null, null, false)
+            : await StateAsync(user, null, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<UserProfileState> StateAsync(

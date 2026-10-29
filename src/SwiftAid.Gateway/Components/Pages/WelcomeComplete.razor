@@ -31,9 +31,10 @@
         var profiles = (IUserProfileService?)ServiceProvider.GetService(typeof(IUserProfileService));
         var verification = (IEmailVerificationService?)ServiceProvider.GetService(typeof(IEmailVerificationService));
         var avatars = (IProfileAvatarService?)ServiceProvider.GetService(typeof(IProfileAvatarService));
-        return auth is null || users is null || profiles is null || verification is null || avatars is null
+        var signIn = (SignInManager<SwiftAidUser>?)ServiceProvider.GetService(typeof(SignInManager<SwiftAidUser>));
+        return auth is null || users is null || profiles is null || verification is null || avatars is null || signIn is null
             ? null
-            : new GatewayUserProfileClient(auth, users, profiles, verification, avatars);
+            : new GatewayUserProfileClient(auth, users, profiles, verification, avatars, signIn);
     }
 
     private IOrganizationMembershipClient? CreateMembershipFallback()

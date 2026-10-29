@@ -163,6 +163,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         verification.HasKey(entity => entity.UserId).HasName("pk_email_verifications");
         verification.Property(entity => entity.UserId).HasColumnName("user_id").HasColumnType("text");
         verification.Property(entity => entity.CodeHash).HasColumnName("code_hash").HasColumnType("text");
+        verification.Property(entity => entity.PendingEmail).HasColumnName("pending_email").HasColumnType("text");
         verification.Property(entity => entity.ExpiresAtUtc).HasColumnName("expires_at_utc")
             .HasColumnType("timestamp with time zone");
         verification.Property(entity => entity.AttemptCount).HasColumnName("attempt_count");

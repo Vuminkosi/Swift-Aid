@@ -196,6 +196,118 @@ public sealed class HttpUserProfileClient(CookieSessionHttpClient session) : IUs
         }
     }
 
+    public async Task<UiCapabilityResult<UserProfileState>> RequestEmailChangeAsync(
+        string newEmail,
+        string currentPassword,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(newEmail) || string.IsNullOrWhiteSpace(currentPassword))
+        {
+            return await InvalidStateAsync(
+                cancellationToken, "Enter a new email address and your current password.").ConfigureAwait(false);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var token = await _session.GetAntiforgeryTokenAsync(cancellationToken).ConfigureAwait(false);
+            using var response = await _session.PostJsonAsync(
+                "/auth/email/change/request",
+                new { email = newEmail.Trim(), currentPassword },
+                token,
+                cancellationToken).ConfigureAwait(false);
+            return await MapEmailChangeResultAsync(
+                response,
+                "A verification code has been sent to your new email address.",
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return Retryable("Email changes are temporarily unavailable. Try again later.");
+        }
+    }
+
+    public async Task<UiCapabilityResult<UserProfileState>> ConfirmEmailChangeAsync(
+        string code,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            return await InvalidStateAsync(cancellationToken, "Enter the verification code.").ConfigureAwait(false);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var token = await _session.GetAntiforgeryTokenAsync(cancellationToken).ConfigureAwait(false);
+            using var response = await _session.PostJsonAsync(
+                "/auth/email/change/confirm",
+                new { code = code.Trim() },
+                token,
+                cancellationToken).ConfigureAwait(false);
+            return await MapEmailChangeResultAsync(
+                response,
+                "Your email address has been updated.",
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return Retryable("Email changes are temporarily unavailable. Try again later.");
+        }
+    }
+
+    private async Task<UiCapabilityResult<UserProfileState>> MapEmailChangeResultAsync(
+        HttpResponseMessage response,
+        string successMessage,
+        CancellationToken cancellationToken)
+    {
+        if (response.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            var message = await ReadMessageAsync(response, cancellationToken).ConfigureAwait(false)
+                ?? "Sign in to change your email address.";
+            var current = await GetAsync(cancellationToken).ConfigureAwait(false);
+            if (current.Value?.IsSignedIn == true)
+            {
+                var state = current.Value with { StatusMessage = message, StatusIsError = true };
+                return new UiCapabilityResult<UserProfileState>(
+                    UiCapabilityResultCode.InvalidRequest, state, Metadata(), message);
+            }
+
+            return SignedOut();
+        }
+
+        if (response.StatusCode == HttpStatusCode.BadRequest ||
+            response.StatusCode == HttpStatusCode.Conflict)
+        {
+            var message = await ReadMessageAsync(response, cancellationToken).ConfigureAwait(false)
+                ?? "Check the details and try again.";
+            return await InvalidStateAsync(cancellationToken, message).ConfigureAwait(false);
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var message = await ReadMessageAsync(response, cancellationToken).ConfigureAwait(false)
+                ?? "Email changes are temporarily unavailable. Try again later.";
+            return Retryable(message);
+        }
+
+        var refreshed = await GetAsync(cancellationToken).ConfigureAwait(false);
+        var updated = (refreshed.Value ?? EmptySignedIn()) with
+        {
+            StatusMessage = successMessage,
+            StatusIsError = false
+        };
+        return Success(updated);
+    }
+
     private async Task<UiCapabilityResult<UserProfileState>> InvalidStateAsync(
         CancellationToken cancellationToken,
         string? fallback = null)

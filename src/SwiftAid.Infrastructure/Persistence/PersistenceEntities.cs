@@ -231,6 +231,8 @@ public sealed class EmailVerificationEntity
 
     public required string CodeHash { get; set; }
 
+    public string? PendingEmail { get; set; }
+
     public DateTimeOffset ExpiresAtUtc { get; set; }
 
     public int AttemptCount { get; set; }

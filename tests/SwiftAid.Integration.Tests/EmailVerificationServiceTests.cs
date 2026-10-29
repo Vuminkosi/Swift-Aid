@@ -62,6 +62,7 @@ public sealed class EmailVerificationServiceTests : IAsyncDisposable
             CREATE TABLE email_verifications (
                 user_id TEXT NOT NULL PRIMARY KEY,
                 code_hash TEXT NOT NULL,
+                pending_email TEXT,
                 expires_at_utc TEXT NOT NULL,
                 attempt_count INTEGER NOT NULL,
                 last_sent_at_utc TEXT NOT NULL,
