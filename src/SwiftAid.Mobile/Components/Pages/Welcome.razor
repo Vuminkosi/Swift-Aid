@@ -58,14 +58,14 @@
     </MudCarousel>
 
     <div class="mobile-welcome__actions">
-        <MudButton Href="/"
+        <MudButton OnClick="GetStartedAsync"
                    Variant="Variant.Filled"
                    Color="Color.Primary"
                    FullWidth="true"
                    StartIcon="@Icons.Material.Filled.ArrowForward">
             Get Started
         </MudButton>
-        <MudButton Href="/report"
+        <MudButton OnClick="ContinueAsGuestAsync"
                    Variant="Variant.Text"
                    Color="Color.Primary"
                    FullWidth="true">
@@ -97,9 +97,24 @@
             signedIn = false;
         }
 
-        if (signedIn || preferences?.IsPublicWelcomeCompleted == true)
+        var introCompleted = new IntroCompletionStore().IsCompleted();
+        if (signedIn || introCompleted || preferences?.IsPublicWelcomeCompleted == true)
         {
             Navigation.NavigateTo("/");
         }
+    }
+
+    private Task GetStartedAsync()
+    {
+        new IntroCompletionStore().MarkCompleted();
+        Navigation.NavigateTo("/");
+        return Task.CompletedTask;
+    }
+
+    private Task ContinueAsGuestAsync()
+    {
+        new IntroCompletionStore().MarkCompleted();
+        Navigation.NavigateTo("/report");
+        return Task.CompletedTask;
     }
 }

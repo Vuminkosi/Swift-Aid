@@ -123,6 +123,10 @@ public static class IdentityEndpoints
         {
             return FacebookWebError(context, StatusCodes.Status403Forbidden, "antiforgery_invalid");
         }
+        catch (InvalidOperationException)
+        {
+            return FacebookWebError(context, StatusCodes.Status400BadRequest, "unsupported_media");
+        }
 
         if (context.User.Identity?.IsAuthenticated == true)
         {
@@ -339,6 +343,10 @@ public static class IdentityEndpoints
         {
             return Results.BadRequest(new { error = "The sign-in request is invalid." });
         }
+        catch (InvalidOperationException)
+        {
+            return Results.BadRequest(new { error = "The sign-in request is invalid." });
+        }
 
         if (!IsLocalReturnUrl(returnUrl) || !TryGetVerifiedProvider(options, providerId, out var scheme, out _))
         {
@@ -452,6 +460,10 @@ public static class IdentityEndpoints
         {
             return Results.BadRequest(new { error = "The reauthentication request is invalid." });
         }
+        catch (InvalidOperationException)
+        {
+            return Results.BadRequest(new { error = "The reauthentication request is invalid." });
+        }
 
         if (!TryGetCurrentActor(context, out var actor) ||
             !await IsCurrentActorAsync(actor, dbContext, timeProvider, cancellationToken).ConfigureAwait(false) ||
@@ -559,6 +571,10 @@ public static class IdentityEndpoints
             await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false);
         }
         catch (AntiforgeryValidationException)
+        {
+            return Results.BadRequest(new { error = "The account-link request is invalid." });
+        }
+        catch (InvalidOperationException)
         {
             return Results.BadRequest(new { error = "The account-link request is invalid." });
         }
@@ -688,6 +704,10 @@ public static class IdentityEndpoints
         {
             return Results.BadRequest(new { error = "The account-unlink request is invalid." });
         }
+        catch (InvalidOperationException)
+        {
+            return Results.BadRequest(new { error = "The account-unlink request is invalid." });
+        }
 
         if (!TryGetCurrentActor(context, out var actor) ||
             !await IsCurrentActorAsync(actor, dbContext, timeProvider, cancellationToken).ConfigureAwait(false))
@@ -735,6 +755,10 @@ public static class IdentityEndpoints
             await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false);
         }
         catch (AntiforgeryValidationException)
+        {
+            return Results.BadRequest(new { error = "The sign-out request is invalid." });
+        }
+        catch (InvalidOperationException)
         {
             return Results.BadRequest(new { error = "The sign-out request is invalid." });
         }
