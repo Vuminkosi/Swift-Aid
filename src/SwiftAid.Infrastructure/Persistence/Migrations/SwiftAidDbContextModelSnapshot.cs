@@ -1987,6 +1987,10 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at_utc");
 
+                    b.Property<Guid?>("InvitationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("invitation_id");
+
                     b.Property<string>("OrganizationId")
                         .IsRequired()
                         .HasColumnType("text")

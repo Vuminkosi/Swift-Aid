@@ -83,6 +83,16 @@ else
             }
         }
     </MudPaper>
+    <MudPaper Class="pa-4 mb-4" Elevation="0">
+        <MudText Typo="Typo.subtitle1">Enter invitation code</MudText>
+        <MudText Typo="Typo.body2">If your organization gave you a code, enter it to request access.</MudText>
+        <MudTextField T="string" Label="Invitation code" Value="@_code" ValueChanged="CodeChanged"
+                      Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" aria-label="Invitation code" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@Snapshot.IsSaving"
+                   OnClick="RedeemAsync" StartIcon="@Icons.Material.Filled.ConfirmationNumber">
+            Redeem code
+        </MudButton>
+    </MudPaper>
 }
 
 @code {
@@ -94,7 +104,15 @@ else
 
     [Parameter] public EventCallback<MembershipJoinRequest> OnRequest { get; set; }
 
+    [Parameter] public EventCallback<string> OnRedeem { get; set; }
+
     private string? _search;
+
+    private string? _code;
+
+    private void CodeChanged(string value) => _code = value;
+
+    private Task RedeemAsync() => OnRedeem.InvokeAsync(_code);
 
     private Task SearchChangedAsync(string value)
     {

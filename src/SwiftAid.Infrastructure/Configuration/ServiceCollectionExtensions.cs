@@ -475,6 +475,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IUserProfileService, UserProfileService>();
         services.AddScoped<IProfileAvatarService, ProfileAvatarService>();
         services.AddScoped<IOrganizationMembershipService, OrganizationMembershipService>();
+        services.AddScoped<IOrganizationInvitationService, OrganizationInvitationService>();
         services.AddScoped<INotificationPreferenceService, NotificationPreferenceService>();
         services.AddSingleton<OrganizationSsoRegistry>();
         services.AddScoped<IExternalIdentityMappingStore, EfExternalIdentityMappingStore>();

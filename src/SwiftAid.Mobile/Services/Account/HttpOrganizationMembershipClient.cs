@@ -149,6 +149,61 @@ public sealed class HttpOrganizationMembershipClient(CookieSessionHttpClient ses
         }
     }
 
+    public async Task<UiCapabilityResult<InvitationRedeemView>> RedeemAsync(
+        string code,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(code);
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var token = await _session.GetAntiforgeryTokenAsync(cancellationToken).ConfigureAwait(false);
+            using var response = await _session.PostJsonAsync(
+                "/auth/organizations/invitations/redeem",
+                new { code },
+                token,
+                cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                return Denied<InvitationRedeemView>();
+            }
+
+            if (response.StatusCode == HttpStatusCode.Conflict)
+            {
+                var conflict = await ReadMessageAsync(response, cancellationToken).ConfigureAwait(false)
+                    ?? "You are already a member of this organization.";
+                return new UiCapabilityResult<InvitationRedeemView>(
+                    UiCapabilityResultCode.Conflict, null, Metadata(), conflict);
+            }
+
+            if (response.StatusCode == HttpStatusCode.BadRequest)
+            {
+                var message = await ReadMessageAsync(response, cancellationToken).ConfigureAwait(false)
+                    ?? "The invitation code is not recognized. Check it and try again.";
+                return new UiCapabilityResult<InvitationRedeemView>(
+                    UiCapabilityResultCode.InvalidRequest, null, Metadata(), message);
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return Retryable<InvitationRedeemView>("Redeeming invitations is temporarily unavailable.");
+            }
+
+            var payload = await ReadAsync<InvitationRedeemPayload>(response, cancellationToken).ConfigureAwait(false);
+            return payload is null
+                ? Retryable<InvitationRedeemView>("Redeeming invitations is temporarily unavailable.")
+                : Success(new InvitationRedeemView(payload.OrganizationId, payload.Status));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return Retryable<InvitationRedeemView>("Redeeming invitations is temporarily unavailable.");
+        }
+    }
+
     public async Task<UiCapabilityResult<IReadOnlyList<MembershipRequestView>>> GetMyRequestsAsync(
         CancellationToken cancellationToken = default)
     {
@@ -261,6 +316,8 @@ public sealed class HttpOrganizationMembershipClient(CookieSessionHttpClient ses
     private sealed record OrganizationDirectoryOptionPayload(string OrganizationId, string Status);
 
     private sealed record MembershipRequestListPayload(IReadOnlyList<MembershipRequestPayload> Requests);
+
+    private sealed record InvitationRedeemPayload(string OrganizationId, string Status);
 
     private sealed record MembershipRequestPayload(
         Guid RequestId,

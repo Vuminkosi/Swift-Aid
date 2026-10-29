@@ -23,6 +23,8 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
     public DbSet<EmailVerificationEntity> EmailVerifications => Set<EmailVerificationEntity>();
     public DbSet<UserProfileEntity> UserProfiles => Set<UserProfileEntity>();
     public DbSet<MembershipRequestEntity> MembershipRequests => Set<MembershipRequestEntity>();
+
+    public DbSet<OrganizationInvitationEntity> OrganizationInvitations => Set<OrganizationInvitationEntity>();
     public DbSet<NotificationPreferenceEntity> NotificationPreferences => Set<NotificationPreferenceEntity>();
     public DbSet<ActorEntity> Actors => Set<ActorEntity>();
     public DbSet<ActorAccessStateEntity> ActorAccessStates => Set<ActorAccessStateEntity>();
@@ -307,6 +309,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         joinRequest.Property(entity => entity.OrganizationId).HasColumnName("organization_id").HasColumnType("text");
         joinRequest.Property(entity => entity.Status).HasColumnName("status").HasConversion<string>().HasColumnType("text");
         joinRequest.Property(entity => entity.Reason).HasColumnName("reason").HasColumnType("text");
+        joinRequest.Property(entity => entity.InvitationId).HasColumnName("invitation_id").HasColumnType("uuid");
         joinRequest.Property(entity => entity.CreatedAtUtc).HasColumnName("created_at_utc")
             .HasColumnType("timestamp with time zone");
         joinRequest.Property(entity => entity.UpdatedAtUtc).HasColumnName("updated_at_utc")
@@ -315,6 +318,30 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
             .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_membership_requests_actor");
         joinRequest.HasOne<OrganizationEntity>().WithMany().HasForeignKey(entity => entity.OrganizationId)
             .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_membership_requests_organization");
+
+        var invitation = modelBuilder.Entity<OrganizationInvitationEntity>();
+        invitation.ToTable("organization_invitations", table =>
+        {
+            table.HasCheckConstraint("ck_invitations_status", "status IN ('Active', 'Revoked', 'Exhausted', 'Expired')");
+            table.HasCheckConstraint("ck_invitations_ids_nonempty", "length(btrim(organization_id)) > 0 AND length(btrim(code_hash)) > 0");
+            table.HasCheckConstraint("ck_invitations_uses_nonnegative", "use_count >= 0 AND max_uses > 0 AND use_count <= max_uses");
+        });
+        invitation.HasKey(entity => entity.InvitationId).HasName("pk_organization_invitations");
+        invitation.HasIndex(entity => entity.CodeHash).IsUnique()
+            .HasDatabaseName("ux_organization_invitations_code_hash");
+        invitation.Property(entity => entity.InvitationId).HasColumnName("invitation_id");
+        invitation.Property(entity => entity.OrganizationId).HasColumnName("organization_id").HasColumnType("text");
+        invitation.Property(entity => entity.CodeHash).HasColumnName("code_hash").HasColumnType("text");
+        invitation.Property(entity => entity.Status).HasColumnName("status").HasColumnType("text");
+        invitation.Property(entity => entity.ExpiresAtUtc).HasColumnName("expires_at_utc")
+            .HasColumnType("timestamp with time zone");
+        invitation.Property(entity => entity.MaxUses).HasColumnName("max_uses");
+        invitation.Property(entity => entity.UseCount).HasColumnName("use_count");
+        invitation.Property(entity => entity.CreatedByActorId).HasColumnName("created_by_actor_id").HasColumnType("text");
+        invitation.Property(entity => entity.CreatedAtUtc).HasColumnName("created_at_utc")
+            .HasColumnType("timestamp with time zone");
+        invitation.HasOne<OrganizationEntity>().WithMany().HasForeignKey(entity => entity.OrganizationId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_invitations_organization");
 
         var preferences = modelBuilder.Entity<NotificationPreferenceEntity>();
         preferences.ToTable("notification_preferences", "swiftaid_identity");

@@ -275,9 +275,32 @@ public sealed class MembershipRequestEntity
 
     public string? Reason { get; set; }
 
+    public Guid? InvitationId { get; set; }
+
     public DateTimeOffset CreatedAtUtc { get; set; }
 
     public DateTimeOffset UpdatedAtUtc { get; set; }
+}
+
+public sealed class OrganizationInvitationEntity
+{
+    public Guid InvitationId { get; set; }
+
+    public required string OrganizationId { get; set; }
+
+    public required string CodeHash { get; set; }
+
+    public required string Status { get; set; }
+
+    public DateTimeOffset? ExpiresAtUtc { get; set; }
+
+    public int MaxUses { get; set; }
+
+    public int UseCount { get; set; }
+
+    public string? CreatedByActorId { get; set; }
+
+    public DateTimeOffset CreatedAtUtc { get; set; }
 }
 
 /// <summary>Self-asserted profile fields. Identity owns the email; authorization owns membership.</summary>

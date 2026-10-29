@@ -142,6 +142,7 @@ public sealed class OrganizationMembershipServiceTests : IAsyncDisposable
                 organization_id TEXT NOT NULL REFERENCES organizations (organization_id),
                 status TEXT NOT NULL,
                 reason TEXT,
+                invitation_id TEXT,
                 created_at_utc TEXT NOT NULL,
                 updated_at_utc TEXT NOT NULL
             );

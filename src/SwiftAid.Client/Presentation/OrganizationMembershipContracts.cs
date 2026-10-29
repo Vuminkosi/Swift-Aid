@@ -14,6 +14,8 @@ public sealed record MembershipRequestView(
     string Status,
     string? Reason);
 
+public sealed record InvitationRedeemView(string OrganizationId, string Status);
+
 /// <summary>Member-side organization access: my memberships, directory, join requests.</summary>
 public interface IOrganizationMembershipClient
 {
@@ -30,6 +32,10 @@ public interface IOrganizationMembershipClient
         CancellationToken cancellationToken = default);
 
     Task<UiCapabilityResult<IReadOnlyList<MembershipRequestView>>> GetMyRequestsAsync(
+        CancellationToken cancellationToken = default);
+
+    Task<UiCapabilityResult<InvitationRedeemView>> RedeemAsync(
+        string code,
         CancellationToken cancellationToken = default);
 }
 
@@ -56,6 +62,14 @@ public sealed class UnavailableOrganizationMembershipClient : IOrganizationMembe
     public Task<UiCapabilityResult<IReadOnlyList<MembershipRequestView>>> GetMyRequestsAsync(
         CancellationToken cancellationToken = default) =>
         Unavailable<IReadOnlyList<MembershipRequestView>>(cancellationToken);
+
+    public Task<UiCapabilityResult<InvitationRedeemView>> RedeemAsync(
+        string code,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(code);
+        return Unavailable<InvitationRedeemView>(cancellationToken);
+    }
 
     private static Task<UiCapabilityResult<T>> Unavailable<T>(CancellationToken cancellationToken)
     {

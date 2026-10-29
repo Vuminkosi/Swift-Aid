@@ -42,9 +42,10 @@
         var auth = (AuthenticationStateProvider?)ServiceProvider.GetService(typeof(AuthenticationStateProvider));
         var users = (UserManager<SwiftAidUser>?)ServiceProvider.GetService(typeof(UserManager<SwiftAidUser>));
         var memberships = (IOrganizationMembershipService?)ServiceProvider.GetService(typeof(IOrganizationMembershipService));
-        return auth is null || users is null || memberships is null
+        var invitations = (IOrganizationInvitationService?)ServiceProvider.GetService(typeof(IOrganizationInvitationService));
+        return auth is null || users is null || memberships is null || invitations is null
             ? null
-            : new GatewayOrganizationMembershipClient(auth, users, memberships);
+            : new GatewayOrganizationMembershipClient(auth, users, memberships, invitations);
     }
 
     protected override async Task OnInitializedAsync() => await RefreshAsync();

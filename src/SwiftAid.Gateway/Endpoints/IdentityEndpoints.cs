@@ -75,6 +75,7 @@ public static class IdentityEndpoints
         group.MapGet("/organizations/directory", SearchOrganizations);
         group.MapGet("/organizations/requests/mine", GetMyMembershipRequests);
         group.MapPost("/organizations/requests", SubmitMembershipRequest);
+        group.MapPost("/organizations/invitations/redeem", RedeemOrganizationInvitation);
 
         if (identityServerOptions.Enabled)
         {
@@ -2142,7 +2143,80 @@ public static class IdentityEndpoints
         }).ConfigureAwait(false);
     }
 
-    private static async Task<IResult> GetNotificationPreferences(
+    
+    private static async Task<IResult> RedeemOrganizationInvitation(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        UserManager<SwiftAidUser> userManager,
+        IOrganizationInvitationService invitationService,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false);
+        }
+        catch (AntiforgeryValidationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The invitation request is invalid.");
+        }
+        catch (InvalidOperationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The invitation request is invalid.");
+        }
+
+        var bodyRead = await ReadPasswordRequestAsync(context.Request, cancellationToken).ConfigureAwait(false);
+        if (bodyRead.Status != PasswordBodyStatus.Valid || bodyRead.Request is null)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "Enter the invitation code.");
+        }
+
+        var code = bodyRead.Request.Code?.Trim() ?? string.Empty;
+        bodyRead.Request.Code = string.Empty;
+        if (string.IsNullOrWhiteSpace(code) || code.Length > 64)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "Enter the invitation code.");
+        }
+
+        return await RequireUserAsync(context, userManager, async user =>
+        {
+            var redeemed = await invitationService.RedeemAsync(user.Id, code, cancellationToken)
+                .ConfigureAwait(false);
+            SetNoStore(context);
+            return redeemed.Status switch
+            {
+                InvitationRedeemStatus.Redeemed => Results.Ok(new InvitationRedeemResponse(
+                    redeemed.OrganizationId ?? string.Empty, "redeemed")),
+                InvitationRedeemStatus.AlreadyRequested => Results.Ok(new InvitationRedeemResponse(
+                    redeemed.OrganizationId ?? string.Empty, "already-requested")),
+                InvitationRedeemStatus.AlreadyMember => PasswordError(
+                    context,
+                    StatusCodes.Status409Conflict,
+                    "You are already a member of this organization."),
+                InvitationRedeemStatus.OrganizationUnavailable => PasswordError(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    "This invitation is not for an available organization."),
+                InvitationRedeemStatus.Expired => PasswordError(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    "This invitation code has expired."),
+                InvitationRedeemStatus.Exhausted => PasswordError(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    "This invitation code has already been used."),
+                InvitationRedeemStatus.InvalidCode => PasswordError(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    "The invitation code is not recognized. Check it and try again."),
+                _ => PasswordError(
+                    context,
+                    StatusCodes.Status503ServiceUnavailable,
+                    "Redeeming invitations is temporarily unavailable.")
+            };
+        }).ConfigureAwait(false);
+    }
+
+private static async Task<IResult> GetNotificationPreferences(
         HttpContext context,
         UserManager<SwiftAidUser> userManager,
         INotificationPreferenceService preferenceService,
@@ -2635,6 +2709,8 @@ public static class IdentityEndpoints
         DateTimeOffset CreatedAtUtc);
 
     private sealed record MembershipRequestListResponse(IReadOnlyList<MembershipRequestResponse> Requests);
+
+    private sealed record InvitationRedeemResponse(string OrganizationId, string Status);
 
     private sealed record NotificationPreferencesResponse(bool WorkReminders, bool SessionUpdates);
 

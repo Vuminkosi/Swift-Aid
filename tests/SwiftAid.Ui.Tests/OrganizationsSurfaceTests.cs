@@ -45,6 +45,16 @@ public sealed class OrganizationsSurfaceTests
         Assert.Contains("No workspaces yet.", markup, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task OrganizationsSurface_ReadyOffersInvitationCodeRedemption()
+    {
+        var markup = await RenderAsync(new OrganizationsSnapshot(
+            OrganizationsViewState.Ready, [], [], [], IsSaving: false));
+
+        Assert.Contains("invitation code", markup, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Redeem code", markup, StringComparison.Ordinal);
+    }
+
     private static async Task<string> RenderAsync(OrganizationsSnapshot snapshot)
     {
         await using var services = CreateServices();

@@ -9,7 +9,7 @@
 
 <PageTitle>Organizations | SwiftAid</PageTitle>
 
-<OrganizationsSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OnSearch="SearchAsync" OnRequest="RequestAsync" />
+<OrganizationsSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OnSearch="SearchAsync" OnRequest="RequestAsync" OnRedeem="RedeemAsync" />
 
 @code {
     private OrganizationsSnapshot _snapshot = OrganizationsSnapshot.Loading;
@@ -24,9 +24,10 @@
         var auth = (AuthenticationStateProvider?)ServiceProvider.GetService(typeof(AuthenticationStateProvider));
         var users = (UserManager<SwiftAidUser>?)ServiceProvider.GetService(typeof(UserManager<SwiftAidUser>));
         var memberships = (IOrganizationMembershipService?)ServiceProvider.GetService(typeof(IOrganizationMembershipService));
-        return auth is null || users is null || memberships is null
+        var invitations = (IOrganizationInvitationService?)ServiceProvider.GetService(typeof(IOrganizationInvitationService));
+        return auth is null || users is null || memberships is null || invitations is null
             ? null
-            : new GatewayOrganizationMembershipClient(auth, users, memberships);
+            : new GatewayOrganizationMembershipClient(auth, users, memberships, invitations);
     }
 
     protected override async Task OnInitializedAsync() => await RefreshAsync();
@@ -60,6 +61,18 @@
         _snapshot = result.Succeeded
             ? mapped with { StatusMessage = "Request sent. The organization will review it.", StatusIsError = false }
             : mapped with { StatusMessage = result.Message ?? "Requesting access failed.", StatusIsError = true };
+    }
+
+    private async Task RedeemAsync(string code)
+    {
+        _snapshot = _snapshot with { IsSaving = true, StatusMessage = null, StatusIsError = false };
+        var result = await MembershipClient.RedeemAsync(code);
+        var memberships = await MembershipClient.GetMineAsync();
+        var requests = await MembershipClient.GetMyRequestsAsync();
+        var mapped = Map(memberships, requests, _snapshot.Directory, _snapshot) with { IsSaving = false };
+        _snapshot = result.Code == UiCapabilityResultCode.Success
+            ? mapped with { StatusMessage = "Invitation accepted. Your request is pending review.", StatusIsError = false }
+            : mapped with { StatusMessage = result.Message ?? "Redeeming the invitation failed.", StatusIsError = true };
     }
 
     private static OrganizationsSnapshot Map(
