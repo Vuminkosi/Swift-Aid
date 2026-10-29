@@ -98,10 +98,17 @@ browser verification that did not run.
 - Keyboard ENTER on Get Started → `/` hub with the preference chooser
   (WelcomeSurface takeover live: preference framing + no-grant disclosure).
 - Cold restart → hub directly, no repeated intro: completion flag persists.
-- `adb input tap` does not reach this emulator's WebView (taps inert, swipes
-  and keys fine), so button-tap continuation is NOT VERIFIED on device; the
-  handlers use the same NavigationManager pattern as every working link in
-  the app, and keyboard activation performed the navigation.
+- Short `adb input tap` does not reliably activate WebView buttons on this
+  emulator (taps inert, swipes and keys fine). A 300-400ms press DOES work:
+  Get Started (OnClick handler) navigated /welcome to the hub, and the new
+  Sign in entry is present on both hosts' welcome pages (Release build,
+  verified on device). Keyboard ENTER also completes the flow. Tap
+  continuation therefore VERIFIED via sustained-press touch + keyboard.
+- Live `/sign-in` (current tree, verified providers): Google renders the
+  challenge POST form (available); Facebook correctly shows unavailable
+  (its challenge-capable web-login exchange is unconfigured — the federated
+  `/auth/facebook/challenge` itself verified 302 separately); organization
+  SSO correctly shows unavailable (none registered). D02/D03 hold live.
 - Gateway in the emulator browser: `/welcome` serves 200 with the single
   column composition; a desktop-split screenshot was not taken (no
   desktop-width viewport available); the `MudHidden` split is code-verified
