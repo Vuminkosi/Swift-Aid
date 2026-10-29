@@ -358,3 +358,7 @@ Shipped: Mobile first-run routing (Routes OnNavigateAsync + device-persisted Int
 ## Onboarding sign-in entry + touch verification — 29 October 2026 (Release build on emulator-5556)
 
 Shipped: Sign in entry on both /welcome pages (native /account provider buttons, web /sign-in live availability), committed 62a0285. Verified with real touch: 300-400ms press on Get Started navigated /welcome to hub (OnClick handler confirmed); keyboard ENTER path; cold-restart no-repeat. Live /sign-in: Google challenge form available, Facebook/org correctly unavailable (D02 live). Short adb taps do not actuate this emulator's WebView buttons (quirk, no app errors). Screenshots inspected only, never committed.
+
+## Onboarding dialog sweep + dead-link audit — 29 October 2026 (read-only, no code changed)
+
+Re-confirmed no profile/membership/invitation backend (only session matches), so M-PRF/M-DONE UI stays absent rather than faked; preference capture stays with the existing WelcomeSurface chooser (no duplicate). Audited shipped welcome pages: all hrefs resolve to real routes (mobile has no /privacy or /terms pages and its welcome page links none). Recorded D01-D15 coverage ledger in ONBOARDING-AUTH-EVIDENCE.md. No maintained test added: audit changed no behavior (per durable-test-collateral, quick direct check suffices and is stated here).

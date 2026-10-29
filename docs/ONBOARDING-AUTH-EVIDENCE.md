@@ -80,6 +80,25 @@ browser verification that did not run.
   `HtmlRenderer` pattern cannot dispatch UI events; needs browser E2E in the
   hardening phase), and any live provider round-trip.
 
+## Dialog coverage sweep (D01-D15, 2026-10-29)
+
+Covered by existing components (adopted, not rebuilt): D01 auth error +
+retry (`MobileAuthenticationControl`, `SignIn.razor` Try again,
+`AccountSurface` refresh); D02 provider availability (live-verified states on
+`/sign-in`, `/account`, native single-option); D07 incomplete-form drafts
+(`GuestDraftStore` survives auth transitions); D10 permission denied
+(`AccountViewState.Denied`, capability panels); D11 offline
+(unavailable states + drafts-safe messaging, emulator-verified); D12
+sign-out confirmation (takeover, in worktree); D14 legal links (Gateway
+`/privacy` + `/terms` exist; mobile `/welcome` carries no legal links —
+audited, no dead links).
+Partial: D03 has loading + external-cancel recovery but no in-app cancel
+button; D08 has pending-sign-out handling but no explicit re-authenticate
+prompt (only meaningful inside the blocked link flow).
+Blocked on backend: D04 (no linked-identity list endpoint), D05 (no OTP),
+D06 (no password policy), D09 (no membership states), D13 (no avatar
+backend). D15 tour selection belongs to the Ellai lane, not onboarding.
+
 ## Remaining gaps (do not fake)
 
 - M-AUTH-01/02/04/05/09 password and code flows: blocked on backend (above).
