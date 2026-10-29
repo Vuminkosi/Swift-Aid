@@ -17,7 +17,6 @@ services:
       # Production deployments must override this to Production with TLS endpoints.
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_HTTP_PORTS: "8080"
-      SwiftAid__UseFakeServices: "false"
 
       # Transport Security
       TransportSecurity__AllowPlaintextDevelopment: "true"

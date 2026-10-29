@@ -1,6 +1,15 @@
-@using Microsoft.Extensions.Configuration
+@using System.Globalization
 @using System.Text.Json
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Hosting
+@using Microsoft.AspNetCore.Http
+@using SwiftAid.Client.Presentation
+@using SwiftAid.Client.Presentation.PublicWorkflows
 @inject IConfiguration Configuration
+@inject IWebHostEnvironment Environment
+@inject IHttpContextAccessor HttpContextAccessor
+@inject IPublicIntakeProcessingPolicyClient ProcessingPolicyClient
+@implements IDisposable
 <!DOCTYPE html>
 <html lang="en">
 
@@ -8,60 +17,127 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
-    <ResourcePreloader />
+    @if (!IsGuestEntry)
+    {
+        <ResourcePreloader />
+    }
     <link rel="stylesheet" href="_content/MudBlazor/MudBlazor.min.css" />
     <link rel="stylesheet" href="@Assets["_content/SwiftAid.UI/css/swiftaid-theme.css"]" />
     <link rel="stylesheet" href="@Assets["app.css"]" />
     <link rel="stylesheet" href="@Assets["SwiftAid.Gateway.styles.css"]" />
-    <ImportMap />
+    @if (!IsGuestEntry)
+    {
+        <ImportMap />
+    }
     <link rel="icon" type="image/png" href="favicon.png" />
-    <HeadOutlet @rendermode="InteractiveServer" />
+    @if (!IsGuestEntry)
+    {
+        <HeadOutlet @rendermode="InteractiveServer" />
+    }
 </head>
 
 <body>
-    <Routes @rendermode="InteractiveServer" />
-    <ReconnectModal />
-    <script src="_content/MudBlazor/MudBlazor.min.js"></script>
-    <script src="@Assets["_framework/blazor.web.js"]"></script>
-    @{
-        var section = Configuration.GetSection("FirebaseWeb");
-        var firebase = new
-        {
-            enabled = section.GetValue<bool>("Enabled"),
-            apiKey = section["ApiKey"],
-            authDomain = section["AuthDomain"],
-            projectId = section["ProjectId"],
-            storageBucket = section["StorageBucket"],
-            messagingSenderId = section["MessagingSenderId"],
-            appId = section["AppId"],
-            measurementId = section["MeasurementId"],
-            vapidKey = section["VapidKey"]
-        };
-        var complete = firebase.enabled &&
-            !string.IsNullOrWhiteSpace(firebase.apiKey) &&
-            !string.IsNullOrWhiteSpace(firebase.authDomain) &&
-            !string.IsNullOrWhiteSpace(firebase.projectId) &&
-            !string.IsNullOrWhiteSpace(firebase.messagingSenderId) &&
-            !string.IsNullOrWhiteSpace(firebase.appId) &&
-            !string.IsNullOrWhiteSpace(firebase.vapidKey);
-        var serialized = JsonSerializer.Serialize(new
-        {
-            enabled = complete,
-            apiKey = firebase.apiKey,
-            authDomain = firebase.authDomain,
-            projectId = firebase.projectId,
-            storageBucket = firebase.storageBucket,
-            messagingSenderId = firebase.messagingSenderId,
-            appId = firebase.appId,
-            measurementId = firebase.measurementId,
-            vapidKey = firebase.vapidKey
-        });
+    @if (IsGuestEntry)
+    {
+        <div id="guest-root"
+             data-processing-policy-reference="@PublicPolicy?.Reference"
+             data-processing-policy-version="@PublicPolicy?.Version"
+             data-processing-policy-notice-text="@PublicPolicy?.NoticeText"
+             data-processing-policy-acknowledgement-label="@PublicPolicy?.AcknowledgementLabel"
+             data-processing-policy-provenance="@PublicPolicyMetadata?.Provenance"
+             data-processing-policy-metadata-notice="@PublicPolicyMetadata?.Notice"
+             data-processing-policy-updated-at-utc="@PublicPolicyUpdatedAt"
+             data-processing-policy-available="@PolicyAvailable.ToString().ToLowerInvariant()">
+        </div>
+        <script src="_content/MudBlazor/MudBlazor.min.js"></script>
+        <script src="_framework/blazor.webassembly.js"></script>
     }
-    <script type="module">
-        import * as notifications from '/notifications/web-notifications.js';
-        await notifications.initialize(@((MarkupString)serialized));
-        window.swiftAidNotifications = notifications;
-    </script>
+    else
+    {
+        <Routes @rendermode="InteractiveServer" />
+        <ReconnectModal />
+        <script src="_content/MudBlazor/MudBlazor.min.js"></script>
+        <script src="@Assets["_framework/blazor.web.js"]"></script>
+        <script type="module">
+            const configuration = @((MarkupString)FirebaseConfiguration);
+            if (configuration.enabled) {
+                const notifications = await import('/notifications/web-notifications.js');
+                await notifications.initialize(configuration);
+                window.swiftAidNotifications = notifications;
+            }
+        </script>
+    }
 </body>
 
 </html>
+
+@code {
+    private UiCapabilityResult<PublicReportProcessingPolicy>? _policyResult;
+
+    private bool IsGuestEntry
+    {
+        get
+        {
+            var path = HttpContextAccessor.HttpContext?.Request.Path.Value?.TrimEnd('/');
+            return path is not null &&
+                (path.Length == 0 || string.Equals(path, "/report", StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    private PublicReportProcessingPolicy? PublicPolicy =>
+        _policyResult is { Code: UiCapabilityResultCode.Success, Value: not null } result
+            ? result.Value
+            : null;
+
+    private UiCapabilityMetadata? PublicPolicyMetadata =>
+        _policyResult is { Code: UiCapabilityResultCode.Success, Value: not null } result
+            ? result.Metadata
+            : null;
+
+    private bool PolicyAvailable => PublicPolicy is not null && PublicPolicyMetadata?.IsAvailable == true;
+
+    private string? PublicPolicyUpdatedAt =>
+        PublicPolicyMetadata?.UpdatedAtUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+
+    private IConfigurationSection firebaseSection => Configuration.GetSection("FirebaseWeb");
+    private bool firebaseEnabled => firebaseSection.GetValue<bool>("Enabled") &&
+        !string.IsNullOrWhiteSpace(firebaseSection["ApiKey"]) &&
+        !string.IsNullOrWhiteSpace(firebaseSection["AuthDomain"]) &&
+        !string.IsNullOrWhiteSpace(firebaseSection["ProjectId"]) &&
+        !string.IsNullOrWhiteSpace(firebaseSection["MessagingSenderId"]) &&
+        !string.IsNullOrWhiteSpace(firebaseSection["AppId"]) &&
+        !string.IsNullOrWhiteSpace(firebaseSection["VapidKey"]);
+    private string FirebaseConfiguration => JsonSerializer.Serialize(new
+    {
+        enabled = firebaseEnabled,
+        apiKey = firebaseSection["ApiKey"],
+        authDomain = firebaseSection["AuthDomain"],
+        projectId = firebaseSection["ProjectId"],
+        storageBucket = firebaseSection["StorageBucket"],
+        messagingSenderId = firebaseSection["MessagingSenderId"],
+        appId = firebaseSection["AppId"],
+        measurementId = firebaseSection["MeasurementId"],
+        vapidKey = firebaseSection["VapidKey"]
+    });
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!IsGuestEntry)
+        {
+            return;
+        }
+
+        try
+        {
+            _policyResult = await ProcessingPolicyClient.GetPolicyAsync();
+        }
+        catch (Exception)
+        {
+            _policyResult = null;
+        }
+    }
+
+    public void Dispose()
+    {
+    }
+}

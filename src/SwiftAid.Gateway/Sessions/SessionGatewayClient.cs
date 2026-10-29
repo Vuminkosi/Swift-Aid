@@ -95,6 +95,13 @@ public sealed class SessionGatewayClient(
         }
     }
 
+    public async Task<string?> GetCurrentActorIdAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var actor = await GetActorAsync().ConfigureAwait(false);
+        return actor?.ActorId;
+    }
+
     /// <summary>Executes an officer command against the known session version.</summary>
     public async Task<SessionStaffOutcome> ExecuteAsync(
         SessionCommand command,
