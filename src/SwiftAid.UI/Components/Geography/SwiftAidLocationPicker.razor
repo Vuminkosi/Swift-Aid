@@ -1,0 +1,312 @@
+@using SwiftAid.UI.Components.Geography
+
+<div class="geo-picker" data-testid="geo-picker">
+    <MudAutocomplete T="GeoPlaceOption"
+                     Label="@Label"
+                     @bind-Value="_selected"
+                     @bind-Value:after="SelectedCommittedAsync"
+                     SearchFunc="SearchPlacesAsync"
+                     ToStringFunc="@(option => option?.Name ?? string.Empty)"
+                     MinCharacters="2"
+                     DebounceInterval="250"
+                     Placeholder="Type at least two characters"
+                     HelperText="@HelperText"
+                     Disabled="@Disabled"
+                     Clearable="true"
+                     Dense="true"
+                     Variant="Variant.Outlined"
+                     Adornment="Adornment.Start"
+                     AdornmentIcon="@Icons.Material.Filled.Place"
+                     aria-label="@Label">
+        <ItemTemplate Context="option">
+            <MudText Typo="Typo.body2">@option.Name</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">@option.Ancestry</MudText>
+        </ItemTemplate>
+        <ItemSelectedTemplate Context="option">
+            <MudText Typo="Typo.body2">@option.Name</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">@option.Ancestry</MudText>
+        </ItemSelectedTemplate>
+        <NoItemsTemplate>
+            <MudText Typo="Typo.body2">No places found. Check the spelling or browse by area below.</MudText>
+        </NoItemsTemplate>
+    </MudAutocomplete>
+
+    @if (!string.IsNullOrWhiteSpace(_searchError))
+    {
+        <div class="geo-picker__feedback" role="alert">
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+                @_searchError
+                <MudButton ButtonType="ButtonType.Button" Variant="Variant.Text" Color="Color.Primary"
+                           Size="Size.Small" Disabled="@_searching" OnClick="RetrySearchAsync">
+                    @(_searching ? "Searching…" : "Retry")
+                </MudButton>
+            </MudAlert>
+        </div>
+    }
+
+    @if (_selected is not null)
+    {
+        <div class="geo-picker__selection">
+            <MudChip T="string" Icon="@Icons.Material.Filled.Place" Color="Color.Primary" Variant="Variant.Outlined">
+                @_selected.Ancestry
+            </MudChip>
+        </div>
+    }
+
+    @if (ShowBrowse)
+    {
+        <details class="geo-picker__browse">
+            <summary>Browse by area</summary>
+            <div class="geo-picker__cascade">
+                <MudSelect T="string" Label="Country" Variant="Variant.Outlined" Dense="true"
+                           Value="_cascadeCountryCode" ValueChanged="CascadeCountryChangedAsync"
+                           Disabled="@(Disabled || Countries.Count == 0)">
+                    @foreach (var country in Countries)
+                    {
+                        <MudSelectItem Value="@country.Code">@country.Name</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudSelect T="string" Label="Region or province" Variant="Variant.Outlined" Dense="true"
+                           Value="_cascadeAreaId" ValueChanged="CascadeAreaChangedAsync"
+                           Disabled="@(Disabled || _cascadeLoading || _cascadeAreas.Count == 0)">
+                    @foreach (var area in _cascadeAreas)
+                    {
+                        <MudSelectItem Value="@area.Id">@area.Name</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudSelect T="string" Label="Town, village, or locality" Variant="Variant.Outlined" Dense="true"
+                           Value="_cascadePlaceId" ValueChanged="CascadePlaceChangedAsync"
+                           Disabled="@(Disabled || _cascadeLoading || _cascadePlaces.Count == 0)">
+                    @foreach (var place in _cascadePlaces)
+                    {
+                        <MudSelectItem Value="@place.Id">@place.Name</MudSelectItem>
+                    }
+                </MudSelect>
+                @if (_cascadeLoading)
+                {
+                    <MudText Typo="Typo.caption" role="status">Loading areas…</MudText>
+                }
+                @if (!string.IsNullOrWhiteSpace(_cascadeError))
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Error" role="alert">@_cascadeError</MudText>
+                }
+            </div>
+        </details>
+    }
+
+    @if (OnProvisionalRequested.HasDelegate)
+    {
+        <MudButton ButtonType="ButtonType.Button" Variant="Variant.Text" Color="Color.Primary"
+                   Size="Size.Small" Class="geo-picker__provisional" OnClick="RequestProvisionalAsync">
+            Location not listed? Enter it manually
+        </MudButton>
+    }
+</div>
+
+@code {
+    private GeoPlaceOption? _selected;
+    private string? _lastQuery;
+    private string? _searchError;
+    private bool _searching;
+    private long _searchGeneration;
+    private string? _cascadeCountryCode;
+    private string? _cascadeAreaId;
+    private string? _cascadePlaceId;
+    private IReadOnlyList<GeoPlaceOption> _cascadeAreas = [];
+    private IReadOnlyList<GeoPlaceOption> _cascadePlaces = [];
+    private bool _cascadeLoading;
+    private string? _cascadeError;
+    private bool _parametersInitialized;
+
+    [Parameter, EditorRequired]
+    public Func<string, string?, CancellationToken, Task<GeoPlaceQueryResult>> SearchFunc { get; set; } = default!;
+    [Parameter, EditorRequired]
+    public Func<string, CancellationToken, Task<GeoPlaceQueryResult>> ChildrenFunc { get; set; } = default!;
+    [Parameter] public IReadOnlyList<GeoPlaceCountry> Countries { get; set; } = [];
+    [Parameter] public string? CountryCode { get; set; }
+    [Parameter] public GeoPlaceOption? Selected { get; set; }
+    [Parameter] public EventCallback<GeoPlaceOption?> SelectedChanged { get; set; }
+    [Parameter] public EventCallback OnProvisionalRequested { get; set; }
+    [Parameter] public string Label { get; set; } = "Search for a place";
+    [Parameter] public string? HelperText { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public bool ShowBrowse { get; set; } = true;
+
+    /// <summary>Last user-facing search error, if any. Observed by tests and the retry control.</summary>
+    public string? SearchError => _searchError;
+
+    protected override void OnParametersSet()
+    {
+        if (!_parametersInitialized || !Equals(Selected, _selected))
+        {
+            _parametersInitialized = true;
+            _selected = Selected;
+            SyncCascadeToSelection();
+        }
+    }
+
+    /// <summary>Search entry used by the autocomplete and by tests. Applies stale-response suppression.</summary>
+    public async Task<IEnumerable<GeoPlaceOption>> SearchPlacesAsync(string? text, CancellationToken cancellationToken)
+    {
+        var generation = Interlocked.Increment(ref _searchGeneration);
+        _lastQuery = text;
+        if (string.IsNullOrWhiteSpace(text) || text.Trim().Length < 2)
+        {
+            return [];
+        }
+
+        _searching = true;
+        _searchError = null;
+        try
+        {
+            var result = await SearchFunc(text.Trim(), EffectiveCountryCode(), cancellationToken)
+                .ConfigureAwait(false);
+            if (generation != Volatile.Read(ref _searchGeneration))
+            {
+                return [];
+            }
+
+            if (result.Succeeded)
+            {
+                return result.Options;
+            }
+
+            _searchError = result.ErrorMessage ?? "Place search is temporarily unavailable.";
+            return [];
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            if (generation == Volatile.Read(ref _searchGeneration))
+            {
+                _searchError = "Place search is temporarily unavailable. Check your connection and retry.";
+            }
+
+            return [];
+        }
+        finally
+        {
+            if (generation == Volatile.Read(ref _searchGeneration))
+            {
+                _searching = false;
+            }
+        }
+    }
+
+    /// <summary>Applies a chosen option and notifies the parent. Used by cascade and tests.</summary>
+    public async Task SelectOptionAsync(GeoPlaceOption? option)
+    {
+        _selected = option;
+        SyncCascadeToSelection();
+        await SelectedChanged.InvokeAsync(option);
+    }
+
+    public Task RequestProvisionalAsync() => OnProvisionalRequested.InvokeAsync();
+
+    private async Task SelectedCommittedAsync() => await SelectedChanged.InvokeAsync(_selected);
+
+    public async Task RetrySearchAsync()
+    {
+        var query = _lastQuery;
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return;
+        }
+
+        await SearchPlacesAsync(query, CancellationToken.None);
+    }
+
+    private string? EffectiveCountryCode() =>
+        string.IsNullOrWhiteSpace(CountryCode) ? _cascadeCountryCode : CountryCode.Trim();
+
+    public async Task CascadeCountryChangedAsync(string? countryCode)
+    {
+        _cascadeCountryCode = countryCode;
+        _cascadeAreaId = null;
+        _cascadePlaceId = null;
+        _cascadeAreas = [];
+        _cascadePlaces = [];
+        _cascadeError = null;
+        if (string.IsNullOrWhiteSpace(countryCode))
+        {
+            return;
+        }
+
+        await LoadCascadeLevelAsync($"country:{countryCode.Trim().ToUpperInvariant()}", isAreaLevel: true);
+    }
+
+    public async Task CascadeAreaChangedAsync(string? areaId)
+    {
+        _cascadeAreaId = areaId;
+        _cascadePlaceId = null;
+        _cascadePlaces = [];
+        _cascadeError = null;
+        if (string.IsNullOrWhiteSpace(areaId))
+        {
+            return;
+        }
+
+        var area = _cascadeAreas.FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, areaId, StringComparison.Ordinal));
+        if (area is not null)
+        {
+            await SelectOptionAsync(area);
+        }
+
+        await LoadCascadeLevelAsync(areaId, isAreaLevel: false);
+    }
+
+    public async Task CascadePlaceChangedAsync(string? placeId)
+    {
+        _cascadePlaceId = placeId;
+        _cascadeError = null;
+        var place = _cascadePlaces.FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, placeId, StringComparison.Ordinal));
+        await SelectOptionAsync(place);
+    }
+
+    private async Task LoadCascadeLevelAsync(string parentId, bool isAreaLevel)
+    {
+        _cascadeLoading = true;
+        try
+        {
+            var result = await ChildrenFunc(parentId, CancellationToken.None);
+            if (result.Succeeded)
+            {
+                if (isAreaLevel)
+                {
+                    _cascadeAreas = result.Options;
+                }
+                else
+                {
+                    _cascadePlaces = result.Options;
+                }
+
+                return;
+            }
+
+            _cascadeError = result.ErrorMessage ?? "Areas are temporarily unavailable.";
+        }
+        catch (Exception)
+        {
+            _cascadeError = "Areas are temporarily unavailable. Check your connection and retry.";
+        }
+        finally
+        {
+            _cascadeLoading = false;
+        }
+    }
+
+    private void SyncCascadeToSelection()
+    {
+        if (_selected is null)
+        {
+            return;
+        }
+
+        _cascadeCountryCode = _selected.CountryCode;
+    }
+}

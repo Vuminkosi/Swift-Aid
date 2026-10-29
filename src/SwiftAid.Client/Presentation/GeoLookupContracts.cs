@@ -11,6 +11,8 @@ public sealed record GeoLookupOption(
     string Ancestry,
     bool HasChildren);
 
+public sealed record GeoLookupCountry(string Code, string Name);
+
 /// <summary>Registry-driven location lookup for search-first pickers and cascading selectors.</summary>
 public interface IGeoLookupClient
 {
