@@ -15,7 +15,7 @@
     else if (ViewState == LinkedIdentityViewState.Unavailable)
     {
         <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert">
-            <MudText>Linked sign-in methods are unavailable right now. Your saved guest drafts remain on this device.</MudText>
+            <MudText>Couldn't load linked sign-in methods. Check your connection and try again. Your saved guest drafts remain on this device.</MudText>
         </MudAlert>
         <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="OnRefresh" StartIcon="@Icons.Material.Filled.Refresh">
             Try again

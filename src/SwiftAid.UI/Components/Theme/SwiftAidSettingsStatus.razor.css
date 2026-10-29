@@ -1,0 +1,19 @@
+.swiftaid-settings-status {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.625rem 0.125rem;
+}
+
+.swiftaid-settings-status__text {
+    display: grid;
+    min-width: 0;
+    flex: 1 1 auto;
+    gap: 0.125rem;
+    overflow-wrap: anywhere;
+}
+
+.swiftaid-settings-status .mud-button-root {
+    margin-left: auto;
+    flex-shrink: 0;
+}

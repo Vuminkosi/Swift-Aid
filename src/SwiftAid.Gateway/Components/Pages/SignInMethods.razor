@@ -226,12 +226,12 @@
 
             _statusMessage = !string.IsNullOrWhiteSpace(result.Message)
                 ? result.Message
-                : "Removing this sign-in method is unavailable right now. Try again later.";
+                : "Couldn't remove this sign-in method. Try again later.";
             _statusIsError = true;
         }
         catch (JSException)
         {
-            _statusMessage = "Removing this sign-in method is unavailable right now. Try again later.";
+            _statusMessage = "Couldn't remove this sign-in method. Try again later.";
             _statusIsError = true;
         }
         finally

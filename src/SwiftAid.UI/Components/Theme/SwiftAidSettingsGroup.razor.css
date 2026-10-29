@@ -1,0 +1,15 @@
+.swiftaid-settings-group {
+    display: grid;
+    gap: 0.375rem;
+}
+
+.swiftaid-settings-group__label {
+    margin: 0;
+}
+
+.swiftaid-settings-group__rows {
+    display: grid;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}

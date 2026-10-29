@@ -1,0 +1,31 @@
+<div class="swiftaid-settings-status" role="alert">
+    <MudIcon Icon="@Icons.Material.Outlined.WarningAmber" Color="Color.Warning" aria-hidden="true" />
+    <div class="swiftaid-settings-status__text">
+        <MudText Typo="Typo.subtitle2">@Title</MudText>
+        <MudText Typo="Typo.body2">@Message</MudText>
+    </div>
+    @if (OnRetry.HasDelegate)
+    {
+        <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="OnRetry">
+            @RetryText
+        </MudButton>
+    }
+</div>
+
+@code {
+    /// <summary>Compact failure title, for example "Couldn't load workspaces".</summary>
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>One-line recovery-safe explanation. Never claim state that is unknown.</summary>
+    [Parameter, EditorRequired]
+    public string Message { get; set; } = string.Empty;
+
+    /// <summary>Optional retry action. No button renders without a handler.</summary>
+    [Parameter]
+    public EventCallback OnRetry { get; set; }
+
+    /// <summary>Retry button text.</summary>
+    [Parameter]
+    public string RetryText { get; set; } = "Retry";
+}

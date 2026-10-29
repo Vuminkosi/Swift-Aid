@@ -1,0 +1,63 @@
+<li class="swiftaid-settings-row">
+    @if (!string.IsNullOrWhiteSpace(Icon))
+    {
+        <MudIcon Icon="@Icon" Color="Color.Secondary" aria-hidden="true" />
+    }
+    <div class="swiftaid-settings-row__text">
+        <MudText Typo="Typo.body1">@Title</MudText>
+        @if (!string.IsNullOrWhiteSpace(Description))
+        {
+            <MudText Typo="Typo.caption" Color="Color.Secondary">@Description</MudText>
+        }
+    </div>
+    <div class="swiftaid-settings-row__trailing">
+        @if (!Disabled && !string.IsNullOrWhiteSpace(Href))
+        {
+            <MudLink Href="@Href" aria-label="@(AriaLabel ?? Title)">
+                @if (!string.IsNullOrWhiteSpace(ActionText))
+                {
+                    @ActionText
+                }
+                <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Secondary" aria-hidden="true" />
+            </MudLink>
+        }
+        else if (Trailing is not null)
+        {
+            @Trailing
+        }
+    </div>
+</li>
+
+@code {
+    /// <summary>Row title shown to the user.</summary>
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>Optional supporting line under the title.</summary>
+    [Parameter]
+    public string? Description { get; set; }
+
+    /// <summary>Optional MudBlazor icon rendered before the title.</summary>
+    [Parameter]
+    public string? Icon { get; set; }
+
+    /// <summary>When set and the row is enabled, the row navigates to this local destination.</summary>
+    [Parameter]
+    public string? Href { get; set; }
+
+    /// <summary>Optional link text shown before the chevron. Defaults to chevron only.</summary>
+    [Parameter]
+    public string? ActionText { get; set; }
+
+    /// <summary>Accessible name for the navigation link. Defaults to the title.</summary>
+    [Parameter]
+    public string? AriaLabel { get; set; }
+
+    /// <summary>Custom trailing content (chip, button, switch) when the row does not navigate.</summary>
+    [Parameter]
+    public RenderFragment? Trailing { get; set; }
+
+    /// <summary>When true no navigation renders, even if <see cref="Href" /> is set.</summary>
+    [Parameter]
+    public bool Disabled { get; set; }
+}
