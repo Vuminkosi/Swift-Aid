@@ -32,8 +32,18 @@
     private int _totalCount;
     private string? _statusMessage;
     private long _loadGeneration;
+    private static readonly TimeSpan CaseListTimeout = TimeSpan.FromSeconds(15);
 
-    protected override Task OnInitializedAsync() => LoadAsync();
+    private bool _interactiveLoadStarted;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_interactiveLoadStarted)
+        {
+            _interactiveLoadStarted = true;
+            await LoadAsync();
+        }
+    }
 
     private async Task ChangeQueryAsync(OperationsCaseQueue.FilterRequestView query)
     {
@@ -66,6 +76,8 @@
         _state = OperationsSurfaceState.Loading;
         _statusMessage = null;
         StateHasChanged();
+        using var timeout = new CancellationTokenSource(CaseListTimeout);
+        var timeoutToken = timeout.Token;
 
         try
         {
@@ -80,7 +92,7 @@
                 return;
             }
 
-            var result = await workspaceClient.ListAsync(_query);
+            var result = await workspaceClient.ListAsync(_query, timeoutToken);
             if (generation != Volatile.Read(ref _loadGeneration))
             {
                 return;
@@ -95,7 +107,7 @@
 
                 try
                 {
-                    var options = await workspaceClient.GetFilterOptionsAsync();
+                    var options = await workspaceClient.GetFilterOptionsAsync(timeoutToken);
                     if (generation == Volatile.Read(ref _loadGeneration))
                     {
                         _filterOptions = options.Succeeded && options.Value is { } availableOptions
@@ -125,6 +137,17 @@
                 _ => OperationsSurfaceState.Error
             };
             _statusMessage = result.Message;
+        }
+        catch (OperationCanceledException)
+        {
+            if (generation == Volatile.Read(ref _loadGeneration))
+            {
+                _items = Array.Empty<OperationsCaseQueue.QueueViewRow>();
+                _totalCount = 0;
+                _filterOptions = null;
+                _state = OperationsSurfaceState.Unavailable;
+                _statusMessage = "The case list is taking too long. Refresh to try again.";
+            }
         }
         catch (HttpRequestException)
         {

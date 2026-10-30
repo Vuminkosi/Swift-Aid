@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases.Commands;
@@ -20,6 +21,22 @@ public interface IMapAggregateStore
 {
     Task<IReadOnlyList<MapAggregateCaseRow>> GetOwnedCaseAreasAsync(
         string ownerActorId, DateTimeOffset sinceUtc, int take, CancellationToken ct);
+}
+
+/// <summary>One isolated authorization lane: its own unit of work and
+/// policy so parallel lanes never share a DbContext or lease.</summary>
+public interface IEllaiCaseAuthScope : IAsyncDisposable
+{
+    ICaseCommandUnitOfWork UnitOfWork { get; }
+
+    ICaseAccessPolicy Policy { get; }
+}
+
+/// <summary>Creates isolated authorization lanes for bounded parallel
+/// per-case checks. A null factory selects the sequential path.</summary>
+public interface IEllaiCaseAuthScopeFactory
+{
+    IEllaiCaseAuthScope CreateScope();
 }
 
 public interface IMapAggregateQuery
@@ -47,9 +64,14 @@ public sealed class SurveillanceMapAggregateQuery(
     ICaseAccessPolicy policy,
     ICaseCommandUnitOfWork unitOfWork,
     IIntakePublicMetadataProvider metadataProvider,
-    TimeProvider timeProvider) : IMapAggregateQuery
+    TimeProvider timeProvider,
+    IEllaiCaseAuthScopeFactory? scopeFactory = null) : IMapAggregateQuery
 {
     public const int MaxCases = 500;
+
+    /// <summary>Maximum concurrent authorization lanes. Each lane owns an
+    /// isolated scope, so lanes never share a DbContext, lease, or policy.</summary>
+    public const int MaxAuthorizationParallelism = 8;
 
     /// <summary>Minimum distinct cases per row before counts may be shown.</summary>
     public const int SuppressionThreshold = 5;
@@ -97,42 +119,117 @@ public sealed class SurveillanceMapAggregateQuery(
         }
 
         var truncated = candidates.Count > MaxCases;
-        var readable = new List<MapAggregateCaseRow>();
-        foreach (var candidate in candidates.Take(MaxCases))
-        {
-            if (candidate.CaseId == Guid.Empty || string.IsNullOrWhiteSpace(candidate.CountryCode))
-            {
-                continue;
-            }
-
-            ICaseCommandLease lease;
-            try
-            {
-                lease = await _unitOfWork.BeginCaseAsync(
-                    actor, candidate.CaseId, ImmutableArray<string>.Empty, CaseLeaseMode.Read, ct).ConfigureAwait(false);
-            }
-            catch (KeyNotFoundException)
-            {
-                continue;
-            }
-
-            await using (lease.ConfigureAwait(false))
-            {
-                var decision = await _policy.AuthorizeAsync(actor, candidate.CaseId, CaseOperation.ReadCase, ct)
-                    .ConfigureAwait(false);
-                if (!decision.IsAllowed)
-                {
-                    continue;
-                }
-
-                await lease.CommitAsync(ct).ConfigureAwait(false);
-                readable.Add(candidate);
-            }
-        }
+        var shortlisted = candidates.Take(MaxCases).ToList();
+        var readable = scopeFactory is null
+            ? await AuthorizeSequentialAsync(shortlisted, actor, _unitOfWork, _policy, ct).ConfigureAwait(false)
+            : await AuthorizeParallelAsync(shortlisted, actor, scopeFactory, ct).ConfigureAwait(false);
 
         var labels = await LoadCountryLabelsAsync(ct).ConfigureAwait(false);
         var areas = Aggregate(readable, regionCode, labels, now);
         return new SurveillanceAggregateResult(SurveillanceAggregateAccess.Allowed, areas, now, truncated);
+    }
+
+    private static async Task<IReadOnlyList<MapAggregateCaseRow>> AuthorizeSequentialAsync(
+        IReadOnlyList<MapAggregateCaseRow> shortlisted,
+        ActorContext actor,
+        ICaseCommandUnitOfWork unitOfWork,
+        ICaseAccessPolicy policy,
+        CancellationToken ct)
+    {
+        var readable = new List<MapAggregateCaseRow>();
+        foreach (var candidate in shortlisted)
+        {
+            var authorized = await AuthorizeOneAsync(unitOfWork, policy, actor, candidate, ct).ConfigureAwait(false);
+            if (authorized is not null)
+            {
+                readable.Add(authorized);
+            }
+        }
+
+        return readable;
+    }
+
+    private static async Task<IReadOnlyList<MapAggregateCaseRow>> AuthorizeParallelAsync(
+        IReadOnlyList<MapAggregateCaseRow> shortlisted,
+        ActorContext actor,
+        IEllaiCaseAuthScopeFactory scopeFactory,
+        CancellationToken ct)
+    {
+        var readable = new ConcurrentBag<MapAggregateCaseRow>();
+        var chunks = Partition(shortlisted, MaxAuthorizationParallelism);
+        await Parallel.ForEachAsync(
+            chunks,
+            new ParallelOptions { MaxDegreeOfParallelism = MaxAuthorizationParallelism, CancellationToken = ct },
+            async (chunk, token) =>
+            {
+                await using var scope = scopeFactory.CreateScope();
+                foreach (var candidate in chunk)
+                {
+                    var authorized = await AuthorizeOneAsync(
+                        scope.UnitOfWork, scope.Policy, actor, candidate, token).ConfigureAwait(false);
+                    if (authorized is not null)
+                    {
+                        readable.Add(authorized);
+                    }
+                }
+            }).ConfigureAwait(false);
+        return readable.ToList();
+    }
+
+    private static IReadOnlyList<IReadOnlyList<MapAggregateCaseRow>> Partition(
+        IReadOnlyList<MapAggregateCaseRow> shortlisted, int maxChunks)
+    {
+        if (shortlisted.Count == 0)
+        {
+            return Array.Empty<IReadOnlyList<MapAggregateCaseRow>>();
+        }
+
+        var chunkCount = Math.Min(maxChunks, shortlisted.Count);
+        var chunkSize = (shortlisted.Count + chunkCount - 1) / chunkCount;
+        var chunks = new List<IReadOnlyList<MapAggregateCaseRow>>(chunkCount);
+        for (var i = 0; i < shortlisted.Count; i += chunkSize)
+        {
+            chunks.Add(shortlisted.Skip(i).Take(chunkSize).ToList());
+        }
+
+        return chunks;
+    }
+
+    private static async Task<MapAggregateCaseRow?> AuthorizeOneAsync(
+        ICaseCommandUnitOfWork unitOfWork,
+        ICaseAccessPolicy policy,
+        ActorContext actor,
+        MapAggregateCaseRow candidate,
+        CancellationToken ct)
+    {
+        if (candidate.CaseId == Guid.Empty || string.IsNullOrWhiteSpace(candidate.CountryCode))
+        {
+            return null;
+        }
+
+        ICaseCommandLease lease;
+        try
+        {
+            lease = await unitOfWork.BeginCaseAsync(
+                actor, candidate.CaseId, ImmutableArray<string>.Empty, CaseLeaseMode.Read, ct).ConfigureAwait(false);
+        }
+        catch (KeyNotFoundException)
+        {
+            return null;
+        }
+
+        await using (lease.ConfigureAwait(false))
+        {
+            var decision = await policy.AuthorizeAsync(actor, candidate.CaseId, CaseOperation.ReadCase, ct)
+                .ConfigureAwait(false);
+            if (!decision.IsAllowed)
+            {
+                return null;
+            }
+
+            await lease.CommitAsync(ct).ConfigureAwait(false);
+            return candidate;
+        }
     }
 
     private static IReadOnlyList<SurveillanceAggregateArea> Aggregate(

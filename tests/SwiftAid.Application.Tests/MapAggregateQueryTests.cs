@@ -192,6 +192,26 @@ public sealed class MapAggregateQueryTests
     }
 
     [Fact]
+    public async Task ParallelScopes_AuthorizeAllCandidatesWithAtMostEightLanes()
+    {
+        var rows = Enumerable.Range(0, 20)
+            .Select(_ => Row("SZ", [], Sector.HumanHealth, Now.AddDays(-2)))
+            .ToList();
+        var factory = new CountingScopeFactory();
+        var query = new SurveillanceMapAggregateQuery(
+            new StubStore(rows), new AllowPolicy(), new StubUnitOfWork(),
+            new StubMetadata(), new FixedTimeProvider(Now), factory);
+
+        var result = await query.GetAsync(CreateOfficer(), null, TimeSpan.FromDays(30), CancellationToken.None);
+
+        Assert.Equal(SurveillanceAggregateAccess.Allowed, result.Access);
+        Assert.Equal(20, result.Areas.Sum(area => area.Denominator ?? 0));
+        Assert.True(factory.ScopesCreated <= SurveillanceMapAggregateQuery.MaxAuthorizationParallelism,
+            $"Lanes used: {factory.ScopesCreated}");
+        Assert.Equal(20, factory.TotalBeginCalls);
+    }
+
+    [Fact]
     public async Task OutOfRangeWindow_IsRejected()
     {
         var query = new SurveillanceMapAggregateQuery(
@@ -262,6 +282,34 @@ public sealed class MapAggregateQueryTests
         {
             BeginCalls++;
             return ValueTask.FromResult<ICaseCommandLease>(new StubLease());
+        }
+    }
+
+    private sealed class CountingScopeFactory : IEllaiCaseAuthScopeFactory
+    {
+        public int ScopesCreated;
+
+        public int TotalBeginCalls;
+
+        public IEllaiCaseAuthScope CreateScope()
+        {
+            Interlocked.Increment(ref ScopesCreated);
+            return new CountingScope(this);
+        }
+
+        private sealed class CountingScope(CountingScopeFactory parent) : IEllaiCaseAuthScope
+        {
+            private readonly StubUnitOfWork _unitOfWork = new();
+
+            public ICaseCommandUnitOfWork UnitOfWork => _unitOfWork;
+
+            public ICaseAccessPolicy Policy => new AllowPolicy();
+
+            public ValueTask DisposeAsync()
+            {
+                Interlocked.Add(ref parent.TotalBeginCalls, _unitOfWork.BeginCalls);
+                return ValueTask.CompletedTask;
+            }
         }
     }
 
