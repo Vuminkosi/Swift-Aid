@@ -31,11 +31,11 @@ builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddMudServices();
 
 builder.Services.AddScoped<IPublicIntakeProcessingPolicyClient, GatewayPublicIntakeProcessingPolicyClient>();
-builder.Services.AddScoped<IEducationClient, UnavailableEducationClient>();
+builder.Services.AddScoped<IEducationClient, StaticEducationClient>();
 builder.Services.AddScoped<ISubscriptionClient, UnavailableSubscriptionClient>();
 builder.Services.AddScoped<IAnalyticsClient, UnavailableAnalyticsClient>();
 builder.Services.AddScoped<IDashboardOverviewClient, UnavailableDashboardOverviewClient>();
-builder.Services.AddScoped<IMapDataClient, UnavailableMapDataClient>();
+
 builder.Services.AddScoped<IOrganizationClient, UnavailableOrganizationClient>();
 builder.Services.AddScoped<IAiInvestigationClient, UnavailableInvestigationClient>();
 builder.Services.AddScoped<IOrganizationManagementClient, UnavailableOrganizationManagementClient>();

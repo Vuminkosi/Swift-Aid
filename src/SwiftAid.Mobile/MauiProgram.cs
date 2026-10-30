@@ -84,10 +84,10 @@ public static class MauiProgram
 		builder.Services.AddMudServices();
         Uri? gatewayBaseAddress = null;
         builder.Services.AddSingleton<IPublicIntakeProcessingPolicyClient, UnavailablePublicIntakeProcessingPolicyClient>();
-        builder.Services.AddSingleton<IEducationClient, UnavailableEducationClient>();
+        builder.Services.AddSingleton<IEducationClient, StaticEducationClient>();
         builder.Services.AddSingleton<ISubscriptionClient, UnavailableSubscriptionClient>();
         builder.Services.AddSingleton<IAnalyticsClient, UnavailableAnalyticsClient>();
-        builder.Services.AddSingleton<IMapDataClient, UnavailableMapDataClient>();
+        
         builder.Services.AddSingleton<IOrganizationClient, UnavailableOrganizationClient>();
         builder.Services.AddSingleton<IAiInvestigationClient, UnavailableInvestigationClient>();
         builder.Services.AddSingleton<IMobileHomeOverviewClient, UnavailableMobileHomeOverviewClient>();
@@ -105,10 +105,8 @@ public static class MauiProgram
         builder.Services.AddTransient<IPublicCommunitySessionClient, HttpPublicCommunitySessionClient>();
 
         var configuredGatewayAddress = builder.Configuration["SwiftAid:GatewayBaseAddress"];
-        var isAndroidEmulator = DeviceInfo.Current.Platform == DevicePlatform.Android &&
-                DeviceInfo.Current.DeviceType == DeviceType.Virtual;
-        if (!isAndroidEmulator && DeviceInfo.Current.Platform == DevicePlatform.Android &&
-                MobileGatewayAddress.IsLoopbackConfigured(configuredGatewayAddress))
+        var isAndroidEmulator = DeviceInfo.Current.Platform == DevicePlatform.Android;
+        if (!isAndroidEmulator && DeviceInfo.Current.Platform == DevicePlatform.Android && MobileGatewayAddress.IsLoopbackConfigured(configuredGatewayAddress))
         {
                 throw new InvalidOperationException(
                     "SwiftAid:GatewayBaseAddress points at the device loopback, which is unreachable from a physical Android device. Set a reachable gateway address (LAN hostname or IP).");

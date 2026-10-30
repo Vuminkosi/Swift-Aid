@@ -1,32 +1,5 @@
 namespace SwiftAid.Client.Presentation;
 
-public sealed record MapDataQuery(
-    PageRequest Page,
-    string? Region = null,
-    string? Sector = null,
-    string? TimeRange = null);
-
-public sealed record MapObservation(
-    string Id,
-    string Category,
-    string Label,
-    double Latitude,
-    double Longitude,
-    DateTimeOffset ReportedAtUtc,
-    string Status,
-    bool IsSynthetic);
-
-public sealed record MapDataPage(
-    Page<MapObservation> Observations,
-    bool HealthPatternInferenceEnabled);
-
-public interface IMapDataClient
-{
-    Task<UiCapabilityResult<MapDataPage>> GetAsync(
-        MapDataQuery query,
-        CancellationToken cancellationToken = default);
-}
-
 /// <summary>Describes the geographic precision of a privacy-safe aggregate area.</summary>
 public enum MapAggregateAreaPrecision
 {
