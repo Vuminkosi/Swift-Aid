@@ -15,6 +15,7 @@ public static class EllaiServiceCollectionExtensions
         services.AddScoped<IEllaiApprovalStore, PostgresEllaiApprovalStore>();
         services.AddScoped<IEllaiTopicStore, PostgresEllaiTopicStore>();
         services.AddScoped<IEllaiConsentStore, PostgresEllaiConsentStore>();
+        services.AddScoped<IEllaiUsageStore, PostgresEllaiUsageStore>();
         return services;
     }
 }

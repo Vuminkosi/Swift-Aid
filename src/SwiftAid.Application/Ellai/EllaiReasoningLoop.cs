@@ -47,7 +47,8 @@ public sealed class EllaiReasoningLoop(
     EllaiCycleRunner runner,
     EllaiPromptBuilder prompts,
     IEllaiTurnCompletionClient completions,
-    EllaiUsageLedger? ledger = null)
+    EllaiUsageLedger? ledger = null,
+    IEllaiUsageStore? usageStore = null)
 {
     public const string TurnProtocol =
         "Reply with exactly one JSON object and no other text. " +
@@ -65,6 +66,7 @@ public sealed class EllaiReasoningLoop(
     private readonly IEllaiTurnCompletionClient _completions =
         completions ?? throw new ArgumentNullException(nameof(completions));
     private readonly EllaiUsageLedger? _ledger = ledger;
+    private readonly IEllaiUsageStore? _usageStore = usageStore;
 
     public async Task<EllaiCycleOutcome> RunAsync(
         EllaiLoopRequest request,
@@ -103,9 +105,16 @@ public sealed class EllaiReasoningLoop(
             messages.AddRange(thread);
             var completion = await _completions.CompleteAsync(
                 messages, request.MaxTokensPerTurn, ct).ConfigureAwait(false);
-            _ledger?.Record(new EllaiUsageSample(
+            var sample = new EllaiUsageSample(
                 request.Context.SessionId,
-                Math.Max(0, completion.PromptTokens), Math.Max(0, completion.CompletionTokens)));
+                Math.Max(0, completion.PromptTokens), Math.Max(0, completion.CompletionTokens));
+            _ledger?.Record(sample);
+            if (_usageStore is not null)
+            {
+                await _usageStore.RecordAsync(new StoredUsageSample(
+                    sample.SessionId, sample.PromptTokens, sample.CompletionTokens,
+                    _ledger?.DollarsFor(sample) ?? 0m, DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
+            }
             thread.Add(new EllaiChatMessage("assistant", completion.Text));
             var parsed = EllaiModelTurnParser.Parse(completion.Text);
             if (parsed.Turn is not null)

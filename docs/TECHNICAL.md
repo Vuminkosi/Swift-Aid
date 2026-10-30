@@ -81,7 +81,11 @@ budget/denied detail for honest terminal status. Tool requests carry a
 model-assigned call id (`EllaiToolRequest.CallId`) that survives
 validation/execution for next-turn correlation. The `EllaiUsageLedger` enforces a
 200,000-token budget plus a $70 per-envelope and $70 total spend cap
-(dollar caps stay inert until real Meta rates are configured).
+(dollar caps stay inert until real Meta rates are configured). Usage samples
+persist per provider call in PostgreSQL `ellai_usage_samples` with priced
+costs; the worker hydrates durable totals into the ledger before each run,
+so token budgets and spend caps survive restarts and converge across
+instances by maximum, never double-count.
 **Deliberate deviation:** the requirements handoff asks for
 3 iterations / 4 calls / 1 repair per cycle; the owner previously directed
 the highest possible ceilings to avoid frustration, so the raised ceilings
@@ -196,7 +200,7 @@ ownership — reported, not introduced here).
 ## 7. Verification map
 
 Run `dotnet test tests/SwiftAid.Application.Tests --filter
-FullyQualifiedName~Ellai` (unit/contract, 189 passing, 3 skipped) and
+FullyQualifiedName~Ellai` (unit/contract, 192 passing, 3 skipped) and
 `dotnet test tests/SwiftAid.Ui.Tests --filter FullyQualifiedName~Ellai`
 (51 passing). PostgreSQL integration tests
 (`tests/SwiftAid.Integration.Tests`, `EllaiPostgres*`) run only with

@@ -150,6 +150,40 @@ public sealed class EllaiUsageLedger(
         }
     }
 
+    /// <summary>Priced dollar cost of one sample under the active table.
+    /// Pure math for durable writes; unpriced tables yield zero.</summary>
+    public decimal DollarsFor(EllaiUsageSample sample)
+    {
+        ArgumentNullException.ThrowIfNull(sample);
+        return Prices.CostFor(
+            Math.Max(0, sample.PromptTokens), Math.Max(0, sample.CompletionTokens));
+    }
+
+    /// <summary>Merges durable usage into memory after a restart or from a
+    /// sibling instance: counters converge by maximum, never double-count.
+    /// Call before budget-gated runs.</summary>
+    public async Task HydrateAsync(string sessionId, IEllaiUsageStore store, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentNullException.ThrowIfNull(store);
+        var totals = await store.TotalsAsync(sessionId, ct).ConfigureAwait(false);
+        var sessionSpend = await store.SpendForAsync(sessionId, ct).ConfigureAwait(false);
+        var globalSpend = await store.TotalSpendAsync(ct).ConfigureAwait(false);
+        lock (_gate)
+        {
+            _totals.TryGetValue(sessionId, out var current);
+            _totals[sessionId] = new EllaiUsageTotals(
+                sessionId,
+                Math.Max(current?.PromptTokens ?? 0, totals.PromptTokens),
+                Math.Max(current?.CompletionTokens ?? 0, totals.CompletionTokens),
+                Math.Max(current?.TotalTokens ?? 0, totals.TotalTokens),
+                Math.Max(current?.Calls ?? 0, totals.Calls));
+            _spend.TryGetValue(sessionId, out var spent);
+            _spend[sessionId] = Math.Max(spent, sessionSpend);
+            _totalSpend = Math.Max(_totalSpend, globalSpend);
+        }
+    }
+
     public decimal SpendFor(string sessionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);

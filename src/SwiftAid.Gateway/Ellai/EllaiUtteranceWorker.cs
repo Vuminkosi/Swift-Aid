@@ -67,6 +67,28 @@ public sealed class EllaiUtteranceWorker(
                 }
             }
 
+            var ledger = scope.ServiceProvider.GetService<EllaiUsageLedger>();
+            var usage = scope.ServiceProvider.GetService<IEllaiUsageStore>();
+            if (ledger is not null && usage is not null)
+            {
+                try
+                {
+                    // Merge durable spend (restart recovery, sibling
+                    // instances) before the budget-gated run.
+                    await ledger.HydrateAsync(work.SessionId, usage, stoppingToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "Ellai usage hydration failed for session {SessionId}; running on memory state.",
+                        work.SessionId);
+                }
+            }
+
             var services = new EllaiUtteranceServices(
                 scope.ServiceProvider.GetRequiredService<EllaiReasoningLoop>(),
                 scope.ServiceProvider.GetService<EllaiActivityStatusCoordinator>(),

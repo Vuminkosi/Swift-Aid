@@ -32,6 +32,7 @@ public sealed class EllaiPostgresTests : IAsyncDisposable
         await using var db = CreateDbContext();
         foreach (var id in _sessionIds)
         {
+            await db.Set<EllaiUsageSampleEntity>().Where(e => e.SessionId == id).ExecuteDeleteAsync();
             await db.Set<EllaiConsentGrantEntity>().Where(e => e.SessionId == id).ExecuteDeleteAsync();
             await db.Set<EllaiUtteranceEntity>().Where(e => e.SessionId == id).ExecuteDeleteAsync();
             await db.Set<EllaiCheckpointEntity>().Where(e => e.SessionId == id).ExecuteDeleteAsync();
@@ -170,6 +171,31 @@ public sealed class EllaiPostgresTests : IAsyncDisposable
         Assert.False(revoked.IsGranted(
             sessionId, EllaiConsentDimension.ReasoningText,
             EllaiToolBroker.ToolReadPurpose, DateTimeOffset.UtcNow));
+    }
+
+    [EllaiPostgresFact]
+    public async Task UsageSamplesSurviveRestartWithSpend()
+    {
+        const string sessionId = "pg-usage-1";
+        _sessionIds.Add(sessionId);
+
+        await using var db = CreateDbContext();
+        var store = new PostgresEllaiUsageStore(db);
+        await store.RecordAsync(
+            new StoredUsageSample(sessionId, 1000, 500, 0.02m, DateTimeOffset.UtcNow),
+            CancellationToken.None);
+
+        // Fresh context (simulated restart) derives the same totals.
+        await using var db2 = CreateDbContext();
+        var fresh = new PostgresEllaiUsageStore(db2);
+        var totals = await fresh.TotalsAsync(sessionId, CancellationToken.None);
+        Assert.Equal(1500, totals.TotalTokens);
+        Assert.Equal(1, totals.Calls);
+        Assert.Equal(0.02m, await fresh.SpendForAsync(sessionId, CancellationToken.None));
+        Assert.Equal(0.02m, await fresh.TotalSpendAsync(CancellationToken.None));
+
+        var missing = await fresh.TotalsAsync("pg-usage-absent", CancellationToken.None);
+        Assert.Equal(0, missing.Calls);
     }
 
     [EllaiPostgresFact]

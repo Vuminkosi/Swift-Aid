@@ -1364,6 +1364,45 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Ellai.EllaiUsageSampleEntity", b =>
+                {
+                    b.Property<string>("SampleId")
+                        .HasColumnType("text")
+                        .HasColumnName("sample_id");
+
+                    b.Property<DateTimeOffset>("AtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("at_utc");
+
+                    b.Property<int>("CompletionTokens")
+                        .HasColumnType("integer")
+                        .HasColumnName("completion_tokens");
+
+                    b.Property<decimal>("Dollars")
+                        .HasColumnType("numeric")
+                        .HasColumnName("dollars");
+
+                    b.Property<int>("PromptTokens")
+                        .HasColumnType("integer")
+                        .HasColumnName("prompt_tokens");
+
+                    b.Property<string>("SessionId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("session_id");
+
+                    b.HasKey("SampleId")
+                        .HasName("pk_ellai_usage_samples");
+
+                    b.HasIndex("SessionId")
+                        .HasDatabaseName("ix_ellai_usage_samples_session");
+
+                    b.ToTable("ellai_usage_samples", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_ellai_usage_samples_nonnegative", "prompt_tokens >= 0 AND completion_tokens >= 0 AND dollars >= 0");
+                        });
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Ellai.EllaiUtteranceEntity", b =>
                 {
                     b.Property<string>("SessionId")
