@@ -149,7 +149,7 @@ public sealed class EllaiPolicyGuardrailTests
     }
 
     [Fact]
-    public void ApprovalReceiptStampsPolicyHash()
+    public async Task ApprovalReceiptStampsPolicyHash()
     {
         var service = new EllaiApprovalService(new EllaiApprovedActionService(), new EllaiReceiptStore());
         var proposal = new AdminActionProposal(
@@ -160,7 +160,7 @@ public sealed class EllaiPolicyGuardrailTests
             "Three items past the recorded deadline.");
         var policy = EllaiRuntimePolicy.Load(WritePolicy(), "1.3");
 
-        var receipt = service.SubmitApproval("s-1", "hash-1", 1, proposal, "hash-1", 1,
+        var receipt = await service.SubmitApprovalAsync("s-1", "hash-1", 1, proposal, "hash-1", 1,
             "officer-1", proposal.HumanSuppliedDueAtUtc, DateTimeOffset.UtcNow, policy.Hash);
 
         Assert.NotNull(receipt);

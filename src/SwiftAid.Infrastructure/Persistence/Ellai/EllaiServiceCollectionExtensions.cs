@@ -12,6 +12,7 @@ public static class EllaiServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
         services.AddScoped<IEllaiSessionStore, PostgresEllaiSessionStore>();
+        services.AddScoped<IEllaiApprovalStore, PostgresEllaiApprovalStore>();
         return services;
     }
 }

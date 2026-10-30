@@ -1092,6 +1092,90 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Ellai.EllaiPlanApprovalEntity", b =>
+                {
+                    b.Property<string>("ApprovalId")
+                        .HasColumnType("text")
+                        .HasColumnName("approval_id");
+
+                    b.Property<string>("ActionId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("action_id");
+
+                    b.Property<DateTimeOffset?>("ApprovedDueAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("approved_due_at_utc");
+
+                    b.Property<string>("ApprovedRecipient")
+                        .HasColumnType("text")
+                        .HasColumnName("approved_recipient");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<DateTimeOffset>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at_utc");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("idempotency_key");
+
+                    b.Property<string>("PlanHash")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("plan_hash");
+
+                    b.Property<int>("PlanVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("plan_version");
+
+                    b.Property<string>("PolicyHash")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("policy_hash");
+
+                    b.Property<string>("SessionId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("session_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset?>("VerifiedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("verified_at_utc");
+
+                    b.HasKey("ApprovalId")
+                        .HasName("pk_ellai_plan_approvals");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_ellai_plan_approvals_key");
+
+                    b.HasIndex("SessionId")
+                        .HasDatabaseName("ix_ellai_plan_approvals_session");
+
+                    b.HasIndex("PlanHash", "PlanVersion", "ActionId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_ellai_plan_approvals_plan_action");
+
+                    b.ToTable("ellai_plan_approvals", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_ellai_plan_approvals_expiry", "expires_at_utc > created_at_utc");
+
+                            t.HasCheckConstraint("ck_ellai_plan_approvals_ids_nonempty", "length(btrim(approval_id)) > 0 AND length(btrim(session_id)) > 0 AND length(btrim(action_id)) > 0 AND length(btrim(idempotency_key)) > 0 AND length(btrim(plan_hash)) > 0");
+
+                            t.HasCheckConstraint("ck_ellai_plan_approvals_status", "status IN ('Accepted', 'AcceptedUnverified', 'UnknownOutcome', 'PartiallyApplied', 'Applied', 'Failed')");
+                        });
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Ellai.EllaiSessionEntity", b =>
                 {
                     b.Property<string>("SessionId")

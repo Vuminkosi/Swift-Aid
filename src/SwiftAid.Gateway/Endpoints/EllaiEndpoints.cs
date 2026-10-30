@@ -124,7 +124,7 @@ public static class EllaiEndpoints
         return Results.Json(view, statusCode: StatusCodes.Status200OK);
     }
 
-    private static Task<IResult> SubmitApprovalAsync(
+    private static async Task<IResult> SubmitApprovalAsync(
         string sessionId,
         SubmitApprovalApiRequest? request,
         EllaiApprovalService approvals,
@@ -137,9 +137,9 @@ public static class EllaiEndpoints
             || string.IsNullOrWhiteSpace(request.ApprovedPlanHash)
             || request.Proposal is null)
         {
-            return Task.FromResult(Results.Problem(
+            return Results.Problem(
                 statusCode: StatusCodes.Status400BadRequest,
-                title: "The Ellai approval request is invalid."));
+                title: "The Ellai approval request is invalid.");
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -152,16 +152,17 @@ public static class EllaiEndpoints
                 || !string.Equals(review.PlanHash, request.PlanHash, StringComparison.Ordinal)
                 || review.PlanVersion != request.PlanVersion)
             {
-                return Task.FromResult(Results.Problem(
+                return Results.Problem(
                     statusCode: StatusCodes.Status409Conflict,
-                    title: "The approval review is stale, superseded or already closed."));
+                    title: "The approval review is stale, superseded or already closed.");
             }
         }
 
-        var receipt = approvals.SubmitApproval(
+        var receipt = await approvals.SubmitApprovalAsync(
             sessionId, request.PlanHash, request.PlanVersion, request.Proposal,
             request.ApprovedPlanHash, request.ApprovedPlanVersion,
-            request.ApprovedRecipient, request.ApprovedDueAtUtc, now);
+            request.ApprovedRecipient, request.ApprovedDueAtUtc, now,
+            cancellationToken: cancellationToken);
         if (!string.IsNullOrWhiteSpace(request.ApprovalRequestId))
         {
             dialogs.Resolve(request.ApprovalRequestId, receipt is not null, now);
@@ -169,27 +170,28 @@ public static class EllaiEndpoints
 
         if (receipt is null)
         {
-            return Task.FromResult(Results.Problem(
+            return Results.Problem(
                 statusCode: StatusCodes.Status422UnprocessableEntity,
-                title: "The approval does not exactly match the proposed plan."));
+                title: "The approval does not exactly match the proposed plan.");
         }
 
-        return Task.FromResult(Results.Json(receipt, statusCode: StatusCodes.Status200OK));
+        return Results.Json(receipt, statusCode: StatusCodes.Status200OK);
     }
 
-    private static Task<IResult> ListReceipts(
+    private static async Task<IResult> ListReceipts(
         string sessionId,
-        EllaiReceiptStore receipts,
+        IEllaiApprovalStore receipts,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(sessionId))
         {
-            return Task.FromResult(Results.Problem(
+            return Results.Problem(
                 statusCode: StatusCodes.Status400BadRequest,
-                title: "The Ellai receipt request is invalid."));
+                title: "The Ellai receipt request is invalid.");
         }
 
-        return Task.FromResult(Results.Json(receipts.ListBySession(sessionId), statusCode: StatusCodes.Status200OK));
+        var list = await receipts.ListBySessionAsync(sessionId, cancellationToken);
+        return Results.Json(list, statusCode: StatusCodes.Status200OK);
     }
 
     private static async Task<IResult> CancelAsync(
