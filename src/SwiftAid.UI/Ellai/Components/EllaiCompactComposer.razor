@@ -4,30 +4,35 @@
 <div class="ellai-composer" role="dialog" aria-label="Ellai assistant composer"
      style="@PositionStyle" @onpointermove="OnPointerMove" @onpointerup="OnPointerUp">
     <div class="ellai-composer__move-row">
-        <span class="ellai-composer__handle" tabindex="0" role="button" aria-label="Move Ellai composer. Use arrow keys to move, or the move buttons."
+        <span class="ellai-composer__handle" tabindex="0" role="button" aria-label="Move Ellai composer. Drag in any direction, or use the arrow keys to move and Home to reset."
               @onpointerdown="OnPointerDown" @onkeydown="OnHandleKeyDown" title="Drag to move">
-            <MudIcon Icon="@Icons.Material.Filled.DragHandle" Size="Size.Small" />
-        </span>
-        <span class="ellai-composer__move-buttons" role="group" aria-label="Move composer without dragging">
-            <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" OnClick="() => Nudge(0, -MoveStep)" aria-label="Move composer up" />
-            <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward" Size="Size.Small" OnClick="() => Nudge(0, MoveStep)" aria-label="Move composer down" />
-            <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Size="Size.Small" OnClick="() => Nudge(-MoveStep, 0)" aria-label="Move composer left" />
-            <MudIconButton Icon="@Icons.Material.Filled.ArrowForward" Size="Size.Small" OnClick="() => Nudge(MoveStep, 0)" aria-label="Move composer right" />
-            <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Small" OnClick="OnResetPosition" aria-label="Reset composer position" />
+            <MudIcon Icon="@Icons.Material.Filled.OpenWith" Size="Size.Small" />
         </span>
     </div>
     <div class="ellai-composer__input-row">
-        <MudTextField T="string" Value="@InputText" ValueChanged="OnInputChanged"
-                      Placeholder="Ask Ellai…" MaxLength="8000" Lines="2"
-                      Label="Message for Ellai" Immediate="true"
-                      @onkeydown="OnInputKeyDown" />
-        @if (CanUseMicrophone)
-        {
-            <MudIconButton Icon="@Icons.Material.Filled.Mic" Color="Color.Default"
-                           OnClick="OnStartVoice" aria-label="Start voice input" />
-        }
-        <MudIconButton Icon="@Icons.Material.Filled.Send" Color="Color.Primary"
-                       OnClick="OnSend" Disabled="@(!CanSend)" aria-label="Send to Ellai" />
+        <div class="ellai-composer__field-wrap">
+            <MudTextField T="string" Value="@InputText" ValueChanged="OnInputChanged"
+                          Placeholder="Ask Ellai…" MaxLength="8000" Lines="2"
+                          Label="Message for Ellai" Immediate="true"
+                          @onkeydown="OnInputKeyDown" />
+            <span class="ellai-composer__field-actions">
+                @if (IsLiveSpeaking)
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.StopCircle" Color="Color.Primary"
+                                   OnClick="OnStopVoice" aria-label="Stop live voice" />
+                }
+                else
+                {
+                    @if (CanUseMicrophone)
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Mic" Color="Color.Default"
+                                       OnClick="OnStartVoice" aria-label="Start voice input" />
+                    }
+                    <MudIconButton Icon="@Icons.Material.Filled.Send" Color="Color.Primary"
+                                   OnClick="OnSend" Disabled="@(!CanSend)" aria-label="Send to Ellai" />
+                }
+            </span>
+        </div>
         <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Default"
                        OnClick="OnCancel" aria-label="Cancel Ellai session" />
     </div>
@@ -60,6 +65,9 @@
     public bool CanUseMicrophone { get; set; }
 
     [Parameter]
+    public bool IsLiveSpeaking { get; set; }
+
+    [Parameter]
     public EllaiComposerPosition? Position { get; set; }
 
     [Parameter]
@@ -73,6 +81,9 @@
 
     [Parameter]
     public EventCallback OnStartVoice { get; set; }
+
+    [Parameter]
+    public EventCallback OnStopVoice { get; set; }
 
     [Parameter]
     public EventCallback<EllaiComposerPosition> PositionChanged { get; set; }
@@ -122,6 +133,12 @@
 
     private async Task OnHandleKeyDown(KeyboardEventArgs e)
     {
+        if (e.Key == "Home")
+        {
+            await OnResetPosition();
+            return;
+        }
+
         var step = e.Key switch
         {
             "ArrowUp" => (0.0, -MoveStep),

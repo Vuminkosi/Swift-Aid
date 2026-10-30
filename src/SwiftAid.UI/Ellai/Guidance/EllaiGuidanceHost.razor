@@ -3,6 +3,7 @@
 @using SwiftAid.UI.Ellai.Components
 @inject IBonboardingService Bonboarding
 @inject IEllaiGuidanceControl Guidance
+@inject EllaiLauncher Launcher
 @implements IDisposable
 
 <div class="ellai-host">
@@ -18,25 +19,20 @@
                                   OnSend="OnSend" OnCancel="OnCancel" OnStartVoice="OnStartVoice" />
         </div>
     }
-    else
+    else if (ShowComposer)
     {
-        <EllaiFabMenu @ref="_fabMenu" OnModeSelected="SelectModeAsync" OnCreateGuide="CreateGuideAsync" />
-        @if (ShowComposer)
-        {
-            <div class="ellai-host__floating">
-                <EllaiCompactComposer Placement="EllaiSurfacePlacement.Floating"
-                                      StatusText="@StatusText" Phase="@Phase"
-                                      InputText="@InputText" InputTextChanged="OnInputChanged"
-                                      Position="@Position" PositionChanged="OnPositionChanged"
-                                      CanSend="true" CanUseMicrophone="@CanUseMicrophone"
-                                      OnSend="OnSend" OnCancel="OnCancel" OnStartVoice="OnStartVoice" />
-            </div>
-        }
+        <div class="ellai-host__floating">
+            <EllaiCompactComposer Placement="EllaiSurfacePlacement.Floating"
+                                  StatusText="@StatusText" Phase="@Phase"
+                                  InputText="@InputText" InputTextChanged="OnInputChanged"
+                                  Position="@Position" PositionChanged="OnPositionChanged"
+                                  CanSend="true" CanUseMicrophone="@CanUseMicrophone"
+                                  OnSend="OnSend" OnCancel="OnCancel" OnStartVoice="OnStartVoice" />
+        </div>
     }
 </div>
 
 @code {
-    private EllaiFabMenu? _fabMenu;
     private CancellationTokenSource? _cts;
     private bool ShowComposer;
     private bool IsActive;
@@ -69,6 +65,16 @@
 
     [Parameter]
     public EventCallback OnCreateGuide { get; set; }
+
+    protected override void OnInitialized()
+    {
+        Launcher.Requested += OnLauncherRequested;
+    }
+
+    private void OnLauncherRequested(EllaiMode mode)
+    {
+        _ = InvokeAsync(() => SelectModeAsync(mode));
+    }
 
     /// <summary>Attaches live guidance, enabling the attached composer
     /// branch. Called by the hosting page when a journey starts.</summary>
@@ -148,16 +154,6 @@
             InputText = null;
             Phase = EllaiStatusPhases.Ready;
             StatusText = "Ellai session ended.";
-            if (_fabMenu is not null)
-            {
-                try
-                {
-                    await _fabMenu.FocusLauncherAsync();
-                }
-                catch (InvalidOperationException)
-                {
-                }
-            }
         }
     }
 
@@ -179,6 +175,7 @@
 
     public void Dispose()
     {
+        Launcher.Requested -= OnLauncherRequested;
         try
         {
             _cts?.Cancel();

@@ -1,0 +1,16 @@
+.ellai-composer__field-wrap {
+    position: relative;
+    flex: 1 1 auto;
+}
+
+.ellai-composer__field-wrap ::deep .mud-input-control > .mud-input {
+    padding-inline-end: 4.5rem;
+}
+
+.ellai-composer__field-actions {
+    position: absolute;
+    inset-inline-end: 0.25rem;
+    inset-block-end: 0.25rem;
+    display: flex;
+    gap: 0.125rem;
+}

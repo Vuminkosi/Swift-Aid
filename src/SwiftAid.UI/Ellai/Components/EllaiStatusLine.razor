@@ -5,14 +5,21 @@
     {
         <MudText Typo="Typo.caption" Color="Color.Primary">@phaseLabel</MudText>
     }
-    <MudText Typo="Typo.caption">@(StatusText ?? "Ellai is ready.")</MudText>
-    @if (Placement == EllaiSurfacePlacement.Attached)
+    <div class="ellai-status__text @(_expanded ? null : "ellai-status__text--clamped")">
+        <MudText Typo="Typo.caption">@(StatusText ?? "Ellai is ready.")</MudText>
+    </div>
+    @if (NeedsExpander)
     {
-        <MudText Typo="Typo.caption" Color="Color.Secondary">Attached to guidance</MudText>
+        <MudIconButton Icon="@(_expanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                       Color="Color.Primary" Size="Size.Small"
+                       OnClick="ToggleExpanded" aria-expanded="@_expanded"
+                       aria-label="@(_expanded ? "Show less status text" : "Show full status text")" />
     }
 </div>
 
 @code {
+    private bool _expanded;
+
     [Parameter]
     public string? StatusText { get; set; }
 
@@ -21,4 +28,10 @@
 
     [Parameter]
     public EllaiSurfacePlacement Placement { get; set; } = EllaiSurfacePlacement.Floating;
+
+    /// <summary>Shows the expander when the text is long enough to clamp.
+    /// Estimated at 120 characters for three lines of caption text.</summary>
+    private bool NeedsExpander => (StatusText?.Length ?? "Ellai is ready.".Length) > 120;
+
+    private void ToggleExpanded() => _expanded = !_expanded;
 }

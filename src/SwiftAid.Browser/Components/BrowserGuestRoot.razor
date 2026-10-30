@@ -7,6 +7,7 @@
 @using SwiftAid.UI.Components.Public
 @using SwiftAid.UI.Components.Surfaces.Public
 @using SwiftAid.UI.Components.Surfaces.Shell
+@using SwiftAid.UI.Ellai.Components
 @implements IAsyncDisposable
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
@@ -53,6 +54,7 @@
         }
     </MobileNavigation>
     <ChildContent>
+    <MudContainer MaxWidth="MaxWidth.Large">
         @if (_isHome)
         {
             <PublicHomeSurface IsSignedIn="false"
@@ -107,6 +109,12 @@
                 <MudButton Href="/" Color="Color.Primary" Variant="Variant.Text"
                            StartIcon="@Icons.Material.Filled.Home">Return home</MudButton>
             </MudContainer>
+        }
+    </MudContainer>
+        <EllaiLauncherMenu OnModeSelected="NotifyEllaiUnavailable" />
+        @if (_ellaiNotice is not null)
+        {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" ShowCloseIcon="true" CloseIconClicked="DismissEllaiNotice">@_ellaiNotice</MudAlert>
         }
     </ChildContent>
 </SwiftAidApplicationShell>
@@ -349,6 +357,13 @@
     }
 
     private void ToggleMobileMoreMenu() => _mobileMoreMenuOpen = !_mobileMoreMenuOpen;
+
+    private string? _ellaiNotice;
+
+    private void NotifyEllaiUnavailable(SwiftAid.Contracts.Ellai.EllaiMode _) =>
+        _ellaiNotice = "Ellai is unavailable right now.";
+
+    private void DismissEllaiNotice() => _ellaiNotice = null;
 
     private void CloseMobileMoreMenu() => _mobileMoreMenuOpen = false;
 

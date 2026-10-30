@@ -1,0 +1,11 @@
+.ellai-status {
+    display: grid;
+    gap: 0.125rem;
+}
+
+.ellai-status__text--clamped {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
