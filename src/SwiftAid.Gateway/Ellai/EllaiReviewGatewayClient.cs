@@ -19,6 +19,37 @@ public sealed class EllaiReviewGatewayClient(
     private readonly IServiceProvider _serviceProvider =
         serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
 
+    public async Task<EllaiSessionView?> StartSessionAsync(
+        EllaiMode mode, CancellationToken cancellationToken)
+    {
+        if (!await IsAuthenticatedAsync().ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        try
+        {
+            var sessions = _serviceProvider.GetService<EllaiSessionService>();
+            if (sessions is null)
+            {
+                return null;
+            }
+
+            return await sessions.StartAsync(
+                new StartSessionRequest(
+                    mode, Guid.NewGuid().ToString("N"), null, null, null, null),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     public async Task<EllaiSessionEventPageDto?> PollEventsAsync(
         string sessionId, long cursor, int waitSeconds, CancellationToken cancellationToken)
     {

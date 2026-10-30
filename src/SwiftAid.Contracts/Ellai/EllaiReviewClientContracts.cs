@@ -37,6 +37,11 @@ public sealed record EllaiApprovedReceiptDto(
 /// keeps its cursor and retries; replay never replays commands.</summary>
 public interface IEllaiReviewClient
 {
+    /// <summary>Starts a durable session for the requested mode and returns
+    /// its server-issued view. Null means unavailable: the caller must not
+    /// invent a session id.</summary>
+    Task<EllaiSessionView?> StartSessionAsync(EllaiMode mode, CancellationToken cancellationToken);
+
     Task<EllaiSessionEventPageDto?> PollEventsAsync(
         string sessionId, long cursor, int waitSeconds, CancellationToken cancellationToken);
 

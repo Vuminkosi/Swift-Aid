@@ -14,6 +14,34 @@ public sealed class EllaiReviewHttpClient(HttpClient http) : IEllaiReviewClient
 
     private readonly HttpClient _http = http ?? throw new ArgumentNullException(nameof(http));
 
+    public async Task<EllaiSessionView?> StartSessionAsync(
+        EllaiMode mode, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var request = new StartSessionRequest(
+                mode, Guid.NewGuid().ToString("N"), null, null, null, null);
+            using var response = await _http.PostAsJsonAsync(
+                "api/v1/ellai/sessions", request, Json, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            return await response.Content
+                .ReadFromJsonAsync<EllaiSessionView>(Json, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     public async Task<EllaiSessionEventPageDto?> PollEventsAsync(
         string sessionId, long cursor, int waitSeconds, CancellationToken cancellationToken)
     {

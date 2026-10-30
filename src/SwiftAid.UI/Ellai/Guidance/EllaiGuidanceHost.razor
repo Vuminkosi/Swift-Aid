@@ -99,8 +99,24 @@
         ShowComposer = true;
         IsActive = false;
         Phase = EllaiStatusPhases.Ready;
-        StatusText = "Ellai session started. Ask a question or start a guided tour.";
-        await OnModeSelected.InvokeAsync(mode);
+        StatusText = "Starting an Ellai session…";
+        StateHasChanged();
+        try
+        {
+            var view = await ReviewClient.StartSessionAsync(mode, CancellationToken.None);
+            if (view is null)
+            {
+                StatusText = "Ellai is unavailable right now. Try again in a moment.";
+                return;
+            }
+
+            TrackSession(view.SessionId);
+            StatusText = "Ellai session started. Ask a question or start a guided tour.";
+        }
+        finally
+        {
+            await OnModeSelected.InvokeAsync(mode);
+        }
     }
 
     private async Task CreateGuideAsync()
