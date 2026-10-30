@@ -87,6 +87,16 @@ else
         }
     </MudPaper>
     <MudPaper Class="pa-4 mb-4" Elevation="0">
+        <MudText Typo="Typo.subtitle1">Create an organization</MudText>
+        <MudText Typo="Typo.body2">Start a new workspace. You become its first member and can invite others.</MudText>
+        <MudTextField T="string" Label="Organization id" Value="@_createOrganizationId" ValueChanged="CreateIdChanged"
+                      Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" aria-label="New organization id" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@Snapshot.IsSaving"
+                   OnClick="CreateAsync" StartIcon="@Icons.Material.Filled.Add" Class="auth-cta">
+            Create organization
+        </MudButton>
+    </MudPaper>
+    <MudPaper Class="pa-4 mb-4" Elevation="0">
         <MudText Typo="Typo.subtitle1">Enter invitation code</MudText>
         <MudText Typo="Typo.body2">If your organization gave you a code, enter it to request access.</MudText>
         <MudTextField T="string" Label="Invitation code" Value="@_code" ValueChanged="CodeChanged"
@@ -153,9 +163,13 @@ else
 
     [Parameter] public EventCallback<InvitationIssueRequest> OnIssue { get; set; }
 
+    [Parameter] public EventCallback<string> OnCreate { get; set; }
+
     private string? _search;
 
     private string? _code;
+
+    private string? _createOrganizationId;
 
     private string? _issueOrganizationId;
 
@@ -185,6 +199,10 @@ else
     }
 
     private void CodeChanged(string value) => _code = value;
+
+    private void CreateIdChanged(string value) => _createOrganizationId = value;
+
+    private Task CreateAsync() => OnCreate.InvokeAsync(_createOrganizationId);
 
     private Task RedeemAsync() => OnRedeem.InvokeAsync(_code);
 

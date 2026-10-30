@@ -277,6 +277,61 @@ public sealed class HttpOrganizationMembershipClient(CookieSessionHttpClient ses
         }
     }
 
+    public async Task<UiCapabilityResult<OrganizationDirectoryOption>> CreateAsync(
+        string organizationId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(organizationId);
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var token = await _session.GetAntiforgeryTokenAsync(cancellationToken).ConfigureAwait(false);
+            using var response = await _session.PostJsonAsync(
+                "/auth/organizations",
+                new { organizationId },
+                token,
+                cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                return Denied<OrganizationDirectoryOption>();
+            }
+
+            if (response.StatusCode == HttpStatusCode.Conflict)
+            {
+                var conflict = await ReadMessageAsync(response, cancellationToken).ConfigureAwait(false)
+                    ?? "That organization id is already taken.";
+                return new UiCapabilityResult<OrganizationDirectoryOption>(
+                    UiCapabilityResultCode.Conflict, null, Metadata(), conflict);
+            }
+
+            if (response.StatusCode == HttpStatusCode.BadRequest)
+            {
+                var message = await ReadMessageAsync(response, cancellationToken).ConfigureAwait(false)
+                    ?? "Enter an organization id to create.";
+                return new UiCapabilityResult<OrganizationDirectoryOption>(
+                    UiCapabilityResultCode.InvalidRequest, null, Metadata(), message);
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return Retryable<OrganizationDirectoryOption>("Creating organizations is temporarily unavailable.");
+            }
+
+            var payload = await ReadAsync<OrganizationDirectoryOptionPayload>(response, cancellationToken).ConfigureAwait(false);
+            return payload is null
+                ? Retryable<OrganizationDirectoryOption>("Creating organizations is temporarily unavailable.")
+                : Success(new OrganizationDirectoryOption(payload.OrganizationId, payload.Status));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return Retryable<OrganizationDirectoryOption>("Creating organizations is temporarily unavailable.");
+        }
+    }
+
     public async Task<UiCapabilityResult<IReadOnlyList<MembershipRequestView>>> GetMyRequestsAsync(
         CancellationToken cancellationToken = default)
     {

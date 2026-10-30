@@ -213,6 +213,10 @@ public sealed class GatewayAccountPageTests
             DateTimeOffset? expiresAtUtc,
             CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("probe failure");
+
+        public Task<UiCapabilityResult<OrganizationDirectoryOption>> CreateAsync(
+            string organizationId, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("probe failure");
     }
 
     private sealed class SignedInAuthStateProvider : AuthenticationStateProvider
@@ -283,6 +287,10 @@ public sealed class GatewayAccountPageTests
 
     private sealed class NeverCalledMembershipService : IOrganizationMembershipService
     {
+        public Task<OrganizationCreateResult> CreateAsync(
+            string actorId, string organizationId, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("probe failure");
+
         public Task<IReadOnlyList<ActorMembershipRecord>> GetMineAsync(string actorId, CancellationToken cancellationToken) =>
             throw new InvalidOperationException("probe failure");
 

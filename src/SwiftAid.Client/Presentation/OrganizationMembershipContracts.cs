@@ -33,6 +33,10 @@ public interface IOrganizationMembershipClient
         string? reason,
         CancellationToken cancellationToken = default);
 
+    Task<UiCapabilityResult<OrganizationDirectoryOption>> CreateAsync(
+        string organizationId,
+        CancellationToken cancellationToken = default);
+
     Task<UiCapabilityResult<IReadOnlyList<MembershipRequestView>>> GetMyRequestsAsync(
         CancellationToken cancellationToken = default);
 
@@ -65,6 +69,14 @@ public sealed class UnavailableOrganizationMembershipClient : IOrganizationMembe
     {
         ArgumentNullException.ThrowIfNull(organizationId);
         return Unavailable<MembershipRequestView>(cancellationToken);
+    }
+
+    public Task<UiCapabilityResult<OrganizationDirectoryOption>> CreateAsync(
+        string organizationId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(organizationId);
+        return Unavailable<OrganizationDirectoryOption>(cancellationToken);
     }
 
     public Task<UiCapabilityResult<IReadOnlyList<MembershipRequestView>>> GetMyRequestsAsync(

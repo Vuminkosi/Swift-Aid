@@ -10,7 +10,7 @@
 
 <ErrorBoundary @ref="_boundary">
     <ChildContent>
-        <OrganizationsSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OnSearch="SearchAsync" OnRequest="RequestAsync" OnRedeem="RedeemAsync" OnIssue="IssueAsync" />
+        <OrganizationsSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OnSearch="SearchAsync" OnRequest="RequestAsync" OnRedeem="RedeemAsync" OnIssue="IssueAsync" OnCreate="CreateAsync" />
     </ChildContent>
     <ErrorContent>
         <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert">
@@ -93,6 +93,18 @@
         _snapshot = result.Succeeded
             ? mapped with { StatusMessage = "Request sent. The organization will review it.", StatusIsError = false }
             : mapped with { StatusMessage = result.Message ?? "Requesting access failed.", StatusIsError = true };
+    }
+
+    private async Task CreateAsync(string? organizationId)
+    {
+        _snapshot = _snapshot with { IsSaving = true, StatusMessage = null, StatusIsError = false };
+        var result = await MembershipClient.CreateAsync(organizationId ?? string.Empty);
+        var memberships = await MembershipClient.GetMineAsync();
+        var requests = await MembershipClient.GetMyRequestsAsync();
+        var mapped = Map(memberships, requests, _snapshot.Directory, _snapshot) with { IsSaving = false };
+        _snapshot = result.Succeeded
+            ? mapped with { StatusMessage = "Organization created. You are its first member.", StatusIsError = false }
+            : mapped with { StatusMessage = result.Message ?? "Creating the organization failed.", StatusIsError = true };
     }
 
     private async Task RedeemAsync(string code)

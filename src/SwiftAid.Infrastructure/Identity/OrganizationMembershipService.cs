@@ -34,8 +34,25 @@ public sealed record MembershipRequestSubmitResult(
     MembershipRequestSubmitStatus Status,
     MembershipRequestRecord? Request = null);
 
+public enum OrganizationCreateStatus
+{
+    Created,
+    DuplicateId,
+    Invalid,
+    Unavailable
+}
+
+public sealed record OrganizationCreateResult(
+    OrganizationCreateStatus Status,
+    string? OrganizationId = null);
+
 public interface IOrganizationMembershipService
 {
+    Task<OrganizationCreateResult> CreateAsync(
+        string actorId,
+        string organizationId,
+        CancellationToken cancellationToken);
+
     Task<IReadOnlyList<ActorMembershipRecord>> GetMineAsync(string actorId, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<MembershipDirectoryRecord>> SearchAsync(string? query, CancellationToken cancellationToken);
@@ -59,6 +76,101 @@ public sealed class OrganizationMembershipService(
 
     private readonly SwiftAidDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     private readonly TimeProvider _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+
+    public async Task<OrganizationCreateResult> CreateAsync(
+        string actorId,
+        string organizationId,
+        CancellationToken cancellationToken)
+    {
+        var organization = NormalizeOrganizationId(organizationId);
+        if (string.IsNullOrWhiteSpace(actorId) || organization is null)
+        {
+            return new OrganizationCreateResult(OrganizationCreateStatus.Invalid);
+        }
+
+        try
+        {
+            var existing = await _dbContext.Organizations
+                .AsNoTracking()
+                .AnyAsync(candidate => candidate.OrganizationId == organization, cancellationToken)
+                .ConfigureAwait(false);
+            if (existing)
+            {
+                return new OrganizationCreateResult(OrganizationCreateStatus.DuplicateId);
+            }
+
+            var now = _timeProvider.GetUtcNow();
+            _dbContext.Organizations.Add(new OrganizationEntity
+            {
+                OrganizationId = organization,
+                Status = PersistentResourceStatus.Active,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            });
+            _dbContext.Workspaces.Add(new WorkspaceEntity
+            {
+                WorkspaceId = organization + "-general",
+                OrganizationId = organization,
+                Status = PersistentResourceStatus.Active
+            });
+            _dbContext.OrganizationMemberships.Add(new OrganizationMembershipEntity
+            {
+                MembershipId = Guid.NewGuid(),
+                ActorId = actorId,
+                OrganizationId = organization,
+                Status = PersistentMembershipStatus.Active,
+                ValidFromUtc = now,
+                ExpiresAtUtc = null,
+                GrantedByActorId = actorId,
+                Version = 1
+            });
+            var epoch = await _dbContext.ActorAccessStates
+                .AsNoTracking()
+                .Where(state => state.ActorId == actorId)
+                .Select(state => (long?)state.AccessEpoch)
+                .SingleOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false);
+            _dbContext.SecurityAuditEntries.Add(new SecurityAuditEntryEntity
+            {
+                AuditId = Guid.NewGuid(),
+                ActorId = actorId,
+                Operation = "Organization.Created",
+                DecisionCode = "Allowed",
+                AccessEpoch = epoch ?? 0,
+                RecordedAtUtc = now
+            });
+            await _dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            return new OrganizationCreateResult(OrganizationCreateStatus.Created, organization);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return new OrganizationCreateResult(OrganizationCreateStatus.Unavailable);
+        }
+    }
+
+    private static string? NormalizeOrganizationId(string? organizationId)
+    {
+        var trimmed = organizationId?.Trim() ?? string.Empty;
+        if (trimmed.Length < 2 || trimmed.Length > 128 || !char.IsAsciiLetterOrDigit(trimmed[0]))
+        {
+            return null;
+        }
+
+        foreach (var character in trimmed)
+        {
+            var ok = char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.';
+            if (!ok)
+            {
+                return null;
+            }
+        }
+
+        return trimmed;
+    }
 
     public async Task<IReadOnlyList<ActorMembershipRecord>> GetMineAsync(
         string actorId,

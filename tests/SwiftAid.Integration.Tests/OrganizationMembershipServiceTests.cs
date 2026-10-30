@@ -78,6 +78,44 @@ public sealed class OrganizationMembershipServiceTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Create_provisions_org_workspace_membership_and_audit()
+    {
+        var service = _provider.GetRequiredService<IOrganizationMembershipService>();
+
+        var created = await service.CreateAsync("actor-3", "org-new", CancellationToken.None);
+        Assert.Equal(OrganizationCreateStatus.Created, created.Status);
+        Assert.Equal("org-new", created.OrganizationId);
+
+        var mine = await service.GetMineAsync("actor-3", CancellationToken.None);
+        var membership = Assert.Single(mine, entry => entry.OrganizationId == "org-new");
+        Assert.Equal("Active", membership.MembershipStatus);
+        Assert.Contains("org-new-general", membership.WorkspaceIds);
+
+        var audit = _dbContext.SecurityAuditEntries
+            .Single(entry => entry.ActorId == "actor-3" && entry.Operation == "Organization.Created");
+        Assert.Equal("Allowed", audit.DecisionCode);
+    }
+
+    [Fact]
+    public async Task Create_rejects_duplicate_and_invalid_ids()
+    {
+        var service = _provider.GetRequiredService<IOrganizationMembershipService>();
+
+        Assert.Equal(
+            OrganizationCreateStatus.DuplicateId,
+            (await service.CreateAsync("actor-3", "org-1", CancellationToken.None)).Status);
+        Assert.Equal(
+            OrganizationCreateStatus.Invalid,
+            (await service.CreateAsync("actor-3", "  ", CancellationToken.None)).Status);
+        Assert.Equal(
+            OrganizationCreateStatus.Invalid,
+            (await service.CreateAsync("actor-3", "bad id!", CancellationToken.None)).Status);
+        Assert.Equal(
+            OrganizationCreateStatus.Invalid,
+            (await service.CreateAsync(string.Empty, "org-other", CancellationToken.None)).Status);
+    }
+
+    [Fact]
     public async Task Request_rejects_members_and_unknown_organizations()
     {
         var service = _provider.GetRequiredService<IOrganizationMembershipService>();
@@ -135,6 +173,24 @@ public sealed class OrganizationMembershipServiceTests : IAsyncDisposable
                 change_reason TEXT,
                 version INTEGER NOT NULL,
                 lock_token SMALLINT NOT NULL DEFAULT 0
+            );
+            CREATE TABLE actor_access_states (
+                actor_id TEXT NOT NULL PRIMARY KEY REFERENCES actors (actor_id),
+                access_epoch INTEGER NOT NULL,
+                version INTEGER NOT NULL,
+                updated_at_utc TEXT NOT NULL,
+                lock_token SMALLINT NOT NULL DEFAULT 0
+            );
+            CREATE TABLE security_audit_entries (
+                audit_id TEXT NOT NULL PRIMARY KEY,
+                actor_id TEXT NOT NULL,
+                target_actor_id TEXT,
+                resource_id TEXT,
+                operation TEXT NOT NULL,
+                decision_code TEXT NOT NULL,
+                access_epoch INTEGER NOT NULL,
+                recorded_at_utc TEXT NOT NULL,
+                reason_code TEXT
             );
             CREATE TABLE membership_requests (
                 request_id TEXT NOT NULL PRIMARY KEY,

@@ -245,6 +245,46 @@ public sealed class GatewayOrganizationMembershipClient(
         }
     }
 
+    public async Task<UiCapabilityResult<OrganizationDirectoryOption>> CreateAsync(
+        string organizationId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(organizationId);
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var actorId = await GetActorIdAsync().ConfigureAwait(false);
+            if (actorId is null)
+            {
+                return Denied<OrganizationDirectoryOption>();
+            }
+
+            var created = await _membershipService.CreateAsync(actorId, organizationId, cancellationToken)
+                .ConfigureAwait(false);
+            return created.Status switch
+            {
+                OrganizationCreateStatus.Created => Success(new OrganizationDirectoryOption(
+                    created.OrganizationId ?? string.Empty, "Active")),
+                OrganizationCreateStatus.DuplicateId => new UiCapabilityResult<OrganizationDirectoryOption>(
+                    UiCapabilityResultCode.Conflict,
+                    null,
+                    Metadata(),
+                    "That organization id is already taken."),
+                OrganizationCreateStatus.Invalid => Invalid<OrganizationDirectoryOption>(
+                    "Enter an organization id to create."),
+                _ => Retryable<OrganizationDirectoryOption>("Creating organizations is temporarily unavailable.")
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return Retryable<OrganizationDirectoryOption>("Creating organizations is temporarily unavailable.");
+        }
+    }
+
     public async Task<UiCapabilityResult<IReadOnlyList<MembershipRequestView>>> GetMyRequestsAsync(
         CancellationToken cancellationToken = default)
     {

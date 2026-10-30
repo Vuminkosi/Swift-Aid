@@ -78,6 +78,7 @@ public static class IdentityEndpoints
         group.MapPost("/organizations/requests", SubmitMembershipRequest);
         group.MapPost("/organizations/invitations/redeem", RedeemOrganizationInvitation);
         group.MapPost("/organizations/invitations", IssueOrganizationInvitation);
+        group.MapPost("/organizations", CreateOrganization);
 
         if (identityServerOptions.Enabled)
         {
@@ -2146,6 +2147,60 @@ public static class IdentityEndpoints
     }
 
     
+    private static async Task<IResult> CreateOrganization(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        UserManager<SwiftAidUser> userManager,
+        [FromServices] IOrganizationMembershipService membershipService,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false);
+        }
+        catch (AntiforgeryValidationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The organization request is invalid.");
+        }
+        catch (InvalidOperationException)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "The organization request is invalid.");
+        }
+
+        var bodyRead = await ReadPasswordRequestAsync(context.Request, cancellationToken).ConfigureAwait(false);
+        if (bodyRead.Status != PasswordBodyStatus.Valid || bodyRead.Request is null)
+        {
+            return PasswordError(context, StatusCodes.Status400BadRequest, "Enter an organization id to create.");
+        }
+
+        return await RequireUserAsync(context, userManager, async user =>
+        {
+            var created = await membershipService.CreateAsync(
+                user.Id,
+                bodyRead.Request.OrganizationId ?? string.Empty,
+                cancellationToken).ConfigureAwait(false);
+            SetNoStore(context);
+            return created.Status switch
+            {
+                OrganizationCreateStatus.Created => Results.Ok(new OrganizationDirectoryEntryResponse(
+                    created.OrganizationId ?? string.Empty,
+                    "Active")),
+                OrganizationCreateStatus.DuplicateId => PasswordError(
+                    context,
+                    StatusCodes.Status409Conflict,
+                    "That organization id is already taken."),
+                OrganizationCreateStatus.Invalid => PasswordError(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    "Enter an organization id to create."),
+                _ => PasswordError(
+                    context,
+                    StatusCodes.Status503ServiceUnavailable,
+                    "Creating organizations is temporarily unavailable.")
+            };
+        }).ConfigureAwait(false);
+    }
+
     private static async Task<IResult> RedeemOrganizationInvitation(
         HttpContext context,
         IAntiforgery antiforgery,
