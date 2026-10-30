@@ -55,13 +55,13 @@ public sealed class EllaiConsentServiceTests
 public sealed class EllaiTopicServiceTests
 {
     [Fact]
-    public void OrdinalReferenceResolvesBeforeSemanticSearch()
+    public async Task OrdinalReferenceResolvesBeforeSemanticSearch()
     {
         var topics = new EllaiTopicService();
-        topics.Track("Missing receipt", new[] { "receipt" }, "case-1", "v1");
-        topics.Track("Overdue tasks", new[] { "tasks" }, "case-1", "v2");
+        await topics.TrackAsync("session-1", "Missing receipt", new[] { "receipt" }, "case-1", "v1");
+        await topics.TrackAsync("session-1", "Overdue tasks", new[] { "tasks" }, "case-1", "v2");
 
-        var resolved = topics.Resolve("the second issue", out var ambiguous);
+        var (resolved, ambiguous) = await topics.ResolveAsync("session-1", "the second issue");
 
         Assert.False(ambiguous);
         Assert.Single(resolved);
@@ -69,16 +69,38 @@ public sealed class EllaiTopicServiceTests
     }
 
     [Fact]
-    public void AmbiguousReferenceStaysExplicit()
+    public async Task AmbiguousReferenceStaysExplicit()
     {
         var topics = new EllaiTopicService();
-        topics.Track("Queue review", new[] { "queue" }, null, null);
-        topics.Track("Queue summary", new[] { "queue" }, null, null);
+        await topics.TrackAsync("session-1", "Queue review", new[] { "queue" }, null, null);
+        await topics.TrackAsync("session-1", "Queue summary", new[] { "queue" }, null, null);
 
-        var resolved = topics.Resolve("queue", out var ambiguous);
+        var (resolved, ambiguous) = await topics.ResolveAsync("session-1", "queue");
 
         Assert.True(ambiguous);
         Assert.Equal(2, resolved.Count);
+    }
+
+    [Fact]
+    public async Task TopicsNeverLeakAcrossSessions()
+    {
+        var topics = new EllaiTopicService();
+        await topics.TrackAsync("session-1", "Queue review", new[] { "queue" }, null, null);
+
+        var (resolved, _) = await topics.ResolveAsync("session-2", "queue");
+
+        Assert.Empty(resolved);
+    }
+
+    [Fact]
+    public async Task RetrackingUpdatesOneStableRow()
+    {
+        var topics = new EllaiTopicService();
+        var first = await topics.TrackAsync("session-1", "Queue review", new[] { "queue" }, null, "v1");
+        var second = await topics.TrackAsync("session-1", "Queue review", new[] { "queue" }, null, "v2");
+
+        Assert.Equal(first.TopicId, second.TopicId);
+        Assert.Equal("v2", second.EntityVersion);
     }
 
     [Fact]

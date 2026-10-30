@@ -1252,6 +1252,64 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Ellai.EllaiTopicEntity", b =>
+                {
+                    b.Property<string>("TopicId")
+                        .HasColumnType("text")
+                        .HasColumnName("topic_id");
+
+                    b.Property<string>("AliasesJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("aliases_json");
+
+                    b.Property<string>("CheckpointId")
+                        .HasColumnType("text")
+                        .HasColumnName("checkpoint_id");
+
+                    b.Property<string>("CoverageState")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("coverage_state");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("EntityRef")
+                        .HasColumnType("text")
+                        .HasColumnName("entity_ref");
+
+                    b.Property<string>("EntityVersion")
+                        .HasColumnType("text")
+                        .HasColumnName("entity_version");
+
+                    b.Property<string>("SessionId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("session_id");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("title");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.HasKey("TopicId")
+                        .HasName("pk_ellai_topics");
+
+                    b.HasIndex("SessionId")
+                        .HasDatabaseName("ix_ellai_topics_session");
+
+                    b.ToTable("ellai_topics", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_ellai_topics_ids_nonempty", "length(btrim(topic_id)) > 0 AND length(btrim(session_id)) > 0 AND length(btrim(title)) > 0");
+                        });
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.EmailVerificationEntity", b =>
                 {
                     b.Property<string>("UserId")

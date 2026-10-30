@@ -207,7 +207,7 @@ public sealed class EllaiToolBroker
 
         if (string.Equals(canonical, EllaiToolNames.Topic, StringComparison.Ordinal))
         {
-            return Bound(ReadTopics(request));
+            return Bound(await ReadTopicsAsync(context, request, ct).ConfigureAwait(false));
         }
 
         return Bound(canonical switch
@@ -382,12 +382,12 @@ public sealed class EllaiToolBroker
             (due is null ? string.Empty : $" · due {due}");
     }
 
-    /// <summary>Live <c>ellai_topic</c> resolution against the topic ledger:
-    /// ordered mentions resolve first, multiple matches stay explicitly
-    /// ambiguous, and unknown references are an authorized empty. The ledger
-    /// is instance-scoped today; durable per-session topic history is the
-    /// Task 2 remainder.</summary>
-    private EllaiToolResult ReadTopics(EllaiToolRequest request)
+    /// <summary>Live <c>ellai_topic</c> resolution against the session's
+    /// durable topic history: ordered mentions resolve first, multiple
+    /// matches stay explicitly ambiguous, and unknown references are an
+    /// authorized empty. Topics never leak across sessions.</summary>
+    private async Task<EllaiToolResult> ReadTopicsAsync(
+        EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
     {
         if (_topics is null)
         {
@@ -404,7 +404,9 @@ public sealed class EllaiToolBroker
                 EllaiToolReasonCodes.InvalidArguments);
         }
 
-        var matches = _topics.Resolve(reference.Trim(), out var ambiguous).Take(MaxItems).ToList();
+        var (resolved, ambiguous) = await _topics
+            .ResolveAsync(context.SessionId, reference.Trim(), ct).ConfigureAwait(false);
+        var matches = resolved.Take(MaxItems).ToList();
         if (matches.Count == 0)
         {
             return Allow(request.ToolName, "No permitted topic matches the reference.", 0, false);

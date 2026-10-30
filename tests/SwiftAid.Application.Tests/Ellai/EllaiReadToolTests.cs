@@ -53,7 +53,7 @@ public sealed class EllaiReadToolTests
             consent.Grant("session-1", EllaiConsentDimension.ReasoningText,
                 EllaiToolBroker.ToolReadPurpose, "synthetic", TimeSpan.FromHours(1));
             var topics = new EllaiTopicService();
-            topics.Track("Sample topic", new[] { "sample" }, null, null);
+            await topics.TrackAsync("session-1", "Sample topic", new[] { "sample" }, null, null);
             var broker = new EllaiToolBroker(
                 new EllaiPolicyService(), consent, new EllaiTechnicalDocs(docsPath), null,
                 new EllaiReceiptStore(), topics);

@@ -20,18 +20,18 @@ public sealed class EllaiLiveTopicReadTests
     private static IReadOnlyDictionary<string, string> Args(params (string Key, string Value)[] pairs) =>
         pairs.ToDictionary(p => p.Key, p => p.Value);
 
-    private static EllaiTopicService SeededTopics()
+    private static async Task<EllaiTopicService> SeededTopicsAsync()
     {
         var service = new EllaiTopicService();
-        service.Track("Overdue queue review", new[] { "queue", "overdue" }, "case-1", "v3");
-        service.Track("Overdue reminder planning", new[] { "reminder", "overdue" }, null, null);
+        await service.TrackAsync("session-1", "Overdue queue review", new[] { "queue", "overdue" }, "case-1", "v3");
+        await service.TrackAsync("session-1", "Overdue reminder planning", new[] { "reminder", "overdue" }, null, null);
         return service;
     }
 
     [Fact]
     public async Task AmbiguousReferenceListsCandidatesExplicitly()
     {
-        var broker = GrantedBroker(SeededTopics());
+        var broker = GrantedBroker(await SeededTopicsAsync());
 
         var result = await broker.InvokeAsync(
             Context, new EllaiToolRequest(EllaiToolNames.Topic, Args(("ref", "overdue"))),
@@ -46,7 +46,7 @@ public sealed class EllaiLiveTopicReadTests
     [Fact]
     public async Task OrderedMentionResolvesOneTopic()
     {
-        var broker = GrantedBroker(SeededTopics());
+        var broker = GrantedBroker(await SeededTopicsAsync());
 
         var result = await broker.InvokeAsync(
             Context, new EllaiToolRequest(EllaiToolNames.Topic, Args(("ref", "the second issue"))),
@@ -61,7 +61,7 @@ public sealed class EllaiLiveTopicReadTests
     [Fact]
     public async Task UnknownReferenceIsAnAuthorizedEmpty()
     {
-        var broker = GrantedBroker(SeededTopics());
+        var broker = GrantedBroker(await SeededTopicsAsync());
 
         var result = await broker.InvokeAsync(
             Context, new EllaiToolRequest(EllaiToolNames.Topic, Args(("ref", "zoning"))),
@@ -74,7 +74,7 @@ public sealed class EllaiLiveTopicReadTests
     [Fact]
     public async Task MissingServiceOrRefIsExplicit()
     {
-        var broker = GrantedBroker(SeededTopics());
+        var broker = GrantedBroker(await SeededTopicsAsync());
         var missingRef = await broker.InvokeAsync(
             Context, new EllaiToolRequest(EllaiToolNames.Topic, Args()),
             CancellationToken.None);
