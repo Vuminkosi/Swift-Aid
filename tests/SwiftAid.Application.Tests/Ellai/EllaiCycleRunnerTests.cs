@@ -81,6 +81,33 @@ public sealed class EllaiCycleRunnerTests
     }
 
     [Fact]
+    public async Task RunPublishesCorrelatedStatusSequence()
+    {
+        var broker = GrantedBroker();
+        var runner = new EllaiCycleRunner(broker);
+        var activity = new EllaiActivityStatusCoordinator();
+
+        var outcome = await runner.RunAsync(
+            Context,
+            iteration => Task.FromResult(iteration == 1
+                ? new EllaiModelTurn(
+                    new[] { new EllaiToolRequest(EllaiToolNames.State, new Dictionary<string, string>()) }, null)
+                : new EllaiModelTurn(Array.Empty<EllaiToolRequest>(), ValidDecision())),
+            d => EllaiDecisionValidator.Validate(d),
+            CancellationToken.None,
+            activity: activity,
+            cycleId: "cycle-9",
+            controllerEpoch: 7);
+
+        Assert.True(outcome.Completed);
+        var status = activity.CurrentStatus("session-1", 7);
+        Assert.NotNull(status);
+        Assert.Equal("Done — the result is verified.", status.Text);
+        Assert.True(status.Sequence >= 5);
+        Assert.Null(activity.CurrentStatus("session-1", 6));
+    }
+
+    [Fact]
     public async Task ConcurrentRequestsAreRejected()
     {
         var broker = GrantedBroker();
