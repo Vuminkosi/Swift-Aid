@@ -133,7 +133,7 @@ public sealed record OrganizationAuditEntry(
     string Summary,
     DateTimeOffset OccurredAtUtc);
 
-/// <summary>Typed organization-management operations not currently present in IOrganizationClient.</summary>
+/// <summary>Typed organization-management operations for staff administrators.</summary>
 public interface IOrganizationManagementClient
 {
     Task<UiCapabilityResult<OrganizationProfile>> GetProfileAsync(CancellationToken cancellationToken = default);

@@ -88,7 +88,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<ISubscriptionClient, UnavailableSubscriptionClient>();
         
         
-        builder.Services.AddSingleton<IOrganizationClient, UnavailableOrganizationClient>();
+        
         builder.Services.AddSingleton<IAiInvestigationClient, UnavailableInvestigationClient>();
         builder.Services.AddSingleton<IMobileHomeOverviewClient, HomeOverviewHttpClient>();
         builder.Services.AddTransient<SwiftAid.Client.Presentation.IMapAggregateClient>(sp => new SwiftAid.Client.Presentation.MapAggregateHttpClient(
@@ -100,7 +100,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<ICaseEvidenceClient, UnavailableCaseEvidenceClient>();
         builder.Services.AddSingleton<ICaseEvidenceUploadClient, UnavailableCaseEvidenceUploadClient>();
         builder.Services.AddSingleton<ICaseEvidenceContentClient, UnavailableCaseEvidenceContentClient>();
-        builder.Services.AddSingleton<ICaseDetailSummaryClient, UnavailableCaseDetailSummaryClient>();
+        builder.Services.AddSingleton<ICaseDetailSummaryClient, CaseDetailSummaryHttpClient>();
         builder.Services.AddSingleton<ICaseObservationClient, UnavailableCaseObservationClient>();
         builder.Services.AddTransient<IPublicCommunitySessionClient, HttpPublicCommunitySessionClient>();
 

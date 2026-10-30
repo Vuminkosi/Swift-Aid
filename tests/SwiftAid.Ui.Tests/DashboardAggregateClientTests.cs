@@ -149,6 +149,47 @@ public sealed class DashboardAggregateClientTests
         Assert.Equal(UiCapabilityResultCode.Unavailable, export.Code);
     }
 
+    [Fact]
+    public async Task SummaryClient_ProjectsValidSummaryAndDeniesSignedOut()
+    {
+        var caseId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var created = new DateTimeOffset(2026, 10, 25, 12, 0, 0, TimeSpan.Zero);
+        var services = new ServiceCollection();
+        services.AddSingleton<ICaseSummaryQuery>(
+            new StubSummaryQuery(new CaseSummaryResult(
+                CaseSummaryAccess.Allowed,
+                new CaseSummaryData(
+                    caseId,
+                    CaseKind.Human,
+                    Sector.HumanHealth,
+                    ClinicalClassification.Confirmed,
+                    CaseWorkflow.Active,
+                    "ZW",
+                    new[] { "ZW-HA" },
+                    "actor-1",
+                    "Officer One",
+                    created,
+                    created))));
+        var client = new CaseDetailSummaryGatewayClient(
+            new SignedInAuthStateProvider(),
+            services.BuildServiceProvider(),
+            new StubMetadataProvider());
+
+        var result = await client.GetAsync(caseId);
+        var invalid = await client.GetAsync(Guid.Empty);
+        var denied = await new CaseDetailSummaryGatewayClient(
+            new SignedOutAuthStateProvider(),
+            services.BuildServiceProvider(),
+            new StubMetadataProvider()).GetAsync(caseId);
+
+        Assert.Equal(UiCapabilityResultCode.Success, result.Code);
+        Assert.NotNull(result.Value);
+        Assert.True(result.Value.IsValid);
+        Assert.Equal(caseId, result.Value.CaseId);
+        Assert.Equal(UiCapabilityResultCode.InvalidRequest, invalid.Code);
+        Assert.Equal(UiCapabilityResultCode.Denied, denied.Code);
+    }
+
     private sealed class SignedOutAuthStateProvider : AuthenticationStateProvider
     {
         public override Task<AuthenticationState> GetAuthenticationStateAsync() =>
@@ -171,6 +212,13 @@ public sealed class DashboardAggregateClientTests
     {
         public Task<DashboardAggregateResult> GetAsync(
             ActorContext actor, TimeSpan window, CancellationToken ct) =>
+            Task.FromResult(result);
+    }
+
+    private sealed class StubSummaryQuery(CaseSummaryResult result) : ICaseSummaryQuery
+    {
+        public Task<CaseSummaryResult> GetAsync(
+            ActorContext actor, Guid caseId, CancellationToken ct) =>
             Task.FromResult(result);
     }
 

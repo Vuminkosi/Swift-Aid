@@ -35,8 +35,9 @@ builder.Services.AddScoped<IEducationClient, StaticEducationClient>();
 builder.Services.AddScoped<ISubscriptionClient, UnavailableSubscriptionClient>();
 builder.Services.AddScoped<IAnalyticsClient, AnalyticsGatewayClient>();
 builder.Services.AddScoped<IDashboardOverviewClient, DashboardOverviewGatewayClient>();
+builder.Services.AddScoped<ICaseDetailSummaryClient, CaseDetailSummaryGatewayClient>();
 
-builder.Services.AddScoped<IOrganizationClient, UnavailableOrganizationClient>();
+
 builder.Services.AddScoped<IAiInvestigationClient, UnavailableInvestigationClient>();
 builder.Services.AddScoped<IOrganizationManagementClient, UnavailableOrganizationManagementClient>();
 builder.Services.AddScoped<IAccountPresentationClient, GatewayAccountPresentationClient>();
@@ -181,6 +182,7 @@ app.MapIntakeDecisionEndpoints();
 app.MapIntakeCoordinationEndpoints();
 app.MapManagedCaseRegistrationEndpoints();
 app.MapCaseTimelineEndpoints();
+app.MapCaseDetailEndpoints();
 app.MapCaseQueueEndpoints();
 app.MapMapAggregateEndpoints();
 app.MapHomeOverviewEndpoints();

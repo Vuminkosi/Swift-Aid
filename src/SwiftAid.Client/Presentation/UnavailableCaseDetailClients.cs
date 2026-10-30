@@ -81,22 +81,6 @@ public sealed class UnavailableCaseEvidenceClient : ICaseEvidenceClient
 }
 
 /// <summary>Fail-closed case summary client until an authorized detail projection exists.</summary>
-public sealed class UnavailableCaseDetailSummaryClient : ICaseDetailSummaryClient
-{
-    private const string Capability = "case-detail-summary";
-
-    public Task<UiCapabilityResult<CaseDetailSummary>> GetAsync(
-        Guid caseId,
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return caseId == Guid.Empty
-            ? Task.FromResult(CaseDetailUnavailableResults.Invalid<CaseDetailSummary>(Capability, "Choose a valid case."))
-            : Task.FromResult(UiCapabilityResults.Unavailable<CaseDetailSummary>(Capability));
-    }
-}
-
-/// <summary>Fail-closed discussion writer until an authorized internal command exists.</summary>
 public sealed class UnavailableCaseDiscussionCommandClient : ICaseDiscussionCommandClient
 {
     private const string Capability = "case-discussion-commands";
