@@ -287,6 +287,10 @@
     {
         _reviewDialog?.Close();
         _reviewDialog = null;
+        _guidancePaused = false;
+        StatusText = "Ellai session ended.";
+        Phase = EllaiStatusPhases.Ready;
+        StateHasChanged();
     }
 
     private async Task OpenReviewAsync(string requestId)
@@ -306,6 +310,11 @@
                 return;
             }
 
+            Phase = EllaiStatusPhases.NeedsInput;
+            StatusText = "Waiting for your approval…";
+            StateHasChanged();
+            await PauseGuidanceForReviewAsync().ConfigureAwait(false);
+
             var parameters = new DialogParameters
             {
                 ["RequestId"] = review.RequestId,
@@ -319,7 +328,7 @@
                     this, selected => SubmitSelectionAsync(review, selected)),
                 ["OnReject"] = EventCallback.Factory.Create(this, () => RejectAsync(review)),
                 ["OnEdit"] = EventCallback.Factory.Create(this, () => EditAsync(review)),
-                ["OnCancel"] = EventCallback.Factory.Create(this, () => dialog?.Close()),
+                ["OnCancel"] = EventCallback.Factory.Create(this, DismissReview),
             };
             dialog = await Dialogs.ShowAsync<EllaiApprovalDialog>(
                 "Review proposed actions", parameters).ConfigureAwait(false);
@@ -336,15 +345,92 @@
             {
                 _reviewDialog = null;
             }
+
+            await ResumeGuidanceAfterReviewAsync().ConfigureAwait(false);
         }
+    }
+
+    /// <summary>Yields focus to the approval dialog: an active guidance
+    /// attempt pauses and resumes when the dialog closes. Pause/Resume go
+    /// through the ordinary guidance control seam with the current fence.</summary>
+    private bool _guidancePaused;
+
+    private async Task PauseGuidanceForReviewAsync()
+    {
+        if (_guidance is null || _guidancePaused)
+        {
+            return;
+        }
+
+        try
+        {
+            var snapshot = await Guidance.DispatchAsync(
+                _guidance.Position.GuidanceAttemptId,
+                _guidance.Position.GuidanceVersion,
+                GuidanceCommandKind.Pause,
+                _guidance.Mode, null, null, CancellationToken.None).ConfigureAwait(false);
+            if (snapshot is not null)
+            {
+                _guidance = snapshot;
+                _guidancePaused = true;
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private async Task ResumeGuidanceAfterReviewAsync()
+    {
+        if (!_guidancePaused)
+        {
+            return;
+        }
+
+        _guidancePaused = false;
+        if (_guidance is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var snapshot = await Guidance.DispatchAsync(
+                _guidance.Position.GuidanceAttemptId,
+                _guidance.Position.GuidanceVersion,
+                GuidanceCommandKind.Resume,
+                _guidance.Mode, null, null, CancellationToken.None).ConfigureAwait(false);
+            if (snapshot is not null)
+            {
+                _guidance = snapshot;
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private void DismissReview()
+    {
+        _reviewDialog?.Close();
+        _reviewDialog = null;
+        StatusText = "Review dismissed.";
+        StateHasChanged();
     }
 
     private async Task SubmitSelectionAsync(EllaiReviewDto review, IReadOnlyList<string> selected)
     {
+        StatusText = "Approval recorded — executing…";
+        StateHasChanged();
         try
         {
-            await ReviewClient.ApproveSelectedAsync(
+            var receipts = await ReviewClient.ApproveSelectedAsync(
                 review.SessionId, review.RequestId, selected, CancellationToken.None).ConfigureAwait(false);
+            if (receipts is null)
+            {
+                StatusText = "Approval was not recorded — the review may have expired.";
+                StateHasChanged();
+            }
         }
         finally
         {
@@ -364,6 +450,8 @@
         {
             _reviewDialog?.Close();
             _reviewDialog = null;
+            StatusText = "Rejected.";
+            StateHasChanged();
         }
     }
 
@@ -371,6 +459,8 @@
     {
         _reviewDialog?.Close();
         _reviewDialog = null;
+        StatusText = "Editing the plan…";
+        StateHasChanged();
         await OnEditRequested.InvokeAsync(review).ConfigureAwait(false);
     }
 
