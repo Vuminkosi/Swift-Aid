@@ -224,8 +224,29 @@
                 updated.CaseId == request.CaseId && updated.Version > request.ExpectedVersion && TryMapWorkSnapshot(updated, out _))
             {
                 await LoadWorkAsync();
-                _workStatusMessage = "Action completed. Coordination work is refreshed.";
-                _workStatusIsError = false;
+                if (CaseId != request.CaseId)
+                {
+                    return;
+                }
+
+                if (_workState is OperationsSurfaceState.Populated or OperationsSurfaceState.Empty &&
+                    _workSnapshot is { } refreshed && refreshed.CaseId == request.CaseId && refreshed.Version >= updated.Version)
+                {
+                    _workStatusMessage = "Action completed. Coordination work is refreshed.";
+                    _workStatusIsError = false;
+                }
+                else
+                {
+                    _workStatusMessage = _workState switch
+                    {
+                        OperationsSurfaceState.Offline => "Action accepted, but coordination work could not be refreshed while offline. Check your connection and refresh.",
+                        OperationsSurfaceState.Denied => "Action accepted, but access to refreshed coordination work could not be confirmed.",
+                        OperationsSurfaceState.Unavailable => "Action accepted, but refreshed coordination work is unavailable.",
+                        _ => "Action accepted, but updated coordination work could not be confirmed. Refresh before continuing."
+                    };
+                    _workStatusIsError = true;
+                }
+
                 return;
             }
 
