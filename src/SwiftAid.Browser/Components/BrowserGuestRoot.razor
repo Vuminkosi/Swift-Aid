@@ -43,7 +43,7 @@
         </MudNavLink>
         <MudNavLink Href="/sessions" Icon="@Icons.Material.Filled.Groups">Community</MudNavLink>
         <button type="button" class="mobile-more-trigger"
-                aria-expanded="@_mobileMoreMenuOpen" aria-controls="guest-more-destinations"
+                aria-expanded="@(_mobileMoreMenuOpen ? "true" : "false")" aria-controls="guest-more-destinations"
                 @ref="_mobileMoreTrigger"
                 @onclick="ToggleMobileMoreMenu"
                 @onkeydown="HandleMobileMoreKeyDown">
