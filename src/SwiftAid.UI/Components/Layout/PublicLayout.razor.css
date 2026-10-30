@@ -1,0 +1,93 @@
+.swiftaid-public-appbar {
+    background: var(--sa-surface);
+    border-block-end: 1px solid var(--sa-border);
+}
+
+.swiftaid-public-header ::deep .swiftaid-brand-link {
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.swiftaid-public-header {
+    position: relative;
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.swiftaid-public-desktop-navigation {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-inline-start: auto;
+}
+
+.swiftaid-public-header ::deep .swiftaid-public-menu-toggle {
+    display: none;
+}
+
+.swiftaid-public-mobile-navigation {
+    display: none;
+}
+
+.swiftaid-public-header ::deep .swiftaid-public-sign-in {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.swiftaid-public-header ::deep .mud-button-root:focus-visible {
+    outline: 3px solid var(--sa-focus);
+    outline-offset: 2px;
+}
+
+@media (max-width: 959.98px) {
+    .swiftaid-public-header ::deep .swiftaid-public-desktop-navigation {
+        display: none;
+    }
+
+    .swiftaid-public-header ::deep .swiftaid-public-menu-toggle {
+        display: inline-flex;
+        flex: 0 0 auto;
+        min-width: 44px;
+        min-height: 44px;
+        margin-inline-start: auto;
+    }
+
+    .swiftaid-public-header ::deep .swiftaid-public-sign-in {
+        min-height: 44px;
+    }
+
+    .swiftaid-public-header ::deep .swiftaid-public-mobile-navigation:not([hidden]) {
+        position: absolute;
+        z-index: 1;
+        inset-block-start: calc(100% + 0.25rem);
+        inset-inline: 0;
+        display: grid;
+        gap: 0.25rem;
+        padding: 0.5rem;
+        border: 1px solid var(--sa-border);
+        border-radius: 0.75rem;
+        background: var(--sa-surface);
+    }
+
+    .swiftaid-public-header ::deep .swiftaid-public-mobile-link {
+        justify-content: flex-start;
+        min-height: 44px;
+        padding-inline: 0.75rem;
+        white-space: nowrap;
+    }
+
+    .swiftaid-public-header ::deep .swiftaid-public-mobile-navigation[hidden] {
+        display: none;
+    }
+}
+
+.swiftaid-public-main {
+    background: var(--sa-canvas);
+}
+
+.swiftaid-public-body {
+    padding-block: 1.5rem 3rem;
+}
