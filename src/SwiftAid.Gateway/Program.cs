@@ -92,6 +92,7 @@ builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiApprovedActionService
 
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiApprovalService>();
 builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiApprovalDialogCoordinator>();
+builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiSessionEventJournal>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiScenarioDirector>();
 builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiConsentService>();
 builder.Services.AddScoped<SwiftAid.UI.Ellai.EllaiLauncher>();

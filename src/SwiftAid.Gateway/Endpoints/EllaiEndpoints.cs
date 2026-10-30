@@ -56,6 +56,13 @@ public static class EllaiEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
+        group.MapGet("/sessions/{sessionId}/events", PollEventsAsync)
+            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .WithName("PollEllaiSessionEvents")
+            .Produces<EllaiSessionEventPage>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
         group.MapGet("/sessions/{sessionId}/receipts", ListReceipts)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
             .WithName("ListEllaiReceipts")
@@ -147,6 +154,7 @@ public static class EllaiEndpoints
         SubmitApprovalApiRequest? request,
         EllaiApprovalService approvals,
         EllaiApprovalDialogCoordinator dialogs,
+        EllaiSessionEventJournal journals,
         CancellationToken cancellationToken)
     {
         if (request is null
@@ -183,7 +191,12 @@ public static class EllaiEndpoints
             cancellationToken: cancellationToken);
         if (!string.IsNullOrWhiteSpace(request.ApprovalRequestId))
         {
-            dialogs.Resolve(request.ApprovalRequestId, receipt is not null, now);
+            var resolved = dialogs.Resolve(request.ApprovalRequestId, receipt is not null, now);
+            if (resolved is not null)
+            {
+                journals.Append(sessionId, "approval-resolved", resolved.RequestId,
+                    resolved.State.ToString(), now);
+            }
         }
 
         if (receipt is null)
@@ -217,6 +230,7 @@ public static class EllaiEndpoints
         CancelEllaiSessionApiRequest? request,
         EllaiSessionService sessions,
         EllaiApprovalDialogCoordinator dialogs,
+        EllaiSessionEventJournal journals,
         CancellationToken cancellationToken)
     {
         if (request is null)
@@ -226,7 +240,9 @@ public static class EllaiEndpoints
                 title: "The Ellai cancel request is invalid.");
         }
 
-        dialogs.CancelSession(sessionId, DateTimeOffset.UtcNow);
+        var now = DateTimeOffset.UtcNow;
+        dialogs.CancelSession(sessionId, now);
+        journals.Append(sessionId, "session-cancelled", null, "Stopped.", now);
         var cancelled = await sessions.CancelAsync(sessionId, request.ExpectedSessionVersion, cancellationToken);
         if (!cancelled)
         {
@@ -238,10 +254,54 @@ public static class EllaiEndpoints
         return Results.Ok();
     }
 
+    private static Task<IResult> PollEventsAsync(
+        string sessionId,
+        long? cursor,
+        int? waitSeconds,
+        EllaiSessionEventJournal journals,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return Task.FromResult(Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "The Ellai event request is invalid."));
+        }
+
+        return PollEventsLoopAsync(sessionId, Math.Max(0, cursor ?? 0),
+            Math.Clamp(waitSeconds ?? 20, 0, 30), journals, cancellationToken);
+    }
+
+    private static async Task<IResult> PollEventsLoopAsync(
+        string sessionId, long position, int waitSeconds,
+        EllaiSessionEventJournal journals, CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(waitSeconds);
+        while (true)
+        {
+            var page = journals.ReadSince(sessionId, position);
+            if (page.Events.Count > 0 || DateTimeOffset.UtcNow >= deadline)
+            {
+                return Results.Json(page, statusCode: StatusCodes.Status200OK);
+            }
+
+            try
+            {
+                await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return Results.Json(new EllaiSessionEventPage([], position),
+                    statusCode: StatusCodes.Status200OK);
+            }
+        }
+    }
+
     private static Task<IResult> RegisterReviewAsync(
         string sessionId,
         RegisterApprovalReviewApiRequest? request,
         EllaiApprovalDialogCoordinator dialogs,
+        EllaiSessionEventJournal journals,
         CancellationToken cancellationToken)
     {
         if (request is null
@@ -254,8 +314,11 @@ public static class EllaiEndpoints
                 title: "The Ellai approval review request is invalid."));
         }
 
+        var now = DateTimeOffset.UtcNow;
         var (review, _) = dialogs.Register(sessionId, request.RequestId, request.PlanHash,
-            request.PlanVersion, DateTimeOffset.UtcNow, EllaiApprovalService.ApprovalLifetime);
+            request.PlanVersion, now, EllaiApprovalService.ApprovalLifetime);
+        journals.Append(sessionId, "approval-required", review.RequestId,
+            $"{review.PlanHash} v{review.PlanVersion} · {review.State}", now);
         return Task.FromResult(Results.Json(review, statusCode: StatusCodes.Status200OK));
     }
 
@@ -264,6 +327,7 @@ public static class EllaiEndpoints
         string requestId,
         EditApprovalReviewApiRequest? request,
         EllaiApprovalDialogCoordinator dialogs,
+        EllaiSessionEventJournal journals,
         CancellationToken cancellationToken)
     {
         if (request is null
@@ -276,8 +340,9 @@ public static class EllaiEndpoints
                 title: "The Ellai approval edit request is invalid."));
         }
 
+        var now = DateTimeOffset.UtcNow;
         var next = dialogs.ApplyEdit(requestId, request.NewRequestId, request.NewPlanHash,
-            request.NewPlanVersion, DateTimeOffset.UtcNow, EllaiApprovalService.ApprovalLifetime);
+            request.NewPlanVersion, now, EllaiApprovalService.ApprovalLifetime);
         if (next is null)
         {
             return Task.FromResult(Results.Problem(
@@ -285,6 +350,8 @@ public static class EllaiEndpoints
                 title: "The approval review is stale, superseded or already closed."));
         }
 
+        journals.Append(sessionId, "approval-edit", next.RequestId,
+            $"{next.PlanHash} v{next.PlanVersion} · {next.State}", now);
         return Task.FromResult(Results.Json(next, statusCode: StatusCodes.Status200OK));
     }
 }
