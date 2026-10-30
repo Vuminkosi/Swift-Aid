@@ -1,0 +1,148 @@
+namespace SwiftAid.Intelligence.Meta;
+
+/// <summary>Ellai provider settings, bound from the <c>Ellai</c> configuration
+/// section. Environment mapping accepts both <c>Ellai__X</c> (standard) and
+/// the legacy single-underscore <c>Ellai_X</c> form for top-level flags.
+/// The API key is never logged, never returned, and only leaves the server
+/// inside an Authorization header to the configured provider URL.</summary>
+public sealed class EllaiOptions
+{
+    public bool Enabled { get; init; }
+
+    public string ApiKey { get; init; } = string.Empty;
+
+    public string ApiUrl { get; init; } = string.Empty;
+
+    public string ReasoningModel { get; init; } = string.Empty;
+
+    public string AsrModel { get; init; } = string.Empty;
+
+    public string AsrLanguage { get; init; } = "en";
+
+    public string AsrWebSocketUrl { get; init; } = string.Empty;
+
+    public string AsrTranscriptionUrl { get; init; } = string.Empty;
+
+    public string AsrMode { get; init; } = "DIARIZATION";
+
+    public bool HasReasoningRoute =>
+        Enabled && !string.IsNullOrWhiteSpace(ApiKey)
+        && IsHttpsUrl(ApiUrl) && !string.IsNullOrWhiteSpace(ReasoningModel);
+
+    public bool HasUploadAsrRoute =>
+        Enabled && !string.IsNullOrWhiteSpace(ApiKey)
+        && IsHttpsUrl(AsrTranscriptionUrl) && !string.IsNullOrWhiteSpace(AsrModel);
+
+    public bool HasRealtimeAsrRoute =>
+        Enabled && !string.IsNullOrWhiteSpace(ApiKey)
+        && IsWebSocketUrl(AsrWebSocketUrl) && !string.IsNullOrWhiteSpace(AsrModel);
+
+    public static EllaiOptions Bind(Func<string, string?> get)
+    {
+        ArgumentNullException.ThrowIfNull(get);
+
+        // Providers may use Ellai:X, Ellai__X or Ellai_X spellings; match
+        // case-insensitively with underscores ignored.
+        var seen = new Dictionary<string, string?>(StringComparer.Ordinal);
+        string? Raw(string key)
+        {
+            if (!seen.TryGetValue(key, out var value))
+            {
+                value = get(key);
+                seen[key] = value;
+            }
+
+            return value;
+        }
+
+        string? First(params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                var direct = Raw(key);
+                if (!string.IsNullOrWhiteSpace(direct))
+                {
+                    return direct.Trim();
+                }
+            }
+
+            return null;
+        }
+
+        string? Setting(string suffix, params string[] extra)
+        {
+            var candidates = new List<string>
+            {
+                "Ellai:" + suffix,
+                "Ellai__" + suffix.Replace(":", "__"),
+                "Ellai_" + suffix.Replace(":", "_"),
+            };
+            candidates.AddRange(extra);
+            return First(candidates.ToArray());
+        }
+
+        var enabledRaw = Setting("Enabled");
+        return new EllaiOptions
+        {
+            Enabled = string.Equals(enabledRaw, "true", StringComparison.OrdinalIgnoreCase),
+            ApiKey = Setting("ApiKey") ?? string.Empty,
+            ApiUrl = Setting("ApiUrl") ?? string.Empty,
+            ReasoningModel = Setting("ReasoningModel") ?? string.Empty,
+            AsrModel = Setting("AsrModel", "Ellai__ASR_MODEL") ?? string.Empty,
+            AsrLanguage = Setting("Asr:Language") ?? "en",
+            AsrWebSocketUrl = Setting("Asr:Wss", "Ellai__ASR_WSS") ?? string.Empty,
+            AsrTranscriptionUrl = Setting("Asr:Transcription:Url", "Ellai__ASR_Transcription__URL") ?? string.Empty,
+            AsrMode = Setting("Asr:Mode", "Ellai__ASRMode") ?? "DIARIZATION",
+        };
+    }
+
+    public IReadOnlyList<string> Validate()
+    {
+        var errors = new List<string>();
+        if (!Enabled)
+        {
+            errors.Add("Ellai is not enabled.");
+            return errors;
+        }
+
+        if (string.IsNullOrWhiteSpace(ApiKey))
+        {
+            errors.Add("Ellai API key is missing.");
+        }
+
+        if (!IsHttpsUrl(ApiUrl))
+        {
+            errors.Add("Ellai API URL must be an https URL.");
+        }
+
+        if (string.IsNullOrWhiteSpace(ReasoningModel))
+        {
+            errors.Add("Ellai reasoning model is missing.");
+        }
+
+        if (string.IsNullOrWhiteSpace(AsrModel))
+        {
+            errors.Add("Ellai ASR model is missing.");
+        }
+
+        if (!IsHttpsUrl(AsrTranscriptionUrl))
+        {
+            errors.Add("Ellai ASR transcription URL must be an https URL.");
+        }
+
+        if (!IsWebSocketUrl(AsrWebSocketUrl))
+        {
+            errors.Add("Ellai ASR WebSocket URL must be a wss URL.");
+        }
+
+        return errors;
+    }
+
+    private static bool IsHttpsUrl(string value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var uri)
+        && uri.Scheme == Uri.UriSchemeHttps;
+
+    private static bool IsWebSocketUrl(string value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var uri)
+        && (uri.Scheme == "wss" || uri.Scheme == "ws");
+}
