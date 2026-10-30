@@ -43,7 +43,8 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
         Func<int, CancellationToken, Task<bool>>? reauthorizeAsync = null,
         EllaiActivityStatusCoordinator? activity = null,
         string cycleId = "cycle-1",
-        long controllerEpoch = 1)
+        long controllerEpoch = 1,
+        EllaiSessionEventJournal? journal = null)
     {
         ArgumentNullException.ThrowIfNull(modelTurn);
         ArgumentNullException.ThrowIfNull(validate);
@@ -64,10 +65,18 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
 
             void Trace(EllaiActivityKind kind, string detail = "")
             {
-                if (activity is not null)
+                if (activity is null)
                 {
-                    activity.Publish(new EllaiActivityEvent(
-                        context.SessionId, controllerEpoch, ++sequence, kind, cycleId, detail, now));
+                    return;
+                }
+
+                var status = activity.Publish(new EllaiActivityEvent(
+                    context.SessionId, controllerEpoch, ++sequence, kind, cycleId, detail, now));
+                if (status is not null)
+                {
+                    journal?.Append(
+                        context.SessionId, "activity", status.Phase, status.Text,
+                        DateTimeOffset.UtcNow);
                 }
             }
 

@@ -74,6 +74,34 @@
         Launcher.Requested += OnLauncherRequested;
         EventPoller.ApprovalRequired += OnApprovalRequired;
         EventPoller.SessionCancelled += OnSessionCancelled;
+        EventPoller.ActivityUpdated += OnActivityUpdated;
+    }
+
+    /// <summary>Binds trusted runtime progress to the composer status line.
+    /// Coordinator phases map onto the canonical label set; unknown phases
+    /// keep the current label while the template text still updates.</summary>
+    internal static string? MapActivityPhase(string phase) => phase switch
+    {
+        "blocked" => EllaiStatusPhases.Blocked,
+        "approval" => EllaiStatusPhases.NeedsInput,
+        "done" or "cancelled" => EllaiStatusPhases.Ready,
+        "working" or "reading" or "reviewing" or "opening" or "verifying"
+            => EllaiStatusPhases.Active,
+        _ => null,
+    };
+
+    private void OnActivityUpdated(string phase, string text)
+    {
+        _ = InvokeAsync(() =>
+        {
+            if (MapActivityPhase(phase) is { } mapped)
+            {
+                Phase = mapped;
+            }
+
+            StatusText = text;
+            StateHasChanged();
+        });
     }
 
     private void OnLauncherRequested(EllaiMode mode)
@@ -351,6 +379,7 @@
         Launcher.Requested -= OnLauncherRequested;
         EventPoller.ApprovalRequired -= OnApprovalRequired;
         EventPoller.SessionCancelled -= OnSessionCancelled;
+        EventPoller.ActivityUpdated -= OnActivityUpdated;
         _pollCts?.Cancel();
         _pollCts?.Dispose();
         try

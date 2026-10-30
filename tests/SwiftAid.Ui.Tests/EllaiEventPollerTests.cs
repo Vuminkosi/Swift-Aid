@@ -140,6 +140,31 @@ public sealed class EllaiEventPollerTests
     }
 
     [Fact]
+    public async Task ActivityEventsUpdateStatusLineInSequenceOrder()
+    {
+        var reviews = new FakeReviews
+        {
+            Page = new EllaiSessionEventPageDto(new[]
+            {
+                new EllaiSessionEventDto(1, "s-1", "activity", "reading", "Checking SwiftAid's technical reference…", DateTimeOffset.UtcNow),
+                new EllaiSessionEventDto(1, "s-1", "activity", "reading", "Checking SwiftAid's technical reference…", DateTimeOffset.UtcNow),
+                new EllaiSessionEventDto(2, "s-1", "activity", "done", "Done — the result is verified.", DateTimeOffset.UtcNow),
+            }, 2),
+        };
+        var poller = new EllaiEventPoller(reviews);
+        var updates = new List<(string Phase, string Text)>();
+        poller.ActivityUpdated += (phase, text) => updates.Add((phase, text));
+        poller.TrackSession("s-1");
+
+        await poller.PollOnceAsync(0, CancellationToken.None);
+
+        Assert.Equal(
+            new[] { ("reading", "Checking SwiftAid's technical reference…"), ("done", "Done — the result is verified.") },
+            updates);
+        Assert.Equal(2, poller.Cursor);
+    }
+
+    [Fact]
     public async Task HttpClientParsesWirePayloadAndBuildsUrl()
     {
         const string json = """

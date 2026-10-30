@@ -168,6 +168,10 @@ public sealed class EllaiEventPoller(IEllaiReviewClient reviews)
 
     public event Action? SessionCancelled;
 
+    /// <summary>Trusted runtime progress for the composer status line:
+    /// deterministic template phase and text, never model output.</summary>
+    public event Action<string, string>? ActivityUpdated;
+
     public string? SessionId { get; private set; }
 
     public long Cursor { get; private set; }
@@ -222,6 +226,10 @@ public sealed class EllaiEventPoller(IEllaiReviewClient reviews)
             else if (string.Equals(@event.Kind, "session-cancelled", StringComparison.Ordinal))
             {
                 SessionCancelled?.Invoke();
+            }
+            else if (string.Equals(@event.Kind, "activity", StringComparison.Ordinal))
+            {
+                ActivityUpdated?.Invoke(@event.Ref ?? string.Empty, @event.Detail);
             }
         }
     }

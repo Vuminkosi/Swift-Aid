@@ -108,6 +108,37 @@ public sealed class EllaiCycleRunnerTests
     }
 
     [Fact]
+    public async Task RunMirrorsProjectedStatusesIntoJournal()
+    {
+        var broker = GrantedBroker();
+        var runner = new EllaiCycleRunner(broker);
+        var activity = new EllaiActivityStatusCoordinator();
+        var journal = new EllaiSessionEventJournal();
+
+        var outcome = await runner.RunAsync(
+            Context,
+            iteration => Task.FromResult(iteration == 1
+                ? new EllaiModelTurn(
+                    new[] { new EllaiToolRequest(EllaiToolNames.State, new Dictionary<string, string>()) }, null)
+                : new EllaiModelTurn(Array.Empty<EllaiToolRequest>(), ValidDecision())),
+            d => EllaiDecisionValidator.Validate(d),
+            CancellationToken.None,
+            activity: activity,
+            cycleId: "cycle-9",
+            controllerEpoch: 7,
+            journal: journal);
+
+        Assert.True(outcome.Completed);
+        var page = journal.ReadSince("session-1", 0);
+        var kinds = page.Events.Select(e => e.Kind).ToList();
+        Assert.All(kinds, kind => Assert.Equal("activity", kind));
+        Assert.Contains(page.Events, e => e.Detail == "Checking that for you…");
+        Assert.Contains(page.Events, e => e.Detail == "Done — the result is verified.");
+        var last = page.Events[^1];
+        Assert.Equal("done", last.Ref);
+    }
+
+    [Fact]
     public async Task ConcurrentRequestsAreRejected()
     {
         var broker = GrantedBroker();
