@@ -52,9 +52,11 @@ public sealed class EllaiReadToolTests
             var consent = new EllaiConsentService();
             consent.Grant("session-1", EllaiConsentDimension.ReasoningText,
                 EllaiToolBroker.ToolReadPurpose, "synthetic", TimeSpan.FromHours(1));
+            var topics = new EllaiTopicService();
+            topics.Track("Sample topic", new[] { "sample" }, null, null);
             var broker = new EllaiToolBroker(
                 new EllaiPolicyService(), consent, new EllaiTechnicalDocs(docsPath), null,
-                new EllaiReceiptStore());
+                new EllaiReceiptStore(), topics);
 
             foreach (var tool in EllaiToolNames.All)
             {
@@ -62,7 +64,9 @@ public sealed class EllaiReadToolTests
                     ? new Dictionary<string, string> { ["q"] = "sample" }
                     : tool == EllaiToolNames.DocsGet
                         ? new Dictionary<string, string> { ["section"] = "1-sample" }
-                        : new Dictionary<string, string>();
+                        : tool == EllaiToolNames.Topic
+                            ? new Dictionary<string, string> { ["ref"] = "sample" }
+                            : new Dictionary<string, string>();
                 var result = await broker.InvokeAsync(
                     Context, new EllaiToolRequest(tool, args),
                     CancellationToken.None);

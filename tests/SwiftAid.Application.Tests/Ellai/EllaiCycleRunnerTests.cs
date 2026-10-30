@@ -45,7 +45,7 @@ public sealed class EllaiCycleRunnerTests
                     {
                         new EllaiToolRequest(EllaiToolNames.State, new Dictionary<string, string>()),
                         new EllaiToolRequest(EllaiToolNames.Capabilities, new Dictionary<string, string>()),
-                        new EllaiToolRequest(EllaiToolNames.Topic, new Dictionary<string, string>()),
+                        new EllaiToolRequest(EllaiToolNames.Now, new Dictionary<string, string>()),
                     },
                     null));
             },

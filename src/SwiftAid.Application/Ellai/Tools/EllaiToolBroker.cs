@@ -117,23 +117,26 @@ public sealed class EllaiToolBroker
     private readonly EllaiTechnicalDocs? _docs;
     private readonly ICaseQueueQuery? _queue;
     private readonly IEllaiApprovalStore? _receipts;
+    private readonly EllaiTopicService? _topics;
 
     /// <summary>Consent infrastructure is mandatory: a missing service fails
     /// closed instead of silently bypassing the ReasoningText grant check.
     /// The documentation source is optional: docs tools report an explicit
-    /// unavailable outcome while it is unconfigured. The domain queue and
-    /// receipt authority are optional: live projections report unavailable
-    /// without them, and no Ellai-only unrestricted query is ever introduced.</summary>
+    /// unavailable outcome while it is unconfigured. The domain queue, topic
+    /// ledger and receipt authority are optional: live projections report
+    /// unavailable without them, and no Ellai-only unrestricted query is
+    /// ever introduced.</summary>
     public EllaiToolBroker(
         EllaiPolicyService policy, EllaiConsentService consent,
         EllaiTechnicalDocs? docs = null, ICaseQueueQuery? queue = null,
-        IEllaiApprovalStore? receipts = null)
+        IEllaiApprovalStore? receipts = null, EllaiTopicService? topics = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _consent = consent ?? throw new ArgumentNullException(nameof(consent));
         _docs = docs;
         _queue = queue;
         _receipts = receipts;
+        _topics = topics;
     }
 
     public async Task<EllaiToolResult> InvokeAsync(
@@ -202,10 +205,14 @@ public sealed class EllaiToolBroker
             return Bound(await ReadReceiptsAsync(context, request, ct).ConfigureAwait(false));
         }
 
+        if (string.Equals(canonical, EllaiToolNames.Topic, StringComparison.Ordinal))
+        {
+            return Bound(ReadTopics(request));
+        }
+
         return Bound(canonical switch
         {
             EllaiToolNames.Evidence => Allow(request.ToolName, "Authorized versioned source items.", Math.Min(request.Arguments.Count, MaxItems), request.Arguments.Count > MaxItems),
-            EllaiToolNames.Topic => Allow(request.ToolName, "Session topic candidates with checkpoints.", 1, false),
             EllaiToolNames.Capabilities => Allow(request.ToolName, "Current capability descriptors.", 1, false),
             EllaiToolNames.ProductFacts => Allow(request.ToolName, "Versioned nonmedical product facts.", 1, false),
             EllaiToolNames.Now => Allow(request.ToolName, DescribeNow(DateTimeOffset.UtcNow), 1, false),
@@ -373,6 +380,47 @@ public sealed class EllaiToolBroker
             $" · accepted {receipt.CreatedAtUtc:O} · expires {receipt.ApprovalExpiresAtUtc:O}" +
             $" · verified {verified}{binding}" +
             (due is null ? string.Empty : $" · due {due}");
+    }
+
+    /// <summary>Live <c>ellai_topic</c> resolution against the topic ledger:
+    /// ordered mentions resolve first, multiple matches stay explicitly
+    /// ambiguous, and unknown references are an authorized empty. The ledger
+    /// is instance-scoped today; durable per-session topic history is the
+    /// Task 2 remainder.</summary>
+    private EllaiToolResult ReadTopics(EllaiToolRequest request)
+    {
+        if (_topics is null)
+        {
+            return Deny(request.ToolName,
+                "The topic ledger is not available for this session.",
+                EllaiToolReasonCodes.Unavailable);
+        }
+
+        if (!request.Arguments.TryGetValue("ref", out var reference)
+            || string.IsNullOrWhiteSpace(reference))
+        {
+            return Deny(request.ToolName,
+                "A bounded ref argument is required to resolve a topic.",
+                EllaiToolReasonCodes.InvalidArguments);
+        }
+
+        var matches = _topics.Resolve(reference.Trim(), out var ambiguous).Take(MaxItems).ToList();
+        if (matches.Count == 0)
+        {
+            return Allow(request.ToolName, "No permitted topic matches the reference.", 0, false);
+        }
+
+        var lines = matches.Select(topic =>
+            $"topic {topic.TopicId} · {topic.Title}" +
+            (topic.EntityRef is null ? string.Empty : $" · ref {topic.EntityRef}") +
+            (topic.EntityVersion is null ? string.Empty : $" · v{topic.EntityVersion}") +
+            (topic.CheckpointId is null ? string.Empty : $" · checkpoint {topic.CheckpointId}"));
+        var evidence = matches.Select(topic => new EvidenceRef(
+            "Topic", topic.TopicId, topic.EntityVersion ?? topic.CoverageState, null, topic.TopicId)).ToList();
+        var summary = (ambiguous ? "Ambiguous reference — candidates: " : string.Empty)
+            + string.Join("\n", lines);
+        return new EllaiToolResult(request.ToolName, true, null, evidence,
+            summary, matches.Count, false, EllaiToolReasonCodes.Ok);
     }
 
     private EllaiToolResult SearchDocs(EllaiToolRequest request)
