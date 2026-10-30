@@ -86,11 +86,11 @@ public sealed class EllaiPolicyGuardrailTests
     }
 
     [Fact]
-    public void PolicyDefaultsPinVersion14()
+    public void PolicyDefaultsPinVersion15()
     {
         var options = EllaiOptions.Bind(_ => null);
 
-        Assert.Equal("1.4", options.PolicyVersion);
+        Assert.Equal("1.5", options.PolicyVersion);
         Assert.Contains("ellai-system-instruction.md", options.PolicyPath);
         Assert.Equal(70.00m, options.SpendingCapDollars);
         Assert.False(options.HasPricing);

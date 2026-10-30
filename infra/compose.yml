@@ -145,7 +145,7 @@ services:
       # elsewhere; the default is relative to this compose file (infra/).
       Ellai__Enabled: "${Ellai_Enabled:-true}"
       Ellai__Policy__Path: "/etc/swiftaid/policy/ellai-system-instruction.md"
-      Ellai__Policy__Version: "${Ellai__Policy__Version:-1.4}"
+      Ellai__Policy__Version: "${Ellai__Policy__Version:-1.5}"
       Ellai__ReasoningBackend: "${Ellai__ReasoningBackend:-meta}"
       Ellai__Pricing__SpendingCap: "${Ellai__Pricing__SpendingCap:-70.00}"
       Ellai__Pricing__InputPer1K: "${Ellai__Pricing__InputPer1K:-}"
