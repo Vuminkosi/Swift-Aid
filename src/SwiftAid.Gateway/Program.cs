@@ -49,17 +49,7 @@ builder.Services.AddScoped<IWorkManagementClient, CommandBackedWorkManagementCli
 builder.Services.AddScoped<IIntakeReviewClient, GatewayIntakeReviewClient>();
 
 builder.Services.AddControllers();
-builder.Services.AddAuthentication();
-builder.Services.AddAuthorization(options =>
-{
-    options.AddPolicy("SwiftAidStaffApi", policy =>
-    {
-        policy.AddAuthenticationSchemes(
-            IdentityConstants.ApplicationScheme,
-            OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
-        policy.RequireAuthenticatedUser();
-    });
-});
+GatewayAuthenticationRegistration.Configure(builder.Services, builder.Configuration);
 
 builder.Services.AddSwiftAidInfrastructure(builder.Configuration, builder.Environment);
 builder.Services.AddScoped<WebGuestIntakeService>();
@@ -200,3 +190,88 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "ok" }))
         .WithName("LiveHealth");
 
 app.Run();
+
+public static class GatewayAuthenticationRegistration
+{
+    public static bool Configure(IServiceCollection services, IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        var identityEnabled = configuration.GetValue<bool>("Identity:Enabled") ||
+            configuration.GetValue<bool>("Federation:Enabled");
+
+        var authentication = services.AddAuthentication();
+        if (!identityEnabled)
+        {
+            authentication = services.AddAuthentication(options =>
+            {
+                options.DefaultAuthenticateScheme = DisabledIdentityAuthenticationHandler.SchemeName;
+                options.DefaultChallengeScheme = DisabledIdentityAuthenticationHandler.SchemeName;
+                options.DefaultForbidScheme = DisabledIdentityAuthenticationHandler.SchemeName;
+            }).AddScheme<AuthenticationSchemeOptions, DisabledIdentityAuthenticationHandler>(
+                DisabledIdentityAuthenticationHandler.SchemeName,
+                _ => { });
+        }
+
+        services.AddAuthorization(options =>
+        {
+            options.AddPolicy("SwiftAidStaffApi", policy =>
+            {
+                if (identityEnabled)
+                {
+                    policy.AddAuthenticationSchemes(
+                        IdentityConstants.ApplicationScheme,
+                        OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
+                }
+                else
+                {
+                    policy.AddAuthenticationSchemes(DisabledIdentityAuthenticationHandler.SchemeName);
+                }
+
+                policy.RequireAuthenticatedUser();
+            });
+        });
+
+        return identityEnabled;
+    }
+}
+
+public sealed class DisabledIdentityAuthenticationHandler : AuthenticationHandler<AuthenticationSchemeOptions>
+{
+    public const string SchemeName = "SwiftAid.DisabledIdentity";
+
+    public DisabledIdentityAuthenticationHandler(
+        IOptionsMonitor<AuthenticationSchemeOptions> options,
+        ILoggerFactory logger,
+        System.Text.Encodings.Web.UrlEncoder encoder)
+        : base(options, logger, encoder)
+    {
+    }
+
+    protected override Task<AuthenticateResult> HandleAuthenticateAsync() =>
+        Task.FromResult(AuthenticateResult.NoResult());
+
+    protected override Task HandleChallengeAsync(AuthenticationProperties properties)
+    {
+        if (Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase))
+        {
+            Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return Task.CompletedTask;
+        }
+
+        var returnUrl = $"{Request.PathBase}{Request.Path}{Request.QueryString}";
+        var signInLocation = Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(
+            "/sign-in",
+            "returnUrl",
+            returnUrl);
+        Response.Redirect(signInLocation);
+        return Task.CompletedTask;
+    }
+
+    protected override Task HandleForbiddenAsync(AuthenticationProperties properties)
+    {
+        Response.StatusCode = StatusCodes.Status403Forbidden;
+        return Task.CompletedTask;
+    }
+}
