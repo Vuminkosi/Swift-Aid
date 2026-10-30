@@ -4,7 +4,9 @@
 <section class="swiftaid-notification-feed" aria-label="Notifications">
     <div class="swiftaid-notification-feed__heading">
         <div>
-            <MudText Typo="Typo.subtitle1" Class="swiftaid-notification-feed__title">Notifications</MudText>
+            <MudText Typo="Typo.subtitle1" HtmlTag="h2" Class="swiftaid-notification-feed__title">
+                <span tabindex="-1" @ref="_headingFocusTarget">Notifications</span>
+            </MudText>
             <MudText Typo="Typo.caption" Color="Color.Secondary">Private to your current staff account</MudText>
         </div>
         <MudBadge Content="@UnreadCount" Visible="@(_items.Count > 0)" Color="Color.Primary" Overlap="true">
@@ -50,21 +52,27 @@
                         <MudText Typo="Typo.caption" Color="Color.Secondary">@item.CreatedAtUtc.ToLocalTime().ToString("g")</MudText>
                     </div>
                     <div class="swiftaid-notification-feed__actions">
-                        @if (HasPermittedAction(item.Action))
+                        @if (HasPermittedAction(item))
                         {
-                                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="() => OpenAsync(item)" aria-label="Open notification">
+                                <MudButton @ref="_openActionButtons[item.Id]" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.OpenInNew" Size="Size.Small" OnClick="() => OpenAsync(item)" aria-label="Open notification">
                                 Open
                             </MudButton>
                         }
+                        else if (HasUnavailableWorkAction(item))
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Secondary" role="status">
+                                Linked work is unavailable. Use the available notification actions instead.
+                            </MudText>
+                        }
                         @if (item.ReadAtUtc is null)
                         {
-                            <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="() => MarkReadAsync(item)" aria-label="Mark notification as read">
+                            <MudButton @ref="_markReadActionButtons[item.Id]" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.MarkEmailRead" Size="Size.Small" OnClick="() => MarkReadAsync(item)" aria-label="Mark notification as read">
                                 Mark read
                             </MudButton>
                         }
                         @if (item.DismissedAtUtc is null)
                         {
-                            <MudIconButton Icon="@Icons.Material.Outlined.Close" Size="Size.Small" OnClick="() => DismissAsync(item)" aria-label="Dismiss notification" />
+                            <MudIconButton @ref="_dismissActionButtons[item.Id]" Icon="@Icons.Material.Outlined.Close" Size="Size.Small" OnClick="() => DismissAsync(item)" aria-label="Dismiss notification" />
                         }
                     </div>
                 </li>
@@ -93,6 +101,64 @@
         .ToArray();
     private int UnreadCount => _items.Count(item => item.ReadAtUtc is null);
     private bool MutationError { get; set; }
+    private readonly Dictionary<Guid, MudButton> _openActionButtons = [];
+    private readonly Dictionary<Guid, MudButton> _markReadActionButtons = [];
+    private readonly Dictionary<Guid, MudIconButton> _dismissActionButtons = [];
+    private ElementReference _headingFocusTarget;
+    private bool _restoreFocusAfterDismiss;
+    private int _dismissedItemIndex;
+
+    protected override void OnParametersSet()
+    {
+        var renderedItems = CanRenderActions ? _items : Array.Empty<NotificationItemView>();
+        RemoveStaleReferences(_openActionButtons, renderedItems
+            .Where(HasPermittedAction)
+            .Select(item => item.Id)
+            .ToHashSet());
+        RemoveStaleReferences(_markReadActionButtons, renderedItems
+            .Where(item => item.ReadAtUtc is null)
+            .Select(item => item.Id)
+            .ToHashSet());
+        RemoveStaleReferences(_dismissActionButtons, renderedItems
+            .Where(item => item.DismissedAtUtc is null)
+            .Select(item => item.Id)
+            .ToHashSet());
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_restoreFocusAfterDismiss)
+        {
+            return;
+        }
+
+        _restoreFocusAfterDismiss = false;
+        var currentItems = _items;
+        if (currentItems.Count == 0)
+        {
+            await _headingFocusTarget.FocusAsync();
+            return;
+        }
+
+        var preferredIndex = Math.Min(_dismissedItemIndex, currentItems.Count - 1);
+        for (var index = preferredIndex; index < currentItems.Count; index++)
+        {
+            if (await FocusFirstActionAsync(currentItems[index]))
+            {
+                return;
+            }
+        }
+
+        for (var index = preferredIndex - 1; index >= 0; index--)
+        {
+            if (await FocusFirstActionAsync(currentItems[index]))
+            {
+                return;
+            }
+        }
+
+        await _headingFocusTarget.FocusAsync();
+    }
 
     private Task RetryAsync() => OnRetry.InvokeAsync();
 
@@ -115,11 +181,16 @@
     private async Task DismissAsync(NotificationItemView item)
     {
         MutationError = false;
+        _dismissedItemIndex = Array.FindIndex(_items.ToArray(), candidate => candidate.Id == item.Id);
         try
         {
             if (OnDismiss is null || !await OnDismiss(item.Id))
             {
                 MutationError = true;
+            }
+            else
+            {
+                _restoreFocusAfterDismiss = true;
             }
         }
         catch
@@ -130,7 +201,7 @@
 
     private async Task OpenAsync(NotificationItemView item)
     {
-        if (!HasPermittedAction(item.Action))
+        if (!HasPermittedAction(item))
         {
             return;
         }
@@ -156,8 +227,55 @@
         await OnOpen.InvokeAsync(item);
     }
 
-    private bool HasPermittedAction(NotificationAction? action) =>
-        action is NotificationAction.OpenAssignedWork && OnOpen.HasDelegate;
+    private bool HasPermittedAction(NotificationItemView item) =>
+        item.Action is NotificationAction.OpenAssignedWork &&
+        OnOpen.HasDelegate &&
+        TryGetAssignedWorkId(item, out _);
+
+    private static bool HasUnavailableWorkAction(NotificationItemView item) =>
+        item.Action is NotificationAction.OpenAssignedWork && !TryGetAssignedWorkId(item, out _);
+
+    private static bool TryGetAssignedWorkId(NotificationItemView item, out Guid caseId) =>
+        Guid.TryParseExact(item.OpaqueResourceReference, "D", out caseId) && caseId != Guid.Empty;
+
+    private bool CanRenderActions =>
+        !Loading && !PermissionDenied && ErrorMessage is null && _items.Count > 0;
+
+    private async Task<bool> FocusFirstActionAsync(NotificationItemView item)
+    {
+        if (!CanRenderActions)
+        {
+            return false;
+        }
+
+        if (HasPermittedAction(item) && _openActionButtons.TryGetValue(item.Id, out var openButton))
+        {
+            await openButton.FocusAsync();
+            return true;
+        }
+
+        if (item.ReadAtUtc is null && _markReadActionButtons.TryGetValue(item.Id, out var markReadButton))
+        {
+            await markReadButton.FocusAsync();
+            return true;
+        }
+
+        if (item.DismissedAtUtc is null && _dismissActionButtons.TryGetValue(item.Id, out var dismissButton))
+        {
+            await dismissButton.FocusAsync();
+            return true;
+        }
+
+        return false;
+    }
+
+    private static void RemoveStaleReferences<T>(Dictionary<Guid, T> references, HashSet<Guid> visibleIds)
+    {
+        foreach (var staleId in references.Keys.Where(id => !visibleIds.Contains(id)).ToArray())
+        {
+            references.Remove(staleId);
+        }
+    }
 
     private static string SafeMessage(NotificationKind kind) => kind switch
     {

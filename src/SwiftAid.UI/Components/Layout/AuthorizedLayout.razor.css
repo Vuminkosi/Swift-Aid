@@ -1,0 +1,35 @@
+.swiftaid-authorized-appbar {
+    background: var(--sa-surface);
+    border-block-end: 1px solid var(--sa-border);
+}
+
+.swiftaid-authorized-drawer {
+    background: var(--ais-bg-sidebar);
+}
+
+.swiftaid-authorized-navigation ::deep .mud-nav-link {
+    color: var(--ais-text-secondary);
+    border-radius: 0.5rem;
+}
+
+.swiftaid-authorized-navigation ::deep .mud-nav-link:hover {
+    background: var(--ais-bg-hover);
+    color: var(--ais-text-primary);
+}
+
+.swiftaid-authorized-navigation ::deep .mud-nav-link.active {
+    background: var(--ais-bg-selection);
+    color: var(--ais-text-strong);
+}
+
+.swiftaid-authorized-navigation ::deep .mud-nav-link.active .mud-icon-root {
+    color: var(--ais-action-primary);
+}
+
+.swiftaid-authorized-main {
+    background: var(--sa-canvas);
+}
+
+.swiftaid-authorized-body {
+    padding-block: 1.5rem 3rem;
+}

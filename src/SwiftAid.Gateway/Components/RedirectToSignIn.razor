@@ -1,0 +1,43 @@
+@inject NavigationManager Navigation
+
+<MudText Typo="Typo.body2" role="status">Redirecting to sign in…</MudText>
+
+@code {
+    protected override void OnInitialized()
+    {
+        var returnUrl = GetLocalReturnUrl();
+        Navigation.NavigateTo($"/sign-in?returnUrl={Uri.EscapeDataString(returnUrl)}");
+    }
+
+    private string GetLocalReturnUrl()
+    {
+        try
+        {
+            var relativePath = Navigation.ToBaseRelativePath(Navigation.Uri);
+            if (string.IsNullOrWhiteSpace(relativePath))
+            {
+                return "/";
+            }
+
+            var localPath = relativePath.StartsWith("/", StringComparison.Ordinal)
+                ? relativePath
+                : $"/{relativePath}";
+
+            return localPath.StartsWith("//", StringComparison.Ordinal)
+                || localPath.StartsWith("/\\", StringComparison.Ordinal)
+                || localPath.Contains('\\')
+                || localPath.Contains('\r')
+                || localPath.Contains('\n')
+                    ? "/"
+                    : localPath;
+        }
+        catch (ArgumentException)
+        {
+            return "/";
+        }
+        catch (UriFormatException)
+        {
+            return "/";
+        }
+    }
+}

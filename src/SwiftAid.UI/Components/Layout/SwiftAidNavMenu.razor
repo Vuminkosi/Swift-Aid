@@ -1,0 +1,21 @@
+@using SwiftAid.UI.Components.Layout
+
+<MudNavMenu Class="swiftaid-nav-menu">
+    <MudNavLink Href="/dashboard" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Dashboard">Dashboard</MudNavLink>
+    <MudNavLink Href="/my-cases" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.FolderOpen">Cases</MudNavLink>
+    <MudNavLink Href="/assignments" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.AssignmentInd">Assignments</MudNavLink>
+    <MudNavLink Href="/surveillance" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Map">Surveillance</MudNavLink>
+    <MudNavLink Href="/reports" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Assessment">Reports</MudNavLink>
+    <MudNavLink Href="/monitoring" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.MonitorHeart">Monitoring</MudNavLink>
+    <MudNavLink Href="/organizations" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Groups">Users</MudNavLink>
+    <MudNavGroup Title="Workspace" Icon="@Icons.Material.Filled.Work" Expanded="false">
+        <MudNavLink Href="/assistance" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.VolunteerActivism">Assistance</MudNavLink>
+        <MudNavLink Href="/follow-ups" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Schedule">Follow-ups</MudNavLink>
+        <MudNavLink Href="/escalations" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.WarningAmber">Escalations</MudNavLink>
+        <MudNavLink Href="/intake-coordination" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Inbox">Intake coordination</MudNavLink>
+        <MudNavLink Href="/investigations" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Search">Investigations</MudNavLink>
+    </MudNavGroup>
+    <MudNavLink Href="/education" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.MenuBook">Education</MudNavLink>
+    <MudNavLink Href="/sessions" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Event">Community</MudNavLink>
+    <MudNavLink Href="/account" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Settings">Settings</MudNavLink>
+</MudNavMenu>

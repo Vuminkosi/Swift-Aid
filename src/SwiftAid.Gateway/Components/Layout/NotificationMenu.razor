@@ -1,0 +1,194 @@
+@using SwiftAid.Client.Notifications
+@using SwiftAid.Contracts.Notifications
+@using SwiftAid.UI.Components.Notifications
+@implements IAsyncDisposable
+@inject INotificationFeedClient NotificationClient
+@inject NavigationManager Navigation
+
+<MudBadge Content="@_unreadCount" Visible="@(_unreadCount > 0)" Color="Color.Primary" Overlap="true">
+    <MudMenu Open="@_isOpen"
+             OpenChanged="NotificationMenuChangedAsync"
+             AnchorOrigin="Origin.BottomRight"
+             TransformOrigin="Origin.TopRight"
+             Class="swiftaid-notification-menu">
+        <ActivatorContent Context="menuContext">
+            <MudIconButton Icon="@Icons.Material.Outlined.Notifications"
+                           Color="Color.Inherit"
+                           OnClick="@menuContext.ToggleAsync"
+                           aria-label="@NotificationButtonLabel"
+                           aria-expanded="@(_isOpen ? "true" : "false")" />
+        </ActivatorContent>
+        <ChildContent>
+            <div class="swiftaid-notification-menu__content">
+                <MudButton Href="/notifications" Variant="Variant.Text" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Settings" Class="swiftaid-notification-menu__preferences">
+                    Notification preferences
+                </MudButton>
+                <NotificationFeed Items="_items"
+                                  Loading="_loading"
+                                  PermissionDenied="_permissionDenied"
+                                  ErrorMessage="@_errorMessage"
+                                  OnRetry="RefreshNotificationsAsync"
+                                  OnMarkRead="MarkNotificationReadAsync"
+                                  OnDismiss="DismissNotificationAsync"
+                                  OnOpen="OpenNotification" />
+            </div>
+        </ChildContent>
+    </MudMenu>
+</MudBadge>
+
+@code {
+    private bool _isOpen;
+    private bool _loading;
+    private bool _permissionDenied;
+    private string? _errorMessage;
+    private IReadOnlyList<NotificationItemView> _items = Array.Empty<NotificationItemView>();
+    private CancellationTokenSource? _monitorCancellation;
+    private Task? _monitorTask;
+
+    private int _unreadCount =>
+        _items.Count(item => item.ReadAtUtc is null && item.DismissedAtUtc is null);
+
+    private string NotificationButtonLabel => _unreadCount == 0
+        ? "Notifications"
+        : $"Notifications, {_unreadCount} unread";
+
+    private async Task NotificationMenuChangedAsync(bool isOpen)
+    {
+        _isOpen = isOpen;
+        if (isOpen)
+        {
+            await LoadNotificationsAsync(CancellationToken.None);
+            if (!_permissionDenied && _monitorCancellation is null)
+            {
+                _monitorCancellation = new CancellationTokenSource();
+                _monitorTask = NotificationClient.MonitorChangesAsync(
+                    LoadNotificationsAsync,
+                    _monitorCancellation.Token);
+            }
+
+            return;
+        }
+
+        await StopMonitorAsync();
+    }
+
+    private Task RefreshNotificationsAsync() => LoadNotificationsAsync(CancellationToken.None);
+
+    private async Task LoadNotificationsAsync(CancellationToken cancellationToken)
+    {
+        _loading = true;
+        _errorMessage = null;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var result = await NotificationClient.GetAsync(cancellationToken);
+            _permissionDenied = result.Status == NotificationFeedStatus.PermissionDenied;
+            if (result.Status == NotificationFeedStatus.Ready)
+            {
+                _items = result.Items;
+                _errorMessage = null;
+            }
+            else if (result.Status == NotificationFeedStatus.Unavailable)
+            {
+                _items = Array.Empty<NotificationItemView>();
+                _errorMessage = "Notifications could not be loaded. Try again.";
+            }
+            else
+            {
+                _items = Array.Empty<NotificationItemView>();
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Closing the menu or leaving the page cancels its live feed request.
+        }
+        catch (Exception)
+        {
+            _items = Array.Empty<NotificationItemView>();
+            _errorMessage = "Notifications could not be loaded. Try again.";
+        }
+        finally
+        {
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task<bool> MarkNotificationReadAsync(Guid notificationId)
+    {
+        try
+        {
+            if (!await NotificationClient.MarkReadAsync(notificationId))
+            {
+                return false;
+            }
+
+            await LoadNotificationsAsync(CancellationToken.None);
+            return _errorMessage is null;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private async Task<bool> DismissNotificationAsync(Guid notificationId)
+    {
+        try
+        {
+            if (!await NotificationClient.DismissAsync(notificationId))
+            {
+                return false;
+            }
+
+            await LoadNotificationsAsync(CancellationToken.None);
+            return _errorMessage is null;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private void OpenNotification(NotificationItemView item)
+    {
+        if (item.Action == NotificationAction.OpenAssignedWork &&
+            Guid.TryParseExact(item.OpaqueResourceReference, "D", out var caseId) &&
+            caseId != Guid.Empty)
+        {
+            Navigation.NavigateTo($"/case/{caseId:D}");
+        }
+    }
+
+    private async Task StopMonitorAsync()
+    {
+        var cancellation = _monitorCancellation;
+        _monitorCancellation = null;
+        cancellation?.Cancel();
+        if (_monitorTask is not null)
+        {
+            try
+            {
+                await _monitorTask;
+            }
+            catch (OperationCanceledException)
+            {
+                // Normal close of the open-feed monitor.
+            }
+            catch (Exception)
+            {
+                // Opening the feed again starts a new monitor.
+            }
+            finally
+            {
+                _monitorTask = null;
+            }
+        }
+
+        cancellation?.Dispose();
+    }
+
+    public ValueTask DisposeAsync() => new(StopMonitorAsync());
+}

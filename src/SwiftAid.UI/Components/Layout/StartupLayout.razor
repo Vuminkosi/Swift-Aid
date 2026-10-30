@@ -1,0 +1,12 @@
+@inherits LayoutComponentBase
+@using Microsoft.AspNetCore.Components.Authorization
+@using SwiftAid.UI.Components.Layout
+
+<AuthorizeView>
+    <Authorized>
+        <AuthorizedLayout>@Body</AuthorizedLayout>
+    </Authorized>
+    <NotAuthorized>
+        <PublicLayout>@Body</PublicLayout>
+    </NotAuthorized>
+</AuthorizeView>
