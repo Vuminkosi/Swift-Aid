@@ -1,10 +1,8 @@
 using System.Net;
 using System.Text.Json;
-using SwiftAid.Client.Presentation;
 using SwiftAid.Contracts.Geography;
-using SwiftAid.Mobile.Services.Http;
 
-namespace SwiftAid.Mobile.Services.Account;
+namespace SwiftAid.Client.Presentation;
 
 /// <summary>Registry location lookup through the anonymous gateway endpoints. Works for signed-out guests.</summary>
 public sealed class HttpGeoLookupClient(HttpClient httpClient) : IGeoLookupClient

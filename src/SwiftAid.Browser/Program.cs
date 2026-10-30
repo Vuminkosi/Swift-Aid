@@ -17,7 +17,8 @@ builder.Services.AddScoped(_ => new HttpClient
 builder.Services.AddScoped<IPublicIntakeMetadataClient, BrowserPublicIntakeMetadataClient>();
 builder.Services.AddScoped<IPublicIntakeProcessingPolicyClient, BrowserPublicIntakeProcessingPolicyClient>();
 builder.Services.AddScoped<IPublicIntakeSubmissionClient, BrowserPublicIntakeSubmissionClient>();
-builder.Services.AddScoped<SwiftAid.Client.Presentation.IGeoLookupClient, BrowserGeoLookupClient>();
+builder.Services.AddScoped<SwiftAid.Client.Presentation.IGeoLookupClient>(serviceProvider => new SwiftAid.Client.Presentation.HttpGeoLookupClient(
+    serviceProvider.GetRequiredService<HttpClient>()));
 builder.Services.AddScoped<IGuestIntakeTransport>(serviceProvider =>
 {
     var httpClient = serviceProvider.GetRequiredService<HttpClient>();
@@ -26,7 +27,8 @@ builder.Services.AddScoped<IGuestIntakeTransport>(serviceProvider =>
         : new BrowserUnavailableGuestIntakeTransport();
 });
 builder.Services.AddScoped<IGuestSubmissionCoordinator, GuestSubmissionCoordinator>();
-builder.Services.AddScoped<ICaseQueueClient, BrowserUnavailableCaseQueueClient>();
+builder.Services.AddScoped<ICaseQueueClient>(serviceProvider => new SwiftAid.Client.Cases.CaseQueueHttpClient(
+    serviceProvider.GetRequiredService<HttpClient>()));
 builder.Services.AddScoped<BrowserGuestSubmissionPersistence>();
 builder.Services.AddScoped<IGuestSubmissionPersistence>(serviceProvider =>
     serviceProvider.GetRequiredService<BrowserGuestSubmissionPersistence>());
