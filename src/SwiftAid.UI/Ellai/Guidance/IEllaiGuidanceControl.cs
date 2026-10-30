@@ -10,13 +10,16 @@ public interface IEllaiGuidanceControl
 {
     Task<GuidanceSnapshot> StartAsync(
         string journeyId, string journeyVersion, GuidanceMode mode,
-        string? startStepId, CancellationToken cancellationToken);
+        string? startStepId, CancellationToken cancellationToken,
+        string? clientCommandId = null);
 
     Task<GuidanceSnapshot?> DispatchAsync(
         string attemptId, long expectedVersion, GuidanceCommandKind command,
         GuidanceMode mode, string? targetStepId, GuidanceMode? targetMode,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        string? clientCommandId = null);
 
     Task<GuidanceSnapshot?> StopAsync(
-        string attemptId, long expectedVersion, GuidanceMode mode, CancellationToken cancellationToken);
+        string attemptId, long expectedVersion, GuidanceMode mode, CancellationToken cancellationToken,
+        string? clientCommandId = null);
 }

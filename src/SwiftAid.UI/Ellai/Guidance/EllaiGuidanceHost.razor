@@ -3,6 +3,7 @@
 @using SwiftAid.UI.Ellai.Components
 @inject IBonboardingService Bonboarding
 @inject IEllaiGuidanceControl Guidance
+@implements IDisposable
 
 <div class="ellai-host">
     <BonboardingRoot />
@@ -10,53 +11,182 @@
     {
         <div class="ellai-host__attached">
             <EllaiCompactComposer Placement="EllaiSurfacePlacement.Attached"
-                                  StatusText="@StatusText"
-                                  CanSend="true"
-                                  OnCancel="OnCancel" />
+                                  StatusText="@StatusText" Phase="@Phase"
+                                  InputText="@InputText" InputTextChanged="OnInputChanged"
+                                  Position="@Position" PositionChanged="OnPositionChanged"
+                                  CanSend="true" CanUseMicrophone="@CanUseMicrophone"
+                                  OnSend="OnSend" OnCancel="OnCancel" OnStartVoice="OnStartVoice" />
         </div>
     }
     else
     {
-        <EllaiFabMenu OnActivate="OnActivate" />
+        <EllaiFabMenu @ref="_fabMenu" OnModeSelected="SelectModeAsync" OnCreateGuide="CreateGuideAsync" />
         @if (ShowComposer)
         {
             <div class="ellai-host__floating">
                 <EllaiCompactComposer Placement="EllaiSurfacePlacement.Floating"
-                                      StatusText="@StatusText"
-                                      CanSend="true"
-                                      OnCancel="OnCancel" />
+                                      StatusText="@StatusText" Phase="@Phase"
+                                      InputText="@InputText" InputTextChanged="OnInputChanged"
+                                      Position="@Position" PositionChanged="OnPositionChanged"
+                                      CanSend="true" CanUseMicrophone="@CanUseMicrophone"
+                                      OnSend="OnSend" OnCancel="OnCancel" OnStartVoice="OnStartVoice" />
             </div>
         }
     }
 </div>
 
 @code {
+    private EllaiFabMenu? _fabMenu;
+    private CancellationTokenSource? _cts;
     private bool ShowComposer;
     private bool IsActive;
     private string? StatusText = "Ellai is ready.";
+    private string? Phase = EllaiStatusPhases.Ready;
+    private string? InputText;
+    private EllaiComposerPosition Position = EllaiComposerPosition.Default;
     private GuidanceSnapshot? _guidance;
+    private string? _stopCommandId;
 
-    private void OnActivate()
+    [Parameter]
+    public double ViewportWidth { get; set; } = 1280;
+
+    [Parameter]
+    public double ViewportHeight { get; set; } = 800;
+
+    /// <summary>Enables the microphone control once the microphone
+    /// permission is granted through the permission flow.</summary>
+    [Parameter]
+    public bool CanUseMicrophone { get; set; }
+
+    [Parameter]
+    public EventCallback<EllaiMode> OnModeSelected { get; set; }
+
+    [Parameter]
+    public EventCallback<string?> OnSendText { get; set; }
+
+    [Parameter]
+    public EventCallback OnStartVoice { get; set; }
+
+    [Parameter]
+    public EventCallback OnCreateGuide { get; set; }
+
+    /// <summary>Attaches live guidance, enabling the attached composer
+    /// branch. Called by the hosting page when a journey starts.</summary>
+    public async Task AttachGuidanceAsync(
+        string journeyId, string journeyVersion, GuidanceMode mode, CancellationToken cancellationToken)
     {
+        _guidance = await Guidance.StartAsync(journeyId, journeyVersion, mode, null, cancellationToken);
+        IsActive = true;
         ShowComposer = true;
+        Phase = EllaiStatusPhases.Active;
+        StatusText = "Guidance is showing. The composer follows the active card.";
+    }
+
+    private async Task SelectModeAsync(EllaiMode mode)
+    {
+        CancelPriorSession();
+        ShowComposer = true;
+        IsActive = false;
+        Phase = EllaiStatusPhases.Ready;
         StatusText = "Ellai session started. Ask a question or start a guided tour.";
+        await OnModeSelected.InvokeAsync(mode);
+    }
+
+    private async Task CreateGuideAsync()
+    {
+        await OnCreateGuide.InvokeAsync();
+    }
+
+    private void OnInputChanged(string? value)
+    {
+        InputText = value;
+    }
+
+    private void OnPositionChanged(EllaiComposerPosition next)
+    {
+        Position = EllaiComposerPosition.Resolve(next, ViewportWidth, ViewportHeight);
+    }
+
+    private async Task OnSend()
+    {
+        if (string.IsNullOrWhiteSpace(InputText))
+        {
+            return;
+        }
+
+        await OnSendText.InvokeAsync(InputText);
     }
 
     private async Task OnCancel()
     {
-        if (_guidance is not null)
+        var token = _cts?.Token ?? CancellationToken.None;
+        try
         {
-            await Guidance.StopAsync(
-                _guidance.Position.GuidanceAttemptId,
-                _guidance.Position.GuidanceVersion,
-                _guidance.Mode,
-                CancellationToken.None);
+            if (_guidance is not null)
+            {
+                _stopCommandId ??= $"cancel-{Guid.NewGuid():N}";
+                await Guidance.StopAsync(
+                    _guidance.Position.GuidanceAttemptId,
+                    _guidance.Position.GuidanceVersion,
+                    _guidance.Mode,
+                    token,
+                    _stopCommandId);
+            }
+
+            await Bonboarding.StopAllAsync(BonboardingTourEndReason.Cancelled, token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            CancelPriorSession();
             _guidance = null;
+            _stopCommandId = null;
             IsActive = false;
+            ShowComposer = false;
+            InputText = null;
+            Phase = EllaiStatusPhases.Ready;
+            StatusText = "Ellai session ended.";
+            if (_fabMenu is not null)
+            {
+                try
+                {
+                    await _fabMenu.FocusLauncherAsync();
+                }
+                catch (InvalidOperationException)
+                {
+                }
+            }
+        }
+    }
+
+    private void CancelPriorSession()
+    {
+        try
+        {
+            _cts?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        finally
+        {
+            _cts?.Dispose();
+            _cts = new CancellationTokenSource();
+        }
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            _cts?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
         }
 
-        await Bonboarding.StopAllAsync(BonboardingTourEndReason.Cancelled, CancellationToken.None);
-        ShowComposer = false;
-        StatusText = "Ellai session ended.";
+        _cts?.Dispose();
     }
 }

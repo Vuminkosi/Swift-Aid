@@ -35,6 +35,7 @@ public sealed class EllaiGuidanceSessionCoordinator
 {
     private readonly object _gate = new();
     private readonly Dictionary<string, CoordinatorState> _attempts = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _processedCommands = new(StringComparer.Ordinal);
 
     private sealed record CoordinatorState(
         GuidancePosition Position,
@@ -64,11 +65,18 @@ public sealed class EllaiGuidanceSessionCoordinator
     public GuidanceSnapshot? Dispatch(GuidanceControlRequest request, GuidanceMode mode)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ClientCommandId);
         lock (_gate)
         {
             if (!_attempts.TryGetValue(request.GuidanceAttemptId, out var state))
             {
                 return null;
+            }
+
+            var commandKey = $"{request.GuidanceAttemptId}:{request.ClientCommandId}";
+            if (!_processedCommands.Add(commandKey))
+            {
+                return ToSnapshot(state, mode);
             }
 
             if (state.Status is GuidanceStatus.Cancelled or GuidanceStatus.Completed or GuidanceStatus.Failed)

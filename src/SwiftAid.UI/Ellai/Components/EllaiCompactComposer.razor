@@ -1,19 +1,46 @@
+@using Microsoft.AspNetCore.Components.Web
 @using SwiftAid.Contracts.Ellai
 
-<div class="ellai-composer" role="dialog" aria-label="Ellai assistant composer">
+<div class="ellai-composer" role="dialog" aria-label="Ellai assistant composer"
+     style="@PositionStyle" @onpointermove="OnPointerMove" @onpointerup="OnPointerUp">
+    <div class="ellai-composer__move-row">
+        <span class="ellai-composer__handle" tabindex="0" role="button" aria-label="Move Ellai composer. Use arrow keys to move, or the move buttons."
+              @onpointerdown="OnPointerDown" @onkeydown="OnHandleKeyDown" title="Drag to move">
+            <MudIcon Icon="@Icons.Material.Filled.DragHandle" Size="Size.Small" />
+        </span>
+        <span class="ellai-composer__move-buttons" role="group" aria-label="Move composer without dragging">
+            <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" OnClick="() => Nudge(0, -MoveStep)" aria-label="Move composer up" />
+            <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward" Size="Size.Small" OnClick="() => Nudge(0, MoveStep)" aria-label="Move composer down" />
+            <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Size="Size.Small" OnClick="() => Nudge(-MoveStep, 0)" aria-label="Move composer left" />
+            <MudIconButton Icon="@Icons.Material.Filled.ArrowForward" Size="Size.Small" OnClick="() => Nudge(MoveStep, 0)" aria-label="Move composer right" />
+            <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Small" OnClick="OnResetPosition" aria-label="Reset composer position" />
+        </span>
+    </div>
     <div class="ellai-composer__input-row">
         <MudTextField T="string" Value="@InputText" ValueChanged="OnInputChanged"
                       Placeholder="Ask Ellai…" MaxLength="8000" Lines="2"
-                      aria-label="Message for Ellai" Immediate="true" />
+                      Label="Message for Ellai" Immediate="true"
+                      @onkeydown="OnInputKeyDown" />
+        @if (CanUseMicrophone)
+        {
+            <MudIconButton Icon="@Icons.Material.Filled.Mic" Color="Color.Default"
+                           OnClick="OnStartVoice" aria-label="Start voice input" />
+        }
         <MudIconButton Icon="@Icons.Material.Filled.Send" Color="Color.Primary"
                        OnClick="OnSend" Disabled="@(!CanSend)" aria-label="Send to Ellai" />
         <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Default"
                        OnClick="OnCancel" aria-label="Cancel Ellai session" />
     </div>
-    <EllaiStatusLine StatusText="@StatusText" Placement="@Placement" />
+    <EllaiStatusLine StatusText="@StatusText" Phase="@Phase" Placement="@Placement" />
 </div>
 
 @code {
+    private const double MoveStep = 24;
+
+    private bool _dragging;
+    private double _lastX;
+    private double _lastY;
+
     [Parameter]
     public string? InputText { get; set; }
 
@@ -21,10 +48,19 @@
     public string? StatusText { get; set; }
 
     [Parameter]
+    public string? Phase { get; set; }
+
+    [Parameter]
     public EllaiSurfacePlacement Placement { get; set; } = EllaiSurfacePlacement.Floating;
 
     [Parameter]
     public bool CanSend { get; set; }
+
+    [Parameter]
+    public bool CanUseMicrophone { get; set; }
+
+    [Parameter]
+    public EllaiComposerPosition? Position { get; set; }
 
     [Parameter]
     public EventCallback<string?> InputTextChanged { get; set; }
@@ -35,9 +71,81 @@
     [Parameter]
     public EventCallback OnCancel { get; set; }
 
+    [Parameter]
+    public EventCallback OnStartVoice { get; set; }
+
+    [Parameter]
+    public EventCallback<EllaiComposerPosition> PositionChanged { get; set; }
+
+    private string PositionStyle =>
+        Placement == EllaiSurfacePlacement.Floating && Position is not null
+            ? $"left:{Position.X:0}px;top:{Position.Y:0}px;"
+            : string.Empty;
+
     private async Task OnInputChanged(string? value)
     {
         InputText = value;
         await InputTextChanged.InvokeAsync(value);
+    }
+
+    private async Task OnInputKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && e.ShiftKey == false && CanSend)
+        {
+            await OnSend.InvokeAsync();
+        }
+    }
+
+    private void OnPointerDown(PointerEventArgs e)
+    {
+        _dragging = true;
+        _lastX = e.ClientX;
+        _lastY = e.ClientY;
+    }
+
+    private async Task OnPointerMove(PointerEventArgs e)
+    {
+        if (!_dragging)
+        {
+            return;
+        }
+
+        await Nudge(e.ClientX - _lastX, e.ClientY - _lastY);
+        _lastX = e.ClientX;
+        _lastY = e.ClientY;
+    }
+
+    private void OnPointerUp(PointerEventArgs e)
+    {
+        _dragging = false;
+    }
+
+    private async Task OnHandleKeyDown(KeyboardEventArgs e)
+    {
+        var step = e.Key switch
+        {
+            "ArrowUp" => (0.0, -MoveStep),
+            "ArrowDown" => (0.0, MoveStep),
+            "ArrowLeft" => (-MoveStep, 0.0),
+            "ArrowRight" => (MoveStep, 0.0),
+            _ => ((double, double)?)null,
+        };
+        if (step is not null)
+        {
+            await Nudge(step.Value.Item1, step.Value.Item2);
+        }
+    }
+
+    private async Task Nudge(double deltaX, double deltaY)
+    {
+        var next = (Position ?? EllaiComposerPosition.Default).Move(deltaX, deltaY);
+        Position = next;
+        await PositionChanged.InvokeAsync(next);
+    }
+
+    private async Task OnResetPosition()
+    {
+        Position = EllaiComposerPosition.Default;
+        await PositionChanged.InvokeAsync(Position);
     }
 }

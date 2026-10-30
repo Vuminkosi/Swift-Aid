@@ -55,6 +55,28 @@ public sealed class EllaiGuidanceCoordinatorTests
     }
 
     [Fact]
+    public void RetriedCommandIdReturnsOneStableSnapshot()
+    {
+        var coordinator = new EllaiGuidanceSessionCoordinator();
+        var started = coordinator.Start(new StartGuidanceRequest(
+            "cmd-1", "journey-1", "1.0", GuidanceMode.Presentation, null));
+
+        var first = coordinator.Dispatch(new GuidanceControlRequest(
+            "cmd-retry-1", started.Position.GuidanceAttemptId,
+            started.Position.GuidanceVersion, GuidanceCommandKind.Next, null, null),
+            GuidanceMode.Presentation);
+        var retry = coordinator.Dispatch(new GuidanceControlRequest(
+            "cmd-retry-1", started.Position.GuidanceAttemptId,
+            started.Position.GuidanceVersion, GuidanceCommandKind.Next, null, null),
+            GuidanceMode.Presentation);
+
+        Assert.NotNull(first);
+        Assert.NotNull(retry);
+        Assert.Equal(first.Position.GuidanceVersion, retry.Position.GuidanceVersion);
+        Assert.Equal(first.LastAcceptedCommandSequence, retry.LastAcceptedCommandSequence);
+    }
+
+    [Fact]
     public void RevisionActivationFencesSpeechAndStartsNewSegment()
     {
         var coordinator = new EllaiGuidanceSessionCoordinator();

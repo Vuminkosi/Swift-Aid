@@ -9,6 +9,35 @@
         that a person reviews and the application verifies.
     </MudText>
     <MudDivider Class="my-4" />
+    <MudText Typo="Typo.subtitle1" HtmlTag="h2">Defaults</MudText>
+    <MudText Typo="Typo.body2">
+        Text input and typed output unless you choose voice. Memory is session-scoped;
+        nothing is retained across sessions without your explicit memory permission.
+    </MudText>
+    <MudDivider Class="my-4" />
+    <MudText Typo="Typo.subtitle1" HtmlTag="h2">Voice</MudText>
+    <MudText Typo="Typo.body2">
+        Voice input uses on-device capture with server transcription only after you
+        grant the microphone permission. Spoken answers are short summaries; the full
+        answer stays on screen. This preview plays no audio until permissions exist:
+    </MudText>
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+        Voice preview is unavailable until the microphone permission is granted.
+    </MudAlert>
+    <MudDivider Class="my-4" />
+    <MudText Typo="Typo.subtitle1" HtmlTag="h2">Interaction</MudText>
+    <MudText Typo="Typo.body2">
+        One compact composer with its status beneath it. It floats where you place it
+        and attaches beneath the active guidance card during demonstrations. Cancel
+        ends the session and removes the composer.
+    </MudText>
+    <MudDivider Class="my-4" />
+    <MudText Typo="Typo.subtitle1" HtmlTag="h2">Guidance</MudText>
+    <MudText Typo="Typo.body2">
+        Demonstrations narrate each step and wait for you. Skipping, pausing, and
+        stopping never lose completed work; receipts record what was verified.
+    </MudText>
+    <MudDivider Class="my-4" />
     <MudText Typo="Typo.subtitle1" HtmlTag="h2">Capabilities</MudText>
     @if (Capabilities is null || Capabilities.Count == 0)
     {

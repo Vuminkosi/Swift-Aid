@@ -1,6 +1,10 @@
 @using SwiftAid.Contracts.Ellai
 
 <div class="ellai-status" role="status" aria-live="polite">
+    @if (EllaiStatusPhases.Label(Phase) is { } phaseLabel)
+    {
+        <MudText Typo="Typo.caption" Color="Color.Primary">@phaseLabel</MudText>
+    }
     <MudText Typo="Typo.caption">@(StatusText ?? "Ellai is ready.")</MudText>
     @if (Placement == EllaiSurfacePlacement.Attached)
     {
@@ -11,6 +15,9 @@
 @code {
     [Parameter]
     public string? StatusText { get; set; }
+
+    [Parameter]
+    public string? Phase { get; set; }
 
     [Parameter]
     public EllaiSurfacePlacement Placement { get; set; } = EllaiSurfacePlacement.Floating;
