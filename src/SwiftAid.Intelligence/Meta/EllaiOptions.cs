@@ -25,6 +25,29 @@ public sealed class EllaiOptions
 
     public string AsrMode { get; init; } = "DIARIZATION";
 
+    /// <summary>Reasoning backend selector: <c>meta</c> (default, Meta-hosted
+    /// API), <c>ollama</c> (local open-weight, e.g. llama3.2:3b) or
+    /// <c>serverless</c> (future OpenAI-compatible cloud serverless endpoint).
+    /// Configured via <c>Ellai__ReasoningBackend</c>; unknown values fail
+    /// closed to <c>meta</c> semantics.</summary>
+    public string ReasoningBackend { get; init; } = "meta";
+
+    /// <summary>Local Ollama base URL, e.g. http://localhost:11434. No secret
+    /// is ever attached to this route.</summary>
+    public string OllamaEndpoint { get; init; } = string.Empty;
+
+    /// <summary>Local open-weight model id. Default is llama3.2:3b, the model
+    /// pinned for local-first reasoning until a cloud lane is approved.</summary>
+    public string OllamaModel { get; init; } = "llama3.2:3b";
+
+    /// <summary>Future cloud-serverless OpenAI-compatible base URL
+    /// (chat/completions). Empty until the operator provisions it.</summary>
+    public string ServerlessEndpoint { get; init; } = string.Empty;
+
+    public string ServerlessModel { get; init; } = string.Empty;
+
+    public string ServerlessApiKey { get; init; } = string.Empty;
+
     public bool HasReasoningRoute =>
         Enabled && !string.IsNullOrWhiteSpace(ApiKey)
         && IsHttpsUrl(ApiUrl) && !string.IsNullOrWhiteSpace(ReasoningModel);
@@ -36,6 +59,19 @@ public sealed class EllaiOptions
     public bool HasRealtimeAsrRoute =>
         Enabled && !string.IsNullOrWhiteSpace(ApiKey)
         && IsWebSocketUrl(AsrWebSocketUrl) && !string.IsNullOrWhiteSpace(AsrModel);
+
+    public bool UsesOllamaBackend =>
+        Enabled && string.Equals(ReasoningBackend, "ollama", StringComparison.OrdinalIgnoreCase);
+
+    public bool UsesServerlessBackend =>
+        Enabled && string.Equals(ReasoningBackend, "serverless", StringComparison.OrdinalIgnoreCase);
+
+    public bool HasOllamaRoute =>
+        UsesOllamaBackend && IsHttpUrl(OllamaEndpoint) && !string.IsNullOrWhiteSpace(OllamaModel);
+
+    public bool HasServerlessRoute =>
+        UsesServerlessBackend && !string.IsNullOrWhiteSpace(ServerlessApiKey)
+        && IsHttpsUrl(ServerlessEndpoint) && !string.IsNullOrWhiteSpace(ServerlessModel);
 
     public static EllaiOptions Bind(Func<string, string?> get)
     {
@@ -93,6 +129,12 @@ public sealed class EllaiOptions
             AsrWebSocketUrl = Setting("Asr:Wss", "Ellai__ASR_WSS") ?? string.Empty,
             AsrTranscriptionUrl = Setting("Asr:Transcription:Url", "Ellai__ASR_Transcription__URL") ?? string.Empty,
             AsrMode = Setting("Asr:Mode", "Ellai__ASRMode") ?? "DIARIZATION",
+            ReasoningBackend = Setting("ReasoningBackend", "Ellai__ReasoningBackend") ?? "meta",
+            OllamaEndpoint = Setting("Reasoning:Ollama:Endpoint", "Ellai__Reasoning__Ollama__Endpoint", "Ellai__Ollama__Endpoint") ?? string.Empty,
+            OllamaModel = Setting("Reasoning:Ollama:Model", "Ellai__Reasoning__Ollama__Model", "Ellai__Ollama__Model") ?? "llama3.2:3b",
+            ServerlessEndpoint = Setting("Reasoning:Serverless:Endpoint", "Ellai__Reasoning__Serverless__Endpoint") ?? string.Empty,
+            ServerlessModel = Setting("Reasoning:Serverless:Model", "Ellai__Reasoning__Serverless__Model") ?? string.Empty,
+            ServerlessApiKey = Setting("Reasoning:Serverless:ApiKey", "Ellai__Reasoning__Serverless__ApiKey") ?? string.Empty,
         };
     }
 
@@ -141,6 +183,10 @@ public sealed class EllaiOptions
     private static bool IsHttpsUrl(string value) =>
         Uri.TryCreate(value, UriKind.Absolute, out var uri)
         && uri.Scheme == Uri.UriSchemeHttps;
+
+    private static bool IsHttpUrl(string value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var uri)
+        && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
 
     private static bool IsWebSocketUrl(string value) =>
         Uri.TryCreate(value, UriKind.Absolute, out var uri)

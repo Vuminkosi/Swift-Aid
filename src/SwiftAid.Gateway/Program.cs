@@ -90,10 +90,10 @@ builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiTrainingVerifier>();
 {
     var ellai = SwiftAid.Intelligence.Meta.EllaiOptions.Bind(key => builder.Configuration[key]);
     builder.Services.AddSingleton(ellai);
-    if (ellai.HasReasoningRoute)
-    {
-        builder.Services.AddHttpClient<SwiftAid.Intelligence.Meta.EllaiReasoningAdapter>();
-    }
+    builder.Services.AddHttpClient<SwiftAid.Intelligence.Meta.EllaiReasoningAdapter>();
+    builder.Services.AddHttpClient<SwiftAid.Intelligence.Meta.OllamaEllaiReasoningProvider>();
+    builder.Services.AddHttpClient<SwiftAid.Intelligence.Meta.ServerlessEllaiReasoningProvider>();
+    builder.Services.AddScoped<SwiftAid.Intelligence.Meta.EllaiReasoningRouter>();
 
     if (ellai.HasUploadAsrRoute)
     {
