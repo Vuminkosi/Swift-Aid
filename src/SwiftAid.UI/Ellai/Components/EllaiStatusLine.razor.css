@@ -9,3 +9,18 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
+
+.ellai-status__image {
+    max-inline-size: 100%;
+    border-radius: 0.5rem;
+}
+
+.ellai-status__audio {
+    margin: 0;
+    display: grid;
+    gap: 0.125rem;
+}
+
+.ellai-status__audio-player {
+    inline-size: 100%;
+}

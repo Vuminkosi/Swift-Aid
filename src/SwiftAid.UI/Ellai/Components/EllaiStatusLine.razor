@@ -1,3 +1,5 @@
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Rendering
 @using SwiftAid.Contracts.Ellai
 
 <div class="ellai-status" role="status" aria-live="polite">
@@ -6,7 +8,7 @@
         <MudText Typo="Typo.caption" Color="Color.Primary">@phaseLabel</MudText>
     }
     <div class="ellai-status__text @(_expanded ? null : "ellai-status__text--clamped")">
-        <MudText Typo="Typo.caption">@(StatusText ?? "Ellai is ready.")</MudText>
+        @RenderRichText()
     </div>
     @if (NeedsExpander)
     {
@@ -14,6 +16,22 @@
                        Color="Color.Primary" Size="Size.Small"
                        OnClick="ToggleExpanded" aria-expanded="@_expanded"
                        aria-label="@(_expanded ? "Show less status text" : "Show full status text")" />
+    }
+    @if (EllaiStatusMarkdown.IsSafeMediaUrl(ImageUrl))
+    {
+        <img class="ellai-status__image" src="@ImageUrl" alt="@(ImageAlt ?? "Status illustration")" loading="lazy" />
+    }
+    @if (EllaiStatusMarkdown.IsSafeMediaUrl(AudioUrl))
+    {
+        <figure class="ellai-status__audio">
+            @if (!string.IsNullOrWhiteSpace(AudioLabel))
+            {
+                <figcaption class="ellai-status__audio-label">@AudioLabel</figcaption>
+            }
+            <audio controls preload="none" src="@AudioUrl" class="ellai-status__audio-player">
+                Your browser cannot play this voice message.
+            </audio>
+        </figure>
     }
 </div>
 
@@ -29,9 +47,89 @@
     [Parameter]
     public EllaiSurfacePlacement Placement { get; set; } = EllaiSurfacePlacement.Floating;
 
+    [Parameter]
+    public string? ImageUrl { get; set; }
+
+    [Parameter]
+    public string? ImageAlt { get; set; }
+
+    [Parameter]
+    public string? AudioUrl { get; set; }
+
+    [Parameter]
+    public string? AudioLabel { get; set; }
+
     /// <summary>Shows the expander when the text is long enough to clamp.
     /// Estimated at 120 characters for three lines of caption text.</summary>
     private bool NeedsExpander => (StatusText?.Length ?? "Ellai is ready.".Length) > 120;
 
     private void ToggleExpanded() => _expanded = !_expanded;
+
+    private RenderFragment RenderRichText() => builder =>
+    {
+        var blocks = EllaiStatusMarkdown.ParseBlocks(StatusText ?? "Ellai is ready.");
+        var seq = 0;
+        foreach (var block in blocks)
+        {
+            switch (block)
+            {
+                case EllaiStatusNode.Paragraph paragraph:
+                    builder.OpenElement(seq++, "p");
+                    RenderInline(builder, paragraph.Inline, ref seq);
+                    builder.CloseElement();
+                    break;
+                case EllaiStatusNode.BulletList list:
+                    builder.OpenElement(seq++, "ul");
+                    foreach (var item in list.Items)
+                    {
+                        builder.OpenElement(seq++, "li");
+                        RenderInline(builder, item, ref seq);
+                        builder.CloseElement();
+                    }
+                    builder.CloseElement();
+                    break;
+            }
+        }
+    };
+
+    private static void RenderInline(
+        RenderTreeBuilder builder, IReadOnlyList<EllaiStatusNode> inline, ref int seq)
+    {
+        foreach (var node in inline)
+        {
+            switch (node)
+            {
+                case EllaiStatusNode.Text text:
+                    builder.AddContent(seq++, text.Value);
+                    break;
+                case EllaiStatusNode.Bold bold:
+                    builder.OpenElement(seq++, "strong");
+                    builder.AddContent(seq++, bold.Value);
+                    builder.CloseElement();
+                    break;
+                case EllaiStatusNode.Italic italic:
+                    builder.OpenElement(seq++, "em");
+                    builder.AddContent(seq++, italic.Value);
+                    builder.CloseElement();
+                    break;
+                case EllaiStatusNode.Code code:
+                    builder.OpenElement(seq++, "code");
+                    builder.AddContent(seq++, code.Value);
+                    builder.CloseElement();
+                    break;
+                case EllaiStatusNode.Link link:
+                    builder.OpenElement(seq++, "a");
+                    builder.AddAttribute(seq++, "href", link.Url);
+                    builder.AddAttribute(seq++, "rel", "noopener");
+                    builder.AddAttribute(seq++, "target", "_blank");
+                    builder.AddContent(seq++, link.Label);
+                    builder.CloseElement();
+                    break;
+                case EllaiStatusNode.LineBreak:
+                    builder.OpenElement(seq++, "br");
+                    builder.CloseElement();
+                    break;
+            }
+        }
+    }
 }
