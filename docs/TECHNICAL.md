@@ -93,7 +93,10 @@ PartiallyApplied / Applied / Failed lattice. A server-side dialog
 coordinator enforces one active review per session, edit-then-new-version
 invalidation, and terminal cancel fencing; the approval endpoint binds
 dialog-issued submissions to their open review (409 when stale). Review
-register/edit endpoints exist; the `EllaiApprovalDialog` component renders
+register/edit endpoints exist and publish to the session event journal;
+clients long-poll `GET .../sessions/{id}/events` with a cursor for
+approval-required/resolved/edit and session-cancelled hints (gap recovery
+by replay; replay never replays commands). The `EllaiApprovalDialog` component renders
 Approve-selected/Edit/Reject/Cancel with selection-gated approval and
 version-change reset. Still **Missing**: auto-open on the ApprovalRequired
 event (no event transport yet), the atomic per-action domain executor with
@@ -135,7 +138,7 @@ the case database.
 ## 7. Verification map
 
 Run `dotnet test tests/SwiftAid.Application.Tests --filter
-FullyQualifiedName~Ellai` (unit/contract, ~128 passing). PostgreSQL
+FullyQualifiedName~Ellai` (unit/contract, ~132 passing). PostgreSQL
 integration tests (`tests/SwiftAid.Integration.Tests`, `EllaiPostgresTests`)
 run only with `SWIFTAID_RUN_SQLAUTH_FIXTURES=1` and the approved disposable
 loopback connection (127.0.0.1:32703); otherwise they skip. Provider, web
