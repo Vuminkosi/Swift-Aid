@@ -394,6 +394,10 @@
             {
                 <span>Your draft could not be saved. Your entries remain on this screen.</span>
             }
+            else if (!DraftSavingAvailable)
+            {
+                <span>Draft saving is unavailable right now. Your entries remain on this screen, but could be lost if you leave or refresh.</span>
+            }
             else if (_saveState == DraftSaveState.Unsaved)
             {
                 <span>Changes are not saved yet.</span>
@@ -416,12 +420,15 @@
     private string? _observationChoiceMessage;
     private string? _submitError;
     private bool _saving;
+    private Guid? _savingDraftId;
+    private PendingDraftRefresh? _pendingDraftRefresh;
     private bool _submitting;
     private bool _submitComplete;
     private DraftSaveState _saveState = DraftSaveState.Unsaved;
     private ReportSubjectCategory? _subjectCategory;
 
     private sealed record ObservationGroup(string Heading, IReadOnlyList<string> Choices);
+    private sealed record PendingDraftRefresh(Guid? SourceDraftId, PublicReportDraft SavedDraft, int Step);
 
     private static readonly ObservationGroup[] HumanObservationGroups =
     [
@@ -516,6 +523,9 @@
     public EventCallback<PublicReportSaveRequest> OnSaveDraft { get; set; }
 
     [Parameter]
+    public bool DraftSavingAvailable { get; set; } = true;
+
+    [Parameter]
     public EventCallback<PublicReportDraft> OnContinue { get; set; }
 
     [Parameter]
@@ -606,6 +616,21 @@
             return;
         }
 
+        var preserveCurrentStepForSaveRefresh = _saving && IsSaveRefreshIdentity(_savingDraftId, CurrentDraftId);
+        if (_pendingDraftRefresh is { } pendingRefresh)
+        {
+            var matchesSavedDraft =
+                IsSaveRefreshIdentity(pendingRefresh.SourceDraftId, CurrentDraftId) &&
+                DraftMatches(Draft, pendingRefresh.SavedDraft);
+            if (matchesSavedDraft)
+            {
+                _step = pendingRefresh.Step;
+                preserveCurrentStepForSaveRefresh = true;
+            }
+
+            _pendingDraftRefresh = null;
+        }
+
         if (_editContext is not null)
         {
             if (!ReferenceEquals(Draft, _observedDraft))
@@ -620,7 +645,10 @@
             _editContext = new EditContext(Draft);
             _messageStore = new ValidationMessageStore(_editContext);
             _editContext.OnFieldChanged += HandleFieldChanged;
-            _step = 0;
+            if (!preserveCurrentStepForSaveRefresh)
+            {
+                _step = 0;
+            }
             _subjectCategory = GetSubjectCategory(Draft.SubjectScope);
             _stepError = null;
             _submitError = null;
@@ -716,7 +744,8 @@
         _ => false
     };
 
-    private bool CanSaveDraft => OnSaveDraft.HasDelegate && AttachmentSelectionCount == 0 && HasCompleteSubject;
+    private bool CanSaveDraft => DraftSavingAvailable && OnSaveDraft.HasDelegate &&
+        AttachmentSelectionCount == 0 && HasCompleteSubject;
 
     private static ReportSubjectCategory? GetSubjectCategory(IntakeSubjectScope? scope) => scope switch
     {
@@ -1197,6 +1226,8 @@
         }
 
         _saving = true;
+        _savingDraftId = CurrentDraftId;
+        _pendingDraftRefresh = null;
         _saveState = DraftSaveState.Saving;
         try
         {
@@ -1208,6 +1239,10 @@
                 CountryCatalogueIsCurrent);
             await OnSaveDraft.InvokeAsync(new PublicReportSaveRequest(CurrentDraftId, submission));
             _saveState = DraftSaveState.Saved;
+            _pendingDraftRefresh = new PendingDraftRefresh(
+                _savingDraftId,
+                PublicReportDraft.FromSubmission(submission),
+                _step);
         }
         catch
         {
@@ -1216,8 +1251,37 @@
         finally
         {
             _saving = false;
+            _savingDraftId = null;
         }
     }
+
+    private static bool IsSaveRefreshIdentity(Guid? sourceDraftId, Guid? updatedDraftId) =>
+        sourceDraftId == updatedDraftId || sourceDraftId is null && updatedDraftId is not null;
+
+    private static bool DraftMatches(PublicReportDraft actual, PublicReportDraft expected) =>
+        actual.SubjectScope == expected.SubjectScope &&
+        actual.Narrative == expected.Narrative &&
+        actual.ObservationsText == expected.ObservationsText &&
+        actual.OccurrencePrecision == expected.OccurrencePrecision &&
+        actual.OccurrenceDate == expected.OccurrenceDate &&
+        actual.OccurrenceTime == expected.OccurrenceTime &&
+        actual.OccurrenceOffset == expected.OccurrenceOffset &&
+        actual.TimeNote == expected.TimeNote &&
+        actual.CapturedAt == expected.CapturedAt &&
+        actual.LocationUnknown == expected.LocationUnknown &&
+        actual.CountryCode == expected.CountryCode &&
+        actual.CountryConfirmed == expected.CountryConfirmed &&
+        actual.RegionPresence == expected.RegionPresence &&
+        actual.Region == expected.Region &&
+        actual.RegionId == expected.RegionId &&
+        actual.AreaPresence == expected.AreaPresence &&
+        actual.Area == expected.Area &&
+        actual.AreaId == expected.AreaId &&
+        actual.LocalityPresence == expected.LocalityPresence &&
+        actual.Locality == expected.Locality &&
+        actual.LocalityId == expected.LocalityId &&
+        actual.ReportReviewConfirmed == expected.ReportReviewConfirmed &&
+        actual.ProcessingConfirmed == expected.ProcessingConfirmed;
 
     private async Task HandleSubmitAsync(EditContext _)
     {

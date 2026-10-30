@@ -263,7 +263,20 @@
 
     private async Task SaveDraftAsync(PublicReportSaveRequest request)
     {
-        if (_busy || !_storageAvailable) return;
+        if (_busy)
+        {
+            _feedback = "Another report action is in progress. Your latest changes have not been saved.";
+            _feedbackIsError = true;
+            throw new InvalidOperationException("A report action is already in progress.");
+        }
+
+        if (!_storageAvailable)
+        {
+            _feedback = "Draft saving is unavailable on this browser. Your entries remain on this page, but could be lost if you leave or refresh.";
+            _feedbackIsError = true;
+            throw new InvalidOperationException("Draft storage is unavailable.");
+        }
+
         _busy = true;
         try
         {
@@ -280,6 +293,7 @@
         {
             _feedback = "This draft could not be saved safely. Your entries remain on this page.";
             _feedbackIsError = true;
+            throw;
         }
         finally { _busy = false; }
     }
