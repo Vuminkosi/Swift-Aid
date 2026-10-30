@@ -196,7 +196,12 @@
         finally
         {
             CancelPriorSession();
+            // Terminal local-first cancel: forget the session and stop the
+            // poll loop so late events can never overwrite the ended state.
+            EventPoller.ForgetSession();
+            _pollCts?.Cancel();
             _guidance = null;
+            _guidancePaused = false;
             _stopCommandId = null;
             IsActive = false;
             ShowComposer = false;
