@@ -23,7 +23,7 @@
     gap: 0.75rem;
     height: 100%;
     padding: 1.5rem 2.5rem 3rem;
-    background-color: #F4F7FB;
+    background-color: var(--sa-surface-subtle);
 }
 
 .mobile-welcome__slide .swiftaid-page-heading__title {
@@ -43,7 +43,7 @@
     width: 4.5rem;
     height: 4.5rem;
     border-radius: 999px;
-    background-color: #E3EFFC;
+    background-color: var(--sa-status-info-soft);
 }
 
 .mobile-welcome__actions {

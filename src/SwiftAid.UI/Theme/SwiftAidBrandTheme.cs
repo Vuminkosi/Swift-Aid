@@ -1,81 +1,96 @@
 using MudBlazor;
+using SwiftAid.UI.Components.Theme;
 
 namespace SwiftAid.UI.Theme;
 
 /// <summary>
 /// Shared light and dark palettes for the Gateway and Mobile hosts.
+/// Mapped to the Agentic Interface System (AIS) semantic tokens in
+/// wwwroot/css/swiftaid-theme.css: green-led primary action, neutral
+/// surfaces, dark text. Brand blues/greens stay for logo, illustration,
+/// and secondary accents only.
 /// </summary>
 public static class SwiftAidBrandTheme
 {
     // Icon ramp, pixel-sampled from swiftaid-icon.png (azure -> teal -> green):
     // upper blue #1778EC, top azure #2189F3, top-right cyan #23A4DA,
     // right teal #10A3A8, mid-right green #27A961, lower-right green #148E58,
-    // lower-left deep sea navy #045676.
+    // The application shell uses the reference-board navy; #045676 remains an accent teal.
     public const string BrandBlue = "#1778EC";
     public const string BrandTeal = "#10A3A8";
     public const string BrandGreen = "#27A961";
-    public const string BrandNavy = "#045676";
+    public const string BrandNavy = SwiftAidDesignTokens.BrandNavy;
     public const string BrandCyan = "#23A4DA";
 
     public static MudTheme Create() => new()
     {
+        Shadows = CreateFlatShadows(),
         PaletteLight = new PaletteLight
         {
-            Primary = BrandBlue,
+            // AIS light: #00804A primary (white label, 5.02:1), white canvas,
+            // #F5F7F5 navigation, #212121 body text.
+            Primary = "#00804A",
             PrimaryContrastText = "#FFFFFF",
             Secondary = BrandNavy,
             SecondaryContrastText = "#FFFFFF",
             Tertiary = BrandGreen,
             TertiaryContrastText = "#062D29",
-            Info = "#2189F3",
-            InfoDarken = "#2189F3",
+            Info = "#1D4ED8",
             InfoContrastText = "#FFFFFF",
-            Success = "#148E58",
+            Success = "#006B3F",
             SuccessContrastText = "#FFFFFF",
-            Error = "#B4233A",
+            Warning = "#8A4B08",
+            WarningContrastText = "#FFFFFF",
+            Error = "#B42318",
             ErrorContrastText = "#FFFFFF",
             Dark = BrandNavy,
             DarkContrastText = "#FFFFFF",
-            Background = "#F5FAF8",
-            BackgroundGray = "#E8F5F2",
+            Background = "#FFFFFF",
+            BackgroundGray = "#F5F7F5",
             Surface = "#FFFFFF",
-            DrawerBackground = "#FFFFFF",
-            DrawerText = "#123B39",
+            DrawerBackground = "#F5F7F5",
+            DrawerText = "#212121",
             AppbarBackground = "#FFFFFF",
-            AppbarText = "#123B39",
-            TextPrimary = "#123B39",
-            TextSecondary = "#3E5E5A",
-            TextDisabled = "#536E69",
-            ActionDefault = "#3E5E5A"
+            AppbarText = "#212121",
+            TextPrimary = "#212121",
+            TextSecondary = "#535752",
+            TextDisabled = "#798177",
+            ActionDefault = "#535752"
         },
         PaletteDark = new PaletteDark
         {
-            Primary = BrandCyan,
-            PrimaryContrastText = "#062D29",
+            // AIS dark: same structure and density as light.
+            Primary = "#53D98D",
+            PrimaryContrastText = "#06180D",
             Secondary = BrandBlue,
             SecondaryContrastText = "#FFFFFF",
             Tertiary = BrandGreen,
             TertiaryContrastText = "#062D29",
-            Info = BrandBlue,
-            InfoDarken = BrandCyan,
-            InfoContrastText = "#FFFFFF",
-            Success = BrandGreen,
-            SuccessContrastText = "#062D29",
-            Error = "#FB7185",
+            Info = "#8AB4FF",
+            InfoContrastText = "#06180D",
+            Success = "#53D98D",
+            SuccessContrastText = "#06180D",
+            Warning = "#F5CE75",
+            WarningContrastText = "#06180D",
+            Error = "#FFAAA3",
             ErrorContrastText = "#40131E",
-            Dark = "#F4FBF8",
-            DarkContrastText = "#071B19",
-            Background = "#071B19",
-            BackgroundGray = "#1F4640",
-            Surface = "#102B29",
-            DrawerBackground = "#102B29",
-            DrawerText = "#F4FBF8",
-            AppbarBackground = "#102B29",
-            AppbarText = "#F4FBF8",
-            TextPrimary = "#F4FBF8",
-            TextSecondary = "#C6DDD6",
-            TextDisabled = "#A7C3BC",
-            ActionDefault = "#C6DDD6"
+            Dark = "#F8FAFC",
+            DarkContrastText = "#0B1018",
+            Background = "#101612",
+            BackgroundGray = "#19231C",
+            Surface = "#151E18",
+            DrawerBackground = "#121A15",
+            DrawerText = "#EDF2EE",
+            AppbarBackground = "#151E18",
+            AppbarText = "#EDF2EE",
+            TextPrimary = "#EDF2EE",
+            TextSecondary = "#B3BDB4",
+            TextDisabled = "#77867B",
+            ActionDefault = "#B3BDB4"
+        },
+        LayoutProperties = new LayoutProperties
+        {
+            DefaultBorderRadius = "6px"
         },
         Typography = new Typography
         {
@@ -85,4 +100,13 @@ public static class SwiftAidBrandTheme
             }
         }
     };
+
+    private static Shadow CreateFlatShadows()
+    {
+        const int elevationLevelCount = 26;
+        var elevation = new string[elevationLevelCount];
+        Array.Fill(elevation, "none");
+
+        return new Shadow { Elevation = elevation };
+    }
 }

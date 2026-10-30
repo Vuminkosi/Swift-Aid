@@ -32,8 +32,8 @@ a,
 
 .form-control:focus-visible,
 .form-check-input:focus-visible {
-    outline: 3px solid var(--sa-focus);
-    outline-offset: 3px;
+    outline: 2px solid var(--sa-focus);
+    outline-offset: 2px;
     box-shadow: none;
 }
 
@@ -66,9 +66,8 @@ h1:focus {
 }
 
 #blazor-error-ui {
-    color-scheme: light;
-    background: #fff1f2;
-    color: #7f1d2d;
+    background: var(--sa-status-error-soft);
+    color: var(--sa-status-error);
     bottom: 0;
     box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.2);
     box-sizing: border-box;
@@ -88,9 +87,9 @@ h1:focus {
 }
 
 .blazor-error-boundary {
-    background: #7f1d2d;
+    background: var(--sa-status-error);
     padding: 1rem 1rem 1rem 3.7rem;
-    color: #ffffff;
+    color: var(--sa-action-foreground);
 }
 
 .blazor-error-boundary::after {
@@ -98,7 +97,7 @@ h1:focus {
 }
 
 .darker-border-checkbox.form-check-input {
-    border-color: #718e87;
+    border-color: var(--sa-border);
 }
 
 .form-floating > .form-control-plaintext::placeholder,
