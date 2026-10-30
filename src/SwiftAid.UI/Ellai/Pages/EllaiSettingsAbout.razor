@@ -8,6 +8,8 @@
         questions, demonstrates features, and proposes bounded administrative work
         that a person reviews and the application verifies.
     </MudText>
+    <MudTabs Class="mt-4" aria-label="Ellai information">
+        <MudTabPanel Text="About">
     <MudDivider Class="my-4" />
     <MudText Typo="Typo.subtitle1" HtmlTag="h2">Defaults</MudText>
     <MudText Typo="Typo.body2">
@@ -61,9 +63,40 @@
         are separate permissions. Opening Ellai does not grant them. Sensitive case
         content is never sent to the default reasoning route.
     </MudText>
+        </MudTabPanel>
+        <MudTabPanel Text="History" aria-label="Previous Ellai sessions">
+            @if (PastSessions is null || PastSessions.Count == 0)
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status" Class="mt-4">
+                    No previous sessions yet. Past conversations appear here when memory permission is granted.
+                </MudAlert>
+            }
+            else
+            {
+                @foreach (var session in PastSessions.OrderByDescending(s => s.StartedAt))
+                {
+                    <MudText Typo="Typo.subtitle2" Class="mt-4">
+                        @session.Mode · @session.Status · started @session.StartedAt.ToLocalTime().ToString("dd MMM yyyy HH:mm")
+                    </MudText>
+                    <EllaiActivityDisclosure Entries="@session.Entries" />
+                    <MudDivider Class="my-4" />
+                }
+            }
+        </MudTabPanel>
+    </MudTabs>
 </MudContainer>
 
 @code {
     [Parameter]
     public IReadOnlyList<VoiceCapability>? Capabilities { get; set; }
+
+    [Parameter]
+    public IReadOnlyList<EllaiPastSession>? PastSessions { get; set; }
+
+    public sealed record EllaiPastSession(
+        string SessionId,
+        string Mode,
+        string Status,
+        DateTimeOffset StartedAt,
+        IReadOnlyList<EllaiActivityDisclosure.EllaiTimelineEntry> Entries);
 }
