@@ -59,6 +59,17 @@ public sealed class EllaiApprovedActionService
     public static string ComputeIdempotencyKey(string planHash, int planVersion, string actionLabel) =>
         $"ellai-{planHash}-{planVersion}-{actionLabel}";
 
+    /// <summary>Stable action identity derived from the exact approved
+    /// fields, so dialog selection, receipts and retries bind the same
+    /// logical action across processes.</summary>
+    public static string ComputeActionId(string planHash, int planVersion, string actionLabel)
+    {
+        var hash = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes($"{planHash}|{planVersion}|{actionLabel}"));
+        return "act-" + Convert.ToBase64String(hash)[..22]
+            .Replace('+', '-').Replace('/', '_').TrimEnd('=');
+    }
+
     public ApprovedEllaiAction? Submit(
         string planHash, int planVersion, AdminActionProposal proposal,
         string approvedPlanHash, int approvedPlanVersion,
@@ -82,7 +93,7 @@ public sealed class EllaiApprovedActionService
             }
 
             var action = new ApprovedEllaiAction(
-                $"act-{Guid.NewGuid():N}", planHash, planVersion,
+                ComputeActionId(planHash, planVersion, proposal.ProposalLabel), planHash, planVersion,
                 proposal.Kind, key, "Submitted");
             _actions[key] = action;
             return action;

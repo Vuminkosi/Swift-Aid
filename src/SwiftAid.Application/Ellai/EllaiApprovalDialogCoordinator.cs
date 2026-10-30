@@ -16,9 +16,9 @@ public enum EllaiApprovalDialogState
     Expired
 }
 
-/// <summary>One server-tracked approval review, carrying the safe display
-/// rows the dialog renders. Rows are display data; approval still binds
-/// the exact plan hash and version.</summary>
+/// <summary>One server-tracked approval review, carrying the exact reviewed
+/// proposals. Display rows derive deterministically; approval binds the
+/// exact plan hash, version and proposal fields.</summary>
 public sealed record EllaiApprovalDialogRequest(
     string RequestId,
     string SessionId,
@@ -27,7 +27,26 @@ public sealed record EllaiApprovalDialogRequest(
     EllaiApprovalDialogState State,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset ExpiresAtUtc,
-    IReadOnlyList<EllaiApprovalActionDescriptor> Actions);
+    IReadOnlyList<AdminActionProposal> Proposals)
+{
+    /// <summary>Safe display rows for the dialog, with stable action ids.</summary>
+    public IReadOnlyList<EllaiApprovalActionDescriptor> Actions => Proposals
+        .Select(proposal => new EllaiApprovalActionDescriptor(
+            EllaiApprovedActionService.ComputeActionId(PlanHash, PlanVersion, proposal.ProposalLabel),
+            proposal.ProposalLabel,
+            Describe(proposal)))
+        .ToList();
+
+    private static string Describe(AdminActionProposal proposal)
+    {
+        var recipient = proposal.RecipientCandidateId ?? "unassigned recipient";
+        var due = proposal.HumanSuppliedDueAtUtc?.ToString("O") ?? "no due time";
+        var rationale = proposal.FactualRationale.Length > 200
+            ? proposal.FactualRationale[..200] + "…"
+            : proposal.FactualRationale;
+        return $"{proposal.Kind} · {recipient} · {due} · {rationale}";
+    }
+}
 
 /// <summary>Server-side half of the mandatory approval dialog contract.
 /// Enforces one active review per session (duplicate request ids focus the
@@ -48,11 +67,15 @@ public sealed class EllaiApprovalDialogCoordinator
     public (EllaiApprovalDialogRequest Request, bool Created) Register(
         string sessionId, string requestId, string planHash, int planVersion,
         DateTimeOffset now, TimeSpan lifetime,
-        IReadOnlyList<EllaiApprovalActionDescriptor>? actions = null)
+        IReadOnlyList<AdminActionProposal>? proposals = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(requestId);
         ArgumentException.ThrowIfNullOrWhiteSpace(planHash);
+        if ((proposals?.Count ?? 0) > EllaiDecisionValidator.MaxPlanActions)
+        {
+            throw new ArgumentException("A plan carries at most three administrative actions.", nameof(proposals));
+        }
 
         lock (_gate)
         {
@@ -69,7 +92,7 @@ public sealed class EllaiApprovalDialogCoordinator
                 requestId, sessionId, planHash, planVersion,
                 active is null ? EllaiApprovalDialogState.AwaitingApproval : EllaiApprovalDialogState.Queued,
                 now, now.Add(lifetime),
-                actions ?? Array.Empty<EllaiApprovalActionDescriptor>());
+                proposals ?? Array.Empty<AdminActionProposal>());
             _byId[requestId] = request;
             return (request, true);
         }
@@ -81,11 +104,15 @@ public sealed class EllaiApprovalDialogCoordinator
     public EllaiApprovalDialogRequest? ApplyEdit(
         string requestId, string newRequestId, string newPlanHash, int newPlanVersion,
         DateTimeOffset now, TimeSpan lifetime,
-        IReadOnlyList<EllaiApprovalActionDescriptor>? actions = null)
+        IReadOnlyList<AdminActionProposal>? proposals = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(requestId);
         ArgumentException.ThrowIfNullOrWhiteSpace(newRequestId);
         ArgumentException.ThrowIfNullOrWhiteSpace(newPlanHash);
+        if ((proposals?.Count ?? 0) > EllaiDecisionValidator.MaxPlanActions)
+        {
+            throw new ArgumentException("A plan carries at most three administrative actions.", nameof(proposals));
+        }
 
         lock (_gate)
         {
@@ -98,7 +125,7 @@ public sealed class EllaiApprovalDialogCoordinator
             var next = new EllaiApprovalDialogRequest(
                 newRequestId, current.SessionId, newPlanHash, newPlanVersion,
                 EllaiApprovalDialogState.AwaitingApproval, now, now.Add(lifetime),
-                actions ?? Array.Empty<EllaiApprovalActionDescriptor>());
+                proposals ?? Array.Empty<AdminActionProposal>());
             _byId[newRequestId] = next;
             return next;
         }

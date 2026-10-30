@@ -9,23 +9,48 @@ public sealed class EllaiApprovalDialogTests
 {
     private static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(15);
 
+    private static AdminActionProposal Proposal(string label) => new(
+        label, AdminActionKind.CreateAdministrativeReviewTask,
+        new EvidenceRef("queue", "q1", "v3", null, "e1"),
+        "officer-1", new DateTimeOffset(2026, 11, 1, 0, 0, 0, TimeSpan.Zero),
+        new[] { new EvidenceRef("queue", "q1", "v3", null, "e1") },
+        "Three items past the recorded deadline.");
+
     [Fact]
-    public void RegisterCarriesDisplayRowsAndEditReplacesThem()
+    public void RegisterCarriesProposalsAndDerivesStableDisplayRows()
     {
         var coordinator = new EllaiApprovalDialogCoordinator();
         var now = DateTimeOffset.UtcNow;
-        var rows = new[]
-        {
-            new EllaiApprovalActionDescriptor("a-1", "Create administrative review task", "case-1"),
-        };
+        var proposals = new[] { Proposal("review-overdue") };
 
-        var (first, _) = coordinator.Register("s-1", "req-1", "hash-1", 1, now, Lifetime, rows);
-        Assert.Equal(rows, first.Actions);
+        var (first, _) = coordinator.Register("s-1", "req-1", "hash-1", 1, now, Lifetime, proposals);
+        Assert.Equal(proposals, first.Proposals);
+        var row = Assert.Single(first.Actions);
+        Assert.Equal("review-overdue", row.Label);
+        Assert.Equal(
+            EllaiApprovedActionService.ComputeActionId("hash-1", 1, "review-overdue"),
+            row.ActionId);
 
         var edited = coordinator.ApplyEdit("req-1", "req-2", "hash-2", 2, now, Lifetime,
-            new[] { new EllaiApprovalActionDescriptor("a-2", "Queue internal reminder", "o-1") });
+            new[] { Proposal("queue-reminder") });
         Assert.NotNull(edited);
-        Assert.Equal("a-2", Assert.Single(edited.Actions).ActionId);
+        var editedRow = Assert.Single(edited.Actions);
+        Assert.Equal(
+            EllaiApprovedActionService.ComputeActionId("hash-2", 2, "queue-reminder"),
+            editedRow.ActionId);
+    }
+
+    [Fact]
+    public void RegisterRejectsOversizedPlans()
+    {
+        var coordinator = new EllaiApprovalDialogCoordinator();
+        var proposals = new[]
+        {
+            Proposal("a"), Proposal("b"), Proposal("c"), Proposal("d"),
+        };
+
+        Assert.Throws<ArgumentException>(() =>
+            coordinator.Register("s-1", "req-1", "hash-1", 1, DateTimeOffset.UtcNow, Lifetime, proposals));
     }
 
     [Fact]

@@ -94,6 +94,17 @@ public static class EllaiEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict);
+        group.MapPost("/sessions/{sessionId}/approval-reviews/{requestId}/approve", ApproveSelectedAsync)
+            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
+            .WithName("ApproveEllaiSelectedActions")
+            .Accepts<ApproveSelectedApiRequest>("application/json")
+            .Produces<IReadOnlyList<EllaiReceipt>>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
+            .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
         group.MapPost("/sessions/{sessionId}/cancel", CancelAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
@@ -321,9 +332,16 @@ public static class EllaiEndpoints
                 title: "The Ellai approval review request is invalid."));
         }
 
+        if (request.Proposals is not null && request.Proposals.Count > EllaiDecisionValidator.MaxPlanActions)
+        {
+            return Task.FromResult(Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "A plan carries at most three administrative actions."));
+        }
+
         var now = DateTimeOffset.UtcNow;
         var (review, _) = dialogs.Register(sessionId, request.RequestId, request.PlanHash,
-            request.PlanVersion, now, EllaiApprovalService.ApprovalLifetime, request.Actions);
+            request.PlanVersion, now, EllaiApprovalService.ApprovalLifetime, request.Proposals);
         journals.Append(sessionId, "approval-required", review.RequestId,
             $"{review.PlanHash} v{review.PlanVersion} · {review.State}", now);
         return Task.FromResult(Results.Json(review, statusCode: StatusCodes.Status200OK));
@@ -370,9 +388,16 @@ public static class EllaiEndpoints
                 title: "The Ellai approval edit request is invalid."));
         }
 
+        if (request.Proposals is not null && request.Proposals.Count > EllaiDecisionValidator.MaxPlanActions)
+        {
+            return Task.FromResult(Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "A plan carries at most three administrative actions."));
+        }
+
         var now = DateTimeOffset.UtcNow;
         var next = dialogs.ApplyEdit(requestId, request.NewRequestId, request.NewPlanHash,
-            request.NewPlanVersion, now, EllaiApprovalService.ApprovalLifetime, request.Actions);
+            request.NewPlanVersion, now, EllaiApprovalService.ApprovalLifetime, request.Proposals);
         if (next is null)
         {
             return Task.FromResult(Results.Problem(
@@ -384,6 +409,51 @@ public static class EllaiEndpoints
             $"{next.PlanHash} v{next.PlanVersion} · {next.State}", now);
         return Task.FromResult(Results.Json(next, statusCode: StatusCodes.Status200OK));
     }
+
+    private static async Task<IResult> ApproveSelectedAsync(
+        string sessionId,
+        string requestId,
+        ApproveSelectedApiRequest? request,
+        EllaiApprovalService approvals,
+        EllaiApprovalDialogCoordinator dialogs,
+        EllaiSessionEventJournal journals,
+        CancellationToken cancellationToken)
+    {
+        if (request is null
+            || !string.Equals(request.SessionId, sessionId, StringComparison.Ordinal)
+            || request.ActionIds is null
+            || request.ActionIds.Count == 0
+            || request.ActionIds.Count > EllaiDecisionValidator.MaxPlanActions)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "The Ellai approval selection is invalid.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var review = dialogs.Get(requestId);
+        if (review is null
+            || !string.Equals(review.SessionId, sessionId, StringComparison.Ordinal)
+            || review.State != EllaiApprovalDialogState.AwaitingApproval)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "The approval review is stale, superseded or already closed.");
+        }
+
+        var receipts = await approvals.ApproveReviewedAsync(
+            review, request.ActionIds, now, cancellationToken: cancellationToken);
+        if (receipts is null)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status422UnprocessableEntity,
+                title: "The selection does not match the reviewed exact plan.");
+        }
+
+        dialogs.Resolve(requestId, approved: true, now);
+        journals.Append(sessionId, "approval-resolved", requestId, "Approved", now);
+        return Results.Json(receipts, statusCode: StatusCodes.Status200OK);
+    }
 }
 
 /// <summary>Cancel request carrying the officer-observed expected version.</summary>
@@ -391,13 +461,13 @@ public sealed record CancelEllaiSessionApiRequest(long ExpectedSessionVersion);
 
 /// <summary>Review registration for a validated pending plan: binds the
 /// dialog instance to one server-tracked review (duplicate ids focus it).
-/// Actions are safe display rows; approval still binds hash and version.</summary>
+/// Display rows derive from the exact proposals; approval binds them.</summary>
 public sealed record RegisterApprovalReviewApiRequest(
     string SessionId,
     string RequestId,
     string PlanHash,
     int PlanVersion,
-    IReadOnlyList<EllaiApprovalActionDescriptor>? Actions = null);
+    IReadOnlyList<AdminActionProposal>? Proposals = null);
 
 /// <summary>Human edit of a plan under review: supersedes the old binding
 /// and opens the revised exact version for fresh review.</summary>
@@ -406,7 +476,14 @@ public sealed record EditApprovalReviewApiRequest(
     string NewRequestId,
     string NewPlanHash,
     int NewPlanVersion,
-    IReadOnlyList<EllaiApprovalActionDescriptor>? Actions = null);
+    IReadOnlyList<AdminActionProposal>? Proposals = null);
+
+/// <summary>Human selection from the open dialog: the stable action ids the
+/// user explicitly approved. The server resolves them against the reviewed
+/// exact proposals; unknown ids reject the batch.</summary>
+public sealed record ApproveSelectedApiRequest(
+    string SessionId,
+    IReadOnlyList<string> ActionIds);
 
 /// <summary>Exact-approval submission: the approved fields must match the
 /// proposed plan exactly or the service returns null (mapped to 422).

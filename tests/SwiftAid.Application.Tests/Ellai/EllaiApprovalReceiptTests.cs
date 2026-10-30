@@ -79,6 +79,53 @@ public sealed class EllaiApprovalReceiptTests
     }
 
     [Fact]
+    public async Task ApproveReviewedBindsSelectionToExactProposals()
+    {
+        var service = Service();
+        var coordinator = new EllaiApprovalDialogCoordinator();
+        var now = DateTimeOffset.UtcNow;
+        var proposals = new[]
+        {
+            Proposal(),
+            new AdminActionProposal(
+                "queue-reminder", AdminActionKind.EnqueueInternalReminder,
+                new EvidenceRef("queue", "q1", "v3", null, "e1"),
+                null, null,
+                new[] { new EvidenceRef("queue", "q1", "v3", null, "e1") },
+                "One obligation needs a nudge."),
+        };
+        var (review, _) = coordinator.Register(
+            "s-1", "req-1", "hash-1", 1, now, EllaiApprovalService.ApprovalLifetime, proposals);
+        var selected = review.Actions.Take(1).Select(a => a.ActionId).ToList();
+
+        var receipts = await service.ApproveReviewedAsync(review, selected, now);
+
+        Assert.NotNull(receipts);
+        var receipt = Assert.Single(receipts);
+        Assert.Equal(
+            EllaiApprovedActionService.ComputeActionId("hash-1", 1, "review-overdue"),
+            receipt.ActionId);
+        Assert.Equal("officer-1", receipt.ApprovedRecipient);
+        Assert.Equal(
+            new DateTimeOffset(2026, 11, 1, 0, 0, 0, TimeSpan.Zero),
+            receipt.ApprovedDueAtUtc);
+    }
+
+    [Fact]
+    public async Task ApproveReviewedRejectsUnknownSelection()
+    {
+        var service = Service();
+        var coordinator = new EllaiApprovalDialogCoordinator();
+        var now = DateTimeOffset.UtcNow;
+        var (review, _) = coordinator.Register(
+            "s-1", "req-1", "hash-1", 1, now, EllaiApprovalService.ApprovalLifetime,
+            new[] { Proposal() });
+
+        Assert.Null(await service.ApproveReviewedAsync(review, new[] { "act-unknown" }, now));
+        Assert.Null(await service.ApproveReviewedAsync(review, Array.Empty<string>(), now));
+    }
+
+    [Fact]
     public async Task ReceiptsListBySession()
     {
         var service = Service();

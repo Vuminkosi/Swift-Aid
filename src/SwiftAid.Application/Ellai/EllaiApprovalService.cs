@@ -179,4 +179,52 @@ public sealed class EllaiApprovalService(
         string receiptId, EllaiReceiptStatus status, DateTimeOffset now,
         CancellationToken cancellationToken = default) =>
         receipts.MarkStatusAsync(receiptId, status, now, cancellationToken);
+
+    /// <summary>Approves the human-selected actions of an open reviewed plan.
+    /// Each selection resolves against the exact reviewed proposals by stable
+    /// action id and submits with the proposal's own recipient and due time,
+    /// so approval can never drift from what the dialog showed. Unknown ids
+    /// or any exact-match failure reject the whole batch.</summary>
+    public async Task<IReadOnlyList<EllaiReceipt>?> ApproveReviewedAsync(
+        EllaiApprovalDialogRequest review,
+        IReadOnlyList<string> actionIds,
+        DateTimeOffset now,
+        string policyHash = "",
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(review);
+        ArgumentNullException.ThrowIfNull(actionIds);
+        if (actionIds.Count == 0)
+        {
+            return null;
+        }
+
+        var receipts = new List<EllaiReceipt>();
+        foreach (var actionId in actionIds.Distinct(StringComparer.Ordinal))
+        {
+            var proposal = review.Proposals.FirstOrDefault(candidate =>
+                string.Equals(
+                    EllaiApprovedActionService.ComputeActionId(
+                        review.PlanHash, review.PlanVersion, candidate.ProposalLabel),
+                    actionId, StringComparison.Ordinal));
+            if (proposal is null)
+            {
+                return null;
+            }
+
+            var receipt = await SubmitApprovalAsync(
+                review.SessionId, review.PlanHash, review.PlanVersion, proposal,
+                review.PlanHash, review.PlanVersion,
+                proposal.RecipientCandidateId, proposal.HumanSuppliedDueAtUtc,
+                now, policyHash, cancellationToken).ConfigureAwait(false);
+            if (receipt is null)
+            {
+                return null;
+            }
+
+            receipts.Add(receipt);
+        }
+
+        return receipts;
+    }
 }
