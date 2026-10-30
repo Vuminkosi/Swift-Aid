@@ -82,7 +82,27 @@ public sealed class IntakePublicMetadataProvider : IIntakePublicMetadataProvider
         UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow
     };
 
-    private sealed record CountryCatalogueSnapshot(string Version, List<CountryRow> Countries);
+    // Binds every member of the reviewed catalogue file: version and country
+    // rows for behavior, provenance members for audit. UnmappedMemberHandling
+    // stays Disallow so an unexpected catalogue shape still fails closed.
+    private sealed record CountryCatalogueSnapshot(
+        string Version,
+        string SourceUrl,
+        string RetrievedOn,
+        string SourceTable,
+        int SourceRowCount,
+        string Coverage,
+        string SourceHtmlSha256,
+        List<CountryRow> Countries,
+        bool Iso3166Alpha2CoverageComplete,
+        List<string> KnownMissingIsoAlpha2Codes);
 
-    private sealed record CountryRow(string Code, string Label);
+    private sealed record CountryRow(
+        string Code,
+        string Label,
+        string M49Code,
+        string IsoAlpha3,
+        string Region,
+        string Subregion,
+        string IntermediateRegion);
 }

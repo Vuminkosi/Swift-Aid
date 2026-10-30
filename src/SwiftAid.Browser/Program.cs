@@ -17,6 +17,7 @@ builder.Services.AddScoped(_ => new HttpClient
 builder.Services.AddScoped<IPublicIntakeMetadataClient, BrowserPublicIntakeMetadataClient>();
 builder.Services.AddScoped<IPublicIntakeProcessingPolicyClient, BrowserPublicIntakeProcessingPolicyClient>();
 builder.Services.AddScoped<IPublicIntakeSubmissionClient, BrowserPublicIntakeSubmissionClient>();
+builder.Services.AddScoped<SwiftAid.Client.Presentation.IGeoLookupClient, BrowserGeoLookupClient>();
 builder.Services.AddScoped<IGuestIntakeTransport>(serviceProvider =>
 {
     var httpClient = serviceProvider.GetRequiredService<HttpClient>();

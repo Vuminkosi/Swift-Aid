@@ -5,6 +5,7 @@
 @using SwiftAid.Contracts.Intake
 @using MudBlazor
 @using SwiftAid.UI.Components.Public
+@using SwiftAid.UI.Components.Geography
 @using SwiftAid.UI.Components.Surfaces.Public
 @using SwiftAid.UI.Components.Surfaces.Shell
 @using SwiftAid.UI.Ellai.Components
@@ -14,6 +15,7 @@
 @inject ICaseQueueClient CaseQueueClient
 @inject IPublicIntakeMetadataClient IntakeMetadataClient
 @inject IPublicIntakeProcessingPolicyClient ProcessingPolicyClient
+@inject SwiftAid.Client.Presentation.IGeoLookupClient GeoLookup
 @inject IGuestSubmissionStore SubmissionStore
 @inject IGuestSubmissionCoordinator SubmissionCoordinator
 
@@ -54,7 +56,7 @@
         }
     </MobileNavigation>
     <ChildContent>
-    <MudContainer MaxWidth="MaxWidth.Large">
+    <MudContainer Style="height:97vh;" MaxWidth="MaxWidth.Medium">
         @if (_isHome)
         {
             <PublicHomeSurface IsSignedIn="false"
@@ -85,6 +87,9 @@
                 <PublicReportSurface Countries="_countries"
                                      CountryCatalogueVersion="@_countryCatalogueVersion"
                                      CountryCatalogueIsCurrent="_countryCatalogueIsCurrent"
+                                     GeoCountries="_geoCountries"
+                                     PlaceSearchFunc="SearchPlacesAsync"
+                                     PlaceChildrenFunc="GetPlaceChildrenAsync"
                                      PrivacyNoticeReference="@_privacyNoticeReference"
                                      PrivacyNoticeIsCurrent="_privacyNoticeIsCurrent"
                                      ProcessingPolicyReference="@_processingPolicyReference"
@@ -104,10 +109,10 @@
         }
         else
         {
-            <MudContainer MaxWidth="MaxWidth.Small" Class="browser-guest__not-found">
-                <SwiftAidPageHeading Eyebrow="Community support" Title="Page not found" HeadingId="guest-not-found-heading" />
-                <MudButton Href="/" Color="Color.Primary" Variant="Variant.Text"
-                           StartIcon="@Icons.Material.Filled.Home">Return home</MudButton>
+            <MudContainer  MaxWidth="MaxWidth.Small" Class="browser-guest__not-found">
+                    <SwiftAidPageHeading Eyebrow="Community support" Title="Page not found" HeadingId="guest-not-found-heading" />
+                    <MudButton Href="/" Color="Color.Primary" Variant="Variant.Text"
+                            StartIcon="@Icons.Material.Filled.Home">Return home</MudButton>
             </MudContainer>
         }
     </MudContainer>
@@ -122,6 +127,7 @@
 @code {
     private PublicReportDraft _draft = new() { CapturedAt = DateTimeOffset.Now };
     private IReadOnlyList<PublicCountryOption> _countries = [];
+    private IReadOnlyList<GeoPlaceCountry> _geoCountries = [];
     private string? _countryCatalogueVersion;
     private bool _countryCatalogueIsCurrent;
     private bool _privacyNoticeIsCurrent;
@@ -175,6 +181,10 @@
                 string.Equals(metadata.CountryCatalogueVersion, catalogue.Version, StringComparison.Ordinal))
             {
                 _countries = catalogue.Countries.Select(country => new PublicCountryOption(country.Code, country.Label)).ToArray();
+                _geoCountries = _countries
+                    .Where(country => GeoRegistryCoverage.CountryCodes.Contains(country.Code))
+                    .Select(country => new GeoPlaceCountry(country.Code, country.Name))
+                    .ToList();
                 _countryCatalogueVersion = catalogue.Version;
                 _countryCatalogueIsCurrent = _countries.Count > 0 &&
                     metadataResult.Metadata.IsAvailable && countriesResult.Metadata.IsAvailable;
@@ -203,6 +213,7 @@
         catch (Exception)
         {
             _countries = [];
+            _geoCountries = [];
             _countryCatalogueVersion = null;
             _countryCatalogueIsCurrent = false;
             _privacyNoticeIsCurrent = false;
@@ -216,6 +227,39 @@
             _feedbackIsError = true;
         }
     }
+
+    private async Task<GeoPlaceQueryResult> SearchPlacesAsync(
+        string query,
+        string? countryCode,
+        CancellationToken cancellationToken)
+    {
+        var result = await GeoLookup.SearchAsync(query, countryCode, cancellationToken).ConfigureAwait(false);
+        return MapGeoLookupResult(result);
+    }
+
+    private async Task<GeoPlaceQueryResult> GetPlaceChildrenAsync(
+        string parentId,
+        CancellationToken cancellationToken)
+    {
+        var result = await GeoLookup.GetChildrenAsync(parentId, cancellationToken).ConfigureAwait(false);
+        return MapGeoLookupResult(result);
+    }
+
+    private static GeoPlaceQueryResult MapGeoLookupResult(
+        SwiftAid.Client.Presentation.UiCapabilityResult<IReadOnlyList<SwiftAid.Client.Presentation.GeoLookupOption>> result) =>
+        result.Code == SwiftAid.Client.Presentation.UiCapabilityResultCode.Success && result.Value is { } options
+            ? new GeoPlaceQueryResult(true, options.Select(ToPlaceOption).ToList(), null)
+            : new GeoPlaceQueryResult(false, [], result.Message ?? "Place search is temporarily unavailable.");
+
+    private static GeoPlaceOption ToPlaceOption(SwiftAid.Client.Presentation.GeoLookupOption option) => new(
+        option.Id,
+        option.Name,
+        option.Kind.ToString(),
+        option.CountryCode,
+        option.CountryName,
+        option.Ancestry,
+        option.HasChildren,
+        option.Ancestors.Select(ancestor => new GeoPlaceAncestor(ancestor.Id, ancestor.Name, ancestor.Kind.ToString())).ToList());
 
     private async Task SaveDraftAsync(PublicReportSaveRequest request)
     {

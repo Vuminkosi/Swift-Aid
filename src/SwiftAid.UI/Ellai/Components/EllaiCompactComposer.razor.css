@@ -1,3 +1,29 @@
+/* Chat-bubble shell anchoring the composer to its MudFabMenu activator:
+   distinct surface background, subtle border, and a tail notch pointing
+   toward the launcher. Palette variables keep light/dark themes intact. */
+.ellai-composer {
+    position: relative;
+    background: var(--sa-surface, var(--mud-palette-surface));
+    border: 1px solid var(--sa-border-subtle, rgba(0, 0, 0, 0.12));
+    border-radius: var(--sa-card-radius, 12px);
+    box-shadow: var(--sa-card-shadow, 0 4px 16px rgba(0, 0, 0, 0.12));
+    padding: 0.75rem;
+}
+
+.ellai-composer::after {
+    content: "";
+    position: absolute;
+    inset-inline-end: 1.5rem;
+    inset-block-end: -0.5rem;
+    inline-size: 1rem;
+    block-size: 1rem;
+    background: inherit;
+    border-inline-end: 1px solid var(--sa-border-subtle, rgba(0, 0, 0, 0.12));
+    border-block-end: 1px solid var(--sa-border-subtle, rgba(0, 0, 0, 0.12));
+    transform: skewX(-30deg) skewY(-30deg);
+    border-end-end-radius: 0.25rem;
+}
+
 .ellai-composer__field-wrap {
     position: relative;
     flex: 1 1 auto;

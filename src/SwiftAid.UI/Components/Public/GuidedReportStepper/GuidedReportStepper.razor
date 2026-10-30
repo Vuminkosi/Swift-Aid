@@ -235,21 +235,12 @@
                 {
                     <MudText Typo="Typo.subtitle2">Reported place names</MudText>
                     <div class="guided-report__grid">
-                        <MudTextField T="string" Label="Region" Variant="Variant.Outlined" @bind-Value="Draft.Region" For="@(() => Draft.Region)" />
-                        <MudSelect T="PresenceState" Label="Region certainty" Variant="Variant.Outlined" @bind-Value="Draft.RegionPresence">
-                            <MudSelectItem Value="PresenceState.Unknown">Unknown</MudSelectItem>
-                            <MudSelectItem Value="PresenceState.Known">Known</MudSelectItem>
-                        </MudSelect>
-                        <MudTextField T="string" Label="Area or district" Variant="Variant.Outlined" @bind-Value="Draft.Area" For="@(() => Draft.Area)" />
-                        <MudSelect T="PresenceState" Label="Area certainty" Variant="Variant.Outlined" @bind-Value="Draft.AreaPresence">
-                            <MudSelectItem Value="PresenceState.Unknown">Unknown</MudSelectItem>
-                            <MudSelectItem Value="PresenceState.Known">Known</MudSelectItem>
-                        </MudSelect>
-                        <MudTextField T="string" Label="Locality" Variant="Variant.Outlined" @bind-Value="Draft.Locality" For="@(() => Draft.Locality)" />
-                        <MudSelect T="PresenceState" Label="Locality certainty" Variant="Variant.Outlined" @bind-Value="Draft.LocalityPresence">
-                            <MudSelectItem Value="PresenceState.Unknown">Unknown</MudSelectItem>
-                            <MudSelectItem Value="PresenceState.Known">Known</MudSelectItem>
-                        </MudSelect>
+                        <MudTextField T="string" Label="Region" Variant="Variant.Outlined" HelperText="Leave blank when unknown."
+                                      Value="Draft.Region" ValueChanged="RegionChangedAsync" For="@(() => Draft.Region)" />
+                        <MudTextField T="string" Label="Area or district" Variant="Variant.Outlined" HelperText="Leave blank when unknown."
+                                      Value="Draft.Area" ValueChanged="AreaChangedAsync" For="@(() => Draft.Area)" />
+                        <MudTextField T="string" Label="Locality" Variant="Variant.Outlined" HelperText="Leave blank when unknown."
+                                      Value="Draft.Locality" ValueChanged="LocalityChangedAsync" For="@(() => Draft.Locality)" />
                     </div>
                 }
                 <MudText Typo="Typo.caption">Leave uncertain place names unknown. No device location is collected by this form.</MudText>
@@ -830,6 +821,35 @@
         GeoPlaceDraftMapper.ClearSubCountryPlace(Draft);
         _showManualPlaces = false;
         _editContext.NotifyFieldChanged(new FieldIdentifier(Draft, nameof(Draft.CountryCode)));
+        return Task.CompletedTask;
+    }
+
+    // Manual place names carry no certainty selector: a non-blank entry is
+    // reported (Known), a blank one is unknown and drops any registry id.
+    private Task RegionChangedAsync(string? value)
+    {
+        Draft.Region = value;
+        Draft.RegionPresence = string.IsNullOrWhiteSpace(value) ? PresenceState.Unknown : PresenceState.Known;
+        if (string.IsNullOrWhiteSpace(value)) Draft.RegionId = null;
+        NotifyPlaceFieldsChanged();
+        return Task.CompletedTask;
+    }
+
+    private Task AreaChangedAsync(string? value)
+    {
+        Draft.Area = value;
+        Draft.AreaPresence = string.IsNullOrWhiteSpace(value) ? PresenceState.Unknown : PresenceState.Known;
+        if (string.IsNullOrWhiteSpace(value)) Draft.AreaId = null;
+        NotifyPlaceFieldsChanged();
+        return Task.CompletedTask;
+    }
+
+    private Task LocalityChangedAsync(string? value)
+    {
+        Draft.Locality = value;
+        Draft.LocalityPresence = string.IsNullOrWhiteSpace(value) ? PresenceState.Unknown : PresenceState.Known;
+        if (string.IsNullOrWhiteSpace(value)) Draft.LocalityId = null;
+        NotifyPlaceFieldsChanged();
         return Task.CompletedTask;
     }
 

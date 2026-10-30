@@ -6,6 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\SwiftAid.Client\SwiftAid.Client.csproj" />
     <ProjectReference Include="..\SwiftAid.Contracts\SwiftAid.Contracts.csproj" />
     <ProjectReference Include="..\SwiftAid.GuestIntake\SwiftAid.GuestIntake.csproj" />
     <ProjectReference Include="..\SwiftAid.UI\SwiftAid.UI.csproj" />
