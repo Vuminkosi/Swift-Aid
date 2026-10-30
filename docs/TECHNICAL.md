@@ -144,7 +144,7 @@ the case database.
 ## 7. Verification map
 
 Run `dotnet test tests/SwiftAid.Application.Tests --filter
-FullyQualifiedName~Ellai` (unit/contract, ~132 passing). PostgreSQL
+FullyQualifiedName~Ellai` (unit/contract, ~136 passing). PostgreSQL
 integration tests (`tests/SwiftAid.Integration.Tests`, `EllaiPostgresTests`)
 run only with `SWIFTAID_RUN_SQLAUTH_FIXTURES=1` and the approved disposable
 loopback connection (127.0.0.1:32703); otherwise they skip. Provider, web
