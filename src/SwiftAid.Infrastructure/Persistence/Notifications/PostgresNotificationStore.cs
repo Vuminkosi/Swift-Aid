@@ -180,7 +180,10 @@ public sealed class PostgresNotificationStore(
                 caseRow.CaseId == item.ResourceId &&
                 caseRow.AccountableOwnerActorId == actorId &&
                 caseRow.Workflow != SwiftAid.Domain.Cases.CaseWorkflow.Resolved &&
-                dbContext.ManagedCaseRegions.Any(region => region.CaseId == caseRow.CaseId) &&
+                // Region coverage is intentionally not part of the page prefilter. Like the
+                // shared access policy, a directly assigned owner bypasses the region check
+                // inside the same organization/workspace/country/sector/sensitivity grant
+                // scope enforced below; per-item lease rechecks still apply the exact policy.
                 dbContext.Organizations.Any(organization =>
                     organization.OrganizationId == caseRow.OrganizationId &&
                     organization.Status == PersistentResourceStatus.Active) &&
@@ -207,12 +210,7 @@ public sealed class PostgresNotificationStore(
                         grant.ExpiresAtUtc > utcNow &&
                         dbContext.AccessGrantOperations.Any(operation =>
                             operation.GrantGroupId == grant.GrantGroupId &&
-                            operation.Operation == CaseOperation.ReadCase) &&
-                        !dbContext.ManagedCaseRegions.Any(caseRegion =>
-                            caseRegion.CaseId == caseRow.CaseId &&
-                            !dbContext.AccessGrantRegions.Any(grantRegion =>
-                                grantRegion.GrantGroupId == grant.GrantGroupId &&
-                                grantRegion.RegionId == caseRegion.RegionId))))));
+                            operation.Operation == CaseOperation.ReadCase)))));
     }
 
     private static async ValueTask<NotificationCounts> CountVisibleItemsAsync(

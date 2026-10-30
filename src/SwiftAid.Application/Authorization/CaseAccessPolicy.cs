@@ -209,18 +209,20 @@ public sealed class CaseAccessPolicy : ICaseAccessPolicy
         var explicitlyAssignedOrShared =
             group.AssignedCaseIds.Contains(resource.CaseId) || group.SharedCaseIds.Contains(resource.CaseId);
 
-        // Assignment is not an override for jurisdiction: all resource dimensions
-        // remain part of the authorization intersection, including for direct shares.
+        if (explicitlyAssignedOrShared)
+        {
+            return (null, matched + 1);
+        }
+
+        // Only jurisdiction-wide access must cover every case region. A direct
+        // assignment or explicit share bypasses the region check alone; the
+        // organization/workspace/country/sector/sensitivity intersection above
+        // still applies inside the same scalar group.
         var coversEveryRegion = resource.RegionIds.Count > 0 &&
             resource.RegionIds.All(group.RegionIds.Contains);
         if (!coversEveryRegion)
         {
             return (AccessDecisionCode.RegionOutsideGrant, matched);
-        }
-
-        if (explicitlyAssignedOrShared)
-        {
-            return (null, matched + 1);
         }
 
         if (!group.CanAccessJurisdictionalCases)

@@ -43,12 +43,23 @@ public sealed class NotificationResourceAuthorizer : INotificationResourceAuthor
             return false;
         }
 
-        await using var lease = await _unitOfWork.BeginCaseAsync(
-            actor,
-            resourceId,
-            ImmutableArray<string>.Empty,
-            CaseLeaseMode.Read,
-            cancellationToken).ConfigureAwait(false);
+        ICaseCommandLease? lease;
+        try
+        {
+            lease = await _unitOfWork.BeginCaseAsync(
+                actor,
+                resourceId,
+                ImmutableArray<string>.Empty,
+                CaseLeaseMode.Read,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (KeyNotFoundException)
+        {
+            // A missing case resource is a denial, not an error, for notification authorization.
+            return false;
+        }
+
+        await using var _ = lease;
 
         var workflow = await _dbContext.ManagedCases
             .AsNoTracking()

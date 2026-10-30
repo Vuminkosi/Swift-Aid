@@ -463,6 +463,14 @@ public sealed class CaseCommandProcessingPostgresTests
             .Where(entity => entity.CaseId == fixture.CaseId)
             .Select(entity => entity.EventId)
             .ToArrayAsync().ConfigureAwait(false);
+        var notificationIds = await dbContext.NotificationItems.AsNoTracking()
+            .Where(entity => entity.ResourceId == fixture.CaseId)
+            .Select(entity => entity.NotificationId)
+            .ToArrayAsync().ConfigureAwait(false);
+        await dbContext.NotificationDeliveryOutbox.Where(entity => notificationIds.Contains(entity.NotificationId))
+            .ExecuteDeleteAsync().ConfigureAwait(false);
+        await dbContext.NotificationItems.Where(entity => entity.ResourceId == fixture.CaseId)
+            .ExecuteDeleteAsync().ConfigureAwait(false);
         await dbContext.DomainOutbox.Where(entity => eventIds.Contains(entity.EventId))
             .ExecuteDeleteAsync().ConfigureAwait(false);
         await dbContext.CaseEvents.Where(entity => entity.CaseId == fixture.CaseId)
