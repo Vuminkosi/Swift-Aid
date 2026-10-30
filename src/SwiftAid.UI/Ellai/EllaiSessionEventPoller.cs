@@ -149,6 +149,29 @@ public sealed class EllaiReviewHttpClient(HttpClient http) : IEllaiReviewClient
             return false;
         }
     }
+
+    public async Task<bool> ReportUiObservationAsync(
+        string sessionId, UiObservationReport report, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentNullException.ThrowIfNull(report);
+        try
+        {
+            using var response = await _http.PostAsJsonAsync(
+                $"api/v1/ellai/sessions/{Uri.EscapeDataString(sessionId)}/ui-observations",
+                new { sessionId, report.ViewInstanceId, report.ContextStamp, report.Platform, report.MountedControlIds },
+                Json, cancellationToken).ConfigureAwait(false);
+            return response.IsSuccessStatusCode;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
 }
 
 /// <summary>Client-side subscription over the session event journal. Tracks

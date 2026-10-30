@@ -31,10 +31,19 @@ public static class EllaiToolNames
     /// by exact section id, with provenance.</summary>
     public const string DocsGet = "ellai_docs_get";
 
+    /// <summary>Permission-filtered semantic catalogue slice: registered
+    /// control descriptors, objectives and proof references for one feature.</summary>
+    public const string UiCatalogue = "ellai_ui_catalogue";
+
+    /// <summary>Live UI observation through the client-posted mounted-control
+    /// channel: Ready only for entitled controls the current view reports
+    /// mounted. Marked ClientObservation with server-stamped freshness.</summary>
+    public const string UiObserve = "ellai_ui_observe";
+
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
     {
         State, Evidence, Topic, Capabilities, Receipts, ProductFacts, Now,
-        DocsSearch, DocsGet
+        DocsSearch, DocsGet, UiCatalogue, UiObserve
     };
 }
 
@@ -118,6 +127,9 @@ public sealed class EllaiToolBroker
     private readonly ICaseQueueQuery? _queue;
     private readonly IEllaiApprovalStore? _receipts;
     private readonly EllaiTopicService? _topics;
+    private readonly EllaiUiRegistry? _uiRegistry;
+    private readonly IEllaiUiDiscoveryService? _uiDiscovery;
+    private readonly IEllaiUiObservationStore? _uiObservations;
 
     /// <summary>Consent infrastructure is mandatory: a missing service fails
     /// closed instead of silently bypassing the ReasoningText grant check.
@@ -125,11 +137,15 @@ public sealed class EllaiToolBroker
     /// unavailable outcome while it is unconfigured. The domain queue, topic
     /// ledger and receipt authority are optional: live projections report
     /// unavailable without them, and no Ellai-only unrestricted query is
-    /// ever introduced.</summary>
+    /// ever introduced. The UI registry, discovery service and observation
+    /// channel are optional the same way: catalogue/observe report
+    /// unavailable without them, never fabricated controls.</summary>
     public EllaiToolBroker(
         EllaiPolicyService policy, EllaiConsentService consent,
         EllaiTechnicalDocs? docs = null, ICaseQueueQuery? queue = null,
-        IEllaiApprovalStore? receipts = null, EllaiTopicService? topics = null)
+        IEllaiApprovalStore? receipts = null, EllaiTopicService? topics = null,
+        EllaiUiRegistry? uiRegistry = null, IEllaiUiDiscoveryService? uiDiscovery = null,
+        IEllaiUiObservationStore? uiObservations = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _consent = consent ?? throw new ArgumentNullException(nameof(consent));
@@ -137,6 +153,9 @@ public sealed class EllaiToolBroker
         _queue = queue;
         _receipts = receipts;
         _topics = topics;
+        _uiRegistry = uiRegistry;
+        _uiDiscovery = uiDiscovery;
+        _uiObservations = uiObservations;
     }
 
     public async Task<EllaiToolResult> InvokeAsync(
@@ -208,6 +227,16 @@ public sealed class EllaiToolBroker
         if (string.Equals(canonical, EllaiToolNames.Topic, StringComparison.Ordinal))
         {
             return Bound(await ReadTopicsAsync(context, request, ct).ConfigureAwait(false));
+        }
+
+        if (string.Equals(canonical, EllaiToolNames.UiCatalogue, StringComparison.Ordinal))
+        {
+            return Bound(ReadUiCatalogue(context, request));
+        }
+
+        if (string.Equals(canonical, EllaiToolNames.UiObserve, StringComparison.Ordinal))
+        {
+            return Bound(await ReadUiObserveAsync(context, request, ct).ConfigureAwait(false));
         }
 
         return Bound(canonical switch
@@ -423,6 +452,145 @@ public sealed class EllaiToolBroker
             + string.Join("\n", lines);
         return new EllaiToolResult(request.ToolName, true, null, evidence,
             summary, matches.Count, false, EllaiToolReasonCodes.Ok);
+    }
+
+    /// <summary>Live <c>ellai_ui_catalogue</c> slice from the registered
+    /// semantic registry: only descriptors the session feature is entitled
+    /// to, bounded, without resolved URLs/selectors. Entitlement is the
+    /// session feature plus an empty capability set — descriptors requiring
+    /// capabilities stay excluded until a scope-capability source exists
+    /// (fail-closed). An empty registry reads as an authorized empty.</summary>
+    private EllaiToolResult ReadUiCatalogue(EllaiToolContext context, EllaiToolRequest request)
+    {
+        if (_uiRegistry is null)
+        {
+            return Deny(request.ToolName,
+                "The UI catalogue is not available for this session.",
+                EllaiToolReasonCodes.Unavailable);
+        }
+
+        var limit = MaxItems;
+        if (request.Arguments.TryGetValue("limit", out var rawLimit)
+            && (!int.TryParse(rawLimit, out limit) || limit < 1 || limit > MaxItems))
+        {
+            return Deny(request.ToolName,
+                $"limit must be an integer from 1 to {MaxItems}.",
+                EllaiToolReasonCodes.InvalidArguments);
+        }
+
+        var goalTags = request.Arguments.TryGetValue("goal", out var goal) && !string.IsNullOrWhiteSpace(goal)
+            ? new[] { goal.Trim() }
+            : Array.Empty<string>();
+        var snapshot = _uiRegistry.GetSnapshot(
+            new UiRegistryQuery(context.FeatureId, goalTags, limit),
+            new HashSet<string>(StringComparer.Ordinal) { context.FeatureId },
+            new HashSet<string>(StringComparer.Ordinal));
+        var items = snapshot.Descriptors.Take(limit).ToList();
+        if (items.Count == 0)
+        {
+            return Allow(request.ToolName, "No entitled controls are registered for this feature.", 0, false);
+        }
+
+        var lines = items.Select(d =>
+            $"control {d.ControlId} · {d.ElementKind} · v{d.DescriptorVersion} · risk {d.RiskClass}" +
+            (d.ObjectiveId is null ? string.Empty : $" · objective {d.ObjectiveId}"));
+        var evidence = items.Select(d => new EvidenceRef(
+            "UiCatalogue", d.ControlId, d.DescriptorVersion.ToString(
+                System.Globalization.CultureInfo.InvariantCulture), null, d.ControlId)).ToList();
+        var summary = $"Semantic catalogue {snapshot.CatalogueVersion} " +
+            $"contract {snapshot.UiContractVersion}: {items.Count} entitled control(s)" +
+            (snapshot.Truncated ? " (truncated)." : ".") + "\n" + string.Join("\n", lines);
+        return new EllaiToolResult(request.ToolName, true, null, evidence,
+            summary, items.Count, snapshot.Truncated, EllaiToolReasonCodes.Ok);
+    }
+
+    /// <summary>Live <c>ellai_ui_observe</c> through the client-posted
+    /// mounted-control channel. Ready only for entitled controls the latest
+    /// session report shows mounted; everything else snapshot-entitled is
+    /// not assumed. Unknown control references fail closed; a missing
+    /// report is an authorized empty, never a fabricated view.</summary>
+    private async Task<EllaiToolResult> ReadUiObserveAsync(
+        EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
+    {
+        if (_uiRegistry is null || _uiDiscovery is null || _uiObservations is null)
+        {
+            return Deny(request.ToolName,
+                "Live UI observation is not available for this session.",
+                EllaiToolReasonCodes.Unavailable);
+        }
+
+        if (!request.Arguments.TryGetValue("controls", out var rawControls)
+            || string.IsNullOrWhiteSpace(rawControls))
+        {
+            return Deny(request.ToolName,
+                "A bounded controls argument (comma-separated control references) is required.",
+                EllaiToolReasonCodes.InvalidArguments);
+        }
+
+        var requested = rawControls.Split(',')
+            .Select(id => id.Trim())
+            .Where(id => id.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .Take(MaxItems + 1)
+            .ToList();
+        if (requested.Count == 0 || requested.Count > MaxItems)
+        {
+            return Deny(request.ToolName,
+                $"controls must name from 1 to {MaxItems} control references.",
+                EllaiToolReasonCodes.InvalidArguments);
+        }
+
+        if (!request.Arguments.TryGetValue("view", out var view) || string.IsNullOrWhiteSpace(view))
+        {
+            return Deny(request.ToolName,
+                "A view argument (current view/instance context) is required.",
+                EllaiToolReasonCodes.InvalidArguments);
+        }
+
+        var report = await _uiObservations.LatestAsync(context.SessionId, ct).ConfigureAwait(false);
+        if (report is null)
+        {
+            return Allow(request.ToolName,
+                "No client UI observation has been reported for this session.", 0, false);
+        }
+
+        var goalTags = request.Arguments.TryGetValue("context", out var goalContext)
+            && !string.IsNullOrWhiteSpace(goalContext)
+            ? goalContext.Split(',').Select(t => t.Trim()).Where(t => t.Length > 0).ToList()
+            : new List<string>();
+        var snapshot = _uiRegistry.GetSnapshot(
+            new UiRegistryQuery(context.FeatureId, goalTags, MaxItems),
+            new HashSet<string>(StringComparer.Ordinal) { context.FeatureId },
+            new HashSet<string>(StringComparer.Ordinal));
+        var eligible = snapshot.Descriptors.ToDictionary(d => d.ControlId, StringComparer.Ordinal);
+        var unknown = requested.Where(id => !eligible.ContainsKey(id)).ToList();
+        if (unknown.Count > 0)
+        {
+            return Deny(request.ToolName,
+                $"Unknown or ineligible control reference(s): {string.Join(", ", unknown)}.",
+                EllaiToolReasonCodes.InvalidArguments);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var mounted = new HashSet<string>(report.MountedControlIds, StringComparer.Ordinal);
+        var observations = _uiDiscovery.Observe(
+            snapshot, mounted, report.ViewInstanceId, report.ContextStamp, report.Platform, now);
+        var byId = observations.ToDictionary(o => o.ControlId, StringComparer.Ordinal);
+        var ordered = requested.Select(id => byId[id]).ToList();
+        var age = now - report.ReceivedAtUtc;
+        var lines = ordered.Select(o =>
+            $"control {o.ControlId} · {o.State} · view {o.ViewInstanceId} · {o.Platform}");
+        var evidence = ordered.Select(o => new EvidenceRef(
+            "UiObservation", o.ControlId, o.State.ToString(), null, o.ControlId)).ToList();
+        var header = $"ClientObservation: {ordered.Count} control(s) from view " +
+            $"{report.ViewInstanceId} ({report.ContextStamp}) reported " +
+            $"{Math.Max(0, (long)age.TotalSeconds)}s ago on {report.Platform}." +
+            (string.Equals(report.ViewInstanceId, view.Trim(), StringComparison.Ordinal)
+                ? string.Empty
+                : $" Requested view '{view.Trim()}' differs from the latest report.");
+        return new EllaiToolResult(request.ToolName, true, null, evidence,
+            header + "\n" + string.Join("\n", lines),
+            ordered.Count, false, EllaiToolReasonCodes.Ok);
     }
 
     private EllaiToolResult SearchDocs(EllaiToolRequest request)

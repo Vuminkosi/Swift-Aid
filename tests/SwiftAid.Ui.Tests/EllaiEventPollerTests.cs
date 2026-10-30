@@ -40,6 +40,10 @@ public sealed class EllaiEventPollerTests
         public Task<bool> RejectReviewAsync(
             string sessionId, string requestId, CancellationToken cancellationToken) =>
             Task.FromResult(false);
+
+        public Task<bool> ReportUiObservationAsync(
+            string sessionId, UiObservationReport report, CancellationToken cancellationToken) =>
+            Task.FromResult(false);
     }
 
     private sealed class FakeHandler : HttpMessageHandler
@@ -271,6 +275,25 @@ public sealed class EllaiEventPollerTests
         Assert.Equal(EllaiMode.Ask, view.Mode);
         Assert.Equal("POST", handler.LastMethod);
         Assert.Contains("api/v1/ellai/sessions", handler.LastPath, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HttpClientReportsUiObservation()
+    {
+        var handler = new FakeHandler("true");
+        var client = new EllaiReviewHttpClient(new HttpClient(handler)
+        {
+            BaseAddress = new Uri("https://loopback.test/"),
+        });
+
+        var reported = await client.ReportUiObservationAsync(
+            "s-9",
+            new UiObservationReport("view-9", "ctx-9", "web", new[] { "cases.queue" }),
+            CancellationToken.None);
+
+        Assert.True(reported);
+        Assert.Equal("POST", handler.LastMethod);
+        Assert.Contains("api/v1/ellai/sessions/s-9/ui-observations", handler.LastPath, StringComparison.Ordinal);
     }
 
     [Fact]

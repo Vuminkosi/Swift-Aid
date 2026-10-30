@@ -47,6 +47,12 @@ public interface IEllaiReviewClient
 
     Task<EllaiReviewDto?> GetActiveReviewAsync(string sessionId, CancellationToken cancellationToken);
 
+    /// <summary>Posts the client's mounted-control report for the live UI
+    /// observation channel. False means unavailable: the caller keeps its
+    /// last report and retries; the server never invents observations.</summary>
+    Task<bool> ReportUiObservationAsync(
+        string sessionId, UiObservationReport report, CancellationToken cancellationToken);
+
     Task<IReadOnlyList<EllaiApprovedReceiptDto>?> ApproveSelectedAsync(
         string sessionId, string requestId, IReadOnlyList<string> actionIds,
         CancellationToken cancellationToken);

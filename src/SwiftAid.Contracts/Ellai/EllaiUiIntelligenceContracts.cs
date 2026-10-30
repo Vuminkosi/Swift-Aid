@@ -68,6 +68,15 @@ public sealed record UiControlDescriptor(
     string DataClassification,
     bool HumanConfirmationRequired);
 
+/// <summary>Client-posted mounted-control report: the live UI observation
+/// channel input. The server stamps receipt time; freshness derives from
+/// that stamp, never from client claims.</summary>
+public sealed record UiObservationReport(
+    string ViewInstanceId,
+    string ContextStamp,
+    string Platform,
+    IReadOnlyList<string> MountedControlIds);
+
 /// <summary>Bounded timestamped observation of a registered control.</summary>
 public sealed record UiControlObservation(
     string ControlId,

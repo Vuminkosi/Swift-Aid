@@ -115,6 +115,14 @@ public static class EllaiEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict);
+        group.MapPost("/sessions/{sessionId}/ui-observations", ReportUiObservationAsync)
+            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
+            .WithName("ReportEllaiUiObservation")
+            .Accepts<ReportUiObservationApiRequest>("application/json")
+            .Produces<bool>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized);
         group.MapPost("/sessions/{sessionId}/cancel", CancelAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
@@ -465,6 +473,45 @@ public static class EllaiEndpoints
         return Results.Json(receipts, statusCode: StatusCodes.Status200OK);
     }
 
+    private static Task<IResult> ReportUiObservationAsync(
+        string sessionId,
+        ReportUiObservationApiRequest? request,
+        IEllaiUiObservationStore observations,
+        CancellationToken cancellationToken)
+    {
+        if (request is null
+            || !string.Equals(request.SessionId, sessionId, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(request.ViewInstanceId)
+            || string.IsNullOrWhiteSpace(request.ContextStamp)
+            || string.IsNullOrWhiteSpace(request.Platform)
+            || request.MountedControlIds is null
+            || request.MountedControlIds.Count == 0
+            || request.MountedControlIds.Count > InMemoryEllaiUiObservationStore.MaxMountedControls
+            || request.MountedControlIds.Any(id =>
+                string.IsNullOrWhiteSpace(id) || id.Length > 120))
+        {
+            return Task.FromResult(Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "The Ellai UI observation report is invalid."));
+        }
+
+        return RecordUiObservationAsync(sessionId, request, observations, cancellationToken);
+    }
+
+    private static async Task<IResult> RecordUiObservationAsync(
+        string sessionId, ReportUiObservationApiRequest request,
+        IEllaiUiObservationStore observations, CancellationToken cancellationToken)
+    {
+        await observations.RecordAsync(new StoredUiObservationReport(
+            sessionId, request.ViewInstanceId.Trim(), request.ContextStamp.Trim(),
+            request.Platform.Trim(), request.MountedControlIds
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Select(id => id.Trim())
+                .ToList(),
+            DateTimeOffset.UtcNow), cancellationToken);
+        return Results.Json(true, statusCode: StatusCodes.Status200OK);
+    }
+
     private static Task<IResult> RejectReviewAsync(
         string sessionId,
         string requestId,
@@ -500,6 +547,16 @@ public static class EllaiEndpoints
 
 /// <summary>Cancel request carrying the officer-observed expected version.</summary>
 public sealed record CancelEllaiSessionApiRequest(long ExpectedSessionVersion);
+
+/// <summary>Client-posted mounted-control report for the live UI
+/// observation channel. At most 20 control ids; the server stamps receipt
+/// time and keeps only the latest report per session.</summary>
+public sealed record ReportUiObservationApiRequest(
+    string SessionId,
+    string ViewInstanceId,
+    string ContextStamp,
+    string Platform,
+    IReadOnlyList<string> MountedControlIds);
 
 /// <summary>Review registration for a validated pending plan: binds the
 /// dialog instance to one server-tracked review (duplicate ids focus it).

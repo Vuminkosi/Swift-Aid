@@ -185,6 +185,51 @@ public sealed class EllaiReviewGatewayClient(
         }
     }
 
+    public async Task<bool> ReportUiObservationAsync(
+        string sessionId, UiObservationReport report, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId) || report is null)
+        {
+            return false;
+        }
+
+        if (!await IsAuthenticatedAsync().ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        try
+        {
+            var observations = _serviceProvider.GetService<IEllaiUiObservationStore>();
+            if (observations is null
+                || string.IsNullOrWhiteSpace(report.ViewInstanceId)
+                || string.IsNullOrWhiteSpace(report.ContextStamp)
+                || string.IsNullOrWhiteSpace(report.Platform)
+                || report.MountedControlIds.Count == 0
+                || report.MountedControlIds.Count > InMemoryEllaiUiObservationStore.MaxMountedControls)
+            {
+                return false;
+            }
+
+            await observations.RecordAsync(new StoredUiObservationReport(
+                sessionId, report.ViewInstanceId.Trim(), report.ContextStamp.Trim(),
+                report.Platform.Trim(), report.MountedControlIds
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Select(id => id.Trim())
+                    .ToList(),
+                DateTimeOffset.UtcNow), cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
     private static EllaiReviewDto MapReview(EllaiApprovalDialogRequest review) => new(
         review.RequestId, review.SessionId, review.PlanHash, review.PlanVersion,
         review.State.ToString(), review.CreatedAtUtc, review.ExpiresAtUtc, review.Actions);
