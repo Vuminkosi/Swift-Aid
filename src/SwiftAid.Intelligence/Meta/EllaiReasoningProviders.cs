@@ -221,6 +221,12 @@ public sealed class EllaiReasoningRouter(
 
         if (options.UsesServerlessBackend)
         {
+            if (!options.ServerlessEnabled)
+            {
+                throw new MetaConfigurationException(
+                    "The Ellai serverless lane is disabled until the Meta-hosted default is fully tested.");
+            }
+
             return serverless;
         }
 

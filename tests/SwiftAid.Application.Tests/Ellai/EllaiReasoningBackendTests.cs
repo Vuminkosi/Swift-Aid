@@ -121,6 +121,56 @@ public sealed class EllaiReasoningBackendTests
     }
 
     [Fact]
+    public void ServerlessLaneStaysDisabledWithoutExplicitOptIn()
+    {
+        var options = Bind(new Dictionary<string, string?>
+        {
+            ["Ellai_Enabled"] = "true",
+            ["Ellai__ReasoningBackend"] = "serverless",
+            ["Ellai__Reasoning__Serverless__Endpoint"] = "https://inference.example/v1",
+            ["Ellai__Reasoning__Serverless__Model"] = "open-weight-large",
+            ["Ellai__Reasoning__Serverless__ApiKey"] = "k",
+        });
+
+        Assert.False(options.ServerlessEnabled);
+        Assert.False(options.HasServerlessRoute);
+
+        using var http = new HttpClient(new StubHandler("{}"));
+        var router = new EllaiReasoningRouter(
+            options,
+            new EllaiReasoningAdapter(http, options),
+            new OllamaEllaiReasoningProvider(http, options),
+            new ServerlessEllaiReasoningProvider(http, options));
+
+        Assert.Throws<MetaConfigurationException>(() => router.Resolve());
+    }
+
+    [Fact]
+    public void ServerlessLaneOpensOnlyWithExplicitEnabledFlag()
+    {
+        var options = Bind(new Dictionary<string, string?>
+        {
+            ["Ellai_Enabled"] = "true",
+            ["Ellai__ReasoningBackend"] = "serverless",
+            ["Ellai__Reasoning__Serverless__Enabled"] = "true",
+            ["Ellai__Reasoning__Serverless__Endpoint"] = "https://inference.example/v1",
+            ["Ellai__Reasoning__Serverless__Model"] = "open-weight-large",
+            ["Ellai__Reasoning__Serverless__ApiKey"] = "k",
+        });
+
+        Assert.True(options.HasServerlessRoute);
+
+        using var http = new HttpClient(new StubHandler("{}"));
+        var router = new EllaiReasoningRouter(
+            options,
+            new EllaiReasoningAdapter(http, options),
+            new OllamaEllaiReasoningProvider(http, options),
+            new ServerlessEllaiReasoningProvider(http, options));
+
+        Assert.Equal("serverless", router.Resolve().Backend);
+    }
+
+    [Fact]
     public void RouterSelectsConfiguredLane()
     {
         var options = Bind(new Dictionary<string, string?>

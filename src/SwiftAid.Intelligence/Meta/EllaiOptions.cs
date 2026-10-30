@@ -48,6 +48,12 @@ public sealed class EllaiOptions
 
     public string ServerlessApiKey { get; init; } = string.Empty;
 
+    /// <summary>Master switch for the self-hosted/cloud-serverless lane.
+    /// Stays <c>false</c> until the Meta-hosted default is fully tested;
+    /// the router refuses the serverless lane while this is false, even
+    /// when endpoint/model/key are all present.</summary>
+    public bool ServerlessEnabled { get; init; }
+
     public bool HasReasoningRoute =>
         Enabled && !string.IsNullOrWhiteSpace(ApiKey)
         && IsHttpsUrl(ApiUrl) && !string.IsNullOrWhiteSpace(ReasoningModel);
@@ -70,7 +76,7 @@ public sealed class EllaiOptions
         UsesOllamaBackend && IsHttpUrl(OllamaEndpoint) && !string.IsNullOrWhiteSpace(OllamaModel);
 
     public bool HasServerlessRoute =>
-        UsesServerlessBackend && !string.IsNullOrWhiteSpace(ServerlessApiKey)
+        ServerlessEnabled && UsesServerlessBackend && !string.IsNullOrWhiteSpace(ServerlessApiKey)
         && IsHttpsUrl(ServerlessEndpoint) && !string.IsNullOrWhiteSpace(ServerlessModel);
 
     public static EllaiOptions Bind(Func<string, string?> get)
@@ -135,6 +141,9 @@ public sealed class EllaiOptions
             ServerlessEndpoint = Setting("Reasoning:Serverless:Endpoint", "Ellai__Reasoning__Serverless__Endpoint") ?? string.Empty,
             ServerlessModel = Setting("Reasoning:Serverless:Model", "Ellai__Reasoning__Serverless__Model") ?? string.Empty,
             ServerlessApiKey = Setting("Reasoning:Serverless:ApiKey", "Ellai__Reasoning__Serverless__ApiKey") ?? string.Empty,
+            ServerlessEnabled = string.Equals(
+                Setting("Reasoning:Serverless:Enabled", "Ellai__Reasoning__Serverless__Enabled"),
+                "true", StringComparison.OrdinalIgnoreCase),
         };
     }
 
