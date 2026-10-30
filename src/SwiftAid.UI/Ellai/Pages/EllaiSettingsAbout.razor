@@ -109,17 +109,22 @@
 
     private static string? CostCaption(EllaiPastSession session)
     {
-        var spend = session.UsageCostDollars is { } cost ? $"${cost:0.00} used" : null;
-        var tokens = session.UsageTokens is { } count ? $"{FormatTokens(count)} tokens" : null;
+        var spend = session.UsageCostDollars is { } cost ? FormatCost(cost) : null;
+        var tokens = session.UsageTokens is { } count ? FormatTokens(count) : null;
         return (spend, tokens) switch
         {
-            (not null, not null) => $"{spend} · {tokens}",
+            (not null, not null) => $"{spend} | {tokens}",
             (not null, null) => spend,
-            (null, not null) => $"unpriced usage · {tokens}",
+            (null, not null) => tokens,
             _ => null,
         };
     }
 
-    private static string FormatTokens(int tokens) =>
-        tokens >= 1000 ? $"{tokens / 1000.0:0.0}k" : tokens.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    private static string FormatCost(decimal dollars)
+    {
+        var cents = (int)decimal.Round(dollars * 100, MidpointRounding.AwayFromZero);
+        return $"${cents / 100}:{cents % 100:00}";
+    }
+
+    private static string FormatTokens(int tokens) => $"{tokens / 1000}:{tokens % 1000:000}t";
 }
