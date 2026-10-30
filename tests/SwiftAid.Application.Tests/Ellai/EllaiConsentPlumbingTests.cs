@@ -11,22 +11,22 @@ public sealed class EllaiConsentPlumbingTests
         "session-1", "epoch-1", "cases", "case-1", 4, true);
 
     [Fact]
-    public void SessionViewReportsRealGrantVersion()
+    public async Task SessionViewReportsRealGrantVersion()
     {
         var consent = new EllaiConsentService();
         var sessions = new EllaiSessionService(new InMemoryEllaiSessionStore(), consent);
-        var start = sessions.StartAsync(
+        var start = await sessions.StartAsync(
             new StartSessionRequest(EllaiMode.Ask, "c-1", "cases", null, "text", "text"),
-            CancellationToken.None).GetAwaiter().GetResult();
+            CancellationToken.None);
 
         Assert.Equal("consent/0", start.ConsentVersion);
 
         consent.Grant(start.SessionId, EllaiConsentDimension.ReasoningText,
             EllaiToolBroker.ToolReadPurpose, "synthetic", TimeSpan.FromHours(1));
-        var after = sessions.SubmitUtteranceAsync(
+        var after = await sessions.SubmitUtteranceAsync(
             new SubmitUtteranceRequest("u-1", start.SessionId, start.SessionVersion,
                 "What is overdue?", null, "typed", 1),
-            CancellationToken.None).GetAwaiter().GetResult();
+            CancellationToken.None);
 
         Assert.NotNull(after);
         Assert.Equal("consent/1", after.ConsentVersion);
@@ -78,10 +78,7 @@ public sealed class EllaiConsentPlumbingTests
             {
                 turns++;
                 return Task.FromResult(new EllaiModelTurn(
-                    Array.Empty<EllaiToolRequest>(),
-                    new EllaiDecision(2, DecisionKind.Stop, "Done.", "Done.",
-                        Array.Empty<GroundedClaim>(), Array.Empty<EllaiQuestion>(),
-                        Array.Empty<UiIntentProposal>(), null, Array.Empty<string>(), null, null)));
+                    Array.Empty<EllaiToolRequest>(), null));
             },
             _ => Array.Empty<string>(),
             CancellationToken.None,
