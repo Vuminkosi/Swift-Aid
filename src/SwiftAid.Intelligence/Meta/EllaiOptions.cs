@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace SwiftAid.Intelligence.Meta;
 
 /// <summary>Ellai provider settings, bound from the <c>Ellai</c> configuration
@@ -53,6 +55,22 @@ public sealed class EllaiOptions
     /// the router refuses the serverless lane while this is false, even
     /// when endpoint/model/key are all present.</summary>
     public bool ServerlessEnabled { get; init; }
+
+    /// <summary>Operator-funded dollar budget for everything ($70).
+    /// Global kill switch and per-envelope bound in the usage ledger.</summary>
+    public decimal SpendingCapDollars { get; init; } = 70.00m;
+
+    /// <summary>Rate per 1,000 input tokens in dollars. Zero means unpriced:
+    /// dollar caps stay inert until the operator sets real Meta plan rates.</summary>
+    public decimal PricingInputPer1KTokens { get; init; }
+
+    public decimal PricingOutputPer1KTokens { get; init; }
+
+    public decimal PricingAudioPerMinute { get; init; }
+
+    public bool HasPricing => PricingInputPer1KTokens > 0
+        || PricingOutputPer1KTokens > 0
+        || PricingAudioPerMinute > 0;
 
     public bool HasReasoningRoute =>
         Enabled && !string.IsNullOrWhiteSpace(ApiKey)
@@ -123,6 +141,15 @@ public sealed class EllaiOptions
             return First(candidates.ToArray());
         }
 
+        decimal? DecimalSetting(string suffix, params string[] extra)
+        {
+            var raw = Setting(suffix, extra);
+            return decimal.TryParse(raw, NumberStyles.Number, CultureInfo.InvariantCulture, out var value)
+                && value >= 0
+                ? value
+                : null;
+        }
+
         var enabledRaw = Setting("Enabled");
         return new EllaiOptions
         {
@@ -144,6 +171,10 @@ public sealed class EllaiOptions
             ServerlessEnabled = string.Equals(
                 Setting("Reasoning:Serverless:Enabled", "Ellai__Reasoning__Serverless__Enabled"),
                 "true", StringComparison.OrdinalIgnoreCase),
+            SpendingCapDollars = DecimalSetting("Pricing:SpendingCap", "Ellai__Pricing__SpendingCap") ?? 70.00m,
+            PricingInputPer1KTokens = DecimalSetting("Pricing:InputPer1K", "Ellai__Pricing__InputPer1K") ?? 0,
+            PricingOutputPer1KTokens = DecimalSetting("Pricing:OutputPer1K", "Ellai__Pricing__OutputPer1K") ?? 0,
+            PricingAudioPerMinute = DecimalSetting("Pricing:AudioPerMinute", "Ellai__Pricing__AudioPerMinute") ?? 0,
         };
     }
 

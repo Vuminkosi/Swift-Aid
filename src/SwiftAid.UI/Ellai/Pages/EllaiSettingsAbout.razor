@@ -79,6 +79,10 @@
                     <MudText Typo="Typo.subtitle2" Class="mt-4">
                         @session.Mode · @session.Status · started @session.StartedAt.ToLocalTime().ToString("dd MMM yyyy HH:mm")
                     </MudText>
+                    @if (CostCaption(session) is { } caption)
+                    {
+                        <MudText Typo="Typo.caption" Class="ellai-history__cost">@caption</MudText>
+                    }
                     <EllaiActivityDisclosure Entries="@session.Entries" />
                     <MudDivider Class="my-4" />
                 }
@@ -99,5 +103,23 @@
         string Mode,
         string Status,
         DateTimeOffset StartedAt,
-        IReadOnlyList<EllaiActivityDisclosure.EllaiTimelineEntry> Entries);
+        IReadOnlyList<EllaiActivityDisclosure.EllaiTimelineEntry> Entries,
+        decimal? UsageCostDollars = null,
+        int? UsageTokens = null);
+
+    private static string? CostCaption(EllaiPastSession session)
+    {
+        var spend = session.UsageCostDollars is { } cost ? $"${cost:0.00} used" : null;
+        var tokens = session.UsageTokens is { } count ? $"{FormatTokens(count)} tokens" : null;
+        return (spend, tokens) switch
+        {
+            (not null, not null) => $"{spend} · {tokens}",
+            (not null, null) => spend,
+            (null, not null) => $"unpriced usage · {tokens}",
+            _ => null,
+        };
+    }
+
+    private static string FormatTokens(int tokens) =>
+        tokens >= 1000 ? $"{tokens / 1000.0:0.0}k" : tokens.ToString(System.Globalization.CultureInfo.InvariantCulture);
 }

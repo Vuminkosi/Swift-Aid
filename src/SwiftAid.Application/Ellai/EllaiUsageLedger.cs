@@ -7,6 +7,25 @@ public sealed record EllaiUsageSample(
     int PromptTokens,
     int CompletionTokens);
 
+/// <summary>Operator-configured rates. Zero means unpriced: dollar caps
+/// stay inert and token budgets remain the active guard until the operator
+/// sets real rates. No vendor prices are assumed here.</summary>
+public sealed record EllaiPriceTable(
+    decimal InputPerThousandTokens,
+    decimal OutputPerThousandTokens,
+    decimal AudioPerMinute)
+{
+    public static readonly EllaiPriceTable Unpriced = new(0, 0, 0);
+
+    public bool IsPriced => InputPerThousandTokens > 0 || OutputPerThousandTokens > 0 || AudioPerMinute > 0;
+
+    public decimal CostFor(int promptTokens, int completionTokens) =>
+        promptTokens / 1000m * InputPerThousandTokens
+        + completionTokens / 1000m * OutputPerThousandTokens;
+
+    public decimal CostForAudio(decimal minutes) => minutes * AudioPerMinute;
+}
+
 /// <summary>Accumulated usage totals for one session envelope.</summary>
 public sealed record EllaiUsageTotals(
     string SessionId,
@@ -15,24 +34,48 @@ public sealed record EllaiUsageTotals(
     int TotalTokens,
     int Calls);
 
-/// <summary>Per-session usage ledger with a hard token budget
-/// (EL-MODEL-06, EL-LOOP-04). Until operator pricing is configured the
-/// $150/envelope reservation is enforced as a token cap; reservation
-/// failures deny further model calls instead of silently overspending.
-/// Thread-safe; sessions are isolated by session id.</summary>
-public sealed class EllaiUsageLedger(int sessionTokenBudget = EllaiUsageLedger.DefaultSessionTokenBudget)
+/// <summary>Per-session usage ledger with a hard token budget and a hard
+/// dollar budget (EL-MODEL-06, EL-LOOP-04). The operator funds $70 for
+/// everything: <see cref="DefaultTotalSpendCap"/> is the global kill
+/// switch and <see cref="DefaultEnvelopeSpendCap"/> bounds one session
+/// envelope. Dollar caps engage once real rates are configured; until
+/// then the token cap is the active guard. Reservation failures deny
+/// further model calls instead of silently overspending. Thread-safe;
+/// sessions are isolated by session id.</summary>
+public sealed class EllaiUsageLedger(
+    int sessionTokenBudget = EllaiUsageLedger.DefaultSessionTokenBudget,
+    decimal envelopeSpendCap = EllaiUsageLedger.DefaultEnvelopeSpendCap,
+    decimal totalSpendCap = EllaiUsageLedger.DefaultTotalSpendCap,
+    EllaiPriceTable? prices = null)
 {
     public const int DefaultSessionTokenBudget = 200_000;
 
+    public const decimal DefaultEnvelopeSpendCap = 70.00m;
+
+    public const decimal DefaultTotalSpendCap = 70.00m;
+
     private readonly object _gate = new();
     private readonly Dictionary<string, EllaiUsageTotals> _totals = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, decimal> _spend = new(StringComparer.Ordinal);
+    private decimal _totalSpend;
 
     public int SessionTokenBudget { get; } = sessionTokenBudget <= 0
         ? throw new ArgumentOutOfRangeException(nameof(sessionTokenBudget))
         : sessionTokenBudget;
 
+    public decimal EnvelopeSpendCap { get; } = envelopeSpendCap < 0
+        ? throw new ArgumentOutOfRangeException(nameof(envelopeSpendCap))
+        : envelopeSpendCap;
+
+    public decimal TotalSpendCap { get; } = totalSpendCap < 0
+        ? throw new ArgumentOutOfRangeException(nameof(totalSpendCap))
+        : totalSpendCap;
+
+    public EllaiPriceTable Prices { get; } = prices ?? EllaiPriceTable.Unpriced;
+
     /// <summary>Reserves estimated tokens before a model call; false means
-    /// the envelope budget is exhausted and the call must not be made.</summary>
+    /// a budget is exhausted and the call must not be made. When priced,
+    /// the estimate also reserves its dollar cost against both caps.</summary>
     public bool TryReserve(string sessionId, int estimatedTokens)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -44,7 +87,20 @@ public sealed class EllaiUsageLedger(int sessionTokenBudget = EllaiUsageLedger.D
         lock (_gate)
         {
             var used = _totals.TryGetValue(sessionId, out var current) ? current.TotalTokens : 0;
-            return used + estimatedTokens <= SessionTokenBudget;
+            if (used + estimatedTokens > SessionTokenBudget)
+            {
+                return false;
+            }
+
+            if (!Prices.IsPriced)
+            {
+                return true;
+            }
+
+            var estimate = Prices.CostFor(estimatedTokens, 0);
+            var sessionSpend = _spend.TryGetValue(sessionId, out var spent) ? spent : 0;
+            return sessionSpend + estimate <= EnvelopeSpendCap
+                && _totalSpend + estimate <= TotalSpendCap;
         }
     }
 
@@ -67,8 +123,57 @@ public sealed class EllaiUsageLedger(int sessionTokenBudget = EllaiUsageLedger.D
                 (current?.TotalTokens ?? 0) + sample.PromptTokens + sample.CompletionTokens,
                 (current?.Calls ?? 0) + 1);
             _totals[sample.SessionId] = next;
+            if (Prices.IsPriced)
+            {
+                AccrueLocked(sample.SessionId, Prices.CostFor(sample.PromptTokens, sample.CompletionTokens));
+            }
+
             return next;
         }
+    }
+
+    /// <summary>Records billable audio minutes (ASR/TTS) against both caps.</summary>
+    public void RecordAudio(string sessionId, decimal minutes)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        if (minutes < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(minutes));
+        }
+
+        lock (_gate)
+        {
+            if (Prices.IsPriced)
+            {
+                AccrueLocked(sessionId, Prices.CostForAudio(minutes));
+            }
+        }
+    }
+
+    public decimal SpendFor(string sessionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        lock (_gate)
+        {
+            return _spend.TryGetValue(sessionId, out var spent) ? spent : 0;
+        }
+    }
+
+    public decimal TotalSpend
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _totalSpend;
+            }
+        }
+    }
+
+    private void AccrueLocked(string sessionId, decimal amount)
+    {
+        _spend[sessionId] = (_spend.TryGetValue(sessionId, out var spent) ? spent : 0) + amount;
+        _totalSpend += amount;
     }
 
     public EllaiUsageTotals TotalsFor(string sessionId)
