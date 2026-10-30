@@ -54,6 +54,7 @@ public static class EllaiEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
         group.MapGet("/sessions/{sessionId}/receipts", ListReceipts)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
@@ -127,6 +128,7 @@ public static class EllaiEndpoints
         string sessionId,
         SubmitApprovalApiRequest? request,
         EllaiApprovalService approvals,
+        EllaiApprovalDialogCoordinator dialogs,
         CancellationToken cancellationToken)
     {
         if (request is null
@@ -140,10 +142,31 @@ public static class EllaiEndpoints
                 title: "The Ellai approval request is invalid."));
         }
 
+        var now = DateTimeOffset.UtcNow;
+        if (!string.IsNullOrWhiteSpace(request.ApprovalRequestId))
+        {
+            var review = dialogs.TryGetActive(sessionId, now);
+            if (review is null
+                || !string.Equals(review.RequestId, request.ApprovalRequestId, StringComparison.Ordinal)
+                || review.State != EllaiApprovalDialogState.AwaitingApproval
+                || !string.Equals(review.PlanHash, request.PlanHash, StringComparison.Ordinal)
+                || review.PlanVersion != request.PlanVersion)
+            {
+                return Task.FromResult(Results.Problem(
+                    statusCode: StatusCodes.Status409Conflict,
+                    title: "The approval review is stale, superseded or already closed."));
+            }
+        }
+
         var receipt = approvals.SubmitApproval(
             sessionId, request.PlanHash, request.PlanVersion, request.Proposal,
             request.ApprovedPlanHash, request.ApprovedPlanVersion,
-            request.ApprovedRecipient, request.ApprovedDueAtUtc, DateTimeOffset.UtcNow);
+            request.ApprovedRecipient, request.ApprovedDueAtUtc, now);
+        if (!string.IsNullOrWhiteSpace(request.ApprovalRequestId))
+        {
+            dialogs.Resolve(request.ApprovalRequestId, receipt is not null, now);
+        }
+
         if (receipt is null)
         {
             return Task.FromResult(Results.Problem(
@@ -173,6 +196,7 @@ public static class EllaiEndpoints
         string sessionId,
         CancelEllaiSessionApiRequest? request,
         EllaiSessionService sessions,
+        EllaiApprovalDialogCoordinator dialogs,
         CancellationToken cancellationToken)
     {
         if (request is null)
@@ -182,6 +206,7 @@ public static class EllaiEndpoints
                 title: "The Ellai cancel request is invalid.");
         }
 
+        dialogs.CancelSession(sessionId, DateTimeOffset.UtcNow);
         var cancelled = await sessions.CancelAsync(sessionId, request.ExpectedSessionVersion, cancellationToken);
         if (!cancelled)
         {
@@ -198,7 +223,10 @@ public static class EllaiEndpoints
 public sealed record CancelEllaiSessionApiRequest(long ExpectedSessionVersion);
 
 /// <summary>Exact-approval submission: the approved fields must match the
-/// proposed plan exactly or the service returns null (mapped to 422).</summary>
+/// proposed plan exactly or the service returns null (mapped to 422).
+/// When the authenticated dialog presents a review, <c>ApprovalRequestId</c>
+/// binds the submission to that open review (mapped to 409 when stale);
+/// it stays optional until the dialog host ships.</summary>
 public sealed record SubmitApprovalApiRequest(
     string SessionId,
     string PlanHash,
@@ -207,7 +235,8 @@ public sealed record SubmitApprovalApiRequest(
     string ApprovedPlanHash,
     int ApprovedPlanVersion,
     string? ApprovedRecipient,
-    DateTimeOffset? ApprovedDueAtUtc);
+    DateTimeOffset? ApprovedDueAtUtc,
+    string? ApprovalRequestId = null);
 
 internal static class EllaiEndpointGuards
 {
