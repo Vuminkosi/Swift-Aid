@@ -101,8 +101,11 @@ rows derived from the exact reviewed proposals with stable action ids;
 `GET .../approval-reviews/active` serves the open review, `POST .../approve`
 approves only the human-selected ids resolved server-side against those
 proposals (unknown ids reject the batch), and the client `EllaiEventPoller`
-dedupes repeat deliveries so one review opens one dialog. The
-`EllaiApprovalDialog` component renders
+dedupes repeat deliveries so one review opens one dialog. The guidance host
+tracks one session, polls its journal, and opens `EllaiApprovalDialog` on
+validated reviews (approve/reject/edit/cancel through `IEllaiReviewClient`;
+Gateway serves it in-process with per-call principal resolution, HTTP
+clients use the same port). The `EllaiApprovalDialog` component renders
 Approve-selected/Edit/Reject/Cancel with selection-gated approval and
 version-change reset. Still **Missing**: auto-open on the ApprovalRequired
 event (no event transport yet), the atomic per-action domain executor with
