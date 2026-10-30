@@ -38,7 +38,7 @@ execute/approve/sql/shell.
 | `ellai_evidence` | Bounded authorized source items and versions. |
 | `ellai_topic` | Session topic candidates with checkpoints. |
 | `ellai_capabilities` | Current capability descriptors and readiness. |
-| `ellai_receipts` | Existing receipts with linked state. |
+| `ellai_receipts` | Live receipts from the durable authority: one by id or the session list, session-bound, absence as authorized empty. |
 | `ellai_productfacts` | Versioned nonmedical product facts and help. |
 | `ellai_now` | Current server time (UTC, round-trip + unix ms); no domain data. |
 | `ellai_docs_search` | Search this approved reference by topic/section id. |
@@ -134,7 +134,7 @@ the case database.
 ## 7. Verification map
 
 Run `dotnet test tests/SwiftAid.Application.Tests --filter
-FullyQualifiedName~Ellai` (unit/contract, ~119 passing). PostgreSQL
+FullyQualifiedName~Ellai` (unit/contract, ~124 passing). PostgreSQL
 integration tests (`tests/SwiftAid.Integration.Tests`, `EllaiPostgresTests`)
 run only with `SWIFTAID_RUN_SQLAUTH_FIXTURES=1` and the approved disposable
 loopback connection (127.0.0.1:32703); otherwise they skip. Provider, web
