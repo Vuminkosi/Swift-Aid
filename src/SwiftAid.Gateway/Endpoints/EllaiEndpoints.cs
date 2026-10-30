@@ -62,6 +62,24 @@ public static class EllaiEndpoints
             .Produces<IReadOnlyList<EllaiReceipt>>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
+        group.MapPost("/sessions/{sessionId}/approval-reviews", RegisterReviewAsync)
+            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
+            .WithName("RegisterEllaiApprovalReview")
+            .Accepts<RegisterApprovalReviewApiRequest>("application/json")
+            .Produces<EllaiApprovalDialogRequest>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized);
+        group.MapPost("/sessions/{sessionId}/approval-reviews/{requestId}/edit", EditReviewAsync)
+            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
+            .WithName("EditEllaiApprovalReview")
+            .Accepts<EditApprovalReviewApiRequest>("application/json")
+            .Produces<EllaiApprovalDialogRequest>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status409Conflict);
         group.MapPost("/sessions/{sessionId}/cancel", CancelAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
@@ -219,10 +237,76 @@ public static class EllaiEndpoints
 
         return Results.Ok();
     }
+
+    private static Task<IResult> RegisterReviewAsync(
+        string sessionId,
+        RegisterApprovalReviewApiRequest? request,
+        EllaiApprovalDialogCoordinator dialogs,
+        CancellationToken cancellationToken)
+    {
+        if (request is null
+            || !string.Equals(request.SessionId, sessionId, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(request.RequestId)
+            || string.IsNullOrWhiteSpace(request.PlanHash))
+        {
+            return Task.FromResult(Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "The Ellai approval review request is invalid."));
+        }
+
+        var (review, _) = dialogs.Register(sessionId, request.RequestId, request.PlanHash,
+            request.PlanVersion, DateTimeOffset.UtcNow, EllaiApprovalService.ApprovalLifetime);
+        return Task.FromResult(Results.Json(review, statusCode: StatusCodes.Status200OK));
+    }
+
+    private static Task<IResult> EditReviewAsync(
+        string sessionId,
+        string requestId,
+        EditApprovalReviewApiRequest? request,
+        EllaiApprovalDialogCoordinator dialogs,
+        CancellationToken cancellationToken)
+    {
+        if (request is null
+            || !string.Equals(request.SessionId, sessionId, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(request.NewRequestId)
+            || string.IsNullOrWhiteSpace(request.NewPlanHash))
+        {
+            return Task.FromResult(Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "The Ellai approval edit request is invalid."));
+        }
+
+        var next = dialogs.ApplyEdit(requestId, request.NewRequestId, request.NewPlanHash,
+            request.NewPlanVersion, DateTimeOffset.UtcNow, EllaiApprovalService.ApprovalLifetime);
+        if (next is null)
+        {
+            return Task.FromResult(Results.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "The approval review is stale, superseded or already closed."));
+        }
+
+        return Task.FromResult(Results.Json(next, statusCode: StatusCodes.Status200OK));
+    }
 }
 
 /// <summary>Cancel request carrying the officer-observed expected version.</summary>
 public sealed record CancelEllaiSessionApiRequest(long ExpectedSessionVersion);
+
+/// <summary>Review registration for a validated pending plan: binds the
+/// dialog instance to one server-tracked review (duplicate ids focus it).</summary>
+public sealed record RegisterApprovalReviewApiRequest(
+    string SessionId,
+    string RequestId,
+    string PlanHash,
+    int PlanVersion);
+
+/// <summary>Human edit of a plan under review: supersedes the old binding
+/// and opens the revised exact version for fresh review.</summary>
+public sealed record EditApprovalReviewApiRequest(
+    string SessionId,
+    string NewRequestId,
+    string NewPlanHash,
+    int NewPlanVersion);
 
 /// <summary>Exact-approval submission: the approved fields must match the
 /// proposed plan exactly or the service returns null (mapped to 422).
