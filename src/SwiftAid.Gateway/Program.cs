@@ -99,6 +99,21 @@ builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiTrainingVerifier>();
     {
         builder.Services.AddHttpClient<SwiftAid.Intelligence.Meta.MetaAsrUploadAdapter>();
     }
+
+    if (ellai.HasRealtimeAsrRoute)
+    {
+        builder.Services.AddScoped<SwiftAid.Intelligence.Meta.MetaAsrRealtimeAdapter>();
+    }
+
+    var qdrantEndpoint = builder.Configuration["Qdrant:Endpoint"];
+    var qdrantKey = builder.Configuration["Qdrant:ApiKey"];
+    if (!string.IsNullOrWhiteSpace(qdrantEndpoint))
+    {
+        var endpoint = qdrantEndpoint;
+        var key = qdrantKey ?? string.Empty;
+        builder.Services.AddHttpClient<SwiftAid.Infrastructure.Memory.EllaiMemoryIndex>(
+            (services, http) => new SwiftAid.Infrastructure.Memory.EllaiMemoryIndex(http, endpoint, key, "ellai-memory"));
+    }
 }
 builder.Services.AddScoped<INotificationApiService, NotificationApiService>();
 builder.Services.AddScoped<INotificationFeedClient, InteractiveServerNotificationFeedClient>();
