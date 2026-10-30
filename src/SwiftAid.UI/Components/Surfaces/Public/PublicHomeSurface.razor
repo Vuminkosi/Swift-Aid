@@ -183,6 +183,13 @@
             <MudButton Href="/report" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AddCircleOutline" Class="mobile-home-primary">
                 Report a concern
             </MudButton>
+            @if (!string.IsNullOrWhiteSpace(StaffWorkspaceHref))
+            {
+                <MudButton Href="@StaffWorkspaceHref" Variant="Variant.Text" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.WorkOutline">
+                    Staff workspace
+                </MudButton>
+            }
             <div class="mobile-home-grid">
                 <MudPaper Class="mobile-home-card" Elevation="0">
                     <MudIcon Icon="@Icons.Material.Filled.ReceiptLong" Color="Color.Primary" aria-hidden="true" />
@@ -216,6 +223,7 @@
     [Parameter] public EventCallback OnHomeOverviewRetry { get; set; }
     [Parameter] public string WorkerReportHref { get; set; } = "/report";
     [Parameter] public string GuestReportsHref { get; set; } = "/report?view=tracking";
+    [Parameter] public string? StaffWorkspaceHref { get; set; }
     [Parameter] public string GuestDataDescription { get; set; } =
         "Share a human or animal concern without creating an account. Saved drafts stay private on this device.";
     [Parameter] public string GuestReportsDescription { get; set; } =
