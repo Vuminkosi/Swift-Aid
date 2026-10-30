@@ -63,6 +63,7 @@ public sealed class EllaiReasoningBackendTests
         {
             ["Ellai_Enabled"] = "true",
             ["Ellai__ReasoningBackend"] = "serverless",
+            ["Ellai__Reasoning__Serverless__Enabled"] = "true",
             ["Ellai__Reasoning__Serverless__Endpoint"] = "https://inference.example/v1",
             ["Ellai__Reasoning__Serverless__Model"] = "open-weight-large",
             ["Ellai__Reasoning__Serverless__ApiKey"] = "k",
