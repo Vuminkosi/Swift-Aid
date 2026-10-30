@@ -34,7 +34,7 @@ execute/approve/sql/shell.
 
 | Tool | Purpose |
 |---|---|
-| `ellai_state` | Minimized current feature/resource projection and permitted actions. |
+| `ellai_state` | Minimized feature projection; `projection=queue` runs the ordinary scoped "my cases" query for the trusted actor. |
 | `ellai_evidence` | Bounded authorized source items and versions. |
 | `ellai_topic` | Session topic candidates with checkpoints. |
 | `ellai_capabilities` | Current capability descriptors and readiness. |
@@ -91,9 +91,15 @@ constraints) with an Accepted / AcceptedUnverified / UnknownOutcome /
 PartiallyApplied / Applied / Failed lattice. A server-side dialog
 coordinator enforces one active review per session, edit-then-new-version
 invalidation, and terminal cancel fencing; the approval endpoint binds
-dialog-issued submissions to their open review (409 when stale). Still
-**Missing**: the atomic per-action domain executor with outbox commit, the
-Blazor dialog host, and cross-instance dialog fencing. HTTP: `POST /ellai/v1/sessions/{id}/approvals`,
+dialog-issued submissions to their open review (409 when stale). Review
+register/edit endpoints exist; the `EllaiApprovalDialog` component renders
+Approve-selected/Edit/Reject/Cancel with selection-gated approval and
+version-change reset. Still **Missing**: auto-open on the ApprovalRequired
+event (no event transport yet), the atomic per-action domain executor with
+outbox commit (**Blocked**: no backing administrative-task, assignment-request
+or reminder domain services exist to reuse — inventing them here would be new
+product surface, not integration), and cross-instance dialog fencing.
+HTTP: `POST /ellai/v1/sessions/{id}/approvals`,
 `GET /receipts`, utterance submit, terminal cancel
 (`src/SwiftAid.Gateway/Endpoints/EllaiEndpoints.cs`). Approval is granted
 only by operating the authenticated approval dialog (Approve selected /
@@ -128,7 +134,7 @@ the case database.
 ## 7. Verification map
 
 Run `dotnet test tests/SwiftAid.Application.Tests --filter
-FullyQualifiedName~Ellai` (unit/contract, ~114 passing). PostgreSQL
+FullyQualifiedName~Ellai` (unit/contract, ~119 passing). PostgreSQL
 integration tests (`tests/SwiftAid.Integration.Tests`, `EllaiPostgresTests`)
 run only with `SWIFTAID_RUN_SQLAUTH_FIXTURES=1` and the approved disposable
 loopback connection (127.0.0.1:32703); otherwise they skip. Provider, web
