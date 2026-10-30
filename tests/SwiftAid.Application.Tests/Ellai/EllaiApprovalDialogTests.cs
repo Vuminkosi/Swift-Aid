@@ -1,4 +1,5 @@
 using SwiftAid.Application.Ellai;
+using SwiftAid.Contracts.Ellai;
 
 namespace SwiftAid.Application.Tests.Ellai;
 
@@ -7,6 +8,25 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiApprovalDialogTests
 {
     private static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(15);
+
+    [Fact]
+    public void RegisterCarriesDisplayRowsAndEditReplacesThem()
+    {
+        var coordinator = new EllaiApprovalDialogCoordinator();
+        var now = DateTimeOffset.UtcNow;
+        var rows = new[]
+        {
+            new EllaiApprovalActionDescriptor("a-1", "Create administrative review task", "case-1"),
+        };
+
+        var (first, _) = coordinator.Register("s-1", "req-1", "hash-1", 1, now, Lifetime, rows);
+        Assert.Equal(rows, first.Actions);
+
+        var edited = coordinator.ApplyEdit("req-1", "req-2", "hash-2", 2, now, Lifetime,
+            new[] { new EllaiApprovalActionDescriptor("a-2", "Queue internal reminder", "o-1") });
+        Assert.NotNull(edited);
+        Assert.Equal("a-2", Assert.Single(edited.Actions).ActionId);
+    }
 
     [Fact]
     public void DuplicateEventIdFocusesTheSameReview()

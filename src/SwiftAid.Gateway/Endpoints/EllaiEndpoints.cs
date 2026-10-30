@@ -77,6 +77,13 @@ public static class EllaiEndpoints
             .Produces<EllaiApprovalDialogRequest>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized);
+        group.MapGet("/sessions/{sessionId}/approval-reviews/active", GetActiveReviewAsync)
+            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .WithName("GetEllaiActiveApprovalReview")
+            .Produces<EllaiApprovalDialogRequest>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
         group.MapPost("/sessions/{sessionId}/approval-reviews/{requestId}/edit", EditReviewAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
@@ -316,10 +323,33 @@ public static class EllaiEndpoints
 
         var now = DateTimeOffset.UtcNow;
         var (review, _) = dialogs.Register(sessionId, request.RequestId, request.PlanHash,
-            request.PlanVersion, now, EllaiApprovalService.ApprovalLifetime);
+            request.PlanVersion, now, EllaiApprovalService.ApprovalLifetime, request.Actions);
         journals.Append(sessionId, "approval-required", review.RequestId,
             $"{review.PlanHash} v{review.PlanVersion} · {review.State}", now);
         return Task.FromResult(Results.Json(review, statusCode: StatusCodes.Status200OK));
+    }
+
+    private static Task<IResult> GetActiveReviewAsync(
+        string sessionId,
+        EllaiApprovalDialogCoordinator dialogs,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return Task.FromResult(Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "The Ellai review request is invalid."));
+        }
+
+        var active = dialogs.TryGetActive(sessionId, DateTimeOffset.UtcNow);
+        if (active is null)
+        {
+            return Task.FromResult(Results.Problem(
+                statusCode: StatusCodes.Status404NotFound,
+                title: "There is no open approval review for this session."));
+        }
+
+        return Task.FromResult(Results.Json(active, statusCode: StatusCodes.Status200OK));
     }
 
     private static Task<IResult> EditReviewAsync(
@@ -342,7 +372,7 @@ public static class EllaiEndpoints
 
         var now = DateTimeOffset.UtcNow;
         var next = dialogs.ApplyEdit(requestId, request.NewRequestId, request.NewPlanHash,
-            request.NewPlanVersion, now, EllaiApprovalService.ApprovalLifetime);
+            request.NewPlanVersion, now, EllaiApprovalService.ApprovalLifetime, request.Actions);
         if (next is null)
         {
             return Task.FromResult(Results.Problem(
@@ -360,12 +390,14 @@ public static class EllaiEndpoints
 public sealed record CancelEllaiSessionApiRequest(long ExpectedSessionVersion);
 
 /// <summary>Review registration for a validated pending plan: binds the
-/// dialog instance to one server-tracked review (duplicate ids focus it).</summary>
+/// dialog instance to one server-tracked review (duplicate ids focus it).
+/// Actions are safe display rows; approval still binds hash and version.</summary>
 public sealed record RegisterApprovalReviewApiRequest(
     string SessionId,
     string RequestId,
     string PlanHash,
-    int PlanVersion);
+    int PlanVersion,
+    IReadOnlyList<EllaiApprovalActionDescriptor>? Actions = null);
 
 /// <summary>Human edit of a plan under review: supersedes the old binding
 /// and opens the revised exact version for fresh review.</summary>
@@ -373,7 +405,8 @@ public sealed record EditApprovalReviewApiRequest(
     string SessionId,
     string NewRequestId,
     string NewPlanHash,
-    int NewPlanVersion);
+    int NewPlanVersion,
+    IReadOnlyList<EllaiApprovalActionDescriptor>? Actions = null);
 
 /// <summary>Exact-approval submission: the approved fields must match the
 /// proposed plan exactly or the service returns null (mapped to 422).

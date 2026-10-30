@@ -1,3 +1,5 @@
+using SwiftAid.Contracts.Ellai;
+
 namespace SwiftAid.Application.Ellai;
 
 /// <summary>Server-side dialog states for one approval-gated plan.
@@ -14,7 +16,9 @@ public enum EllaiApprovalDialogState
     Expired
 }
 
-/// <summary>One server-tracked approval review.</summary>
+/// <summary>One server-tracked approval review, carrying the safe display
+/// rows the dialog renders. Rows are display data; approval still binds
+/// the exact plan hash and version.</summary>
 public sealed record EllaiApprovalDialogRequest(
     string RequestId,
     string SessionId,
@@ -22,7 +26,8 @@ public sealed record EllaiApprovalDialogRequest(
     int PlanVersion,
     EllaiApprovalDialogState State,
     DateTimeOffset CreatedAtUtc,
-    DateTimeOffset ExpiresAtUtc);
+    DateTimeOffset ExpiresAtUtc,
+    IReadOnlyList<EllaiApprovalActionDescriptor> Actions);
 
 /// <summary>Server-side half of the mandatory approval dialog contract.
 /// Enforces one active review per session (duplicate request ids focus the
@@ -42,7 +47,8 @@ public sealed class EllaiApprovalDialogCoordinator
     /// event id returns the same active review instead of stacking dialogs.</summary>
     public (EllaiApprovalDialogRequest Request, bool Created) Register(
         string sessionId, string requestId, string planHash, int planVersion,
-        DateTimeOffset now, TimeSpan lifetime)
+        DateTimeOffset now, TimeSpan lifetime,
+        IReadOnlyList<EllaiApprovalActionDescriptor>? actions = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(requestId);
@@ -62,7 +68,8 @@ public sealed class EllaiApprovalDialogCoordinator
             var request = new EllaiApprovalDialogRequest(
                 requestId, sessionId, planHash, planVersion,
                 active is null ? EllaiApprovalDialogState.AwaitingApproval : EllaiApprovalDialogState.Queued,
-                now, now.Add(lifetime));
+                now, now.Add(lifetime),
+                actions ?? Array.Empty<EllaiApprovalActionDescriptor>());
             _byId[requestId] = request;
             return (request, true);
         }
@@ -73,7 +80,8 @@ public sealed class EllaiApprovalDialogCoordinator
     /// never be approved afterwards.</summary>
     public EllaiApprovalDialogRequest? ApplyEdit(
         string requestId, string newRequestId, string newPlanHash, int newPlanVersion,
-        DateTimeOffset now, TimeSpan lifetime)
+        DateTimeOffset now, TimeSpan lifetime,
+        IReadOnlyList<EllaiApprovalActionDescriptor>? actions = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(requestId);
         ArgumentException.ThrowIfNullOrWhiteSpace(newRequestId);
@@ -89,7 +97,8 @@ public sealed class EllaiApprovalDialogCoordinator
             _byId[requestId] = current with { State = EllaiApprovalDialogState.Superseded };
             var next = new EllaiApprovalDialogRequest(
                 newRequestId, current.SessionId, newPlanHash, newPlanVersion,
-                EllaiApprovalDialogState.AwaitingApproval, now, now.Add(lifetime));
+                EllaiApprovalDialogState.AwaitingApproval, now, now.Add(lifetime),
+                actions ?? Array.Empty<EllaiApprovalActionDescriptor>());
             _byId[newRequestId] = next;
             return next;
         }
