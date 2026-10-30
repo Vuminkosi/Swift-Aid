@@ -398,6 +398,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICaseQueueQuery, CaseQueueQuery>();
         services.AddScoped<IMapAggregateStore, PostgresMapAggregateStore>();
         services.AddScoped<IMapAggregateQuery, SurveillanceMapAggregateQuery>();
+        services.AddScoped<IDashboardAggregateStore, PostgresDashboardAggregateStore>();
+        services.AddScoped<IDashboardAggregateQuery, DashboardAggregateQuery>();
         services.AddTransient<IEllaiCaseAuthScopeFactory, EllaiCaseAuthScopeFactory>();
         services.AddScoped<ICaseMonitoringSummaryStore, PostgresCaseMonitoringSummaryStore>();
         services.AddScoped<ICaseMonitoringSummaryQuery, CaseMonitoringSummaryQuery>();

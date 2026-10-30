@@ -86,7 +86,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<IPublicIntakeProcessingPolicyClient, UnavailablePublicIntakeProcessingPolicyClient>();
         builder.Services.AddSingleton<IEducationClient, StaticEducationClient>();
         builder.Services.AddSingleton<ISubscriptionClient, UnavailableSubscriptionClient>();
-        builder.Services.AddSingleton<IAnalyticsClient, UnavailableAnalyticsClient>();
+        
         
         builder.Services.AddSingleton<IOrganizationClient, UnavailableOrganizationClient>();
         builder.Services.AddSingleton<IAiInvestigationClient, UnavailableInvestigationClient>();

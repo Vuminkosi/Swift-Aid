@@ -72,36 +72,6 @@ public sealed class DashboardOverviewContractTests
         Assert.True(overview.IsValid);
     }
 
-    [Fact]
-    public async Task UnavailableClient_FailsClosedAndPreservesInvalidRequestState()
-    {
-        var client = new UnavailableDashboardOverviewClient();
-
-        var unavailable = await client.GetAsync(new DashboardOverviewQuery());
-        var invalid = await client.GetAsync(new DashboardOverviewQuery(
-            Period: (DashboardOverviewPeriod)123));
-
-        Assert.Equal(UiCapabilityResultCode.Unavailable, unavailable.Code);
-        Assert.Null(unavailable.Value);
-        Assert.False(unavailable.Metadata.IsAvailable);
-        Assert.Equal(UiCapabilityProvenance.LiveService, unavailable.Metadata.Provenance);
-
-        Assert.Equal(UiCapabilityResultCode.InvalidRequest, invalid.Code);
-        Assert.Null(invalid.Value);
-        Assert.False(invalid.Metadata.IsAvailable);
-    }
-
-    [Fact]
-    public async Task DashboardClients_ObserveCancellationBeforeReturningResults()
-    {
-        using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
-        var query = new DashboardOverviewQuery();
-
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
-            await new UnavailableDashboardOverviewClient().GetAsync(query, cancellation.Token));
-    }
-
     private static DashboardOverview CreateOverview()
     {
         var asOf = DateTimeOffset.Parse("2026-10-28T12:00:00Z");

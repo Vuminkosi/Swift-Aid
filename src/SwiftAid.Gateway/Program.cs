@@ -33,8 +33,8 @@ builder.Services.AddMudServices();
 builder.Services.AddScoped<IPublicIntakeProcessingPolicyClient, GatewayPublicIntakeProcessingPolicyClient>();
 builder.Services.AddScoped<IEducationClient, StaticEducationClient>();
 builder.Services.AddScoped<ISubscriptionClient, UnavailableSubscriptionClient>();
-builder.Services.AddScoped<IAnalyticsClient, UnavailableAnalyticsClient>();
-builder.Services.AddScoped<IDashboardOverviewClient, UnavailableDashboardOverviewClient>();
+builder.Services.AddScoped<IAnalyticsClient, AnalyticsGatewayClient>();
+builder.Services.AddScoped<IDashboardOverviewClient, DashboardOverviewGatewayClient>();
 
 builder.Services.AddScoped<IOrganizationClient, UnavailableOrganizationClient>();
 builder.Services.AddScoped<IAiInvestigationClient, UnavailableInvestigationClient>();
