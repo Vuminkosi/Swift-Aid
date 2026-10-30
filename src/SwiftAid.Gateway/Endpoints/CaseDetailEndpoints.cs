@@ -35,6 +35,75 @@ public static class CaseDetailEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
+
+        endpoints.MapGet("/api/v1/cases/{caseId:guid}/correction", GetCorrectionReadAsync)
+            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .WithName("GetCaseCorrectionRead")
+            .Produces<CaseCorrectionReadData>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status503ServiceUnavailable);
+    }
+
+    private static async Task<IResult> GetCorrectionReadAsync(
+        Guid caseId,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        context.Response.Headers.CacheControl = "no-store, private";
+        context.Response.Headers.Pragma = "no-cache";
+
+        if (caseId == Guid.Empty)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "A case identifier is required.");
+        }
+
+        ActorContext? actor;
+        try
+        {
+            actor = TryGetActor(context);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status401Unauthorized, title: "Authentication is required.");
+        }
+
+        if (actor is null)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status401Unauthorized, title: "Authentication is required.");
+        }
+
+        try
+        {
+            var correctionQuery = context.RequestServices.GetService<ICaseCorrectionReadQuery>();
+            if (correctionQuery is null)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "The case was not found.");
+            }
+
+            var result = await correctionQuery.GetAsync(actor, caseId, cancellationToken).ConfigureAwait(false);
+            if (result.Access == CaseCorrectionReadAccess.Allowed && result.Data is not null)
+            {
+                return Results.Json(result.Data, options: JsonOptions, statusCode: StatusCodes.Status200OK);
+            }
+
+            return result.Access == CaseCorrectionReadAccess.NotFoundOrNotAuthorized
+                ? Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "The case was not found.")
+                : Results.Problem(
+                    statusCode: StatusCodes.Status503ServiceUnavailable,
+                    title: "The case is temporarily unavailable.");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                title: "The case is temporarily unavailable.");
+        }
     }
 
     private static async Task<IResult> GetSummaryAsync(
