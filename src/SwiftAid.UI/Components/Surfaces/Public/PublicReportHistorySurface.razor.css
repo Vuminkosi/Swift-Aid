@@ -89,3 +89,4 @@
         min-height: 44px;
     }
 }
+@media (max-width: 767px) { .public-report-history { padding-inline: 0.5rem; } }

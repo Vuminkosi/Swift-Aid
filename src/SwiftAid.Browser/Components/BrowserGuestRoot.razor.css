@@ -1,0 +1,10 @@
+/* Guest shell: keep page content close to the viewport edges on phones.
+   MudContainer gutters stack with each surface's own container, so tighten
+   every level under 768px instead of only one. */
+@media (max-width: 767px) {
+    .browser-guest__shell,
+    .browser-guest__tracking,
+    .browser-guest__not-found {
+        padding-inline: 0.5rem;
+    }
+}

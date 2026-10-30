@@ -352,3 +352,4 @@
         padding: 0.625rem;
     }
 }
+@media (max-width: 767px) { .public-home-container { padding-inline: 0.5rem; } }
