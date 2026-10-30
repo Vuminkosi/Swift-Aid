@@ -26,7 +26,9 @@ public sealed record EllaiToolContext(
     string FeatureId,
     string? ResourceId,
     int RemainingCalls,
-    bool ContributorEligible);
+    bool ContributorEligible,
+    string ConsentVersion = "consent/1",
+    string DataClassification = "synthetic");
 
 /// <summary>Tool request with bounded arguments.</summary>
 public sealed record EllaiToolRequest(
@@ -46,9 +48,12 @@ public sealed record EllaiToolResult(
 /// <summary>Authorized typed evidence/app-state tool broker (ELL-T07 groundwork).
 /// Every invocation rechecks scope; unregistered tools, arbitrary queries and
 /// over-broad reads are rejected before execution.</summary>
-public sealed class EllaiToolBroker(EllaiPolicyService policy)
+public sealed class EllaiToolBroker(EllaiPolicyService policy, EllaiConsentService? consent = null)
 {
     public const int MaxItems = 20;
+
+    /// <summary>Purpose bound to every brokered model-visible read.</summary>
+    public const string ToolReadPurpose = "ellai-tool-read";
 
     public Task<EllaiToolResult> InvokeAsync(
         EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
@@ -85,11 +90,17 @@ public sealed class EllaiToolBroker(EllaiPolicyService policy)
             }
         }
 
+        if (consent is not null && !consent.IsGranted(
+                context.SessionId, EllaiConsentDimension.ReasoningText, ToolReadPurpose, DateTimeOffset.UtcNow))
+        {
+            return Task.FromResult(Deny(request.ToolName, "Reasoning-text consent grant is missing or expired."));
+        }
+
         var auth = policy.Authorize(
             new EllaiAuthorizationRequest(
                 context.SessionId, EllaiMode.Ask, context.FeatureId, context.ResourceId,
-                null, null, context.ScopeEpoch, "consent/1", context.ContributorEligible),
-            "synthetic");
+                null, null, context.ScopeEpoch, context.ConsentVersion, context.ContributorEligible),
+            context.DataClassification);
 
         if (!auth.Permitted)
         {

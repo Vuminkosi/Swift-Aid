@@ -100,7 +100,7 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore
 /// <summary>Session lifecycle: start, versioned utterance acceptance,
 /// checkpointing, pause/stop with fencing. Cancelled sessions never resume;
 /// restart creates a new session/epoch. (ELL-T04 groundwork.)</summary>
-public sealed class EllaiSessionService(IEllaiSessionStore store)
+public sealed class EllaiSessionService(IEllaiSessionStore store, EllaiConsentService? consent = null)
 {
     public const int DefaultCyclesAllowed = 12;
 
@@ -199,8 +199,9 @@ public sealed class EllaiSessionService(IEllaiSessionStore store)
         return await store.TryUpdateAsync(next, expectedVersion, ct) is not null;
     }
 
-    private static EllaiSessionView ToView(EllaiSessionRecord record) => new(
+    private EllaiSessionView ToView(EllaiSessionRecord record) => new(
         record.SessionId, record.Mode, record.ActiveInvestigationId, record.Status,
-        record.ScopeEpoch, "consent/1", "caps/1", record.CyclesUsed, record.CyclesAllowed,
+        record.ScopeEpoch, consent?.VersionLabel(record.SessionId) ?? "consent/1", "caps/1",
+        record.CyclesUsed, record.CyclesAllowed,
         null, 0, record.SessionVersion);
 }

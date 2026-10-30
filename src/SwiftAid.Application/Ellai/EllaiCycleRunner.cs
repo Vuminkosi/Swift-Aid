@@ -33,7 +33,8 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
         EllaiToolContext context,
         Func<int, Task<EllaiModelTurn>> modelTurn,
         Func<EllaiDecision, IReadOnlyList<string>> validate,
-        CancellationToken ct)
+        CancellationToken ct,
+        Func<int, CancellationToken, Task<bool>>? reauthorizeAsync = null)
     {
         ArgumentNullException.ThrowIfNull(modelTurn);
         ArgumentNullException.ThrowIfNull(validate);
@@ -52,6 +53,12 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
             for (var iteration = 1; iteration <= MaxIterations; iteration++)
             {
                 ct.ThrowIfCancellationRequested();
+                if (reauthorizeAsync is not null && !await reauthorizeAsync(iteration, ct))
+                {
+                    return new EllaiCycleOutcome(false, null,
+                        $"Scope reauthorization failed at iteration {iteration}.", iteration, toolCallsUsed, repairUsed);
+                }
+
                 var turn = await modelTurn(iteration);
 
                 foreach (var toolRequest in turn.ToolRequests)

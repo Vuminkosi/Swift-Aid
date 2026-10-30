@@ -86,7 +86,7 @@ builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiApprovedActionService
 builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiReceiptStore>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiApprovalService>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiScenarioDirector>();
-builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiConsentService>();
+builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiConsentService>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiTopicService>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiTrainingVerifier>();
 {

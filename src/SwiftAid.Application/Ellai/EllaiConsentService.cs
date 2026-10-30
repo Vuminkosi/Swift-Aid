@@ -76,6 +76,23 @@ public sealed class EllaiConsentService
         }
     }
 
+    /// <summary>Highest grant version issued for the session, or 0 when none.</summary>
+    public int LatestVersion(string sessionId)
+    {
+        lock (_gate)
+        {
+            return _grants.Values
+                .Where(g => g.SessionId == sessionId)
+                .Select(g => g.Version)
+                .DefaultIfEmpty(0)
+                .Max();
+        }
+    }
+
+    /// <summary>Consent version label for session projections. Sessions
+    /// without any grant report consent/0 — never a fabricated grant.</summary>
+    public string VersionLabel(string sessionId) => $"consent/{LatestVersion(sessionId)}";
+
     public bool IsGranted(string sessionId, EllaiConsentDimension dimension, string purpose, DateTimeOffset now)
     {
         lock (_gate)
