@@ -32,6 +32,7 @@ public sealed class EllaiPostgresTests : IAsyncDisposable
         await using var db = CreateDbContext();
         foreach (var id in _sessionIds)
         {
+            await db.Set<EllaiUtteranceEntity>().Where(e => e.SessionId == id).ExecuteDeleteAsync();
             await db.Set<EllaiCheckpointEntity>().Where(e => e.SessionId == id).ExecuteDeleteAsync();
             await db.Set<EllaiSessionEntity>().Where(e => e.SessionId == id).ExecuteDeleteAsync();
         }
@@ -101,6 +102,39 @@ public sealed class EllaiPostgresTests : IAsyncDisposable
                 "stale", null, "typed", 1),
             CancellationToken.None);
         Assert.Null(stale);
+    }
+
+    [EllaiPostgresFact]
+    public async Task ReplayedUtteranceIdentitySurvivesRestartWithoutNewCycle()
+    {
+        await using var db = CreateDbContext();
+        var service = new EllaiSessionService(new PostgresEllaiSessionStore(db));
+        var view = await service.StartAsync(
+            new StartSessionRequest(EllaiMode.Ask, "pg-4", "cases", null, "text", "text"),
+            CancellationToken.None);
+        _sessionIds.Add(view.SessionId);
+
+        var first = await service.SubmitUtteranceAsync(
+            new SubmitUtteranceRequest("u-1", view.SessionId, view.SessionVersion,
+                "What is overdue?", null, "typed", 1),
+            CancellationToken.None);
+        Assert.NotNull(first);
+        Assert.False(first.Replay);
+
+        // Fresh context (simulated restart) replays the identity: same view,
+        // no new cycle.
+        await using var db2 = CreateDbContext();
+        var replay = await new EllaiSessionService(new PostgresEllaiSessionStore(db2)).SubmitUtteranceAsync(
+            new SubmitUtteranceRequest("u-1", view.SessionId, first.View.SessionVersion,
+                "What is overdue?", null, "typed", 1),
+            CancellationToken.None);
+        Assert.NotNull(replay);
+        Assert.True(replay.Replay);
+        Assert.Equal(1, replay.View.CyclesUsed);
+
+        var claims = await db2.Set<EllaiUtteranceEntity>()
+            .CountAsync(e => e.SessionId == view.SessionId);
+        Assert.Equal(1, claims);
     }
 
     [EllaiPostgresFact]

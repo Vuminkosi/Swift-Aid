@@ -88,9 +88,11 @@ stand and that handoff item is recorded as owner-deferred, not implemented.
 
 **Status: Implemented, unit-verified (sessions and approvals durable).**
 Sessions persist in PostgreSQL (`EllaiSessionEntity`, `EllaiCheckpointEntity`,
-`PostgresEllaiSessionStore`) with version-fenced compare-and-set and
-idempotent utterance/checkpoint identities; restart and second-gateway
-visibility hold. Approvals carry a 15-minute expiry and idempotent durable receipts
+`EllaiUtteranceEntity`, `PostgresEllaiSessionStore`) with version-fenced
+compare-and-set and idempotent utterance/checkpoint identities; restart and
+second-gateway visibility hold. Replaying an accepted (session,
+client-utterance) identity returns the current view without consuming
+another cycle or re-triggering reasoning (§7.1). Approvals carry a 15-minute expiry and idempotent durable receipts
 (`EllaiApprovalService` over `IEllaiApprovalStore`, PostgreSQL
 `ellai_plan_approvals` with unique idempotency-key and plan/action
 constraints) with an Accepted / AcceptedUnverified / UnknownOutcome /
@@ -188,7 +190,7 @@ ownership — reported, not introduced here).
 ## 7. Verification map
 
 Run `dotnet test tests/SwiftAid.Application.Tests --filter
-FullyQualifiedName~Ellai` (unit/contract, 184 passing, 3 skipped) and
+FullyQualifiedName~Ellai` (unit/contract, 185 passing, 3 skipped) and
 `dotnet test tests/SwiftAid.Ui.Tests --filter FullyQualifiedName~Ellai`
 (~44 passing). PostgreSQL integration tests
 (`tests/SwiftAid.Integration.Tests`, `EllaiPostgres*`) run only with

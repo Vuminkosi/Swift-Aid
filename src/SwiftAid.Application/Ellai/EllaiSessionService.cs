@@ -37,8 +37,18 @@ public interface IEllaiSessionStore
     /// <summary>Compare-and-set by expected version; returns null on fence conflict.</summary>
     Task<EllaiSessionRecord?> TryUpdateAsync(EllaiSessionRecord record, long expectedVersion, CancellationToken ct);
 
+    /// <summary>Claims one accepted utterance per (session, client-utterance)
+    /// identity. True is first acceptance; false is an idempotent replay that
+    /// must not consume another cycle.</summary>
+    Task<bool> TryClaimUtteranceAsync(string sessionId, string clientUtteranceId, DateTimeOffset now, CancellationToken ct);
+
     Task SaveCheckpointAsync(EllaiCheckpoint checkpoint, CancellationToken ct);
 }
+
+/// <summary>Utterance acceptance: the current view plus whether this call
+/// replayed an already-accepted utterance identity. Replays return the
+/// current view without consuming a cycle or re-triggering reasoning.</summary>
+public sealed record EllaiUtteranceAcceptance(EllaiSessionView View, bool Replay);
 
 /// <summary>Thread-safe in-memory store for tests and local development.
 /// Production persistence (PostgreSQL, ELL-T04) must implement the same
@@ -47,6 +57,7 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore
 {
     private readonly object _gate = new();
     private readonly Dictionary<string, EllaiSessionRecord> _sessions = new(StringComparer.Ordinal);
+    private readonly HashSet<(string SessionId, string ClientUtteranceId)> _utterances = new();
     private readonly List<EllaiCheckpoint> _checkpoints = new();
 
     public Task<EllaiSessionRecord?> GetAsync(string sessionId, CancellationToken ct)
@@ -79,6 +90,17 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore
 
             _sessions[record.SessionId] = record;
             return Task.FromResult<EllaiSessionRecord?>(record);
+        }
+    }
+
+    public Task<bool> TryClaimUtteranceAsync(
+        string sessionId, string clientUtteranceId, DateTimeOffset now, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(clientUtteranceId);
+        lock (_gate)
+        {
+            return Task.FromResult(_utterances.Add((sessionId, clientUtteranceId)));
         }
     }
 
@@ -122,10 +144,17 @@ public sealed class EllaiSessionService(IEllaiSessionStore store, EllaiConsentSe
     }
 
     /// <summary>Accepts a finalized utterance; stale expected versions are
-    /// rejected so late/replayed turns cannot overwrite newer state.</summary>
-    public async Task<EllaiSessionView?> SubmitUtteranceAsync(SubmitUtteranceRequest request, CancellationToken ct)
+    /// rejected so late turns cannot overwrite newer state. Replaying an
+    /// already-accepted (session, client-utterance) identity returns the
+    /// current view without consuming another cycle (§7.1).</summary>
+    public async Task<EllaiUtteranceAcceptance?> SubmitUtteranceAsync(SubmitUtteranceRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.ClientUtteranceId))
+        {
+            throw new ArgumentException("ClientUtteranceId is required.", nameof(request));
+        }
+
         var current = await store.GetAsync(request.SessionId, ct);
         if (current is null || current.Status is "Cancelled" or "Completed")
         {
@@ -142,6 +171,12 @@ public sealed class EllaiSessionService(IEllaiSessionStore store, EllaiConsentSe
             return null;
         }
 
+        if (!await store.TryClaimUtteranceAsync(
+                request.SessionId, request.ClientUtteranceId, DateTimeOffset.UtcNow, ct).ConfigureAwait(false))
+        {
+            return new EllaiUtteranceAcceptance(ToView(current), true);
+        }
+
         var next = current with
         {
             SessionVersion = current.SessionVersion + 1,
@@ -150,7 +185,7 @@ public sealed class EllaiSessionService(IEllaiSessionStore store, EllaiConsentSe
             UpdatedAtUtc = DateTimeOffset.UtcNow
         };
         var updated = await store.TryUpdateAsync(next, request.ExpectedSessionVersion, ct);
-        return updated is null ? null : ToView(updated);
+        return updated is null ? null : new EllaiUtteranceAcceptance(ToView(updated), false);
     }
 
     public async Task<EllaiCheckpoint?> SaveCheckpointAsync(

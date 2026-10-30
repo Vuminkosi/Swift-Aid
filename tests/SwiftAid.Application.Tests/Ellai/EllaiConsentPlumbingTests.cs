@@ -29,7 +29,7 @@ public sealed class EllaiConsentPlumbingTests
             CancellationToken.None);
 
         Assert.NotNull(after);
-        Assert.Equal("consent/1", after.ConsentVersion);
+        Assert.Equal("consent/1", after.View.ConsentVersion);
     }
 
     [Fact]

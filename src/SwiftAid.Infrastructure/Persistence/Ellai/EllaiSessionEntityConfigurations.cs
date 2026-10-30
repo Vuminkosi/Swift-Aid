@@ -35,6 +35,30 @@ public sealed class EllaiSessionEntityConfiguration : IEntityTypeConfiguration<E
     }
 }
 
+public sealed class EllaiUtteranceEntityConfiguration : IEntityTypeConfiguration<EllaiUtteranceEntity>
+{
+    public void Configure(EntityTypeBuilder<EllaiUtteranceEntity> builder)
+    {
+        builder.ToTable("ellai_utterances", table =>
+        {
+            table.HasCheckConstraint(
+                "ck_ellai_utterances_ids_nonempty",
+                "length(btrim(session_id)) > 0 AND length(btrim(client_utterance_id)) > 0");
+        });
+
+        builder.HasKey(entity => new { entity.SessionId, entity.ClientUtteranceId })
+            .HasName("pk_ellai_utterances");
+        builder.HasIndex(entity => entity.SessionId).HasDatabaseName("ix_ellai_utterances_session");
+        builder.HasOne<EllaiSessionEntity>().WithMany()
+            .HasForeignKey(entity => entity.SessionId)
+            .OnDelete(DeleteBehavior.Cascade)
+            .HasConstraintName("fk_ellai_utterances_session");
+        builder.Property(entity => entity.SessionId).HasColumnName("session_id").HasColumnType("text");
+        builder.Property(entity => entity.ClientUtteranceId).HasColumnName("client_utterance_id").HasColumnType("text");
+        builder.Property(entity => entity.AcceptedAtUtc).HasColumnName("accepted_at_utc").HasColumnType("timestamp with time zone");
+    }
+}
+
 public sealed class EllaiCheckpointEntityConfiguration : IEntityTypeConfiguration<EllaiCheckpointEntity>
 {
     public void Configure(EntityTypeBuilder<EllaiCheckpointEntity> builder)

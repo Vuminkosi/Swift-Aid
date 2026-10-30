@@ -1310,6 +1310,32 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Ellai.EllaiUtteranceEntity", b =>
+                {
+                    b.Property<string>("SessionId")
+                        .HasColumnType("text")
+                        .HasColumnName("session_id");
+
+                    b.Property<string>("ClientUtteranceId")
+                        .HasColumnType("text")
+                        .HasColumnName("client_utterance_id");
+
+                    b.Property<DateTimeOffset>("AcceptedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("accepted_at_utc");
+
+                    b.HasKey("SessionId", "ClientUtteranceId")
+                        .HasName("pk_ellai_utterances");
+
+                    b.HasIndex("SessionId")
+                        .HasDatabaseName("ix_ellai_utterances_session");
+
+                    b.ToTable("ellai_utterances", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_ellai_utterances_ids_nonempty", "length(btrim(session_id)) > 0 AND length(btrim(client_utterance_id)) > 0");
+                        });
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.EmailVerificationEntity", b =>
                 {
                     b.Property<string>("UserId")
@@ -3437,6 +3463,16 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_ellai_checkpoints_session");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Ellai.EllaiUtteranceEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.Ellai.EllaiSessionEntity", null)
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_ellai_utterances_session");
                 });
 
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.EmailVerificationEntity", b =>

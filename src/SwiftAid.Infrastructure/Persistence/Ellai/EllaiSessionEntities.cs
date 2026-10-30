@@ -19,6 +19,16 @@ public sealed class EllaiSessionEntity
     public DateTimeOffset UpdatedAtUtc { get; set; }
 }
 
+/// <summary>Accepted utterance identity: one row per (session,
+/// client-utterance) pair enforces §7.1 idempotency across restarts and
+/// gateway instances. Replays read this row instead of consuming a cycle.</summary>
+public sealed class EllaiUtteranceEntity
+{
+    public string SessionId { get; set; } = "";
+    public string ClientUtteranceId { get; set; } = "";
+    public DateTimeOffset AcceptedAtUtc { get; set; }
+}
+
 /// <summary>Durable accepted-turn checkpoint linkage.</summary>
 public sealed class EllaiCheckpointEntity
 {

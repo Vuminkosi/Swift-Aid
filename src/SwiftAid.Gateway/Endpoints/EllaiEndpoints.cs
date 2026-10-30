@@ -192,12 +192,20 @@ public static class EllaiEndpoints
                 title: "The Ellai utterance is invalid.");
         }
 
-        var view = await sessions.SubmitUtteranceAsync(request, cancellationToken);
-        if (view is null)
+        var acceptance = await sessions.SubmitUtteranceAsync(request, cancellationToken);
+        if (acceptance is null)
         {
             return Results.Problem(
                 statusCode: StatusCodes.Status409Conflict,
                 title: "The Ellai session changed before the utterance was recorded.");
+        }
+
+        var view = acceptance.View;
+        if (acceptance.Replay)
+        {
+            // Idempotent replay: the utterance was already accepted, so the
+            // current view returns without consuming a cycle or re-running.
+            return Results.Json(view, statusCode: StatusCodes.Status200OK);
         }
 
         // Best-effort background reasoning: the recorded view returns

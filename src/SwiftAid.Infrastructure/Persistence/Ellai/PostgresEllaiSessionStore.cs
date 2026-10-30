@@ -75,6 +75,52 @@ public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext) : IEl
         return record;
     }
 
+    public async Task<bool> TryClaimUtteranceAsync(
+        string sessionId, string clientUtteranceId, DateTimeOffset now, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(clientUtteranceId);
+        var exists = await _dbContext.Set<EllaiUtteranceEntity>().AsNoTracking()
+            .AnyAsync(
+                e => e.SessionId == sessionId && e.ClientUtteranceId == clientUtteranceId, ct)
+            .ConfigureAwait(false);
+        if (exists)
+        {
+            return false;
+        }
+
+        var entity = new EllaiUtteranceEntity
+        {
+            SessionId = sessionId,
+            ClientUtteranceId = clientUtteranceId,
+            AcceptedAtUtc = now,
+        };
+        _dbContext.Set<EllaiUtteranceEntity>().Add(entity);
+        try
+        {
+            await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (DbUpdateException)
+        {
+            _dbContext.Entry(entity).State = EntityState.Detached;
+        }
+
+        // A concurrent winner holds the identity: replay, never a second
+        // acceptance. Any other failure surfaces by rethrowing below.
+        var winner = await _dbContext.Set<EllaiUtteranceEntity>().AsNoTracking()
+            .AnyAsync(
+                e => e.SessionId == sessionId && e.ClientUtteranceId == clientUtteranceId, ct)
+            .ConfigureAwait(false);
+        if (winner)
+        {
+            return false;
+        }
+
+        throw new InvalidOperationException(
+            "The utterance claim failed without a conflicting acceptance.");
+    }
+
     public async Task SaveCheckpointAsync(EllaiCheckpoint checkpoint, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(checkpoint);

@@ -63,6 +63,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
     public DbSet<SessionReminderOccurrenceEntity> SessionReminderOccurrences => Set<SessionReminderOccurrenceEntity>();
     public DbSet<Ellai.EllaiSessionEntity> EllaiSessions => Set<Ellai.EllaiSessionEntity>();
     public DbSet<Ellai.EllaiCheckpointEntity> EllaiCheckpoints => Set<Ellai.EllaiCheckpointEntity>();
+    public DbSet<Ellai.EllaiUtteranceEntity> EllaiUtterances => Set<Ellai.EllaiUtteranceEntity>();
     public DbSet<Ellai.EllaiPlanApprovalEntity> EllaiPlanApprovals => Set<Ellai.EllaiPlanApprovalEntity>();
     public DbSet<Ellai.EllaiTopicEntity> EllaiTopics => Set<Ellai.EllaiTopicEntity>();
 
@@ -97,6 +98,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         modelBuilder.ApplyConfiguration(new SessionReminderOccurrenceEntityConfiguration());
         modelBuilder.ApplyConfiguration(new Ellai.EllaiSessionEntityConfiguration());
         modelBuilder.ApplyConfiguration(new Ellai.EllaiCheckpointEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new Ellai.EllaiUtteranceEntityConfiguration());
         modelBuilder.ApplyConfiguration(new Ellai.EllaiPlanApprovalEntityConfiguration());
         modelBuilder.ApplyConfiguration(new Ellai.EllaiTopicEntityConfiguration());
     }
