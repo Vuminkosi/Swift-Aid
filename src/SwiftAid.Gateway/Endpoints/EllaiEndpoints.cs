@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using OpenIddict.Validation.AspNetCore;
+using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Ellai;
 using SwiftAid.Contracts.Ellai;
 
@@ -123,6 +124,14 @@ public static class EllaiEndpoints
             .Produces<bool>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized);
+        group.MapPost("/sessions/{sessionId}/consents", GrantConsentAsync)
+            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
+            .WithName("GrantEllaiConsent")
+            .Accepts<GrantEllaiConsentApiRequest>("application/json")
+            .Produces<EllaiConsentGrant>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized);
         group.MapPost("/sessions/{sessionId}/cancel", CancelAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
@@ -162,12 +171,21 @@ public static class EllaiEndpoints
         string sessionId,
         SubmitUtteranceRequest? request,
         EllaiSessionService sessions,
+        HttpContext http,
+        IEllaiSessionStore sessionStore,
+        EllaiConsentService consent,
+        EllaiUtteranceQueue utterances,
+        EllaiSessionEventJournal journals,
         CancellationToken cancellationToken)
     {
         if (request is null
             || !string.Equals(request.SessionId, sessionId, StringComparison.Ordinal)
             || string.IsNullOrWhiteSpace(request.FinalizedText)
-            || request.FinalizedText.Length > 8000)
+            || request.FinalizedText.Length > 8000
+            || (request.FeatureId is not null
+                && (string.IsNullOrWhiteSpace(request.FeatureId) || request.FeatureId.Length > 120))
+            || (request.ResourceId is not null
+                && (string.IsNullOrWhiteSpace(request.ResourceId) || request.ResourceId.Length > 120)))
         {
             return Results.Problem(
                 statusCode: StatusCodes.Status400BadRequest,
@@ -180,6 +198,44 @@ public static class EllaiEndpoints
             return Results.Problem(
                 statusCode: StatusCodes.Status409Conflict,
                 title: "The Ellai session changed before the utterance was recorded.");
+        }
+
+        // Best-effort background reasoning: the recorded view returns
+        // immediately; progress and results flow through the session event
+        // journal. A refused trigger journals why instead of going silent.
+        ActorContext actor;
+        try
+        {
+            actor = ActorContext.FromValidatedPrincipal(http.User);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status401Unauthorized,
+                title: "The Ellai utterance needs an authenticated actor.");
+        }
+
+        var record = await sessionStore.GetAsync(sessionId, cancellationToken);
+        if (record is null)
+        {
+            journals.Append(sessionId, "activity", "blocked",
+                "That information isn't available right now.", DateTimeOffset.UtcNow);
+            return Results.Json(view, statusCode: StatusCodes.Status200OK);
+        }
+
+        var feature = string.IsNullOrWhiteSpace(request.FeatureId) ? "general" : request.FeatureId.Trim();
+        var work = new EllaiUtteranceWork(
+            sessionId, record.ScopeEpoch, request.FinalizedText.Trim(), feature,
+            string.IsNullOrWhiteSpace(request.ResourceId) ? null : request.ResourceId.Trim(),
+            record.Mode, record.InteractionEpoch, $"cycle-{record.CyclesUsed}",
+            actor,
+            EllaiPolicyService.IsContributorEligible(
+                EllaiUtteranceRunner.ConsentedLabel, "general"),
+            consent.VersionLabel(sessionId));
+        if (!utterances.TryEnqueue(work))
+        {
+            journals.Append(sessionId, "activity", "blocked",
+                "That information isn't available right now.", DateTimeOffset.UtcNow);
         }
 
         return Results.Json(view, statusCode: StatusCodes.Status200OK);
@@ -512,6 +568,34 @@ public static class EllaiEndpoints
         return Results.Json(true, statusCode: StatusCodes.Status200OK);
     }
 
+    private static Task<IResult> GrantConsentAsync(
+        string sessionId,
+        GrantEllaiConsentApiRequest? request,
+        EllaiConsentService consent,
+        CancellationToken cancellationToken)
+    {
+        // Sessions are not owner-bound yet (pre-existing gap, reported):
+        // this records a grant only for the named session and returns only
+        // that grant's safe fields, never another session's state.
+        if (request is null
+            || !string.Equals(request.SessionId, sessionId, StringComparison.Ordinal)
+            || !Enum.TryParse<EllaiConsentDimension>(request.Dimension, ignoreCase: true, out var dimension)
+            || !Enum.IsDefined(dimension)
+            || string.IsNullOrWhiteSpace(request.Purpose)
+            || request.Purpose.Length > 120
+            || !string.Equals(request.Purpose, EllaiToolBroker.ToolReadPurpose, StringComparison.Ordinal)
+            || request.HoursToLive is < 1 or > 24)
+        {
+            return Task.FromResult(Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "The Ellai consent grant is invalid."));
+        }
+
+        var grant = consent.Grant(sessionId, dimension, request.Purpose,
+            EllaiUtteranceRunner.ConsentedLabel, TimeSpan.FromHours(request.HoursToLive));
+        return Task.FromResult(Results.Json(grant, statusCode: StatusCodes.Status200OK));
+    }
+
     private static Task<IResult> RejectReviewAsync(
         string sessionId,
         string requestId,
@@ -547,6 +631,16 @@ public static class EllaiEndpoints
 
 /// <summary>Cancel request carrying the officer-observed expected version.</summary>
 public sealed record CancelEllaiSessionApiRequest(long ExpectedSessionVersion);
+
+/// <summary>Authenticated consent grant for one session: dimension plus a
+/// purpose from the closed purpose set, with a bounded lifetime. Recording
+/// the grant lets consented utterances reach the reasoning lane; it never
+/// approves an administrative action and never grants another session.</summary>
+public sealed record GrantEllaiConsentApiRequest(
+    string SessionId,
+    string Dimension,
+    string Purpose,
+    int HoursToLive);
 
 /// <summary>Client-posted mounted-control report for the live UI
 /// observation channel. At most 20 control ids; the server stamps receipt

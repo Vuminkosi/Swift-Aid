@@ -167,12 +167,23 @@ object, canonical/alias names, string args, call ids); accepted tool results
 re-enter the next turn under their call ids, usage accrues to
 `EllaiUsageLedger`, and the per-iteration gate stops the run with a
 budget/denied detail. Pure small-talk turns emit no activity; completion
-projects only after real tool work, blocks always. Memory: PostgreSQL is
+projects only after real tool work, blocks always. Accepted utterances
+trigger background reasoning: `POST .../sessions/{id}/utterances` records
+the view and enqueues an `EllaiUtteranceWork` item (optional client
+`FeatureId`/`ResourceId`, default feature "general"); the
+`EllaiUtteranceWorker` hosted service runs one loop per session at a time
+(latest utterance wins, queue single-flight per process) with ledger,
+activity and journal wiring, and progress/results reach the UI through the
+journal transport. Reasoning-text consent gates every run: grants are
+recorded via authenticated `POST .../sessions/{id}/consents` (closed
+purpose set `ellai-tool-read`, 1..24h TTL) and missing grants journal the
+blocked template with zero model calls. Memory: PostgreSQL is
 authoritative for records and provenance; Qdrant (`EllaiMemoryIndex`) is a
 private derived index of scoped references only — never secrets, audio, or
-the case database. Still **Missing**: the background worker that triggers
-the loop from an accepted utterance (no prod caller yet) with the
-single-flight session fence.
+the case database. Still **Missing**: cross-instance run fencing (shared
+Redis lock; gate is per process) and session-to-actor ownership binding
+(pre-existing: session endpoints authenticate but do not prove session
+ownership — reported, not introduced here).
 
 ## 7. Verification map
 

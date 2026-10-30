@@ -65,7 +65,10 @@ public sealed record EllaiSessionView(
     long LastEventSequence,
     long SessionVersion);
 
-/// <summary>Finalized user utterance submission.</summary>
+/// <summary>Finalized user utterance submission. Optional
+/// <c>FeatureId</c>/<c>ResourceId</c> scope background reasoning to the
+/// client's current feature; absent features default to "general" and every
+/// value still passes policy, consent and budget checks.</summary>
 public sealed record SubmitUtteranceRequest(
     string ClientUtteranceId,
     string SessionId,
@@ -73,7 +76,9 @@ public sealed record SubmitUtteranceRequest(
     string FinalizedText,
     string? TranscriptRef,
     string InputSource,
-    long ClientEpoch);
+    long ClientEpoch,
+    string? FeatureId = null,
+    string? ResourceId = null);
 
 /// <summary>Client UI-intent execution envelope; server-issued and expiring.</summary>
 public sealed record UiIntentEnvelope(
