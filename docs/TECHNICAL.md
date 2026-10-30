@@ -188,7 +188,7 @@ ownership — reported, not introduced here).
 ## 7. Verification map
 
 Run `dotnet test tests/SwiftAid.Application.Tests --filter
-FullyQualifiedName~Ellai` (unit/contract, 172 passing, 3 skipped) and
+FullyQualifiedName~Ellai` (unit/contract, 180 passing, 3 skipped) and
 `dotnet test tests/SwiftAid.Ui.Tests --filter FullyQualifiedName~Ellai`
 (~44 passing). PostgreSQL integration tests
 (`tests/SwiftAid.Integration.Tests`, `EllaiPostgres*`) run only with
