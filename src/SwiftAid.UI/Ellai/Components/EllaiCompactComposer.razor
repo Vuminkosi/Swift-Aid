@@ -1,0 +1,43 @@
+@using SwiftAid.Contracts.Ellai
+
+<div class="ellai-composer" role="dialog" aria-label="Ellai assistant composer">
+    <div class="ellai-composer__input-row">
+        <MudTextField T="string" Value="@InputText" ValueChanged="OnInputChanged"
+                      Placeholder="Ask Ellai…" MaxLength="8000" Lines="2"
+                      aria-label="Message for Ellai" Immediate="true" />
+        <MudIconButton Icon="@Icons.Material.Filled.Send" Color="Color.Primary"
+                       OnClick="OnSend" Disabled="@(!CanSend)" aria-label="Send to Ellai" />
+        <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Default"
+                       OnClick="OnCancel" aria-label="Cancel Ellai session" />
+    </div>
+    <EllaiStatusLine StatusText="@StatusText" Placement="@Placement" />
+</div>
+
+@code {
+    [Parameter]
+    public string? InputText { get; set; }
+
+    [Parameter]
+    public string? StatusText { get; set; }
+
+    [Parameter]
+    public EllaiSurfacePlacement Placement { get; set; } = EllaiSurfacePlacement.Floating;
+
+    [Parameter]
+    public bool CanSend { get; set; }
+
+    [Parameter]
+    public EventCallback<string?> InputTextChanged { get; set; }
+
+    [Parameter]
+    public EventCallback OnSend { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    private async Task OnInputChanged(string? value)
+    {
+        InputText = value;
+        await InputTextChanged.InvokeAsync(value);
+    }
+}

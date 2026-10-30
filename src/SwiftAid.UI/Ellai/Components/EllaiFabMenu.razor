@@ -1,0 +1,10 @@
+@using SwiftAid.Contracts.Ellai
+
+<div class="ellai-fab-host">
+    <MudFab StartIcon="@Icons.Material.Filled.SmartToy" Color="Color.Primary" Size="Size.Large" OnClick="OnActivate" aria-label="Open Ellai assistant" />
+</div>
+
+@code {
+    [Parameter]
+    public EventCallback OnActivate { get; set; }
+}

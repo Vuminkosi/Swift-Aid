@@ -1,0 +1,17 @@
+@using SwiftAid.Contracts.Ellai
+
+<div class="ellai-status" role="status" aria-live="polite">
+    <MudText Typo="Typo.caption">@(StatusText ?? "Ellai is ready.")</MudText>
+    @if (Placement == EllaiSurfacePlacement.Attached)
+    {
+        <MudText Typo="Typo.caption" Color="Color.Secondary">Attached to guidance</MudText>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public string? StatusText { get; set; }
+
+    [Parameter]
+    public EllaiSurfacePlacement Placement { get; set; } = EllaiSurfacePlacement.Floating;
+}

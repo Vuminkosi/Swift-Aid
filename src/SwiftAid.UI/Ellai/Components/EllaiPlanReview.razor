@@ -1,0 +1,46 @@
+@using SwiftAid.Contracts.Ellai
+
+<MudCard Elevation="0" Outlined="true" Class="ellai-plan-review" aria-label="Review proposed administrative plan">
+    <MudCardContent>
+        <MudText Typo="Typo.subtitle1" HtmlTag="h2">@Plan?.Objective</MudText>
+        <MudText Typo="Typo.caption">Plan version @PlanVersion · Hash @PlanHash · Expires @ExpiresAtUtc.ToString("u")</MudText>
+        @if (Plan is not null)
+        {
+            <MudList T="AdminActionProposal" Dense="true" aria-label="Proposed actions">
+                @foreach (var action in Plan.Actions)
+                {
+                    <MudListItem T="AdminActionProposal" Text="@($"{action.ProposalLabel} · {action.Kind} · due {action.HumanSuppliedDueAtUtc?.ToString("u") ?? "unset"}")" />
+                }
+            </MudList>
+        }
+        <MudText Typo="Typo.caption">Approving submits each action exactly once. Changing any action, recipient, date, or evidence starts a new review.</MudText>
+    </MudCardContent>
+    <MudCardActions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="OnApprove" aria-label="Approve exact plan">Approve</MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Default" OnClick="OnReject" aria-label="Reject plan">Reject</MudButton>
+        <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="OnEdit" aria-label="Edit plan before approval">Edit</MudButton>
+    </MudCardActions>
+</MudCard>
+
+@code {
+    [Parameter]
+    public PlanProposal? Plan { get; set; }
+
+    [Parameter]
+    public string? PlanHash { get; set; }
+
+    [Parameter]
+    public int PlanVersion { get; set; }
+
+    [Parameter]
+    public DateTimeOffset ExpiresAtUtc { get; set; }
+
+    [Parameter]
+    public EventCallback OnApprove { get; set; }
+
+    [Parameter]
+    public EventCallback OnReject { get; set; }
+
+    [Parameter]
+    public EventCallback OnEdit { get; set; }
+}

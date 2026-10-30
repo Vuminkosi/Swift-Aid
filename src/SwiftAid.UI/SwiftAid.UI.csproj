@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Bit.Bonboarding" />
     <ProjectReference Include="..\SwiftAid.Contracts\SwiftAid.Contracts.csproj" />
     <PackageReference Include="Microsoft.AspNetCore.Components.Web" />
     <PackageReference Include="MudBlazor" />

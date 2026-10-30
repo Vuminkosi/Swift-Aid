@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "journeyId": "curated-queue-tour-001",
+  "journeyVersion": "1.0",
+  "manifestHash": "fixture-static",
+  "allowedModes": [ "SystemTour", "Presentation" ],
+  "environment": "synthetic",
+  "requiredCapabilities": [ "cases.read" ],
+  "productFactVersions": [ "productfacts/1.0" ],
+  "mandatoryObjectiveIds": [ "view-queue" ],
+  "offlineEligible": false,
+  "steps": [
+    {
+      "stepId": "see-queue",
+      "topicId": "queue-overview",
+      "featureId": "cases",
+      "controlId": "cases.queue",
+      "preparationIds": [],
+      "advancePolicy": "UiObservationRequired",
+      "proofPredicate": "proof-ui-observed",
+      "mandatory": true,
+      "narration": "This is the case queue. It lists items your role may see."
+    },
+    {
+      "stepId": "your-turn",
+      "topicId": "queue-handoff",
+      "featureId": "cases",
+      "controlId": "cases.queue",
+      "preparationIds": [],
+      "advancePolicy": "Manual",
+      "proofPredicate": "proof-human-acknowledged",
+      "mandatory": false,
+      "narration": "Your turn: open the first item yourself. Ellai waits and verifies."
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+@using SwiftAid.Contracts.Ellai
+
+<MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="ellai-permission" role="status">
+    <MudText Typo="Typo.body2">@Description</MudText>
+    <MudText Typo="Typo.caption">Ellai asks through this flow only. Granting one permission never grants others.</MudText>
+    <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="OnOpenSettings" aria-label="Open Ellai settings">Review in Settings</MudButton>
+</MudAlert>
+
+@code {
+    [Parameter]
+    public string? Description { get; set; }
+
+    [Parameter]
+    public EventCallback OnOpenSettings { get; set; }
+}

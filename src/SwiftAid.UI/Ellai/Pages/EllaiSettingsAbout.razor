@@ -1,0 +1,40 @@
+@using SwiftAid.Contracts.Ellai
+@page "/ellai/about"
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="ellai-settings">
+    <MudText Typo="Typo.h5" HtmlTag="h1">About Ellai</MudText>
+    <MudText Typo="Typo.body2">
+        Ellai is SwiftAid's permission-aware application assistant. It answers product
+        questions, demonstrates features, and proposes bounded administrative work
+        that a person reviews and the application verifies.
+    </MudText>
+    <MudDivider Class="my-4" />
+    <MudText Typo="Typo.subtitle1" HtmlTag="h2">Capabilities</MudText>
+    @if (Capabilities is null || Capabilities.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+            Capability status is loading.
+        </MudAlert>
+    }
+    else
+    {
+        <MudList T="VoiceCapability" Dense="true" aria-label="Ellai capabilities">
+            @foreach (var capability in Capabilities)
+            {
+                <MudListItem T="VoiceCapability" Text="@($"{capability.Modality} · {capability.Language} · {capability.Availability}")" />
+            }
+        </MudList>
+    }
+    <MudDivider Class="my-4" />
+    <MudText Typo="Typo.subtitle1" HtmlTag="h2">Privacy</MudText>
+    <MudText Typo="Typo.body2">
+        Microphone access, transcription, reasoning, memory, and each business action
+        are separate permissions. Opening Ellai does not grant them. Sensitive case
+        content is never sent to the default reasoning route.
+    </MudText>
+</MudContainer>
+
+@code {
+    [Parameter]
+    public IReadOnlyList<VoiceCapability>? Capabilities { get; set; }
+}

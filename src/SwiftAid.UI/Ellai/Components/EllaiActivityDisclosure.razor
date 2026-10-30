@@ -1,0 +1,31 @@
+@using SwiftAid.Contracts.Ellai
+
+<div class="ellai-activity" aria-label="Current Ellai activity">
+    @if (Explanation is null)
+    {
+        <MudText Typo="Typo.caption">No activity yet this session.</MudText>
+    }
+    else
+    {
+        <MudText Typo="Typo.body2">@Explanation.Observed</MudText>
+        <MudText Typo="Typo.caption">@Explanation.Rationale</MudText>
+        <MudText Typo="Typo.caption">@Explanation.ApprovalState</MudText>
+        <MudText Typo="Typo.caption">@Explanation.VerificationState</MudText>
+        @if (Explanation.Sources.Count > 0)
+        {
+            <MudText Typo="Typo.caption">Sources: @string.Join(", ", Explanation.Sources.Select(s => $"{s.SourceKind}:{s.ResourceId}@{s.Version}"))</MudText>
+        }
+    }
+</div>
+
+@code {
+    [Parameter]
+    public EllaiActivityExplanation? Explanation { get; set; }
+
+    public sealed record EllaiActivityExplanation(
+        string Observed,
+        string Rationale,
+        string ApprovalState,
+        string VerificationState,
+        IReadOnlyList<EvidenceRef> Sources);
+}

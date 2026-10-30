@@ -2,6 +2,15 @@
   "version": 2,
   "dependencies": {
     "net10.0": {
+      "Bit.Bonboarding": {
+        "type": "Direct",
+        "requested": "[10.7.0, )",
+        "resolved": "10.7.0",
+        "contentHash": "mo1VJzd1gvP5DcvGlF3d2OyzzuVn28YyJEUZ3BZ+OK0BMGwsvn+YHckuGMX1KfkYGV1izg6JHBX3MwGShwsXTQ==",
+        "dependencies": {
+          "Microsoft.AspNetCore.Components.Web": "[10.0.0, 11.0.0)"
+        }
+      },
       "Blazor.Lottie.Player": {
         "type": "Direct",
         "requested": "[1.0.6, )",

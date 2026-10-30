@@ -571,10 +571,17 @@
       "swiftaid.ui": {
         "type": "Project",
         "dependencies": {
+          "Bit.Bonboarding": "[10.7.0, )",
           "Blazor.Lottie.Player": "[1.0.6, )",
           "MudBlazor": "[9.11.0, )",
           "SwiftAid.Contracts": "[1.0.0, )"
         }
+      },
+      "Bit.Bonboarding": {
+        "type": "CentralTransitive",
+        "requested": "[10.7.0, )",
+        "resolved": "10.7.0",
+        "contentHash": "mo1VJzd1gvP5DcvGlF3d2OyzzuVn28YyJEUZ3BZ+OK0BMGwsvn+YHckuGMX1KfkYGV1izg6JHBX3MwGShwsXTQ=="
       },
       "Blazor.Lottie.Player": {
         "type": "CentralTransitive",

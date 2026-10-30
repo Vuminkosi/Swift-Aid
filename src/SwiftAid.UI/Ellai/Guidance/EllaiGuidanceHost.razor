@@ -1,0 +1,62 @@
+@using Bit.Bonboarding
+@using SwiftAid.Contracts.Ellai
+@using SwiftAid.UI.Ellai.Components
+@inject IBonboardingService Bonboarding
+@inject IEllaiGuidanceControl Guidance
+
+<div class="ellai-host">
+    <BonboardingRoot />
+    @if (IsActive)
+    {
+        <div class="ellai-host__attached">
+            <EllaiCompactComposer Placement="EllaiSurfacePlacement.Attached"
+                                  StatusText="@StatusText"
+                                  CanSend="true"
+                                  OnCancel="OnCancel" />
+        </div>
+    }
+    else
+    {
+        <EllaiFabMenu OnActivate="OnActivate" />
+        @if (ShowComposer)
+        {
+            <div class="ellai-host__floating">
+                <EllaiCompactComposer Placement="EllaiSurfacePlacement.Floating"
+                                      StatusText="@StatusText"
+                                      CanSend="true"
+                                      OnCancel="OnCancel" />
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private bool ShowComposer;
+    private bool IsActive;
+    private string? StatusText = "Ellai is ready.";
+    private GuidanceSnapshot? _guidance;
+
+    private void OnActivate()
+    {
+        ShowComposer = true;
+        StatusText = "Ellai session started. Ask a question or start a guided tour.";
+    }
+
+    private async Task OnCancel()
+    {
+        if (_guidance is not null)
+        {
+            await Guidance.StopAsync(
+                _guidance.Position.GuidanceAttemptId,
+                _guidance.Position.GuidanceVersion,
+                _guidance.Mode,
+                CancellationToken.None);
+            _guidance = null;
+            IsActive = false;
+        }
+
+        await Bonboarding.StopAllAsync(BonboardingTourEndReason.Cancelled, CancellationToken.None);
+        ShowComposer = false;
+        StatusText = "Ellai session ended.";
+    }
+}
