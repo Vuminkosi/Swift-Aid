@@ -40,6 +40,23 @@
     border-color: var(--sa-status-success);
 }
 
+.guided-report__step-complete-icon {
+    flex: 0 0 auto;
+    color: var(--sa-status-success);
+}
+
+.guided-report__screen-reader-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
 .guided-report__step-number {
     display: inline-grid;
     flex: 0 0 1.75rem;
@@ -426,18 +443,18 @@
 
     .guided-report:has(.guided-report__panel[aria-labelledby="report-type-title"]) ::deep form {
         display: flex;
-        flex: 0 0 auto;
+        flex: 1 0 auto;
         flex-direction: column;
         gap: 0.5rem;
     }
 
     .guided-report:has(.guided-report__panel[aria-labelledby="report-type-title"]) .guided-report__panel[aria-labelledby="report-type-title"] {
         display: flex;
-        flex: 0 0 auto;
+        flex: 1 0 auto;
         flex-direction: column;
     }
 
     .guided-report:has(.guided-report__panel[aria-labelledby="report-type-title"]) .guided-report__actions {
-        margin-block-start: 0;
+        margin-block-start: auto;
     }
 }

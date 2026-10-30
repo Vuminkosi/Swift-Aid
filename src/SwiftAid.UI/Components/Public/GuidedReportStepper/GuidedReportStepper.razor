@@ -27,8 +27,22 @@
             var stepIndex = index;
             <li class="@(stepIndex == _step ? "is-current" : stepIndex < _step ? "is-complete" : null)"
                 aria-current="@(stepIndex == _step ? "step" : null)">
-                <span class="guided-report__step-number" aria-hidden="true">@(stepIndex + 1)</span>
+                <span class="guided-report__step-number" aria-hidden="true">
+                    @if (stepIndex < _step)
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.Check"
+                                 Class="guided-report__step-complete-icon" />
+                    }
+                    else
+                    {
+                        @(stepIndex + 1)
+                    }
+                </span>
                 <span>@StepNames[stepIndex]</span>
+                @if (stepIndex < _step)
+                {
+                    <span class="guided-report__screen-reader-only">Complete</span>
+                }
             </li>
         }
     </ol>
@@ -84,7 +98,7 @@
                     <MudText Color="Color.Error" Typo="Typo.body2" role="alert">@_stepError</MudText>
                 }
                 <div class="guided-report__actions">
-                    <MudButton ButtonType="ButtonType.Button" Color="Color.Primary" Variant="Variant.Text" Disabled="@(!HasCompleteSubject)" OnClick="ContinueFromTypeAsync" StartIcon="@Icons.Material.Filled.ArrowForward">
+                    <MudButton ButtonType="ButtonType.Button" Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!HasCompleteSubject)" OnClick="ContinueFromTypeAsync" StartIcon="@Icons.Material.Filled.ArrowForward">
                         Continue to details
                     </MudButton>
                     @if (OnSaveDraft.HasDelegate)
