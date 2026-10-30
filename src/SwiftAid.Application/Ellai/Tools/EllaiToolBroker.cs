@@ -116,21 +116,24 @@ public sealed class EllaiToolBroker
     private readonly EllaiConsentService _consent;
     private readonly EllaiTechnicalDocs? _docs;
     private readonly ICaseQueueQuery? _queue;
+    private readonly IEllaiApprovalStore? _receipts;
 
     /// <summary>Consent infrastructure is mandatory: a missing service fails
     /// closed instead of silently bypassing the ReasoningText grant check.
     /// The documentation source is optional: docs tools report an explicit
-    /// unavailable outcome while it is unconfigured. The domain queue is
-    /// optional: live projections report unavailable without it, and no
-    /// Ellai-only unrestricted query is ever introduced.</summary>
+    /// unavailable outcome while it is unconfigured. The domain queue and
+    /// receipt authority are optional: live projections report unavailable
+    /// without them, and no Ellai-only unrestricted query is ever introduced.</summary>
     public EllaiToolBroker(
         EllaiPolicyService policy, EllaiConsentService consent,
-        EllaiTechnicalDocs? docs = null, ICaseQueueQuery? queue = null)
+        EllaiTechnicalDocs? docs = null, ICaseQueueQuery? queue = null,
+        IEllaiApprovalStore? receipts = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _consent = consent ?? throw new ArgumentNullException(nameof(consent));
         _docs = docs;
         _queue = queue;
+        _receipts = receipts;
     }
 
     public async Task<EllaiToolResult> InvokeAsync(
@@ -194,12 +197,16 @@ public sealed class EllaiToolBroker
             return Bound(await ReadStateAsync(context, request, ct).ConfigureAwait(false));
         }
 
+        if (string.Equals(canonical, EllaiToolNames.Receipts, StringComparison.Ordinal))
+        {
+            return Bound(await ReadReceiptsAsync(context, request, ct).ConfigureAwait(false));
+        }
+
         return Bound(canonical switch
         {
             EllaiToolNames.Evidence => Allow(request.ToolName, "Authorized versioned source items.", Math.Min(request.Arguments.Count, MaxItems), request.Arguments.Count > MaxItems),
             EllaiToolNames.Topic => Allow(request.ToolName, "Session topic candidates with checkpoints.", 1, false),
             EllaiToolNames.Capabilities => Allow(request.ToolName, "Current capability descriptors.", 1, false),
-            EllaiToolNames.Receipts => Allow(request.ToolName, "Existing receipts with linked state.", 1, false),
             EllaiToolNames.ProductFacts => Allow(request.ToolName, "Versioned nonmedical product facts.", 1, false),
             EllaiToolNames.Now => Allow(request.ToolName, DescribeNow(DateTimeOffset.UtcNow), 1, false),
             EllaiToolNames.DocsSearch => SearchDocs(request),
@@ -313,6 +320,60 @@ public sealed class EllaiToolBroker
 
     private static EllaiToolResult Allow(string tool, string summary, int count, bool truncated) =>
         new(tool, true, null, Array.Empty<EvidenceRef>(), summary, count, truncated, EllaiToolReasonCodes.Ok);
+
+    /// <summary>Live <c>ellai_receipts</c> reads against the durable receipt
+    /// authority. A single receipt is looked up by id; otherwise the current
+    /// session's receipts list. Session binding is enforced: a receipt from
+    /// another session reads as absent, never as a leak. Absence is an
+    /// authorized empty, distinct from proof that an effect never happened.</summary>
+    private async Task<EllaiToolResult> ReadReceiptsAsync(
+        EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
+    {
+        if (_receipts is null)
+        {
+            return Deny(request.ToolName,
+                "The receipt authority is not available for this session.",
+                EllaiToolReasonCodes.Unavailable);
+        }
+
+        if (request.Arguments.TryGetValue("receipt", out var receiptId)
+            && !string.IsNullOrWhiteSpace(receiptId))
+        {
+            var receipt = await _receipts.GetAsync(receiptId.Trim(), ct).ConfigureAwait(false);
+            if (receipt is null
+                || !string.Equals(receipt.SessionId, context.SessionId, StringComparison.Ordinal))
+            {
+                return Allow(request.ToolName, "No matching receipt in this session.", 0, false);
+            }
+
+            var evidence = new[] { new EvidenceRef(
+                "Receipt", receipt.ReceiptId, receipt.Status.ToString(), null, receipt.ReceiptId) };
+            return new EllaiToolResult(request.ToolName, true, null, evidence,
+                DescribeReceipt(receipt), 1, false, EllaiToolReasonCodes.Ok);
+        }
+
+        var list = await _receipts.ListBySessionAsync(context.SessionId, ct).ConfigureAwait(false);
+        var items = list.Take(MaxItems).ToList();
+        var lines = items.Select(DescribeReceipt);
+        var refs = items.Select(receipt => new EvidenceRef(
+            "Receipt", receipt.ReceiptId, receipt.Status.ToString(), null, receipt.ReceiptId)).ToList();
+        return new EllaiToolResult(request.ToolName, true, null, refs,
+            items.Count == 0 ? "No receipts recorded in this session." : string.Join("\n", lines),
+            items.Count, list.Count > MaxItems, EllaiToolReasonCodes.Ok);
+    }
+
+    private static string DescribeReceipt(EllaiReceipt receipt)
+    {
+        var verified = receipt.VerifiedAtUtc?.ToString("O") ?? "not yet verified";
+        var binding = receipt.ApprovedRecipient is null
+            ? string.Empty
+            : $" · recipient {receipt.ApprovedRecipient}";
+        var due = receipt.ApprovedDueAtUtc?.ToString("O") ?? null;
+        return $"receipt {receipt.ReceiptId} · action {receipt.ActionId} · status {receipt.Status}" +
+            $" · accepted {receipt.CreatedAtUtc:O} · expires {receipt.ApprovalExpiresAtUtc:O}" +
+            $" · verified {verified}{binding}" +
+            (due is null ? string.Empty : $" · due {due}");
+    }
 
     private EllaiToolResult SearchDocs(EllaiToolRequest request)
     {

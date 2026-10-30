@@ -53,7 +53,8 @@ public sealed class EllaiReadToolTests
             consent.Grant("session-1", EllaiConsentDimension.ReasoningText,
                 EllaiToolBroker.ToolReadPurpose, "synthetic", TimeSpan.FromHours(1));
             var broker = new EllaiToolBroker(
-                new EllaiPolicyService(), consent, new EllaiTechnicalDocs(docsPath));
+                new EllaiPolicyService(), consent, new EllaiTechnicalDocs(docsPath), null,
+                new EllaiReceiptStore());
 
             foreach (var tool in EllaiToolNames.All)
             {
