@@ -4,27 +4,121 @@
 @using SwiftAid.Client.Notifications
 @using SwiftAid.Contracts.Notifications
 @using SwiftAid.UI.Components.Notifications
+@using SwiftAid.UI.Components.Surfaces.Shell
 @inject INotificationFeedClient NotificationClient
 @inject INotificationPlatformSettings NotificationPlatform
 @inject IJSRuntime JS
 @inject NavigationManager Navigation
-
-<a class="skip-link" href="#main-content">Skip to main content</a>
+@inject SwiftAid.UI.Ellai.EllaiLauncher EllaiLauncher
 
 <SwiftAidThemeProvider />
 <MudPopoverProvider />
 <MudDialogProvider />
 <MudSnackbarProvider />
 
-<MudLayout>
-    <MudAppBar Elevation="0" Color="Color.Surface" Class="app-bar">
-        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
-                       OnClick="ToggleDrawer"
-                       aria-label="Toggle navigation"
-                       aria-controls="primary-navigation"
-                       aria-expanded="@(_drawerOpen ? "true" : "false")" />
-        <MudText Typo="Typo.h6" Class="brand-mark">SwiftAid</MudText>
-        <MudSpacer />
+<SwiftAidApplicationShell BrandName="SwiftAid" HomeHref="/" PageLabel="SwiftAid workspace" ContentClass="main-content">
+    <DesktopNavigation>
+        <AuthorizeView>
+            <Authorized>
+                <MudNavLink Href="/dashboard" Icon="@Icons.Material.Filled.Dashboard">Dashboard</MudNavLink>
+                <MudNavLink Href="/my-cases" Icon="@Icons.Material.Filled.FolderOpen">Cases</MudNavLink>
+                <MudNavLink Href="/assignments" Icon="@Icons.Material.Filled.AssignmentInd">Assignments</MudNavLink>
+                <MudNavLink Href="/surveillance" Icon="@Icons.Material.Filled.Map">Surveillance</MudNavLink>
+                <MudNavLink Href="/reports" Icon="@Icons.Material.Filled.Assessment">Reports</MudNavLink>
+            </Authorized>
+            <NotAuthorized>
+                <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">Dashboard</MudNavLink>
+                <MudNavLink Href="/report?view=tracking" Icon="@Icons.Material.Filled.FolderOpen">Cases</MudNavLink>
+            </NotAuthorized>
+        </AuthorizeView>
+        <MudNavLink Href="/education" Icon="@Icons.Material.Filled.MenuBook">Education</MudNavLink>
+        <MudNavLink Href="/sessions" Icon="@Icons.Material.Filled.Event">Community</MudNavLink>
+        <AuthorizeView>
+            <Authorized>
+                <MudNavLink Href="/organizations" Icon="@Icons.Material.Filled.Groups">Users</MudNavLink>
+            </Authorized>
+        </AuthorizeView>
+        <MudNavLink Href="/account" Icon="@Icons.Material.Filled.Settings">Settings</MudNavLink>
+    </DesktopNavigation>
+    <MobileNavigation>
+        <NavLink href="/" Match="NavLinkMatch.All">
+            <MudIcon Icon="@Icons.Material.Filled.Home" aria-hidden="true" />
+            <span>Home</span>
+        </NavLink>
+        <AuthorizeView>
+            <Authorized>
+                <NavLink href="/my-cases">
+                    <MudIcon Icon="@Icons.Material.Filled.FolderOpen" aria-hidden="true" />
+                    <span>Cases</span>
+                </NavLink>
+            </Authorized>
+            <NotAuthorized>
+                <NavLink href="/report?view=tracking">
+                    <MudIcon Icon="@Icons.Material.Filled.FolderOpen" aria-hidden="true" />
+                    <span>Cases</span>
+                </NavLink>
+            </NotAuthorized>
+        </AuthorizeView>
+        <NavLink href="/report" class="mobile-report-link" aria-label="Report a concern">
+            <MudIcon Icon="@Icons.Material.Filled.Add" aria-hidden="true" />
+        </NavLink>
+        <NavLink href="/sessions">
+            <MudIcon Icon="@Icons.Material.Filled.Groups" aria-hidden="true" />
+            <span>Community</span>
+        </NavLink>
+        <button @ref="_mobileMoreTrigger" type="button" class="mobile-more-trigger"
+                aria-expanded="@_moreMenuOpen" aria-controls="mobile-more-destinations"
+                @onclick="ToggleMoreMenu" @onkeydown="HandleMobileMoreKeydown">
+            <MudIcon Icon="@Icons.Material.Filled.MoreHoriz" aria-hidden="true" />
+            <span>More</span>
+        </button>
+        @if (_moreMenuOpen)
+        {
+            <nav id="mobile-more-destinations" class="mobile-more-menu" aria-label="More destinations"
+                 @onkeydown="HandleMobileMoreKeydown">
+                <a href="/education" class="more-menu-link" @onclick="CloseMoreMenu">Education</a>
+                <a href="/account" class="more-menu-link" @onclick="CloseMoreMenu">Settings</a>
+                <AuthorizeView>
+                    <Authorized>
+                        <a href="/monitoring" class="more-menu-link" @onclick="CloseMoreMenu">Monitoring</a>
+                        <a href="/assistance" class="more-menu-link" @onclick="CloseMoreMenu">Assistance</a>
+                        <a href="/follow-ups" class="more-menu-link" @onclick="CloseMoreMenu">Follow-ups</a>
+                        <a href="/escalations" class="more-menu-link" @onclick="CloseMoreMenu">Escalations</a>
+                        <a href="/intake-coordination" class="more-menu-link" @onclick="CloseMoreMenu">Intake coordination</a>
+                        <a href="/investigations" class="more-menu-link" @onclick="CloseMoreMenu">Investigations</a>
+                    </Authorized>
+                </AuthorizeView>
+            </nav>
+        }
+    </MobileNavigation>
+    <HeaderActions>
+        <div class="desktop-more-container" @onkeydown="HandleDesktopMoreKeydown">
+            <button @ref="_desktopMoreTrigger" type="button" class="desktop-more-trigger"
+                    aria-expanded="@_moreMenuOpen" aria-controls="desktop-more-destinations"
+                    @onclick="ToggleMoreMenu">
+                <MudIcon Icon="@Icons.Material.Filled.MoreHoriz" aria-hidden="true" />
+                <span>More</span>
+            </button>
+            @if (_moreMenuOpen)
+            {
+                <nav id="desktop-more-destinations" class="desktop-more-menu" aria-label="More destinations">
+                    <a href="/account" class="more-menu-link" @onclick="CloseMoreMenu">Settings</a>
+                    <AuthorizeView>
+                        <Authorized>
+                            <a href="/monitoring" class="more-menu-link" @onclick="CloseMoreMenu">Monitoring</a>
+                            <a href="/assistance" class="more-menu-link" @onclick="CloseMoreMenu">Assistance</a>
+                            <a href="/follow-ups" class="more-menu-link" @onclick="CloseMoreMenu">Follow-ups</a>
+                            <a href="/escalations" class="more-menu-link" @onclick="CloseMoreMenu">Escalations</a>
+                            <a href="/intake-coordination" class="more-menu-link" @onclick="CloseMoreMenu">Intake coordination</a>
+                            <a href="/investigations" class="more-menu-link" @onclick="CloseMoreMenu">Investigations</a>
+                        </Authorized>
+                    </AuthorizeView>
+                </nav>
+            }
+        </div>
+        <MudButton Class="gateway-report-action" Href="/report" StartIcon="@Icons.Material.Filled.EditNote" Variant="Variant.Text" Size="Size.Small">
+            Report a concern
+        </MudButton>
         <MudBadge Content="@_unreadNotificationCount" Visible="@(_unreadNotificationCount > 0)" Color="Color.Primary" Overlap="true" Class="notification-badge">
             <MudMenu Open="@_notificationMenuOpen"
                      OpenChanged="NotificationMenuChangedAsync"
@@ -48,7 +142,7 @@
                                 <MudCheckBox T="bool" Value="_notificationSoundEnabled" ValueChanged="SetNotificationSoundAsync"
                                              Label="Play a gentle sound for new notifications" Disabled="_notificationSettingsBusy" />
                                 <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="DisableNotificationsAsync"
-                                           Disabled="_notificationSettingsBusy">Turn off push</MudButton>
+                                           Disabled="_notificationSettingsBusy" StartIcon="@Icons.Material.Filled.NotificationsOff">Turn off push</MudButton>
                             }
                             else if (_notificationPermission == NotificationPermissionState.Denied)
                             {
@@ -81,7 +175,7 @@
                     <NotificationFeed Items="_notificationItems"
                                       Loading="_notificationLoading"
                                       PermissionDenied="_notificationPermissionDenied"
-                                      ErrorMessage="_notificationError"
+                                      ErrorMessage="@_notificationError"
                                       OnRetry="RefreshNotificationsAsync"
                                       OnMarkRead="MarkNotificationReadAsync"
                                       OnDismiss="DismissNotificationAsync"
@@ -89,35 +183,20 @@
                 </ChildContent>
             </MudMenu>
         </MudBadge>
-        <MudChip T="string" Color="Color.Default" Variant="Variant.Outlined" Size="Size.Small">
-            Public information
-        </MudChip>
-    </MudAppBar>
-
-    <MudDrawer id="primary-navigation" @bind-Open="_drawerOpen"
-               ClipMode="DrawerClipMode.Always" Elevation="0">
-        <MudNavMenu Class="navigation-menu">
-            <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Home">Home</MudNavLink>
-            <MudNavLink Href="/report" Icon="@Icons.Material.Filled.EditNote">Report a concern</MudNavLink>
-            <MudNavLink Href="/education" Icon="@Icons.Material.Filled.MenuBook">Education</MudNavLink>
-            <MudNavLink Href="/sessions" Icon="@Icons.Material.Filled.Event">Community sessions</MudNavLink>
-            <AuthorizeView>
-                <MudNavLink Href="/intake-coordination" Icon="@Icons.Material.Filled.Rule">Intake coordination</MudNavLink>
-                <MudNavLink Href="/monitoring" Icon="@Icons.Material.Filled.MonitorHeart">Monitoring</MudNavLink>
-            </AuthorizeView>
-        </MudNavMenu>
-        <MudDivider Class="drawer-divider" />
-        <MudText Typo="Typo.caption" Class="drawer-note">
-            A private report is not a promise of service or a confirmed case.
-        </MudText>
-    </MudDrawer>
-
-    <MudMainContent Class="main-content">
-        <main id="main-content" tabindex="-1">
+        <AuthorizeView>
+            <Authorized>
+                <MudChip Class="header-access-indicator" T="string" Color="Color.Primary" Variant="Variant.Outlined" Size="Size.Small">Officer workspace</MudChip>
+            </Authorized>
+            <NotAuthorized>
+                <MudChip Class="header-access-indicator" T="string" Color="Color.Default" Variant="Variant.Outlined" Size="Size.Small">Public access</MudChip>
+            </NotAuthorized>
+        </AuthorizeView>
+    </HeaderActions>
+    <ChildContent>
+        <MudContainer MaxWidth="MaxWidth.Large">
             @Body
-        </main>
-
-        <footer aria-label="Site information">
+        </MudContainer>
+        <footer class="site-footer" aria-label="Site information">
             <MudDivider />
             <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Class="pa-4">
                 <MudText Typo="Typo.caption">SwiftAid</MudText>
@@ -126,11 +205,42 @@
                 <MudLink Href="/terms" Color="Color.Inherit">Terms</MudLink>
             </MudStack>
         </footer>
-    </MudMainContent>
-</MudLayout>
+        <EllaiLauncherMenu OnModeSelected="RequestEllaiMode" />
+        <EllaiGuidanceHost />
+    </ChildContent>
+</SwiftAidApplicationShell>
 
 @code {
-    private bool _drawerOpen = true;
+    private void RequestEllaiMode(EllaiMode mode) => EllaiLauncher.Request(mode);
+
+    private bool _moreMenuOpen;
+    private ElementReference _mobileMoreTrigger;
+    private ElementReference _desktopMoreTrigger;
+
+    private void ToggleMoreMenu() => _moreMenuOpen = !_moreMenuOpen;
+
+    private void CloseMoreMenu() => _moreMenuOpen = false;
+
+    private async Task HandleMobileMoreKeydown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Escape" && _moreMenuOpen)
+        {
+            _moreMenuOpen = false;
+            await InvokeAsync(StateHasChanged);
+            await _mobileMoreTrigger.FocusAsync();
+        }
+    }
+
+    private async Task HandleDesktopMoreKeydown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Escape" && _moreMenuOpen)
+        {
+            _moreMenuOpen = false;
+            await InvokeAsync(StateHasChanged);
+            await _desktopMoreTrigger.FocusAsync();
+        }
+    }
+
     private bool _notificationMenuOpen;
     private bool _notificationLoading;
     private bool _notificationPermissionDenied;
@@ -155,8 +265,6 @@
         _unreadNotificationCount == 0
             ? "Notifications"
             : $"Notifications, {_unreadNotificationCount} unread";
-
-    private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
 
     private void OpenNotification(NotificationItemView item)
     {
