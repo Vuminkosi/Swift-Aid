@@ -77,7 +77,8 @@ public sealed class CaseCommandEndpointTests
         await using var host = await TestCommandHost.StartAsync();
         var commandId = Guid.NewGuid();
         using var request = CreateRequest(FixedCaseId, new CaseCommandApiRequest(
-            1, "CorrectReport", commandId, 3, null, "corrected narrative", null, null, null, null));
+            1, "CorrectReport", commandId, 3, null, "reason for correction", null, null, null, null,
+            Narrative: "corrected report text"));
 
         using var response = await host.SendBearerAsync(request);
         var body = await response.Content.ReadAsStringAsync();
@@ -91,7 +92,24 @@ public sealed class CaseCommandEndpointTests
         var command = Assert.IsType<CorrectReportCommand>(host.Processor.LastCommand);
         Assert.Equal(commandId, command.CommandId);
         Assert.Equal(3, command.ExpectedVersion);
-        Assert.Equal("corrected narrative", command.CorrectedNarrative);
+        Assert.Equal("corrected report text", command.CorrectedNarrative);
+        Assert.Equal("reason for correction", command.Reason);
+    }
+
+    [Theory]
+    [InlineData(null, "reason for correction")]
+    [InlineData("corrected report text", null)]
+    public async Task CorrectReport_RequiresNarrativeAndReason(string? narrative, string? reason)
+    {
+        await using var host = await TestCommandHost.StartAsync();
+        using var request = CreateRequest(FixedCaseId, new CaseCommandApiRequest(
+            1, "CorrectReport", Guid.NewGuid(), 3, null, reason, null, null, null, null,
+            Narrative: narrative));
+
+        using var response = await host.SendBearerAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, host.Processor.Calls);
     }
 
     [Fact]

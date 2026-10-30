@@ -88,7 +88,7 @@ public static class CaseCommandEndpoints
             "CorrectReport" => new CorrectReportCommand(
                 request.CommandId,
                 request.ExpectedVersion,
-                RequireReason(request),
+                RequireCorrectedNarrative(request),
                 RequireReason(request),
                 request.OccurredAtUtc,
                 recordedAt),
@@ -411,6 +411,16 @@ public static class CaseCommandEndpoints
         if (string.IsNullOrWhiteSpace(request.Narrative))
         {
             throw new ArgumentException("An observation narrative is required.", nameof(request));
+        }
+
+        return request.Narrative;
+    }
+
+    private static string RequireCorrectedNarrative(CaseCommandApiRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Narrative))
+        {
+            throw new ArgumentException("A corrected report narrative is required.", nameof(request));
         }
 
         return request.Narrative;

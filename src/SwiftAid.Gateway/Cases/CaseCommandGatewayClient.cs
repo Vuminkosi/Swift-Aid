@@ -104,7 +104,7 @@ public sealed class CaseCommandGatewayClient(
             "CorrectReport" => new CorrectReportCommand(
                 commandId,
                 expectedVersion,
-                RequireReason(input),
+                RequireCorrectedNarrative(input),
                 RequireReason(input),
                 null,
                 recordedAt),
@@ -229,6 +229,16 @@ public sealed class CaseCommandGatewayClient(
         }
 
         return input.Reason;
+    }
+
+    private static string RequireCorrectedNarrative(CaseCommandInput input)
+    {
+        if (string.IsNullOrWhiteSpace(input.Narrative))
+        {
+            throw new ArgumentException("A corrected report narrative is required.", nameof(input));
+        }
+
+        return input.Narrative;
     }
 
     private static string RequireOwnerId(string? proposedOwnerId)
