@@ -79,6 +79,8 @@ builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiPolicyService>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiToolBroker>();
 builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiUiRegistry>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiGuidancePlanValidator>();
+builder.Services.AddScoped<SwiftAid.Application.Ellai.IEllaiUiDiscoveryService, SwiftAid.Application.Ellai.EllaiUiDiscoveryService>();
+builder.Services.AddScoped<SwiftAid.Application.Ellai.IEllaiGuidancePlanner, SwiftAid.Application.Ellai.EllaiGuidancePlanner>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiGuidanceSessionCoordinator>();
 builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.IEllaiGuidanceControl, SwiftAid.Gateway.Ellai.EllaiGuidanceControlAdapter>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiCycleRunner>();
