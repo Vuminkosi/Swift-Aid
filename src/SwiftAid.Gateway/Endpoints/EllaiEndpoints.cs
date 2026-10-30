@@ -67,7 +67,7 @@ public static class EllaiEndpoints
         group.MapGet("/sessions/{sessionId}/receipts", ListReceipts)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
             .WithName("ListEllaiReceipts")
-            .Produces<IReadOnlyList<EllaiReceipt>>(StatusCodes.Status200OK)
+            .Produces<IReadOnlyList<EllaiApprovedReceiptDto>>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
         group.MapPost("/sessions/{sessionId}/approval-reviews", RegisterReviewAsync)
@@ -100,7 +100,7 @@ public static class EllaiEndpoints
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("ApproveEllaiSelectedActions")
             .Accepts<ApproveSelectedApiRequest>("application/json")
-            .Produces<IReadOnlyList<EllaiReceipt>>(StatusCodes.Status200OK)
+            .Produces<IReadOnlyList<EllaiApprovedReceiptDto>>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
@@ -322,8 +322,17 @@ public static class EllaiEndpoints
         }
 
         var list = await receipts.ListBySessionAsync(sessionId, cancellationToken);
-        return Results.Json(list, statusCode: StatusCodes.Status200OK);
+        return Results.Json(MapReceipts(list), statusCode: StatusCodes.Status200OK);
     }
+
+    /// <summary>Wire projection for durable receipts: identity plus the
+    /// status name. Statuses serialize as names (never enum numbers) so
+    /// typed clients can parse them without guessing the lattice.</summary>
+    private static IReadOnlyList<EllaiApprovedReceiptDto> MapReceipts(
+        IReadOnlyList<EllaiReceipt> receipts) => receipts
+        .Select(receipt => new EllaiApprovedReceiptDto(
+            receipt.ReceiptId, receipt.ActionId, receipt.Status.ToString()))
+        .ToList();
 
     private static async Task<IResult> CancelAsync(
         string sessionId,
@@ -534,7 +543,7 @@ public static class EllaiEndpoints
 
         dialogs.Resolve(requestId, approved: true, now);
         journals.Append(sessionId, "approval-resolved", requestId, "Approved", now);
-        return Results.Json(receipts, statusCode: StatusCodes.Status200OK);
+        return Results.Json(MapReceipts(receipts), statusCode: StatusCodes.Status200OK);
     }
 
     private static Task<IResult> ReportUiObservationAsync(

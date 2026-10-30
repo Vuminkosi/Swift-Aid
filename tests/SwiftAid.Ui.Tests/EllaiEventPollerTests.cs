@@ -44,6 +44,10 @@ public sealed class EllaiEventPollerTests
         public Task<bool> ReportUiObservationAsync(
             string sessionId, UiObservationReport report, CancellationToken cancellationToken) =>
             Task.FromResult(false);
+
+        public Task<IReadOnlyList<EllaiApprovedReceiptDto>?> ListReceiptsAsync(
+            string sessionId, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<EllaiApprovedReceiptDto>?>(null);
     }
 
     private sealed class FakeHandler : HttpMessageHandler
@@ -294,6 +298,41 @@ public sealed class EllaiEventPollerTests
         Assert.True(reported);
         Assert.Equal("POST", handler.LastMethod);
         Assert.Contains("api/v1/ellai/sessions/s-9/ui-observations", handler.LastPath, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HttpClientListsReceiptsWithNamedStatuses()
+    {
+        const string json = """
+            [{"receiptId":"rcpt-1","actionId":"a-1","status":"Accepted"},
+             {"receiptId":"rcpt-2","actionId":"a-2","status":"Applied"}]
+            """;
+        var handler = new FakeHandler(json);
+        var client = new EllaiReviewHttpClient(new HttpClient(handler)
+        {
+            BaseAddress = new Uri("https://loopback.test/"),
+        });
+
+        var list = await client.ListReceiptsAsync("s-9", CancellationToken.None);
+
+        Assert.NotNull(list);
+        Assert.Equal(2, list.Count);
+        Assert.Equal("Accepted", list[0].Status);
+        Assert.Equal("a-2", list[1].ActionId);
+        Assert.Equal("GET", handler.LastMethod);
+        Assert.Contains("api/v1/ellai/sessions/s-9/receipts", handler.LastPath, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HttpClientListReceiptsReturnsNullOnFailure()
+    {
+        var handler = new FakeHandler("[]", HttpStatusCode.ServiceUnavailable);
+        var client = new EllaiReviewHttpClient(new HttpClient(handler)
+        {
+            BaseAddress = new Uri("https://loopback.test/"),
+        });
+
+        Assert.Null(await client.ListReceiptsAsync("s-9", CancellationToken.None));
     }
 
     [Fact]

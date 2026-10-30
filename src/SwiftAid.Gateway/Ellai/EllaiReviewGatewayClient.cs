@@ -185,6 +185,41 @@ public sealed class EllaiReviewGatewayClient(
         }
     }
 
+    public async Task<IReadOnlyList<EllaiApprovedReceiptDto>?> ListReceiptsAsync(
+        string sessionId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return null;
+        }
+
+        if (!await IsAuthenticatedAsync().ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        try
+        {
+            var receipts = _serviceProvider.GetService<IEllaiApprovalStore>();
+            if (receipts is null)
+            {
+                return null;
+            }
+
+            var list = await receipts.ListBySessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            return list.Select(receipt => new EllaiApprovedReceiptDto(
+                receipt.ReceiptId, receipt.ActionId, receipt.Status.ToString())).ToList();
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     public async Task<bool> ReportUiObservationAsync(
         string sessionId, UiObservationReport report, CancellationToken cancellationToken)
     {

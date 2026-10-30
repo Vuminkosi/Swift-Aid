@@ -425,7 +425,7 @@
 
     private async Task SubmitSelectionAsync(EllaiReviewDto review, IReadOnlyList<string> selected)
     {
-        StatusText = "Approval recorded — executing…";
+        StatusText = "Approval recorded — verifying…";
         StateHasChanged();
         try
         {
@@ -435,7 +435,18 @@
             {
                 StatusText = "Approval was not recorded — the review may have expired.";
                 StateHasChanged();
+                return;
             }
+
+            // Reconcile once against the durable authority: the approval
+            // response is re-read, never trusted blindly. Verification claims
+            // recording, never that dispatch succeeded.
+            var listed = await ReviewClient.ListReceiptsAsync(
+                review.SessionId, CancellationToken.None).ConfigureAwait(false);
+            StatusText = EllaiReceiptVerifier.IsReconciled(selected, listed)
+                ? $"Verified — {selected.Count} approval(s) recorded."
+                : "Approval recorded — receipt check pending.";
+            StateHasChanged();
         }
         finally
         {

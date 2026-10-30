@@ -116,8 +116,11 @@ through `IEllaiReviewClient`; Gateway serves it in-process with per-call
 principal resolution, HTTP clients use the same port). While the dialog is
 open, active guidance pauses through the ordinary Pause/Resume control seam
 and resumes on close; the composer status reads Waiting for your approval,
-then Approval recorded — executing / Rejected / Review dismissed / Editing
-the plan. The `EllaiApprovalDialog` component renders
+then Approval recorded — verifying / Verified / Rejected / Review dismissed /
+Editing the plan. Approval responses re-read the durable authority once
+(`GET .../receipts`, statuses as names on the wire): every selected id must
+reconcile with a definitive status or the UI reports receipt check pending —
+recording, never dispatch success. The `EllaiApprovalDialog` component renders
 Approve-selected/Edit/Reject/Cancel with selection-gated approval and
 version-change reset. Cycle progress reaches the status line as journal
 `activity` events (projected by `EllaiActivityStatusCoordinator` from real
@@ -192,7 +195,7 @@ ownership — reported, not introduced here).
 Run `dotnet test tests/SwiftAid.Application.Tests --filter
 FullyQualifiedName~Ellai` (unit/contract, 185 passing, 3 skipped) and
 `dotnet test tests/SwiftAid.Ui.Tests --filter FullyQualifiedName~Ellai`
-(~44 passing). PostgreSQL integration tests
+(51 passing). PostgreSQL integration tests
 (`tests/SwiftAid.Integration.Tests`, `EllaiPostgres*`) run only with
 `SWIFTAID_RUN_SQLAUTH_FIXTURES=1` and the approved disposable loopback
 connection (127.0.0.1:32703); otherwise they skip. Provider, web and

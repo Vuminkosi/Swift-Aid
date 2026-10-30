@@ -53,6 +53,12 @@ public interface IEllaiReviewClient
     Task<bool> ReportUiObservationAsync(
         string sessionId, UiObservationReport report, CancellationToken cancellationToken);
 
+    /// <summary>Re-reads the session's durable receipts for post-approval
+    /// reconciliation (RT-60). Null means unavailable; an empty list is an
+    /// authorized empty, never proof that an effect did not occur.</summary>
+    Task<IReadOnlyList<EllaiApprovedReceiptDto>?> ListReceiptsAsync(
+        string sessionId, CancellationToken cancellationToken);
+
     Task<IReadOnlyList<EllaiApprovedReceiptDto>?> ApproveSelectedAsync(
         string sessionId, string requestId, IReadOnlyList<string> actionIds,
         CancellationToken cancellationToken);

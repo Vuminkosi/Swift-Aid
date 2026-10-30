@@ -172,6 +172,34 @@ public sealed class EllaiReviewHttpClient(HttpClient http) : IEllaiReviewClient
             return false;
         }
     }
+
+    public async Task<IReadOnlyList<EllaiApprovedReceiptDto>?> ListReceiptsAsync(
+        string sessionId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        try
+        {
+            using var response = await _http.GetAsync(
+                $"api/v1/ellai/sessions/{Uri.EscapeDataString(sessionId)}/receipts",
+                cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            return await response.Content
+                .ReadFromJsonAsync<IReadOnlyList<EllaiApprovedReceiptDto>>(Json, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
 }
 
 /// <summary>Client-side subscription over the session event journal. Tracks
