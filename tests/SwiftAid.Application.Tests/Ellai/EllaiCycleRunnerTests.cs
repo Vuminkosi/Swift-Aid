@@ -139,6 +139,33 @@ public sealed class EllaiCycleRunnerTests
     }
 
     [Fact]
+    public async Task ExhaustedReadsStopAsUnreviewed()
+    {
+        var broker = GrantedBroker();
+        var runner = new EllaiCycleRunner(broker);
+        var activity = new EllaiActivityStatusCoordinator();
+
+        var outcome = await runner.RunAsync(
+            Context,
+            _ => Task.FromResult(new EllaiModelTurn(
+                new[] { new EllaiToolRequest(EllaiToolNames.State, new Dictionary<string, string>()) }, null)),
+            d => EllaiDecisionValidator.Validate(d),
+            CancellationToken.None,
+            activity: activity,
+            cycleId: "cycle-9",
+            controllerEpoch: 1);
+
+        Assert.False(outcome.Completed);
+        Assert.Equal(EllaiCycleRunner.MaxIterations, outcome.IterationsUsed);
+        Assert.Equal(EllaiCycleRunner.MaxIterations, outcome.ToolCallsUsed);
+        var status = activity.CurrentStatus("session-1", 1);
+        Assert.NotNull(status);
+        Assert.Equal(
+            "I found information, but need another authorized step to finish reviewing it.",
+            status.Text);
+    }
+
+    [Fact]
     public async Task ConcurrentRequestsAreRejected()
     {
         var broker = GrantedBroker();

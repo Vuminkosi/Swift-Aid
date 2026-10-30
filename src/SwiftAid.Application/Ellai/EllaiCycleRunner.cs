@@ -69,6 +69,7 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
             long sequence = 0;
             var now = DateTimeOffset.UtcNow;
             var accepted = false;
+            var lastTurnUnreviewed = false;
 
             void Trace(EllaiActivityKind kind, string detail = "")
             {
@@ -107,6 +108,7 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
                 }
 
                 var turn = await modelTurn(iteration);
+                lastTurnUnreviewed = turn.ToolRequests.Count > 0 && turn.FinalDecision is null;
 
                 // The accepted check-in fires on the first real tool request,
                 // never for a pure small-talk turn: a greeting answers directly
@@ -174,7 +176,11 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
                 }
             }
 
-            return Stop("Reasoning iteration budget exhausted.", MaxIterations, "budget");
+            // A final turn of reads with no decision and no room left is an
+            // honest unreviewed stop (RT-55), not a budget exhaustion: the
+            // observation was accepted and stored, but never reasoned on.
+            return Stop("Reasoning iteration budget exhausted.", MaxIterations,
+                lastTurnUnreviewed ? "unreviewed" : "budget");
         }
         finally
         {

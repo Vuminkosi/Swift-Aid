@@ -160,6 +160,7 @@ public sealed class EllaiActivityStatusCoordinator
             "unavailable" => "That information isn't available right now.",
             "budget" => "The trusted budget for this request is used up.",
             "timeout" => "Still checking; the connection is taking longer than expected…",
+            "unreviewed" => "I found information, but need another authorized step to finish reviewing it.",
             _ => "Checking stopped before finishing.",
         };
 }
