@@ -402,6 +402,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IDashboardAggregateQuery, DashboardAggregateQuery>();
         services.AddScoped<ICaseSummaryStore, PostgresCaseSummaryStore>();
         services.AddScoped<ICaseSummaryQuery, CaseSummaryQuery>();
+        services.AddScoped<ICaseCorrectionReadQuery, CaseCorrectionReadQuery>();
         services.AddScoped<IHomeOverviewStore, PostgresHomeOverviewStore>();
         services.AddScoped<IHomeOverviewQuery, HomeOverviewQuery>();
         services.AddTransient<IEllaiCaseAuthScopeFactory, EllaiCaseAuthScopeFactory>();
