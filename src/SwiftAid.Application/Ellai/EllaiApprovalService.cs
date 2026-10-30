@@ -15,7 +15,9 @@ public enum EllaiReceiptStatus
     Failed
 }
 
-/// <summary>Durable receipt for one approved action, keyed idempotently.</summary>
+/// <summary>Durable receipt for one approved action, keyed idempotently.
+/// <see cref="PolicyHash"/> stamps the pinned runtime policy so spend and
+/// effects audit against the exact guardrails in force.</summary>
 public sealed record EllaiReceipt(
     string ReceiptId,
     string SessionId,
@@ -24,7 +26,8 @@ public sealed record EllaiReceipt(
     EllaiReceiptStatus Status,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset ApprovalExpiresAtUtc,
-    DateTimeOffset? VerifiedAtUtc);
+    DateTimeOffset? VerifiedAtUtc,
+    string PolicyHash = "");
 
 /// <summary>Thread-safe in-memory receipt store. Production persistence must
 /// implement the same semantics with transactional writes.</summary>
@@ -35,7 +38,8 @@ public sealed class EllaiReceiptStore
     private readonly Dictionary<string, EllaiReceipt> _byId = new(StringComparer.Ordinal);
 
     public EllaiReceipt Record(
-        string sessionId, string actionId, string idempotencyKey, DateTimeOffset now, TimeSpan approvalLifetime)
+        string sessionId, string actionId, string idempotencyKey, DateTimeOffset now, TimeSpan approvalLifetime,
+        string policyHash = "")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(idempotencyKey);
@@ -48,7 +52,7 @@ public sealed class EllaiReceiptStore
 
             var receipt = new EllaiReceipt(
                 $"rcpt-{Guid.NewGuid():N}", sessionId, actionId, idempotencyKey,
-                EllaiReceiptStatus.Accepted, now, now.Add(approvalLifetime), null);
+                EllaiReceiptStatus.Accepted, now, now.Add(approvalLifetime), null, policyHash);
             _byKey[idempotencyKey] = receipt;
             _byId[receipt.ReceiptId] = receipt;
             return receipt;
@@ -108,7 +112,8 @@ public sealed class EllaiApprovalService(
         string planHash, int planVersion, AdminActionProposal proposal,
         string approvedPlanHash, int approvedPlanVersion,
         string? approvedRecipient, DateTimeOffset? approvedDueAtUtc,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        string policyHash = "")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         var action = actions.Submit(
@@ -119,7 +124,7 @@ public sealed class EllaiApprovalService(
             return null;
         }
 
-        return receipts.Record(sessionId, action.ActionId, action.IdempotencyKey, now, ApprovalLifetime);
+        return receipts.Record(sessionId, action.ActionId, action.IdempotencyKey, now, ApprovalLifetime, policyHash);
     }
 
     public EllaiReceipt? VerifyReceipt(string receiptId, EllaiReceiptStatus status, DateTimeOffset now) =>

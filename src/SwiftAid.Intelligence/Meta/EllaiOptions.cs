@@ -72,6 +72,16 @@ public sealed class EllaiOptions
         || PricingOutputPer1KTokens > 0
         || PricingAudioPerMinute > 0;
 
+    /// <summary>Runtime policy file path. Absolute as-is; relative paths
+    /// resolve against the content root (walking up for local layouts) or
+    /// the app base. In Docker this is the read-only bind mount, never
+    /// content baked into the image.</summary>
+    public string PolicyPath { get; init; } = "docs/ellai/ellai-system-instruction.md";
+
+    /// <summary>Pinned approved policy version. Guarded calls stamp and
+    /// verify this label alongside the file hash.</summary>
+    public string PolicyVersion { get; init; } = "1.3";
+
     public bool HasReasoningRoute =>
         Enabled && !string.IsNullOrWhiteSpace(ApiKey)
         && IsHttpsUrl(ApiUrl) && !string.IsNullOrWhiteSpace(ReasoningModel);
@@ -175,6 +185,8 @@ public sealed class EllaiOptions
             PricingInputPer1KTokens = DecimalSetting("Pricing:InputPer1K", "Ellai__Pricing__InputPer1K") ?? 0,
             PricingOutputPer1KTokens = DecimalSetting("Pricing:OutputPer1K", "Ellai__Pricing__OutputPer1K") ?? 0,
             PricingAudioPerMinute = DecimalSetting("Pricing:AudioPerMinute", "Ellai__Pricing__AudioPerMinute") ?? 0,
+            PolicyPath = Setting("Policy:Path", "Ellai__Policy__Path") ?? "docs/ellai/ellai-system-instruction.md",
+            PolicyVersion = Setting("Policy:Version", "Ellai__Policy__Version") ?? "1.3",
         };
     }
 

@@ -102,7 +102,7 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore
 /// restart creates a new session/epoch. (ELL-T04 groundwork.)</summary>
 public sealed class EllaiSessionService(IEllaiSessionStore store, EllaiConsentService? consent = null)
 {
-    public const int DefaultCyclesAllowed = 12;
+    public const int DefaultCyclesAllowed = 100;
 
     public async Task<EllaiSessionView> StartAsync(StartSessionRequest request, CancellationToken ct)
     {

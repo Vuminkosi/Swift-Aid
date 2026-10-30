@@ -137,6 +137,21 @@ services:
       DataProtection__MaximumPayloadBytes: "65536"
       DataProtection__AllowUnencryptedDevelopmentKeys: "true"
 
+      # Ellai runtime LLM policy: attached by reference, never baked into the
+      # image. The file below is bind-mounted read-only; the gateway resolves
+      # Ellai__Policy__Path at startup and refuses guarded model calls when
+      # the pinned file is missing, empty, or leaks engineering content.
+      # Override the host source with SWIFTAID_POLICY_FILE if the repo lives
+      # elsewhere; the default is relative to this compose file (infra/).
+      Ellai__Enabled: "${Ellai_Enabled:-true}"
+      Ellai__Policy__Path: "/etc/swiftaid/policy/ellai-system-instruction.md"
+      Ellai__Policy__Version: "${Ellai__Policy__Version:-1.3}"
+      Ellai__ReasoningBackend: "${Ellai__ReasoningBackend:-meta}"
+      Ellai__Pricing__SpendingCap: "${Ellai__Pricing__SpendingCap:-70.00}"
+      Ellai__Pricing__InputPer1K: "${Ellai__Pricing__InputPer1K:-}"
+      Ellai__Pricing__OutputPer1K: "${Ellai__Pricing__OutputPer1K:-}"
+      Ellai__Pricing__AudioPerMinute: "${Ellai__Pricing__AudioPerMinute:-}"
+
     secrets:
       - source: fcm-service-account
         target: swiftaid-fcm-service-account.json
@@ -144,6 +159,11 @@ services:
       - "127.0.0.1:${GATEWAY_PORT:-8080}:8080"
     tmpfs:
       - /var/swiftaid/keys:rw,noexec,nosuid,uid=1654,gid=1654,mode=700
+    volumes:
+      - type: bind
+        source: ${SWIFTAID_POLICY_FILE:-../docs/ellai/ellai-system-instruction.md}
+        target: /etc/swiftaid/policy/ellai-system-instruction.md
+        read_only: true
     depends_on:
       postgres:
         condition: service_healthy

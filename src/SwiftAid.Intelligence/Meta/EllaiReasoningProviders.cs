@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using SwiftAid.Application.Ellai;
 
 namespace SwiftAid.Intelligence.Meta;
 
@@ -210,7 +211,8 @@ public sealed class EllaiReasoningRouter(
     EllaiOptions options,
     EllaiReasoningAdapter meta,
     OllamaEllaiReasoningProvider ollama,
-    ServerlessEllaiReasoningProvider serverless)
+    ServerlessEllaiReasoningProvider serverless,
+    EllaiPromptBuilder? policyBuilder = null)
 {
     public IEllaiReasoningProvider Resolve()
     {
@@ -231,5 +233,32 @@ public sealed class EllaiReasoningRouter(
         }
 
         return new MetaEllaiReasoningProvider(meta, options);
+    }
+
+    /// <summary>Mandatory guarded call: the pinned runtime policy becomes
+    /// the system message on every call. Caller-supplied system messages
+    /// are stripped so users cannot smuggle their own policy; without a
+    /// loaded policy builder the call is refused outright.</summary>
+    public Task<EllaiReasoningResult> CompleteGuardedAsync(
+        EllaiRoleOverlay role,
+        string capabilitySummary,
+        string limitsSummary,
+        IReadOnlyList<(string Role, string Content)> userMessages,
+        int maxTokens,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(role);
+        ArgumentNullException.ThrowIfNull(userMessages);
+        if (policyBuilder is null)
+        {
+            throw new MetaConfigurationException(
+                "Ellai runtime policy is not loaded; guarded reasoning is unavailable.");
+        }
+
+        var system = policyBuilder.Build(role, capabilitySummary, limitsSummary);
+        var messages = new List<(string Role, string Content)> { ("system", system) };
+        messages.AddRange(userMessages.Where(m =>
+            !string.Equals(m.Role, "system", StringComparison.OrdinalIgnoreCase)));
+        return Resolve().CompleteAsync(messages, maxTokens, ct);
     }
 }

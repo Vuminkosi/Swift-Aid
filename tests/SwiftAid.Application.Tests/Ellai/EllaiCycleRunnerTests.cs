@@ -21,7 +21,7 @@ public sealed class EllaiCycleRunnerTests
         null, Array.Empty<string>(), null, null);
 
     [Fact]
-    public async Task ThirdIterationAndFourthToolCallCannotStartHiddenContinuation()
+    public async Task GenerousCeilingsStillTerminateRunawayTurns()
     {
         var broker = new EllaiToolBroker(new EllaiPolicyService());
         var runner = new EllaiCycleRunner(broker);
@@ -37,16 +37,18 @@ public sealed class EllaiCycleRunnerTests
                     {
                         new EllaiToolRequest(EllaiToolNames.State, new Dictionary<string, string>()),
                         new EllaiToolRequest(EllaiToolNames.Capabilities, new Dictionary<string, string>()),
+                        new EllaiToolRequest(EllaiToolNames.Topic, new Dictionary<string, string>()),
                     },
-                    iteration == 3 ? ValidDecision() : null));
+                    null));
             },
             d => EllaiDecisionValidator.Validate(d),
             CancellationToken.None);
 
-        Assert.Equal(3, calls);
         Assert.False(outcome.Completed);
         Assert.Contains("budget exhausted", outcome.StopReason ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(4, outcome.ToolCallsUsed);
+        Assert.Equal(EllaiCycleRunner.MaxToolCalls, outcome.ToolCallsUsed);
+        Assert.Equal(21, outcome.IterationsUsed);
+        Assert.Equal(21, calls);
     }
 
     [Fact]
