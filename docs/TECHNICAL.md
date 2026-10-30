@@ -39,20 +39,19 @@ execute/approve/sql/shell.
 | `ellai_topic` | Session topic candidates with checkpoints. |
 | `ellai_capabilities` | Current capability descriptors and readiness. |
 | `ellai_receipts` | Live receipts from the durable authority: one by id or the session list, session-bound, absence as authorized empty. |
-| `ellai_topic` | Live topic-ledger resolution: ordinals first, ambiguity explicit, unknown as authorized empty. |
+| `ellai_topic` | Live topic-ledger resolution: ordinals first, ambiguity explicit, unknown as authorized empty; durable in PostgreSQL `ellai_topics`. |
 | `ellai_productfacts` | Versioned nonmedical product facts and help. |
 | `ellai_now` | Current server time (UTC, round-trip + unix ms); no domain data. |
 | `ellai_docs_search` | Search this approved reference by topic/section id. |
 | `ellai_docs_get` | Retrieve one approved section excerpt with provenance. |
-| `ellai_docs_search` | Search this approved reference by topic/section id. |
-| `ellai_docs_get` | Retrieve one approved section excerpt with provenance. |
+| `ellai_ui_catalogue` | Permission-filtered semantic catalogue slice (`goal`, `limit`); descriptors requiring capabilities stay excluded fail-closed. |
+| `ellai_ui_observe` | Live observation over the client-posted mounted-control channel (`controls`, `view`, `context`); Ready only for reported-mounted entitled controls, marked `ClientObservation` with server-stamped freshness; missing report is an authorized empty. |
 
 Compatibility aliases (accepted, metered, never advertised):
 `ellai_voice_capability` → `ellai_capabilities`,
 `ellai_guidance_session` → `ellai_state`. Retired names
 (`ellai_caption`, `ellai_guidance_anchor_catalogue`) have no backing
-projection and are rejected as unregistered until the UI-catalogue slice
-lands.
+projection and are rejected as unregistered.
 
 Uniform bounds per call: at most 20 items, at most 32,768 serialized UTF-8
 bytes of the wire envelope (multibyte/escaped text counts as sent), at most
@@ -81,8 +80,8 @@ stand and that handoff item is recorded as owner-deferred, not implemented.
 
 ## 4. Sessions, approvals, receipts
 
-**Status: Implemented (sessions durable; approvals Stub).** Sessions persist
-in PostgreSQL (`EllaiSessionEntity`, `EllaiCheckpointEntity`,
+**Status: Implemented, unit-verified (sessions and approvals durable).**
+Sessions persist in PostgreSQL (`EllaiSessionEntity`, `EllaiCheckpointEntity`,
 `PostgresEllaiSessionStore`) with version-fenced compare-and-set and
 idempotent utterance/checkpoint identities; restart and second-gateway
 visibility hold. Approvals carry a 15-minute expiry and idempotent durable receipts
@@ -95,42 +94,57 @@ invalidation, and terminal cancel fencing; the approval endpoint binds
 dialog-issued submissions to their open review (409 when stale). Review
 register/edit endpoints exist and publish to the session event journal;
 clients long-poll `GET .../sessions/{id}/events` with a cursor for
-approval-required/resolved/edit and session-cancelled hints (gap recovery
-by replay; replay never replays commands). Reviews carry safe display
+approval-required/resolved/edit, session-cancelled and activity hints (gap
+recovery by replay; replay never replays commands). Reviews carry safe display
 rows derived from the exact reviewed proposals with stable action ids;
 `GET .../approval-reviews/active` serves the open review, `POST .../approve`
 approves only the human-selected ids resolved server-side against those
 proposals (unknown ids reject the batch), and the client `EllaiEventPoller`
 dedupes repeat deliveries so one review opens one dialog. The guidance host
-tracks one session, polls its journal, and opens `EllaiApprovalDialog` on
-validated reviews (approve/reject/edit/cancel through `IEllaiReviewClient`;
-Gateway serves it in-process with per-call principal resolution, HTTP
-clients use the same port). The `EllaiApprovalDialog` component renders
+starts its own durable session through `IEllaiReviewClient.StartSessionAsync`
+(no layout plumbing), tracks it, polls its journal, and auto-opens
+`EllaiApprovalDialog` on validated reviews (approve/reject/edit/cancel/dismiss
+through `IEllaiReviewClient`; Gateway serves it in-process with per-call
+principal resolution, HTTP clients use the same port). While the dialog is
+open, active guidance pauses through the ordinary Pause/Resume control seam
+and resumes on close; the composer status reads Waiting for your approval,
+then Approval recorded — executing / Rejected / Review dismissed / Editing
+the plan. The `EllaiApprovalDialog` component renders
 Approve-selected/Edit/Reject/Cancel with selection-gated approval and
-version-change reset. Still **Missing**: auto-open on the ApprovalRequired
-event (no event transport yet), the atomic per-action domain executor with
-outbox commit (**Blocked**: no backing administrative-task, assignment-request
-or reminder domain services exist to reuse — inventing them here would be new
-product surface, not integration), and cross-instance dialog fencing.
+version-change reset. Cycle progress reaches the status line as journal
+`activity` events (projected by `EllaiActivityStatusCoordinator` from real
+runner events, never model text). Still **Missing**: the atomic per-action
+domain executor with outbox commit (**Blocked**: no backing
+administrative-task, assignment-request or reminder domain services exist to
+reuse — inventing them here would be new product surface, not integration),
+and cross-instance dialog fencing.
 HTTP: `POST /ellai/v1/sessions/{id}/approvals`,
-`GET /receipts`, utterance submit, terminal cancel
+`GET /receipts`, `POST /ui-observations`, utterance submit, terminal cancel
 (`src/SwiftAid.Gateway/Endpoints/EllaiEndpoints.cs`). Approval is granted
 only by operating the authenticated approval dialog (Approve selected /
 Edit / Reject / Cancel); text or voice consent is never approval.
 
 ## 5. Dynamic UI Intelligence and surface
 
-**Status: Implemented (registry/planner/coordinator live; client
-observation channel partial).** `EllaiUiRegistry` holds versioned semantic
-descriptors; `EllaiGuidancePlanValidator`, `EllaiBonboardingCompiler` and
-`EllaiGuidanceSessionCoordinator` plan, compile and activate one guidance
+**Status: Implemented, unit-verified (observation channel live; no
+production descriptors registered yet).** `EllaiUiRegistry` holds versioned
+semantic descriptors; `EllaiGuidancePlanValidator`, `EllaiBonboardingCompiler`
+and `EllaiGuidanceSessionCoordinator` plan, compile and activate one guidance
 at a time. The single compact composer (`EllaiCompactComposer`) attaches
 under the active Bonboarding card; `EllaiStatusLine` projects activity;
 `EllaiPlanReview` renders the approval card; `EllaiLauncherMenu` is the one
 shared launcher on every layout for guest and signed-in users; Settings/About
-hosts history with per-session cost captions. Live client observation
-(`ellai_ui_observe`) requires the active controller channel; an absent
-client yields `Unavailable`, never a fabricated target.
+hosts history with per-session cost captions. The live observation channel
+is real end to end: clients post mounted-control reports to
+`POST .../sessions/{id}/ui-observations` (also via `IEllaiReviewClient`,
+in-process and HTTP), the server keeps the latest per session in
+`IEllaiUiObservationStore`, and `ellai_ui_catalogue` / `ellai_ui_observe`
+read the registry plus that channel through the same consent, budget and
+byte-bound pipeline as every tool. An absent report yields an authorized
+empty, never a fabricated view. Production descriptors are not registered
+next to owning features yet, so live catalogue/observe reads are
+authorized-empty until that registration lands; capability-gated descriptors
+stay excluded fail-closed (no scope-capability source yet).
 
 ## 6. Voice, reasoning routes, memory
 
@@ -147,8 +161,10 @@ the case database.
 ## 7. Verification map
 
 Run `dotnet test tests/SwiftAid.Application.Tests --filter
-FullyQualifiedName~Ellai` (unit/contract, ~136 passing). PostgreSQL
-integration tests (`tests/SwiftAid.Integration.Tests`, `EllaiPostgresTests`)
-run only with `SWIFTAID_RUN_SQLAUTH_FIXTURES=1` and the approved disposable
-loopback connection (127.0.0.1:32703); otherwise they skip. Provider, web
-and Android smoke checks are recorded separately and never mocked.
+FullyQualifiedName~Ellai` (unit/contract, 151 passing, 3 skipped) and
+`dotnet test tests/SwiftAid.Ui.Tests --filter FullyQualifiedName~Ellai`
+(~44 passing). PostgreSQL integration tests
+(`tests/SwiftAid.Integration.Tests`, `EllaiPostgres*`) run only with
+`SWIFTAID_RUN_SQLAUTH_FIXTURES=1` and the approved disposable loopback
+connection (127.0.0.1:32703); otherwise they skip. Provider, web and
+Android smoke checks are recorded separately and never mocked.

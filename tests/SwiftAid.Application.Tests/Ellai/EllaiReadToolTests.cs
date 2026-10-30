@@ -1,4 +1,5 @@
 using SwiftAid.Application.Ellai;
+using SwiftAid.Contracts.Ellai;
 
 namespace SwiftAid.Application.Tests.Ellai;
 
@@ -54,9 +55,24 @@ public sealed class EllaiReadToolTests
                 EllaiToolBroker.ToolReadPurpose, "synthetic", TimeSpan.FromHours(1));
             var topics = new EllaiTopicService();
             await topics.TrackAsync("session-1", "Sample topic", new[] { "sample" }, null, null);
+            var registry = new EllaiUiRegistry();
+            registry.Register(new UiControlDescriptor(
+                "cases.sample", "cases", 1, "ellai-uicontract/1.0", "Cases",
+                "Button", "label-key", "desc-key",
+                Array.Empty<string>(), new[] { "sample" }, Array.Empty<string>(),
+                "nav-cases", "anchor-sample",
+                new[] { "HighlightControl" }, UiRiskClass.R0,
+                new[] { GuidanceMode.Navigation }, Array.Empty<string>(), Array.Empty<string>(),
+                "sample", "proof-ui-observed",
+                Array.Empty<string>(), "internal", false));
+            var observations = new InMemoryEllaiUiObservationStore();
+            await observations.RecordAsync(new StoredUiObservationReport(
+                "session-1", "view-1", "ctx-1", "web",
+                new[] { "cases.sample" }, DateTimeOffset.UtcNow), CancellationToken.None);
             var broker = new EllaiToolBroker(
                 new EllaiPolicyService(), consent, new EllaiTechnicalDocs(docsPath), null,
-                new EllaiReceiptStore(), topics);
+                new EllaiReceiptStore(), topics, registry,
+                new EllaiUiDiscoveryService(), observations);
 
             foreach (var tool in EllaiToolNames.All)
             {
@@ -66,7 +82,13 @@ public sealed class EllaiReadToolTests
                         ? new Dictionary<string, string> { ["section"] = "1-sample" }
                         : tool == EllaiToolNames.Topic
                             ? new Dictionary<string, string> { ["ref"] = "sample" }
-                            : new Dictionary<string, string>();
+                            : tool == EllaiToolNames.UiObserve
+                                ? new Dictionary<string, string>
+                                {
+                                    ["controls"] = "cases.sample",
+                                    ["view"] = "view-1",
+                                }
+                                : new Dictionary<string, string>();
                 var result = await broker.InvokeAsync(
                     Context, new EllaiToolRequest(tool, args),
                     CancellationToken.None);
