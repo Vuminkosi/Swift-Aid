@@ -97,9 +97,12 @@ register/edit endpoints exist and publish to the session event journal;
 clients long-poll `GET .../sessions/{id}/events` with a cursor for
 approval-required/resolved/edit and session-cancelled hints (gap recovery
 by replay; replay never replays commands). Reviews carry safe display
-rows; `GET .../approval-reviews/active` serves the open review, and the
-client `EllaiEventPoller` dedupes repeat deliveries so one review opens
-one dialog. The `EllaiApprovalDialog` component renders
+rows derived from the exact reviewed proposals with stable action ids;
+`GET .../approval-reviews/active` serves the open review, `POST .../approve`
+approves only the human-selected ids resolved server-side against those
+proposals (unknown ids reject the batch), and the client `EllaiEventPoller`
+dedupes repeat deliveries so one review opens one dialog. The
+`EllaiApprovalDialog` component renders
 Approve-selected/Edit/Reject/Cancel with selection-gated approval and
 version-change reset. Still **Missing**: auto-open on the ApprovalRequired
 event (no event transport yet), the atomic per-action domain executor with
