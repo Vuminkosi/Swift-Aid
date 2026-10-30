@@ -69,7 +69,7 @@ public sealed class EllaiConsentPlumbingTests
     [Fact]
     public async Task RunnerStopsWhenReauthorizationFails()
     {
-        var runner = new EllaiCycleRunner(new EllaiToolBroker(new EllaiPolicyService()));
+        var runner = new EllaiCycleRunner(new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService()));
         var turns = 0;
 
         var outcome = await runner.RunAsync(

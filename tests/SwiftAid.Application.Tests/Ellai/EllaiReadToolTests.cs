@@ -9,10 +9,18 @@ public sealed class EllaiReadToolTests
     private static readonly EllaiToolContext Context = new(
         "session-1", "epoch-1", "cases", "case-1", 4, true);
 
+    private static EllaiToolBroker GrantedBroker()
+    {
+        var consent = new EllaiConsentService();
+        consent.Grant("session-1", EllaiConsentDimension.ReasoningText,
+            EllaiToolBroker.ToolReadPurpose, "synthetic", TimeSpan.FromHours(1));
+        return new EllaiToolBroker(new EllaiPolicyService(), consent);
+    }
+
     [Fact]
     public async Task NestedCallsCannotBypassBoundOrScope()
     {
-        var broker = new EllaiToolBroker(new EllaiPolicyService());
+        var broker = GrantedBroker();
 
         var unregistered = await broker.InvokeAsync(
             Context, new EllaiToolRequest("ellai_sql", new Dictionary<string, string>()),
@@ -37,7 +45,7 @@ public sealed class EllaiReadToolTests
     [Fact]
     public async Task RegisteredReadsReturnBoundedResults()
     {
-        var broker = new EllaiToolBroker(new EllaiPolicyService());
+        var broker = GrantedBroker();
 
         foreach (var tool in EllaiToolNames.All)
         {
@@ -45,14 +53,16 @@ public sealed class EllaiReadToolTests
                 Context, new EllaiToolRequest(tool, new Dictionary<string, string>()),
                 CancellationToken.None);
             Assert.True(result.Allowed);
+            Assert.Equal(EllaiToolReasonCodes.Ok, result.ReasonCode);
             Assert.True(result.ItemCount <= EllaiToolBroker.MaxItems);
+            Assert.True(EllaiToolBroker.MeasureEnvelopeBytes(result) <= EllaiToolBroker.MaxResultBytes);
         }
     }
 
     [Fact]
     public async Task MissingScopeIsDenied()
     {
-        var broker = new EllaiToolBroker(new EllaiPolicyService());
+        var broker = GrantedBroker();
 
         var result = await broker.InvokeAsync(
             Context with { ScopeEpoch = string.Empty },

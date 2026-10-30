@@ -10,6 +10,14 @@ public sealed class EllaiCycleRunnerTests
     private static readonly EllaiToolContext Context = new(
         "session-1", "epoch-1", "cases", "case-1", 4, true);
 
+    private static EllaiToolBroker GrantedBroker()
+    {
+        var consent = new EllaiConsentService();
+        consent.Grant("session-1", EllaiConsentDimension.ReasoningText,
+            EllaiToolBroker.ToolReadPurpose, "synthetic", TimeSpan.FromHours(1));
+        return new EllaiToolBroker(new EllaiPolicyService(), consent);
+    }
+
     private static EllaiDecision ValidDecision() => new(
         2, DecisionKind.Answer, "Queue reviewed.", "Queue reviewed.",
         new[]
@@ -23,7 +31,7 @@ public sealed class EllaiCycleRunnerTests
     [Fact]
     public async Task GenerousCeilingsStillTerminateRunawayTurns()
     {
-        var broker = new EllaiToolBroker(new EllaiPolicyService());
+        var broker = GrantedBroker();
         var runner = new EllaiCycleRunner(broker);
         var calls = 0;
 
@@ -54,7 +62,7 @@ public sealed class EllaiCycleRunnerTests
     [Fact]
     public async Task ValidSecondTurnDecisionCompletes()
     {
-        var broker = new EllaiToolBroker(new EllaiPolicyService());
+        var broker = GrantedBroker();
         var runner = new EllaiCycleRunner(broker);
 
         var outcome = await runner.RunAsync(
@@ -75,7 +83,7 @@ public sealed class EllaiCycleRunnerTests
     [Fact]
     public async Task ConcurrentRequestsAreRejected()
     {
-        var broker = new EllaiToolBroker(new EllaiPolicyService());
+        var broker = GrantedBroker();
         var runner = new EllaiCycleRunner(broker);
         var gate = new TaskCompletionSource();
 

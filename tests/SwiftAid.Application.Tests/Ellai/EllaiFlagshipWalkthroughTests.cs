@@ -17,7 +17,8 @@ public sealed class EllaiFlagshipWalkthroughTests
         var store = new InMemoryEllaiSessionStore();
         var sessions = new EllaiSessionService(store);
         var policy = new EllaiPolicyService();
-        var broker = new EllaiToolBroker(policy);
+        var consent = new EllaiConsentService();
+        var broker = new EllaiToolBroker(policy, consent);
         var runner = new EllaiCycleRunner(broker);
         var coordinator = new EllaiGuidanceSessionCoordinator();
         var registry = new EllaiUiRegistry();
@@ -41,6 +42,8 @@ public sealed class EllaiFlagshipWalkthroughTests
                 "What is overdue?", null, "typed", 1),
             CancellationToken.None);
         Assert.NotNull(afterUtterance);
+        consent.Grant(session.SessionId, EllaiConsentDimension.ReasoningText,
+            EllaiToolBroker.ToolReadPurpose, "synthetic", TimeSpan.FromHours(1));
 
         // 2. Policy authorizes a synthetic read.
         var auth = policy.Authorize(
