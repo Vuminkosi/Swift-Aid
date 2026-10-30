@@ -183,6 +183,7 @@ app.MapManagedCaseRegistrationEndpoints();
 app.MapCaseTimelineEndpoints();
 app.MapCaseQueueEndpoints();
 app.MapMapAggregateEndpoints();
+app.MapHomeOverviewEndpoints();
 app.MapMonitoringQueueEndpoints();
 app.MapCaseCommandEndpoints();
 app.MapCommunitySessionEndpoints();
