@@ -45,6 +45,22 @@ public static class EllaiEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
+        group.MapPost("/sessions/{sessionId}/approvals", SubmitApprovalAsync)
+            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
+            .WithName("SubmitEllaiApproval")
+            .Accepts<SubmitApprovalApiRequest>("application/json")
+            .Produces<EllaiReceipt>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
+        group.MapGet("/sessions/{sessionId}/receipts", ListReceipts)
+            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .WithName("ListEllaiReceipts")
+            .Produces<IReadOnlyList<EllaiReceipt>>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
         group.MapPost("/sessions/{sessionId}/cancel", CancelAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
@@ -107,6 +123,52 @@ public static class EllaiEndpoints
         return Results.Json(view, statusCode: StatusCodes.Status200OK);
     }
 
+    private static Task<IResult> SubmitApprovalAsync(
+        string sessionId,
+        SubmitApprovalApiRequest? request,
+        EllaiApprovalService approvals,
+        CancellationToken cancellationToken)
+    {
+        if (request is null
+            || !string.Equals(request.SessionId, sessionId, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(request.PlanHash)
+            || string.IsNullOrWhiteSpace(request.ApprovedPlanHash)
+            || request.Proposal is null)
+        {
+            return Task.FromResult(Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "The Ellai approval request is invalid."));
+        }
+
+        var receipt = approvals.SubmitApproval(
+            sessionId, request.PlanHash, request.PlanVersion, request.Proposal,
+            request.ApprovedPlanHash, request.ApprovedPlanVersion,
+            request.ApprovedRecipient, request.ApprovedDueAtUtc, DateTimeOffset.UtcNow);
+        if (receipt is null)
+        {
+            return Task.FromResult(Results.Problem(
+                statusCode: StatusCodes.Status422UnprocessableEntity,
+                title: "The approval does not exactly match the proposed plan."));
+        }
+
+        return Task.FromResult(Results.Json(receipt, statusCode: StatusCodes.Status200OK));
+    }
+
+    private static Task<IResult> ListReceipts(
+        string sessionId,
+        EllaiReceiptStore receipts,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return Task.FromResult(Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "The Ellai receipt request is invalid."));
+        }
+
+        return Task.FromResult(Results.Json(receipts.ListBySession(sessionId), statusCode: StatusCodes.Status200OK));
+    }
+
     private static async Task<IResult> CancelAsync(
         string sessionId,
         CancelEllaiSessionApiRequest? request,
@@ -134,6 +196,18 @@ public static class EllaiEndpoints
 
 /// <summary>Cancel request carrying the officer-observed expected version.</summary>
 public sealed record CancelEllaiSessionApiRequest(long ExpectedSessionVersion);
+
+/// <summary>Exact-approval submission: the approved fields must match the
+/// proposed plan exactly or the service returns null (mapped to 422).</summary>
+public sealed record SubmitApprovalApiRequest(
+    string SessionId,
+    string PlanHash,
+    int PlanVersion,
+    AdminActionProposal Proposal,
+    string ApprovedPlanHash,
+    int ApprovedPlanVersion,
+    string? ApprovedRecipient,
+    DateTimeOffset? ApprovedDueAtUtc);
 
 internal static class EllaiEndpointGuards
 {

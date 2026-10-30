@@ -83,6 +83,8 @@ builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiGuidanceSessionCoordi
 builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.IEllaiGuidanceControl, SwiftAid.Gateway.Ellai.EllaiGuidanceControlAdapter>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiCycleRunner>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiApprovedActionService>();
+builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiReceiptStore>();
+builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiApprovalService>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiScenarioDirector>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiConsentService>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiTopicService>();
