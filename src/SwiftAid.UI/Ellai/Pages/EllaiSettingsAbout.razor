@@ -107,18 +107,10 @@
         decimal? UsageCostDollars = null,
         int? UsageTokens = null);
 
-    private static string? CostCaption(EllaiPastSession session)
-    {
-        var spend = session.UsageCostDollars is { } cost ? FormatCost(cost) : null;
-        var tokens = session.UsageTokens is { } count ? FormatTokens(count) : null;
-        return (spend, tokens) switch
-        {
-            (not null, not null) => $"{spend} | {tokens}",
-            (not null, null) => spend,
-            (null, not null) => tokens,
-            _ => null,
-        };
-    }
+    private static string? CostCaption(EllaiPastSession session) =>
+        session.UsageCostDollars is { } cost && session.UsageTokens is { } count
+            ? $"{FormatCost(cost)} | {FormatTokens(count)}"
+            : null;
 
     private static string FormatCost(decimal dollars)
     {
