@@ -8,11 +8,13 @@ namespace SwiftAid.Integration.Tests;
 /// <summary>Live PostgreSQL gate for durable Ellai topic history. Same
 /// approved disposable loopback target as the other Ellai fixtures. Cleans
 /// up its own rows; never touches other data.</summary>
-public sealed class EllaiPostgresTopicTests : IAsyncDisposable
+public sealed class EllaiPostgresTopicTests : IAsyncLifetime
 {
     private readonly List<string> _sessionIds = new();
 
-    public async ValueTask DisposeAsync()
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public async Task DisposeAsync()
     {
         if (!Enabled()) return;
         await using var db = CreateDbContext();

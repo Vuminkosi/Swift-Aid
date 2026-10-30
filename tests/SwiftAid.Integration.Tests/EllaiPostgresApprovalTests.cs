@@ -9,11 +9,13 @@ namespace SwiftAid.Integration.Tests;
 /// <summary>Live PostgreSQL gate for the durable Ellai approval/receipt
 /// authority. Same approved disposable loopback target as the session
 /// fixtures. Cleans up its own rows; never touches other data.</summary>
-public sealed class EllaiPostgresApprovalTests : IAsyncDisposable
+public sealed class EllaiPostgresApprovalTests : IAsyncLifetime
 {
     private readonly List<string> _sessionIds = new();
 
-    public async ValueTask DisposeAsync()
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public async Task DisposeAsync()
     {
         if (!Enabled()) return;
         await using var db = CreateDbContext();

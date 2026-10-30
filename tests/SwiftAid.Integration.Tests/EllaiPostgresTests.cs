@@ -22,11 +22,13 @@ public sealed class EllaiPostgresFactAttribute : FactAttribute
 /// <summary>Live PostgreSQL gate for the Ellai session store (ELL-T04).
 /// Same approved disposable loopback target as the authority fixtures.
 /// Cleans up its own rows; never touches other data.</summary>
-public sealed class EllaiPostgresTests : IAsyncDisposable
+public sealed class EllaiPostgresTests : IAsyncLifetime
 {
     private readonly List<string> _sessionIds = new();
 
-    public async ValueTask DisposeAsync()
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public async Task DisposeAsync()
     {
         if (!Enabled()) return;
         await using var db = CreateDbContext();

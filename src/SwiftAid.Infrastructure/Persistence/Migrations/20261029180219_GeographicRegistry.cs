@@ -1,4 +1,3 @@
-﻿using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -45,33 +44,9 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         onDelete: ReferentialAction.Restrict);
                 });
 
-            migrationBuilder.CreateTable(
-                name: "organization_invitations",
-                columns: table => new
-                {
-                    invitation_id = table.Column<Guid>(type: "uuid", nullable: false),
-                    organization_id = table.Column<string>(type: "text", nullable: false),
-                    code_hash = table.Column<string>(type: "text", nullable: false),
-                    status = table.Column<string>(type: "text", nullable: false),
-                    expires_at_utc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
-                    max_uses = table.Column<int>(type: "integer", nullable: false),
-                    use_count = table.Column<int>(type: "integer", nullable: false),
-                    created_by_actor_id = table.Column<string>(type: "text", nullable: true),
-                    created_at_utc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("pk_organization_invitations", x => x.invitation_id);
-                    table.CheckConstraint("ck_invitations_ids_nonempty", "length(btrim(organization_id)) > 0 AND length(btrim(code_hash)) > 0");
-                    table.CheckConstraint("ck_invitations_status", "status IN ('Active', 'Revoked', 'Exhausted', 'Expired')");
-                    table.CheckConstraint("ck_invitations_uses_nonnegative", "use_count >= 0 AND max_uses > 0 AND use_count <= max_uses");
-                    table.ForeignKey(
-                        name: "fk_invitations_organization",
-                        column: x => x.organization_id,
-                        principalTable: "organizations",
-                        principalColumn: "organization_id",
-                        onDelete: ReferentialAction.Restrict);
-                });
+            // NOTE: organization_invitations is created by the earlier
+            // OrganizationInvitations migration; it must not be recreated
+            // here (duplicate CreateTable broke fresh-database migration).
 
             migrationBuilder.CreateIndex(
                 name: "ix_geo_locations_country_name",
@@ -84,17 +59,6 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                 schema: "swiftaid_geo",
                 table: "locations",
                 column: "parent_id");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_organization_invitations_organization_id",
-                table: "organization_invitations",
-                column: "organization_id");
-
-            migrationBuilder.CreateIndex(
-                name: "ux_organization_invitations_code_hash",
-                table: "organization_invitations",
-                column: "code_hash",
-                unique: true);
         }
 
         /// <inheritdoc />
@@ -103,9 +67,6 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
             migrationBuilder.DropTable(
                 name: "locations",
                 schema: "swiftaid_geo");
-
-            migrationBuilder.DropTable(
-                name: "organization_invitations");
         }
     }
 }
