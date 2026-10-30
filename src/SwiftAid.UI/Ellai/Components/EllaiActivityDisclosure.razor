@@ -1,19 +1,47 @@
 @using SwiftAid.Contracts.Ellai
 
 <div class="ellai-activity" aria-label="Current Ellai activity">
-    @if (Explanation is null)
+    @if (Explanation is null && (Entries is null || Entries.Count == 0))
     {
         <MudText Typo="Typo.caption">No activity yet this session.</MudText>
     }
     else
     {
-        <MudText Typo="Typo.body2">@Explanation.Observed</MudText>
-        <MudText Typo="Typo.caption">@Explanation.Rationale</MudText>
-        <MudText Typo="Typo.caption">@Explanation.ApprovalState</MudText>
-        <MudText Typo="Typo.caption">@Explanation.VerificationState</MudText>
-        @if (Explanation.Sources.Count > 0)
+        @if (Explanation is not null)
         {
-            <MudText Typo="Typo.caption">Sources: @string.Join(", ", Explanation.Sources.Select(s => $"{s.SourceKind}:{s.ResourceId}@{s.Version}"))</MudText>
+            <MudText Typo="Typo.body2">@Explanation.Observed</MudText>
+            <MudText Typo="Typo.caption">@Explanation.Rationale</MudText>
+            <MudText Typo="Typo.caption">@Explanation.ApprovalState</MudText>
+            <MudText Typo="Typo.caption">@Explanation.VerificationState</MudText>
+            @if (Explanation.Sources.Count > 0)
+            {
+                <MudText Typo="Typo.caption">Sources: @string.Join(", ", Explanation.Sources.Select(s => $"{s.SourceKind}:{s.ResourceId}@{s.Version}"))</MudText>
+            }
+        }
+        @if (Entries is not null && Entries.Count > 0)
+        {
+            <MudTimeline TimelinePosition="TimelinePosition.Alternate" Class="ellai-timeline">
+                @foreach (var entry in Entries.OrderBy(e => e.Timestamp))
+                {
+                    var outgoing = entry.Direction == EllaiTimelineDirection.Outgoing;
+                    <MudTimelineItem TimelineAlign="@(outgoing ? TimelineAlign.Start : TimelineAlign.End)"
+                                     Color="@(outgoing ? Color.Primary : Color.Secondary)"
+                                     Icon="@(outgoing ? Icons.Material.Filled.SmartToy : Icons.Material.Filled.Person)"
+                                     aria-label="@(outgoing ? "Ellai message" : "Your message")">
+                        <ItemOpposite>
+                            <MudText Typo="Typo.caption" title="@entry.Timestamp.ToLocalTime().ToString("f")">
+                                @entry.Timestamp.ToLocalTime().ToString("dd MMM HH:mm")
+                            </MudText>
+                        </ItemOpposite>
+                        <ItemContent>
+                            <MudText Typo="Typo.caption" Color="@(outgoing ? Color.Primary : Color.Secondary)">
+                                @(entry.Label ?? (outgoing ? "Ellai" : "You"))
+                            </MudText>
+                            <MudText Typo="Typo.body2">@entry.Text</MudText>
+                        </ItemContent>
+                    </MudTimelineItem>
+                }
+            </MudTimeline>
         }
     }
 </div>
@@ -21,6 +49,21 @@
 @code {
     [Parameter]
     public EllaiActivityExplanation? Explanation { get; set; }
+
+    [Parameter]
+    public IReadOnlyList<EllaiTimelineEntry>? Entries { get; set; }
+
+    public enum EllaiTimelineDirection
+    {
+        Incoming,
+        Outgoing
+    }
+
+    public sealed record EllaiTimelineEntry(
+        EllaiTimelineDirection Direction,
+        string Text,
+        DateTimeOffset Timestamp,
+        string? Label = null);
 
     public sealed record EllaiActivityExplanation(
         string Observed,
