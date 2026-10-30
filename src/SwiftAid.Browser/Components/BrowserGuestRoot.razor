@@ -44,13 +44,16 @@
         <MudNavLink Href="/sessions" Icon="@Icons.Material.Filled.Groups">Community</MudNavLink>
         <button type="button" class="mobile-more-trigger"
                 aria-expanded="@_mobileMoreMenuOpen" aria-controls="guest-more-destinations"
-                @onclick="ToggleMobileMoreMenu">
+                @ref="_mobileMoreTrigger"
+                @onclick="ToggleMobileMoreMenu"
+                @onkeydown="HandleMobileMoreKeyDown">
             <MudIcon Icon="@Icons.Material.Filled.MoreHoriz" aria-hidden="true" />
             <span>More</span>
         </button>
         @if (_mobileMoreMenuOpen)
         {
-            <nav id="guest-more-destinations" class="mobile-more-menu" aria-label="More destinations">
+            <nav id="guest-more-destinations" class="mobile-more-menu" aria-label="More destinations"
+                 @onkeydown="HandleMobileMoreKeyDown">
                 <a href="/education" class="more-menu-link" @onclick="CloseMobileMoreMenu">Education</a>
             </nav>
         }
@@ -144,6 +147,7 @@
     private bool _isReport;
     private bool _isTracking;
     private bool _mobileMoreMenuOpen;
+    private ElementReference _mobileMoreTrigger;
     private Guid? _activeDraftId;
     private IReadOnlyList<PublicReportHistorySurface.HistoryItem> _history = [];
     private bool _historyLoading;
@@ -416,6 +420,17 @@
     }
 
     private void ToggleMobileMoreMenu() => _mobileMoreMenuOpen = !_mobileMoreMenuOpen;
+
+    private async Task HandleMobileMoreKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key != "Escape" || !_mobileMoreMenuOpen)
+        {
+            return;
+        }
+
+        _mobileMoreMenuOpen = false;
+        await _mobileMoreTrigger.FocusAsync();
+    }
 
     private string? _ellaiNotice;
 
