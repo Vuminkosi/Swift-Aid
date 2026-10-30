@@ -1,4 +1,7 @@
 using System.Text.Json;
+using SwiftAid.Application.Authorization;
+using SwiftAid.Application.Cases;
+using SwiftAid.Contracts.Cases;
 using SwiftAid.Contracts.Ellai;
 
 namespace SwiftAid.Application.Ellai;
@@ -51,7 +54,9 @@ public static class EllaiToolReasonCodes
     public const string Unavailable = "Unavailable";
 }
 
-/// <summary>Trusted tool-call context; server-constructed, never model-supplied.</summary>
+/// <summary>Trusted tool-call context; server-constructed, never model-supplied.
+/// <see cref="Actor"/> carries the authenticated actor for live domain
+/// projections; reads without one stay on static capability content.</summary>
 public sealed record EllaiToolContext(
     string SessionId,
     string ScopeEpoch,
@@ -60,7 +65,8 @@ public sealed record EllaiToolContext(
     int RemainingCalls,
     bool ContributorEligible,
     string ConsentVersion = "consent/1",
-    string DataClassification = "synthetic");
+    string DataClassification = "synthetic",
+    ActorContext? Actor = null);
 
 /// <summary>Tool request with bounded arguments.</summary>
 public sealed record EllaiToolRequest(
@@ -109,19 +115,25 @@ public sealed class EllaiToolBroker
     private readonly EllaiPolicyService _policy;
     private readonly EllaiConsentService _consent;
     private readonly EllaiTechnicalDocs? _docs;
+    private readonly ICaseQueueQuery? _queue;
 
     /// <summary>Consent infrastructure is mandatory: a missing service fails
     /// closed instead of silently bypassing the ReasoningText grant check.
     /// The documentation source is optional: docs tools report an explicit
-    /// unavailable outcome while it is unconfigured.</summary>
-    public EllaiToolBroker(EllaiPolicyService policy, EllaiConsentService consent, EllaiTechnicalDocs? docs = null)
+    /// unavailable outcome while it is unconfigured. The domain queue is
+    /// optional: live projections report unavailable without it, and no
+    /// Ellai-only unrestricted query is ever introduced.</summary>
+    public EllaiToolBroker(
+        EllaiPolicyService policy, EllaiConsentService consent,
+        EllaiTechnicalDocs? docs = null, ICaseQueueQuery? queue = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _consent = consent ?? throw new ArgumentNullException(nameof(consent));
         _docs = docs;
+        _queue = queue;
     }
 
-    public Task<EllaiToolResult> InvokeAsync(
+    public async Task<EllaiToolResult> InvokeAsync(
         EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -134,36 +146,36 @@ public sealed class EllaiToolBroker
 
         if (!EllaiToolNames.All.Contains(canonical))
         {
-            return Task.FromResult(Bound(Deny(request.ToolName, "Unregistered tool.", EllaiToolReasonCodes.UnregisteredTool)));
+            return Bound(Deny(request.ToolName, "Unregistered tool.", EllaiToolReasonCodes.UnregisteredTool));
         }
 
         if (context.RemainingCalls <= 0)
         {
-            return Task.FromResult(Bound(Deny(request.ToolName, "Model-visible tool budget exhausted.", EllaiToolReasonCodes.BudgetExceeded)));
+            return Bound(Deny(request.ToolName, "Model-visible tool budget exhausted.", EllaiToolReasonCodes.BudgetExceeded));
         }
 
         if (string.IsNullOrWhiteSpace(context.SessionId) || string.IsNullOrWhiteSpace(context.ScopeEpoch))
         {
-            return Task.FromResult(Bound(Deny(request.ToolName, "Missing session scope.", EllaiToolReasonCodes.MissingScope)));
+            return Bound(Deny(request.ToolName, "Missing session scope.", EllaiToolReasonCodes.MissingScope));
         }
 
         if (request.Arguments.Count > 8)
         {
-            return Task.FromResult(Bound(Deny(request.ToolName, "Too many tool arguments.", EllaiToolReasonCodes.InvalidArguments)));
+            return Bound(Deny(request.ToolName, "Too many tool arguments.", EllaiToolReasonCodes.InvalidArguments));
         }
 
         foreach (var (key, value) in request.Arguments)
         {
             if (value.Length > 120 || LooksLikeCode(value))
             {
-                return Task.FromResult(Bound(Deny(request.ToolName, $"Argument {key} is not an allowed bounded reference.", EllaiToolReasonCodes.InvalidArguments)));
+                return Bound(Deny(request.ToolName, $"Argument {key} is not an allowed bounded reference.", EllaiToolReasonCodes.InvalidArguments));
             }
         }
 
         if (!_consent.IsGranted(
                 context.SessionId, EllaiConsentDimension.ReasoningText, ToolReadPurpose, DateTimeOffset.UtcNow))
         {
-            return Task.FromResult(Bound(Deny(request.ToolName, "Reasoning-text consent grant is missing or expired.", EllaiToolReasonCodes.ConsentMissing)));
+            return Bound(Deny(request.ToolName, "Reasoning-text consent grant is missing or expired.", EllaiToolReasonCodes.ConsentMissing));
         }
 
         var auth = _policy.Authorize(
@@ -174,12 +186,16 @@ public sealed class EllaiToolBroker
 
         if (!auth.Permitted)
         {
-            return Task.FromResult(Bound(Deny(request.ToolName, auth.DenialReason ?? "Denied by policy.", EllaiToolReasonCodes.DeniedByPolicy)));
+            return Bound(Deny(request.ToolName, auth.DenialReason ?? "Denied by policy.", EllaiToolReasonCodes.DeniedByPolicy));
         }
 
-        return Task.FromResult(Bound(canonical switch
+        if (string.Equals(canonical, EllaiToolNames.State, StringComparison.Ordinal))
         {
-            EllaiToolNames.State => Allow(request.ToolName, "Current permitted feature projection.", 1, false),
+            return Bound(await ReadStateAsync(context, request, ct).ConfigureAwait(false));
+        }
+
+        return Bound(canonical switch
+        {
             EllaiToolNames.Evidence => Allow(request.ToolName, "Authorized versioned source items.", Math.Min(request.Arguments.Count, MaxItems), request.Arguments.Count > MaxItems),
             EllaiToolNames.Topic => Allow(request.ToolName, "Session topic candidates with checkpoints.", 1, false),
             EllaiToolNames.Capabilities => Allow(request.ToolName, "Current capability descriptors.", 1, false),
@@ -189,7 +205,81 @@ public sealed class EllaiToolBroker
             EllaiToolNames.DocsSearch => SearchDocs(request),
             EllaiToolNames.DocsGet => GetDocs(request),
             _ => Deny(request.ToolName, "Unregistered tool.", EllaiToolReasonCodes.UnregisteredTool)
-        }));
+        });
+    }
+
+    /// <summary>Live <c>ellai_state</c> projections. Without a projection
+    /// argument the static permitted-feature description applies. The
+    /// <c>queue</c> projection runs the ordinary scoped "my cases" query for
+    /// the trusted actor: same handlers, same per-case authorization, no
+    /// Ellai-only query path.</summary>
+    private async Task<EllaiToolResult> ReadStateAsync(
+        EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
+    {
+        if (!request.Arguments.TryGetValue("projection", out var projection)
+            || string.Equals(projection, "feature", StringComparison.OrdinalIgnoreCase))
+        {
+            return Allow(request.ToolName, "Current permitted feature projection.", 1, false);
+        }
+
+        if (!string.Equals(projection, "queue", StringComparison.OrdinalIgnoreCase))
+        {
+            return Deny(request.ToolName,
+                "Unknown state projection. Use projection=queue for the live work queue.",
+                EllaiToolReasonCodes.InvalidArguments);
+        }
+
+        if (context.Actor is null || _queue is null)
+        {
+            return Deny(request.ToolName,
+                "The live queue projection is not available for this session.",
+                EllaiToolReasonCodes.Unavailable);
+        }
+
+        var limit = MaxItems;
+        if (request.Arguments.TryGetValue("limit", out var rawLimit)
+            && (!int.TryParse(rawLimit, out limit) || limit < 1 || limit > MaxItems))
+        {
+            return Deny(request.ToolName,
+                $"limit must be an integer from 1 to {MaxItems}.",
+                EllaiToolReasonCodes.InvalidArguments);
+        }
+
+        CaseQueueResult result;
+        try
+        {
+            result = await _queue.GetMineAsync(context.Actor, limit, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return Deny(request.ToolName,
+                "The work queue could not be read right now.",
+                EllaiToolReasonCodes.Unavailable);
+        }
+
+        if (result.Access == CaseQueueAccess.Unavailable)
+        {
+            return Deny(request.ToolName,
+                "The work queue could not be read right now.",
+                EllaiToolReasonCodes.Unavailable);
+        }
+
+        if (result.Access == CaseQueueAccess.Denied)
+        {
+            return Deny(request.ToolName,
+                "The work queue is denied for the current actor.",
+                EllaiToolReasonCodes.DeniedByPolicy);
+        }
+
+        var items = result.Items.Take(limit).ToList();
+        var lines = items.Select(item =>
+            $"case {item.CaseId:D} · {item.Workflow} · v{item.AggregateVersion} · updated {item.UpdatedAtUtc:O}");
+        var evidence = items.Select(item => new EvidenceRef(
+            "CaseQueue", item.CaseId.ToString("D"), item.AggregateVersion.ToString(System.Globalization.CultureInfo.InvariantCulture), null,
+            item.CaseId.ToString("D"))).ToList();
+        return new EllaiToolResult(request.ToolName, true, null, evidence,
+            items.Count == 0 ? "The permitted work queue is empty." : string.Join("\n", lines),
+            items.Count, items.Count >= limit, EllaiToolReasonCodes.Ok);
     }
 
     /// <summary>Measures the model-visible envelope exactly as serialized for

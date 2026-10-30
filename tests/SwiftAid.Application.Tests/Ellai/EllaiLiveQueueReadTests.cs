@@ -1,0 +1,186 @@
+using System.Security.Claims;
+using SwiftAid.Application.Authorization;
+using SwiftAid.Application.Cases;
+using SwiftAid.Application.Ellai;
+using SwiftAid.Contracts.Cases;
+
+namespace SwiftAid.Application.Tests.Ellai;
+
+[Trait("Feature", "Ellai")]
+[Trait("Task", "ELL-T07")]
+public sealed class EllaiLiveQueueReadTests
+{
+    private static readonly EllaiToolContext Context = new(
+        "session-1", "epoch-1", "cases", "case-1", 4, true);
+
+    private sealed class FakeQueue : ICaseQueueQuery
+    {
+        public CaseQueueResult Result { get; set; } =
+            new(CaseQueueAccess.Allowed, Array.Empty<CaseQueueItem>());
+
+        public bool Throw { get; set; }
+
+        public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CancellationToken ct)
+        {
+            LastActor = actor;
+            LastLimit = limit;
+            if (Throw)
+            {
+                throw new InvalidOperationException("store down");
+            }
+
+            return Task.FromResult(Result);
+        }
+
+        public ActorContext? LastActor { get; private set; }
+
+        public int? LastLimit { get; private set; }
+    }
+
+    private static ActorContext TestActor() => ActorContext.FromValidatedPrincipal(
+        new ClaimsPrincipal(new ClaimsIdentity(new[]
+        {
+            new Claim(ClaimTypes.NameIdentifier, "actor-1"),
+            new Claim(ActorContext.AccessEpochClaimType, "3"),
+        }, "test")));
+
+    private static EllaiToolBroker GrantedBroker(ICaseQueueQuery? queue = null)
+    {
+        var consent = new EllaiConsentService();
+        consent.Grant("session-1", EllaiConsentDimension.ReasoningText,
+            EllaiToolBroker.ToolReadPurpose, "synthetic", TimeSpan.FromHours(1));
+        return new EllaiToolBroker(new EllaiPolicyService(), consent, null, queue);
+    }
+
+    private static IReadOnlyDictionary<string, string> Args(params (string Key, string Value)[] pairs) =>
+        pairs.ToDictionary(p => p.Key, p => p.Value);
+
+    private static CaseQueueItem Row(string suffix, long version) => new(
+        Guid.Parse($"11111111-1111-1111-1111-1111111111{suffix}"),
+        "UnderReview", "US", "actor-1", version,
+        new DateTimeOffset(2026, 10, 30, 8, 0, 0, TimeSpan.Zero));
+
+    [Fact]
+    public async Task QueueProjectionReturnsLiveVersionedRows()
+    {
+        var queue = new FakeQueue
+        {
+            Result = new CaseQueueResult(CaseQueueAccess.Allowed,
+                new[] { Row("01", 7), Row("02", 9) })
+        };
+        var broker = GrantedBroker(queue);
+        var context = Context with { Actor = TestActor() };
+
+        var result = await broker.InvokeAsync(
+            context, new EllaiToolRequest(EllaiToolNames.State, Args(("projection", "queue"))),
+            CancellationToken.None);
+
+        Assert.True(result.Allowed);
+        Assert.Equal(2, result.ItemCount);
+        Assert.False(result.Truncated);
+        Assert.Contains("v7", result.ResultSummary, StringComparison.Ordinal);
+        Assert.Contains("v9", result.ResultSummary, StringComparison.Ordinal);
+        Assert.Equal("actor-1", queue.LastActor?.ActorId);
+        Assert.Equal(
+            new[] { "7", "9" },
+            result.Evidence.Select(e => e.Version).ToArray());
+        Assert.True(EllaiToolBroker.MeasureEnvelopeBytes(result) <= EllaiToolBroker.MaxResultBytes);
+    }
+
+    [Fact]
+    public async Task ChangedSourceShowsNewVersionOnReread()
+    {
+        var queue = new FakeQueue
+        {
+            Result = new CaseQueueResult(CaseQueueAccess.Allowed, new[] { Row("01", 7) })
+        };
+        var broker = GrantedBroker(queue);
+        var context = Context with { Actor = TestActor() };
+        var request = new EllaiToolRequest(EllaiToolNames.State, Args(("projection", "queue")));
+
+        var first = await broker.InvokeAsync(context, request, CancellationToken.None);
+        Assert.Contains("v7", first.ResultSummary, StringComparison.Ordinal);
+
+        queue.Result = new CaseQueueResult(CaseQueueAccess.Allowed, new[] { Row("01", 8) });
+        var second = await broker.InvokeAsync(context, request, CancellationToken.None);
+        Assert.Contains("v8", second.ResultSummary, StringComparison.Ordinal);
+        Assert.DoesNotContain("v7", second.ResultSummary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task QueueOutageAndDenialAreExplicit()
+    {
+        var queue = new FakeQueue { Result = new CaseQueueResult(CaseQueueAccess.Unavailable, []) };
+        var broker = GrantedBroker(queue);
+        var context = Context with { Actor = TestActor() };
+        var request = new EllaiToolRequest(EllaiToolNames.State, Args(("projection", "queue")));
+
+        var unavailable = await broker.InvokeAsync(context, request, CancellationToken.None);
+        Assert.False(unavailable.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, unavailable.ReasonCode);
+
+        queue.Result = new CaseQueueResult(CaseQueueAccess.Denied, []);
+        var denied = await broker.InvokeAsync(context, request, CancellationToken.None);
+        Assert.False(denied.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.DeniedByPolicy, denied.ReasonCode);
+
+        queue.Throw = true;
+        var failed = await broker.InvokeAsync(context, request, CancellationToken.None);
+        Assert.False(failed.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, failed.ReasonCode);
+    }
+
+    [Fact]
+    public async Task MissingActorOrServiceYieldsUnavailableNeverFakeRows()
+    {
+        var queue = new FakeQueue
+        {
+            Result = new CaseQueueResult(CaseQueueAccess.Allowed, new[] { Row("01", 7) })
+        };
+        var request = new EllaiToolRequest(EllaiToolNames.State, Args(("projection", "queue")));
+
+        var noActor = await GrantedBroker(queue).InvokeAsync(Context, request, CancellationToken.None);
+        Assert.False(noActor.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, noActor.ReasonCode);
+
+        var noService = await GrantedBroker().InvokeAsync(
+            Context with { Actor = TestActor() }, request, CancellationToken.None);
+        Assert.False(noService.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, noService.ReasonCode);
+    }
+
+    [Fact]
+    public async Task QueueProjectionBoundsAreEnforced()
+    {
+        var rows = Enumerable.Range(1, 8).Select(i => Row(i.ToString("D2"), i)).ToArray();
+        var queue = new FakeQueue { Result = new CaseQueueResult(CaseQueueAccess.Allowed, rows) };
+        var broker = GrantedBroker(queue);
+        var context = Context with { Actor = TestActor() };
+
+        var paged = await broker.InvokeAsync(
+            context, new EllaiToolRequest(EllaiToolNames.State, Args(("projection", "queue"), ("limit", "5"))),
+            CancellationToken.None);
+        Assert.True(paged.Allowed);
+        Assert.Equal(5, paged.ItemCount);
+        Assert.True(paged.Truncated);
+        Assert.Equal(5, queue.LastLimit);
+
+        var badLimit = await broker.InvokeAsync(
+            context, new EllaiToolRequest(EllaiToolNames.State, Args(("projection", "queue"), ("limit", "99"))),
+            CancellationToken.None);
+        Assert.False(badLimit.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.InvalidArguments, badLimit.ReasonCode);
+
+        var unknown = await broker.InvokeAsync(
+            context, new EllaiToolRequest(EllaiToolNames.State, Args(("projection", "ledger"))),
+            CancellationToken.None);
+        Assert.False(unknown.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.InvalidArguments, unknown.ReasonCode);
+
+        var feature = await broker.InvokeAsync(
+            context, new EllaiToolRequest(EllaiToolNames.State, Args()),
+            CancellationToken.None);
+        Assert.True(feature.Allowed);
+        Assert.Equal("Current permitted feature projection.", feature.ResultSummary);
+    }
+}
