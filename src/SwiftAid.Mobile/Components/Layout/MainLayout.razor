@@ -3,6 +3,7 @@
 @using SwiftAid.Mobile.Components.Notifications
 @using SwiftAid.Mobile.Services.Authentication
 @using SwiftAid.Mobile.Services.Welcome
+@using SwiftAid.Client.Navigation
 @using SwiftAid.UI.Components.Surfaces.Shell
 @inject IMobileAuthenticationSession AuthenticationSession
 @inject IMobileWelcomePreferenceStore WelcomePreferenceStore
@@ -77,7 +78,7 @@
                     <section class="mobile-sign-in-required" aria-labelledby="mobile-sign-in-required-title">
                         <MudIcon Icon="@Icons.Material.Filled.Lock" Color="Color.Secondary" aria-hidden="true" />
                         <MudText Typo="Typo.body1" id="mobile-sign-in-required-title" role="status">Sign in to view this page.</MudText>
-                        <MudButton Href="/account" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Login">
+                        <MudButton Href="@SignInHref" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Login">
                             Sign in
                         </MudButton>
                     </section>
@@ -150,6 +151,22 @@
         CurrentPath.Equals("/verify-email", StringComparison.OrdinalIgnoreCase) ||
         CurrentPath.Equals("/welcome-complete", StringComparison.OrdinalIgnoreCase);
     private string CasesHref => _signedIn ? "/my-cases" : "/report?view=tracking";
+    private string SignInHref
+    {
+        get
+        {
+            try
+            {
+                var appRelativePath = Navigation.ToBaseRelativePath(Navigation.Uri);
+                var returnUrl = LocalReturnUrlPolicy.FromAppRelativePath(appRelativePath, "/");
+                return $"/sign-in?returnUrl={Uri.EscapeDataString(returnUrl)}";
+            }
+            catch (Exception)
+            {
+                return "/sign-in";
+            }
+        }
+    }
     private readonly CancellationTokenSource _lifetime = new();
     private long _authenticationRevision;
     private bool _disposed;

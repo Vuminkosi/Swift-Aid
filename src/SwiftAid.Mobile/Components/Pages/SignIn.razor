@@ -1,5 +1,6 @@
 @page "/sign-in"
 @using SwiftAid.Client.Authentication
+@using SwiftAid.Client.Navigation
 @using SwiftAid.Mobile.Services.Account
 @using SwiftAid.Mobile.Services.Http
 @using SwiftAid.Mobile.Services.Authentication
@@ -92,6 +93,11 @@
         !string.IsNullOrWhiteSpace(_email) &&
         !string.IsNullOrWhiteSpace(_password);
 
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    private string? ReturnUrl { get; set; }
+
+    private string SafeReturnUrl => LocalReturnUrlPolicy.Resolve(ReturnUrl, "/account");
+
     private async Task SignInAsync()
     {
         if (!CanSubmit)
@@ -108,7 +114,7 @@
             if (result.Status == PasswordAuthStatus.Succeeded)
             {
                 await RefreshShellAsync();
-                Navigation.NavigateTo("/account");
+                Navigation.NavigateTo(SafeReturnUrl);
                 return;
             }
 
