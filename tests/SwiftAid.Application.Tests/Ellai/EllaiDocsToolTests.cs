@@ -148,4 +148,27 @@ public sealed class EllaiDocsToolTests : IDisposable
         Assert.False(badLimit.Allowed);
         Assert.Equal(EllaiToolReasonCodes.InvalidArguments, badLimit.ReasonCode);
     }
+
+    [Theory]
+    [InlineData("https://internal/docs/secret.md")]
+    [InlineData("http://localhost/admin")]
+    [InlineData("../secret")]
+    [InlineData("other-doc#section")]
+    [InlineData("C:\\Windows\\secret.txt")]
+    public async Task DocsGetRejectsLinksPathsAndForeignDocs(string section)
+    {
+        // DOC-02: no link traversal exists; URLs, paths and foreign
+        // document references fail closed as invalid arguments.
+        WriteSource(SampleSource());
+        var docs = new EllaiTechnicalDocs(_path);
+        Assert.Null(docs.Get(section));
+
+        var broker = GrantedBroker(docs);
+        var result = await broker.InvokeAsync(
+            Context, new EllaiToolRequest(EllaiToolNames.DocsGet, Args(("section", section))),
+            CancellationToken.None);
+
+        Assert.False(result.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.InvalidArguments, result.ReasonCode);
+    }
 }
