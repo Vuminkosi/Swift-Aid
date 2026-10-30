@@ -1,7 +1,7 @@
 .ellai-launcher-menu {
     position: fixed;
     z-index: 15;
-    inset-block-end: 1.25rem;
+    inset-block-end: 20vh;
     inset-inline-end: max(1rem, env(safe-area-inset-right));
 }
 
