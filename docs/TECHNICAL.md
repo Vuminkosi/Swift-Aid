@@ -43,6 +43,8 @@ execute/approve/sql/shell.
 | `ellai_now` | Current server time (UTC, round-trip + unix ms); no domain data. |
 | `ellai_docs_search` | Search this approved reference by topic/section id. |
 | `ellai_docs_get` | Retrieve one approved section excerpt with provenance. |
+| `ellai_docs_search` | Search this approved reference by topic/section id. |
+| `ellai_docs_get` | Retrieve one approved section excerpt with provenance. |
 
 Compatibility aliases (accepted, metered, never advertised):
 `ellai_voice_capability` → `ellai_capabilities`,
@@ -64,10 +66,14 @@ reason codes (`Ok`, `UnregisteredTool`, `BudgetExceeded`, `MissingScope`,
 `ReasoningText` grant for purpose `ellai-tool-read`; a missing consent
 service fails closed. The cycle runner (`EllaiCycleRunner`) enforces
 25 reasoning iterations, 60 model-visible tool calls and 5 model-only
-schema repairs per cycle with single-flight per investigation; the
-`EllaiUsageLedger` enforces a 200,000-token budget plus a $70 per-envelope
-and $70 total spend cap (dollar caps stay inert until real Meta rates are
-configured). **Deliberate deviation:** the requirements handoff asks for
+schema repairs per cycle with single-flight per investigation. The runner
+publishes correlated activity events (`EllaiActivityStatusCoordinator`:
+accepted, turn, tool-started/observed, approval, verification, completed,
+blocked, cancelled) with session/epoch/sequence fencing; the composer
+status line binds to these next. The `EllaiUsageLedger` enforces a
+200,000-token budget plus a $70 per-envelope and $70 total spend cap
+(dollar caps stay inert until real Meta rates are configured).
+**Deliberate deviation:** the requirements handoff asks for
 3 iterations / 4 calls / 1 repair per cycle; the owner previously directed
 the highest possible ceilings to avoid frustration, so the raised ceilings
 stand and that handoff item is recorded as owner-deferred, not implemented.
@@ -78,12 +84,16 @@ stand and that handoff item is recorded as owner-deferred, not implemented.
 in PostgreSQL (`EllaiSessionEntity`, `EllaiCheckpointEntity`,
 `PostgresEllaiSessionStore`) with version-fenced compare-and-set and
 idempotent utterance/checkpoint identities; restart and second-gateway
-visibility hold. Approvals carry a 15-minute expiry and idempotent receipts
-(`EllaiApprovalService`, `EllaiReceiptStore`) with an Accepted /
-AcceptedUnverified / UnknownOutcome / PartiallyApplied / Applied / Failed
-lattice, but the receipt authority is still an in-memory store: the
-PostgreSQL plan/approval/receipt tables and the atomic per-action executor
-are **Missing** (the next slice). HTTP: `POST /ellai/v1/sessions/{id}/approvals`,
+visibility hold. Approvals carry a 15-minute expiry and idempotent durable receipts
+(`EllaiApprovalService` over `IEllaiApprovalStore`, PostgreSQL
+`ellai_plan_approvals` with unique idempotency-key and plan/action
+constraints) with an Accepted / AcceptedUnverified / UnknownOutcome /
+PartiallyApplied / Applied / Failed lattice. A server-side dialog
+coordinator enforces one active review per session, edit-then-new-version
+invalidation, and terminal cancel fencing; the approval endpoint binds
+dialog-issued submissions to their open review (409 when stale). Still
+**Missing**: the atomic per-action domain executor with outbox commit, the
+Blazor dialog host, and cross-instance dialog fencing. HTTP: `POST /ellai/v1/sessions/{id}/approvals`,
 `GET /receipts`, utterance submit, terminal cancel
 (`src/SwiftAid.Gateway/Endpoints/EllaiEndpoints.cs`). Approval is granted
 only by operating the authenticated approval dialog (Approve selected /
@@ -118,7 +128,7 @@ the case database.
 ## 7. Verification map
 
 Run `dotnet test tests/SwiftAid.Application.Tests --filter
-FullyQualifiedName~Ellai` (unit/contract, ~96 passing). PostgreSQL
+FullyQualifiedName~Ellai` (unit/contract, ~114 passing). PostgreSQL
 integration tests (`tests/SwiftAid.Integration.Tests`, `EllaiPostgresTests`)
 run only with `SWIFTAID_RUN_SQLAUTH_FIXTURES=1` and the approved disposable
 loopback connection (127.0.0.1:32703); otherwise they skip. Provider, web
