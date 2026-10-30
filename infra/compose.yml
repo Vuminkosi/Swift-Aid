@@ -164,6 +164,10 @@ services:
         source: ${SWIFTAID_POLICY_FILE:-../docs/ellai/ellai-system-instruction.md}
         target: /etc/swiftaid/policy/ellai-system-instruction.md
         read_only: true
+      - type: bind
+        source: ${SWIFTAID_TECHNICAL_FILE:-../docs/TECHNICAL.md}
+        target: /etc/swiftaid/docs/TECHNICAL.md
+        read_only: true
     depends_on:
       postgres:
         condition: service_healthy

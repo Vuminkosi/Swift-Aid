@@ -77,6 +77,10 @@ builder.Services.AddEllaiPersistence();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiSessionService>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiPolicyService>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiToolBroker>();
+builder.Services.AddScoped(_ => new SwiftAid.Application.Ellai.EllaiTechnicalDocs(
+    SwiftAid.Application.Ellai.EllaiTechnicalDocs.TryResolvePath(
+        builder.Environment.ContentRootPath,
+        builder.Configuration["Ellai:Docs:Path"] ?? "docs/TECHNICAL.md")));
 builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiUiRegistry>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiGuidancePlanValidator>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.IEllaiUiDiscoveryService, SwiftAid.Application.Ellai.EllaiUiDiscoveryService>();

@@ -20,9 +20,18 @@ public static class EllaiToolNames
     /// the same consent, budget and byte-bound pipeline as every read.</summary>
     public const string Now = "ellai_now";
 
+    /// <summary>Read-only documentation search over the approved technical
+    /// reference. Never indexes or returns raw repository source.</summary>
+    public const string DocsSearch = "ellai_docs_search";
+
+    /// <summary>Read-only retrieval of one approved documentation section
+    /// by exact section id, with provenance.</summary>
+    public const string DocsGet = "ellai_docs_get";
+
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
     {
-        State, Evidence, Topic, Capabilities, Receipts, ProductFacts, Now
+        State, Evidence, Topic, Capabilities, Receipts, ProductFacts, Now,
+        DocsSearch, DocsGet
     };
 }
 
@@ -39,6 +48,7 @@ public static class EllaiToolReasonCodes
     public const string ConsentMissing = "ConsentMissing";
     public const string DeniedByPolicy = "DeniedByPolicy";
     public const string ResultTooLarge = "ResultTooLarge";
+    public const string Unavailable = "Unavailable";
 }
 
 /// <summary>Trusted tool-call context; server-constructed, never model-supplied.</summary>
@@ -98,13 +108,17 @@ public sealed class EllaiToolBroker
 
     private readonly EllaiPolicyService _policy;
     private readonly EllaiConsentService _consent;
+    private readonly EllaiTechnicalDocs? _docs;
 
     /// <summary>Consent infrastructure is mandatory: a missing service fails
-    /// closed instead of silently bypassing the ReasoningText grant check.</summary>
-    public EllaiToolBroker(EllaiPolicyService policy, EllaiConsentService consent)
+    /// closed instead of silently bypassing the ReasoningText grant check.
+    /// The documentation source is optional: docs tools report an explicit
+    /// unavailable outcome while it is unconfigured.</summary>
+    public EllaiToolBroker(EllaiPolicyService policy, EllaiConsentService consent, EllaiTechnicalDocs? docs = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _consent = consent ?? throw new ArgumentNullException(nameof(consent));
+        _docs = docs;
     }
 
     public Task<EllaiToolResult> InvokeAsync(
@@ -172,6 +186,8 @@ public sealed class EllaiToolBroker
             EllaiToolNames.Receipts => Allow(request.ToolName, "Existing receipts with linked state.", 1, false),
             EllaiToolNames.ProductFacts => Allow(request.ToolName, "Versioned nonmedical product facts.", 1, false),
             EllaiToolNames.Now => Allow(request.ToolName, DescribeNow(DateTimeOffset.UtcNow), 1, false),
+            EllaiToolNames.DocsSearch => SearchDocs(request),
+            EllaiToolNames.DocsGet => GetDocs(request),
             _ => Deny(request.ToolName, "Unregistered tool.", EllaiToolReasonCodes.UnregisteredTool)
         }));
     }
@@ -207,6 +223,73 @@ public sealed class EllaiToolBroker
 
     private static EllaiToolResult Allow(string tool, string summary, int count, bool truncated) =>
         new(tool, true, null, Array.Empty<EvidenceRef>(), summary, count, truncated, EllaiToolReasonCodes.Ok);
+
+    private EllaiToolResult SearchDocs(EllaiToolRequest request)
+    {
+        if (_docs is null || !_docs.IsAvailable)
+        {
+            return Deny(request.ToolName,
+                "The documentation source is not configured; no documentation was searched.",
+                EllaiToolReasonCodes.Unavailable);
+        }
+
+        if (!request.Arguments.TryGetValue("q", out var query) || string.IsNullOrWhiteSpace(query))
+        {
+            return Deny(request.ToolName,
+                "A non-empty q argument is required.",
+                EllaiToolReasonCodes.InvalidArguments);
+        }
+
+        var limit = EllaiTechnicalDocs.MaxHits;
+        if (request.Arguments.TryGetValue("limit", out var rawLimit)
+            && (!int.TryParse(rawLimit, out limit) || limit < 1 || limit > EllaiTechnicalDocs.MaxHits))
+        {
+            return Deny(request.ToolName,
+                $"limit must be an integer from 1 to {EllaiTechnicalDocs.MaxHits}.",
+                EllaiToolReasonCodes.InvalidArguments);
+        }
+
+        var hits = _docs.Search(query, limit);
+        if (hits.Count == 0)
+        {
+            return Deny(request.ToolName,
+                "No approved documentation section matches the query.",
+                EllaiToolReasonCodes.InvalidArguments);
+        }
+
+        var lines = hits.Select(h =>
+            $"[{h.SectionId}] {h.Title} (status {h.Status}, rev {h.Revision}): {h.Snippet}");
+        return Allow(request.ToolName, string.Join("\n", lines), hits.Count, false);
+    }
+
+    private EllaiToolResult GetDocs(EllaiToolRequest request)
+    {
+        if (_docs is null || !_docs.IsAvailable)
+        {
+            return Deny(request.ToolName,
+                "The documentation source is not configured; no section was retrieved.",
+                EllaiToolReasonCodes.Unavailable);
+        }
+
+        if (!request.Arguments.TryGetValue("section", out var sectionId) || string.IsNullOrWhiteSpace(sectionId))
+        {
+            return Deny(request.ToolName,
+                "An exact section argument is required.",
+                EllaiToolReasonCodes.InvalidArguments);
+        }
+
+        var section = _docs.Get(sectionId);
+        if (section is null)
+        {
+            return Deny(request.ToolName,
+                $"Unknown documentation section '{sectionId.Trim()}'.",
+                EllaiToolReasonCodes.InvalidArguments);
+        }
+
+        var summary = $"{section.Title} [{section.SectionId}] " +
+            $"(technical.md, status {section.Status}, rev {section.Revision}):\n{section.Body}";
+        return Allow(request.ToolName, summary, 1, false);
+    }
 
     internal static string DescribeNow(DateTimeOffset now) =>
         $"Current server time (UTC): {now:O} (unix {now.ToUnixTimeMilliseconds()} ms, {now.DayOfWeek}). " +

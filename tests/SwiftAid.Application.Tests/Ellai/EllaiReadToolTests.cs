@@ -45,17 +45,35 @@ public sealed class EllaiReadToolTests
     [Fact]
     public async Task RegisteredReadsReturnBoundedResults()
     {
-        var broker = GrantedBroker();
-
-        foreach (var tool in EllaiToolNames.All)
+        var docsPath = Path.Combine(Path.GetTempPath(), $"technical-{Guid.NewGuid():N}.md");
+        File.WriteAllText(docsPath, "## 1. Sample\n\n**Status: Implemented.** Sample section.\n");
+        try
         {
-            var result = await broker.InvokeAsync(
-                Context, new EllaiToolRequest(tool, new Dictionary<string, string>()),
-                CancellationToken.None);
-            Assert.True(result.Allowed);
-            Assert.Equal(EllaiToolReasonCodes.Ok, result.ReasonCode);
-            Assert.True(result.ItemCount <= EllaiToolBroker.MaxItems);
-            Assert.True(EllaiToolBroker.MeasureEnvelopeBytes(result) <= EllaiToolBroker.MaxResultBytes);
+            var consent = new EllaiConsentService();
+            consent.Grant("session-1", EllaiConsentDimension.ReasoningText,
+                EllaiToolBroker.ToolReadPurpose, "synthetic", TimeSpan.FromHours(1));
+            var broker = new EllaiToolBroker(
+                new EllaiPolicyService(), consent, new EllaiTechnicalDocs(docsPath));
+
+            foreach (var tool in EllaiToolNames.All)
+            {
+                var args = tool == EllaiToolNames.DocsSearch
+                    ? new Dictionary<string, string> { ["q"] = "sample" }
+                    : tool == EllaiToolNames.DocsGet
+                        ? new Dictionary<string, string> { ["section"] = "1-sample" }
+                        : new Dictionary<string, string>();
+                var result = await broker.InvokeAsync(
+                    Context, new EllaiToolRequest(tool, args),
+                    CancellationToken.None);
+                Assert.True(result.Allowed);
+                Assert.Equal(EllaiToolReasonCodes.Ok, result.ReasonCode);
+                Assert.True(result.ItemCount <= EllaiToolBroker.MaxItems);
+                Assert.True(EllaiToolBroker.MeasureEnvelopeBytes(result) <= EllaiToolBroker.MaxResultBytes);
+            }
+        }
+        finally
+        {
+            File.Delete(docsPath);
         }
     }
 
