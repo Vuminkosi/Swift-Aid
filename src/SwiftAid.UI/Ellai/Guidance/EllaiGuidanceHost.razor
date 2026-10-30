@@ -4,6 +4,9 @@
 @inject IBonboardingService Bonboarding
 @inject IEllaiGuidanceControl Guidance
 @inject EllaiLauncher Launcher
+@inject IEllaiReviewClient ReviewClient
+@inject MudBlazor.IDialogService Dialogs
+@inject EllaiEventPoller EventPoller
 @implements IDisposable
 
 <div class="ellai-host">
@@ -69,6 +72,8 @@
     protected override void OnInitialized()
     {
         Launcher.Requested += OnLauncherRequested;
+        EventPoller.ApprovalRequired += OnApprovalRequired;
+        EventPoller.SessionCancelled += OnSessionCancelled;
     }
 
     private void OnLauncherRequested(EllaiMode mode)
@@ -173,9 +178,165 @@
         }
     }
 
+    private CancellationTokenSource? _pollCts;
+    private IDialogReference? _reviewDialog;
+
+    /// <summary>Human edit of the plan under review. Bound by the hosting
+    /// page when a reasoning lane can present a revised plan.</summary>
+    [Parameter]
+    public EventCallback<EllaiReviewDto> OnEditRequested { get; set; }
+
+    /// <summary>Starts tracking one session: polls its event journal and
+    /// opens the approval dialog on validated reviews.</summary>
+    public void TrackSession(string sessionId)
+    {
+        EventPoller.TrackSession(sessionId);
+        RestartPollLoop();
+    }
+
+    private void RestartPollLoop()
+    {
+        _pollCts?.Cancel();
+        _pollCts?.Dispose();
+        _pollCts = new CancellationTokenSource();
+        _ = PollLoopAsync(_pollCts.Token);
+    }
+
+    private async Task PollLoopAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await EventPoller.PollOnceAsync(20, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch
+            {
+                try
+                {
+                    await Task.Delay(2000, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
+        }
+    }
+
+    private async void OnApprovalRequired(string requestId)
+    {
+        try
+        {
+            await InvokeAsync(() => OpenReviewAsync(requestId)).ConfigureAwait(false);
+        }
+        catch
+        {
+        }
+    }
+
+    private void OnSessionCancelled()
+    {
+        _reviewDialog?.Close();
+        _reviewDialog = null;
+    }
+
+    private async Task OpenReviewAsync(string requestId)
+    {
+        var sessionId = EventPoller.SessionId;
+        if (sessionId is null || _reviewDialog is not null)
+        {
+            return;
+        }
+
+        IDialogReference? dialog = null;
+        try
+        {
+            var review = await ReviewClient.GetActiveReviewAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
+            if (review is null || review.RequestId != requestId)
+            {
+                return;
+            }
+
+            var parameters = new DialogParameters
+            {
+                ["RequestId"] = review.RequestId,
+                ["PlanHash"] = review.PlanHash,
+                ["PlanVersion"] = review.PlanVersion,
+                ["ExpiresAtUtc"] = review.ExpiresAtUtc,
+                ["EvidenceText"] = $"Plan {review.PlanHash} version {review.PlanVersion}.",
+                ["Actions"] = review.Actions.Select(action =>
+                    new EllaiApprovalActionRow(action.ActionId, action.Label, action.Detail, false)).ToList(),
+                ["OnApproveSelected"] = EventCallback.Factory.Create<IReadOnlyList<string>>(
+                    this, selected => SubmitSelectionAsync(review, selected)),
+                ["OnReject"] = EventCallback.Factory.Create(this, () => RejectAsync(review)),
+                ["OnEdit"] = EventCallback.Factory.Create(this, () => EditAsync(review)),
+                ["OnCancel"] = EventCallback.Factory.Create(this, () => dialog?.Close()),
+            };
+            dialog = await Dialogs.ShowAsync<EllaiApprovalDialog>(
+                "Review proposed actions", parameters).ConfigureAwait(false);
+            _reviewDialog = dialog;
+            await dialog.Result.ConfigureAwait(false);
+        }
+        catch
+        {
+            dialog?.Close();
+        }
+        finally
+        {
+            if (ReferenceEquals(_reviewDialog, dialog))
+            {
+                _reviewDialog = null;
+            }
+        }
+    }
+
+    private async Task SubmitSelectionAsync(EllaiReviewDto review, IReadOnlyList<string> selected)
+    {
+        try
+        {
+            await ReviewClient.ApproveSelectedAsync(
+                review.SessionId, review.RequestId, selected, CancellationToken.None).ConfigureAwait(false);
+        }
+        finally
+        {
+            _reviewDialog?.Close();
+            _reviewDialog = null;
+        }
+    }
+
+    private async Task RejectAsync(EllaiReviewDto review)
+    {
+        try
+        {
+            await ReviewClient.RejectReviewAsync(
+                review.SessionId, review.RequestId, CancellationToken.None).ConfigureAwait(false);
+        }
+        finally
+        {
+            _reviewDialog?.Close();
+            _reviewDialog = null;
+        }
+    }
+
+    private async Task EditAsync(EllaiReviewDto review)
+    {
+        _reviewDialog?.Close();
+        _reviewDialog = null;
+        await OnEditRequested.InvokeAsync(review).ConfigureAwait(false);
+    }
+
     public void Dispose()
     {
         Launcher.Requested -= OnLauncherRequested;
+        EventPoller.ApprovalRequired -= OnApprovalRequired;
+        EventPoller.SessionCancelled -= OnSessionCancelled;
+        _pollCts?.Cancel();
+        _pollCts?.Dispose();
         try
         {
             _cts?.Cancel();

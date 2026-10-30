@@ -1,39 +1,20 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using SwiftAid.Contracts.Ellai;
 
 namespace SwiftAid.UI.Ellai;
 
-/// <summary>Session UI event as delivered by the gateway event transport.</summary>
-public sealed record EllaiSessionEventDto(
-    long Sequence,
-    string SessionId,
-    string Kind,
-    string? Ref,
-    string Detail,
-    DateTimeOffset AtUtc);
-
-/// <summary>Bounded poll page with the cursor the client passes back.</summary>
-public sealed record EllaiSessionEventPageDto(
-    IReadOnlyList<EllaiSessionEventDto> Events,
-    long Cursor);
-
-/// <summary>Event transport port. Null means a transient hiccup: keep the
-/// cursor and poll again. Cancellation stops the loop.</summary>
-public interface IEllaiEventTransport
-{
-    Task<EllaiSessionEventPageDto?> PollAsync(
-        string sessionId, long cursor, int waitSeconds, CancellationToken cancellationToken);
-}
-
-/// <summary>HTTP long-poll transport for the gateway session events endpoint.
-/// Relative URLs: the host app supplies the authorized HttpClient.</summary>
-public sealed class EllaiEventHttpTransport(HttpClient http) : IEllaiEventTransport
+/// <summary>HTTP review client for the gateway Ellai endpoints: event
+/// long-poll, active-review fetch, approve-selected and reject. Relative
+/// URLs: the host app supplies the authorized HttpClient. Non-success
+/// responses read as unavailable so the caller keeps polling.</summary>
+public sealed class EllaiReviewHttpClient(HttpClient http) : IEllaiReviewClient
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     private readonly HttpClient _http = http ?? throw new ArgumentNullException(nameof(http));
 
-    public async Task<EllaiSessionEventPageDto?> PollAsync(
+    public async Task<EllaiSessionEventPageDto?> PollEventsAsync(
         string sessionId, long cursor, int waitSeconds, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -60,6 +41,86 @@ public sealed class EllaiEventHttpTransport(HttpClient http) : IEllaiEventTransp
             return null;
         }
     }
+
+    public async Task<EllaiReviewDto?> GetActiveReviewAsync(
+        string sessionId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        try
+        {
+            using var response = await _http.GetAsync(
+                $"api/v1/ellai/sessions/{Uri.EscapeDataString(sessionId)}/approval-reviews/active",
+                cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            return await response.Content
+                .ReadFromJsonAsync<EllaiReviewDto>(Json, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    public async Task<IReadOnlyList<EllaiApprovedReceiptDto>?> ApproveSelectedAsync(
+        string sessionId, string requestId, IReadOnlyList<string> actionIds,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(requestId);
+        try
+        {
+            using var response = await _http.PostAsJsonAsync(
+                $"api/v1/ellai/sessions/{Uri.EscapeDataString(sessionId)}/approval-reviews/{Uri.EscapeDataString(requestId)}/approve",
+                new { sessionId, actionIds }, Json, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            return await response.Content
+                .ReadFromJsonAsync<IReadOnlyList<EllaiApprovedReceiptDto>>(Json, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    public async Task<bool> RejectReviewAsync(
+        string sessionId, string requestId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(requestId);
+        try
+        {
+            using var response = await _http.PostAsJsonAsync(
+                $"api/v1/ellai/sessions/{Uri.EscapeDataString(sessionId)}/approval-reviews/{Uri.EscapeDataString(requestId)}/reject",
+                new { sessionId }, Json, cancellationToken).ConfigureAwait(false);
+            return response.IsSuccessStatusCode;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
 }
 
 /// <summary>Client-side subscription over the session event journal. Tracks
@@ -68,10 +129,10 @@ public sealed class EllaiEventHttpTransport(HttpClient http) : IEllaiEventTransp
 /// cancellation fences stale events. The host opens the approval dialog on
 /// <see cref="ApprovalRequired"/> and closes it on
 /// <see cref="SessionCancelled"/>.</summary>
-public sealed class EllaiEventPoller(IEllaiEventTransport transport)
+public sealed class EllaiEventPoller(IEllaiReviewClient reviews)
 {
-    private readonly IEllaiEventTransport _transport =
-        transport ?? throw new ArgumentNullException(nameof(transport));
+    private readonly IEllaiReviewClient _reviews =
+        reviews ?? throw new ArgumentNullException(nameof(reviews));
 
     private readonly HashSet<string> _seenReviews = new(StringComparer.Ordinal);
 
@@ -108,8 +169,8 @@ public sealed class EllaiEventPoller(IEllaiEventTransport transport)
             return;
         }
 
-        var page = await _transport
-            .PollAsync(SessionId, Cursor, waitSeconds, cancellationToken)
+        var page = await _reviews
+            .PollEventsAsync(SessionId, Cursor, waitSeconds, cancellationToken)
             .ConfigureAwait(false);
         if (page?.Events is null)
         {

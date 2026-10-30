@@ -96,6 +96,8 @@ builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiSessionEventJourna
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiScenarioDirector>();
 builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiConsentService>();
 builder.Services.AddScoped<SwiftAid.UI.Ellai.EllaiLauncher>();
+builder.Services.AddScoped<SwiftAid.UI.Ellai.EllaiEventPoller>();
+builder.Services.AddScoped<SwiftAid.Contracts.Ellai.IEllaiReviewClient, SwiftAid.Gateway.Ellai.EllaiReviewGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiTopicService>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiTrainingVerifier>();
 {

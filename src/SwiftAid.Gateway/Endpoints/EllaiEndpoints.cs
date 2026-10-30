@@ -105,6 +105,16 @@ public static class EllaiEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
+        group.MapPost("/sessions/{sessionId}/approval-reviews/{requestId}/reject", RejectReviewAsync)
+            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
+            .WithName("RejectEllaiApprovalReview")
+            .Accepts<RejectReviewApiRequest>("application/json")
+            .Produces<bool>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status409Conflict);
         group.MapPost("/sessions/{sessionId}/cancel", CancelAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
@@ -454,6 +464,38 @@ public static class EllaiEndpoints
         journals.Append(sessionId, "approval-resolved", requestId, "Approved", now);
         return Results.Json(receipts, statusCode: StatusCodes.Status200OK);
     }
+
+    private static Task<IResult> RejectReviewAsync(
+        string sessionId,
+        string requestId,
+        RejectReviewApiRequest? request,
+        EllaiApprovalDialogCoordinator dialogs,
+        EllaiSessionEventJournal journals,
+        CancellationToken cancellationToken)
+    {
+        if (request is null
+            || !string.Equals(request.SessionId, sessionId, StringComparison.Ordinal))
+        {
+            return Task.FromResult(Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "The Ellai review rejection is invalid."));
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var review = dialogs.Get(requestId);
+        if (review is null
+            || !string.Equals(review.SessionId, sessionId, StringComparison.Ordinal)
+            || review.State != EllaiApprovalDialogState.AwaitingApproval)
+        {
+            return Task.FromResult(Results.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "The approval review is stale, superseded or already closed."));
+        }
+
+        dialogs.Resolve(requestId, approved: false, now);
+        journals.Append(sessionId, "approval-resolved", requestId, "Rejected", now);
+        return Task.FromResult(Results.Json(true, statusCode: StatusCodes.Status200OK));
+    }
 }
 
 /// <summary>Cancel request carrying the officer-observed expected version.</summary>
@@ -484,6 +526,9 @@ public sealed record EditApprovalReviewApiRequest(
 public sealed record ApproveSelectedApiRequest(
     string SessionId,
     IReadOnlyList<string> ActionIds);
+
+/// <summary>Human rejection of the open dialog review.</summary>
+public sealed record RejectReviewApiRequest(string SessionId);
 
 /// <summary>Exact-approval submission: the approved fields must match the
 /// proposed plan exactly or the service returns null (mapped to 422).
