@@ -20,6 +20,7 @@ using SwiftAid.Gateway.Sessions;
 using SwiftAid.Contracts.Sessions;
 using SwiftAid.Infrastructure.Configuration;
 using SwiftAid.Infrastructure.Identity;
+using SwiftAid.Infrastructure.Persistence.Ellai;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -70,6 +71,35 @@ builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseQueueClient, SwiftAid.G
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.IMonitoringQueueClient, SwiftAid.Gateway.Cases.MonitoringQueueGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseCommandClient, SwiftAid.Gateway.Cases.CaseCommandGatewayClient>();
 builder.Services.AddScoped<SessionGatewayClient>();
+Bit.Bonboarding.BitBonboarding.AddBitBonboardingServices(builder.Services, _ => { });
+Bit.Bonboarding.BitBonboarding.AddBitBonboardingInMemoryStore(builder.Services);
+builder.Services.AddEllaiPersistence();
+builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiSessionService>();
+builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiPolicyService>();
+builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiToolBroker>();
+builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiUiRegistry>();
+builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiGuidancePlanValidator>();
+builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiGuidanceSessionCoordinator>();
+builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.IEllaiGuidanceControl, SwiftAid.Gateway.Ellai.EllaiGuidanceControlAdapter>();
+builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiCycleRunner>();
+builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiApprovedActionService>();
+builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiScenarioDirector>();
+builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiConsentService>();
+builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiTopicService>();
+builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiTrainingVerifier>();
+{
+    var ellai = SwiftAid.Intelligence.Meta.EllaiOptions.Bind(key => builder.Configuration[key]);
+    builder.Services.AddSingleton(ellai);
+    if (ellai.HasReasoningRoute)
+    {
+        builder.Services.AddHttpClient<SwiftAid.Intelligence.Meta.EllaiReasoningAdapter>();
+    }
+
+    if (ellai.HasUploadAsrRoute)
+    {
+        builder.Services.AddHttpClient<SwiftAid.Intelligence.Meta.MetaAsrUploadAdapter>();
+    }
+}
 builder.Services.AddScoped<INotificationApiService, NotificationApiService>();
 builder.Services.AddScoped<INotificationFeedClient, InteractiveServerNotificationFeedClient>();
 builder.Services.AddScoped<INotificationPlatformSettings, GatewayNotificationPlatformSettings>();
@@ -115,6 +145,7 @@ app.MapMonitoringQueueEndpoints();
 app.MapCaseCommandEndpoints();
 app.MapCommunitySessionEndpoints();
 app.MapPublicSessionEndpoints();
+app.MapEllaiEndpoints();
 
 app.MapSwiftAidIdentityEndpoints(
     app.Services.GetRequiredService<FederationOptions>(),
