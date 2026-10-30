@@ -64,7 +64,10 @@ reason codes (`Ok`, `UnregisteredTool`, `BudgetExceeded`, `MissingScope`,
 
 **Status: Implemented, unit-verified.** Every broker call requires a live
 `ReasoningText` grant for purpose `ellai-tool-read`; a missing consent
-service fails closed. The cycle runner (`EllaiCycleRunner`) enforces
+service fails closed. Grants persist in PostgreSQL `ellai_consent_grants`
+with authenticated grant/revoke endpoints; the worker hydrates durable
+grants into the hot path before each run, so restarts and sibling instances
+converge (revocation only moves toward revoked). The cycle runner (`EllaiCycleRunner`) enforces
 25 reasoning iterations, 60 model-visible tool calls and 5 model-only
 schema repairs per cycle with single-flight per investigation. The runner
 publishes correlated activity events (`EllaiActivityStatusCoordinator`:
@@ -193,7 +196,7 @@ ownership — reported, not introduced here).
 ## 7. Verification map
 
 Run `dotnet test tests/SwiftAid.Application.Tests --filter
-FullyQualifiedName~Ellai` (unit/contract, 185 passing, 3 skipped) and
+FullyQualifiedName~Ellai` (unit/contract, 189 passing, 3 skipped) and
 `dotnet test tests/SwiftAid.Ui.Tests --filter FullyQualifiedName~Ellai`
 (51 passing). PostgreSQL integration tests
 (`tests/SwiftAid.Integration.Tests`, `EllaiPostgres*`) run only with

@@ -32,6 +32,7 @@ public sealed class EllaiPostgresTests : IAsyncDisposable
         await using var db = CreateDbContext();
         foreach (var id in _sessionIds)
         {
+            await db.Set<EllaiConsentGrantEntity>().Where(e => e.SessionId == id).ExecuteDeleteAsync();
             await db.Set<EllaiUtteranceEntity>().Where(e => e.SessionId == id).ExecuteDeleteAsync();
             await db.Set<EllaiCheckpointEntity>().Where(e => e.SessionId == id).ExecuteDeleteAsync();
             await db.Set<EllaiSessionEntity>().Where(e => e.SessionId == id).ExecuteDeleteAsync();
@@ -135,6 +136,40 @@ public sealed class EllaiPostgresTests : IAsyncDisposable
         var claims = await db2.Set<EllaiUtteranceEntity>()
             .CountAsync(e => e.SessionId == view.SessionId);
         Assert.Equal(1, claims);
+    }
+
+    [EllaiPostgresFact]
+    public async Task ConsentGrantsSurviveRestartAndRevokeDurably()
+    {
+        const string sessionId = "pg-consent-1";
+        _sessionIds.Add(sessionId);
+
+        await using var db = CreateDbContext();
+        var store = new PostgresEllaiConsentStore(db);
+        var grant = new EllaiConsentGrant(
+            "grant-pg-1", sessionId, EllaiConsentDimension.ReasoningText,
+            EllaiToolBroker.ToolReadPurpose, "synthetic", 7,
+            DateTimeOffset.UtcNow.AddHours(1), false);
+        await store.RecordAsync(grant, CancellationToken.None);
+        await store.RecordAsync(grant, CancellationToken.None);
+
+        // Fresh context (simulated restart) hydrates the same grant.
+        await using var db2 = CreateDbContext();
+        var fresh = new EllaiConsentService();
+        await fresh.HydrateAsync(sessionId, new PostgresEllaiConsentStore(db2), CancellationToken.None);
+        Assert.True(fresh.IsGranted(
+            sessionId, EllaiConsentDimension.ReasoningText,
+            EllaiToolBroker.ToolReadPurpose, DateTimeOffset.UtcNow));
+
+        Assert.True(await store.SetRevokedAsync(sessionId, "grant-pg-1", CancellationToken.None));
+        Assert.False(await store.SetRevokedAsync(sessionId, "grant-missing", CancellationToken.None));
+
+        await using var db3 = CreateDbContext();
+        var revoked = new EllaiConsentService();
+        await revoked.HydrateAsync(sessionId, new PostgresEllaiConsentStore(db3), CancellationToken.None);
+        Assert.False(revoked.IsGranted(
+            sessionId, EllaiConsentDimension.ReasoningText,
+            EllaiToolBroker.ToolReadPurpose, DateTimeOffset.UtcNow));
     }
 
     [EllaiPostgresFact]

@@ -93,6 +93,40 @@ public sealed class EllaiConsentService
     /// without any grant report consent/0 — never a fabricated grant.</summary>
     public string VersionLabel(string sessionId) => $"consent/{LatestVersion(sessionId)}";
 
+    /// <summary>Merges durable grants into memory after a restart or from a
+    /// sibling instance: adds missing rows, applies recorded revocations,
+    /// and advances the version counter past hydrated versions. Memory-only
+    /// grants are preserved; revocation only moves toward revoked, never
+    /// back. Call before consent-gated runs.</summary>
+    public async Task HydrateAsync(string sessionId, IEllaiConsentStore store, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentNullException.ThrowIfNull(store);
+        var rows = await store.ListBySessionAsync(sessionId, ct).ConfigureAwait(false);
+        lock (_gate)
+        {
+            foreach (var row in rows)
+            {
+                if (_grants.TryGetValue(row.GrantId, out var current))
+                {
+                    if (row.Revoked && !current.Revoked)
+                    {
+                        _grants[row.GrantId] = current with { Revoked = true };
+                    }
+                }
+                else
+                {
+                    _grants[row.GrantId] = row;
+                }
+
+                if (row.Version > _version)
+                {
+                    _version = row.Version;
+                }
+            }
+        }
+    }
+
     public bool IsGranted(string sessionId, EllaiConsentDimension dimension, string purpose, DateTimeOffset now)
     {
         lock (_gate)

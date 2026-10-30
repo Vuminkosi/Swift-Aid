@@ -66,6 +66,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
     public DbSet<Ellai.EllaiUtteranceEntity> EllaiUtterances => Set<Ellai.EllaiUtteranceEntity>();
     public DbSet<Ellai.EllaiPlanApprovalEntity> EllaiPlanApprovals => Set<Ellai.EllaiPlanApprovalEntity>();
     public DbSet<Ellai.EllaiTopicEntity> EllaiTopics => Set<Ellai.EllaiTopicEntity>();
+    public DbSet<Ellai.EllaiConsentGrantEntity> EllaiConsentGrants => Set<Ellai.EllaiConsentGrantEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -101,6 +102,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         modelBuilder.ApplyConfiguration(new Ellai.EllaiUtteranceEntityConfiguration());
         modelBuilder.ApplyConfiguration(new Ellai.EllaiPlanApprovalEntityConfiguration());
         modelBuilder.ApplyConfiguration(new Ellai.EllaiTopicEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new Ellai.EllaiConsentGrantEntityConfiguration());
     }
 
     private static void ConfigureOpenIddictSchema(ModelBuilder modelBuilder)

@@ -45,11 +45,33 @@ public sealed class EllaiUtteranceWorker(
         try
         {
             using var scope = _services.CreateScope();
+            var consent = scope.ServiceProvider.GetRequiredService<EllaiConsentService>();
+            var store = scope.ServiceProvider.GetService<IEllaiConsentStore>();
+            if (store is not null)
+            {
+                try
+                {
+                    // Merge durable grants (restart recovery, sibling
+                    // instances) before the consent-gated run.
+                    await consent.HydrateAsync(work.SessionId, store, stoppingToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "Ellai consent hydration failed for session {SessionId}; running on memory state.",
+                        work.SessionId);
+                }
+            }
+
             var services = new EllaiUtteranceServices(
                 scope.ServiceProvider.GetRequiredService<EllaiReasoningLoop>(),
                 scope.ServiceProvider.GetService<EllaiActivityStatusCoordinator>(),
                 scope.ServiceProvider.GetService<EllaiSessionEventJournal>(),
-                scope.ServiceProvider.GetRequiredService<EllaiConsentService>());
+                consent);
             var outcome = await EllaiUtteranceRunner.RunOneAsync(
                 work, services, MaxTokensPerTurn, stoppingToken).ConfigureAwait(false);
             _logger.LogInformation(

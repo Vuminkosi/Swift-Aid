@@ -132,6 +132,13 @@ public static class EllaiEndpoints
             .Produces<EllaiConsentGrant>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized);
+        group.MapDelete("/sessions/{sessionId}/consents/{grantId}", RevokeConsentAsync)
+            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .WithName("RevokeEllaiConsent")
+            .Produces<bool>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
         group.MapPost("/sessions/{sessionId}/cancel", CancelAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
@@ -585,10 +592,11 @@ public static class EllaiEndpoints
         return Results.Json(true, statusCode: StatusCodes.Status200OK);
     }
 
-    private static Task<IResult> GrantConsentAsync(
+    private static async Task<IResult> GrantConsentAsync(
         string sessionId,
         GrantEllaiConsentApiRequest? request,
         EllaiConsentService consent,
+        IEllaiConsentStore consents,
         CancellationToken cancellationToken)
     {
         // Sessions are not owner-bound yet (pre-existing gap, reported):
@@ -603,14 +611,62 @@ public static class EllaiEndpoints
             || !string.Equals(request.Purpose, EllaiToolBroker.ToolReadPurpose, StringComparison.Ordinal)
             || request.HoursToLive is < 1 or > 24)
         {
-            return Task.FromResult(Results.Problem(
+            return Results.Problem(
                 statusCode: StatusCodes.Status400BadRequest,
-                title: "The Ellai consent grant is invalid."));
+                title: "The Ellai consent grant is invalid.");
         }
 
         var grant = consent.Grant(sessionId, dimension, request.Purpose,
             EllaiUtteranceRunner.ConsentedLabel, TimeSpan.FromHours(request.HoursToLive));
-        return Task.FromResult(Results.Json(grant, statusCode: StatusCodes.Status200OK));
+        try
+        {
+            await consents.RecordAsync(grant, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Never leave a memory-only grant behind a durable failure:
+            // revoke locally so both lanes agree the grant does not exist.
+            consent.Revoke(grant.GrantId);
+            return Results.Problem(
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                title: "The Ellai consent store is unavailable.");
+        }
+
+        return Results.Json(grant, statusCode: StatusCodes.Status200OK);
+    }
+
+    private static async Task<IResult> RevokeConsentAsync(
+        string sessionId,
+        string grantId,
+        EllaiConsentService consent,
+        IEllaiConsentStore consents,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(grantId))
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "The Ellai consent revocation is invalid.");
+        }
+
+        var owned = await consents.ListBySessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (owned.All(grant => grant.GrantId != grantId))
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status404NotFound,
+                title: "The Ellai consent grant was not found for this session.");
+        }
+
+        consent.Revoke(grantId);
+        var revoked = await consents.SetRevokedAsync(sessionId, grantId, cancellationToken).ConfigureAwait(false);
+        if (!revoked)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                title: "The Ellai consent store is unavailable.");
+        }
+
+        return Results.Json(true, statusCode: StatusCodes.Status200OK);
     }
 
     private static Task<IResult> RejectReviewAsync(

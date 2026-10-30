@@ -26,6 +26,7 @@ public sealed class EllaiTechnicalSyncTests
     {
         "ellai_topics",
         "ellai_plan_approvals",
+        "ellai_consent_grants",
     };
 
     private static string LoadReference()

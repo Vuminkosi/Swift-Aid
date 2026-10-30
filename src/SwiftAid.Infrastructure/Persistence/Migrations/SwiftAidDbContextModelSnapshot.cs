@@ -1092,6 +1092,60 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Ellai.EllaiConsentGrantEntity", b =>
+                {
+                    b.Property<string>("GrantId")
+                        .HasColumnType("text")
+                        .HasColumnName("grant_id");
+
+                    b.Property<string>("DataClass")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("data_class");
+
+                    b.Property<string>("Dimension")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("dimension");
+
+                    b.Property<DateTimeOffset>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at_utc");
+
+                    b.Property<DateTimeOffset>("GrantedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("granted_at_utc");
+
+                    b.Property<string>("Purpose")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("purpose");
+
+                    b.Property<bool>("Revoked")
+                        .HasColumnType("boolean")
+                        .HasColumnName("revoked");
+
+                    b.Property<string>("SessionId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("session_id");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("GrantId")
+                        .HasName("pk_ellai_consent_grants");
+
+                    b.HasIndex("SessionId")
+                        .HasDatabaseName("ix_ellai_consent_grants_session");
+
+                    b.ToTable("ellai_consent_grants", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_ellai_consent_grants_ids_nonempty", "length(btrim(grant_id)) > 0 AND length(btrim(session_id)) > 0 AND length(btrim(purpose)) > 0");
+                        });
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Ellai.EllaiPlanApprovalEntity", b =>
                 {
                     b.Property<string>("ApprovalId")
