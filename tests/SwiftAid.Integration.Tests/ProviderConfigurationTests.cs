@@ -439,6 +439,60 @@ public sealed class ProviderConfigurationTests
         NotificationSubject = "swiftaid.notifications.inapp"
     };
 
+    [Theory]
+    [InlineData("online.swiftaid.mobile:/oauth2redirect")]
+    [InlineData("swiftaid:/oauth2redirect")]
+    public void NativeClientRedirectSchemesAreAccepted(string redirectUri)
+    {
+        var validator = new ProviderOptionsValidator();
+        var options = ValidIdentityOptions([redirectUri]);
+
+        Assert.True(validator.Validate(Options.DefaultName, options).Succeeded);
+    }
+
+    [Fact]
+    public void UnknownCustomRedirectSchemesAreRejected()
+    {
+        var validator = new ProviderOptionsValidator();
+        var options = ValidIdentityOptions(["myapp:/oauth2redirect"]);
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+    }
+
+    private static IdentityServerOptions ValidIdentityOptions(string[] redirectUris)
+    {
+        var directory = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()));
+        var signingPath = Path.Combine(directory.FullName, "signing.pfx");
+        var encryptionPath = Path.Combine(directory.FullName, "encryption.pfx");
+        File.WriteAllBytes(signingPath, []);
+        File.WriteAllBytes(encryptionPath, []);
+
+        return new IdentityServerOptions
+        {
+            Enabled = true,
+            Issuer = "https://identity.example",
+            SigningCertificatePath = signingPath,
+            SigningCertificatePassword = "synthetic-signing-password",
+            EncryptionCertificatePath = encryptionPath,
+            EncryptionCertificatePassword = "synthetic-encryption-password",
+            AuthorizationCodeLifetimeSeconds = 120,
+            AccessTokenLifetimeSeconds = 600,
+            RefreshTokenLifetimeSeconds = 2_592_000,
+            PublicClients =
+            [
+                new IdentityPublicClientOptions
+                {
+                    ClientId = "swiftaid-mobile",
+                    DisplayName = "SwiftAid Mobile",
+                    RedirectUris = [.. redirectUris],
+                    PostLogoutRedirectUris = [.. redirectUris]
+                }
+            ]
+        };
+    }
+
     private sealed class TestHostEnvironment(string environmentName) : IHostEnvironment
     {
         public string EnvironmentName { get; set; } = environmentName;

@@ -443,7 +443,8 @@ public sealed class ProviderOptionsValidator :
         return (uri.Scheme == Uri.UriSchemeHttp &&
                 IPAddress.TryParse(uri.Host, out var address) && IPAddress.IsLoopback(address)) ||
             (uri.Scheme == Uri.UriSchemeHttp && string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase)) ||
-            string.Equals(uri.Scheme, "swiftaid", StringComparison.Ordinal);
+            string.Equals(uri.Scheme, "swiftaid", StringComparison.Ordinal) ||
+            string.Equals(uri.Scheme, "online.swiftaid.mobile", StringComparison.Ordinal);
     }
 
     private static bool TryGetNatsEndpoint(string? value, out Uri endpoint)
