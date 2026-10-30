@@ -61,6 +61,8 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
     public DbSet<CommunitySessionEntity> CommunitySessions => Set<CommunitySessionEntity>();
     public DbSet<CommunitySessionRevisionEntity> CommunitySessionRevisions => Set<CommunitySessionRevisionEntity>();
     public DbSet<SessionReminderOccurrenceEntity> SessionReminderOccurrences => Set<SessionReminderOccurrenceEntity>();
+    public DbSet<Ellai.EllaiSessionEntity> EllaiSessions => Set<Ellai.EllaiSessionEntity>();
+    public DbSet<Ellai.EllaiCheckpointEntity> EllaiCheckpoints => Set<Ellai.EllaiCheckpointEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -91,6 +93,8 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         modelBuilder.ApplyConfiguration(new CommunitySessionEntityConfiguration());
         modelBuilder.ApplyConfiguration(new CommunitySessionRevisionEntityConfiguration());
         modelBuilder.ApplyConfiguration(new SessionReminderOccurrenceEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new Ellai.EllaiSessionEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new Ellai.EllaiCheckpointEntityConfiguration());
     }
 
     private static void ConfigureOpenIddictSchema(ModelBuilder modelBuilder)

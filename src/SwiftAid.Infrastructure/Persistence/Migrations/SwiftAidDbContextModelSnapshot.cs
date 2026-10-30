@@ -1047,6 +1047,127 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Ellai.EllaiCheckpointEntity", b =>
+                {
+                    b.Property<string>("CheckpointId")
+                        .HasColumnType("text")
+                        .HasColumnName("checkpoint_id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("PendingReceiptIdsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("pending_receipt_ids");
+
+                    b.Property<string>("SessionId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("session_id");
+
+                    b.Property<long>("SessionVersion")
+                        .HasColumnType("bigint")
+                        .HasColumnName("session_version");
+
+                    b.Property<string>("TopicRefsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("topic_refs");
+
+                    b.Property<string>("TurnId")
+                        .HasColumnType("text")
+                        .HasColumnName("turn_id");
+
+                    b.HasKey("CheckpointId")
+                        .HasName("pk_ellai_checkpoints");
+
+                    b.HasIndex("SessionId")
+                        .HasDatabaseName("ix_ellai_checkpoints_session");
+
+                    b.ToTable("ellai_checkpoints", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_ellai_checkpoints_ids_nonempty", "length(btrim(checkpoint_id)) > 0 AND length(btrim(session_id)) > 0");
+                        });
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Ellai.EllaiSessionEntity", b =>
+                {
+                    b.Property<string>("SessionId")
+                        .HasColumnType("text")
+                        .HasColumnName("session_id");
+
+                    b.Property<string>("ActiveInvestigationId")
+                        .HasColumnType("text")
+                        .HasColumnName("active_investigation_id");
+
+                    b.Property<long>("ControlFence")
+                        .HasColumnType("bigint")
+                        .HasColumnName("control_fence");
+
+                    b.Property<int>("CyclesAllowed")
+                        .HasColumnType("integer")
+                        .HasColumnName("cycles_allowed");
+
+                    b.Property<int>("CyclesUsed")
+                        .HasColumnType("integer")
+                        .HasColumnName("cycles_used");
+
+                    b.Property<long>("InteractionEpoch")
+                        .HasColumnType("bigint")
+                        .HasColumnName("interaction_epoch");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("mode");
+
+                    b.Property<string>("PendingCheckpointId")
+                        .HasColumnType("text")
+                        .HasColumnName("pending_checkpoint_id");
+
+                    b.Property<string>("ScopeEpoch")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("scope_epoch");
+
+                    b.Property<long>("SpeechEpoch")
+                        .HasColumnType("bigint")
+                        .HasColumnName("speech_epoch");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("version");
+
+                    b.HasKey("SessionId")
+                        .HasName("pk_ellai_sessions");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("ix_ellai_sessions_status");
+
+                    b.ToTable("ellai_sessions", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_ellai_sessions_cycles", "cycles_used >= 0 AND cycles_allowed BETWEEN 1 AND 12");
+
+                            t.HasCheckConstraint("ck_ellai_sessions_ids_nonempty", "length(btrim(session_id)) > 0 AND length(btrim(scope_epoch)) > 0");
+
+                            t.HasCheckConstraint("ck_ellai_sessions_status", "status IN ('Active', 'Completed', 'Cancelled')");
+
+                            t.HasCheckConstraint("ck_ellai_sessions_version", "version > 0");
+                        });
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.EmailVerificationEntity", b =>
                 {
                     b.Property<string>("UserId")
@@ -3164,6 +3285,16 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_domain_outbox_event");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Ellai.EllaiCheckpointEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.Ellai.EllaiSessionEntity", null)
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_ellai_checkpoints_session");
                 });
 
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.EmailVerificationEntity", b =>
