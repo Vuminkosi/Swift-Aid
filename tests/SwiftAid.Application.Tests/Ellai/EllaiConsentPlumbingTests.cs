@@ -82,10 +82,13 @@ public sealed class EllaiConsentPlumbingTests
             },
             _ => Array.Empty<string>(),
             CancellationToken.None,
-            (iteration, _) => Task.FromResult(iteration < 2));
+            (iteration, _) => Task.FromResult(
+                iteration < 2
+                    ? new EllaiReauthorization(true, string.Empty)
+                    : new EllaiReauthorization(false, "denied")));
 
         Assert.False(outcome.Completed);
         Assert.Equal(1, turns);
-        Assert.Contains("eauthorization", outcome.StopReason ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("authorization", outcome.StopReason ?? string.Empty, StringComparison.OrdinalIgnoreCase);
     }
 }

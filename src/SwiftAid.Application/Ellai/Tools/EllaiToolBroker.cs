@@ -77,10 +77,14 @@ public sealed record EllaiToolContext(
     string DataClassification = "synthetic",
     ActorContext? Actor = null);
 
-/// <summary>Tool request with bounded arguments.</summary>
+/// <summary>Tool request with bounded arguments. <see cref="CallId"/> is the
+/// model-assigned call correlation id: it travels untouched through
+/// validation and execution so tool results re-enter the next model turn
+/// under the same id. It never affects authorization.</summary>
 public sealed record EllaiToolRequest(
     string ToolName,
-    IReadOnlyDictionary<string, string> Arguments);
+    IReadOnlyDictionary<string, string> Arguments,
+    string? CallId = null);
 
 /// <summary>Minimized typed tool result with version stamps.</summary>
 public sealed record EllaiToolResult(
@@ -120,6 +124,46 @@ public sealed class EllaiToolBroker
             ["ellai_voice_capability"] = EllaiToolNames.Capabilities,
             ["ellai_guidance_session"] = EllaiToolNames.State,
         };
+
+    /// <summary>Resolves a model-supplied tool name to its canonical handler:
+    /// canonical names resolve to themselves, compatibility aliases to their
+    /// canonical target, anything else fails. Single source for the broker
+    /// dispatch and the model-turn parser so both agree.</summary>
+    public static bool TryResolveCanonical(string name, out string canonical)
+    {
+        if (EllaiToolNames.All.Contains(name))
+        {
+            canonical = name;
+            return true;
+        }
+
+        if (AliasToCanonical.TryGetValue(name, out var target))
+        {
+            canonical = target;
+            return true;
+        }
+
+        canonical = string.Empty;
+        return false;
+    }
+
+    /// <summary>Deterministic tool catalogue summary for the reasoning
+    /// system prompt: canonical names with argument hints. The model still
+    /// passes the same consent, budget and byte-bound pipeline per call.</summary>
+    public static string DescribeCatalogue() => string.Join("\n", new[]
+    {
+        $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, ref?) — permitted feature or live work queue.",
+        $"{EllaiToolNames.Evidence}(ref, field?) — versioned source items with provenance.",
+        $"{EllaiToolNames.Topic}(ref) — session topic candidates with checkpoints.",
+        $"{EllaiToolNames.Capabilities}(feature?) — capability readiness, no credentials.",
+        $"{EllaiToolNames.Receipts}(receipt?) — durable receipts, session-bound.",
+        $"{EllaiToolNames.ProductFacts}(topic?) — versioned nonmedical product facts.",
+        $"{EllaiToolNames.Now}() — current server UTC time.",
+        $"{EllaiToolNames.DocsSearch}(q, limit?) — approved technical reference search.",
+        $"{EllaiToolNames.DocsGet}(section) — one approved section excerpt.",
+        $"{EllaiToolNames.UiCatalogue}(goal?, limit?) — entitled control descriptors.",
+        $"{EllaiToolNames.UiObserve}(controls, view, context?) — live mounted-control facts.",
+    });
 
     private readonly EllaiPolicyService _policy;
     private readonly EllaiConsentService _consent;
@@ -165,11 +209,7 @@ public sealed class EllaiToolBroker
         ArgumentNullException.ThrowIfNull(request);
         ct.ThrowIfCancellationRequested();
 
-        var canonical = AliasToCanonical.TryGetValue(request.ToolName, out var target)
-            ? target
-            : request.ToolName;
-
-        if (!EllaiToolNames.All.Contains(canonical))
+        if (!TryResolveCanonical(request.ToolName, out var canonical))
         {
             return Bound(Deny(request.ToolName, "Unregistered tool.", EllaiToolReasonCodes.UnregisteredTool));
         }

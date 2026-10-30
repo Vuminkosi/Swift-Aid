@@ -70,7 +70,13 @@ schema repairs per cycle with single-flight per investigation. The runner
 publishes correlated activity events (`EllaiActivityStatusCoordinator`:
 accepted, turn, tool-started/observed, approval, verification, completed,
 blocked, cancelled) with session/epoch/sequence fencing; the composer
-status line binds to these next. The `EllaiUsageLedger` enforces a
+status line binds to these over the journal `activity` transport. The
+accepted check-in fires on the first real tool request only, so pure
+small talk emits no activity; completion projects only after tool work,
+blocks always. The per-iteration gate (`EllaiReauthorization`) carries a
+budget/denied detail for honest terminal status. Tool requests carry a
+model-assigned call id (`EllaiToolRequest.CallId`) that survives
+validation/execution for next-turn correlation. The `EllaiUsageLedger` enforces a
 200,000-token budget plus a $70 per-envelope and $70 total spend cap
 (dollar caps stay inert until real Meta rates are configured).
 **Deliberate deviation:** the requirements handoff asks for
@@ -153,15 +159,25 @@ stay excluded fail-closed (no scope-capability source yet).
 handshake frame. Reasoning backends: `meta` (default hosted API), `ollama`
 (local-first, `llama3.2:3b`), `serverless` (locked disabled until the Meta
 default is fully tested). Local TTS stays disabled pending the ED-EL-05
-decision; text fallback applies when voice is down. Memory: PostgreSQL is
+decision; text fallback applies when voice is down. The multi-turn loop
+(`EllaiReasoningLoop` over `EllaiCycleRunner`, `IEllaiTurnCompletionClient`
+adapted from the routed provider) parses each text turn to typed tool calls
+or a validated final decision through `EllaiModelTurnParser` (single JSON
+object, canonical/alias names, string args, call ids); accepted tool results
+re-enter the next turn under their call ids, usage accrues to
+`EllaiUsageLedger`, and the per-iteration gate stops the run with a
+budget/denied detail. Pure small-talk turns emit no activity; completion
+projects only after real tool work, blocks always. Memory: PostgreSQL is
 authoritative for records and provenance; Qdrant (`EllaiMemoryIndex`) is a
 private derived index of scoped references only — never secrets, audio, or
-the case database.
+the case database. Still **Missing**: the background worker that triggers
+the loop from an accepted utterance (no prod caller yet) with the
+single-flight session fence.
 
 ## 7. Verification map
 
 Run `dotnet test tests/SwiftAid.Application.Tests --filter
-FullyQualifiedName~Ellai` (unit/contract, 151 passing, 3 skipped) and
+FullyQualifiedName~Ellai` (unit/contract, 172 passing, 3 skipped) and
 `dotnet test tests/SwiftAid.Ui.Tests --filter FullyQualifiedName~Ellai`
 (~44 passing). PostgreSQL integration tests
 (`tests/SwiftAid.Integration.Tests`, `EllaiPostgres*`) run only with

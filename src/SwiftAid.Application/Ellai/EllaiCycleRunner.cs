@@ -17,6 +17,11 @@ public sealed record EllaiModelTurn(
     IReadOnlyList<EllaiToolRequest> ToolRequests,
     EllaiDecision? FinalDecision);
 
+/// <summary>Per-iteration run gate. A refused gate stops the run with the
+/// given safe blocked detail: "budget" for exhausted token/dollar budgets,
+/// "denied" for revoked scope or consent.</summary>
+public sealed record EllaiReauthorization(bool Permitted, string BlockedDetail);
+
 /// <summary>Generous multi-turn cycle runner (ELL-T06 groundwork). Safety
 /// ceilings sit far above normal use — 25 reasoning iterations, 60
 /// model-visible tool calls, 5 model-only schema repairs, 100 session
@@ -40,11 +45,12 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
         Func<int, Task<EllaiModelTurn>> modelTurn,
         Func<EllaiDecision, IReadOnlyList<string>> validate,
         CancellationToken ct,
-        Func<int, CancellationToken, Task<bool>>? reauthorizeAsync = null,
+        Func<int, CancellationToken, Task<EllaiReauthorization>>? reauthorizeAsync = null,
         EllaiActivityStatusCoordinator? activity = null,
         string cycleId = "cycle-1",
         long controllerEpoch = 1,
-        EllaiSessionEventJournal? journal = null)
+        EllaiSessionEventJournal? journal = null,
+        Action<EllaiToolRequest, EllaiToolResult>? onToolResult = null)
     {
         ArgumentNullException.ThrowIfNull(modelTurn);
         ArgumentNullException.ThrowIfNull(validate);
@@ -62,6 +68,7 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
             var remaining = context;
             long sequence = 0;
             var now = DateTimeOffset.UtcNow;
+            var accepted = false;
 
             void Trace(EllaiActivityKind kind, string detail = "")
             {
@@ -86,18 +93,39 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
                 return new EllaiCycleOutcome(false, null, reason, iteration, toolCallsUsed, repairUsed);
             }
 
-            Trace(EllaiActivityKind.OperationAccepted);
-
             for (var iteration = 1; iteration <= MaxIterations; iteration++)
             {
                 ct.ThrowIfCancellationRequested();
-                if (reauthorizeAsync is not null && !await reauthorizeAsync(iteration, ct))
+                if (reauthorizeAsync is not null)
                 {
-                    return Stop($"Scope reauthorization failed at iteration {iteration}.", iteration, "denied");
+                    var gate = await reauthorizeAsync(iteration, ct);
+                    if (gate is null || !gate.Permitted)
+                    {
+                        return Stop($"Run authorization failed at iteration {iteration}.", iteration,
+                            gate?.BlockedDetail ?? "denied");
+                    }
                 }
 
-                Trace(EllaiActivityKind.ReasoningTurnStarted);
                 var turn = await modelTurn(iteration);
+
+                // The accepted check-in fires on the first real tool request,
+                // never for a pure small-talk turn: a greeting answers directly
+                // with no "looking up" status. A later iteration revisits the
+                // evidence only after observations exist.
+                if (turn.ToolRequests.Count > 0)
+                {
+                    if (!accepted)
+                    {
+                        Trace(EllaiActivityKind.OperationAccepted);
+                        accepted = true;
+                    }
+
+                    Trace(EllaiActivityKind.ReasoningTurnStarted);
+                }
+                else if (iteration > 1 && accepted)
+                {
+                    Trace(EllaiActivityKind.ReasoningTurnStarted);
+                }
 
                 foreach (var toolRequest in turn.ToolRequests)
                 {
@@ -110,6 +138,7 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
                     remaining = remaining with { RemainingCalls = MaxToolCalls - toolCallsUsed };
                     var result = await broker.InvokeAsync(remaining, toolRequest, ct);
                     toolCallsUsed++;
+                    onToolResult?.Invoke(toolRequest, result);
                     if (!result.Allowed)
                     {
                         return Stop($"Tool {toolRequest.ToolName} denied: {result.DenialReason}",
@@ -124,7 +153,14 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
                     var errors = validate(turn.FinalDecision);
                     if (errors.Count == 0)
                     {
-                        Trace(EllaiActivityKind.CycleCompleted, "verified");
+                        // A tool-less run (pure small talk) answers with no
+                        // status at all; completion projects only after real
+                        // tool work. Blocks always project (see Stop).
+                        if (accepted)
+                        {
+                            Trace(EllaiActivityKind.CycleCompleted, "verified");
+                        }
+
                         return new EllaiCycleOutcome(true, turn.FinalDecision, null, iteration, toolCallsUsed, repairUsed);
                     }
 

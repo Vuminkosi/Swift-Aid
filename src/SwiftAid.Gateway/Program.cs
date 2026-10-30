@@ -108,12 +108,15 @@ builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiTrainingVerifier>();
     builder.Services.AddHttpClient<SwiftAid.Intelligence.Meta.OllamaEllaiReasoningProvider>();
     builder.Services.AddHttpClient<SwiftAid.Intelligence.Meta.ServerlessEllaiReasoningProvider>();
     builder.Services.AddScoped<SwiftAid.Intelligence.Meta.EllaiReasoningRouter>();
+    builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiUsageLedger>();
+    builder.Services.AddScoped<SwiftAid.Application.Ellai.IEllaiTurnCompletionClient, SwiftAid.Intelligence.Meta.EllaiProviderTurnClient>();
     if (ellai.Enabled)
     {
         var policyPath = SwiftAid.Application.Ellai.EllaiRuntimePolicy.ResolvePath(builder.Environment.ContentRootPath, ellai.PolicyPath);
         var runtimePolicy = SwiftAid.Application.Ellai.EllaiRuntimePolicy.Load(policyPath, ellai.PolicyVersion);
         builder.Services.AddSingleton(runtimePolicy);
         builder.Services.AddScoped(sp => new SwiftAid.Application.Ellai.EllaiPromptBuilder(runtimePolicy.Text, runtimePolicy.Version));
+        builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiReasoningLoop>();
     }
 
     if (ellai.HasUploadAsrRoute)
