@@ -50,6 +50,8 @@ The coordinator exposes `System.Diagnostics.Metrics` measurements for speech-sta
 
 | Check | Result | Scope / limitation |
 |---|---|---|
+| `docker compose -f infra/compose.yml up -d --build --no-deps gateway` | PASS | Built the Gateway image from the updated checkout and recreated only Gateway; container reports healthy and `GET http://127.0.0.1:8080/health/live` returned 200. This does not prove authenticated browser, provider or device playback. |
+| `docker compose -f infra/compose.yml --profile ellai-voice up -d --build --no-deps ellai-tts` then `--force-recreate --no-deps ellai-tts` | PASS | Rebuilt the unchanged pinned TTS service image, force-recreated its container, and `GET /health/ready` inside the container returned 200 (`swiftaid-mms-english-v1`). The model volume stayed read-only; no synthesis request or client audio playback was exercised. |
 | `dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -p:WasmBuildNative=false -m:1 -nr:false` | PASS, 0 warnings/errors | Builds the server implementation and Blazor web client against the streamed response contract; native WASM linking disabled. |
 | `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -p:WasmBuildNative=false -m:1 -nr:false --filter FullyQualifiedName~EllaiResponseSpeechCoordinatorTests` | PASS, 4/4 | Confirms Gateway response cancellation/fencing regression coverage; does not exercise an actual mobile HTTP disconnect. |
 | `dotnet build src/SwiftAid.UI/SwiftAid.UI.csproj --no-restore -p:BuildProjectReferences=false` | PASS, 0 warnings/errors | Builds native speech-confirmation dispatch through the shared UI host. |
