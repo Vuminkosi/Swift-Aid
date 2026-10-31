@@ -1,6 +1,6 @@
 # Ellai client voice processing progress
 
-This checklist tracks implementation against [`ellai-client-voice-processing.md`](../designs/ellai/ellai-client-voice-processing.md). It is an execution record, not a completion claim. Updated 2026-10-31 against baseline `0ea5d50e48b4a35baec8e0912a61ab202c2ffedf`.
+This checklist tracks implementation against [`ellai-client-voice-processing.md`](../designs/ellai/ellai-client-voice-processing.md). It is an execution record, not a completion claim. Updated 2026-10-31 against baseline `f87b1947e28826bc6978bbb76cf79e5a0eae5eaf`.
 
 ## Existing pipeline audit
 
@@ -69,6 +69,7 @@ The coordinator exposes `System.Diagnostics.Metrics` measurements for speech-sta
 | `dotnet test tests/SwiftAid.Ui.Tests/SwiftAid.Ui.Tests.csproj --no-restore -p:WasmBuildNative=false -m:1 -nr:false --filter FullyQualifiedName~Ellai` | PASS, 101/101 | Includes early stream failure recovery, bounded browser channel and queue-overflow recovery, offline/online transition feedback, native PCM buffering without a stream when offline, explicit unsent status when upload recovery fails, one upload recovery attempt, exactly one transcript submission, and the existing guest live endpoint/raw PCM contract. Browser/WebView runtime remains NOT VERIFIED. |
 | `Get-Content -Raw src/SwiftAid.UI/wwwroot/js/ellai-voice-capture.js \| node --input-type=module --check` | PASS | JavaScript syntax only; browser and WebView online/offline event behavior remains NOT VERIFIED. |
 | `dotnet msbuild src/SwiftAid.Mobile/SwiftAid.Mobile.csproj -target:CoreCompile -property:TargetFramework=net10.0-ios -property:BuildProjectReferences=false -property:UseSharedCompilation=false -maxcpucount:1 -nodeReuse:false -verbosity:normal` | PASS, 0 warnings/errors | iOS target C# compile after shared connectivity changes; no iOS app packaging or device execution. |
+| `node -e "try { process.stdout.write(require.resolve('playwright')); } catch { process.exit(2); }"` and `cua.getState()` | NOT VERIFIED | Playwright is not installed in the checkout, and the computer-use browser host reported unavailable. The repository browser journey did not run; this is not browser behavior evidence. |
 | `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -p:WasmBuildNative=false -m:1 -nr:false --filter FullyQualifiedName~LiveTranscription_FallsBackToConfiguredUploadWhenRealtimeSocketFails` | PASS, 1/1 | Confirms Gateway live transcription falls back to the configured upload adapter after realtime socket failure; does not exercise a physical client or offline network. |
 | `dotnet build src/SwiftAid.Mobile/SwiftAid.Mobile.csproj --no-restore -f net10.0-android -m:1 -nr:false` | PASS, 0 warnings/errors | Android Debug build includes the shared recovery UI; physical-device behavior remains NOT VERIFIED. |
 | `dotnet build src/SwiftAid.Mobile/SwiftAid.Mobile.csproj --no-restore -f net10.0-android -m:1 -nr:false` | PASS, 0 warnings/errors | Android Debug build including native Ellai `AudioRecord`, session effects, audio focus, routing notification, and lifecycle stop; no physical-device verification. |
