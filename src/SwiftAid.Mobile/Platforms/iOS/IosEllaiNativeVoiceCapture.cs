@@ -15,7 +15,9 @@ public sealed class IosEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, IAsyn
 {
     private const int MaximumInputFrames = 8_192;
     private const int MaximumQueuedChunks = 8;
+    private const int PcmSampleRate = 24_000;
     private const double SpeechRmsThreshold = 0.025;
+    private static readonly TimeSpan BargeInConfirmation = TimeSpan.FromMilliseconds(180);
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private AVAudioEngine? _engine;
@@ -32,12 +34,16 @@ public sealed class IosEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, IAsyn
     private string? _previousMode;
     private AVAudioSessionCategoryOptions _previousCategoryOptions;
     private bool _sessionConfigured;
+    private bool _voiceProcessingEnabled;
     private bool _disposed;
     private int _stopRequested;
 
     public bool IsAvailable => !_disposed;
 
+    public bool IsCapturing => _engine is not null;
+
     public event Action<string>? Interrupted;
+    public event Action? SpeechDetected;
     public event Action? RouteChanged;
 
     public async Task<string> StartAsync(
@@ -88,6 +94,7 @@ public sealed class IosEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, IAsyn
 
                 _engine = engine;
                 _input = input;
+                _voiceProcessingEnabled = voiceProcessingEnabled;
                 _captureCts = captureCts;
                 _audioFrames = channel;
                 _consumerTask = ConsumeFramesAsync(channel.Reader, onPcmChunk, captureCts.Token);
@@ -260,6 +267,8 @@ public sealed class IosEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, IAsyn
         CancellationToken cancellationToken)
     {
         var lastSpeechTimestamp = Stopwatch.GetTimestamp();
+        var bargeInDetector = new EllaiSpeechConfirmation(
+            SpeechRmsThreshold, BargeInConfirmation);
         try
         {
             await foreach (var pcm in reader.ReadAllAsync().ConfigureAwait(false))
@@ -271,7 +280,8 @@ public sealed class IosEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, IAsyn
                         continue;
                     }
 
-                    if (MeasureRms(pcm) >= SpeechRmsThreshold)
+                    var voiceLevel = MeasureRms(pcm);
+                    if (voiceLevel >= SpeechRmsThreshold)
                     {
                         lastSpeechTimestamp = Stopwatch.GetTimestamp();
                     }
@@ -280,6 +290,21 @@ public sealed class IosEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, IAsyn
                         InterruptAndStop(
                             "No speech detected. The microphone stopped; you can try again or type instead.");
                         continue;
+                    }
+
+                    if (bargeInDetector.Observe(
+                            voiceLevel,
+                            TimeSpan.FromSeconds(pcm.Length / (double)(PcmSampleRate * sizeof(short))),
+                            _voiceProcessingEnabled))
+                    {
+                        try
+                        {
+                            SpeechDetected?.Invoke();
+                        }
+                        catch (Exception)
+                        {
+                            // Keep capture moving if a UI subscriber has already been disposed.
+                        }
                     }
 
                     await onPcmChunk(pcm, cancellationToken).ConfigureAwait(false);
@@ -420,6 +445,7 @@ public sealed class IosEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, IAsyn
         _audioFrames = null;
         _input = null;
         _engine = null;
+        _voiceProcessingEnabled = false;
 
         captureCts?.Cancel();
         if (input is not null)

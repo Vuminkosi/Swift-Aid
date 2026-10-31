@@ -12,6 +12,8 @@ namespace SwiftAid.Mobile.Platforms.Android;
 public sealed class AndroidEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, IAsyncDisposable
 {
     private const int TargetSampleRate = 24_000;
+    private const double BargeInRmsThreshold = 0.025;
+    private static readonly TimeSpan BargeInConfirmation = TimeSpan.FromMilliseconds(180);
     private readonly SemaphoreSlim _gate = new(1, 1);
     private AudioRecord? _record;
     private global::Android.Media.IAudioRoutingOnRoutingChangedListener? _routingChangedListener;
@@ -28,6 +30,7 @@ public sealed class AndroidEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, I
 
     public bool IsAvailable => !_disposed;
     public event Action<string>? Interrupted;
+    public event Action? SpeechDetected;
     public event Action? RouteChanged;
 
     public async Task<string> StartAsync(
@@ -262,6 +265,7 @@ public sealed class AndroidEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, I
         var samplesPerChunk = inputRate / 50;
         var samples = new short[samplesPerChunk];
         var lastVoiceActivityTimestamp = Stopwatch.GetTimestamp();
+        var bargeInDetector = new EllaiSpeechConfirmation(BargeInRmsThreshold, BargeInConfirmation);
         try
         {
             while (!cancellationToken.IsCancellationRequested)
@@ -280,7 +284,8 @@ public sealed class AndroidEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, I
                     continue;
                 }
 
-                if (MeasureRms(samples.AsSpan(0, read)) >= 0.025)
+                var voiceLevel = MeasureRms(samples.AsSpan(0, read));
+                if (voiceLevel >= 0.025)
                 {
                     lastVoiceActivityTimestamp = Stopwatch.GetTimestamp();
                 }
@@ -289,6 +294,21 @@ public sealed class AndroidEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, I
                     Interrupted?.Invoke(
                         "No speech detected. The microphone stopped; you can try again or type instead.");
                     break;
+                }
+
+                if (bargeInDetector.Observe(
+                        voiceLevel,
+                        TimeSpan.FromSeconds(read / (double)inputRate),
+                        _echoCanceler?.Enabled == true))
+                {
+                    try
+                    {
+                        SpeechDetected?.Invoke();
+                    }
+                    catch (Exception)
+                    {
+                        // A UI listener must not stop the native capture loop.
+                    }
                 }
 
                 var pcm = ConvertToTargetRate(samples.AsSpan(0, read), inputRate);

@@ -399,6 +399,79 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
             expectedPurpose: null, expectedPlaybackId: playbackId, cancellationToken).ConfigureAwait(false);
     }
 
+    public Task<EllaiResponseAudioStream?> DownloadResponseAudioStreamAsync(
+        string sessionId, long sequence, string playbackId, CancellationToken cancellationToken)
+    {
+        if (sequence < 1 || string.IsNullOrWhiteSpace(sessionId))
+        {
+            return Task.FromResult<EllaiResponseAudioStream?>(null);
+        }
+
+        var requestUri = $"{SessionRoute(sessionId)}/responses/{sequence}/audio"
+            + (Guid.TryParseExact(playbackId, "N", out _)
+                ? $"?playbackId={Uri.EscapeDataString(playbackId)}"
+                : string.Empty);
+        return DownloadPcmAudioStreamAsync(
+            sessionId, requestUri, sequence, playbackId, cancellationToken);
+    }
+
+    private async Task<EllaiResponseAudioStream?> DownloadPcmAudioStreamAsync(
+        string sessionId,
+        string requestUri,
+        long expectedSequence,
+        string? expectedPlaybackId,
+        CancellationToken cancellationToken)
+    {
+        HttpResponseMessage? response = null;
+        try
+        {
+            response = await _http.GetAsync(
+                requestUri,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode
+                || response.Content.Headers.ContentType?.MediaType != "application/vnd.swiftaid.pcm"
+                || !response.Headers.TryGetValues("X-SwiftAid-Session-Id", out var sessionIds)
+                || !sessionIds.Contains(sessionId, StringComparer.Ordinal)
+                || !response.Headers.TryGetValues("X-SwiftAid-Response-Sequence", out var sequences)
+                || !long.TryParse(sequences.FirstOrDefault(), out var actualSequence)
+                || actualSequence != expectedSequence
+                || (response.Content.Headers.ContentLength is > MaximumPcmBytes)
+                || (!string.IsNullOrWhiteSpace(expectedPlaybackId)
+                    && (!response.Headers.TryGetValues("X-SwiftAid-Playback-Id", out var playbackIds)
+                        || !playbackIds.Contains(expectedPlaybackId, StringComparer.Ordinal)))
+                || !response.Headers.TryGetValues("X-SwiftAid-Sample-Format", out var formats)
+                || !formats.Contains("s16le", StringComparer.Ordinal)
+                || !response.Headers.TryGetValues("X-SwiftAid-Channels", out var channels)
+                || !channels.Contains("1", StringComparer.Ordinal)
+                || !response.Headers.TryGetValues("X-SwiftAid-Voice-Id", out var voices)
+                || !response.Headers.TryGetValues("X-SwiftAid-Sample-Rate", out var sampleRates)
+                || !int.TryParse(sampleRates.FirstOrDefault(), out var sampleRate)
+                || sampleRate is < 8_000 or > 48_000)
+            {
+                return null;
+            }
+
+            var pcm = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            var result = new EllaiResponseAudioStream(
+                pcm, sampleRate, voices.First(), expectedSequence, response);
+            response = null;
+            return result;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+        finally
+        {
+            response?.Dispose();
+        }
+    }
+
     public async Task<bool> InterruptResponseAudioAsync(
         string sessionId, long sequence, string playbackId, CancellationToken cancellationToken)
     {

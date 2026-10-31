@@ -13,17 +13,18 @@ public sealed class AndroidEllaiPcmAudioPlayer : IEllaiPcmAudioPlayer, IDisposab
 
     public bool IsAvailable => !_disposed;
 
-    public async Task PlayAsync(byte[] pcm, int sampleRate, CancellationToken cancellationToken)
+    public async Task PlayAsync(System.IO.Stream pcm, int sampleRate, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(pcm);
-        if (pcm.Length is 0 or > 3_840_000 || (pcm.Length & 1) != 0
-            || sampleRate is < 8_000 or > 48_000)
+        if (!pcm.CanRead || sampleRate is < 8_000 or > 48_000)
         {
-            throw new ArgumentOutOfRangeException(nameof(pcm), "The Gateway PCM stream is invalid or exceeds its limit.");
+            throw new ArgumentException("The Gateway PCM stream or sample rate is invalid.", nameof(pcm));
         }
 
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         AudioTrack? track = null;
+        byte[]? readBuffer = null;
+        byte[]? writeBuffer = null;
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -49,7 +50,7 @@ public sealed class AndroidEllaiPcmAudioPlayer : IEllaiPcmAudioPlayer, IDisposab
                 .SetAudioAttributes(attributes)
                 .SetAudioFormat(format)
                 .SetTransferMode(AudioTrackMode.Stream)
-                .SetBufferSizeInBytes(Math.Max(minimumBufferSize, sampleRate * 2))
+                .SetBufferSizeInBytes(Math.Max(minimumBufferSize, sampleRate / 2))
                 .Build();
             lock (_trackGate)
             {
@@ -57,23 +58,70 @@ public sealed class AndroidEllaiPcmAudioPlayer : IEllaiPcmAudioPlayer, IDisposab
             }
 
             track.Play();
-            const int writeSize = 32 * 1024;
-            for (var offset = 0; offset < pcm.Length;)
+            const int readSize = 8 * 1024;
+            const int maximumPcmBytes = 3_840_000;
+            readBuffer = new byte[readSize];
+            writeBuffer = new byte[readSize + 1];
+            var hasPendingByte = false;
+            byte pendingByte = 0;
+            var totalBytes = 0;
+            var totalFrames = 0;
+            while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var count = Math.Min(writeSize, pcm.Length - offset);
-                var written = await Task.Run(
-                    () => track.Write(pcm, offset, count, WriteMode.Blocking), cancellationToken)
-                    .ConfigureAwait(false);
-                if (written <= 0)
+                var read = await pcm.ReadAsync(readBuffer, cancellationToken).ConfigureAwait(false);
+                if (read == 0)
                 {
-                    throw new InvalidOperationException("Android stopped accepting Ellai PCM.");
+                    break;
                 }
 
-                offset += written;
+                totalBytes = checked(totalBytes + read);
+                if (totalBytes > maximumPcmBytes)
+                {
+                    throw new InvalidOperationException("The Gateway PCM stream exceeds its playback limit.");
+                }
+
+                var writeCount = 0;
+                var inputOffset = 0;
+                if (hasPendingByte)
+                {
+                    writeBuffer[writeCount++] = pendingByte;
+                    writeBuffer[writeCount++] = readBuffer[inputOffset++];
+                    hasPendingByte = false;
+                }
+
+                var remainingReadBytes = read - inputOffset;
+                var completeReadBytes = remainingReadBytes & ~1;
+                Buffer.BlockCopy(readBuffer, inputOffset, writeBuffer, writeCount, completeReadBytes);
+                writeCount += completeReadBytes;
+                if ((remainingReadBytes & 1) != 0)
+                {
+                    pendingByte = readBuffer[read - 1];
+                    hasPendingByte = true;
+                }
+
+                var offset = 0;
+                while (offset < writeCount)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var written = await Task.Run(
+                        () => track.Write(writeBuffer, offset, writeCount - offset, WriteMode.Blocking),
+                        cancellationToken).ConfigureAwait(false);
+                    if (written <= 0 || (written & 1) != 0)
+                    {
+                        throw new InvalidOperationException("Android stopped accepting Ellai PCM.");
+                    }
+
+                    offset += written;
+                    totalFrames += written / 2;
+                }
             }
 
-            var totalFrames = pcm.Length / 2;
+            if (totalBytes == 0 || hasPendingByte)
+            {
+                throw new InvalidOperationException("The Gateway PCM stream is empty or incomplete.");
+            }
+
             while (track.PlaybackHeadPosition < totalFrames)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -82,28 +130,47 @@ public sealed class AndroidEllaiPcmAudioPlayer : IEllaiPcmAudioPlayer, IDisposab
         }
         finally
         {
-            lock (_trackGate)
+            try
             {
-                if (ReferenceEquals(_activeTrack, track))
+                lock (_trackGate)
                 {
-                    _activeTrack = null;
+                    if (ReferenceEquals(_activeTrack, track))
+                    {
+                        _activeTrack = null;
+                    }
+                }
+
+                if (track is not null)
+                {
+                    try
+                    {
+                        track.Stop();
+                    }
+                    catch (InvalidOperationException)
+                    {
+                    }
+                    try
+                    {
+                        track.Release();
+                    }
+                    finally
+                    {
+                        track.Dispose();
+                    }
                 }
             }
-
-            if (track is not null)
+            finally
             {
-                try
+                if (readBuffer is not null)
                 {
-                    track.Stop();
+                    Array.Clear(readBuffer);
                 }
-                catch (InvalidOperationException)
+                if (writeBuffer is not null)
                 {
+                    Array.Clear(writeBuffer);
                 }
-                track.Release();
-                track.Dispose();
+                _gate.Release();
             }
-
-            _gate.Release();
         }
     }
 
@@ -136,6 +203,5 @@ public sealed class AndroidEllaiPcmAudioPlayer : IEllaiPcmAudioPlayer, IDisposab
 
         _disposed = true;
         StopAsync().GetAwaiter().GetResult();
-        _gate.Dispose();
     }
 }

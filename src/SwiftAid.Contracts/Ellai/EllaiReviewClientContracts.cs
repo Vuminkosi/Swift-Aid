@@ -53,6 +53,57 @@ public sealed record EllaiSessionResponsePageDto(
 /// <summary>Bounded little-endian, mono PCM response streamed from the Gateway.</summary>
 public sealed record EllaiResponseAudio(byte[] Pcm, int SampleRate, string VoiceId, long Sequence);
 
+/// <summary>Transient Gateway PCM response that keeps the transport alive until
+/// playback finishes or is canceled. Disposing it closes both the PCM stream
+/// and its owning response.</summary>
+public sealed class EllaiResponseAudioStream : IAsyncDisposable
+{
+    private readonly IDisposable? _owner;
+    private int _disposed;
+
+    public EllaiResponseAudioStream(
+        Stream pcm, int sampleRate, string voiceId, long sequence, IDisposable? owner = null)
+    {
+        ArgumentNullException.ThrowIfNull(pcm);
+        ArgumentException.ThrowIfNullOrWhiteSpace(voiceId);
+        if (!pcm.CanRead || sampleRate is < 8_000 or > 48_000 || sequence < 0)
+        {
+            throw new ArgumentException("The Gateway PCM stream metadata is invalid.");
+        }
+
+        Pcm = pcm;
+        SampleRate = sampleRate;
+        VoiceId = voiceId;
+        Sequence = sequence;
+        _owner = owner;
+    }
+
+    public Stream Pcm { get; }
+
+    public int SampleRate { get; }
+
+    public string VoiceId { get; }
+
+    public long Sequence { get; }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await Pcm.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            _owner?.Dispose();
+        }
+    }
+}
+
 /// <summary>Open review for dialog rendering: identity, binding, state and
 /// safe display rows. Approval still resolves server-side.</summary>
 public sealed record EllaiReviewDto(
@@ -150,6 +201,20 @@ public interface IEllaiReviewClient
     Task<EllaiResponseAudio?> DownloadResponseAudioAsync(
         string sessionId, long sequence, string playbackId, CancellationToken cancellationToken) =>
         DownloadResponseAudioAsync(sessionId, sequence, cancellationToken);
+
+    async Task<EllaiResponseAudioStream?> DownloadResponseAudioStreamAsync(
+        string sessionId, long sequence, string playbackId, CancellationToken cancellationToken)
+    {
+        var audio = await DownloadResponseAudioAsync(
+            sessionId, sequence, playbackId, cancellationToken).ConfigureAwait(false);
+        return audio is null
+            ? null
+            : new EllaiResponseAudioStream(
+                new MemoryStream(audio.Pcm, writable: false),
+                audio.SampleRate,
+                audio.VoiceId,
+                audio.Sequence);
+    }
 
     Task<bool> InterruptResponseAudioAsync(
         string sessionId, long sequence, string playbackId, CancellationToken cancellationToken) =>

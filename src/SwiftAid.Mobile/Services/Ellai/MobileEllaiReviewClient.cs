@@ -119,6 +119,11 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
         string sessionId, long sequence, string playbackId, CancellationToken cancellationToken) =>
         ClientFor(sessionId).DownloadResponseAudioAsync(sessionId, sequence, playbackId, cancellationToken);
 
+    public Task<EllaiResponseAudioStream?> DownloadResponseAudioStreamAsync(
+        string sessionId, long sequence, string playbackId, CancellationToken cancellationToken) =>
+        ClientFor(sessionId).DownloadResponseAudioStreamAsync(
+            sessionId, sequence, playbackId, cancellationToken);
+
     public Task<bool> InterruptResponseAudioAsync(
         string sessionId, long sequence, string playbackId, CancellationToken cancellationToken) =>
         ClientFor(sessionId).InterruptResponseAudioAsync(sessionId, sequence, playbackId, cancellationToken);

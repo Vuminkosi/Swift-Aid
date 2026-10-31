@@ -22,6 +22,29 @@ namespace SwiftAid.Ui.Tests;
 public sealed class EllaiSurfaceLogicTests
 {
     [Fact]
+    public void LocalBargeInRequiresSustainedSpeechAndActiveEchoCancellation()
+    {
+        var detector = new EllaiSpeechConfirmation(0.025, TimeSpan.FromMilliseconds(180));
+        var frame = TimeSpan.FromMilliseconds(20);
+
+        for (var index = 0; index < 8; index++)
+        {
+            Assert.False(detector.Observe(0.08, frame, echoCancellationEnabled: true));
+        }
+        Assert.False(detector.Observe(0.08, frame, echoCancellationEnabled: false));
+        Assert.False(detector.Observe(0.08, TimeSpan.FromMilliseconds(160), echoCancellationEnabled: true));
+        Assert.True(detector.Observe(0.08, frame, echoCancellationEnabled: true));
+        Assert.False(detector.Observe(0.08, frame, echoCancellationEnabled: true));
+        Assert.False(detector.Observe(0.01, frame, echoCancellationEnabled: true));
+
+        for (var index = 0; index < 8; index++)
+        {
+            Assert.False(detector.Observe(0.08, frame, echoCancellationEnabled: true));
+        }
+        Assert.True(detector.Observe(0.08, frame, echoCancellationEnabled: true));
+    }
+
+    [Fact]
     public async Task PublicLayoutExposesOnlyGuestAskModeToUnauthenticatedVisitors()
     {
         var markup = await RenderPublicLayoutAsync();
@@ -129,6 +152,30 @@ public sealed class EllaiSurfaceLogicTests
         Assert.True(client.VoiceTurnStatusReads > 0);
         Assert.False(GetField<bool>(host, "_isPlayingResponse"));
         Assert.Equal("I’m listening to your message.", GetField<string?>(host, "StatusText"));
+    }
+
+    [Fact]
+    public async Task NativeSpeechCallbackStopsMatchingPlaybackWhileCaptureContinues()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(version: 1), string.Empty);
+        SetField(host, "_isRecordingAudio", true);
+        SetField(host, "_captureMode", EllaiVoiceCaptureMode.Live);
+        SetField(host, "_isPlayingResponse", true);
+        SetField(host, "_activeResponseSequence", 9L);
+        SetField(host, "_activeResponsePlaybackId", "native-playback");
+
+        await InvokeAsync(host, "OnNativeVoiceSpeechDetected");
+
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (GetField<bool>(host, "_isPlayingResponse") && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(10);
+        }
+
+        Assert.False(GetField<bool>(host, "_isPlayingResponse"));
+        Assert.True(GetField<bool>(host, "_isRecordingAudio"));
+        Assert.Contains("You interrupted Ellai", GetField<string?>(host, "StatusText"),
+            StringComparison.Ordinal);
     }
 
     [Fact]

@@ -194,6 +194,7 @@
         if (_nativeVoiceCapture is not null)
         {
             _nativeVoiceCapture.Interrupted += OnNativeVoiceCaptureInterrupted;
+            _nativeVoiceCapture.SpeechDetected += OnNativeVoiceSpeechDetected;
             _nativeVoiceCapture.RouteChanged += OnNativeVoiceRouteChanged;
         }
 
@@ -1053,6 +1054,21 @@
         });
     }
 
+    private void OnNativeVoiceSpeechDetected()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            if (!_isRecordingAudio
+                || _captureMode != EllaiVoiceCaptureMode.Live || !_isPlayingResponse
+                || _activeResponseSequence < 1 || string.IsNullOrWhiteSpace(_activeResponsePlaybackId))
+            {
+                return;
+            }
+
+            await OnVoiceBargeInDetected(_activeResponseSequence, _activeResponsePlaybackId);
+        });
+    }
+
     private void OnNativeVoiceRouteChanged()
     {
         _ = InvokeAsync(() =>
@@ -1386,7 +1402,7 @@
 
             if (ReviewClient.UsesGatewayPcmAudioDownload)
             {
-                var audio = await ReviewClient.DownloadResponseAudioAsync(
+                await using var audio = await ReviewClient.DownloadResponseAudioStreamAsync(
                     sessionId, sequence, playbackId, playbackCts.Token);
                 var player = Services.GetService<IEllaiPcmAudioPlayer>();
                 if (audio is null || player is null || !player.IsAvailable
@@ -2291,6 +2307,7 @@
         if (_nativeVoiceCapture is not null)
         {
             _nativeVoiceCapture.Interrupted -= OnNativeVoiceCaptureInterrupted;
+            _nativeVoiceCapture.SpeechDetected -= OnNativeVoiceSpeechDetected;
             _nativeVoiceCapture.RouteChanged -= OnNativeVoiceRouteChanged;
         }
         Launcher.Requested -= OnLauncherRequested;

@@ -69,6 +69,30 @@ public sealed class EllaiGuestReviewHttpClientTests
     }
 
     [Fact]
+    public async Task ResponseAudioStreamReturnsBeforeReadingPcmBody()
+    {
+        var body = new TrackingReadStream([0x01, 0x00, 0xFF, 0x7F]);
+        var handler = new AudioHandler(body);
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost/") };
+        var client = new EllaiReviewHttpClient(http, useGuestRoutes: true);
+
+        await using var audio = await client.DownloadResponseAudioStreamAsync(
+            "guest-session", 7, Guid.NewGuid().ToString("N"), CancellationToken.None);
+
+        Assert.NotNull(audio);
+        Assert.Equal(0, body.BytesRead);
+        Assert.Equal(16_000, audio.SampleRate);
+        Assert.Equal("swiftaid-mms-english-v1", audio.VoiceId);
+        Assert.Equal(7, audio.Sequence);
+        using var buffered = new MemoryStream();
+        await audio.Pcm.CopyToAsync(buffered);
+        Assert.Equal(new byte[] { 0x01, 0x00, 0xFF, 0x7F }, buffered.ToArray());
+        Assert.True(body.BytesRead >= 4);
+        await audio.DisposeAsync();
+        Assert.True(body.IsDisposed);
+    }
+
+    [Fact]
     public async Task ListeningGreetingUsesSessionScopedGuestRouteAndValidatesPurpose()
     {
         var handler = new GreetingAudioHandler();
@@ -210,6 +234,10 @@ public sealed class EllaiGuestReviewHttpClientTests
 
     private sealed class AudioHandler : HttpMessageHandler
     {
+        private readonly Stream? _pcmStream;
+
+        public AudioHandler(Stream? pcmStream = null) => _pcmStream = pcmStream;
+
         public string? Path { get; private set; }
 
         protected override Task<HttpResponseMessage> SendAsync(
@@ -218,7 +246,9 @@ public sealed class EllaiGuestReviewHttpClientTests
             Path = request.RequestUri?.PathAndQuery;
             var response = new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new ByteArrayContent([0x01, 0x00, 0xFF, 0x7F]),
+                Content = _pcmStream is null
+                    ? new ByteArrayContent([0x01, 0x00, 0xFF, 0x7F])
+                    : new StreamContent(_pcmStream),
             };
             response.Content.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.swiftaid.pcm");
             response.Headers.Add("X-SwiftAid-Session-Id", "guest-session");
@@ -238,6 +268,48 @@ public sealed class EllaiGuestReviewHttpClientTests
                 response.Headers.Add("X-SwiftAid-Playback-Id", playbackId);
             }
             return Task.FromResult(response);
+        }
+    }
+
+    private sealed class TrackingReadStream(byte[] bytes) : MemoryStream(bytes)
+    {
+        public int BytesRead { get; private set; }
+
+        public bool IsDisposed { get; private set; }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var read = base.Read(buffer, offset, count);
+            BytesRead += read;
+            return read;
+        }
+
+        public override int Read(Span<byte> buffer)
+        {
+            var read = base.Read(buffer);
+            BytesRead += read;
+            return read;
+        }
+
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var read = base.Read(buffer.Span);
+            BytesRead += read;
+            return ValueTask.FromResult(read);
+        }
+
+        public override Task<int> ReadAsync(
+            byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            var read = Read(buffer, offset, count);
+            return Task.FromResult(read);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            IsDisposed = true;
+            base.Dispose(disposing);
         }
     }
 

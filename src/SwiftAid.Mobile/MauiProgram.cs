@@ -309,6 +309,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<IosEllaiNativeVoiceCapture>();
         builder.Services.AddSingleton<IEllaiNativeVoiceCapture>(services =>
             services.GetRequiredService<IosEllaiNativeVoiceCapture>());
+        builder.Services.AddSingleton<IEllaiPcmAudioPlayer, IosEllaiPcmAudioPlayer>();
 #endif
         builder.Services.AddSingleton<EllaiLauncher>();
         builder.Services.AddSingleton<EllaiEventPoller>();
