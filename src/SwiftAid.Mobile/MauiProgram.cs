@@ -35,6 +35,7 @@ using Plugin.Firebase.CloudMessaging;
 using SwiftAid.Mobile.Platforms.Android;
 using Plugin.Firebase.Core.Platforms.Android;
 #elif IOS
+using SwiftAid.Mobile.Platforms.iOS;
 using Plugin.Firebase.Core.Platforms.iOS;
 #endif
 
@@ -304,6 +305,10 @@ public static class MauiProgram
         builder.Services.AddSingleton<AndroidEllaiNativeVoiceCapture>();
         builder.Services.AddSingleton<IEllaiNativeVoiceCapture>(services =>
             services.GetRequiredService<AndroidEllaiNativeVoiceCapture>());
+#elif IOS
+        builder.Services.AddSingleton<IosEllaiNativeVoiceCapture>();
+        builder.Services.AddSingleton<IEllaiNativeVoiceCapture>(services =>
+            services.GetRequiredService<IosEllaiNativeVoiceCapture>());
 #endif
         builder.Services.AddSingleton<EllaiLauncher>();
         builder.Services.AddSingleton<EllaiEventPoller>();

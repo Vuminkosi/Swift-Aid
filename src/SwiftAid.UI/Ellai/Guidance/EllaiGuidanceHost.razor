@@ -284,11 +284,32 @@
             }
 
             _isRecordingAudio = true;
-            var processingStatus = useNativeLiveCapture
-                ? await _nativeVoiceCapture!.StartAsync(
-                    QueueNativePcmChunkAsync, _cts?.Token ?? CancellationToken.None)
-                : await _captureModule!.InvokeAsync<string>(
+            string processingStatus;
+            if (useNativeLiveCapture)
+            {
+                try
+                {
+                    processingStatus = await _nativeVoiceCapture!.StartAsync(
+                        QueueNativePcmChunkAsync, _cts?.Token ?? CancellationToken.None);
+                }
+                catch (OperationCanceledException) when (_cts?.IsCancellationRequested == true)
+                {
+                    throw;
+                }
+                catch (Exception) when (_microphoneCaptureAvailable && _captureModule is not null)
+                {
+                    useNativeLiveCapture = false;
+                    var browserStatus = await _captureModule.InvokeAsync<string>(
+                        "startCapture", _captureDotnetReference, true, session.SessionId);
+                    processingStatus = "Native voice capture is unavailable; browser capture is active. "
+                        + browserStatus;
+                }
+            }
+            else
+            {
+                processingStatus = await _captureModule!.InvokeAsync<string>(
                     "startCapture", _captureDotnetReference, mode == EllaiVoiceCaptureMode.Live, session.SessionId);
+            }
             _nativeVoiceCaptureActive = useNativeLiveCapture;
             if (!useNativeLiveCapture && _isPlayingResponse && _activeResponsePlaybackId is not null)
             {
