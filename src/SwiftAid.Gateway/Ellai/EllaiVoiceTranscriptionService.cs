@@ -251,6 +251,10 @@ public sealed class EllaiVoiceTranscriptionService(
             }
 
             transcript = transcript.Trim();
+            if (transcript.Length == 0)
+            {
+                turn?.MarkRecovering();
+            }
             return transcript.Length is > 0 and <= 8_000
                 ? new EllaiVoiceTranscriptionResult(transcript)
                 : null;
@@ -261,6 +265,7 @@ public sealed class EllaiVoiceTranscriptionService(
         }
         catch (Exception ex)
         {
+            turn?.MarkRecovering();
             logger?.LogWarning("Ellai live transcription failed ({FailureType}).", ex.GetType().Name);
             return null;
         }

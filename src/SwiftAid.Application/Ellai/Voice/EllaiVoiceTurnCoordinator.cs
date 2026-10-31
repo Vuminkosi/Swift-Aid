@@ -243,6 +243,22 @@ public sealed class EllaiVoiceTurnCoordinator
         }
     }
 
+    public bool MarkRecovering(VoiceStreamLease lease)
+    {
+        ArgumentNullException.ThrowIfNull(lease);
+        lock (_gate)
+        {
+            if (!IsCurrent(lease) || lease.CancellationToken.IsCancellationRequested)
+            {
+                return false;
+            }
+
+            lease.Session.State = EllaiVoiceTurnState.Recovering;
+            lease.Session.LastTouchedUtc = _timeProvider.GetUtcNow();
+            return true;
+        }
+    }
+
     public EllaiVoiceTurnSnapshot GetSnapshot(string sessionId)
     {
         lock (_gate)
@@ -442,6 +458,8 @@ public sealed class EllaiVoiceTurnCoordinator
 
         public EllaiAcceptedFinalTranscript? AcceptFinalTranscript(string providerTurnId, string text) =>
             _owner.AcceptFinalTranscript(this, providerTurnId, text);
+
+        public bool MarkRecovering() => _owner.MarkRecovering(this);
 
         internal void Cancel()
         {

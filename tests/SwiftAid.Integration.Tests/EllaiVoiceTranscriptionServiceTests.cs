@@ -143,6 +143,35 @@ public sealed class EllaiVoiceTranscriptionServiceTests
     }
 
     [Fact]
+    public async Task LiveTranscriptionWithoutProviderFinalLeavesTurnRecovering()
+    {
+        await using var server = await AudioForwardingWebSocketServer.CreateAsync(sendFinalTranscript: false);
+        var options = new EllaiOptions
+        {
+            Enabled = true,
+            ApiKey = "test-key",
+            AsrModel = "muse-voice-transcribe-1.0",
+            AsrWebSocketUrl = server.WebSocketUrl,
+            AsrMode = "DIARIZATION",
+        };
+        var turns = new EllaiVoiceTurnCoordinator();
+        var providerServices = new ServiceCollection();
+        providerServices.AddSingleton(turns);
+        providerServices.AddSingleton(new MetaAsrRealtimeAdapter(options));
+        using var provider = providerServices.BuildServiceProvider();
+        var service = new EllaiVoiceTranscriptionService(
+            new EllaiConsentService(), new InMemoryEllaiConsentStore(), options, provider);
+        await service.GrantVoiceConsentAsync("session-recovery", CancellationToken.None);
+        await using var audio = new MemoryStream(new byte[24_000 * sizeof(short)]);
+
+        var result = await service.TranscribeAsync(
+            "session-recovery", EllaiVoiceCaptureMode.Live, audio, audio.Length, CancellationToken.None);
+
+        Assert.Null(result);
+        Assert.Equal(EllaiVoiceTurnState.Recovering, turns.GetSnapshot("session-recovery").State);
+    }
+
+    [Fact]
     public async Task LiveTranscriptionVadConfirmsBargeInAndCancelsOnlyTheActiveResponsePlayback()
     {
         await using var server = await AudioForwardingWebSocketServer.CreateAsync();
@@ -289,6 +318,7 @@ public sealed class EllaiVoiceTranscriptionServiceTests
 
     private sealed class AudioForwardingWebSocketServer : IAsyncDisposable
     {
+        private readonly bool _sendFinalTranscript;
         private WebApplication _application = null!;
         private readonly TaskCompletionSource _firstAudioReceived = new(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -297,9 +327,12 @@ public sealed class EllaiVoiceTranscriptionServiceTests
         public Task FirstAudioReceived => _firstAudioReceived.Task;
         public byte[] ReceivedPcm { get; private set; } = [];
 
-        public static async Task<AudioForwardingWebSocketServer> CreateAsync()
+        private AudioForwardingWebSocketServer(bool sendFinalTranscript) =>
+            _sendFinalTranscript = sendFinalTranscript;
+
+        public static async Task<AudioForwardingWebSocketServer> CreateAsync(bool sendFinalTranscript = true)
         {
-            var result = new AudioForwardingWebSocketServer();
+            var result = new AudioForwardingWebSocketServer(sendFinalTranscript);
             var builder = WebApplication.CreateBuilder();
             builder.Logging.ClearProviders();
             builder.WebHost.ConfigureKestrel(server => server.Listen(IPAddress.Loopback, 0));
@@ -355,9 +388,12 @@ public sealed class EllaiVoiceTranscriptionServiceTests
             }
 
             ReceivedPcm = pcm.ToArray();
-            await SendTextAsync(socket,
-                "{\"type\":\"transcript\",\"final\":true,\"turnId\":1,\"transcript\":\"streamed words\"}")
-                .ConfigureAwait(false);
+            if (_sendFinalTranscript)
+            {
+                await SendTextAsync(socket,
+                    "{\"type\":\"transcript\",\"final\":true,\"turnId\":1,\"transcript\":\"streamed words\"}")
+                    .ConfigureAwait(false);
+            }
             await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "complete", CancellationToken.None)
                 .ConfigureAwait(false);
         }

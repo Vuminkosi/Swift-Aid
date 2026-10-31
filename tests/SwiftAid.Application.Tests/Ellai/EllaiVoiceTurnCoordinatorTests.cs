@@ -91,6 +91,20 @@ public sealed class EllaiVoiceTurnCoordinatorTests
     }
 
     [Fact]
+    public void FailedTurnCanEnterRecoveryAndTheNextStreamReturnsToListening()
+    {
+        var coordinator = new EllaiVoiceTurnCoordinator();
+        using var failed = coordinator.BeginStream("session-recovery", CancellationToken.None);
+
+        Assert.True(failed.MarkRecovering());
+        Assert.Equal(EllaiVoiceTurnState.Recovering, coordinator.GetSnapshot("session-recovery").State);
+
+        using var retry = coordinator.BeginStream("session-recovery", CancellationToken.None);
+
+        Assert.Equal(EllaiVoiceTurnState.Listening, coordinator.GetSnapshot("session-recovery").State);
+    }
+
+    [Fact]
     public void DuplicateFinalsAndOtherSessionsAreIsolated()
     {
         var coordinator = new EllaiVoiceTurnCoordinator();
