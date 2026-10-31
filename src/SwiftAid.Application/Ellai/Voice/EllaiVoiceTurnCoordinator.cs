@@ -84,6 +84,7 @@ public sealed class EllaiVoiceTurnCoordinator
             state.ActiveStream?.Cancel();
             state.Epoch = Interlocked.Increment(ref _nextEpoch);
             state.LastTouchedUtc = _timeProvider.GetUtcNow();
+            state.StreamStartedTimestamp = _timeProvider.GetTimestamp();
             state.FinalProviderTurnIds.Clear();
             state.LastVadSequence = -1;
             state.SpeechCandidate = TimeSpan.Zero;
@@ -194,6 +195,7 @@ public sealed class EllaiVoiceTurnCoordinator
                             state.ActiveResponseSequence!.Value,
                             state.ActivePlaybackId.Value,
                             state.Epoch);
+                        EllaiVoiceTurnMetrics.BargeInConfirmed(state.BargeInSpeech);
                         MarkInterrupted(state);
                         state.State = EllaiVoiceTurnState.UserSpeaking;
                         state.ConfirmedSpeech += state.BargeInSpeech;
@@ -239,6 +241,8 @@ public sealed class EllaiVoiceTurnCoordinator
 
             state.State = EllaiVoiceTurnState.Processing;
             state.LastTouchedUtc = _timeProvider.GetUtcNow();
+            EllaiVoiceTurnMetrics.FinalTranscriptAccepted(
+                _timeProvider.GetElapsedTime(state.StreamStartedTimestamp));
             return new EllaiAcceptedFinalTranscript(providerTurnId, normalized, lease.Epoch);
         }
     }
@@ -255,6 +259,7 @@ public sealed class EllaiVoiceTurnCoordinator
 
             lease.Session.State = EllaiVoiceTurnState.Recovering;
             lease.Session.LastTouchedUtc = _timeProvider.GetUtcNow();
+            EllaiVoiceTurnMetrics.TurnRecovered();
             return true;
         }
     }
@@ -358,6 +363,7 @@ public sealed class EllaiVoiceTurnCoordinator
                     state.ConfirmedSpeech = state.SpeechCandidate;
                     state.SpeechCandidate = TimeSpan.Zero;
                     state.State = EllaiVoiceTurnState.UserSpeaking;
+                    EllaiVoiceTurnMetrics.SpeechStartConfirmed(state.ConfirmedSpeech);
                 }
                 break;
             case EllaiVoiceTurnState.UserSpeaking:
@@ -372,6 +378,7 @@ public sealed class EllaiVoiceTurnCoordinator
                     if (state.Silence.TotalMilliseconds >= _options.EndOfTurnSilenceMs)
                     {
                         state.State = EllaiVoiceTurnState.EndpointCandidate;
+                        EllaiVoiceTurnMetrics.EndpointCandidateReached(state.Silence);
                     }
                 }
                 break;
@@ -431,6 +438,7 @@ public sealed class EllaiVoiceTurnCoordinator
         public TimeSpan Silence { get; set; }
         public TimeSpan BargeInSpeech { get; set; }
         public DateTimeOffset LastTouchedUtc { get; set; } = createdAtUtc;
+        public long StreamStartedTimestamp { get; set; }
     }
 
     public sealed class VoiceStreamLease : IDisposable

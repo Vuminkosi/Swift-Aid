@@ -1,4 +1,5 @@
 using SwiftAid.Application.Ellai;
+using System.Diagnostics.Metrics;
 
 namespace SwiftAid.Application.Tests.Ellai;
 
@@ -75,6 +76,71 @@ public sealed class EllaiVoiceTurnCoordinatorTests
         var options = new EllaiVoiceTurnOptions(speechStartMs, silenceMs, bargeInMs);
 
         Assert.Throws<ArgumentOutOfRangeException>(options.Validate);
+    }
+
+    [Fact]
+    public void VoiceTimingMetricsContainNoSessionOrTranscriptDimensions()
+    {
+        var measurements = new List<string>();
+        var nonEmptyTagSets = 0;
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, meterListener) =>
+        {
+            if (instrument.Meter.Name == "SwiftAid.Application.Ellai.Voice")
+            {
+                meterListener.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<double>((instrument, _, tags, _) =>
+        {
+            measurements.Add(instrument.Name);
+            if (tags.Length != 0)
+            {
+                nonEmptyTagSets++;
+            }
+        });
+        listener.SetMeasurementEventCallback<long>((instrument, _, tags, _) =>
+        {
+            measurements.Add(instrument.Name);
+            if (tags.Length != 0)
+            {
+                nonEmptyTagSets++;
+            }
+        });
+        listener.Start();
+
+        var coordinator = new EllaiVoiceTurnCoordinator(new EllaiVoiceTurnOptions(64, 100, 96));
+        using (var stream = coordinator.BeginStream("private-session-id", CancellationToken.None))
+        {
+            coordinator.ObserveAcousticFrame(stream, Speech(0), VadFrameDuration);
+            coordinator.ObserveAcousticFrame(stream, Speech(1), VadFrameDuration);
+            for (var sequence = 2; sequence <= 5; sequence++)
+            {
+                coordinator.ObserveAcousticFrame(stream, Silence(sequence), VadFrameDuration);
+            }
+            Assert.NotNull(stream.AcceptFinalTranscript("provider-turn", "private transcript"));
+        }
+
+        var playbackId = Guid.NewGuid();
+        coordinator.SetAssistantPlayback("private-session-id", 1, playbackId, isPlaying: true);
+        using (var stream = coordinator.BeginStream("private-session-id", CancellationToken.None))
+        {
+            for (var sequence = 0; sequence < 3; sequence++)
+            {
+                coordinator.ObserveAcousticFrame(stream, Speech(sequence), VadFrameDuration);
+            }
+        }
+        using (var stream = coordinator.BeginStream("private-session-id", CancellationToken.None))
+        {
+            Assert.True(stream.MarkRecovering());
+        }
+
+        Assert.Contains("swiftaid.ellai.voice.speech.start.delay", measurements);
+        Assert.Contains("swiftaid.ellai.voice.endpoint.silence", measurements);
+        Assert.Contains("swiftaid.ellai.voice.transcription.final.latency", measurements);
+        Assert.Contains("swiftaid.ellai.voice.barge_in.confirmation", measurements);
+        Assert.Contains("swiftaid.ellai.voice.turn.recovery", measurements);
+        Assert.Equal(0, nonEmptyTagSets);
     }
 
     [Fact]
