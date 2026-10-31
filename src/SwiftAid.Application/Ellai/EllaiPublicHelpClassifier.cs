@@ -48,6 +48,7 @@ public sealed class EllaiPublicHelpClassifier
         var words = Regex.Matches(normalized, @"\p{L}+")
             .Select(match => match.Value)
             .ToArray();
+        words = NormalizeRecognizedTopicTerms(words);
         if (words.Length == 0 || words.Any(word => !QuestionWords.Contains(word) && !_publicTopics.Contains(word)))
         {
             return false;
@@ -70,6 +71,31 @@ public sealed class EllaiPublicHelpClassifier
             $"Answer a public SwiftAid product-help question about these approved topics: {topicList}. " +
             "Use only approved public product facts. Do not infer personal, case-specific, medical, or staff information.");
         return true;
+    }
+
+    private static string[] NormalizeRecognizedTopicTerms(IReadOnlyList<string> words)
+    {
+        var normalized = new List<string>(words.Count);
+        for (var index = 0; index < words.Count; index++)
+        {
+            if (index + 1 < words.Count
+                && string.Equals(words[index], "swift", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(words[index + 1], "aid", StringComparison.OrdinalIgnoreCase))
+            {
+                normalized.Add("swiftaid");
+                index++;
+                continue;
+            }
+
+            // The configured ASR commonly renders the spoken topic "guest"
+            // as "guess". It is safe to accept this alias because only the
+            // matched catalog topic, never the recognized wording, is sent on.
+            normalized.Add(string.Equals(words[index], "guess", StringComparison.OrdinalIgnoreCase)
+                ? "guest"
+                : words[index]);
+        }
+
+        return normalized.ToArray();
     }
 }
 

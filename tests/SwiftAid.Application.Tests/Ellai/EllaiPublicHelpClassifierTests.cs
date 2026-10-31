@@ -11,6 +11,8 @@ public sealed class EllaiPublicHelpClassifierTests
     [InlineData("What does an intake receipt mean?", "intake, receipt")]
     [InlineData("Can Ellai give medical advice?", "advice, ellai, medical")]
     [InlineData("What is SwiftAid and what can I do here?", "swiftaid")]
+    [InlineData("What is Swift Aid?", "swiftaid")]
+    [InlineData("Can I guess submit a report without an account? Can I guess", "account, guest, report")]
     public void ApprovedPublicQuestion_IsReducedToCatalogTopics(string input, string expectedTopics)
     {
         Assert.True(_classifier.TryClassify(input, out var result));

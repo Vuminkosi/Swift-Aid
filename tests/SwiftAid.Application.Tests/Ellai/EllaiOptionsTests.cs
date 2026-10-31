@@ -30,6 +30,28 @@ public sealed class EllaiOptionsTests
     }
 
     [Fact]
+    public void BindsComposeAsrKeysAfterConfigurationEnvironmentNormalization()
+    {
+        var values = new Dictionary<string, string?>
+        {
+            ["Ellai:Enabled"] = "true",
+            ["Ellai:ApiKey"] = "k",
+            ["Ellai:ASR_MODEL"] = "muse-voice-transcribe-1.0",
+            ["Ellai:ASR_WSS"] = "wss://api.meta.ai/v1/asr/realtime",
+            ["Ellai:ASR_Transcription:URL"] = "https://api.meta.ai/v1/asr/transcribe",
+            ["Ellai:ASRMode"] = "DIARIZATION",
+        };
+        var options = EllaiOptions.Bind(key => values.TryGetValue(key, out var value) ? value : null);
+
+        Assert.Equal("muse-voice-transcribe-1.0", options.AsrModel);
+        Assert.Equal("wss://api.meta.ai/v1/asr/realtime", options.AsrWebSocketUrl);
+        Assert.Equal("https://api.meta.ai/v1/asr/transcribe", options.AsrTranscriptionUrl);
+        Assert.Equal("DIARIZATION", options.AsrMode);
+        Assert.True(options.HasRealtimeAsrRoute);
+        Assert.True(options.HasUploadAsrRoute);
+    }
+
+    [Fact]
     public void DisabledOptionsFailClosed()
     {
         var options = EllaiOptions.Bind(_ => null);
