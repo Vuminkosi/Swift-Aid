@@ -491,3 +491,10 @@ infra/.env-backup
 implementation.md
 implementation.md
 spec.md
+src/SwiftAid.Intelligence/packages.lock.json
+src/SwiftAid.Application/packages.lock.json
+src/SwiftAid.Client/packages.lock.json
+src/SwiftAid.Contracts/packages.lock.json
+src/SwiftAid.Domain/packages.lock.json
+src/SwiftAid.GuestIntake/packages.lock.json
+src/SwiftAid.Intelligence/packages.lock.json
