@@ -43,6 +43,7 @@
     @if (IsGuestEntry)
     {
         <div id="guest-root"
+             data-authenticated="@IsAuthenticated.ToString().ToLowerInvariant()"
              data-processing-policy-reference="@PublicPolicy?.Reference"
              data-processing-policy-version="@PublicPolicy?.Version"
              data-processing-policy-notice-text="@PublicPolicy?.NoticeText"
@@ -126,6 +127,9 @@
                 (path.Length == 0 || string.Equals(path, "/sessions", StringComparison.OrdinalIgnoreCase));
         }
     }
+
+    private bool IsAuthenticated =>
+        HttpContextAccessor.HttpContext?.User.Identity?.IsAuthenticated == true;
 
     private PublicReportProcessingPolicy? PublicPolicy =>
         _policyResult is { Code: UiCapabilityResultCode.Success, Value: not null } result

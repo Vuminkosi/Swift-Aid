@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "swiftaid-guest-static-";
-const CACHE_NAME = `${CACHE_PREFIX}v1`;
+const CACHE_NAME = `${CACHE_PREFIX}v2`;
 const OFFLINE_SHELL = "/offline.html";
 const PRELOAD_PATHS = [
     "/_content/MudBlazor/MudBlazor.min.js",
@@ -21,17 +21,15 @@ self.addEventListener("install", event => {
         const cache = await caches.open(CACHE_NAME);
         await cache.addAll([
             OFFLINE_SHELL,
-            "/_framework/blazor.webassembly.js",
-            "/_framework/blazor.boot.json"
+            "/_framework/blazor.webassembly.js"
         ]);
 
-        const boot = await (await fetch("/_framework/blazor.boot.json", { cache: "no-store" })).json();
-        const paths = Object.values(boot.resources ?? {})
-            .flatMap(group => Object.keys(group ?? {}))
-            .map(resource => new URL(resource, `${self.registration.scope}_framework/`))
-            .filter(url => url.origin === self.location.origin && isAllowedStaticPath(url.pathname));
-        await cache.addAll([...new Set(paths.map(url => url.href))]);
-        await Promise.allSettled(PRELOAD_PATHS.map(path => cache.add(new Request(path, { cache: "reload" }))));
+        await Promise.allSettled(PRELOAD_PATHS.map(async path => {
+            const response = await fetch(new Request(path, { cache: "reload" }));
+            if (response.ok) {
+                await cache.put(path, response);
+            }
+        }));
 
         await self.skipWaiting();
     })());
@@ -67,8 +65,18 @@ self.addEventListener("fetch", event => {
     }
 
     if (!isAllowedStaticPath(url.pathname)) return;
-    event.respondWith((async () =>
-        (await caches.match(request)) ?? fetch(request))());
+    event.respondWith((async () => {
+        const cache = await caches.open(CACHE_NAME);
+        try {
+            const response = await fetch(request);
+            if (response.ok) {
+                await cache.put(request, response.clone());
+            }
+            return response;
+        } catch {
+            return (await cache.match(request)) ?? Response.error();
+        }
+    })());
 });
 
 function isAllowedStaticPath(path) {

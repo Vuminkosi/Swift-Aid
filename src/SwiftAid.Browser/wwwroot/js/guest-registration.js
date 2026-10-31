@@ -9,3 +9,7 @@ export async function registerServiceWorker() {
         // Offline navigation is optional; the active report page remains available.
     }
 }
+
+export function isAuthenticated() {
+    return document.getElementById("guest-root")?.dataset.authenticated === "true";
+}
