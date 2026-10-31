@@ -98,6 +98,11 @@ public static class EllaiEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
+        group.MapGet("/sessions/{sessionId}/voice/state", EllaiGuestEndpoints.ReadVoiceTurnState)
+            .WithName("ReadEllaiVoiceTurnState")
+            .Produces<EllaiVoiceTurnStatusDto>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
         group.MapGet("/sessions/{sessionId}/responses", ReadResponses)
             .WithName("ReadEllaiSessionResponses")
             .Produces<EllaiSessionResponsePageDto>(StatusCodes.Status200OK)

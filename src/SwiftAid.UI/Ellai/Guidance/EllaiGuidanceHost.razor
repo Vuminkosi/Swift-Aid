@@ -99,6 +99,8 @@
     private Stream? _liveVoiceStream;
     private Task<EllaiVoiceTranscriptionResult?>? _liveVoiceTranscriptionTask;
     private CancellationTokenSource? _liveVoiceCts;
+    private CancellationTokenSource? _voiceTurnStatusCts;
+    private Task? _voiceTurnStatusTask;
     private long _capturedVoiceBytes;
     private EllaiVoiceCaptureMode? _captureMode;
     private bool _microphoneCaptureAvailable;
@@ -272,6 +274,10 @@
                 await _captureModule.InvokeVoidAsync("setPlaybackState", true, session.SessionId,
                     _activeResponseSequence, _activeResponsePlaybackId);
             }
+            if (mode == EllaiVoiceCaptureMode.Live)
+            {
+                await StartVoiceTurnStatusPollingAsync(session.SessionId);
+            }
             _startingVoiceCapture = false;
             StatusText = mode == EllaiVoiceCaptureMode.Recorded
                 ? $"Recording for transcription. {processingStatus} Stop when you are ready."
@@ -352,6 +358,99 @@
         _liveVoiceCts = null;
         return Task.CompletedTask;
     }
+
+    private async Task StartVoiceTurnStatusPollingAsync(string sessionId)
+    {
+        await StopVoiceTurnStatusPollingAsync();
+        var statusCts = CancellationTokenSource.CreateLinkedTokenSource(
+            _cts?.Token ?? CancellationToken.None);
+        _voiceTurnStatusCts = statusCts;
+        _voiceTurnStatusTask = PollVoiceTurnStatusAsync(sessionId, statusCts);
+    }
+
+    private async Task PollVoiceTurnStatusAsync(string sessionId, CancellationTokenSource statusCts)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+            do
+            {
+                var status = await ReviewClient.GetVoiceTurnStatusAsync(sessionId, statusCts.Token)
+                    .ConfigureAwait(false);
+                if (status is not null && status.Epoch > 0)
+                {
+                    await InvokeAsync(() =>
+                    {
+                        if (!_isRecordingAudio || _captureMode != EllaiVoiceCaptureMode.Live
+                            || !string.Equals(_sessionView?.SessionId, sessionId, StringComparison.Ordinal))
+                        {
+                            return;
+                        }
+
+                        if (GetVoiceTurnStatusText(status.State) is { } text
+                            && !string.Equals(StatusText, text, StringComparison.Ordinal))
+                        {
+                            StatusText = text;
+                            Phase = EllaiStatusPhases.Active;
+                            StateHasChanged();
+                        }
+                    }).ConfigureAwait(false);
+                }
+            }
+            while (await timer.WaitForNextTickAsync(statusCts.Token).ConfigureAwait(false));
+        }
+        catch (OperationCanceledException) when (statusCts.IsCancellationRequested)
+        {
+        }
+        catch (Exception)
+        {
+            // Status polling is advisory; capture and final transcription continue.
+        }
+        finally
+        {
+            if (ReferenceEquals(_voiceTurnStatusCts, statusCts))
+            {
+                _voiceTurnStatusCts = null;
+                _voiceTurnStatusTask = null;
+            }
+            statusCts.Dispose();
+        }
+    }
+
+    private async Task StopVoiceTurnStatusPollingAsync()
+    {
+        var statusCts = _voiceTurnStatusCts;
+        var statusTask = _voiceTurnStatusTask;
+        if (statusCts is null)
+        {
+            return;
+        }
+
+        statusCts.Cancel();
+        if (statusTask is not null)
+        {
+            try
+            {
+                await statusTask.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+    }
+
+    private static string? GetVoiceTurnStatusText(string state) => state switch
+    {
+        "Listening" => "I’m listening. Speak at your own pace.",
+        "SpeechCandidate" => "Speech detected. Keep speaking.",
+        "UserSpeaking" => "I’m listening to your message.",
+        "EndpointCandidate" => "Checking if you’re finished…",
+        "Processing" => "Finishing live transcription…",
+        "AssistantSpeaking" => "Ellai is speaking. You can interrupt by talking.",
+        "Interrupted" => "Ellai was interrupted. I’m listening.",
+        "Recovering" => "I couldn’t confirm that voice turn. Try again or type your message.",
+        _ => null,
+    };
 
     private async Task<bool> PlayListeningGreetingAsync(string sessionId)
     {
@@ -465,6 +564,7 @@
             await _captureModule.InvokeVoidAsync("cancelCapture");
         }
         _isRecordingAudio = false;
+        await StopVoiceTurnStatusPollingAsync();
         await CancelLiveVoiceStreamAsync();
         DiscardCapturedAudio();
         StatusText = "No speech detected. The microphone stopped; you can try again or type instead.";
@@ -480,6 +580,7 @@
             await _captureModule.InvokeVoidAsync("cancelCapture");
         }
         _isRecordingAudio = false;
+        await StopVoiceTurnStatusPollingAsync();
         await CancelLiveVoiceStreamAsync();
         DiscardCapturedAudio();
         StatusText = "Voice capture paused because audio could not be sent reliably. Try again or type your message.";
@@ -504,6 +605,7 @@
                 await _captureModule.InvokeVoidAsync("stopCapture");
             }
             _isRecordingAudio = false;
+            await StopVoiceTurnStatusPollingAsync();
             var session = _sessionView;
             var mode = _captureMode;
             if (session is null || mode is null || _capturedVoiceBytes == 0
@@ -546,7 +648,14 @@
 
             if (result is null || string.IsNullOrWhiteSpace(result.Transcript))
             {
-                StatusText = "That voice turn didn't come through. Please try again or type your message.";
+                var failedTurnStatus = mode == EllaiVoiceCaptureMode.Live
+                    ? await ReviewClient.GetVoiceTurnStatusAsync(
+                        session.SessionId, _cts?.Token ?? CancellationToken.None).ConfigureAwait(false)
+                    : null;
+                StatusText = failedTurnStatus is not null
+                    ? GetVoiceTurnStatusText(failedTurnStatus.State)
+                        ?? "That voice turn didn't come through. Please try again or type your message."
+                    : "That voice turn didn't come through. Please try again or type your message.";
                 Phase = EllaiStatusPhases.NeedsInput;
                 return;
             }
@@ -1637,6 +1746,7 @@
         _submissionCts?.Dispose();
         _captureDotnetReference?.Dispose();
         _isRecordingAudio = false;
+        _voiceTurnStatusCts?.Cancel();
         if (_captureModule is not null)
         {
             _ = _captureModule.InvokeVoidAsync("cancelCapture");
@@ -1656,6 +1766,7 @@
     {
         _isRecordingAudio = false;
         _voiceCaptureConsentGranted = false;
+        await StopVoiceTurnStatusPollingAsync();
         try
         {
             if (_captureModule is not null)

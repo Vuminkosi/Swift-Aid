@@ -14,6 +14,14 @@ public enum EllaiVoiceCaptureMode
 
 public sealed record EllaiVoiceTranscriptionResult(string Transcript);
 
+/// <summary>Transient state for the active voice stream. Contains no audio or
+/// transcript content and is scoped to the owning Ellai session.</summary>
+public sealed record EllaiVoiceTurnStatusDto(
+    string State,
+    long Epoch,
+    int ConfirmedSpeechMilliseconds,
+    int SilenceMilliseconds);
+
 /// <summary>Session UI event as delivered by the review event transport.</summary>
 public sealed record EllaiSessionEventDto(
     long Sequence,
@@ -119,6 +127,10 @@ public interface IEllaiReviewClient
     Task<EllaiVoiceTranscriptionResult?> TranscribeLiveVoiceStreamAsync(
         string sessionId, Stream audio, CancellationToken cancellationToken) =>
         Task.FromResult<EllaiVoiceTranscriptionResult?>(null);
+
+    Task<EllaiVoiceTurnStatusDto?> GetVoiceTurnStatusAsync(
+        string sessionId, CancellationToken cancellationToken) =>
+        Task.FromResult<EllaiVoiceTurnStatusDto?>(null);
 
     Task<EllaiSessionCancelResult> CancelSessionAsync(
         string sessionId, long expectedSessionVersion, CancellationToken cancellationToken);

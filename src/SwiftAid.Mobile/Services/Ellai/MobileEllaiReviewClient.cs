@@ -86,6 +86,10 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
         string sessionId, Stream audio, CancellationToken cancellationToken) =>
         ClientFor(sessionId).TranscribeLiveVoiceStreamAsync(sessionId, audio, cancellationToken);
 
+    public Task<EllaiVoiceTurnStatusDto?> GetVoiceTurnStatusAsync(
+        string sessionId, CancellationToken cancellationToken) =>
+        ClientFor(sessionId).GetVoiceTurnStatusAsync(sessionId, cancellationToken);
+
     public async Task<EllaiSessionCancelResult> CancelSessionAsync(
         string sessionId, long expectedSessionVersion, CancellationToken cancellationToken)
     {

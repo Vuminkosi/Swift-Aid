@@ -21,6 +21,20 @@ public static class EllaiGuestEndpoints
     private const string GuestActorPrefix = "ellai-guest-";
     private static readonly TimeSpan GuestSessionLifetime = TimeSpan.FromHours(2);
 
+    public static IResult ReadVoiceTurnState(
+        string sessionId, EllaiVoiceTurnCoordinator coordinator)
+    {
+        var snapshot = coordinator.GetSnapshot(sessionId);
+        return Results.Ok(new EllaiVoiceTurnStatusDto(
+            snapshot.State.ToString(),
+            snapshot.Epoch,
+            ToMilliseconds(snapshot.ConfirmedSpeech),
+            ToMilliseconds(snapshot.Silence)));
+    }
+
+    private static int ToMilliseconds(TimeSpan duration) =>
+        (int)Math.Clamp(duration.TotalMilliseconds, 0, int.MaxValue);
+
     public static void MapEllaiGuestEndpoints(this IEndpointRouteBuilder endpoints)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
@@ -128,6 +142,12 @@ public static class EllaiGuestEndpoints
             .RequireRateLimiting("ellai-guest-read")
             .WithName("PollEllaiGuestSessionEvents")
             .Produces<EllaiSessionEventPageDto>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
+        group.MapGet("/sessions/{sessionId}/voice/state", ReadVoiceTurnState)
+            .RequireRateLimiting("ellai-guest-read")
+            .WithName("ReadEllaiGuestVoiceTurnState")
+            .Produces<EllaiVoiceTurnStatusDto>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
         group.MapGet("/sessions/{sessionId}/responses", ReadResponses)

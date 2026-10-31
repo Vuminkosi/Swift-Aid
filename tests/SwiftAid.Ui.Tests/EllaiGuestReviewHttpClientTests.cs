@@ -141,6 +141,26 @@ public sealed class EllaiGuestReviewHttpClientTests
         Assert.Equal(new byte[] { 1, 2, 3, 4, 5, 6 }, handler.AudioBytes);
     }
 
+    [Theory]
+    [InlineData(true, "/api/v1/ellai/guest/sessions/guest-session/voice/state")]
+    [InlineData(false, "/api/v1/ellai/sessions/guest-session/voice/state")]
+    public async Task VoiceTurnStatusUsesSessionScopedReadRouteWithoutTranscriptData(
+        bool guestRoute, string expectedPath)
+    {
+        var handler = new VoiceStatusHandler();
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost/") };
+        var client = new EllaiReviewHttpClient(http, useGuestRoutes: guestRoute);
+
+        var status = await client.GetVoiceTurnStatusAsync("guest-session", CancellationToken.None);
+
+        Assert.Equal(expectedPath, handler.Path);
+        Assert.Equal(HttpMethod.Get, handler.Method);
+        Assert.NotNull(status);
+        Assert.Equal("UserSpeaking", status.State);
+        Assert.Equal(5, status.Epoch);
+        Assert.Null(handler.CsrfToken);
+    }
+
     private sealed class RecordingHandler : HttpMessageHandler
     {
         public List<HttpMethod> Methods { get; } = [];
@@ -288,6 +308,29 @@ public sealed class EllaiGuestReviewHttpClientTests
             {
                 Content = new StringContent("{\"transcript\":\"streamed words\"}", Encoding.UTF8, "application/json"),
             };
+        }
+    }
+
+    private sealed class VoiceStatusHandler : HttpMessageHandler
+    {
+        public string? Path { get; private set; }
+        public HttpMethod? Method { get; private set; }
+        public string? CsrfToken { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Path = request.RequestUri?.AbsolutePath;
+            Method = request.Method;
+            CsrfToken = request.Headers.TryGetValues("X-CSRF-TOKEN", out var values)
+                ? values.Single()
+                : null;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "{\"state\":\"UserSpeaking\",\"epoch\":5,\"confirmedSpeechMilliseconds\":320,\"silenceMilliseconds\":0}",
+                    Encoding.UTF8, "application/json"),
+            });
         }
     }
 

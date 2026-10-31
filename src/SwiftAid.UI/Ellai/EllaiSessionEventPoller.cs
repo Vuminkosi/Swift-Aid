@@ -256,6 +256,33 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
         }
     }
 
+    public async Task<EllaiVoiceTurnStatusDto?> GetVoiceTurnStatusAsync(
+        string sessionId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var response = await _http.GetAsync(
+                $"{SessionRoute(sessionId)}/voice/state", cancellationToken).ConfigureAwait(false);
+            return response.IsSuccessStatusCode
+                ? await response.Content.ReadFromJsonAsync<EllaiVoiceTurnStatusDto>(Json, cancellationToken)
+                    .ConfigureAwait(false)
+                : null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     public async Task<EllaiSessionCancelResult> CancelSessionAsync(
         string sessionId, long expectedSessionVersion, CancellationToken cancellationToken)
     {

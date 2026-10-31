@@ -290,6 +290,29 @@ public sealed class EllaiReviewGatewayClient(
         }
     }
 
+    public async Task<EllaiVoiceTurnStatusDto?> GetVoiceTurnStatusAsync(
+        string sessionId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId)
+            || !await OwnsSessionAsync(sessionId, cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        var coordinator = _serviceProvider.GetService<EllaiVoiceTurnCoordinator>();
+        if (coordinator is null)
+        {
+            return null;
+        }
+
+        var snapshot = coordinator.GetSnapshot(sessionId);
+        return new EllaiVoiceTurnStatusDto(snapshot.State.ToString(), snapshot.Epoch,
+            ToMilliseconds(snapshot.ConfirmedSpeech), ToMilliseconds(snapshot.Silence));
+    }
+
+    private static int ToMilliseconds(TimeSpan duration) =>
+        (int)Math.Clamp(duration.TotalMilliseconds, 0, int.MaxValue);
+
     public async Task<EllaiSessionCancelResult> CancelSessionAsync(
         string sessionId, long expectedSessionVersion, CancellationToken cancellationToken)
     {

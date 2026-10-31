@@ -5,6 +5,7 @@ using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -13,6 +14,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using OpenIddict.Validation.AspNetCore;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Ellai;
@@ -261,6 +263,19 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             var session = (await started.Content.ReadFromJsonAsync<EllaiSessionView>())!;
             Assert.StartsWith("ellai-help-identity-epoch-0", session.ScopeDisplay, StringComparison.Ordinal);
 
+            using (var stateRequest = new HttpRequestMessage(HttpMethod.Get,
+                       $"/api/v1/ellai/guest/sessions/{session.SessionId}/voice/state"))
+            {
+                stateRequest.Headers.TryAddWithoutValidation("Cookie",
+                    string.Join("; ", cookies.Select(cookie => $"{cookie.Key}={cookie.Value}")));
+                using var stateResponse = await client.SendAsync(stateRequest);
+                Assert.Equal(System.Net.HttpStatusCode.OK, stateResponse.StatusCode);
+                var stateJson = await stateResponse.Content.ReadAsStringAsync();
+                Assert.DoesNotContain("transcript", stateJson, StringComparison.OrdinalIgnoreCase);
+                var voiceState = await stateResponse.Content.ReadFromJsonAsync<EllaiVoiceTurnStatusDto>();
+                Assert.Equal("Idle", voiceState?.State);
+            }
+
             var responseStore = app.Services.GetRequiredService<EllaiSessionResponseStore>();
             responseStore.Publish(session.SessionId, "guest-utterance-1", "Guest-safe current turn output.");
             using (var responseRequest = new HttpRequestMessage(HttpMethod.Get,
@@ -341,6 +356,29 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
                 }
             }
         }
+    }
+
+    [Fact]
+    public async Task AuthenticatedVoiceTurnStateIsSessionOwnerScopedAndTranscriptFree()
+    {
+        await using var app = await StartApplicationAsync();
+        var coordinator = app.Services.GetRequiredService<EllaiVoiceTurnCoordinator>();
+        using var stream = coordinator.BeginStream("session-1", CancellationToken.None);
+        using var client = app.GetTestClient();
+
+        using var response = await client.GetAsync("/api/v1/ellai/sessions/session-1/voice/state");
+
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+        var payload = await response.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("transcript", payload, StringComparison.OrdinalIgnoreCase);
+        var status = await response.Content.ReadFromJsonAsync<EllaiVoiceTurnStatusDto>();
+        Assert.Equal("Listening", status?.State);
+        Assert.Equal(stream.Epoch, status?.Epoch);
+
+        await using var otherOwnerApp = await StartApplicationAsync(sessionOwnerId: "different-owner");
+        using var otherOwnerClient = otherOwnerApp.GetTestClient();
+        using var denied = await otherOwnerClient.GetAsync("/api/v1/ellai/sessions/session-1/voice/state");
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, denied.StatusCode);
     }
 
     [Fact]
@@ -444,6 +482,7 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
+        builder.Logging.ClearProviders();
         builder.Services.AddAuthentication(options =>
             {
                 options.DefaultAuthenticateScheme = IdentityConstants.ApplicationScheme;
@@ -459,6 +498,7 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
                 options.Cookie.SameSite = SameSiteMode.Strict;
             });
         builder.Services.AddAntiforgery(options => options.HeaderName = "X-CSRF-TOKEN");
+        builder.Services.AddDataProtection().UseEphemeralDataProtectionProvider();
         builder.Services.AddRateLimiter(options =>
         {
             foreach (var policyName in new[] { "ellai-guest-write", "ellai-guest-read" })
@@ -508,6 +548,11 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
         });
         builder.Services.AddSingleton<EllaiSessionEventJournal>();
         builder.Services.AddSingleton<EllaiSessionResponseStore>();
+        builder.Services.AddSingleton<EllaiResponseSpeechCoordinator>();
+        builder.Services.AddSingleton<EllaiVoiceTurnCoordinator>();
+        builder.Services.AddHttpClient<EllaiSpeechSynthesisClient>();
+        builder.Services.AddTransient<IEllaiSpeechSynthesisClient>(services =>
+            services.GetRequiredService<EllaiSpeechSynthesisClient>());
         builder.Services.AddSingleton<IEllaiApprovalStore, EllaiReceiptStore>();
 
         var app = builder.Build();
