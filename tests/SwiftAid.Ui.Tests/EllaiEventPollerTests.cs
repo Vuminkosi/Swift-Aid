@@ -9,6 +9,35 @@ namespace SwiftAid.Ui.Tests;
 [Trait("Task", "ELL-T08")]
 public sealed class EllaiEventPollerTests
 {
+    [Fact]
+    public async Task GatewayRestartResetsTransientCursor()
+    {
+        var reviews = new FakeReviews
+        {
+            ResponsePage = new([new(8, "s-1", "Before restart", DateTimeOffset.UtcNow)], 8, "first-process"),
+        };
+        var poller = new EllaiEventPoller(reviews);
+        var received = new List<EllaiSessionResponseDto>();
+        poller.ResponseReceived += received.Add;
+        poller.TrackSession("s-1");
+        await poller.PollOnceAsync(0, CancellationToken.None);
+        reviews.ResponsePage = new([new(1, "s-1", "After restart", DateTimeOffset.UtcNow)], 1, "second-process");
+        await poller.PollOnceAsync(0, CancellationToken.None);
+        Assert.Equal(2, received.Count);
+        Assert.Equal("After restart", received[1].Text);
+    }
+
+    [Fact]
+    public async Task FailedResponseHandlerDoesNotAdvanceCursor()
+    {
+        var reviews = new FakeReviews { ResponsePage = new([new(1, "s-1", "Answer", DateTimeOffset.UtcNow)], 1) };
+        var poller = new EllaiEventPoller(reviews);
+        poller.TrackSession("s-1");
+        poller.ResponseReceived += _ => throw new InvalidOperationException("synthetic handler failure");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => poller.PollOnceAsync(0, CancellationToken.None));
+        Assert.Equal(0, poller.ResponseCursor);
+    }
+
     private sealed class FakeReviews : IEllaiReviewClient
     {
         public EllaiSessionEventPageDto? Page { get; set; } =

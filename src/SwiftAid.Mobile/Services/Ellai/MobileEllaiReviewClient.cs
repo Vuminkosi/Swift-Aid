@@ -71,6 +71,24 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
         SubmitUtteranceRequest request, CancellationToken cancellationToken) =>
         ClientFor(request.SessionId).SubmitUtteranceAsync(request, cancellationToken);
 
+    public async Task<EllaiSessionStartResult> ResumeSessionAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        if (_authenticated is null || _guest is null) return new(EllaiClientOperationStatus.Unavailable);
+        if (_guestSessions.ContainsKey(sessionId))
+            return await _guest.ResumeSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var signedIn = await _authentication.IsSignedInAsync(cancellationToken).ConfigureAwait(false);
+            var result = await (signedIn ? _authenticated : _guest).ResumeSessionAsync(sessionId, cancellationToken)
+                .ConfigureAwait(false);
+            if (!signedIn && result.Status == EllaiClientOperationStatus.Accepted)
+                _guestSessions.TryAdd(sessionId, 0);
+            return result;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch { return new(EllaiClientOperationStatus.OutcomeUnknown); }
+    }
+
     public Task<bool> GrantPublicProductHelpConsentAsync(
         string sessionId, CancellationToken cancellationToken) =>
         ClientFor(sessionId).GrantPublicProductHelpConsentAsync(sessionId, cancellationToken);

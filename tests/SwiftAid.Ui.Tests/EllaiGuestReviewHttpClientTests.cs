@@ -9,6 +9,22 @@ namespace SwiftAid.Ui.Tests;
 [Trait("Feature", "Ellai")]
 public sealed class EllaiGuestReviewHttpClientTests
 {
+    [Theory]
+    [InlineData("http://localhost:8080/", "ws://localhost:8080/api/v1/ellai/guest/sessions/guest-session/voice/live-stream?voiceCaptureId=capture-1")]
+    [InlineData("https://example.test/app/", "wss://example.test/app/api/v1/ellai/guest/sessions/guest-session/voice/live-stream?voiceCaptureId=capture-1")]
+    public void LiveVoiceWebSocketUsesSameOriginAndSecureScheme(
+        string baseAddress, string expected)
+    {
+        var handler = new RecordingHandler();
+        using var http = new HttpClient(handler) { BaseAddress = new Uri(baseAddress) };
+        var client = new EllaiReviewHttpClient(http, useGuestRoutes: true);
+
+        var uri = client.CreateLiveVoiceWebSocketUri(
+            new Uri(baseAddress), "guest-session", "capture-1");
+
+        Assert.Equal(expected, uri.ToString());
+    }
+
     [Fact]
     public async Task PublicHelpConsentUsesGuestRouteAndAntiforgeryHeader()
     {

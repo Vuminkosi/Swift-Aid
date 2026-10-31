@@ -2,7 +2,8 @@ const activeCaptures = new Set();
 const targetRate = 24000;
 const chunkSamples = 960;
 const maximumDurationMs = 8 * 60 * 1000;
-const maximumQueuedChunks = 8;
+const maximumQueuedChunks = 64;
+const maximumRecoveryBytes = 32 * 1024 * 1024;
 
 export function isSupported() {
     return Boolean(navigator.mediaDevices?.getUserMedia
@@ -28,21 +29,28 @@ export function startConnectivityMonitoring(dotnet) {
     };
 }
 
-export async function startCapture(dotnet, showLiveVoiceLevel = false, sessionId = "") {
+export async function startCapture(dotnet, showLiveVoiceLevel = false, sessionId = "", voiceSocketUrl = "") {
     if (!isSupported()) {
         throw new Error("Microphone capture requires browser AudioWorklet support.");
     }
 
     await stopCapture();
-    const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-            channelCount: { ideal: 1 },
-            echoCancellation: { ideal: true },
-            noiseSuppression: { ideal: true },
-            autoGainControl: { ideal: true }
-        },
-        video: false
-    });
+    let voiceSocket = null;
+    let stream;
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+                channelCount: { ideal: 1 },
+                echoCancellation: { ideal: true },
+                noiseSuppression: { ideal: true },
+                autoGainControl: { ideal: true }
+            },
+            video: false
+        });
+    } catch (error) {
+        if (voiceSocket) await closeVoiceSocket(voiceSocket);
+        throw error;
+    }
 
     let context;
     try {
@@ -51,12 +59,17 @@ export async function startCapture(dotnet, showLiveVoiceLevel = false, sessionId
         await context.resume();
     } catch (error) {
         for (const track of stream.getTracks()) track.stop();
+        if (voiceSocket) await closeVoiceSocket(voiceSocket);
         if (context) {
             try { await context.close(); } catch { }
         }
         throw error;
     }
 
+    if (voiceSocketUrl) {
+        try { voiceSocket = await openVoiceSocket(voiceSocketUrl); }
+        catch { /* Keep capture available for bounded reconnect recovery. */ }
+    }
     const source = context.createMediaStreamSource(stream);
     const processor = new AudioWorkletNode(context, "ellai-voice-capture", {
         numberOfInputs: 1,
@@ -84,6 +97,13 @@ export async function startCapture(dotnet, showLiveVoiceLevel = false, sessionId
         });
     const state = {
         stream, context, source, processor, sink, dotnet,
+        voiceSocket,
+        usesVoiceSocket: Boolean(voiceSocketUrl),
+        transportRecovering: false,
+        recoveryFrames: [],
+        recoveryBytes: 0,
+        unmirroredFrames: [],
+        producedBytes: 0,
         showLiveVoiceLevel: showLiveVoiceLevel === true,
         sessionId,
         voiceLevel: 0,
@@ -93,7 +113,8 @@ export async function startCapture(dotnet, showLiveVoiceLevel = false, sessionId
         phase: 0,
         queue: Promise.resolve(),
         queuedChunks: 0,
-        limitTimer: 0
+        limitTimer: 0,
+        cancelled: false
     };
 
     source.connect(processor);
@@ -104,6 +125,7 @@ export async function startCapture(dotnet, showLiveVoiceLevel = false, sessionId
         if (state.active) void dotnet.invokeMethodAsync("OnVoiceCaptureLimitReached");
     }, maximumDurationMs);
     activeCaptures.add(state);
+    if (state.usesVoiceSocket && state.voiceSocket?.readyState !== WebSocket.OPEN) beginTransportRecovery(state);
     const formatState = value => value === true || value === "all"
         ? "on"
         : value === false ? "off" : value ?? "not reported";
@@ -159,12 +181,37 @@ function clearLiveSpeakGlow() {
     }
 }
 
+function beginTransportRecovery(state) {
+    if (state.transportRecovering || !state.active) return;
+    state.transportRecovering = true;
+    state.recoveryFrames = [...state.unmirroredFrames];
+    state.recoveryBytes = state.recoveryFrames.reduce((sum, frame) => sum + frame.bytes.byteLength, 0);
+    void state.dotnet.invokeMethodAsync("OnVoiceCaptureBackpressure").catch(() => { });
+}
+
 function enqueueChunk(state, samples) {
     if (!state.active) return;
-    if (state.queuedChunks >= maximumQueuedChunks) {
+    if (state.queuedChunks >= maximumQueuedChunks || state.recoveryBytes >= maximumRecoveryBytes) {
+        // A finite buffer cannot hide sustained loss. End explicitly, preserving the captured copy.
         state.active = false;
-        void state.dotnet.invokeMethodAsync("OnVoiceCaptureBackpressure");
+        void state.dotnet.invokeMethodAsync("OnVoiceCaptureLimitReached").catch(() => { });
         return;
+    }
+
+    let frame = null;
+    if (state.usesVoiceSocket) {
+        frame = { start: state.producedBytes, bytes: encodePcm16(samples) };
+        state.producedBytes += frame.bytes.byteLength;
+        state.unmirroredFrames.push(frame);
+        if (state.transportRecovering) {
+            state.recoveryFrames.push(frame);
+            state.recoveryBytes += frame.bytes.byteLength;
+        } else if (state.voiceSocket?.readyState !== WebSocket.OPEN || state.voiceSocket.bufferedAmount > 65536) {
+            beginTransportRecovery(state);
+        } else {
+            try { state.voiceSocket.send(frame.bytes); }
+            catch { beginTransportRecovery(state); }
+        }
     }
 
     state.queuedChunks++;
@@ -172,11 +219,13 @@ function enqueueChunk(state, samples) {
         .then(() => state.dotnet.invokeMethodAsync("ReceiveVoicePcmChunk", samples))
         .catch(() => {
             state.active = false;
-            globalThis.setTimeout(() => {
-                void state.dotnet.invokeMethodAsync("OnVoiceCaptureBackpressure").catch(() => { });
-            }, 0);
+            // Interop failure is observable; do not silently discard the recording.
+            void state.dotnet.invokeMethodAsync("OnVoiceCaptureLimitReached").catch(() => { });
         })
-        .finally(() => { state.queuedChunks--; });
+        .finally(() => {
+            state.queuedChunks--;
+            if (frame) state.unmirroredFrames = state.unmirroredFrames.filter(item => item !== frame);
+        });
 }
 
 export async function stopCapture() {
@@ -196,11 +245,22 @@ export async function stopCapture() {
         for (const track of state.stream.getTracks()) track.stop();
         try { await state.context.close(); } catch { }
         await state.queue;
+        if (state.voiceSocket) {
+            if (!state.cancelled && state.voiceSocket.readyState === WebSocket.OPEN) {
+                const silence = new Uint8Array(1536);
+                for (let frame = 0; frame < 22; frame++) state.voiceSocket.send(silence);
+            }
+            await closeVoiceSocket(state.voiceSocket);
+            state.voiceSocket = null;
+        }
         activeCaptures.delete(state);
     }
 }
 
 function enqueueFinalChunk(state, samples) {
+    if (state.voiceSocket?.readyState === WebSocket.OPEN) {
+        state.voiceSocket.send(encodePcm16(samples));
+    }
     state.queuedChunks++;
     state.queue = state.queue
         .then(() => state.dotnet.invokeMethodAsync("ReceiveVoicePcmChunk", samples))
@@ -209,8 +269,118 @@ function enqueueFinalChunk(state, samples) {
 
 export async function cancelCapture() {
     for (const state of activeCaptures) {
+        state.cancelled = true;
         state.pending.length = 0;
         state.pendingLength = 0;
     }
     await stopCapture();
+}
+
+export async function closeVoiceStream() {
+    for (const state of activeCaptures) {
+        state.cancelled = true;
+        if (state.voiceSocket) {
+            await closeVoiceSocket(state.voiceSocket);
+            state.voiceSocket = null;
+        }
+    }
+}
+
+export async function reconnectVoiceStream(voiceSocketUrl, replayPcm) {
+    const state = [...activeCaptures].find(capture => capture.active);
+    if (!state || !voiceSocketUrl || !(replayPcm instanceof Uint8Array)) return false;
+    beginTransportRecovery(state);
+    const previous = state.voiceSocket;
+    if (previous) {
+        previous.onclose = null;
+        try { previous.close(1000, "Replacing recovered voice stream."); } catch { }
+    }
+
+    const socket = await openVoiceSocket(voiceSocketUrl);
+    state.voiceSocket = socket;
+    const deadline = Date.now() + 10000;
+    async function send(bytes) {
+        while (socket.bufferedAmount > 65536 && socket.readyState === WebSocket.OPEN && state.active) {
+            if (Date.now() >= deadline) throw new Error("Voice recovery buffer did not drain.");
+            await new Promise(resolve => globalThis.setTimeout(resolve, 20));
+        }
+        if (!state.active || socket.readyState !== WebSocket.OPEN) throw new Error("Voice recovery connection closed.");
+        socket.send(bytes);
+    }
+    const maximumChunkBytes = 8192;
+    for (let offset = 0; offset < replayPcm.byteLength; offset += maximumChunkBytes) {
+        await send(replayPcm.slice(offset, Math.min(offset + maximumChunkBytes, replayPcm.byteLength)));
+    }
+    // Audio continues while reconnecting. Absolute byte offsets reconcile the JS tail with
+    // the .NET snapshot, including frames awaiting interop when the connection failed.
+    let sentThrough = replayPcm.byteLength;
+    while (state.recoveryFrames.length > 0) {
+        const frame = state.recoveryFrames.shift();
+        state.recoveryBytes -= frame.bytes.byteLength;
+        const skip = Math.max(0, sentThrough - frame.start);
+        if (skip < frame.bytes.byteLength) {
+            await send(frame.bytes.slice(skip));
+            sentThrough = frame.start + frame.bytes.byteLength;
+        }
+    }
+    state.transportRecovering = false;
+    return true;
+}
+
+function openVoiceSocket(url) {
+    return new Promise((resolve, reject) => {
+        const socket = new WebSocket(url);
+        socket.binaryType = "arraybuffer";
+        const timeout = globalThis.setTimeout(() => {
+            socket.close();
+            reject(new Error("Voice stream connection timed out."));
+        }, 10000);
+        socket.onopen = () => {
+            globalThis.clearTimeout(timeout);
+            resolve(socket);
+        };
+        socket.onerror = () => {
+            globalThis.clearTimeout(timeout);
+            reject(new Error("Voice stream connection failed."));
+        };
+        socket.onclose = event => {
+            globalThis.clearTimeout(timeout);
+            const capture = [...activeCaptures].find(item => item.voiceSocket === socket);
+            if (capture) {
+                if (capture.active) beginTransportRecovery(capture);
+                void capture.dotnet.invokeMethodAsync("OnVoiceWebSocketClosed", event.code, event.wasClean)
+                    .catch(() => { });
+            }
+        };
+    });
+}
+
+function closeVoiceSocket(socket) {
+    return new Promise(resolve => {
+        if (socket.readyState === WebSocket.CLOSED) {
+            resolve();
+            return;
+        }
+        const timeout = globalThis.setTimeout(resolve, 2000);
+        socket.addEventListener("close", () => {
+            globalThis.clearTimeout(timeout);
+            resolve();
+        }, { once: true });
+        try {
+            if (socket.readyState === WebSocket.OPEN) socket.close(1000, "Capture stopped.");
+            else if (socket.readyState === WebSocket.CONNECTING) socket.close();
+        } catch {
+            globalThis.clearTimeout(timeout);
+            resolve();
+        }
+    });
+}
+
+function encodePcm16(samples) {
+    const bytes = new Uint8Array(samples.length * 2);
+    const view = new DataView(bytes.buffer);
+    for (let index = 0; index < samples.length; index++) {
+        view.setInt16(index * 2, samples[index], true);
+    }
+    return bytes.buffer;
 }

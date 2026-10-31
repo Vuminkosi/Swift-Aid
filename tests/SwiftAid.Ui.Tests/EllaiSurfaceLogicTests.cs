@@ -22,6 +22,24 @@ namespace SwiftAid.Ui.Tests;
 public sealed class EllaiSurfaceLogicTests
 {
     [Fact]
+    public async Task VoiceEntryWaitsForAnActiveSessionAndRecoversAfterStartup()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(version: 1), string.Empty);
+        SetField(host, "_sessionView", null);
+        SetField(host, "_startingSession", true);
+        Assert.False(GetProperty<bool>(host, "CanStartVoiceCapture"));
+        SetField(host, "_sessionView", CreateSession(version: 1));
+        Assert.False(GetProperty<bool>(host, "CanStartVoiceCapture"));
+        SetField(host, "_startingSession", false);
+        Assert.True(GetProperty<bool>(host, "CanStartVoiceCapture"));
+        SetField(host, "_startingVoiceCapture", true);
+        Assert.False(GetProperty<bool>(host, "CanStartVoiceCapture"));
+        SetField(host, "_startingVoiceCapture", false);
+        SetField(host, "_isRecordingAudio", true);
+        Assert.False(GetProperty<bool>(host, "CanStartVoiceCapture"));
+    }
+
+    [Fact]
     public void AudioProcessingStatusShowsEffectiveAndUnreportedCapabilities()
     {
         var status = new EllaiAudioProcessingStatus("iOS", true, null, null, true);
@@ -123,6 +141,27 @@ public sealed class EllaiSurfaceLogicTests
 
         streamCompletion.SetResult(null);
         await InvokeAsync(host, "StopAndDiscardVoiceCaptureAsync");
+    }
+
+    [Fact]
+    public async Task GreetingStartsAfterCaptureAndDoesNotEndIt()
+    {
+        var streaming = new TaskCompletionSource<EllaiVoiceTranscriptionResult?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var client = new FakeReviewClient { LiveTranscriptionHandler = (_, _) => streaming.Task };
+        using var host = await CreateHost(client, CreateSession(version: 1), string.Empty);
+        var module = new RecordingJsModule();
+        SetField(host, "_captureModule", module);
+        SetField(host, "_speechModule", module);
+        SetField(host, "_microphoneCaptureAvailable", true);
+        SetField(host, "_voiceNetworkOnline", true);
+        try
+        {
+            await InvokeAsync(host, "StartLiveCaptureAsync");
+            Assert.True(module.Invocations.IndexOf("startCapture") < module.Invocations.IndexOf("playListeningGreeting"));
+            Assert.True(GetField<bool>(host, "_isRecordingAudio"));
+            Assert.DoesNotContain("stopCapture", module.Invocations);
+        }
+        finally { streaming.TrySetResult(null); }
     }
 
     [Fact]
@@ -371,7 +410,7 @@ public sealed class EllaiSurfaceLogicTests
     }
 
     [Fact]
-    public async Task BrowserCaptureQueueOverflowDoesNotSubmitAnUnconfirmedTranscript()
+    public async Task BrowserBackpressureKeepsCaptureUntilExplicitStop()
     {
         var client = new FakeReviewClient
         {
@@ -389,6 +428,9 @@ public sealed class EllaiSurfaceLogicTests
 
         await InvokeAsync(host, "OnVoiceCaptureBackpressure");
 
+        Assert.True(GetField<bool>(host, "_isRecordingAudio"));
+        Assert.Empty(client.VoiceTranscriptions);
+        await InvokeAsync(host, "StopVoiceCaptureAsync");
         Assert.Single(client.VoiceTranscriptions);
         Assert.Equal(new byte[] { 1, 2, 3, 4 }, client.VoiceTranscriptions[0].Audio);
         Assert.Equal("draft", GetField<string?>(host, "InputText"));
@@ -839,6 +881,24 @@ public sealed class EllaiSurfaceLogicTests
 
         Assert.Contains(responseText, html, StringComparison.Ordinal);
         Assert.Contains("aria-live=\"polite\"", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FinalOutcomeReplacesProvisionalTextAndRejectsFailedCompletion()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(version: 1), "draft");
+        await InvokeAsync(host, "OnResponseReceived",
+            new EllaiSessionResponseDto(1, "session-1", "Provisional answer", DateTimeOffset.UtcNow, "u-1", false));
+        await InvokeAsync(host, "OnResponseReceived",
+            new EllaiSessionResponseDto(2, "session-1", "Validated answer", DateTimeOffset.UtcNow, "u-1", true, true, "Completed"));
+        await host.Dispatcher.InvokeAsync(async () => await Task.Yield());
+        Assert.Equal("Validated answer", GetField<string?>(host, "_latestResponseText"));
+        await InvokeAsync(host, "OnResponseReceived",
+            new EllaiSessionResponseDto(3, "session-1", "Unsafe provisional", DateTimeOffset.UtcNow, "u-2", false));
+        await InvokeAsync(host, "OnResponseReceived",
+            new EllaiSessionResponseDto(4, "session-1", "", DateTimeOffset.UtcNow, "u-2", true, true, "TerminalFailure"));
+        await host.Dispatcher.InvokeAsync(async () => await Task.Yield());
+        Assert.DoesNotContain("Unsafe provisional", GetField<string?>(host, "_latestResponseText") ?? "");
     }
 
     [Fact]

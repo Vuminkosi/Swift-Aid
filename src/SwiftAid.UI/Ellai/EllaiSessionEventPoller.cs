@@ -16,6 +16,27 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
     private readonly HttpClient _http = http ?? throw new ArgumentNullException(nameof(http));
     private readonly bool _useGuestRoutes = useGuestRoutes;
     private string? _guestAntiforgeryToken;
+    private string? _responseStreamId;
+
+    public Uri CreateLiveVoiceWebSocketUri(Uri baseUri, string sessionId, string voiceCaptureId,
+        long voiceCaptureOffsetSamples = 0)
+    {
+        ArgumentNullException.ThrowIfNull(baseUri);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(voiceCaptureId);
+        var route = $"{SessionRoute(sessionId)}/voice/live-stream?voiceCaptureId={Uri.EscapeDataString(voiceCaptureId)}";
+        if (voiceCaptureOffsetSamples > 0)
+        {
+            route += $"&voiceCaptureOffsetSamples={voiceCaptureOffsetSamples}";
+        }
+
+        var uri = new Uri(baseUri, route);
+        var builder = new UriBuilder(uri)
+        {
+            Scheme = uri.Scheme == Uri.UriSchemeHttps ? "wss" : "ws",
+        };
+        return builder.Uri;
+    }
 
     public async Task<EllaiSessionStartResult> StartSessionAsync(
         EllaiMode mode, CancellationToken cancellationToken)
@@ -66,6 +87,24 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
                 => EllaiClientOperationStatus.PolicyBlocked,
             _ => EllaiClientOperationStatus.Unavailable,
         };
+    }
+
+    public async Task<EllaiSessionStartResult> ResumeSessionAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await _http.GetAsync(SessionRoute(sessionId), cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+                return new(response.StatusCode == System.Net.HttpStatusCode.NotFound
+                    ? EllaiClientOperationStatus.Unauthorized : MapStartStatus(response.StatusCode));
+            var session = await response.Content.ReadFromJsonAsync<EllaiSessionView>(Json, cancellationToken).ConfigureAwait(false);
+            return session is null ? new(EllaiClientOperationStatus.OutcomeUnknown)
+                : new(EllaiClientOperationStatus.Accepted, session);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            return new(EllaiClientOperationStatus.OutcomeUnknown);
+        }
     }
 
     public async Task<EllaiUtteranceSubmitResult> SubmitUtteranceAsync(
@@ -389,16 +428,18 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
         try
         {
             using var response = await _http.GetAsync(
-                $"{SessionRoute(sessionId)}/responses?cursor={Math.Max(0, cursor)}",
+                $"{SessionRoute(sessionId)}/responses?cursor={Math.Max(0, cursor)}&streamId={Uri.EscapeDataString(_responseStreamId ?? string.Empty)}",
                 cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
                 return null;
             }
 
-            return await response.Content
+            var page = await response.Content
                 .ReadFromJsonAsync<EllaiSessionResponsePageDto>(Json, cancellationToken)
                 .ConfigureAwait(false);
+            _responseStreamId = page?.StreamId;
+            return page;
         }
         catch (OperationCanceledException)
         {
@@ -937,6 +978,9 @@ public sealed class EllaiEventPoller(IEllaiReviewClient reviews)
     public event Action<string, string>? ActivityUpdated;
 
     public event Action<EllaiSessionResponseDto>? ResponseReceived;
+    public event Action<IReadOnlyList<EllaiConversationTurnDto>>? ConversationUpdated;
+    public event Action? ResponseStreamReset;
+    private string? _streamId;
 
     public string? SessionId { get; private set; }
 
@@ -952,6 +996,7 @@ public sealed class EllaiEventPoller(IEllaiReviewClient reviews)
             SessionId = sessionId;
             Cursor = 0;
             ResponseCursor = 0;
+            _streamId = null;
             _seenReviews.Clear();
         }
     }
@@ -961,6 +1006,7 @@ public sealed class EllaiEventPoller(IEllaiReviewClient reviews)
         SessionId = null;
         Cursor = 0;
         ResponseCursor = 0;
+        _streamId = null;
         _seenReviews.Clear();
     }
 
@@ -971,9 +1017,11 @@ public sealed class EllaiEventPoller(IEllaiReviewClient reviews)
             return;
         }
 
+        var sessionId = SessionId;
         var page = await _reviews
-            .PollEventsAsync(SessionId, Cursor, waitSeconds, cancellationToken)
+            .PollEventsAsync(sessionId, Cursor, waitSeconds, cancellationToken)
             .ConfigureAwait(false);
+        if (SessionId != sessionId) return;
         if (page?.Events is not null)
         {
             foreach (var @event in page.Events)
@@ -983,7 +1031,6 @@ public sealed class EllaiEventPoller(IEllaiReviewClient reviews)
                     continue;
                 }
 
-                Cursor = @event.Sequence;
                 if (string.Equals(@event.Kind, "approval-required", StringComparison.Ordinal)
                     && @event.Ref is not null
                     && _seenReviews.Add(@event.Ref))
@@ -998,16 +1045,28 @@ public sealed class EllaiEventPoller(IEllaiReviewClient reviews)
                 {
                     ActivityUpdated?.Invoke(@event.Ref ?? string.Empty, @event.Detail);
                 }
+                Cursor = @event.Sequence;
             }
         }
 
         var responses = await _reviews.PollResponsesAsync(
-            SessionId, ResponseCursor, cancellationToken).ConfigureAwait(false);
+            sessionId, ResponseCursor, cancellationToken).ConfigureAwait(false);
+        if (SessionId != sessionId) return;
         if (responses?.Responses is null)
         {
             return;
         }
 
+        if (responses.StreamId is not null && responses.StreamId != _streamId)
+        {
+            if (_streamId is not null)
+            {
+                Cursor = 0;
+                ResponseCursor = 0;
+                ResponseStreamReset?.Invoke();
+            }
+            _streamId = responses.StreamId;
+        }
         foreach (var response in responses.Responses)
         {
             if (response.Sequence <= ResponseCursor
@@ -1016,8 +1075,9 @@ public sealed class EllaiEventPoller(IEllaiReviewClient reviews)
                 continue;
             }
 
-            ResponseCursor = response.Sequence;
             ResponseReceived?.Invoke(response);
+            ResponseCursor = response.Sequence;
         }
+        if (responses.Conversation is not null) ConversationUpdated?.Invoke(responses.Conversation);
     }
 }

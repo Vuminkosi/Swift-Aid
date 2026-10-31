@@ -72,6 +72,9 @@ public sealed class IosEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, IAsyn
                 engine = new AVAudioEngine();
                 var input = engine.InputNode
                     ?? throw new InvalidOperationException("iOS audio input is unavailable.");
+                // Enabling native voice processing can renegotiate the hardware format.
+                var voiceProcessingEnabled = input.SetVoiceProcessingEnabled(true, out var voiceProcessingError);
+                var voiceProcessingErrorText = GetErrorDescription(voiceProcessingError);
                 var inputFormat = input.GetBusOutputFormat(0);
                 if (inputFormat.SampleRate <= 0 || inputFormat.ChannelCount is 0 or > 8
                     || inputFormat.CommonFormat != AVAudioCommonFormat.PCMFloat32
@@ -81,8 +84,6 @@ public sealed class IosEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, IAsyn
                         "iOS returned an unsupported microphone format. Try again or type your message.");
                 }
 
-                var voiceProcessingEnabled = input.SetVoiceProcessingEnabled(true, out var voiceProcessingError);
-                var voiceProcessingErrorText = GetErrorDescription(voiceProcessingError);
                 var captureCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 var channel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(MaximumQueuedChunks)
                 {
