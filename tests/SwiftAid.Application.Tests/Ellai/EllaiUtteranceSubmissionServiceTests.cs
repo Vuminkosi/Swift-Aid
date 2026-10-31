@@ -10,13 +10,14 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiUtteranceSubmissionServiceTests
 {
     [Theory]
-    [InlineData("synthetic demo prompt")]
-    [InlineData("case 4812, patient narrative and report details")]
+    [InlineData("hello")]
+    [InlineData("show my assigned cases")]
     [InlineData("unclassifiable arbitrary text")]
-    public async Task UnclassifiedFreeTextIsBlockedBeforeSessionMutationOrQueue(string text)
+    public async Task FreeTextIsAcceptedForDynamicReasoningWithinPublicToolScope(string text)
     {
         var store = new InMemoryEllaiSessionStore();
-        var service = new EllaiUtteranceSubmissionService(store, new EllaiConsentService());
+        var consent = new EllaiConsentService();
+        var service = new EllaiUtteranceSubmissionService(store, consent);
         var session = await StartSessionAsync(store, AuthenticatedPrincipal("actor-one"));
         var request = Request(session, "utterance-one") with { FinalizedText = text };
 
@@ -24,35 +25,84 @@ public sealed class EllaiUtteranceSubmissionServiceTests
             session.SessionId, request, AuthenticatedPrincipal("actor-one"), CancellationToken.None);
         var after = await store.GetAsync(session.SessionId, CancellationToken.None);
 
-        Assert.Equal(EllaiClientOperationStatus.PolicyBlocked, result.Status);
-        Assert.Null(result.Session);
-        Assert.Equal(session.SessionVersion, after!.SessionVersion);
-        Assert.Equal(0, after.CyclesUsed);
+        Assert.Equal(EllaiClientOperationStatus.Accepted, result.Status);
+        Assert.Equal(session.SessionVersion + 1, result.Session!.SessionVersion);
+        Assert.Equal(session.SessionVersion + 1, after!.SessionVersion);
+        Assert.Equal(1, after.CyclesUsed);
+        var item = await store.ClaimNextAsync(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(1),
+            CancellationToken.None);
+        Assert.NotNull(item);
+        var envelope = EllaiUtteranceWorkEnvelope.Deserialize(item!.PayloadJson);
+        Assert.Equal(text, envelope.Utterance);
+        Assert.Equal([EllaiToolNames.ProductFacts], envelope.AllowedTools);
     }
 
     [Fact]
-    public async Task ConsentForDifferentDataClassCannotAuthorizeUnknownOrSensitiveText()
+    public async Task TypedSubmissionDoesNotRequireAnExtraConsentPrompt()
     {
         var store = new InMemoryEllaiSessionStore();
         var consent = new EllaiConsentService();
         var service = new EllaiUtteranceSubmissionService(store, consent);
         var session = await StartSessionAsync(store, AuthenticatedPrincipal("actor-one"));
-        consent.Grant(session.SessionId, EllaiConsentDimension.ReasoningText,
-            EllaiToolBroker.ToolReadPurpose, EllaiProcessingClassification.SyntheticDemo,
-            TimeSpan.FromHours(1));
-
         var result = await service.SubmitAsync(
             session.SessionId, Request(session, "sensitive"),
             AuthenticatedPrincipal("actor-one"), CancellationToken.None);
 
-        Assert.Equal(EllaiClientOperationStatus.PolicyBlocked, result.Status);
-        Assert.False(consent.IsGranted(session.SessionId, EllaiConsentDimension.ReasoningText,
-            EllaiToolBroker.ToolReadPurpose, EllaiProcessingClassification.RealSensitive,
-            DateTimeOffset.UtcNow));
+        Assert.Equal(EllaiClientOperationStatus.Accepted, result.Status);
+        Assert.True(consent.IsGranted(session.SessionId, EllaiConsentDimension.ReasoningText,
+            EllaiConsentPurposes.PublicProductHelp,
+            EllaiProcessingClassification.ConsentedNonSensitive, DateTimeOffset.UtcNow));
     }
 
     [Fact]
-    public async Task ExplicitPublicHelpConsentAcceptsOnlySanitizedCatalogPromptIntoOutbox()
+    public async Task WorkspaceScopedSessionCanExposeAuthorizedReadToolsToDynamicReasoning()
+    {
+        var store = new InMemoryEllaiSessionStore();
+        var consent = new EllaiConsentService();
+        var service = new EllaiUtteranceSubmissionService(store, consent);
+        var principal = AuthenticatedPrincipal("actor-one");
+        var session = await StartSessionAsync(store, principal);
+        var current = await store.GetAsync(session.SessionId, CancellationToken.None);
+        await store.TryUpdateAsync(current! with { ScopeEpoch = "access-epoch-1" },
+            current!.SessionVersion, CancellationToken.None);
+
+        var result = await service.SubmitAsync(session.SessionId,
+            Request(session, "assigned-cases") with { FinalizedText = "show my assigned cases" },
+            principal, CancellationToken.None);
+
+        Assert.Equal(EllaiClientOperationStatus.Accepted, result.Status);
+        var item = await store.ClaimNextAsync(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(1),
+            CancellationToken.None);
+        Assert.NotNull(item);
+        var envelope = EllaiUtteranceWorkEnvelope.Deserialize(item!.PayloadJson);
+        Assert.Contains(EllaiToolNames.State, envelope.AllowedTools);
+    }
+
+    [Fact]
+    public async Task GuestScopeKeepsDynamicIntentWithinPublicFactsOnly()
+    {
+        var store = new InMemoryEllaiSessionStore();
+        var service = new EllaiUtteranceSubmissionService(store, new EllaiConsentService());
+        var principal = AuthenticatedPrincipal("guest-one");
+        var session = await StartSessionAsync(store, principal);
+        var current = await store.GetAsync(session.SessionId, CancellationToken.None);
+        await store.TryUpdateAsync(current! with { ScopeEpoch = "ellai-help-identity-epoch-1" },
+            current!.SessionVersion, CancellationToken.None);
+
+        var result = await service.SubmitAsync(session.SessionId,
+            Request(session, "guest-assigned-cases") with { FinalizedText = "show assigned cases" },
+            principal, CancellationToken.None);
+
+        Assert.Equal(EllaiClientOperationStatus.Accepted, result.Status);
+        var item = await store.ClaimNextAsync(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(1),
+            CancellationToken.None);
+        Assert.NotNull(item);
+        var envelope = EllaiUtteranceWorkEnvelope.Deserialize(item!.PayloadJson);
+        Assert.Equal([EllaiToolNames.ProductFacts], envelope.AllowedTools);
+    }
+
+    [Fact]
+    public async Task ExplicitPublicHelpConsentAcceptsOriginalDynamicPromptIntoOutbox()
     {
         var store = new InMemoryEllaiSessionStore();
         var consent = new EllaiConsentService();
@@ -74,7 +124,7 @@ public sealed class EllaiUtteranceSubmissionServiceTests
             CancellationToken.None);
         Assert.NotNull(item);
         var envelope = EllaiUtteranceWorkEnvelope.Deserialize(item!.PayloadJson);
-        Assert.DoesNotContain(originalText, envelope.Utterance, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(originalText, envelope.Utterance);
         Assert.Equal(EllaiConsentPurposes.PublicProductHelp, envelope.ConsentPurpose);
         Assert.Equal([EllaiToolNames.ProductFacts], envelope.AllowedTools);
         Assert.Equal(EllaiProcessingClassification.ConsentedNonSensitive, envelope.DataClassification);

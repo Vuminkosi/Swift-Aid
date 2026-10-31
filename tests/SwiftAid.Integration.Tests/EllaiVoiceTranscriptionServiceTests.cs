@@ -88,8 +88,9 @@ public sealed class EllaiVoiceTranscriptionServiceTests
 
         Assert.Equal("recognized fallback words", result?.Transcript);
         Assert.True(handler.ReceivedWaveAudio);
-        Assert.Equal(EllaiVoiceTurnState.Processing,
+        Assert.Equal(EllaiVoiceTurnState.Listening,
             turnCoordinator.GetSnapshot("session-fallback").State);
+        Assert.Empty(turnCoordinator.GetCompletedTurns("session-fallback"));
     }
 
     [Fact]
@@ -133,8 +134,9 @@ public sealed class EllaiVoiceTranscriptionServiceTests
 
             Assert.Equal("streamed words", result?.Transcript);
             Assert.Equal(expectedPcm, server.ReceivedPcm);
-            Assert.Equal(EllaiVoiceTurnState.Processing,
+            Assert.Equal(EllaiVoiceTurnState.Listening,
                 turnCoordinator.GetSnapshot("session-stream").State);
+            Assert.Empty(turnCoordinator.GetCompletedTurns("session-stream"));
         }
         finally
         {
@@ -308,7 +310,8 @@ public sealed class EllaiVoiceTranscriptionServiceTests
 
         Assert.Equal("streamed words", result?.Transcript);
         Assert.True(playback.Token.IsCancellationRequested);
-        Assert.Equal(EllaiVoiceTurnState.Processing, turns.GetSnapshot(sessionId).State);
+        Assert.Equal(EllaiVoiceTurnState.UserSpeaking, turns.GetSnapshot(sessionId).State);
+        Assert.Empty(turns.GetCompletedTurns(sessionId));
     }
 
     private static EllaiVoiceTranscriptionService CreateService(

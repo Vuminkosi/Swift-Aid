@@ -141,7 +141,7 @@ public sealed class EllaiSurfaceLogicTests
     }
 
     [Fact]
-    public async Task InterruptedLiveStreamRetriesPcmOnceAndSubmitsTranscriptOnce()
+    public async Task InterruptedLiveStreamSubmitsOnlyTheGatewayConfirmedFinalTurn()
     {
         var client = new FakeReviewClient(
             new EllaiUtteranceSubmitResult(
@@ -151,6 +151,8 @@ public sealed class EllaiSurfaceLogicTests
             LiveTranscriptionHandler = (_, _) => Task.FromResult<EllaiVoiceTranscriptionResult?>(null),
             VoiceTranscriptionHandler = (_, _, _, _) =>
                 Task.FromResult<EllaiVoiceTranscriptionResult?>(new("recovered words")),
+            VoiceTurnStatusHandler = (_, _) => Task.FromResult<EllaiVoiceTurnStatusDto?>(
+                CompletedVoiceTurnStatus("recovered words")),
         };
         using var host = await CreateHost(client, CreateSession(version: 1), string.Empty);
         SetField(host, "_capturedPcm", new MemoryStream());
@@ -161,10 +163,7 @@ public sealed class EllaiSurfaceLogicTests
         await InvokeAsync(host, "ReceiveVoicePcmChunk", new[] { 1234, -2345 });
         await InvokeAsync(host, "StopVoiceCaptureAsync");
 
-        var recovery = Assert.Single(client.VoiceTranscriptions);
-        Assert.Equal("session-1", recovery.SessionId);
-        Assert.Equal(EllaiVoiceCaptureMode.Live, recovery.Mode);
-        Assert.Equal(new byte[] { 0xD2, 0x04, 0xD7, 0xF6 }, recovery.Audio);
+        Assert.Empty(client.VoiceTranscriptions);
         var submitted = Assert.Single(client.Submissions);
         Assert.Equal("recovered words", submitted.FinalizedText);
     }
@@ -181,7 +180,6 @@ public sealed class EllaiSurfaceLogicTests
                 Task.FromResult<EllaiVoiceTranscriptionResult?>(new("Can I submit a report without an account?")),
         };
         using var host = await CreateHost(client, CreateSession(version: 1), string.Empty);
-        SetField(host, "_publicProductHelpConsentGranted", true);
         SetField(host, "_capturedPcm", new MemoryStream([1, 2, 3, 4]));
         SetField(host, "_captureMode", EllaiVoiceCaptureMode.Recorded);
         SetField(host, "_isRecordingAudio", true);
@@ -209,7 +207,6 @@ public sealed class EllaiSurfaceLogicTests
                 [new EllaiCompletedVoiceTurnDto(1, "muse-turn-1", "How do I follow up on a report?")])),
         };
         using var host = await CreateHost(client, CreateSession(version: 1), string.Empty);
-        SetField(host, "_publicProductHelpConsentGranted", true);
         SetField(host, "_capturedPcm", new MemoryStream());
         SetField(host, "_captureMode", EllaiVoiceCaptureMode.Live);
         SetField(host, "_isRecordingAudio", true);
@@ -262,7 +259,6 @@ public sealed class EllaiSurfaceLogicTests
                 EllaiClientOperationStatus.Accepted,
                 CreateSession(version: 2)));
         using var host = await CreateHost(client, CreateSession(version: 1), string.Empty);
-        SetField(host, "_publicProductHelpConsentGranted", true);
         SetField(host, "_captureMode", EllaiVoiceCaptureMode.Live);
         SetField(host, "_isRecordingAudio", true);
         SetField(host, "_voiceTurnCursorSessionId", "session-1");
@@ -304,7 +300,7 @@ public sealed class EllaiSurfaceLogicTests
         await InvokeAsync(host, "StopVoiceCaptureAsync");
 
         Assert.Single(client.VoiceTranscriptions);
-        Assert.Contains("was not sent", GetField<string?>(host, "StatusText"), StringComparison.Ordinal);
+        Assert.Contains("no completed turn was confirmed", GetField<string?>(host, "StatusText"), StringComparison.OrdinalIgnoreCase);
         Assert.Equal("draft", GetField<string?>(host, "InputText"));
         Assert.Empty(client.Submissions);
     }
@@ -341,7 +337,7 @@ public sealed class EllaiSurfaceLogicTests
     }
 
     [Fact]
-    public async Task BrowserCaptureQueueOverflowProcessesBufferedLiveTurnInsteadOfDiscardingIt()
+    public async Task BrowserCaptureQueueOverflowDoesNotSubmitAnUnconfirmedTranscript()
     {
         var client = new FakeReviewClient
         {
@@ -361,7 +357,7 @@ public sealed class EllaiSurfaceLogicTests
 
         Assert.Single(client.VoiceTranscriptions);
         Assert.Equal(new byte[] { 1, 2, 3, 4 }, client.VoiceTranscriptions[0].Audio);
-        Assert.Equal("draft\nbuffered words", GetField<string?>(host, "InputText"));
+        Assert.Equal("draft", GetField<string?>(host, "InputText"));
         Assert.Empty(client.Submissions);
     }
 
@@ -406,9 +402,12 @@ public sealed class EllaiSurfaceLogicTests
         await InvokeAsync(host, "StopVoiceCaptureAsync");
 
         Assert.Empty(client.VoiceTranscriptions);
-        Assert.Equal("draft\nresumed words", GetField<string?>(host, "InputText"));
+        Assert.Equal("draft", GetField<string?>(host, "InputText"));
         Assert.Equal(2, client.LiveTranscriptionCalls);
-        Assert.Equal(new byte[] { 10, 0, 11, 0, 12, 0 }, Assert.Single(streams.Skip(1)));
+        var completedStream = Assert.Single(streams.Skip(1));
+        Assert.Equal(new byte[] { 10, 0, 11, 0, 12, 0 }, completedStream[..6]);
+        Assert.Equal(6 + (22 * 512 * 3), completedStream.Length);
+        Assert.All(completedStream[6..], sample => Assert.Equal(0, sample));
         Assert.Empty(client.Submissions);
     }
 
@@ -442,9 +441,80 @@ public sealed class EllaiSurfaceLogicTests
 
         var upload = Assert.Single(client.VoiceTranscriptions);
         Assert.Equal(new byte[] { 21, 0, 22, 0, 23, 0 }, upload.Audio);
-        Assert.Equal("draft\nuploaded words", GetField<string?>(host, "InputText"));
+        Assert.Equal("draft", GetField<string?>(host, "InputText"));
         Assert.Equal(2, client.LiveTranscriptionCalls);
         Assert.Empty(client.Submissions);
+    }
+
+    [Fact]
+    public async Task LiveRecoveryUploadsOnlyTheTailAfterTheLatestCompletedSampleSpan()
+    {
+        var client = new FakeReviewClient
+        {
+            LiveTranscriptionHandler = (_, _) => Task.FromResult<EllaiVoiceTranscriptionResult?>(null),
+            VoiceTranscriptionHandler = (_, _, _, _) => Task.FromResult<EllaiVoiceTranscriptionResult?>(null),
+            VoiceTurnStatusHandler = (_, _) => Task.FromResult<EllaiVoiceTurnStatusDto?>(new(
+                "TurnCompleted", 2, 1_200, 700, null,
+                [new EllaiCompletedVoiceTurnDto(
+                    1, "muse-1", "Already submitted.", "session-1", Guid.NewGuid().ToString("N"), 1,
+                    AudioStartSample: 0, AudioEndSample: 2_000, VoiceCaptureId: "capture-current")],
+                "session-1")),
+        };
+        using var host = await CreateHost(client, CreateSession(version: 1), "draft");
+        var capturedPcm = Enumerable.Range(0, 5_000).Select(value => (byte)(value % 251)).ToArray();
+        SetField(host, "_capturedPcm", new MemoryStream(capturedPcm));
+        SetField(host, "_capturedVoiceBytes", (long)capturedPcm.Length);
+        SetField(host, "_captureMode", EllaiVoiceCaptureMode.Live);
+        SetField(host, "_isRecordingAudio", true);
+        SetField(host, "_lastCompletedVoiceTurnSequence", 1L);
+        SetField(host, "_liveVoiceCaptureId", "capture-current");
+        SetField(host, "_voiceNetworkOnline", false);
+        await InvokeAsync(host, "StartLiveVoiceStream", "session-1");
+        SetField(host, "_liveVoiceReconnectRequired", true);
+
+        await InvokeAsync(host, "StopVoiceCaptureAsync");
+
+        var recovery = Assert.Single(client.VoiceTranscriptions);
+        Assert.Equal(capturedPcm[4_000..], recovery.Audio);
+        Assert.Equal("capture-current", recovery.VoiceCaptureId);
+        Assert.Equal(2_000, recovery.VoiceCaptureOffsetSamples);
+        Assert.Empty(client.Submissions);
+        Assert.Equal("draft", GetField<string?>(host, "InputText"));
+    }
+
+    [Fact]
+    public async Task NewMicrophoneCaptureDoesNotReuseOffsetsFromAnEarlierCapture()
+    {
+        const string newCaptureId = "capture-new";
+        var client = new FakeReviewClient
+        {
+            LiveTranscriptionHandler = (_, _) => Task.FromResult<EllaiVoiceTranscriptionResult?>(null),
+            VoiceTranscriptionHandler = (_, _, _, _) => Task.FromResult<EllaiVoiceTranscriptionResult?>(null),
+            VoiceTurnStatusHandler = (_, _) => Task.FromResult<EllaiVoiceTurnStatusDto?>(new(
+                "TurnCompleted", 2, 1_200, 700, null,
+                [new EllaiCompletedVoiceTurnDto(
+                    1, "muse-old", "Earlier capture.", "session-1", Guid.NewGuid().ToString("N"), 1,
+                    AudioStartSample: 0, AudioEndSample: 2_000, VoiceCaptureId: "capture-old")],
+                "session-1")),
+        };
+        using var host = await CreateHost(client, CreateSession(version: 1), "draft");
+        var capturedPcm = new byte[] { 3, 4, 5, 6, 7, 8 };
+        SetField(host, "_capturedPcm", new MemoryStream(capturedPcm));
+        SetField(host, "_capturedVoiceBytes", (long)capturedPcm.Length);
+        SetField(host, "_captureMode", EllaiVoiceCaptureMode.Live);
+        SetField(host, "_isRecordingAudio", true);
+        SetField(host, "_lastCompletedVoiceTurnSequence", 1L);
+        SetField(host, "_liveVoiceCaptureId", newCaptureId);
+        SetField(host, "_voiceNetworkOnline", false);
+        await InvokeAsync(host, "StartLiveVoiceStream", "session-1");
+        SetField(host, "_liveVoiceReconnectRequired", true);
+
+        await InvokeAsync(host, "StopVoiceCaptureAsync");
+
+        var recovery = Assert.Single(client.VoiceTranscriptions);
+        Assert.Equal(capturedPcm, recovery.Audio);
+        Assert.Equal(newCaptureId, recovery.VoiceCaptureId);
+        Assert.Equal(0, recovery.VoiceCaptureOffsetSamples);
     }
 
     [Fact]
@@ -470,7 +540,8 @@ public sealed class EllaiSurfaceLogicTests
 
         var recovery = Assert.Single(client.VoiceTranscriptions);
         Assert.Equal(new byte[] { 8, 9, 10, 11 }, recovery.Audio);
-        Assert.Equal("draft\noffline words", GetField<string?>(host, "InputText"));
+        Assert.Equal("draft", GetField<string?>(host, "InputText"));
+        Assert.Empty(client.Submissions);
         Assert.Equal(0, client.LiveTranscriptionCalls);
     }
 
@@ -751,7 +822,7 @@ public sealed class EllaiSurfaceLogicTests
 
         Assert.Equal("private report text", GetField<string?>(host, "InputText"));
         Assert.True(GetProperty<bool>(host, "CanSubmitText"));
-        Assert.Contains("remove any sensitive details", GetField<string?>(host, "StatusText"));
+        Assert.Contains("current session policy", GetField<string?>(host, "StatusText"));
         Assert.Single(client.Submissions);
     }
 
@@ -1039,6 +1110,13 @@ public sealed class EllaiSurfaceLogicTests
         });
     }
 
+    private static EllaiVoiceTurnStatusDto CompletedVoiceTurnStatus(string transcript) => new(
+        "TurnCompleted", 1, 1_200, 700, null,
+        [new EllaiCompletedVoiceTurnDto(
+            1, "muse-turn-1", transcript, "session-1", Guid.NewGuid().ToString("N"), 1,
+            AudioStartSample: 0, AudioEndSample: 1_200)],
+        "session-1");
+
     private static EllaiSessionView CreateSession(long version) => new(
         "session-1", EllaiMode.Ask, null, "Active", "scope-1", "consent/1", "caps/1",
         0, 12, null, 0, version);
@@ -1069,7 +1147,6 @@ public sealed class EllaiSurfaceLogicTests
         var testHost = await renderer.RenderAsync<EllaiGuidanceHost>();
         SetField(testHost, "_sessionView", session);
         SetField(testHost, "InputText", inputText);
-        SetField(testHost, "_publicProductHelpConsentGranted", true);
         if (session is not null)
         {
             await renderer.Dispatcher.InvokeAsync(() => eventPoller.TrackSession(session.SessionId));
@@ -1308,7 +1385,8 @@ public sealed class EllaiSurfaceLogicTests
 
         public List<SubmitUtteranceRequest> Submissions { get; } = [];
 
-        public List<(string SessionId, byte[] Audio, EllaiVoiceCaptureMode Mode)> VoiceTranscriptions { get; } = [];
+        public List<(string SessionId, byte[] Audio, EllaiVoiceCaptureMode Mode,
+            string? VoiceCaptureId, long VoiceCaptureOffsetSamples)> VoiceTranscriptions { get; } = [];
 
         public int LiveTranscriptionCalls { get; private set; }
 
@@ -1364,9 +1442,11 @@ public sealed class EllaiSurfaceLogicTests
             string sessionId,
             byte[] audio,
             EllaiVoiceCaptureMode mode,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            string? voiceCaptureId = null,
+            long voiceCaptureOffsetSamples = 0)
         {
-            VoiceTranscriptions.Add((sessionId, audio.ToArray(), mode));
+            VoiceTranscriptions.Add((sessionId, audio.ToArray(), mode, voiceCaptureId, voiceCaptureOffsetSamples));
             return VoiceTranscriptionHandler?.Invoke(sessionId, audio, mode, cancellationToken)
                 ?? Task.FromResult<EllaiVoiceTranscriptionResult?>(null);
         }
@@ -1374,7 +1454,9 @@ public sealed class EllaiSurfaceLogicTests
         public Task<EllaiVoiceTranscriptionResult?> TranscribeLiveVoiceStreamAsync(
             string sessionId,
             Stream audio,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            string? voiceCaptureId = null,
+            long voiceCaptureOffsetSamples = 0)
         {
             LiveTranscriptionCalls++;
             return LiveTranscriptionHandler?.Invoke(sessionId, audio)

@@ -11,7 +11,9 @@ public sealed record VoiceActivityResult(
     long Sequence,
     float SpeechProbability,
     bool IsSpeech,
-    bool StateWasReset);
+    bool StateWasReset,
+    long AudioStartSample = -1,
+    long AudioEndSample = -1);
 
 /// <summary>Creates isolated recurrent inference state for each voice stream.</summary>
 public interface IVoiceActivityDetector

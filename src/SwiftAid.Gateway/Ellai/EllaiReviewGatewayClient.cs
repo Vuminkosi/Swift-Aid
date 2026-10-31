@@ -220,7 +220,8 @@ public sealed class EllaiReviewGatewayClient(
     }
 
     public async Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceAsync(
-        string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken)
+        string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken,
+        string? voiceCaptureId = null, long voiceCaptureOffsetSamples = 0)
     {
         if (audio is null || audio.Length == 0 || audio.Length > EllaiVoiceTranscriptionService.MaximumAudioBytes
             || !await OwnsSessionAsync(sessionId, cancellationToken).ConfigureAwait(false))
@@ -240,7 +241,9 @@ public sealed class EllaiReviewGatewayClient(
                 return null;
             }
             using var stream = new MemoryStream(audio, writable: false);
-            return await voice.TranscribeAsync(sessionId, mode, stream, audio.LongLength, cancellationToken)
+            return await voice.TranscribeAsync(
+                    sessionId, mode, stream, audio.LongLength, cancellationToken,
+                    voiceCaptureId, voiceCaptureOffsetSamples)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -254,7 +257,8 @@ public sealed class EllaiReviewGatewayClient(
     }
 
     public async Task<EllaiVoiceTranscriptionResult?> TranscribeLiveVoiceStreamAsync(
-        string sessionId, Stream audio, CancellationToken cancellationToken)
+        string sessionId, Stream audio, CancellationToken cancellationToken, string? voiceCaptureId = null,
+        long voiceCaptureOffsetSamples = 0)
     {
         if (string.IsNullOrWhiteSpace(sessionId) || audio is null || !audio.CanRead
             || !await OwnsSessionAsync(sessionId, cancellationToken).ConfigureAwait(false))
@@ -277,7 +281,8 @@ public sealed class EllaiReviewGatewayClient(
 
             return await voice.TranscribeAsync(
                 sessionId, EllaiVoiceCaptureMode.Live, audio, contentLength: null,
-                cancellationToken: cancellationToken)
+                cancellationToken: cancellationToken, voiceCaptureId: voiceCaptureId,
+                voiceCaptureOffsetSamples: voiceCaptureOffsetSamples)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -316,7 +321,10 @@ public sealed class EllaiReviewGatewayClient(
                     turn.Transcript,
                     sessionId,
                     turn.TurnId.ToString("N"),
-                    turn.StreamEpoch))
+                    turn.StreamEpoch,
+                    AudioStartSample: turn.AudioStartSample,
+                    AudioEndSample: turn.AudioEndSample,
+                    VoiceCaptureId: turn.VoiceCaptureId))
                 .ToArray(),
             snapshot.SessionId);
     }

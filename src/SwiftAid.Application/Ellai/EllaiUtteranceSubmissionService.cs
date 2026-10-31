@@ -10,10 +10,12 @@ namespace SwiftAid.Application.Ellai;
 public sealed class EllaiUtteranceSubmissionService(
     IEllaiSessionStore sessionStore,
     EllaiConsentService consent,
-    EllaiPublicHelpClassifier? classifier = null)
+    IEllaiConsentStore? consentStore = null)
 {
     private const string PublicHelpFeatureId = "public.product-help";
-    private readonly EllaiPublicHelpClassifier _classifier = classifier ?? new EllaiPublicHelpClassifier();
+    private const int MaximumUtteranceLength = 8_000;
+    private static readonly IReadOnlySet<string> PublicHelpTools =
+        new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.ProductFacts };
 
     public async Task<EllaiUtteranceSubmitResult> SubmitAsync(
         string routeSessionId,
@@ -52,28 +54,21 @@ public sealed class EllaiUtteranceSubmissionService(
                     routeSessionId, principal, cancellationToken).ConfigureAwait(false));
         }
 
-        if (!_classifier.TryClassify(request!.FinalizedText, out var classification)
-            || classification is null)
+        const string dataClassification = EllaiProcessingClassification.ConsentedNonSensitive;
+        if (!await EnsureReasoningGrantAsync(routeSessionId, dataClassification, cancellationToken)
+                .ConfigureAwait(false))
         {
-            return new(EllaiClientOperationStatus.PolicyBlocked, null);
+            return new(EllaiClientOperationStatus.Unavailable, null);
         }
 
-        const string dataClassification = EllaiProcessingClassification.ConsentedNonSensitive;
-        var consented = consent.IsGranted(
-            routeSessionId,
-            EllaiConsentDimension.ReasoningText,
-            EllaiConsentService.PublicProductHelpPurpose,
-            dataClassification,
-            DateTimeOffset.UtcNow);
-        if (!consented)
-        {
-            return new(EllaiClientOperationStatus.PolicyBlocked, null);
-        }
+        var allowedTools = HasWorkspaceScope(current.ScopeEpoch)
+            ? new HashSet<string>(EllaiToolNames.All, StringComparer.Ordinal)
+            : PublicHelpTools;
 
         var work = new EllaiUtteranceWork(
             current.SessionId,
             current.ScopeEpoch,
-            classification.SanitizedPrompt,
+            request!.FinalizedText.Trim(),
             PublicHelpFeatureId,
             null,
             current.Mode,
@@ -84,13 +79,13 @@ public sealed class EllaiUtteranceSubmissionService(
             consent.VersionLabel(routeSessionId),
             EllaiProcessingClassification.ConsentedNonSensitive,
             dataClassification,
-            new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.ProductFacts },
+            allowedTools,
             EllaiConsentService.PublicProductHelpPurpose,
             request.ClientUtteranceId);
         var payload = EllaiUtteranceWorkEnvelope.Serialize(work, request.ClientUtteranceId);
         var safeRequest = request with
         {
-            FinalizedText = classification.SanitizedPrompt,
+            FinalizedText = request.FinalizedText.Trim(),
             TranscriptRef = null,
             InputSource = "typed",
             FeatureId = PublicHelpFeatureId,
@@ -110,13 +105,51 @@ public sealed class EllaiUtteranceSubmissionService(
         return new(EllaiClientOperationStatus.Accepted, acceptance.View);
     }
 
+    private async Task<bool> EnsureReasoningGrantAsync(
+        string sessionId, string dataClassification, CancellationToken cancellationToken)
+    {
+        if (consentStore is not null)
+        {
+            await consent.HydrateAsync(sessionId, consentStore, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (consent.IsGranted(sessionId, EllaiConsentDimension.ReasoningText,
+                EllaiConsentService.PublicProductHelpPurpose, dataClassification, DateTimeOffset.UtcNow))
+        {
+            return true;
+        }
+
+        var grant = consent.Grant(
+            sessionId, EllaiConsentDimension.ReasoningText,
+            EllaiConsentService.PublicProductHelpPurpose, dataClassification,
+            TimeSpan.FromHours(1));
+        if (consentStore is null)
+        {
+            return true;
+        }
+
+        try
+        {
+            await consentStore.RecordAsync(grant, cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch
+        {
+            consent.Revoke(grant.GrantId);
+            return false;
+        }
+    }
+
+    private static bool HasWorkspaceScope(string scopeEpoch) =>
+        scopeEpoch.StartsWith("access-epoch-", StringComparison.Ordinal);
+
     private static bool IsValid(string routeSessionId, SubmitUtteranceRequest? request) =>
         !string.IsNullOrWhiteSpace(routeSessionId)
         && request is not null
         && string.Equals(request.SessionId, routeSessionId, StringComparison.Ordinal)
         && !string.IsNullOrWhiteSpace(request.ClientUtteranceId)
         && !string.IsNullOrWhiteSpace(request.FinalizedText)
-        && request.FinalizedText.Length <= EllaiPublicHelpClassifier.MaximumInputLength
+        && request.FinalizedText.Length <= MaximumUtteranceLength
         && string.Equals(request.InputSource, "typed", StringComparison.Ordinal)
         && (request.FeatureId is null
             || (!string.IsNullOrWhiteSpace(request.FeatureId) && request.FeatureId.Length <= 120))

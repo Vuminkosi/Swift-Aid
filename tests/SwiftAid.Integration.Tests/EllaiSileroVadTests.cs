@@ -226,6 +226,9 @@ public sealed class EllaiSileroVadTests
         Assert.Equal(Enumerable.Range(0, results.Length).Select(index => (long)index),
             results.Select(result => result.Sequence));
         Assert.All(results, result => Assert.InRange(result.SpeechProbability, 0f, 1f));
+        Assert.Equal(0, results[0].AudioStartSample);
+        Assert.Equal(768, results[1].AudioStartSample);
+        Assert.Equal(23_808, results[^1].AudioEndSample);
     }
 
     [Fact]
@@ -240,6 +243,20 @@ public sealed class EllaiSileroVadTests
         Assert.NotEmpty(results);
         Assert.True(results[0].StateWasReset);
         Assert.Equal(0, results[0].Sequence);
+    }
+
+    [Fact]
+    public async Task AudioStreamPreservesAbsoluteSourceSampleOffsetForTailRecovery()
+    {
+        using var detector = new SileroOnnxVoiceActivityDetector();
+        using var stream = new SileroVoiceActivityAudioStream(detector);
+        stream.SetSourceSampleOffset(4_800);
+
+        var results = await stream.AppendPcm16Async(new byte[24_000], 24_000);
+
+        Assert.Equal(4_800, results[0].AudioStartSample);
+        Assert.Equal(4_800 + 768, results[1].AudioStartSample);
+        Assert.Equal(4_800 + (results.Count * 768), results[^1].AudioEndSample);
     }
 
     private static VoiceActivityFrame CreateFrame(long sequence, float[] samples) =>

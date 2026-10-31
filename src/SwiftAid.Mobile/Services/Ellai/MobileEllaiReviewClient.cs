@@ -79,12 +79,16 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
         ClientFor(sessionId).GrantVoiceCaptureConsentAsync(sessionId, cancellationToken);
 
     public Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceAsync(
-        string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken) =>
-        ClientFor(sessionId).TranscribeVoiceAsync(sessionId, audio, mode, cancellationToken);
+        string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken,
+        string? voiceCaptureId = null, long voiceCaptureOffsetSamples = 0) =>
+        ClientFor(sessionId).TranscribeVoiceAsync(
+            sessionId, audio, mode, cancellationToken, voiceCaptureId, voiceCaptureOffsetSamples);
 
     public Task<EllaiVoiceTranscriptionResult?> TranscribeLiveVoiceStreamAsync(
-        string sessionId, Stream audio, CancellationToken cancellationToken) =>
-        ClientFor(sessionId).TranscribeLiveVoiceStreamAsync(sessionId, audio, cancellationToken);
+        string sessionId, Stream audio, CancellationToken cancellationToken, string? voiceCaptureId = null,
+        long voiceCaptureOffsetSamples = 0) =>
+        ClientFor(sessionId).TranscribeLiveVoiceStreamAsync(
+            sessionId, audio, cancellationToken, voiceCaptureId, voiceCaptureOffsetSamples);
 
     public Task<EllaiVoiceTurnStatusDto?> GetVoiceTurnStatusAsync(
         string sessionId, CancellationToken cancellationToken, long afterSequence = 0) =>
@@ -188,11 +192,13 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
             Task.FromResult(false);
 
         public Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceAsync(
-            string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken) =>
+            string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken,
+            string? voiceCaptureId = null, long voiceCaptureOffsetSamples = 0) =>
             Task.FromResult<EllaiVoiceTranscriptionResult?>(null);
 
         public Task<EllaiVoiceTranscriptionResult?> TranscribeLiveVoiceStreamAsync(
-            string sessionId, Stream audio, CancellationToken cancellationToken) =>
+            string sessionId, Stream audio, CancellationToken cancellationToken, string? voiceCaptureId = null,
+            long voiceCaptureOffsetSamples = 0) =>
             Task.FromResult<EllaiVoiceTranscriptionResult?>(null);
 
         public Task<EllaiSessionCancelResult> CancelSessionAsync(string sessionId, long expectedSessionVersion, CancellationToken cancellationToken) =>

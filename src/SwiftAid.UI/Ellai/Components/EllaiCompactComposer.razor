@@ -70,6 +70,9 @@
             </span>
         </div>
     </div>
+    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="ellai-composer__privacy-note">
+        Messages are processed by Ellai's configured AI service. Do not include patient, case, or personal information.
+    </MudText>
     @if (!string.IsNullOrWhiteSpace(LivePartialTranscript))
     {
         <p class="ellai-composer__partial-transcript" aria-live="off">

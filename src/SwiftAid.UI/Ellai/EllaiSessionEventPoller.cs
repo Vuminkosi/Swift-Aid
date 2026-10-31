@@ -183,7 +183,8 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
     }
 
     public async Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceAsync(
-        string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken)
+        string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken,
+        string? voiceCaptureId = null, long voiceCaptureOffsetSamples = 0)
     {
         if (string.IsNullOrWhiteSpace(sessionId) || audio is null || audio.Length == 0
             || audio.Length > 32 * 1024 * 1024)
@@ -192,6 +193,20 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
         }
 
         var route = $"{SessionRoute(sessionId)}/voice/{mode.ToString().ToLowerInvariant()}";
+        if (mode == EllaiVoiceCaptureMode.Live
+            && (!string.IsNullOrWhiteSpace(voiceCaptureId) || voiceCaptureOffsetSamples > 0))
+        {
+            var query = new List<string>();
+            if (!string.IsNullOrWhiteSpace(voiceCaptureId))
+            {
+                query.Add($"voiceCaptureId={Uri.EscapeDataString(voiceCaptureId)}");
+            }
+            if (voiceCaptureOffsetSamples > 0)
+            {
+                query.Add($"voiceCaptureOffsetSamples={voiceCaptureOffsetSamples}");
+            }
+            route += $"?{string.Join('&', query)}";
+        }
         var contentType = mode == EllaiVoiceCaptureMode.Recorded ? "audio/wav" : "application/octet-stream";
         try
         {
@@ -213,7 +228,8 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
     }
 
     public async Task<EllaiVoiceTranscriptionResult?> TranscribeLiveVoiceStreamAsync(
-        string sessionId, Stream audio, CancellationToken cancellationToken)
+        string sessionId, Stream audio, CancellationToken cancellationToken, string? voiceCaptureId = null,
+        long voiceCaptureOffsetSamples = 0)
     {
         if (string.IsNullOrWhiteSpace(sessionId) || audio is null || !audio.CanRead)
         {
@@ -222,9 +238,22 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
 
         var content = new StreamContent(audio, 8_192);
         content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+        var route = $"{SessionRoute(sessionId)}/voice/live";
+        var query = new List<string>();
+        if (!string.IsNullOrWhiteSpace(voiceCaptureId))
+        {
+            query.Add($"voiceCaptureId={Uri.EscapeDataString(voiceCaptureId)}");
+        }
+        if (voiceCaptureOffsetSamples > 0)
+        {
+            query.Add($"voiceCaptureOffsetSamples={voiceCaptureOffsetSamples}");
+        }
+        if (query.Count > 0)
+        {
+            route += $"?{string.Join('&', query)}";
+        }
         using (content)
-        using (var request = new HttpRequestMessage(
-            HttpMethod.Post, $"{SessionRoute(sessionId)}/voice/live") { Content = content })
+        using (var request = new HttpRequestMessage(HttpMethod.Post, route) { Content = content })
         {
             if (_useGuestRoutes)
             {

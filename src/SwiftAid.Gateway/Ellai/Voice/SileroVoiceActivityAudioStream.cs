@@ -16,6 +16,8 @@ public sealed class SileroVoiceActivityAudioStream : IDisposable
     private int _frameLength;
     private int? _inputSampleRate;
     private double _sourcePosition;
+    private long _removedSourceSamples;
+    private long _frameStartSourceSample = -1;
     private long _sequence;
     private bool _stateResetPending;
     private bool _disposed;
@@ -49,7 +51,7 @@ public sealed class SileroVoiceActivityAudioStream : IDisposable
             var sampleRateChanged = _inputSampleRate.HasValue && _inputSampleRate.Value != sampleRate;
             if (sampleRateChanged)
             {
-                ResetCore();
+                ResetCore(resetSourceOffset: false);
                 _stateResetPending = true;
             }
             _inputSampleRate = sampleRate;
@@ -66,6 +68,10 @@ public sealed class SileroVoiceActivityAudioStream : IDisposable
             {
                 var index = (int)_sourcePosition;
                 var fraction = (float)(_sourcePosition - index);
+                if (_frameLength == 0)
+                {
+                    _frameStartSourceSample = _removedSourceSamples + index;
+                }
                 var sample = _resampleBuffer[index] * (1 - fraction)
                     + _resampleBuffer[index + 1] * fraction;
                 _frame[_frameLength++] = sample;
@@ -77,9 +83,15 @@ public sealed class SileroVoiceActivityAudioStream : IDisposable
                     var activity = await _session.AnalyzeAsync(
                         new VoiceActivityFrame(_sequence++, ModelSampleRate, frameSamples), cancellationToken)
                         .ConfigureAwait(false);
-                    results.Add(activity with { StateWasReset = activity.StateWasReset || _stateResetPending });
+                    results.Add(activity with
+                    {
+                        StateWasReset = activity.StateWasReset || _stateResetPending,
+                        AudioStartSample = _frameStartSourceSample,
+                        AudioEndSample = _removedSourceSamples + (long)Math.Ceiling(_sourcePosition),
+                    });
                     _stateResetPending = false;
                     _frameLength = 0;
+                    _frameStartSourceSample = -1;
                 }
             }
 
@@ -88,6 +100,7 @@ public sealed class SileroVoiceActivityAudioStream : IDisposable
             {
                 _resampleBuffer.RemoveRange(0, consumed);
                 _sourcePosition -= consumed;
+                _removedSourceSamples += consumed;
             }
 
             return results;
@@ -105,6 +118,29 @@ public sealed class SileroVoiceActivityAudioStream : IDisposable
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             ResetCore();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public void SetSourceSampleOffset(long sourceSampleOffset)
+    {
+        if (sourceSampleOffset < 0 || sourceSampleOffset > 16_000_000)
+        {
+            throw new ArgumentOutOfRangeException(nameof(sourceSampleOffset));
+        }
+
+        _gate.Wait();
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_inputSampleRate.HasValue || _sequence != 0 || _frameLength != 0)
+            {
+                throw new InvalidOperationException("The source offset must be set before audio is appended.");
+            }
+            _removedSourceSamples = sourceSampleOffset;
         }
         finally
         {
@@ -139,13 +175,18 @@ public sealed class SileroVoiceActivityAudioStream : IDisposable
         }
     }
 
-    private void ResetCore()
+    private void ResetCore(bool resetSourceOffset = true)
     {
         _session.Reset();
         _resampleBuffer.Clear();
         Array.Clear(_frame);
         _frameLength = 0;
         _sourcePosition = 0;
+        if (resetSourceOffset)
+        {
+            _removedSourceSamples = 0;
+        }
+        _frameStartSourceSample = -1;
         _sequence = 0;
         _inputSampleRate = null;
         _stateResetPending = true;

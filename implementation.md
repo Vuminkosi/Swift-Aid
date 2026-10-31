@@ -3772,3 +3772,17 @@ Before merging implementation work, the coordinator must check that all 379 requ
 [R13]: https://qdrant.tech/articles/semantic-cache-ai-data-retrieval/
 
 [R14]: https://qdrant.tech/documentation/manage-data/points/
+
+## Ellai stream lifecycle correction (2026-10-31)
+
+A microphone capture carries a stable per-capture ID through its initial and reconnected Gateway streams. Silero activity results include source PCM sample spans; completed-turn events expose those spans and the capture ID, and the session coordinator suppresses a span only when that same capture's audio is replayed in a later stream epoch. A new microphone capture has a new ID, so its offsets restart safely.
+
+On explicit microphone stop, the client appends bounded silence to the active stream to let Silero reach its endpoint threshold, then submits only Gateway `TurnCompleted` events. Recovery transcribes only the uncompleted audio tail and carries its original sample offset. A transcription HTTP response is never independently submitted as a user turn.
+
+Focused coordinator tests passed 18/18; full UI tests passed 276/276; combined Silero audio-stream and live-transcription integration tests passed 17/17; Gateway and UI Debug builds passed with 0 warnings/errors; Android Debug source build passed with 0 warnings/errors. A normal integration-test invocation attempted to build the referenced Browser project and failed because `emcc` is not installed; the focused integration tests passed with `BuildProjectReferences=false` after rebuilding Gateway and UI separately. Live multi-utterance Muse through the microphone, slow-network assigned-cases/tool interruption, acoustic TTS echo rejection, and physical Android/iOS journeys remain **NotRun**.
+
+## Ellai typed-message routing correction (2026-10-31)
+
+Typed utterances no longer pass through a public-topic text classifier or a per-send consent popup. The original user text reaches the reasoning model so it can determine intent. A typed submission establishes the one-hour reasoning grant in the active session; consent persistence failure returns unavailable and does not enqueue work. Tool availability is selected from the server-owned session scope: public/guest sessions receive only `ProductFacts`, while workspace-scoped sessions may use the existing read-only tool broker, including its actor-authorized assigned-work queue. The model cannot expand this allowlist or bypass tool authorization. Input remains bounded at 8,000 characters and the composer discloses that text is processed by the configured AI service.
+
+Regression coverage: typed greetings and unclassified requests enqueue with their original text; scoped sessions include the authorized state tool; guest sessions remain limited to public facts; foreign actors remain denied. Application tests passed 547/547 (three live-provider probes skipped); UI tests passed 276/276; focused typed-submission/guest-scope endpoint tests passed 5/5. `docker compose -f infra/compose.yml up --build -d gateway` rebuilt and recreated the local Gateway; `/health/live`, `/`, and both voice JS assets returned HTTP 200. A live guest HTTP smoke submitted a typed greeting without a consent call, received HTTP 200/Accepted, read the LLM response `Hello! How can I help?`, and cancelled the test session. Authenticated live assigned-case retrieval remains **NotRun**; the exact slow-network voice interruption/tool sequence and acoustic TTS echo tests remain **NotRun**.

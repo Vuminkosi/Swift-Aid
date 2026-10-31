@@ -172,10 +172,12 @@ public sealed class EllaiGuestReviewHttpClientTests
         using var audio = new NonSeekableStream([1, 2, 3, 4, 5, 6]);
 
         var result = await client.TranscribeLiveVoiceStreamAsync(
-            "guest-session", audio, CancellationToken.None);
+            "guest-session", audio, CancellationToken.None, "voice-capture-1", 4_800);
 
         Assert.Equal("streamed words", result?.Transcript);
-        Assert.Equal("/api/v1/ellai/guest/sessions/guest-session/voice/live", handler.Path);
+        Assert.Equal(
+            "/api/v1/ellai/guest/sessions/guest-session/voice/live?voiceCaptureId=voice-capture-1&voiceCaptureOffsetSamples=4800",
+            handler.Path);
         Assert.Equal("application/octet-stream", handler.ContentType);
         Assert.Null(handler.ContentLength);
         Assert.Equal("csrf-test", handler.CsrfToken);

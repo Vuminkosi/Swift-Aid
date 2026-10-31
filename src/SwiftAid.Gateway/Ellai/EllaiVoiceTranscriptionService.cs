@@ -50,7 +50,8 @@ public sealed class EllaiVoiceTranscriptionService(
 
     public async Task<EllaiVoiceTranscriptionResult?> TranscribeAsync(
         string sessionId, EllaiVoiceCaptureMode mode, Stream audio, long? contentLength,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, string? voiceCaptureId = null,
+        long voiceCaptureOffsetSamples = 0)
     {
         ArgumentNullException.ThrowIfNull(audio);
         if (string.IsNullOrWhiteSpace(sessionId)
@@ -70,7 +71,7 @@ public sealed class EllaiVoiceTranscriptionService(
         if (mode == EllaiVoiceCaptureMode.Live)
         {
             using var turn = services.GetService<EllaiVoiceTurnCoordinator>()
-                ?.BeginStream(sessionId, cancellationToken);
+                ?.BeginStream(sessionId, cancellationToken, voiceCaptureId);
             var turnOptions = services.GetService<EllaiVoiceTurnOptions>() ?? new EllaiVoiceTurnOptions();
             using var durationCts = new CancellationTokenSource(
                 TimeSpan.FromMilliseconds(turnOptions.MaximumTurnDurationMs));
@@ -78,7 +79,8 @@ public sealed class EllaiVoiceTranscriptionService(
                 turn?.CancellationToken ?? cancellationToken, durationCts.Token);
             try
             {
-                return await TranscribeLiveStreamAsync(audio, turn, liveCancellation.Token)
+                return await TranscribeLiveStreamAsync(
+                    audio, turn, voiceCaptureOffsetSamples, liveCancellation.Token)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (durationCts.IsCancellationRequested
@@ -143,6 +145,7 @@ public sealed class EllaiVoiceTranscriptionService(
     private async Task<EllaiVoiceTranscriptionResult?> TranscribeLiveStreamAsync(
         Stream audio,
         EllaiVoiceTurnCoordinator.VoiceStreamLease? turn,
+        long voiceCaptureOffsetSamples,
         CancellationToken cancellationToken)
     {
         using var capturedPcm = new MemoryStream();
@@ -156,6 +159,7 @@ public sealed class EllaiVoiceTranscriptionService(
                 var finalizedTurns = new List<(string ProviderTurnId, string Text)>();
                 var unscopedTurnSequence = 0L;
                 var vadStream = services.GetService<SileroVoiceActivityAudioStream>();
+                vadStream?.SetSourceSampleOffset(voiceCaptureOffsetSamples);
                 Channel<byte[]>? vadChunks = null;
                 Task? vadWorker = null;
                 if (vadStream is not null)

@@ -40,7 +40,10 @@ public static class EllaiGuestEndpoints
                     turn.Transcript,
                     sessionId,
                     turn.TurnId.ToString("N"),
-                    turn.StreamEpoch))
+                    turn.StreamEpoch,
+                    AudioStartSample: turn.AudioStartSample,
+                    AudioEndSample: turn.AudioEndSample,
+                    VoiceCaptureId: turn.VoiceCaptureId))
                 .ToArray(),
             snapshot.SessionId));
     }
@@ -350,7 +353,10 @@ public static class EllaiGuestEndpoints
         }
 
         var result = await transcription.TranscribeAsync(
-            sessionId, captureMode, request.Body, request.ContentLength, cancellationToken).ConfigureAwait(false);
+            sessionId, captureMode, request.Body, request.ContentLength, cancellationToken,
+            request.Query["voiceCaptureId"].FirstOrDefault(),
+            long.TryParse(request.Query["voiceCaptureOffsetSamples"].FirstOrDefault(), out var offsetSamples)
+                ? offsetSamples : 0).ConfigureAwait(false);
         return result is not null
             ? Results.Json(result)
             : Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,

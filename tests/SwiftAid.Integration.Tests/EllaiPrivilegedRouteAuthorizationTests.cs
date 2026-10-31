@@ -105,8 +105,6 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             .GetAsync(started.Session.SessionId, CancellationToken.None);
         Assert.StartsWith("ellai-guest-", record!.OwnerActorId, StringComparison.Ordinal);
 
-        Assert.True(await client.GrantPublicProductHelpConsentAsync(
-            started.Session.SessionId, CancellationToken.None));
         var submitted = await client.SubmitUtteranceAsync(new SubmitUtteranceRequest(
             "server-guest-question", started.Session.SessionId, started.Session.SessionVersion,
             "What does an intake receipt mean?", null, "typed", 1), CancellationToken.None);
@@ -119,7 +117,8 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
         var outbox = await app.Services.GetRequiredService<IEllaiUtteranceOutboxStore>()
             .ClaimNextAsync(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(1), CancellationToken.None);
         Assert.NotNull(outbox);
-        Assert.DoesNotContain("What does an intake receipt mean?", outbox!.PayloadJson, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("What does an intake receipt mean?",
+            EllaiUtteranceWorkEnvelope.Deserialize(outbox!.PayloadJson).Utterance);
     }
 
     [Theory]
@@ -173,7 +172,7 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
     }
 
     [Fact]
-    public async Task MixedCaseUnknownUtteranceIsPolicyBlockedWithoutMutationOrQueueing()
+    public async Task MixedCaseUnknownUtteranceIsAcceptedForDynamicReasoning()
     {
         await using var app = await StartApplicationAsync();
         var request = new SubmitUtteranceRequest(
@@ -183,11 +182,16 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
         var response = await app.GetTestClient().PostAsJsonAsync(
             "/API/V1/ELLAI/SESSIONS/session-1/UTTERANCES", request);
 
-        Assert.Equal(System.Net.HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
         var session = await app.Services.GetRequiredService<IEllaiSessionStore>()
             .GetAsync("session-1", CancellationToken.None);
-        Assert.Equal(1, session!.SessionVersion);
-        Assert.Equal(0, session.CyclesUsed);
+        Assert.Equal(2, session!.SessionVersion);
+        Assert.Equal(1, session.CyclesUsed);
+        var outbox = await app.Services.GetRequiredService<IEllaiUtteranceOutboxStore>()
+            .ClaimNextAsync(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(1), CancellationToken.None);
+        Assert.NotNull(outbox);
+        Assert.Equal(request.FinalizedText,
+            EllaiUtteranceWorkEnvelope.Deserialize(outbox!.PayloadJson).Utterance);
         Assert.Equal(0, app.Services.GetRequiredService<EllaiUtteranceQueue>().PendingCount);
     }
 
@@ -231,7 +235,7 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             .ClaimNextAsync(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(1), CancellationToken.None);
         Assert.NotNull(outbox);
         var work = EllaiUtteranceWorkEnvelope.Deserialize(outbox!.PayloadJson);
-        Assert.DoesNotContain("What does an intake receipt mean?", work.Utterance, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("What does an intake receipt mean?", work.Utterance);
         Assert.Equal([EllaiToolNames.ProductFacts], work.AllowedTools);
     }
 
@@ -291,12 +295,6 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
                 Assert.Equal("Guest-safe current turn output.", Assert.Single(responsePage!.Responses).Text);
             }
 
-            using var consent = await SendGuestPostAsync(client, cookies, token,
-                $"/api/v1/ellai/guest/sessions/{session.SessionId}/consents",
-                new GrantEllaiConsentApiRequest(session.SessionId, "ReasoningText",
-                    EllaiConsentPurposes.PublicProductHelp, 1));
-            Assert.Equal(System.Net.HttpStatusCode.OK, consent.StatusCode);
-
             using var submitted = await SendGuestPostAsync(client, cookies, token,
                 $"/api/v1/ellai/guest/sessions/{session.SessionId}/utterances",
                 new SubmitUtteranceRequest("guest-question-1", session.SessionId, session.SessionVersion,
@@ -311,16 +309,16 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             var envelope = EllaiUtteranceWorkEnvelope.Deserialize(work!.PayloadJson);
             Assert.StartsWith("ellai-guest-", envelope.ActorId, StringComparison.Ordinal);
             Assert.Equal([EllaiToolNames.ProductFacts], envelope.AllowedTools);
-            Assert.DoesNotContain("What does an intake receipt mean?", envelope.Utterance, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal("What does an intake receipt mean?", envelope.Utterance);
 
-            using var sensitive = await SendGuestPostAsync(client, cookies, token,
+            using var anotherRequest = await SendGuestPostAsync(client, cookies, token,
                 $"/api/v1/ellai/guest/sessions/{session.SessionId}/utterances",
                 new SubmitUtteranceRequest("guest-question-sensitive", session.SessionId, accepted.SessionVersion,
-                    "Patient has a fever, what should I do?", null, "typed", 2));
-            Assert.Equal(System.Net.HttpStatusCode.UnprocessableEntity, sensitive.StatusCode);
-            var afterSensitive = await app.Services.GetRequiredService<IEllaiSessionStore>()
+                    "Tell me a joke.", null, "typed", 2));
+            Assert.Equal(System.Net.HttpStatusCode.OK, anotherRequest.StatusCode);
+            var afterSecondRequest = await app.Services.GetRequiredService<IEllaiSessionStore>()
                 .GetAsync(session.SessionId, CancellationToken.None);
-            Assert.Equal(1, afterSensitive!.CyclesUsed);
+            Assert.Equal(2, afterSecondRequest!.CyclesUsed);
         }
 
         using var unauthorizedPost = await client.PostAsJsonAsync(

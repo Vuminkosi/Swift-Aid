@@ -52,7 +52,10 @@ public sealed record EllaiCompletedVoiceTurn(
     string ProviderTurnId,
     string Transcript,
     Guid TurnId,
-    long StreamEpoch);
+    long StreamEpoch,
+    long AudioStartSample = -1,
+    long AudioEndSample = -1,
+    string VoiceCaptureId = "");
 
 public sealed record EllaiBargeInDecision(
     string SessionId,
@@ -81,7 +84,8 @@ public sealed class EllaiVoiceTurnCoordinator
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
-    public VoiceStreamLease BeginStream(string sessionId, CancellationToken cancellationToken)
+    public VoiceStreamLease BeginStream(
+        string sessionId, CancellationToken cancellationToken, string? voiceCaptureId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         lock (_gate)
@@ -95,6 +99,9 @@ public sealed class EllaiVoiceTurnCoordinator
 
             state.ActiveStream?.Cancel();
             state.Epoch = Interlocked.Increment(ref _nextEpoch);
+            var effectiveCaptureId = string.IsNullOrWhiteSpace(voiceCaptureId) || voiceCaptureId.Length > 64
+                ? $"epoch:{state.Epoch}"
+                : voiceCaptureId;
             state.LastTouchedUtc = _timeProvider.GetUtcNow();
             state.StreamStartedTimestamp = _timeProvider.GetTimestamp();
             state.FinalProviderTurnIds.Clear();
@@ -103,6 +110,10 @@ public sealed class EllaiVoiceTurnCoordinator
             state.PartialTranscript = null;
             state.LastVadSequence = -1;
             state.SpeechCandidate = TimeSpan.Zero;
+            state.SpeechCandidateStartSample = -1;
+            state.LastSpeechStartSample = -1;
+            state.LastSpeechEndSample = -1;
+            state.BargeInStartSample = -1;
             state.ConfirmedSpeech = TimeSpan.Zero;
             state.Silence = TimeSpan.Zero;
             state.BargeInSpeech = TimeSpan.Zero;
@@ -115,7 +126,8 @@ public sealed class EllaiVoiceTurnCoordinator
                 ? EllaiVoiceTurnState.AssistantSpeaking
                 : EllaiVoiceTurnState.Listening;
             var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            var lease = new VoiceStreamLease(this, state, state.Epoch, linkedCancellation);
+            var lease = new VoiceStreamLease(
+                this, state, state.Epoch, effectiveCaptureId, linkedCancellation);
             state.ActiveStream = lease;
             return lease;
         }
@@ -255,6 +267,10 @@ public sealed class EllaiVoiceTurnCoordinator
             {
                 if (isSpeech)
                 {
+                    if (state.BargeInSpeech == TimeSpan.Zero)
+                    {
+                        state.BargeInStartSample = activity.AudioStartSample;
+                    }
                     state.BargeInSpeech += frameDuration;
                     if (state.BargeInSpeech.TotalMilliseconds >= _options.BargeInConfirmationMs)
                     {
@@ -269,6 +285,8 @@ public sealed class EllaiVoiceTurnCoordinator
                         state.PendingInterruptionTurnId = null;
                         state.State = EllaiVoiceTurnState.UserSpeaking;
                         state.ConfirmedSpeech += state.BargeInSpeech;
+                        state.LastSpeechStartSample = state.BargeInStartSample;
+                        state.LastSpeechEndSample = activity.AudioEndSample;
                         state.BargeInSpeech = TimeSpan.Zero;
                         return decision;
                     }
@@ -279,7 +297,7 @@ public sealed class EllaiVoiceTurnCoordinator
                 }
             }
 
-            AdvanceAcousticState(state, isSpeech, frameDuration);
+            AdvanceAcousticState(state, isSpeech, frameDuration, activity);
             return null;
         }
     }
@@ -466,15 +484,19 @@ public sealed class EllaiVoiceTurnCoordinator
     private static void ResetAcousticState(SessionState state)
     {
         state.SpeechCandidate = TimeSpan.Zero;
+        state.SpeechCandidateStartSample = -1;
         state.ConfirmedSpeech = TimeSpan.Zero;
         state.Silence = TimeSpan.Zero;
+        state.LastSpeechStartSample = -1;
+        state.LastSpeechEndSample = -1;
         if (!state.ActivePlaybackId.HasValue)
         {
             state.State = EllaiVoiceTurnState.Listening;
         }
     }
 
-    private void AdvanceAcousticState(SessionState state, bool isSpeech, TimeSpan frameDuration)
+    private void AdvanceAcousticState(
+        SessionState state, bool isSpeech, TimeSpan frameDuration, VoiceActivityResult activity)
     {
         switch (state.State)
         {
@@ -483,6 +505,7 @@ public sealed class EllaiVoiceTurnCoordinator
                 {
                     state.State = EllaiVoiceTurnState.SpeechCandidate;
                     state.SpeechCandidate = frameDuration;
+                    state.SpeechCandidateStartSample = activity.AudioStartSample;
                 }
                 break;
             case EllaiVoiceTurnState.SpeechCandidate:
@@ -497,7 +520,10 @@ public sealed class EllaiVoiceTurnCoordinator
                 if (state.SpeechCandidate.TotalMilliseconds >= _options.SpeechStartConfirmationMs)
                 {
                     state.ConfirmedSpeech = state.SpeechCandidate;
+                    state.LastSpeechStartSample = state.SpeechCandidateStartSample;
+                    state.LastSpeechEndSample = activity.AudioEndSample;
                     state.SpeechCandidate = TimeSpan.Zero;
+                    state.SpeechCandidateStartSample = -1;
                     state.State = EllaiVoiceTurnState.UserSpeaking;
                     EllaiVoiceTurnMetrics.SpeechStartConfirmed(state.ConfirmedSpeech);
                 }
@@ -507,6 +533,7 @@ public sealed class EllaiVoiceTurnCoordinator
                 {
                     state.ConfirmedSpeech += frameDuration;
                     state.Silence = TimeSpan.Zero;
+                    state.LastSpeechEndSample = activity.AudioEndSample;
                 }
                 else
                 {
@@ -525,6 +552,7 @@ public sealed class EllaiVoiceTurnCoordinator
                     state.State = EllaiVoiceTurnState.UserSpeaking;
                     state.ConfirmedSpeech += frameDuration;
                     state.Silence = TimeSpan.Zero;
+                    state.LastSpeechEndSample = activity.AudioEndSample;
                 }
                 else
                 {
@@ -537,6 +565,8 @@ public sealed class EllaiVoiceTurnCoordinator
                     state.State = EllaiVoiceTurnState.UserSpeaking;
                     state.ConfirmedSpeech = frameDuration;
                     state.Silence = TimeSpan.Zero;
+                    state.LastSpeechStartSample = activity.AudioStartSample;
+                    state.LastSpeechEndSample = activity.AudioEndSample;
                 }
                 break;
             case EllaiVoiceTurnState.Interrupted:
@@ -544,6 +574,11 @@ public sealed class EllaiVoiceTurnCoordinator
                 {
                     state.State = EllaiVoiceTurnState.UserSpeaking;
                     state.ConfirmedSpeech += frameDuration;
+                    if (state.LastSpeechStartSample < 0)
+                    {
+                        state.LastSpeechStartSample = activity.AudioStartSample;
+                    }
+                    state.LastSpeechEndSample = activity.AudioEndSample;
                 }
                 break;
         }
@@ -564,6 +599,35 @@ public sealed class EllaiVoiceTurnCoordinator
                 break;
             }
 
+            var hasAudioSpan = state.LastSpeechStartSample >= 0
+                && state.LastSpeechEndSample > state.LastSpeechStartSample;
+            var audioSpan = (state.ActiveStream?.VoiceCaptureId ?? string.Empty,
+                state.LastSpeechStartSample, state.LastSpeechEndSample);
+            if (hasAudioSpan && state.CompletedAudioSpans.TryGetValue(audioSpan, out var priorEpoch)
+                && priorEpoch < transcript.Epoch)
+            {
+                state.State = EllaiVoiceTurnState.TurnCompleted;
+                continue;
+            }
+            if (hasAudioSpan)
+            {
+                var isNewSpan = !state.CompletedAudioSpans.ContainsKey(audioSpan);
+                state.CompletedAudioSpans[audioSpan] = transcript.Epoch;
+                if (isNewSpan)
+                {
+                    state.CompletedAudioSpanOrder.Enqueue(audioSpan);
+                }
+                while (state.CompletedAudioSpanOrder.Count > MaximumRetainedCompletedTurnsPerSession)
+                {
+                    var expiredSpan = state.CompletedAudioSpanOrder.Dequeue();
+                    if (state.CompletedAudioSpans.TryGetValue(expiredSpan, out var expiredEpoch)
+                        && expiredEpoch <= transcript.Epoch)
+                    {
+                        state.CompletedAudioSpans.Remove(expiredSpan);
+                    }
+                }
+            }
+
             while (state.CompletedTurns.Count >= MaximumRetainedCompletedTurnsPerSession)
             {
                 state.CompletedTurns.Dequeue();
@@ -576,7 +640,10 @@ public sealed class EllaiVoiceTurnCoordinator
                 transcript.ProviderTurnId,
                 transcript.Text,
                 turnId,
-                transcript.Epoch));
+                transcript.Epoch,
+                hasAudioSpan ? state.LastSpeechStartSample : -1,
+                hasAudioSpan ? state.LastSpeechEndSample : -1,
+                state.ActiveStream?.VoiceCaptureId ?? string.Empty));
             state.PendingInterruptionTurnId = null;
             state.ConfirmedInterruptionTurnId = null;
             state.State = EllaiVoiceTurnState.TurnCompleted;
@@ -612,6 +679,8 @@ public sealed class EllaiVoiceTurnCoordinator
         public HashSet<string> FinalProviderTurnIds { get; } = new(StringComparer.Ordinal);
         public Queue<EllaiAcceptedFinalTranscript> PendingFinalTranscripts { get; } = new();
         public Queue<EllaiCompletedVoiceTurn> CompletedTurns { get; } = new();
+        public Dictionary<(string CaptureId, long Start, long End), long> CompletedAudioSpans { get; } = [];
+        public Queue<(string CaptureId, long Start, long End)> CompletedAudioSpanOrder { get; } = new();
         public long NextCompletionSequence { get; set; }
         public long LastVadSequence { get; set; } = -1;
         public long? ActiveResponseSequence { get; set; }
@@ -623,6 +692,10 @@ public sealed class EllaiVoiceTurnCoordinator
         public Guid? ConfirmedInterruptionTurnId { get; set; }
         public EllaiVoiceTurnState State { get; set; } = EllaiVoiceTurnState.Idle;
         public TimeSpan SpeechCandidate { get; set; }
+        public long SpeechCandidateStartSample { get; set; } = -1;
+        public long LastSpeechStartSample { get; set; } = -1;
+        public long LastSpeechEndSample { get; set; } = -1;
+        public long BargeInStartSample { get; set; } = -1;
         public TimeSpan ConfirmedSpeech { get; set; }
         public TimeSpan Silence { get; set; }
         public TimeSpan BargeInSpeech { get; set; }
@@ -642,16 +715,19 @@ public sealed class EllaiVoiceTurnCoordinator
             EllaiVoiceTurnCoordinator owner,
             SessionState session,
             long epoch,
+            string voiceCaptureId,
             CancellationTokenSource cancellation)
         {
             _owner = owner;
             Session = session;
             Epoch = epoch;
+            VoiceCaptureId = voiceCaptureId;
             _cancellation = cancellation;
         }
 
         internal SessionState Session { get; }
         public long Epoch { get; }
+        public string VoiceCaptureId { get; }
         public CancellationToken CancellationToken => _cancellation.Token;
         public string SessionId => Session.SessionId;
 

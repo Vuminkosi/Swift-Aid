@@ -34,7 +34,10 @@ public sealed record EllaiCompletedVoiceTurnDto(
     string? SessionId = null,
     string? TurnId = null,
     long StreamEpoch = 0,
-    string Kind = "TurnCompleted");
+    string Kind = "TurnCompleted",
+    long AudioStartSample = -1,
+    long AudioEndSample = -1,
+    string? VoiceCaptureId = null);
 
 /// <summary>Session UI event as delivered by the review event transport.</summary>
 public sealed record EllaiSessionEventDto(
@@ -186,11 +189,13 @@ public interface IEllaiReviewClient
         Task.FromResult(false);
 
     Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceAsync(
-        string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken) =>
+        string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken,
+        string? voiceCaptureId = null, long voiceCaptureOffsetSamples = 0) =>
         Task.FromResult<EllaiVoiceTranscriptionResult?>(null);
 
     Task<EllaiVoiceTranscriptionResult?> TranscribeLiveVoiceStreamAsync(
-        string sessionId, Stream audio, CancellationToken cancellationToken) =>
+        string sessionId, Stream audio, CancellationToken cancellationToken, string? voiceCaptureId = null,
+        long voiceCaptureOffsetSamples = 0) =>
         Task.FromResult<EllaiVoiceTranscriptionResult?>(null);
 
     Task<EllaiVoiceTurnStatusDto?> GetVoiceTurnStatusAsync(
