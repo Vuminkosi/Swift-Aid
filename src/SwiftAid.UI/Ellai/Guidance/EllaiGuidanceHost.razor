@@ -97,6 +97,7 @@
     private Microsoft.JSInterop.IJSObjectReference? _speechModule;
     private CancellationTokenSource? _audioPlaybackCts;
     private Microsoft.JSInterop.IJSObjectReference? _captureModule;
+    private Microsoft.JSInterop.IJSObjectReference? _connectivitySubscription;
     private IEllaiNativeVoiceCapture? _nativeVoiceCapture;
     private Microsoft.JSInterop.DotNetObjectReference<EllaiGuidanceHost>? _captureDotnetReference;
     private MemoryStream? _capturedPcm;
@@ -112,6 +113,7 @@
     private long _capturedVoiceBytes;
     private EllaiVoiceCaptureMode? _captureMode;
     private bool _microphoneCaptureAvailable;
+    private bool _voiceNetworkOnline = true;
     private bool _nativeVoiceCaptureActive;
     private bool _voiceCaptureConsentGranted;
     private bool _isRecordingAudio;
@@ -193,6 +195,7 @@
 
         try
         {
+            _captureDotnetReference ??= Microsoft.JSInterop.DotNetObjectReference.Create(this);
             _captureModule = await JS.InvokeAsync<Microsoft.JSInterop.IJSObjectReference>(
                 "import", "./_content/SwiftAid.UI/js/ellai-voice-capture.js");
             _microphoneCaptureAvailable = await _captureModule.InvokeAsync<bool>("isSupported");
@@ -204,6 +207,24 @@
         catch (Microsoft.JSInterop.JSException)
         {
             _microphoneCaptureAvailable = false;
+        }
+
+        if (_captureModule is not null && _captureDotnetReference is not null)
+        {
+            try
+            {
+                _voiceNetworkOnline = await _captureModule.InvokeAsync<bool>("isOnline");
+                _connectivitySubscription = await _captureModule.InvokeAsync<Microsoft.JSInterop.IJSObjectReference>(
+                    "startConnectivityMonitoring", _captureDotnetReference);
+            }
+            catch (Microsoft.JSInterop.JSDisconnectedException)
+            {
+                _voiceNetworkOnline = true;
+            }
+            catch (Microsoft.JSInterop.JSException)
+            {
+                _voiceNetworkOnline = true;
+            }
         }
 
         await InvokeAsync(StateHasChanged);
@@ -280,9 +301,15 @@
                 return;
             }
 
-            if (mode == EllaiVoiceCaptureMode.Live)
+            _liveVoiceReconnectRequired = false;
+            _liveVoiceCaptureEnding = false;
+            if (mode == EllaiVoiceCaptureMode.Live && _voiceNetworkOnline)
             {
                 StartLiveVoiceStream(session.SessionId);
+            }
+            else if (mode == EllaiVoiceCaptureMode.Live)
+            {
+                _liveVoiceReconnectRequired = true;
             }
 
             _isRecordingAudio = true;
@@ -318,14 +345,21 @@
                 await _captureModule!.InvokeVoidAsync("setPlaybackState", true, session.SessionId,
                     _activeResponseSequence, _activeResponsePlaybackId);
             }
-            if (mode == EllaiVoiceCaptureMode.Live)
+            if (mode == EllaiVoiceCaptureMode.Live && _liveVoiceChunks is not null)
             {
                 await StartVoiceTurnStatusPollingAsync(session.SessionId);
             }
             _startingVoiceCapture = false;
-            StatusText = mode == EllaiVoiceCaptureMode.Recorded
+            if (mode == EllaiVoiceCaptureMode.Live && _liveVoiceReconnectRequired)
+            {
+                StatusText = "Your device reports no network connection. This voice turn is held in memory and will be sent once when you stop.";
+            }
+            else
+            {
+                StatusText = mode == EllaiVoiceCaptureMode.Recorded
                 ? $"Recording for transcription. {processingStatus} Stop when you are ready."
                 : $"I’m listening. I’ll transcribe when you stop. {processingStatus}";
+            }
             Phase = EllaiStatusPhases.Active;
             await InvokeAsync(StateHasChanged);
         }
@@ -512,6 +546,26 @@
                             changed = true;
                         }
 
+                        if (_liveVoiceReconnectRequired)
+                        {
+                            var recoveryText = _voiceNetworkOnline
+                                ? "Your device reports a network connection; this turn remains buffered and will be transcribed once when you stop."
+                                : "Your device reports no network connection. This voice turn is held in memory and will be sent once when you stop.";
+                            if (!string.Equals(StatusText, recoveryText, StringComparison.Ordinal))
+                            {
+                                StatusText = recoveryText;
+                                Phase = EllaiStatusPhases.Active;
+                                changed = true;
+                            }
+
+                            if (changed)
+                            {
+                                StateHasChanged();
+                            }
+
+                            return;
+                        }
+
                         if (GetVoiceTurnStatusText(status.State) is { } text
                             && !string.Equals(StatusText, text, StringComparison.Ordinal))
                         {
@@ -685,7 +739,7 @@
         ReadOnlyMemory<byte> pcm,
         CancellationToken cancellationToken)
     {
-        if (!_isRecordingAudio || _liveVoiceChunks is null || pcm.Length is 0 or > 8_192
+        if (!_isRecordingAudio || _captureMode != EllaiVoiceCaptureMode.Live || pcm.Length is 0 or > 8_192
             || (pcm.Length & 1) != 0)
         {
             return;
@@ -703,6 +757,12 @@
             _capturedPcm.Write(bytes);
         }
         _capturedVoiceBytes += bytes.Length;
+        if (_liveVoiceChunks is null)
+        {
+            Array.Clear(bytes);
+            return;
+        }
+
         if (_liveVoiceTranscriptionTask?.IsCompleted == true)
         {
             EnterLiveVoiceRecovery();
@@ -743,6 +803,34 @@
 
     [Microsoft.JSInterop.JSInvokable]
     public Task OnVoiceCaptureLimitReached() => InvokeAsync(StopVoiceCaptureAsync);
+
+    [Microsoft.JSInterop.JSInvokable]
+    public Task OnVoiceConnectivityChanged(bool isOnline) => InvokeAsync(() =>
+    {
+        if (_voiceNetworkOnline == isOnline)
+        {
+            return;
+        }
+
+        _voiceNetworkOnline = isOnline;
+        if (!_isRecordingAudio || _captureMode != EllaiVoiceCaptureMode.Live)
+        {
+            return;
+        }
+
+        if (!isOnline)
+        {
+            EnterLiveVoiceRecovery();
+            return;
+        }
+
+        if (_liveVoiceReconnectRequired)
+        {
+            StatusText = "Your device reports a network connection; this turn remains buffered and will be transcribed once when you stop.";
+            Phase = EllaiStatusPhases.Active;
+            StateHasChanged();
+        }
+    });
 
     [Microsoft.JSInterop.JSInvokable]
     public Task OnVoiceBargeInDetected(long sequence, string playbackId) => InvokeAsync(async () =>
@@ -2036,6 +2124,7 @@
         _cts?.Dispose();
         _submissionCts?.Cancel();
         _submissionCts?.Dispose();
+        _ = DisposeConnectivityMonitoringAsync();
         _captureDotnetReference?.Dispose();
         _isRecordingAudio = false;
         _voiceTurnStatusCts?.Cancel();
@@ -2071,5 +2160,32 @@
         }
         await CancelLiveVoiceStreamAsync();
         DiscardCapturedAudio();
+    }
+
+    private async Task DisposeConnectivityMonitoringAsync()
+    {
+        var subscription = _connectivitySubscription;
+        _connectivitySubscription = null;
+        if (subscription is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await subscription.InvokeVoidAsync("dispose");
+        }
+        catch (Microsoft.JSInterop.JSException)
+        {
+            // The browser context may already be unavailable during component disposal.
+        }
+
+        try
+        {
+            await subscription.DisposeAsync();
+        }
+        catch (Microsoft.JSInterop.JSException)
+        {
+        }
     }
 }

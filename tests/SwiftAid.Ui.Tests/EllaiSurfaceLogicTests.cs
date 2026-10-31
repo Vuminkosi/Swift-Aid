@@ -169,6 +169,68 @@ public sealed class EllaiSurfaceLogicTests
     }
 
     [Fact]
+    public async Task ConnectivityRestorationKeepsTurnBufferedUntilExplicitStop()
+    {
+        var streamCompletion = new TaskCompletionSource<EllaiVoiceTranscriptionResult?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var client = new FakeReviewClient
+        {
+            LiveTranscriptionHandler = (_, _) => streamCompletion.Task,
+            VoiceTranscriptionHandler = (_, _, _, _) =>
+                Task.FromResult<EllaiVoiceTranscriptionResult?>(new("recovered words")),
+        };
+        using var host = await CreateHost(client, CreateSession(version: 1), "draft");
+        SetField(host, "_capturedPcm", new MemoryStream([10, 11]));
+        SetField(host, "_capturedVoiceBytes", 2L);
+        SetField(host, "_captureMode", EllaiVoiceCaptureMode.Live);
+        SetField(host, "_isRecordingAudio", true);
+        SetField(host, "_voiceNetworkOnline", true);
+        await InvokeAsync(host, "StartLiveVoiceStream", "session-1");
+
+        await InvokeAsync(host, "OnVoiceConnectivityChanged", false);
+        await InvokeAsync(host, "OnVoiceConnectivityChanged", true);
+
+        Assert.True(GetField<bool>(host, "_liveVoiceReconnectRequired"));
+        Assert.True(GetField<bool>(host, "_voiceNetworkOnline"));
+        Assert.Contains("remains buffered", GetField<string?>(host, "StatusText"), StringComparison.Ordinal);
+        Assert.Equal(1, client.LiveTranscriptionCalls);
+
+        streamCompletion.SetResult(null);
+        await InvokeAsync(host, "StopVoiceCaptureAsync");
+
+        Assert.Single(client.VoiceTranscriptions);
+        Assert.Equal("draft\nrecovered words", GetField<string?>(host, "InputText"));
+        Assert.Equal(1, client.LiveTranscriptionCalls);
+    }
+
+    [Fact]
+    public async Task NativeCaptureBuffersPcmWithoutStartingLiveStreamWhenOffline()
+    {
+        var client = new FakeReviewClient
+        {
+            VoiceTranscriptionHandler = (_, _, _, _) =>
+                Task.FromResult<EllaiVoiceTranscriptionResult?>(new("offline words")),
+        };
+        using var host = await CreateHost(client, CreateSession(version: 1), "draft");
+        SetField(host, "_capturedPcm", new MemoryStream());
+        SetField(host, "_captureMode", EllaiVoiceCaptureMode.Live);
+        SetField(host, "_isRecordingAudio", true);
+        SetField(host, "_liveVoiceReconnectRequired", true);
+        SetField(host, "_voiceNetworkOnline", false);
+        var queueMethod = typeof(EllaiGuidanceHost).GetMethod(
+            "QueueNativePcmChunkAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var chunk = new ReadOnlyMemory<byte>(new byte[] { 8, 9, 10, 11 });
+
+        await (ValueTask)queueMethod.Invoke(host.Component, [chunk, CancellationToken.None])!;
+        await InvokeAsync(host, "StopVoiceCaptureAsync");
+
+        var recovery = Assert.Single(client.VoiceTranscriptions);
+        Assert.Equal(new byte[] { 8, 9, 10, 11 }, recovery.Audio);
+        Assert.Equal("draft\noffline words", GetField<string?>(host, "InputText"));
+        Assert.Equal(0, client.LiveTranscriptionCalls);
+    }
+
+    [Fact]
     public async Task EmptyComposerShowsLiveVoiceControlInsteadOfSend()
     {
         var markup = await RenderComposerAsync(inputText: string.Empty, canUseMicrophone: true,
@@ -983,6 +1045,8 @@ public sealed class EllaiSurfaceLogicTests
 
         public List<(string SessionId, byte[] Audio, EllaiVoiceCaptureMode Mode)> VoiceTranscriptions { get; } = [];
 
+        public int LiveTranscriptionCalls { get; private set; }
+
         public Func<string, byte[], EllaiVoiceCaptureMode, CancellationToken,
             Task<EllaiVoiceTranscriptionResult?>>? VoiceTranscriptionHandler { get; init; }
 
@@ -1033,9 +1097,12 @@ public sealed class EllaiSurfaceLogicTests
         public Task<EllaiVoiceTranscriptionResult?> TranscribeLiveVoiceStreamAsync(
             string sessionId,
             Stream audio,
-            CancellationToken cancellationToken) =>
-            LiveTranscriptionHandler?.Invoke(sessionId, audio)
+            CancellationToken cancellationToken)
+        {
+            LiveTranscriptionCalls++;
+            return LiveTranscriptionHandler?.Invoke(sessionId, audio)
                 ?? Task.FromResult<EllaiVoiceTranscriptionResult?>(null);
+        }
 
         public Task<EllaiSessionStartResult> StartSessionAsync(EllaiMode mode, CancellationToken cancellationToken)
         {

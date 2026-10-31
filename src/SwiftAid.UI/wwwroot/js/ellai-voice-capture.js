@@ -11,6 +11,24 @@ export function isSupported() {
         && globalThis.AudioWorkletNode);
 }
 
+export function isOnline() {
+    return globalThis.navigator?.onLine !== false;
+}
+
+export function startConnectivityMonitoring(dotnet) {
+    const notify = () => {
+        void dotnet.invokeMethodAsync("OnVoiceConnectivityChanged", isOnline()).catch(() => { });
+    };
+    globalThis.addEventListener("online", notify);
+    globalThis.addEventListener("offline", notify);
+    return {
+        dispose() {
+            globalThis.removeEventListener("online", notify);
+            globalThis.removeEventListener("offline", notify);
+        }
+    };
+}
+
 export async function startCapture(dotnet, showLiveVoiceLevel = false, sessionId = "") {
     if (!isSupported()) {
         throw new Error("Microphone capture requires browser AudioWorklet support.");
