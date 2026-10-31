@@ -53,6 +53,11 @@ public sealed class EllaiSurfaceLogicTests
         Assert.Contains("aria-label=\"Send to Ellai\"", markup, StringComparison.Ordinal);
         Assert.Contains("aria-label=\"Ellai voice and text controls\"", markup, StringComparison.Ordinal);
         Assert.Contains("Message Ellai", markup, StringComparison.Ordinal);
+        Assert.Contains(
+            "For privacy, avoid sharing names, contact details, or other details that could identify someone.",
+            markup,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("configured AI service", markup, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Start voice input", markup, StringComparison.Ordinal);
         Assert.DoesNotContain("Stop live voice", markup, StringComparison.Ordinal);
         Assert.Matches("""(?s)<button(?=[^>]*aria-label="Send to Ellai")(?=[^>]*disabled)[^>]*>""", markup);
@@ -314,7 +319,7 @@ public sealed class EllaiSurfaceLogicTests
         await InvokeAsync(host, "StopVoiceCaptureAsync");
 
         Assert.Single(client.VoiceTranscriptions);
-        Assert.Contains("no completed turn was confirmed", GetField<string?>(host, "StatusText"), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Couldn't send your voice message", GetField<string?>(host, "StatusText"), StringComparison.OrdinalIgnoreCase);
         Assert.Equal("draft", GetField<string?>(host, "InputText"));
         Assert.Empty(client.Submissions);
     }
@@ -410,7 +415,7 @@ public sealed class EllaiSurfaceLogicTests
 
         Assert.False(GetField<bool>(host, "_liveVoiceReconnectRequired"));
         Assert.True(GetField<bool>(host, "_voiceNetworkOnline"));
-        Assert.Contains("resumed", GetField<string?>(host, "StatusText"), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("Connection restored. Keep speaking.", GetField<string?>(host, "StatusText"));
         Assert.Equal(2, client.LiveTranscriptionCalls);
 
         await InvokeAsync(host, "StopVoiceCaptureAsync");

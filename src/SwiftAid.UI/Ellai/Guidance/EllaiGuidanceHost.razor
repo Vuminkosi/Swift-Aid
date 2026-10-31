@@ -290,7 +290,7 @@
                     .ConfigureAwait(false))
             {
                 _startingVoiceCapture = false;
-                StatusText = "Voice consent could not be saved. No audio was recorded.";
+                StatusText = "We couldn't confirm your permission to use the microphone. No audio was recorded.";
                 Phase = EllaiStatusPhases.Blocked;
                 return;
             }
@@ -397,7 +397,7 @@
             _startingVoiceCapture = false;
             if (mode == EllaiVoiceCaptureMode.Live && _liveVoiceReconnectRequired)
             {
-                StatusText = "Your device reports no network connection. This voice turn is held in memory and will be sent once when you stop.";
+                StatusText = "No internet connection. Keep speaking; Ellai will try to reconnect.";
             }
             else
             {
@@ -519,7 +519,7 @@
 
     private void SetLiveVoiceRecoveryStatus()
     {
-        StatusText = "Connection interrupted. Keep speaking; this turn is held in memory while one live reconnect is attempted. Stop will retry once by upload if it cannot reconnect.";
+        StatusText = "Connection interrupted. Keep speaking; Ellai will try to reconnect. If it cannot, stop and try sending your voice message again.";
         Phase = EllaiStatusPhases.Active;
     }
 
@@ -596,7 +596,7 @@
             }
 
             _liveVoiceReconnectRequired = false;
-            StatusText = "Connection restored. Live transcription has resumed.";
+            StatusText = "Connection restored. Keep speaking.";
             Phase = EllaiStatusPhases.Active;
             await InvokeAsync(StateHasChanged).ConfigureAwait(false);
             return true;
@@ -1269,8 +1269,8 @@
             }
 
             StatusText = mode == EllaiVoiceCaptureMode.Live
-                ? "Finishing live transcription…"
-                : "Sending transient audio to Gateway transcription…";
+                ? "Finishing your voice message…"
+                : "Sending your voice message…";
             Phase = EllaiStatusPhases.Active;
             await InvokeAsync(StateHasChanged);
             EllaiVoiceTranscriptionResult? result;
@@ -1305,7 +1305,7 @@
                         && (result is null || _liveVoiceReconnectRequired))
                     {
                         usedLiveVoiceUploadRecovery = true;
-                        StatusText = "Retrying the unfinished voice audio once from its temporary in-memory copy.";
+                        StatusText = "Trying again to send the unfinished part of your voice message…";
                         await InvokeAsync(StateHasChanged);
                         try
                         {
@@ -1341,7 +1341,7 @@
                     && !_isPlayingResponse)
                 {
                     StatusText = usedLiveVoiceUploadRecovery
-                        ? "Connection unavailable. This voice audio was held only in memory and no completed turn was confirmed. Try again or type your message."
+                        ? "Couldn't send your voice message. Try again or type your message."
                         : "No completed voice turn came through. Try again or type your message.";
                     Phase = EllaiStatusPhases.NeedsInput;
                 }
@@ -1366,7 +1366,7 @@
             {
                 if (usedLiveVoiceUploadRecovery)
                 {
-                    StatusText = "Connection unavailable. This voice turn was only held in memory and was not sent. Try again or type your message.";
+                    StatusText = "Couldn't send your voice message. Try again or type your message.";
                     Phase = EllaiStatusPhases.NeedsInput;
                     return;
                 }
@@ -1623,7 +1623,7 @@
         }
         catch (Exception)
         {
-            StatusText = "Gateway speech could not play. Try again, or continue with the text response.";
+            StatusText = "Ellai couldn't play the spoken reply. You can still read it above.";
         }
         finally
         {
@@ -1756,7 +1756,7 @@
 
             _sessionView = view;
             TrackSession(view.SessionId);
-            StatusText = "Ellai session started. Enter a question to continue.";
+            StatusText = "Ellai is ready. Enter a question to continue.";
         }
         catch (Exception)
         {
