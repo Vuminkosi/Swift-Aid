@@ -46,6 +46,38 @@ public sealed class EllaiVoiceTurnCoordinatorTests
     }
 
     [Fact]
+    public void ConfiguredSpeechStartAndSilenceThresholdsDriveStateTransitions()
+    {
+        var coordinator = new EllaiVoiceTurnCoordinator(new EllaiVoiceTurnOptions(
+            SpeechStartConfirmationMs: 64,
+            EndOfTurnSilenceMs: 100,
+            BargeInConfirmationMs: 96));
+        using var stream = coordinator.BeginStream("session-configured", CancellationToken.None);
+
+        coordinator.ObserveAcousticFrame(stream, Speech(0), VadFrameDuration);
+        coordinator.ObserveAcousticFrame(stream, Speech(1), VadFrameDuration);
+        Assert.Equal(EllaiVoiceTurnState.UserSpeaking, coordinator.GetSnapshot("session-configured").State);
+
+        coordinator.ObserveAcousticFrame(stream, Silence(2), VadFrameDuration);
+        coordinator.ObserveAcousticFrame(stream, Silence(3), VadFrameDuration);
+        coordinator.ObserveAcousticFrame(stream, Silence(4), VadFrameDuration);
+        coordinator.ObserveAcousticFrame(stream, Silence(5), VadFrameDuration);
+
+        Assert.Equal(EllaiVoiceTurnState.EndpointCandidate, coordinator.GetSnapshot("session-configured").State);
+    }
+
+    [Theory]
+    [InlineData(0, 650, 180)]
+    [InlineData(120, 99, 180)]
+    [InlineData(120, 650, 2001)]
+    public void InvalidThresholdsAreRejected(int speechStartMs, int silenceMs, int bargeInMs)
+    {
+        var options = new EllaiVoiceTurnOptions(speechStartMs, silenceMs, bargeInMs);
+
+        Assert.Throws<ArgumentOutOfRangeException>(options.Validate);
+    }
+
+    [Fact]
     public void NewStreamCancelsPriorEpochAndRejectsItsLateFinal()
     {
         var coordinator = new EllaiVoiceTurnCoordinator();

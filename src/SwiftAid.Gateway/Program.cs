@@ -126,6 +126,15 @@ builder.Services.AddHostedService<SwiftAid.Gateway.Ellai.EllaiUtteranceWorker>()
 builder.Services.AddSingleton<SwiftAid.Application.Ellai.IEllaiUiObservationStore, SwiftAid.Application.Ellai.InMemoryEllaiUiObservationStore>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiScenarioDirector>();
 builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiConsentService>();
+var voiceTurnOptions = new SwiftAid.Application.Ellai.EllaiVoiceTurnOptions(
+    SpeechStartConfirmationMs: builder.Configuration.GetValue(
+        "Ellai:VoiceTurn:SpeechStartConfirmationMs", 120),
+    EndOfTurnSilenceMs: builder.Configuration.GetValue(
+        "Ellai:VoiceTurn:EndOfTurnSilenceMs", 650),
+    BargeInConfirmationMs: builder.Configuration.GetValue(
+        "Ellai:VoiceTurn:BargeInConfirmationMs", 180));
+voiceTurnOptions.Validate();
+builder.Services.AddSingleton(voiceTurnOptions);
 builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiVoiceTurnCoordinator>();
 builder.Services.AddScoped<SwiftAid.Gateway.Ellai.EllaiVoiceTranscriptionService>();
 builder.Services.AddSingleton<SwiftAid.Application.Ellai.IVoiceActivityDetector,
