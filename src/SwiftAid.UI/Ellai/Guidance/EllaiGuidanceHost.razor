@@ -404,8 +404,8 @@
                 StatusText = mode == EllaiVoiceCaptureMode.Recorded
                     ? $"Recording for transcription. {processingStatus} Stop when you are ready."
                     : capturingAlongsidePlayback
-                        ? $"I’m listening while Ellai speaks. Speak to interrupt, then stop to send your turn. {processingStatus}"
-                        : $"I’m listening. I’ll transcribe when you stop. {processingStatus}";
+                        ? $"I’m listening while Ellai speaks. Speak to interrupt; completed turns are sent automatically. {processingStatus}"
+                        : $"I’m listening. Completed turns are sent automatically, and the microphone stays ready for your next turn. {processingStatus}";
             }
             Phase = EllaiStatusPhases.Active;
             await InvokeAsync(StateHasChanged);
@@ -1618,7 +1618,7 @@
         catch (OperationCanceledException) when (playbackCts.IsCancellationRequested)
         {
             StatusText = _isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Live
-                ? "You interrupted Ellai. Keep speaking, then stop to send your turn."
+                ? "You interrupted Ellai. Keep speaking; completed turns are sent automatically."
                 : "Speech playback stopped.";
         }
         catch (Exception)

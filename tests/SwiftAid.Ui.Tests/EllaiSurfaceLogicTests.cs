@@ -106,6 +106,8 @@ public sealed class EllaiSurfaceLogicTests
         Assert.Equal(playbackId, GetField<string?>(host, "_activeResponsePlaybackId"));
         Assert.Contains("I’m listening while Ellai speaks", GetField<string?>(host, "StatusText"),
             StringComparison.Ordinal);
+        Assert.Contains("completed turns are sent automatically", GetField<string?>(host, "StatusText"),
+            StringComparison.OrdinalIgnoreCase);
 
         var deadline = DateTime.UtcNow.AddSeconds(2);
         while (GetField<bool>(host, "_isPlayingResponse") && DateTime.UtcNow < deadline)

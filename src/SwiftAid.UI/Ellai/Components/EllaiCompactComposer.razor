@@ -34,7 +34,8 @@
                 @if (IsRecordingAudio && OnStopVoice.HasDelegate)
                 {
                     <MudIconButton Icon="@Icons.Material.Filled.StopCircle" Color="Color.Error" Size="Size.Small"
-                                   OnClick="OnStopVoice" aria-label="Stop recording for transcription" />
+                                   OnClick="OnStopVoice"
+                                   aria-label="@(IsLiveSpeaking ? "Stop the live microphone session" : "Stop recording for transcription")" />
                 }
                 else
                 {
@@ -49,8 +50,8 @@
                     <MudIconButton Icon="@Icons.Material.Filled.GraphicEq" Color="Color.Primary"
                                    Class="ellai-composer__live-speak ellai-composer__live-speak--active"
                                    OnClick="OnStopVoice" data-ellai-live-speak="true"
-                                   aria-pressed="true" aria-label="Finish and send this voice turn now"
-                                   title="Listening. Pause to send automatically, or select to finish now." />
+                                   aria-pressed="true" aria-label="Stop the live microphone session"
+                                   title="Listening. Completed turns are sent automatically; select to stop the microphone." />
                 }
                 else if (string.IsNullOrWhiteSpace(InputText))
                 {
@@ -60,7 +61,7 @@
                                    Disabled="@(!CanUseRealtimeMicrophone || !OnStartRealtimeVoice.HasDelegate)"
                                    data-ellai-audio-unlock="true"
                                    aria-label="@(CanUseRealtimeMicrophone && OnStartRealtimeVoice.HasDelegate ? "Start live voice question" : "Live voice question unavailable")"
-                                   title="@(CanUseRealtimeMicrophone && OnStartRealtimeVoice.HasDelegate ? "Speak normally. A pause finishes and sends your question automatically." : "Live voice questions are unavailable.")" />
+                                   title="@(CanUseRealtimeMicrophone && OnStartRealtimeVoice.HasDelegate ? "Speak naturally. Completed turns are sent automatically while the microphone stays ready." : "Live voice questions are unavailable.")" />
                 }
                 else
                 {
