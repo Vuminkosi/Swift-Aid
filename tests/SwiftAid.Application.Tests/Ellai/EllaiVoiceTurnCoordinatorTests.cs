@@ -192,10 +192,63 @@ public sealed class EllaiVoiceTurnCoordinatorTests
 
         Assert.Contains("swiftaid.ellai.voice.speech.start.delay", measurements);
         Assert.Contains("swiftaid.ellai.voice.endpoint.silence", measurements);
+        Assert.Contains("swiftaid.ellai.voice.endpoint.provider_final.delay", measurements);
+        Assert.Contains("swiftaid.ellai.voice.endpoint.turn_completed.delay", measurements);
         Assert.Contains("swiftaid.ellai.voice.transcription.final.latency", measurements);
         Assert.Contains("swiftaid.ellai.voice.barge_in.confirmation", measurements);
         Assert.Contains("swiftaid.ellai.voice.turn.recovery", measurements);
         Assert.Equal(0, nonEmptyTagSets);
+    }
+
+    [Fact]
+    public void EndpointLatencyMetricsSeparateProviderFinalWaitFromCoordinatorCompletion()
+    {
+        var providerFinalDelays = new List<double>();
+        var completedDelays = new List<double>();
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, meterListener) =>
+        {
+            if (instrument.Meter.Name == "SwiftAid.Application.Ellai.Voice")
+            {
+                meterListener.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<double>((instrument, value, _, _) =>
+        {
+            if (instrument.Name == "swiftaid.ellai.voice.endpoint.provider_final.delay")
+            {
+                providerFinalDelays.Add(value);
+            }
+            else if (instrument.Name == "swiftaid.ellai.voice.endpoint.turn_completed.delay")
+            {
+                completedDelays.Add(value);
+            }
+        });
+        listener.Start();
+
+        var timeProvider = new AdvanceableTimeProvider();
+        var coordinator = new EllaiVoiceTurnCoordinator(
+            new EllaiVoiceTurnOptions(64, 100, 96), timeProvider);
+        using var stream = coordinator.BeginStream("session-latency", CancellationToken.None);
+
+        for (var sequence = 0; sequence < 2; sequence++)
+        {
+            timeProvider.Advance(VadFrameDuration);
+            coordinator.ObserveAcousticFrame(stream, Speech(sequence), VadFrameDuration);
+        }
+        for (var sequence = 2; sequence < 6; sequence++)
+        {
+            timeProvider.Advance(VadFrameDuration);
+            coordinator.ObserveAcousticFrame(stream, Silence(sequence), VadFrameDuration);
+        }
+
+        Assert.Equal(EllaiVoiceTurnState.EndpointCandidate,
+            coordinator.GetSnapshot("session-latency").State);
+        timeProvider.Advance(TimeSpan.FromMilliseconds(200));
+        Assert.NotNull(stream.AcceptFinalTranscript("provider-turn", "test utterance"));
+
+        Assert.Equal(200, Assert.Single(providerFinalDelays), precision: 4);
+        Assert.Equal(200, Assert.Single(completedDelays), precision: 4);
     }
 
     [Fact]
@@ -386,6 +439,15 @@ public sealed class EllaiVoiceTurnCoordinatorTests
 
     private static VoiceActivityResult Speech(long sequence) => new(sequence, 0.9f, true, false);
     private static VoiceActivityResult Silence(long sequence) => new(sequence, 0.05f, false, false);
+
+    private sealed class AdvanceableTimeProvider : TimeProvider
+    {
+        private long _timestamp;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => _timestamp;
+        public void Advance(TimeSpan elapsed) => _timestamp += elapsed.Ticks;
+    }
 
     private static void CompleteTurn(
         EllaiVoiceTurnCoordinator coordinator,

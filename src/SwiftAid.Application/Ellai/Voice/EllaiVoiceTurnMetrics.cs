@@ -13,6 +13,12 @@ internal static class EllaiVoiceTurnMetrics
     private static readonly Histogram<double> EndpointSilence = Meter.CreateHistogram<double>(
         "swiftaid.ellai.voice.endpoint.silence", "ms",
         "Silence duration when the turn coordinator creates an endpoint candidate.");
+    private static readonly Histogram<double> EndpointToProviderFinal = Meter.CreateHistogram<double>(
+        "swiftaid.ellai.voice.endpoint.provider_final.delay", "ms",
+        "Time from an acoustic endpoint candidate until the provider final transcript arrives.");
+    private static readonly Histogram<double> EndpointToTurnCompleted = Meter.CreateHistogram<double>(
+        "swiftaid.ellai.voice.endpoint.turn_completed.delay", "ms",
+        "Time from an acoustic endpoint candidate until the coordinator confirms the turn.");
     private static readonly Histogram<double> BargeInConfirmation = Meter.CreateHistogram<double>(
         "swiftaid.ellai.voice.barge_in.confirmation", "ms",
         "Consecutive acoustic speech duration before playback interruption is confirmed.");
@@ -27,6 +33,12 @@ internal static class EllaiVoiceTurnMetrics
 
     public static void EndpointCandidateReached(TimeSpan silence) =>
         SafeRecord(EndpointSilence, silence.TotalMilliseconds);
+
+    public static void ProviderFinalAfterEndpoint(TimeSpan delay) =>
+        SafeRecord(EndpointToProviderFinal, delay.TotalMilliseconds);
+
+    public static void TurnCompletedAfterEndpoint(TimeSpan delay) =>
+        SafeRecord(EndpointToTurnCompleted, delay.TotalMilliseconds);
 
     public static void BargeInConfirmed(TimeSpan delay) =>
         SafeRecord(BargeInConfirmation, delay.TotalMilliseconds);

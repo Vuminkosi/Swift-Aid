@@ -113,6 +113,7 @@ public sealed class EllaiVoiceTurnCoordinator
             state.SpeechCandidateStartSample = -1;
             state.LastSpeechStartSample = -1;
             state.LastSpeechEndSample = -1;
+            state.EndpointCandidateTimestamp = null;
             state.BargeInStartSample = -1;
             state.ConfirmedSpeech = TimeSpan.Zero;
             state.Silence = TimeSpan.Zero;
@@ -328,6 +329,11 @@ public sealed class EllaiVoiceTurnCoordinator
             }
 
             state.LastTouchedUtc = _timeProvider.GetUtcNow();
+            if (state.EndpointCandidateTimestamp is { } endpointTimestamp)
+            {
+                EllaiVoiceTurnMetrics.ProviderFinalAfterEndpoint(
+                    _timeProvider.GetElapsedTime(endpointTimestamp));
+            }
             if (string.Equals(state.PartialProviderTurnId, providerTurnId, StringComparison.Ordinal)
                 || string.Equals(state.PartialProviderTurnId, "unscoped", StringComparison.Ordinal))
             {
@@ -489,6 +495,7 @@ public sealed class EllaiVoiceTurnCoordinator
         state.Silence = TimeSpan.Zero;
         state.LastSpeechStartSample = -1;
         state.LastSpeechEndSample = -1;
+        state.EndpointCandidateTimestamp = null;
         if (!state.ActivePlaybackId.HasValue)
         {
             state.State = EllaiVoiceTurnState.Listening;
@@ -541,6 +548,7 @@ public sealed class EllaiVoiceTurnCoordinator
                     if (state.Silence.TotalMilliseconds >= _options.EndOfTurnSilenceMs)
                     {
                         state.State = EllaiVoiceTurnState.EndpointCandidate;
+                        state.EndpointCandidateTimestamp = _timeProvider.GetTimestamp();
                         EllaiVoiceTurnMetrics.EndpointCandidateReached(state.Silence);
                         CompletePendingTranscripts(state);
                     }
@@ -552,6 +560,7 @@ public sealed class EllaiVoiceTurnCoordinator
                     state.State = EllaiVoiceTurnState.UserSpeaking;
                     state.ConfirmedSpeech += frameDuration;
                     state.Silence = TimeSpan.Zero;
+                    state.EndpointCandidateTimestamp = null;
                     state.LastSpeechEndSample = activity.AudioEndSample;
                 }
                 else
@@ -584,7 +593,7 @@ public sealed class EllaiVoiceTurnCoordinator
         }
     }
 
-    private static void CompletePendingTranscripts(SessionState state)
+    private void CompletePendingTranscripts(SessionState state)
     {
         if (state.State != EllaiVoiceTurnState.EndpointCandidate)
         {
@@ -635,6 +644,12 @@ public sealed class EllaiVoiceTurnCoordinator
 
             var turnId = state.ConfirmedInterruptionTurnId ?? Guid.NewGuid();
             state.ConfirmedInterruptionTurnId = null;
+            if (state.EndpointCandidateTimestamp is { } endpointTimestamp)
+            {
+                EllaiVoiceTurnMetrics.TurnCompletedAfterEndpoint(
+                    _timeProvider.GetElapsedTime(endpointTimestamp));
+                state.EndpointCandidateTimestamp = null;
+            }
             state.CompletedTurns.Enqueue(new EllaiCompletedVoiceTurn(
                 ++state.NextCompletionSequence,
                 transcript.ProviderTurnId,
@@ -701,6 +716,7 @@ public sealed class EllaiVoiceTurnCoordinator
         public TimeSpan BargeInSpeech { get; set; }
         public DateTimeOffset LastTouchedUtc { get; set; } = createdAtUtc;
         public long StreamStartedTimestamp { get; set; }
+        public long? EndpointCandidateTimestamp { get; set; }
         public string? PartialProviderTurnId { get; set; }
         public string? PartialTranscript { get; set; }
     }
