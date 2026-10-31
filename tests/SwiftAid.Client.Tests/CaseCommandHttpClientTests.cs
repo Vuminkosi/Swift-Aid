@@ -11,6 +11,26 @@ public sealed class CaseCommandHttpClientTests
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     [Fact]
+    public async Task Send_UsesSuppliedCommandId_AndRejectsEmptyId()
+    {
+        var commandId = Guid.NewGuid();
+        var handler = new ScriptedHandler([JsonResponse(HttpStatusCode.OK, new
+        {
+            caseId = Guid.NewGuid(), commandId, eventIds = Array.Empty<Guid>(), aggregateVersion = 5, reportRevision = 1
+        })]);
+        var client = Create(handler);
+        await client.SendAsync(Guid.NewGuid(), new CaseCommandInput("Resolve", null, "done", null, null, null, 4, CommandId: commandId));
+        using var body = JsonDocument.Parse(await handler.Requests[0].Content!.ReadAsStringAsync());
+        Assert.Equal(commandId, body.RootElement.GetProperty("commandId").GetGuid());
+
+        var invalidHandler = new ScriptedHandler([]);
+        var invalid = await Create(invalidHandler).SendAsync(Guid.NewGuid(),
+            new CaseCommandInput("Resolve", null, "done", null, null, null, 4, CommandId: Guid.Empty));
+        Assert.Equal(CaseCommandStatus.Invalid, invalid.Status);
+        Assert.Empty(invalidHandler.Requests);
+    }
+
+    [Fact]
     public async Task Send_WithExplicitVersion_PostsWireBodyAndMapsAccepted()
     {
         var caseId = Guid.NewGuid();

@@ -16,6 +16,24 @@ public sealed class CaseCommandGatewayClientTests
     private static readonly Guid FixedCaseId = Guid.Parse("c0de0001-1111-4c22-9dd9-123456789abc");
 
     [Fact]
+    public async Task Send_UsesSuppliedCommandId_AndRejectsEmptyId()
+    {
+        var processor = new TestCaseCommandProcessor();
+        using var services = CreateServices(processor, new TestCaseTimelineQuery(FixedCaseId));
+        var client = new CaseCommandGatewayClient(new TestAuthenticationStateProvider(), services);
+        var commandId = Guid.NewGuid();
+        var result = await client.SendAsync(FixedCaseId,
+            new CaseCommandInput("Resolve", null, "done", null, null, null, 3, CommandId: commandId));
+        Assert.Equal(commandId, result.CommandId);
+        Assert.Equal(commandId, processor.LastCommand!.CommandId);
+
+        var invalid = await client.SendAsync(FixedCaseId,
+            new CaseCommandInput("Resolve", null, "done", null, null, null, 3, CommandId: Guid.Empty));
+        Assert.Equal(CaseCommandStatus.Invalid, invalid.Status);
+        Assert.Equal(1, processor.Calls);
+    }
+
+    [Fact]
     public async Task CorrectReport_MapsNarrativeAndReasonToSeparateCommandFields()
     {
         var processor = new TestCaseCommandProcessor();
@@ -38,8 +56,28 @@ public sealed class CaseCommandGatewayClientTests
 
         Assert.Equal(CaseCommandStatus.Accepted, result.Status);
         var command = Assert.IsType<CorrectReportCommand>(processor.LastCommand);
+        Assert.NotEqual(Guid.Empty, command.CommandId);
+        Assert.Equal(command.CommandId, result.CommandId);
         Assert.Equal("corrected report text", command.CorrectedNarrative);
         Assert.Equal("reason for correction", command.Reason);
+    }
+
+    [Fact]
+    public async Task CorrectReport_PreservesStaleExpectedVersionAndReturnsConflict()
+    {
+        var processor = new TestCaseCommandProcessor { AuthoritativeVersion = 5 };
+        var timeline = new TestCaseTimelineQuery(FixedCaseId);
+        using var services = CreateServices(processor, timeline);
+        var client = new CaseCommandGatewayClient(new TestAuthenticationStateProvider(), services);
+
+        var result = await client.SendAsync(FixedCaseId, new CaseCommandInput(
+            "CorrectReport", null, "correction reason", null, null, null,
+            ExpectedVersion: 4, Narrative: "corrected report"));
+
+        Assert.Equal(CaseCommandStatus.Conflict, result.Status);
+        Assert.Equal(1, timeline.Calls);
+        Assert.Equal(5, timeline.LatestVersion);
+        Assert.Equal(4, processor.LastCommand!.ExpectedVersion);
     }
 
     [Theory]
@@ -95,6 +133,10 @@ public sealed class CaseCommandGatewayClientTests
 
     private sealed class TestCaseTimelineQuery(Guid caseId) : ICaseTimelineQuery
     {
+        public int Calls { get; private set; }
+
+        public long LatestVersion => 5;
+
         public Task<CaseTimelineResult> GetAsync(
             ActorContext actor,
             Guid requestedCaseId,
@@ -102,6 +144,7 @@ public sealed class CaseCommandGatewayClientTests
             CancellationToken ct)
         {
             ct.ThrowIfCancellationRequested();
+            Calls++;
             Assert.Equal("synthetic-staff", actor.ActorId);
             Assert.Equal(caseId, requestedCaseId);
 
@@ -122,6 +165,8 @@ public sealed class CaseCommandGatewayClientTests
 
     private sealed class TestCaseCommandProcessor : ICaseCommandProcessor
     {
+        public long? AuthoritativeVersion { get; init; }
+
         public int Calls { get; private set; }
 
         public CaseCommand? LastCommand { get; private set; }
@@ -138,7 +183,9 @@ public sealed class CaseCommandGatewayClientTests
             LastCommand = command;
 
             return ValueTask.FromResult(new CaseCommandProcessingResult(
-                CaseCommandProcessingStatus.Accepted,
+                AuthoritativeVersion is null || command.ExpectedVersion == AuthoritativeVersion
+                    ? CaseCommandProcessingStatus.Accepted
+                    : CaseCommandProcessingStatus.Conflict,
                 caseId,
                 command.CommandId,
                 ImmutableArray.Create(Guid.NewGuid()),

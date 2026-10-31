@@ -21,6 +21,7 @@
                                      TimelineClient="TimelineClient"
                                      OverviewData="_overview"
                                      OnRefreshOverview="LoadOverviewAsync"
+                                     CorrectionData="_correction" RefreshCorrectionAsync="LoadCorrectionAsync" SubmitCorrectionAsyncCallback="SubmitCorrectionAsync"
                                      DiscussionData="_discussion" MentionTargetsData="_mentionTargets" OnRefreshDiscussion="LoadDiscussionAsync" AppendDiscussionAsync="AppendDiscussionAsync"
                                      EvidenceData="_evidence" OnRefreshEvidence="LoadEvidenceAsync"
                                      OnDownloadEvidence="DownloadEvidenceAsync" UploadEvidenceAsyncCallback="UploadEvidenceAsync"
@@ -48,6 +49,8 @@
     private Guid _loadedCaseId;
     private long _overviewRequest;
     private CaseDetailOverviewView? _overview;
+    private CaseDetailCorrectionView? _correction;
+    private long _correctionRequest;
     private CaseDetailMentionTargetsView? _mentionTargets;
     private CaseDetailObservationsView? _observations;
     private long _discussionRequest;
@@ -74,7 +77,7 @@
                 _evidenceRequest++;
                 _downloadRequest++;
                 _workRequest++;
-                await Task.WhenAll(LoadOverviewAsync(), LoadDiscussionAsync(), LoadEvidenceAsync(), LoadObservationsAsync(), LoadWorkAsync());
+                await Task.WhenAll(LoadOverviewAsync(), LoadCorrectionAsync(), LoadDiscussionAsync(), LoadEvidenceAsync(), LoadObservationsAsync(), LoadWorkAsync());
             }
         }
         else
@@ -82,6 +85,8 @@
             _loadedCaseId = Guid.Empty;
             _overviewRequest++;
             _overview = null;
+            _correctionRequest++;
+            _correction = null;
             _discussionRequest++;
             _discussion = null;
             _evidenceRequest++;
@@ -90,6 +95,59 @@
             _workRequest++;
             ClearWorkProjection(OperationsSurfaceState.Unavailable, "Open a case to review its coordination work.");
         }
+    }
+
+    private async Task<CaseDetailCorrectionView?> LoadCorrectionAsync()
+    {
+        var caseId = _loadedCaseId;
+        var request = ++_correctionRequest;
+        _correction = new CaseDetailCorrectionView(CaseDetailPanelState.Loading);
+        if (caseId == Guid.Empty) return _correction = new(CaseDetailPanelState.Unavailable);
+        try
+        {
+            var client = ServiceProvider.GetService<ICaseCorrectionReadClient>();
+            if (client is null) return _correction = new(CaseDetailPanelState.Unavailable);
+            var result = await client.GetAsync(caseId);
+            if (request != _correctionRequest || caseId != _loadedCaseId) return _correction;
+            if (result.Succeeded && result.Metadata.IsAvailable && result.Value is { } snapshot && snapshot.IsValidFor(caseId))
+                return _correction = new(CaseDetailPanelState.Populated, snapshot.AggregateVersion, snapshot.ReportRevision,
+                    (CaseDetailCorrectionKind)snapshot.ReportKind, snapshot.CanCorrectReport, snapshot.Narrative);
+            return _correction = new(CorrectionState(result.Code));
+        }
+        catch (Exception)
+        {
+            return request == _correctionRequest && caseId == _loadedCaseId
+                ? _correction = new(CaseDetailPanelState.Error)
+                : _correction;
+        }
+    }
+
+    private async Task<CaseDetailCorrectionOutcome> SubmitCorrectionAsync(CaseDetailCorrectionRequest request)
+    {
+        if (request.CaseId == Guid.Empty || request.CaseId != _loadedCaseId || request.CommandId == Guid.Empty || request.ExpectedVersion <= 0 ||
+            string.IsNullOrWhiteSpace(request.Narrative) || string.IsNullOrWhiteSpace(request.Reason))
+            return new(CaseDetailOperationStatus.Failed);
+        var client = ServiceProvider.GetService<ICaseCommandClient>();
+        if (client is null) return new(CaseDetailOperationStatus.Unavailable);
+        try
+        {
+            var result = await client.SendAsync(request.CaseId,
+                new CaseCommandInput("CorrectReport", null, request.Reason, null, null, null, request.ExpectedVersion,
+                    Narrative: request.Narrative, CommandId: request.CommandId));
+            if (result.CommandId != request.CommandId) return new(CaseDetailOperationStatus.Failed);
+            var status = result.Status switch
+            {
+                CaseCommandStatus.Accepted => CaseDetailOperationStatus.Accepted,
+                CaseCommandStatus.Replayed => CaseDetailOperationStatus.Replayed,
+                CaseCommandStatus.Conflict => CaseDetailOperationStatus.Conflict,
+                CaseCommandStatus.Denied => CaseDetailOperationStatus.Denied,
+                CaseCommandStatus.Unavailable => CaseDetailOperationStatus.Unavailable,
+                _ => CaseDetailOperationStatus.Failed
+            };
+            return new(status, result.AggregateVersion ?? 0, result.ReportRevision ?? 0);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception) { return new(CaseDetailOperationStatus.Failed); }
     }
 
     private async Task LoadOverviewAsync()
@@ -594,6 +652,14 @@
     });
 
     private static CaseDetailPanelState ResultPanelState(UiCapabilityResultCode code) => code switch
+    {
+        UiCapabilityResultCode.Denied => CaseDetailPanelState.Denied,
+        UiCapabilityResultCode.Unavailable => CaseDetailPanelState.Unavailable,
+        UiCapabilityResultCode.Cancelled => CaseDetailPanelState.Offline,
+        _ => CaseDetailPanelState.Error
+    };
+
+    private static CaseDetailPanelState CorrectionState(UiCapabilityResultCode code) => code switch
     {
         UiCapabilityResultCode.Denied => CaseDetailPanelState.Denied,
         UiCapabilityResultCode.Unavailable => CaseDetailPanelState.Unavailable,

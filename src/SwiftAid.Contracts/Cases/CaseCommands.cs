@@ -50,7 +50,8 @@ public sealed record CaseCommandInput(
     string? RecipientRoute = null,
     string? Resolution = null,
     string? ActionSummary = null,
-    IReadOnlyList<string>? EvidenceEventIds = null);
+    IReadOnlyList<string>? EvidenceEventIds = null,
+    Guid? CommandId = null);
 
 /// <summary>Staff case-command outcome. Denial and absence share one value for privacy.</summary>
 public enum CaseCommandStatus

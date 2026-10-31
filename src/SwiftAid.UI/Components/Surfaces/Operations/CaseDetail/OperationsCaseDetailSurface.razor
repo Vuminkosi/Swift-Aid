@@ -49,6 +49,72 @@
                 var state = OverviewData?.State ?? CaseDetailPanelState.Unavailable;
                 <CaseDetailUnavailable State="state" Title="@(PanelTitle(state, "Case summary"))" Description="@(PanelDescription(state, "case summary"))" OnRetry="OnRefreshOverview" />
             }
+            <section class="case-detail__section" aria-labelledby="correction-heading">
+                <div class="case-detail__section-heading">
+                    <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="correction-heading">Report correction</MudText>
+                    @if (CorrectionData is { State: CaseDetailPanelState.Populated, CanCorrectReport: true, ReportKind: CaseDetailCorrectionKind.LegacyV1, Narrative: not null } && !_showCorrectionForm)
+                    {
+                        <MudButton @ref="_correctionTrigger" Variant="Variant.Text" Class="case-detail__correction-action" StartIcon="@Icons.Material.Outlined.EditNote" Color="Color.Primary" OnClick="OpenCorrectionForm">Correct report</MudButton>
+                    }
+                </div>
+                @if (_showCorrectionForm && CorrectionData is { State: CaseDetailPanelState.Populated, CanCorrectReport: true, ReportKind: CaseDetailCorrectionKind.LegacyV1, Narrative: not null })
+                {
+                    <div class="case-detail__form" aria-label="Correct report">
+                        <MudText Typo="Typo.body2">This records a new report revision. Earlier accepted facts are preserved.</MudText>
+                        <MudTextField @ref="_correctionNarrativeField" T="string" Label="Corrected report" Lines="6" MaxLength="20000" Required="true" @bind-Value="_correctionNarrative" @bind-Value:after="OnCorrectionDraftChanged" />
+                        <MudTextField T="string" Label="Reason for correction" Lines="3" MaxLength="2000" Required="true" @bind-Value="_correctionReason" @bind-Value:after="OnCorrectionDraftChanged" />
+                        @if (_correctionNeedsReview)
+                        {
+                            <div @ref="_correctionReviewFocusTarget" class="case-detail__correction-review" tabindex="-1" role="group" aria-label="Review the latest report before submitting">
+                                <MudTextField T="string" Label="Latest authorized report" Value="@CorrectionData.Narrative" Lines="4" ReadOnly="true" />
+                                <MudCheckBox T="bool" @bind-Value="_correctionReviewConfirmed" Label="I reviewed the latest report and want to submit this draft as a new correction." />
+                            </div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(_correctionMessage))
+                        {
+                            <MudAlert Severity="@(_correctionMessageIsError ? Severity.Error : Severity.Info)" Variant="Variant.Text" role="@(_correctionMessageIsError ? "alert" : "status")">@_correctionMessage</MudAlert>
+                        }
+                        @if (_correctionNeedsRebase)
+                        {
+                            <MudButton Variant="Variant.Outlined" Class="case-detail__touch-action" Disabled="@_savingCorrection" OnClick="ReloadCorrectionForRebaseAsync">Load latest version and keep my draft</MudButton>
+                        }
+                        <div class="case-detail__actions">
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="case-detail__touch-action" Disabled="@_savingCorrection" OnClick="SubmitCorrectionAsync">@(_savingCorrection ? "Saving…" : "Submit correction")</MudButton>
+                            <MudButton Variant="Variant.Text" Class="case-detail__touch-action" Disabled="@_savingCorrection" OnClick="CancelCorrectionForm">Cancel</MudButton>
+                        </div>
+                    </div>
+                }
+                else if ((_showCorrectionForm && CorrectionData is { State: CaseDetailPanelState.Denied }) || _correctionAccessChanged)
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Text" role="status">Access or correction capability changed. The draft was cleared.</MudAlert>
+                }
+                else if (_showCorrectionForm)
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Text" role="status">
+                        The latest correction access could not be confirmed. The draft is hidden until a fresh authorized report can be loaded.
+                        <MudButton Variant="Variant.Text" Class="case-detail__touch-action" OnClick="RetryCorrectionAsync">Refresh report</MudButton>
+                    </MudAlert>
+                }
+                else if (CorrectionData is { State: CaseDetailPanelState.Populated, ReportKind: not CaseDetailCorrectionKind.LegacyV1 })
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">This report type is not supported by the legacy correction workflow.</MudText>
+                }
+                else if (CorrectionData is { State: CaseDetailPanelState.Populated, CanCorrectReport: false })
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">Report correction is unavailable for this case.</MudText>
+                }
+                else if (!_showCorrectionForm)
+                {
+                    var correctionState = CorrectionData?.State ?? CaseDetailPanelState.Unavailable;
+                    <CaseDetailUnavailable State="correctionState" Title="@(PanelTitle(correctionState, "report correction"))" Description="@(PanelDescription(correctionState, "report correction"))" OnRetry="RetryCorrectionAsync" />
+                }
+                @if (!_showCorrectionForm && !string.IsNullOrWhiteSpace(_correctionMessage))
+                {
+                    <div @ref="_correctionSuccessFocusTarget" tabindex="-1" aria-label="Correction result">
+                        <MudAlert Severity="@(_correctionMessageIsError ? Severity.Warning : Severity.Success)" Variant="Variant.Text" role="status">@_correctionMessage</MudAlert>
+                    </div>
+                }
+            </section>
             <section class="case-detail__section">
                 <MudText Typo="Typo.subtitle1" HtmlTag="h2">Current work</MudText>
                 <div class="case-detail__work-summary">
@@ -164,6 +230,9 @@
     [Parameter] public ICaseTimelineClient? TimelineClient { get; set; }
     [Parameter] public CaseDetailOverviewView? OverviewData { get; set; }
     [Parameter] public EventCallback OnRefreshOverview { get; set; }
+    [Parameter] public CaseDetailCorrectionView? CorrectionData { get; set; }
+    [Parameter] public Func<Task<CaseDetailCorrectionView?>>? RefreshCorrectionAsync { get; set; }
+    [Parameter] public Func<CaseDetailCorrectionRequest, Task<CaseDetailCorrectionOutcome>>? SubmitCorrectionAsyncCallback { get; set; }
     [Parameter] public CaseDetailDiscussionView? DiscussionData { get; set; }
     [Parameter] public CaseDetailMentionTargetsView? MentionTargetsData { get; set; }
     [Parameter] public EventCallback OnRefreshDiscussion { get; set; }
@@ -184,10 +253,16 @@
     [Parameter] public EventCallback OnWorkRetry { get; set; }
 
     private MudTabs? _tabs;
+    private MudButton? _correctionTrigger;
+    private MudTextField<string>? _correctionNarrativeField;
+    private ElementReference _correctionReviewFocusTarget;
+    private ElementReference _correctionSuccessFocusTarget;
     private CaseTimelineView? _timelineView;
     private long _caseVersion;
-    private bool _showDiscussionForm, _showObservationForm, _savingDiscussion, _savingObservation, _uploadFailed;
-    private string? _message, _discussionError, _observationText, _observationSource, _observationError, _uploadMessage;
+    private bool _showDiscussionForm, _showObservationForm, _savingDiscussion, _savingObservation, _uploadFailed, _showCorrectionForm, _savingCorrection, _correctionMessageIsError, _correctionNeedsRebase, _correctionNeedsReview, _correctionReviewConfirmed, _correctionAccessChanged, _focusCorrectionFieldAfterRender, _restoreCorrectionTriggerAfterRender, _focusCorrectionReviewAfterRender, _focusCorrectionSuccessAfterRender;
+    private string? _message, _discussionError, _observationText, _observationSource, _observationError, _uploadMessage, _correctionNarrative, _correctionReason, _correctionMessage;
+    private Guid? _correctionCommandId;
+    private CorrectionPayloadKey? _correctionCommandPayload;
     private CaseDetailObservationCategory _category = CaseDetailObservationCategory.Clinical;
     private IReadOnlyCollection<string> _selectedMentions = Array.Empty<string>();
     private IReadOnlyCollection<string> _selectedEvidence = Array.Empty<string>();
@@ -200,8 +275,46 @@
 
     protected override void OnParametersSet()
     {
-        if (CaseId != _boundCaseId) { _boundCaseId = CaseId; _caseVersion = 0; CloseDiscussionForm(); CloseObservationForm(); }
+        if (CaseId != _boundCaseId) { _boundCaseId = CaseId; _caseVersion = 0; _savingCorrection = false; CloseDiscussionForm(); CloseObservationForm(); CloseCorrectionForm(); }
+        if (_showCorrectionForm && (CorrectionData is { State: CaseDetailPanelState.Denied } ||
+            CorrectionData is { State: CaseDetailPanelState.Populated, CanCorrectReport: false } ||
+            CorrectionData is { State: CaseDetailPanelState.Populated, ReportKind: not CaseDetailCorrectionKind.LegacyV1 }))
+        {
+            ClearCorrectionDraftAfterAuthorizationChange();
+        }
+        else if (CorrectionData is { State: CaseDetailPanelState.Populated, CanCorrectReport: true, ReportKind: CaseDetailCorrectionKind.LegacyV1, Narrative: not null })
+        {
+            _correctionAccessChanged = false;
+        }
         _caseVersion = Math.Max(_caseVersion, Math.Max(DiscussionData?.AggregateVersion ?? 0, EvidenceData?.AggregateVersion ?? 0));
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusCorrectionFieldAfterRender)
+        {
+            _focusCorrectionFieldAfterRender = false;
+            try { if (_correctionNarrativeField is not null) await _correctionNarrativeField.FocusAsync(); }
+            catch (InvalidOperationException) { }
+        }
+        if (_focusCorrectionReviewAfterRender)
+        {
+            _focusCorrectionReviewAfterRender = false;
+            try { await _correctionReviewFocusTarget.FocusAsync(preventScroll: true); }
+            catch (InvalidOperationException) { }
+        }
+        if (_focusCorrectionSuccessAfterRender)
+        {
+            _focusCorrectionSuccessAfterRender = false;
+            try { await _correctionSuccessFocusTarget.FocusAsync(preventScroll: true); }
+            catch (InvalidOperationException) { }
+        }
+        if (_restoreCorrectionTriggerAfterRender)
+        {
+            _restoreCorrectionTriggerAfterRender = false;
+            try { if (_correctionTrigger is not null) await _correctionTrigger.FocusAsync(); }
+            catch (InvalidOperationException) { }
+        }
     }
 
     private async Task HandleWorkActionAsync(OperationsWorkManagementSurface.OperationsWorkActionRequest request)
@@ -216,6 +329,191 @@
     private void ShowDiscussionForm() { _discussionError = null; _showDiscussionForm = true; }
     private void CloseDiscussionForm() { _showDiscussionForm = false; _message = null; _discussionError = null; _selectedMentions = Array.Empty<string>(); _selectedEvidence = Array.Empty<string>(); }
     private void CloseObservationForm() { _showObservationForm = false; _observationText = null; _observationSource = null; _observationError = null; _observationEvidence = Array.Empty<string>(); }
+
+    private void OpenCorrectionForm()
+    {
+        if (CorrectionData is not { State: CaseDetailPanelState.Populated, CanCorrectReport: true, ReportKind: CaseDetailCorrectionKind.LegacyV1, Narrative: { } narrative }) return;
+        _correctionNarrative = narrative;
+        _correctionReason = null;
+        _correctionMessage = null;
+        _correctionMessageIsError = false;
+        _correctionNeedsRebase = false;
+        _correctionNeedsReview = false;
+        _correctionReviewConfirmed = false;
+        _correctionAccessChanged = false;
+        _focusCorrectionFieldAfterRender = true;
+        _showCorrectionForm = true;
+    }
+
+    private Task OnCorrectionDraftChanged()
+    {
+        _correctionReviewConfirmed = false;
+        return Task.CompletedTask;
+    }
+
+    private void CloseCorrectionForm()
+    {
+        _showCorrectionForm = false;
+        _correctionNarrative = null;
+        _correctionReason = null;
+        _correctionMessage = null;
+        _correctionMessageIsError = false;
+        _correctionNeedsRebase = false;
+        _correctionNeedsReview = false;
+        _correctionReviewConfirmed = false;
+        _correctionCommandId = null;
+        _correctionCommandPayload = null;
+        _correctionAccessChanged = false;
+        _focusCorrectionFieldAfterRender = false;
+        _restoreCorrectionTriggerAfterRender = false;
+        _focusCorrectionReviewAfterRender = false;
+        _focusCorrectionSuccessAfterRender = false;
+    }
+
+    private void CancelCorrectionForm()
+    {
+        _restoreCorrectionTriggerAfterRender = true;
+        CloseCorrectionForm();
+        _restoreCorrectionTriggerAfterRender = true;
+    }
+
+    private void ClearCorrectionDraftAfterAuthorizationChange()
+    {
+        _showCorrectionForm = false;
+        _correctionNarrative = null;
+        _correctionReason = null;
+        _correctionCommandId = null;
+        _correctionCommandPayload = null;
+        _correctionNeedsRebase = false;
+        _correctionNeedsReview = false;
+        _correctionReviewConfirmed = false;
+        _focusCorrectionFieldAfterRender = false;
+        _restoreCorrectionTriggerAfterRender = false;
+        _focusCorrectionReviewAfterRender = false;
+        _focusCorrectionSuccessAfterRender = false;
+        _correctionMessage = null;
+        _correctionMessageIsError = true;
+        _correctionAccessChanged = true;
+    }
+
+    private async Task ReloadCorrectionForRebaseAsync()
+    {
+        if (RefreshCorrectionAsync is null) return;
+        var caseId = CaseId;
+        var latest = await RefreshCorrectionAsync();
+        if (caseId != CaseId) return;
+        if (latest is not { State: CaseDetailPanelState.Populated, CanCorrectReport: true, ReportKind: CaseDetailCorrectionKind.LegacyV1, Narrative: not null })
+        {
+            _correctionMessage = "The latest report could not be loaded. Your draft is preserved.";
+            _correctionMessageIsError = true;
+            return;
+        }
+        CorrectionData = latest;
+        _correctionNeedsRebase = false;
+        _correctionNeedsReview = true;
+        _correctionReviewConfirmed = false;
+        _focusCorrectionReviewAfterRender = true;
+        _correctionMessage = "Latest revision loaded. Compare it with your draft before submitting again.";
+        _correctionMessageIsError = false;
+    }
+
+    private async Task RetryCorrectionAsync()
+    {
+        if (RefreshCorrectionAsync is null) return;
+        var caseId = CaseId;
+        var latest = await RefreshCorrectionAsync();
+        if (caseId != CaseId) return;
+        if (latest is { State: CaseDetailPanelState.Populated, CanCorrectReport: true, ReportKind: CaseDetailCorrectionKind.LegacyV1, Narrative: not null })
+        {
+            CorrectionData = latest;
+            _correctionAccessChanged = false;
+        }
+        else if (latest is { State: CaseDetailPanelState.Denied } or { State: CaseDetailPanelState.Populated, CanCorrectReport: false } or
+            { State: CaseDetailPanelState.Populated, ReportKind: not CaseDetailCorrectionKind.LegacyV1 })
+        {
+            ClearCorrectionDraftAfterAuthorizationChange();
+        }
+    }
+
+    private async Task SubmitCorrectionAsync()
+    {
+        if (_savingCorrection || SubmitCorrectionAsyncCallback is null ||
+            CorrectionData is not { State: CaseDetailPanelState.Populated, CanCorrectReport: true, ReportKind: CaseDetailCorrectionKind.LegacyV1, Narrative: not null } snapshot || CaseId == Guid.Empty)
+            return;
+        if (string.IsNullOrWhiteSpace(_correctionNarrative) || string.IsNullOrWhiteSpace(_correctionReason))
+        {
+            _correctionMessage = "Enter the corrected report and the reason for changing it.";
+            _correctionMessageIsError = true;
+            return;
+        }
+        if (_correctionNeedsReview && !_correctionReviewConfirmed)
+        {
+            _correctionMessage = "Compare the latest authorized report with your draft and confirm before submitting.";
+            _correctionMessageIsError = true;
+            return;
+        }
+
+        _savingCorrection = true;
+        _correctionMessage = null;
+        var payloadFingerprint = new CorrectionPayloadKey(snapshot.AggregateVersion, _correctionNarrative, _correctionReason);
+        if (payloadFingerprint != _correctionCommandPayload || _correctionCommandId is null)
+        {
+            _correctionCommandId = Guid.NewGuid();
+            _correctionCommandPayload = payloadFingerprint;
+        }
+        var commandId = _correctionCommandId.Value;
+        var request = new CaseDetailCorrectionRequest(CaseId, commandId, snapshot.AggregateVersion, _correctionNarrative, _correctionReason);
+        try
+        {
+            var result = await SubmitCorrectionAsyncCallback(request);
+            if (CaseId != request.CaseId) return;
+            if (result.Status == CaseDetailOperationStatus.Conflict)
+            {
+                _correctionMessage = "The report changed while you were editing. Your draft is preserved. Review it against the latest report, then submit again.";
+                _correctionMessageIsError = true;
+                _correctionNeedsRebase = true;
+                return;
+            }
+            if (result.Status is not (CaseDetailOperationStatus.Accepted or CaseDetailOperationStatus.Replayed))
+            {
+                _correctionMessage = OperationMessage(result.Status, "correction");
+                _correctionMessageIsError = true;
+                return;
+            }
+
+            var latest = RefreshCorrectionAsync is null ? null : await RefreshCorrectionAsync();
+            if (CaseId != request.CaseId) return;
+            if (latest is { State: CaseDetailPanelState.Populated, CanCorrectReport: true, ReportKind: CaseDetailCorrectionKind.LegacyV1, Narrative: not null } &&
+                latest.AggregateVersion > snapshot.AggregateVersion && latest.ReportRevision > snapshot.ReportRevision &&
+                string.Equals(latest.Narrative, request.Narrative, StringComparison.Ordinal))
+            {
+                CorrectionData = latest;
+                CloseCorrectionForm();
+                _correctionMessage = "Correction saved and the new revision is loaded.";
+                _correctionMessageIsError = false;
+                if (_timelineView is not null)
+                {
+                    await _timelineView.RefreshAsync();
+                    if (CaseId != request.CaseId) return;
+                }
+                _focusCorrectionSuccessAfterRender = true;
+            }
+            else
+            {
+                _correctionMessage = "The correction was accepted, but the updated report could not be confirmed. Your draft is preserved. Refresh to check the latest revision.";
+                _correctionMessageIsError = true;
+            }
+        }
+        catch (Exception)
+        {
+            if (CaseId != request.CaseId) return;
+            _correctionMessage = "The correction could not be confirmed. Your draft is preserved; refresh before retrying.";
+            _correctionMessageIsError = true;
+        }
+        finally { _savingCorrection = false; }
+    }
+
+    private sealed record CorrectionPayloadKey(long ExpectedVersion, string Narrative, string Reason);
 
     private async Task SubmitDiscussionAsync()
     {

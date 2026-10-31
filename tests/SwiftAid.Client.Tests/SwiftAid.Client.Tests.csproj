@@ -25,6 +25,7 @@
     <Compile Include="..\..\src\SwiftAid.Mobile\Services\Intake\EncryptedGuestSubmissionStore.cs" Link="Linked\Mobile\EncryptedGuestSubmissionStore.cs" />
     <Compile Include="..\..\src\SwiftAid.Mobile\Services\Intake\EncryptedGuestAudioStore.cs" Link="Linked\Mobile\EncryptedGuestAudioStore.cs" />
     <Compile Include="..\..\src\SwiftAid.Mobile\Services\Intake\EncryptedGuestAudioCleanupJournal.cs" Link="Linked\Mobile\EncryptedGuestAudioCleanupJournal.cs" />
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Presentation\CaseCorrectionReadHttpClient.cs" Link="Linked\Mobile\CaseCorrectionReadHttpClient.cs" />
   </ItemGroup>
 
 </Project>

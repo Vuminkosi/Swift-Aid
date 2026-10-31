@@ -171,6 +171,15 @@
                 _statusMessage = "The case list could not be loaded. Refresh to try again.";
             }
         }
+        finally
+        {
+            // The initial load starts in OnAfterRenderAsync, where Blazor does
+            // not schedule another render when the awaited task completes.
+            if (generation == Volatile.Read(ref _loadGeneration))
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+        }
     }
 
     private static OperationsCaseQueue.QueueViewRow ToViewRow(CaseWorkspaceRow row) => new(

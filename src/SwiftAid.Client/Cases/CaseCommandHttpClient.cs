@@ -27,8 +27,13 @@ public sealed class CaseCommandHttpClient(HttpClient httpClient) : ICaseCommandC
         CaseCommandInput input,
         CancellationToken cancellationToken = default)
     {
-        var commandId = Guid.NewGuid();
+        var commandId = input?.CommandId ?? Guid.NewGuid();
         if (input is null || caseId == Guid.Empty || string.IsNullOrWhiteSpace(input.CommandType))
+        {
+            return new CaseCommandResult(CaseCommandStatus.Invalid, commandId, [], null, null);
+        }
+
+        if (commandId == Guid.Empty)
         {
             return new CaseCommandResult(CaseCommandStatus.Invalid, commandId, [], null, null);
         }

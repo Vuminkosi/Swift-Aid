@@ -80,23 +80,10 @@ h1:focus {
 }
 
 #blazor-error-ui .dismiss {
-    min-width: 2.75rem;
-    min-height: 2.75rem;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    font-size: 1.25rem;
     cursor: pointer;
     position: absolute;
     right: 0.75rem;
     top: 0.5rem;
-}
-
-#blazor-error-ui .dismiss:focus-visible {
-    outline: 3px solid var(--sa-focus);
-    outline-offset: 2px;
 }
 
 .blazor-error-boundary {

@@ -26,6 +26,7 @@
 .case-detail__upload-label { display: inline-flex; align-items: center; min-height: 2.75rem; padding-inline: 0.5rem; color: var(--mud-palette-primary); cursor: pointer; }
 .case-detail__upload-label input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .case-detail__upload-label:focus-within { outline: 2px solid var(--mud-palette-primary); outline-offset: 2px; }
+.case-detail__touch-action, .case-detail__correction-action { min-height: 2.75rem; }
 
 @media (max-width: 40rem) {
     .case-detail__quick-actions { gap: 0.125rem; }

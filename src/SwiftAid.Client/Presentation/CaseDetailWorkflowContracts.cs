@@ -50,6 +50,43 @@ public interface ICaseDetailSummaryClient
         CancellationToken cancellationToken = default);
 }
 
+/// <summary>Report kind exposed by the authorized correction projection; numeric values are wire-stable.</summary>
+public enum CaseDetailCorrectionReportKind
+{
+    LegacyV1 = 0,
+    HumanV2 = 1,
+    AnimalV2 = 2
+}
+
+/// <summary>Case-scoped correction projection. Narrative is returned only for an authorized LegacyV1 correction.</summary>
+public sealed record CaseDetailCorrectionSnapshot(
+    Guid CaseId,
+    long AggregateVersion,
+    long ReportRevision,
+    CaseDetailCorrectionReportKind ReportKind,
+    bool CanCorrectReport,
+    string? Narrative)
+{
+    public bool IsValidFor(Guid caseId) =>
+        caseId != Guid.Empty && CaseId == caseId && AggregateVersion > 0 && ReportRevision > 0 &&
+        Enum.IsDefined(ReportKind) &&
+        (CanCorrectReport
+            ? ReportKind == CaseDetailCorrectionReportKind.LegacyV1 && IsBoundedNarrative(Narrative)
+            : Narrative is null);
+
+    private static bool IsBoundedNarrative(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && value.Length <= 20_000 &&
+        !value.Any(character => char.IsControl(character) && character is not '\r' and not '\n');
+}
+
+/// <summary>Authorized read of the current report correction projection.</summary>
+public interface ICaseCorrectionReadClient
+{
+    Task<UiCapabilityResult<CaseDetailCorrectionSnapshot>> GetAsync(
+        Guid caseId,
+        CancellationToken cancellationToken = default);
+}
+
 /// <summary>A safe, case-authorized mention target. Reference is opaque and server-resolved.</summary>
 public sealed record CaseDiscussionMentionTarget(string Reference, string DisplayLabel)
 {

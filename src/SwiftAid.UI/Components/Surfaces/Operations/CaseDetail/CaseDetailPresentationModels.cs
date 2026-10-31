@@ -2,7 +2,7 @@ namespace SwiftAid.UI.Components.Surfaces.Operations.CaseDetail;
 
 public enum CaseDetailSubjectType { Human, Animal, Unknown }
 public enum CaseDetailObservationCategory { Clinical, Environmental, Community }
-public enum CaseDetailOperationStatus { Accepted, Conflict, Denied, Offline, Unavailable, Failed }
+public enum CaseDetailOperationStatus { Accepted, Replayed, Conflict, Denied, Offline, Unavailable, Failed }
 
 public sealed record CaseDetailSummary(
     Guid CaseId, string PublicReference, CaseDetailSubjectType SubjectType, string Summary,
@@ -11,6 +11,14 @@ public sealed record CaseDetailSummary(
 
 public sealed record CaseDetailMentionTarget(string Reference, string DisplayLabel);
 public sealed record CaseDetailCommandOutcome(CaseDetailOperationStatus Status, long AggregateVersion = 0);
+public enum CaseDetailCorrectionKind { LegacyV1 = 0, HumanV2 = 1, AnimalV2 = 2 }
+public sealed record CaseDetailCorrectionView(CaseDetailPanelState State, long AggregateVersion = 0,
+    long ReportRevision = 0, CaseDetailCorrectionKind ReportKind = CaseDetailCorrectionKind.LegacyV1,
+    bool CanCorrectReport = false, string? Narrative = null);
+public sealed record CaseDetailCorrectionRequest(Guid CaseId, Guid CommandId, long ExpectedVersion,
+    string Narrative, string Reason);
+public sealed record CaseDetailCorrectionOutcome(CaseDetailOperationStatus Status,
+    long AggregateVersion = 0, long ReportRevision = 0);
 public sealed record CaseDetailDiscussionPostRequest(Guid CaseId, Guid SubmissionId, long ExpectedVersion,
     string Message, IReadOnlyList<string> MentionReferences, IReadOnlyList<string> EvidenceKeys);
 public sealed record CaseDetailEvidenceUploadRequest(Guid CaseId, Guid SubmissionId, long ExpectedVersion,

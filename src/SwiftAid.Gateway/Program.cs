@@ -36,6 +36,7 @@ builder.Services.AddScoped<ISubscriptionClient, UnavailableSubscriptionClient>()
 builder.Services.AddScoped<IAnalyticsClient, AnalyticsGatewayClient>();
 builder.Services.AddScoped<IDashboardOverviewClient, DashboardOverviewGatewayClient>();
 builder.Services.AddScoped<ICaseDetailSummaryClient, CaseDetailSummaryGatewayClient>();
+builder.Services.AddScoped<ICaseCorrectionReadClient, CaseCorrectionReadGatewayClient>();
 
 
 builder.Services.AddScoped<IAiInvestigationClient, UnavailableInvestigationClient>();

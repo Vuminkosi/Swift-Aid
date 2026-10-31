@@ -12,9 +12,10 @@ namespace SwiftAid.Gateway.Cases;
 /// Server-side command client for Blazor Server: resolves the current staff
 /// principal per call and invokes the command processor directly. All data rules
 /// (authorization, idempotency, optimistic concurrency) are enforced by the
-/// processor, not by this adapter. The expected version always comes from the
-/// authoritative timeline header. Deployments without the case command pipeline
-/// fail closed with the same unavailable outcome.
+/// processor, not by this adapter. Commands use the authorized timeline version,
+/// except that an explicit correction version preserves the draft's original
+/// version so stale writes are detected instead of silently rebased. Deployments
+/// without the case command pipeline fail closed with the same unavailable outcome.
 /// </summary>
 public sealed class CaseCommandGatewayClient(
     AuthenticationStateProvider authenticationStateProvider,
@@ -32,6 +33,11 @@ public sealed class CaseCommandGatewayClient(
         CaseCommandInput input,
         CancellationToken cancellationToken = default)
     {
+        if (input?.CommandId == Guid.Empty)
+        {
+            return new CaseCommandResult(CaseCommandStatus.Invalid, Guid.Empty, [], null, null);
+        }
+
         var actor = await GetActorAsync().ConfigureAwait(false);
         if (actor is null || caseId == Guid.Empty || input is null)
         {
@@ -62,8 +68,10 @@ public sealed class CaseCommandGatewayClient(
         }
 
         CaseCommand command;
-        var commandId = Guid.NewGuid();
-        var expectedVersion = timelineResult.Timeline.Header.AggregateVersion;
+        var commandId = input.CommandId ?? Guid.NewGuid();
+        var expectedVersion = input.CommandType == "CorrectReport" && input.ExpectedVersion.HasValue
+            ? input.ExpectedVersion.Value
+            : timelineResult.Timeline.Header.AggregateVersion;
         try
         {
             command = MapCommand(input, commandId, expectedVersion);
