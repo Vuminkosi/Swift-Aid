@@ -55,8 +55,8 @@ public sealed class EllaiSurfaceLogicTests
 
         Assert.Contains("class=\"ellai-composer__partial-transcript\" aria-live=\"off\"", markup,
             StringComparison.Ordinal);
-        Assert.Contains("Heard so far:", markup, StringComparison.Ordinal);
         Assert.Contains("transient recognized words", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Heard so far:", markup, StringComparison.Ordinal);
         Assert.Contains("existing draft", markup, StringComparison.Ordinal);
     }
 
@@ -80,6 +80,22 @@ public sealed class EllaiSurfaceLogicTests
         Assert.Contains("aria-label=\"Realtime voice dialog unavailable\"", markup, StringComparison.Ordinal);
         Assert.Matches("""(?s)<button(?=[^>]*aria-label="Realtime voice dialog unavailable")(?=[^>]*disabled)[^>]*>""", markup);
         Assert.DoesNotContain("aria-label=\"Send to Ellai\"", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task NativeLiveCaptureCanBeAvailableWhenBrowserRecordingIsUnavailable()
+    {
+        var callback = EventCallback.Factory.Create(new object(), () => Task.CompletedTask);
+        var markup = await RenderComposerAsync(inputText: string.Empty,
+            canUseMicrophone: false,
+            canUseRealtimeMicrophone: true,
+            onStartVoice: callback,
+            onStartRealtimeVoice: callback,
+            isLiveSpeaking: false);
+
+        Assert.Matches("""(?s)<button(?=[^>]*aria-label="Audio transcription unavailable")(?=[^>]*disabled)[^>]*>""", markup);
+        Assert.Contains("aria-label=\"Start realtime voice dialog\"", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("aria-label=\"Realtime voice dialog unavailable\"", markup, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -571,6 +587,7 @@ public sealed class EllaiSurfaceLogicTests
         string? inputText = "test question",
         string? livePartialTranscript = null,
         bool canUseMicrophone = true,
+        bool? canUseRealtimeMicrophone = null,
         EventCallback onStartVoice = default,
         EventCallback onStartRealtimeVoice = default,
         EventCallback onOpenSettings = default,
@@ -596,6 +613,8 @@ public sealed class EllaiSurfaceLogicTests
                     [nameof(EllaiCompactComposer.StatusText)] = "Messaging is unavailable.",
                     [nameof(EllaiCompactComposer.CanSend)] = false,
                     [nameof(EllaiCompactComposer.CanUseMicrophone)] = canUseMicrophone,
+                    [nameof(EllaiCompactComposer.CanUseRealtimeMicrophone)] =
+                        canUseRealtimeMicrophone ?? canUseMicrophone,
                     [nameof(EllaiCompactComposer.IsLiveSpeaking)] = isLiveSpeaking,
                     [nameof(EllaiCompactComposer.OnStartVoice)] = onStartVoice,
                     [nameof(EllaiCompactComposer.OnStartRealtimeVoice)] = onStartRealtimeVoice,

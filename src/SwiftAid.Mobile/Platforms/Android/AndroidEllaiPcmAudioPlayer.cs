@@ -28,7 +28,7 @@ public sealed class AndroidEllaiPcmAudioPlayer : IEllaiPcmAudioPlayer, IDisposab
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             var attributesBuilder = new AudioAttributes.Builder()!;
-            attributesBuilder.SetUsage(AudioUsageKind.Media);
+            attributesBuilder.SetUsage(AudioUsageKind.VoiceCommunication);
             attributesBuilder.SetContentType(AudioContentType.Speech);
             var attributes = attributesBuilder.Build()
                 ?? throw new InvalidOperationException("Android audio attributes are unavailable.");

@@ -39,6 +39,12 @@ public class MainActivity : MauiAppCompatActivity
     protected override void OnPause()
     {
         MobileNotificationForeground.IsForeground = false;
+        var voiceCapture = Microsoft.Maui.Controls.Application.Current?.Handler?.MauiContext?.Services
+            .GetService<SwiftAid.UI.Ellai.IEllaiNativeVoiceCapture>();
+        if (voiceCapture is not null)
+        {
+            _ = voiceCapture.SuspendAsync();
+        }
         base.OnPause();
     }
 }

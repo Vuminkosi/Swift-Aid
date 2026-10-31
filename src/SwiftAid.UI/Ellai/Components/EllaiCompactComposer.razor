@@ -56,10 +56,10 @@
                     <MudIconButton Icon="@Icons.Material.Filled.GraphicEq" Color="Color.Default"
                                    Class="ellai-composer__live-speak"
                                    OnClick="OnStartRealtimeVoice"
-                                   Disabled="@(!CanUseMicrophone || !OnStartRealtimeVoice.HasDelegate)"
+                                   Disabled="@(!CanUseRealtimeMicrophone || !OnStartRealtimeVoice.HasDelegate)"
                                    data-ellai-audio-unlock="true"
-                                   aria-label="@(CanUseMicrophone && OnStartRealtimeVoice.HasDelegate ? "Start realtime voice dialog" : "Realtime voice dialog unavailable")"
-                                   title="@(CanUseMicrophone && OnStartRealtimeVoice.HasDelegate ? "Start realtime voice dialog" : "Realtime voice dialog is unavailable")" />
+                                   aria-label="@(CanUseRealtimeMicrophone && OnStartRealtimeVoice.HasDelegate ? "Start realtime voice dialog" : "Realtime voice dialog unavailable")"
+                                   title="@(CanUseRealtimeMicrophone && OnStartRealtimeVoice.HasDelegate ? "Start realtime voice dialog" : "Realtime voice dialog is unavailable")" />
                 }
                 else
                 {
@@ -72,7 +72,7 @@
     @if (!string.IsNullOrWhiteSpace(LivePartialTranscript))
     {
         <p class="ellai-composer__partial-transcript" aria-live="off">
-            <span>Heard so far:</span> @LivePartialTranscript
+            @LivePartialTranscript
         </p>
     }
     <EllaiStatusLine StatusText="@StatusText" Phase="@Phase" Placement="@Placement" />
@@ -120,6 +120,9 @@
 
     [Parameter]
     public bool CanUseMicrophone { get; set; }
+
+    [Parameter]
+    public bool CanUseRealtimeMicrophone { get; set; }
 
     [Parameter]
     public bool IsLiveSpeaking { get; set; }

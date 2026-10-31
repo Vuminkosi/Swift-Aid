@@ -33,6 +33,7 @@
                                   InputText="@InputText" InputTextChanged="OnInputChanged"
                                   Position="@Position" PositionChanged="OnPositionChanged"
                                   CanSend="@CanSubmitText" CanCancel="@(!_startOutcomeUnknown)" CanUseMicrophone="@_microphoneCaptureAvailable"
+                                  CanUseRealtimeMicrophone="@(_microphoneCaptureAvailable || _nativeVoiceCapture?.IsAvailable == true)"
                                   IsLiveSpeaking="@(_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Live)"
                                   IsRecordingAudio="@(_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Recorded)"
                                   CanPlayResponse="@CanPlayResponse" IsPlayingResponse="@_isPlayingResponse"
@@ -51,6 +52,7 @@
                                   InputText="@InputText" InputTextChanged="OnInputChanged"
                                   Position="@Position" PositionChanged="OnPositionChanged"
                                   CanSend="@CanSubmitText" CanCancel="@(!_startOutcomeUnknown)" CanUseMicrophone="@_microphoneCaptureAvailable"
+                                  CanUseRealtimeMicrophone="@(_microphoneCaptureAvailable || _nativeVoiceCapture?.IsAvailable == true)"
                                   IsLiveSpeaking="@(_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Live)"
                                   IsRecordingAudio="@(_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Recorded)"
                                   CanPlayResponse="@CanPlayResponse" IsPlayingResponse="@_isPlayingResponse"
@@ -95,6 +97,7 @@
     private Microsoft.JSInterop.IJSObjectReference? _speechModule;
     private CancellationTokenSource? _audioPlaybackCts;
     private Microsoft.JSInterop.IJSObjectReference? _captureModule;
+    private IEllaiNativeVoiceCapture? _nativeVoiceCapture;
     private Microsoft.JSInterop.DotNetObjectReference<EllaiGuidanceHost>? _captureDotnetReference;
     private MemoryStream? _capturedPcm;
     private Channel<byte[]>? _liveVoiceChunks;
@@ -107,6 +110,7 @@
     private long _capturedVoiceBytes;
     private EllaiVoiceCaptureMode? _captureMode;
     private bool _microphoneCaptureAvailable;
+    private bool _nativeVoiceCaptureActive;
     private bool _voiceCaptureConsentGranted;
     private bool _isRecordingAudio;
     private bool _voiceTranscriptionInProgress;
@@ -178,6 +182,13 @@
             _speechModule = null;
         }
 
+        _nativeVoiceCapture = Services.GetService<IEllaiNativeVoiceCapture>();
+        if (_nativeVoiceCapture is not null)
+        {
+            _nativeVoiceCapture.Interrupted += OnNativeVoiceCaptureInterrupted;
+            _nativeVoiceCapture.RouteChanged += OnNativeVoiceRouteChanged;
+        }
+
         try
         {
             _captureModule = await JS.InvokeAsync<Microsoft.JSInterop.IJSObjectReference>(
@@ -203,7 +214,10 @@
     private async Task StartVoiceCaptureAsync(EllaiVoiceCaptureMode mode)
     {
         var session = _sessionView;
-        if (!_microphoneCaptureAvailable || _captureModule is null
+        var useNativeLiveCapture = mode == EllaiVoiceCaptureMode.Live
+            && _nativeVoiceCapture?.IsAvailable == true;
+        if ((!useNativeLiveCapture && !_microphoneCaptureAvailable)
+            || (!useNativeLiveCapture && _captureModule is null)
             || session is null || !string.Equals(session.Status, "Active", StringComparison.Ordinal)
             || _isRecordingAudio || _voiceTranscriptionInProgress || _startingVoiceCapture)
         {
@@ -270,11 +284,15 @@
             }
 
             _isRecordingAudio = true;
-            var processingStatus = await _captureModule.InvokeAsync<string>(
-                "startCapture", _captureDotnetReference, mode == EllaiVoiceCaptureMode.Live, session.SessionId);
-            if (_isPlayingResponse && _activeResponsePlaybackId is not null)
+            var processingStatus = useNativeLiveCapture
+                ? await _nativeVoiceCapture!.StartAsync(
+                    QueueNativePcmChunkAsync, _cts?.Token ?? CancellationToken.None)
+                : await _captureModule!.InvokeAsync<string>(
+                    "startCapture", _captureDotnetReference, mode == EllaiVoiceCaptureMode.Live, session.SessionId);
+            _nativeVoiceCaptureActive = useNativeLiveCapture;
+            if (!useNativeLiveCapture && _isPlayingResponse && _activeResponsePlaybackId is not null)
             {
-                await _captureModule.InvokeVoidAsync("setPlaybackState", true, session.SessionId,
+                await _captureModule!.InvokeVoidAsync("setPlaybackState", true, session.SessionId,
                     _activeResponseSequence, _activeResponsePlaybackId);
             }
             if (mode == EllaiVoiceCaptureMode.Live)
@@ -332,6 +350,19 @@
 
     private async Task CancelLiveVoiceStreamAsync()
     {
+        _liveVoiceCts?.Cancel();
+        if (_nativeVoiceCaptureActive && _nativeVoiceCapture is not null)
+        {
+            try
+            {
+                await _nativeVoiceCapture.StopAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+                // Cancellation discards the transient turn after a device read failure.
+            }
+            _nativeVoiceCaptureActive = false;
+        }
         _liveVoiceChunks?.Writer.TryComplete();
         try
         {
@@ -553,6 +584,47 @@
         }
     }
 
+    private async ValueTask QueueNativePcmChunkAsync(
+        ReadOnlyMemory<byte> pcm,
+        CancellationToken cancellationToken)
+    {
+        if (!_isRecordingAudio || _liveVoiceChunks is null || pcm.Length is 0 or > 8_192
+            || (pcm.Length & 1) != 0)
+        {
+            return;
+        }
+
+        if (_liveVoiceTranscriptionTask?.IsCompleted == true)
+        {
+            throw new InvalidOperationException("The live voice stream ended before capture completed.");
+        }
+
+        if (_capturedVoiceBytes + pcm.Length > EllaiVoiceTranscriptionMaximumBytes)
+        {
+            _ = InvokeAsync(StopVoiceCaptureAsync);
+            return;
+        }
+
+        var bytes = pcm.ToArray();
+        using var enqueueCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        enqueueCts.CancelAfter(TimeSpan.FromMilliseconds(500));
+        try
+        {
+            await _liveVoiceChunks.Writer.WriteAsync(bytes, enqueueCts.Token).ConfigureAwait(false);
+            _capturedVoiceBytes += bytes.Length;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            Array.Clear(bytes);
+            throw new IOException("Android voice audio could not be sent reliably.");
+        }
+        catch
+        {
+            Array.Clear(bytes);
+            throw;
+        }
+    }
+
     [Microsoft.JSInterop.JSInvokable]
     public Task OnVoiceCaptureLimitReached() => InvokeAsync(StopVoiceCaptureAsync);
 
@@ -604,6 +676,38 @@
         await InvokeAsync(StateHasChanged);
     });
 
+    private void OnNativeVoiceCaptureInterrupted(string message)
+    {
+        _ = InvokeAsync(async () =>
+        {
+            if (!_nativeVoiceCaptureActive)
+            {
+                return;
+            }
+
+            _isRecordingAudio = false;
+            await StopVoiceTurnStatusPollingAsync();
+            await CancelLiveVoiceStreamAsync();
+            _nativeVoiceCaptureActive = false;
+            DiscardCapturedAudio();
+            StatusText = message;
+            Phase = EllaiStatusPhases.NeedsInput;
+            await InvokeAsync(StateHasChanged);
+        });
+    }
+
+    private void OnNativeVoiceRouteChanged()
+    {
+        _ = InvokeAsync(() =>
+        {
+            if (_nativeVoiceCaptureActive)
+            {
+                StatusText = "Microphone route changed. Capture continues.";
+                StateHasChanged();
+            }
+        });
+    }
+
     private const int EllaiVoiceTranscriptionMaximumBytes = 32 * 1024 * 1024;
 
     private async Task StopVoiceCaptureAsync()
@@ -616,7 +720,12 @@
         _voiceTranscriptionInProgress = true;
         try
         {
-            if (_captureModule is not null)
+            if (_nativeVoiceCaptureActive && _nativeVoiceCapture is not null)
+            {
+                await _nativeVoiceCapture.StopAsync();
+                _nativeVoiceCaptureActive = false;
+            }
+            else if (_captureModule is not null)
             {
                 await _captureModule.InvokeVoidAsync("stopCapture");
             }
@@ -1743,6 +1852,11 @@
 
     public void Dispose()
     {
+        if (_nativeVoiceCapture is not null)
+        {
+            _nativeVoiceCapture.Interrupted -= OnNativeVoiceCaptureInterrupted;
+            _nativeVoiceCapture.RouteChanged -= OnNativeVoiceRouteChanged;
+        }
         Launcher.Requested -= OnLauncherRequested;
         EventPoller.ApprovalRequired -= OnApprovalRequired;
         EventPoller.SessionCancelled -= OnSessionCancelled;

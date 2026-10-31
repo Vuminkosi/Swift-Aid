@@ -301,6 +301,9 @@ public static class MauiProgram
         builder.Services.AddSingleton<IEllaiMicrophonePermission, MobileEllaiMicrophonePermission>();
 #if ANDROID
         builder.Services.AddSingleton<IEllaiPcmAudioPlayer, AndroidEllaiPcmAudioPlayer>();
+        builder.Services.AddSingleton<AndroidEllaiNativeVoiceCapture>();
+        builder.Services.AddSingleton<IEllaiNativeVoiceCapture>(services =>
+            services.GetRequiredService<AndroidEllaiNativeVoiceCapture>());
 #endif
         builder.Services.AddSingleton<EllaiLauncher>();
         builder.Services.AddSingleton<EllaiEventPoller>();
