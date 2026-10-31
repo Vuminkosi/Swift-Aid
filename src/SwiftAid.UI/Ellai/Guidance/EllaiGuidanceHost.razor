@@ -364,7 +364,7 @@
                     processingStatus = await _nativeVoiceCapture!.StartAsync(
                         QueueNativePcmChunkAsync, _cts?.Token ?? CancellationToken.None);
                     _audioProcessingStatus = _nativeVoiceCapture.AudioProcessingStatus;
-                    _captureEchoCancellationEnabled = _audioProcessingStatus.EchoCancellationEnabled;
+                    _captureEchoCancellationEnabled = _audioProcessingStatus.EchoCancellationEnabled == true;
                 }
                 catch (OperationCanceledException) when (_cts?.IsCancellationRequested == true)
                 {
@@ -1103,7 +1103,7 @@
     public Task OnVoiceAudioProcessingChanged(EllaiAudioProcessingStatus status)
     {
         _audioProcessingStatus = status ?? EllaiAudioProcessingStatus.Unknown;
-        _captureEchoCancellationEnabled = _audioProcessingStatus.EchoCancellationEnabled;
+        _captureEchoCancellationEnabled = _audioProcessingStatus.EchoCancellationEnabled == true;
         return Task.CompletedTask;
     }
 
@@ -1192,7 +1192,7 @@
             {
                 _audioProcessingStatus = _nativeVoiceCapture?.AudioProcessingStatus
                     ?? EllaiAudioProcessingStatus.Unknown;
-                _captureEchoCancellationEnabled = _audioProcessingStatus.EchoCancellationEnabled;
+                _captureEchoCancellationEnabled = _audioProcessingStatus.EchoCancellationEnabled == true;
                 StatusText = $"Microphone route changed; capture continues. {_audioProcessingStatus.ToStatusText()}";
                 StateHasChanged();
             }

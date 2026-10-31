@@ -29,7 +29,7 @@ public sealed class AndroidEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, I
     public bool IsEchoCancellationEnabled => _echoCanceler?.Enabled == true;
     public EllaiAudioProcessingStatus AudioProcessingStatus => new(
         "Android",
-        _echoCanceler?.Enabled == true,
+        _echoCanceler is null ? null : _echoCanceler.Enabled,
         _noiseSuppressor is null ? null : _noiseSuppressor.Enabled,
         _gainControl is null ? null : _gainControl.Enabled,
         _record?.RecordingState == RecordState.Recording);

@@ -39,7 +39,7 @@ public sealed class IosEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, IAsyn
     public bool IsEchoCancellationEnabled => _engine is not null && _voiceProcessingEnabled;
     public EllaiAudioProcessingStatus AudioProcessingStatus => new(
         "iOS",
-        _engine is not null && _voiceProcessingEnabled,
+        _engine is null ? null : _voiceProcessingEnabled,
         null,
         null,
         _engine is not null);

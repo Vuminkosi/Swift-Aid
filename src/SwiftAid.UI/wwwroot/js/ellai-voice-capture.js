@@ -69,8 +69,10 @@ export async function startCapture(dotnet, showLiveVoiceLevel = false, sessionId
     sink.gain.value = 0;
     const track = stream.getAudioTracks()[0];
     const settings = track?.getSettings?.() ?? {};
-    const echoCancellationEnabled = settings.echoCancellation === true
-        || settings.echoCancellation === "all";
+    const echoCancellationEnabled = typeof settings.echoCancellation === "boolean"
+        ? settings.echoCancellation
+        : settings.echoCancellation === "all" ? true
+            : settings.echoCancellation === "remote-only" ? false : null;
     await dotnet.invokeMethodAsync(
         "OnVoiceAudioProcessingChanged",
         {

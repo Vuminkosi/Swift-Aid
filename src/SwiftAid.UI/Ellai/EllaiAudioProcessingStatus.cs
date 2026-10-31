@@ -5,13 +5,13 @@ namespace SwiftAid.UI.Ellai;
 /// for that feature.</summary>
 public sealed record EllaiAudioProcessingStatus(
     string Platform,
-    bool EchoCancellationEnabled,
+    bool? EchoCancellationEnabled,
     bool? NoiseSuppressionEnabled,
     bool? AutomaticGainControlEnabled,
     bool CaptureActive)
 {
     public static EllaiAudioProcessingStatus Unknown { get; } =
-        new("unknown", false, null, null, false);
+        new("unknown", null, null, null, false);
 
     public string ToStatusText()
     {

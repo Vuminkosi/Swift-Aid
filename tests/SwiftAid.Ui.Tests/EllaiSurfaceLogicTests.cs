@@ -30,6 +30,7 @@ public sealed class EllaiSurfaceLogicTests
             "iOS audio processing: echo cancellation on, noise suppression not reported, automatic gain control not reported.",
             status.ToStatusText());
         Assert.False(EllaiAudioProcessingStatus.Unknown.CaptureActive);
+        Assert.Contains("echo cancellation not reported", EllaiAudioProcessingStatus.Unknown.ToStatusText());
     }
 
     [Fact]

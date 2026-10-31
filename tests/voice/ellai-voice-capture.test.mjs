@@ -121,3 +121,16 @@ test("browser all-mode echo cancellation is accepted as enabled", async () => {
     assert.match(status, /echo cancellation on/);
     assert.equal(reported.echoCancellationEnabled, true);
 });
+
+test("unreported browser echo cancellation remains unknown", async () => {
+    installBrowser({ noiseSuppression: true, autoGainControl: true });
+    let reported;
+    const dotnet = { invokeMethodAsync: async (method, value) => {
+        if (method === "OnVoiceAudioProcessingChanged") reported = value;
+    } };
+
+    const status = await startCapture(dotnet);
+
+    assert.match(status, /echo cancellation not reported/);
+    assert.equal(reported.echoCancellationEnabled, null);
+});
