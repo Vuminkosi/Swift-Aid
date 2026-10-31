@@ -1,7 +1,6 @@
 using System.Security.Claims;
 using System.Text;
 using System.Net.Http.Json;
-using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -27,6 +26,42 @@ namespace SwiftAid.Integration.Tests;
 
 public sealed class EllaiPrivilegedRouteAuthorizationTests
 {
+    [Fact]
+    public async Task DurableFeedRecoversCommittedAnswerWhenTransientPublicationIsMissing()
+    {
+        await using var app = await StartApplicationAsync();
+        var store = app.Services.GetRequiredService<CountingEllaiSessionStore>();
+        var session = (await store.GetAsync("session-1", CancellationToken.None))!;
+        await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 }, 1,
+            "durable-1", CancellationToken.None, "{\"utterance\":\"Synthetic question\"}");
+        var now = DateTimeOffset.UtcNow;
+        var claim = (await store.ClaimNextAsync(now, now.AddMinutes(1), CancellationToken.None))!;
+        await store.CompleteAsync(session.SessionId, claim.ClientUtteranceId, claim.AttemptCount, now,
+            CancellationToken.None, EllaiUtteranceResolution.Completed("Synthetic response", session.InteractionEpoch));
+        var response = await app.GetTestClient().GetAsync("/api/v1/ellai/sessions/session-1/responses?cursor=999&streamId=old-process");
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+        var page = (await response.Content.ReadFromJsonAsync<EllaiSessionResponsePageDto>())!;
+        Assert.Empty(page.Responses);
+        Assert.NotEmpty(page.StreamId!);
+        var turn = Assert.Single(page.Conversation!);
+        Assert.Equal("Synthetic question", turn.UserText);
+        Assert.Equal("Synthetic response", turn.AssistantText);
+        Assert.Equal("Completed", turn.Outcome);
+        Assert.True(response.Headers.CacheControl!.NoStore);
+        var restored = await app.GetTestClient().GetFromJsonAsync<EllaiSessionView>("/api/v1/ellai/sessions/session-1");
+        Assert.Equal(2, restored!.SessionVersion);
+    }
+
+    [Fact]
+    public async Task ConversationAndResumeRejectAnotherOwner()
+    {
+        await using var app = await StartApplicationAsync(sessionOwnerId: "another-owner");
+        Assert.Equal(System.Net.HttpStatusCode.NotFound,
+            (await app.GetTestClient().GetAsync("/api/v1/ellai/sessions/session-1/responses?cursor=0")).StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.NotFound,
+            (await app.GetTestClient().GetAsync("/api/v1/ellai/sessions/session-1")).StatusCode);
+    }
+
     [Fact]
     public async Task MixedCaseSessionStartCreatesIdentityOnlyHelpSessionWithoutWorkspaceScope()
     {
@@ -240,7 +275,7 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
     }
 
     [Fact]
-    public async Task GuestCanUseRateLimitedPublicHelpWithoutGettingWorkspaceTools()
+    public async Task GuestCanUsePublicHelpWithoutGettingWorkspaceTools()
     {
         await using var app = await StartApplicationAsync();
         using var client = app.GetTestClient();
@@ -266,6 +301,7 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             MergeCookies(cookies, started);
             var session = (await started.Content.ReadFromJsonAsync<EllaiSessionView>())!;
             Assert.StartsWith("ellai-help-identity-epoch-0", session.ScopeDisplay, StringComparison.Ordinal);
+            Assert.Equal(EllaiSessionService.GuestCyclesAllowed, session.CyclesAllowed);
 
             using (var stateRequest = new HttpRequestMessage(HttpMethod.Get,
                        $"/api/v1/ellai/guest/sessions/{session.SessionId}/voice/state"))
@@ -280,6 +316,16 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
                 Assert.DoesNotContain("private guest words", stateJson, StringComparison.Ordinal);
                 var voiceState = await stateResponse.Content.ReadFromJsonAsync<EllaiVoiceTurnStatusDto>();
                 Assert.Equal("Idle", voiceState?.State);
+            }
+
+            for (var poll = 0; poll < 125; poll++)
+            {
+                using var voiceStateRequest = new HttpRequestMessage(HttpMethod.Get,
+                    $"/api/v1/ellai/guest/sessions/{session.SessionId}/voice/state");
+                voiceStateRequest.Headers.TryAddWithoutValidation("Cookie",
+                    string.Join("; ", cookies.Select(cookie => $"{cookie.Key}={cookie.Value}")));
+                using var voiceStateResponse = await client.SendAsync(voiceStateRequest);
+                Assert.Equal(System.Net.HttpStatusCode.OK, voiceStateResponse.StatusCode);
             }
 
             var responseStore = app.Services.GetRequiredService<EllaiSessionResponseStore>();
@@ -311,14 +357,19 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             Assert.Equal([EllaiToolNames.ProductFacts], envelope.AllowedTools);
             Assert.Equal("What does an intake receipt mean?", envelope.Utterance);
 
-            using var anotherRequest = await SendGuestPostAsync(client, cookies, token,
-                $"/api/v1/ellai/guest/sessions/{session.SessionId}/utterances",
-                new SubmitUtteranceRequest("guest-question-sensitive", session.SessionId, accepted.SessionVersion,
-                    "Tell me a joke.", null, "typed", 2));
-            Assert.Equal(System.Net.HttpStatusCode.OK, anotherRequest.StatusCode);
+            for (var turn = 2; turn <= EllaiSessionService.DefaultCyclesAllowed + 1; turn++)
+            {
+                using var anotherRequest = await SendGuestPostAsync(client, cookies, token,
+                    $"/api/v1/ellai/guest/sessions/{session.SessionId}/utterances",
+                    new SubmitUtteranceRequest($"guest-question-{turn}", session.SessionId, accepted.SessionVersion,
+                        "Tell me a joke.", null, "typed", turn));
+                Assert.Equal(System.Net.HttpStatusCode.OK, anotherRequest.StatusCode);
+                accepted = (await anotherRequest.Content.ReadFromJsonAsync<EllaiSessionView>())!;
+            }
+
             var afterSecondRequest = await app.Services.GetRequiredService<IEllaiSessionStore>()
                 .GetAsync(session.SessionId, CancellationToken.None);
-            Assert.Equal(2, afterSecondRequest!.CyclesUsed);
+            Assert.Equal(EllaiSessionService.DefaultCyclesAllowed + 1, afterSecondRequest!.CyclesUsed);
         }
 
         using var unauthorizedPost = await client.PostAsJsonAsync(
@@ -501,20 +552,7 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             });
         builder.Services.AddAntiforgery(options => options.HeaderName = "X-CSRF-TOKEN");
         builder.Services.AddDataProtection().UseEphemeralDataProtectionProvider();
-        builder.Services.AddRateLimiter(options =>
-        {
-            foreach (var policyName in new[] { "ellai-guest-write", "ellai-guest-read" })
-            {
-                options.AddPolicy(policyName, _ => RateLimitPartition.GetFixedWindowLimiter(
-                    "integration-test", _ => new FixedWindowRateLimiterOptions
-                    {
-                        PermitLimit = 1000,
-                        Window = TimeSpan.FromMinutes(1),
-                        QueueLimit = 0,
-                        AutoReplenishment = true,
-                    }));
-            }
-        });
+        builder.Services.AddRateLimiter();
         builder.Services.AddAuthorization(options => options.AddPolicy("SwiftAidStaffApi", policy =>
         {
             policy.AddAuthenticationSchemes(
@@ -631,10 +669,13 @@ public sealed class CountingEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
         DateTimeOffset nowUtc, DateTimeOffset leaseExpiresAtUtc, CancellationToken ct) =>
         _inner.ClaimNextAsync(nowUtc, leaseExpiresAtUtc, ct);
 
-    public Task CompleteAsync(
+    public Task<EllaiUtteranceResolution?> CompleteAsync(
         string sessionId, string clientUtteranceId, int attemptCount,
-        DateTimeOffset completedAtUtc, CancellationToken ct) =>
-        _inner.CompleteAsync(sessionId, clientUtteranceId, attemptCount, completedAtUtc, ct);
+        DateTimeOffset completedAtUtc, CancellationToken ct, EllaiUtteranceResolution? resolution = null) =>
+        _inner.CompleteAsync(sessionId, clientUtteranceId, attemptCount, completedAtUtc, ct, resolution);
+
+    public Task<IReadOnlyList<EllaiConversationTurn>> ReadConversationAsync(string sessionId, string ownerActorId, CancellationToken ct) =>
+        _inner.ReadConversationAsync(sessionId, ownerActorId, ct);
 
     public Task FailAsync(
         string sessionId, string clientUtteranceId, int attemptCount,

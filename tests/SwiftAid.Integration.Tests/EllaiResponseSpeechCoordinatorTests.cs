@@ -84,6 +84,32 @@ public sealed class EllaiResponseSpeechCoordinatorTests
     }
 
     [Fact]
+    public async Task ResponseAudioSynthesizesSentenceChunksSequentiallyIntoOnePcmStream()
+    {
+        const string sessionId = "session-sentence-stream";
+        const long sequence = 1;
+        var playbackId = Guid.NewGuid();
+        var responses = new EllaiSessionResponseStore();
+        responses.Publish(sessionId, "turn-sentences", "First sentence. Second sentence!");
+        var speech = new SentenceSpeechSynthesisClient();
+        var playbackCoordinator = new EllaiResponseSpeechCoordinator();
+        var turnCoordinator = new EllaiVoiceTurnCoordinator();
+        var http = new DefaultHttpContext();
+        using var output = new MemoryStream();
+        http.Response.Body = output;
+
+        var result = await EllaiGuestEndpoints.StreamResponseAudioAsync(
+            sessionId, sequence, http, responses, speech, playbackCoordinator, turnCoordinator, playbackId);
+        Assert.Equal(["First sentence."], speech.Texts);
+
+        await result.ExecuteAsync(http);
+
+        Assert.Equal(["First sentence.", "Second sentence!"], speech.Texts);
+        Assert.Equal(["session-sentence-stream-1-0", "session-sentence-stream-1-1"], speech.RequestIds);
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, output.ToArray());
+    }
+
+    [Fact]
     public async Task ClientBargeInCandidateLeavesServerSpeechRunningUntilGatewayVadConfirms()
     {
         const string sessionId = "session-client-candidate";
@@ -142,8 +168,36 @@ public sealed class EllaiResponseSpeechCoordinatorTests
             SynthesisToken = cancellationToken;
             var content = new StreamContent(stream);
             content.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.swiftaid.pcm");
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+            return Task.FromResult(CreateSpeechResponse(content));
         }
+    }
+
+    private sealed class SentenceSpeechSynthesisClient : IEllaiSpeechSynthesisClient
+    {
+        private static readonly byte[][] Audio = [[1, 2], [3, 4]];
+
+        public bool IsConfigured => true;
+        public List<string> Texts { get; } = [];
+        public List<string> RequestIds { get; } = [];
+
+        public Task<HttpResponseMessage> SynthesizeAsync(
+            string requestId, string text, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            RequestIds.Add(requestId);
+            Texts.Add(text);
+            var content = new ByteArrayContent(Audio[Texts.Count - 1]);
+            content.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.swiftaid.pcm");
+            return Task.FromResult(CreateSpeechResponse(content));
+        }
+    }
+
+    private static HttpResponseMessage CreateSpeechResponse(HttpContent content)
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
+        response.Headers.Add("X-SwiftAid-Voice-Id", "swiftaid-mms-english-v1");
+        response.Headers.Add("X-SwiftAid-Sample-Rate", "16000");
+        return response;
     }
 
     private sealed class BlockingReadStream : Stream

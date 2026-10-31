@@ -25,6 +25,21 @@ public interface IEllaiTurnCompletionClient
 {
     Task<EllaiTurnCompletion> CompleteAsync(
         IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct);
+
+    async Task<EllaiTurnCompletion> CompleteStreamingAsync(
+        IReadOnlyList<EllaiChatMessage> messages,
+        int maxTokens,
+        Func<string, CancellationToken, ValueTask> onText,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(onText);
+        var completion = await CompleteAsync(messages, maxTokens, ct).ConfigureAwait(false);
+        if (!string.IsNullOrEmpty(completion.Text))
+        {
+            await onText(completion.Text, ct).ConfigureAwait(false);
+        }
+        return completion;
+    }
 }
 
 /// <summary>One utterance bound for multi-turn reasoning.</summary>
@@ -35,7 +50,8 @@ public sealed record EllaiLoopRequest(
     string CapabilitySummary,
     int MaxTokensPerTurn,
     string CycleId,
-    long ControllerEpoch);
+    long ControllerEpoch,
+    IReadOnlyList<EllaiChatMessage>? Conversation = null);
 
 /// <summary>Multi-turn reasoning loop (Task 6): drives the bounded cycle
 /// runner with a routed text provider. Each model text turn parses to typed
@@ -79,7 +95,8 @@ public sealed class EllaiReasoningLoop(
         Func<int, CancellationToken, Task<bool>>? reauthorizeAsync = null,
         EllaiActivityStatusCoordinator? activity = null,
         EllaiSessionEventJournal? journal = null,
-        Func<CancellationToken, Task<bool>>? isExecutionCurrentAsync = null)
+        Func<CancellationToken, Task<bool>>? isExecutionCurrentAsync = null,
+        Func<string, CancellationToken, ValueTask>? onTextDelta = null)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(request.Context);
@@ -103,14 +120,27 @@ public sealed class EllaiReasoningLoop(
         var system = _prompts.Build(request.Role, request.CapabilitySummary, limits) +
             "\n## Turn protocol\n" + TurnProtocol +
             "\n## Tool catalogue\n" + EllaiToolBroker.DescribeCatalogue(request.Context.AllowedTools);
-        var thread = new List<EllaiChatMessage> { new("user", request.Utterance) };
+        var thread = new List<EllaiChatMessage>(request.Conversation ?? []);
+        thread.Add(new("user", request.Utterance));
 
         async Task<EllaiModelTurn> TurnAsync(int iteration)
         {
             var messages = new List<EllaiChatMessage> { new("system", system) };
             messages.AddRange(thread);
-            var completion = await _completions.CompleteAsync(
-                messages, request.MaxTokensPerTurn, ct).ConfigureAwait(false);
+            var textParser = onTextDelta is null ? null : new EllaiDecisionTextStreamParser();
+            var completion = onTextDelta is null
+                ? await _completions.CompleteAsync(messages, request.MaxTokensPerTurn, ct).ConfigureAwait(false)
+                : await _completions.CompleteStreamingAsync(
+                    messages,
+                    request.MaxTokensPerTurn,
+                    async (delta, callbackCt) =>
+                    {
+                        foreach (var sentence in textParser!.Append(delta))
+                        {
+                            await onTextDelta(sentence, callbackCt).ConfigureAwait(false);
+                        }
+                    },
+                    ct).ConfigureAwait(false);
             var sample = new EllaiUsageSample(
                 request.Context.SessionId,
                 Math.Max(0, completion.PromptTokens), Math.Max(0, completion.CompletionTokens));
@@ -122,12 +152,23 @@ public sealed class EllaiReasoningLoop(
                     _ledger?.DollarsFor(sample) ?? 0m, DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
             }
             thread.Add(new EllaiChatMessage("assistant", completion.Text));
+            var validationStarted = System.Diagnostics.Stopwatch.GetTimestamp();
             var parsed = EllaiModelTurnParser.Parse(completion.Text);
             var decisionErrors = parsed.Turn?.FinalDecision is { } decision
                 ? EllaiDecisionValidator.Validate(decision)
                 : Array.Empty<string>();
+            EllaiPipelineMetrics.Record("decision_validation", System.Diagnostics.Stopwatch.GetElapsedTime(validationStarted).TotalMilliseconds);
             if (parsed.Turn is not null && decisionErrors.Count == 0)
             {
+                if (textParser is not null && parsed.Turn.FinalDecision is { } finalDecision)
+                {
+                    var remainder = textParser.FlushVerified(finalDecision.DisplayText);
+                    if (remainder.Length > 0)
+                    {
+                        await onTextDelta!(remainder, ct).ConfigureAwait(false);
+                    }
+                }
+
                 if (parsed.Turn.ToolRequests.Count > 0)
                 {
                     thread[^1] = thread[^1] with { ToolCalls = parsed.Turn.ToolRequests };

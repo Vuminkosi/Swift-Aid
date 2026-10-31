@@ -9,7 +9,8 @@ public sealed record EllaiCycleOutcome(
     string? StopReason,
     int IterationsUsed,
     int ToolCallsUsed,
-    bool RepairUsed);
+    bool RepairUsed,
+    string? FailureCode = null);
 
 /// <summary>Model-turn delegate: one bounded reasoning step returning either
 /// tool requests or a final decision draft.</summary>
@@ -89,10 +90,11 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
                 }
             }
 
-            EllaiCycleOutcome Stop(string reason, int iteration, string blockedDetail)
+            EllaiCycleOutcome Stop(string reason, int iteration, string blockedDetail, string? failureCode = null)
             {
                 Trace(EllaiActivityKind.CycleBlocked, blockedDetail);
-                return new EllaiCycleOutcome(false, null, reason, iteration, toolCallsUsed, repairUsed);
+                return new EllaiCycleOutcome(false, null, reason, iteration, toolCallsUsed, repairUsed,
+                    failureCode ?? (string.IsNullOrEmpty(blockedDetail) ? "InvalidDecision" : blockedDetail));
             }
 
             for (var iteration = 1; iteration <= MaxIterations; iteration++)
@@ -130,6 +132,7 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
                     Trace(EllaiActivityKind.ReasoningTurnStarted);
                 }
 
+                var needsArgumentRepair = false;
                 foreach (var toolRequest in turn.ToolRequests)
                 {
                     if (isExecutionCurrentAsync is not null
@@ -146,16 +149,33 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
 
                     Trace(EllaiActivityKind.ToolStarted, ActivityDetail(toolRequest.ToolName));
                     remaining = remaining with { RemainingCalls = MaxToolCalls - toolCallsUsed };
-                    var result = await broker.InvokeAsync(remaining, toolRequest, ct);
+                    EllaiToolResult result;
+                    using (EllaiPipelineMetrics.Measure("tool_execution"))
+                    {
+                        result = await broker.InvokeAsync(remaining, toolRequest, ct);
+                    }
                     toolCallsUsed++;
                     onToolResult?.Invoke(toolRequest, result);
                     if (!result.Allowed)
                     {
+                        if (result.ReasonCode == EllaiToolReasonCodes.InvalidArguments)
+                        {
+                            // The rejected call did not execute. Its error observation is already
+                            // in the model thread; allow correction within the existing call/turn limits.
+                            // Never accept a decision packaged with the rejected call.
+                            needsArgumentRepair = true;
+                            continue;
+                        }
                         return Stop($"Tool {toolRequest.ToolName} denied: {result.DenialReason}",
-                            iteration, BlockedDetail(result.ReasonCode));
+                            iteration, BlockedDetail(result.ReasonCode), result.ReasonCode);
                     }
 
                     Trace(EllaiActivityKind.ToolObservationAccepted);
+                }
+
+                if (needsArgumentRepair)
+                {
+                    continue;
                 }
 
                 if (turn.FinalDecision is not null)

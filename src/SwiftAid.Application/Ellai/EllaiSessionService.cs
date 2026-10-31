@@ -64,16 +64,20 @@ public sealed record EllaiUtteranceOutboxItem(
     string SessionId,
     string ClientUtteranceId,
     string PayloadJson,
-    int AttemptCount);
+    int AttemptCount,
+    DateTimeOffset? AcceptedAtUtc = null);
 
 public interface IEllaiUtteranceOutboxStore
 {
+    Task<IReadOnlyList<EllaiConversationTurn>> ReadConversationAsync(
+        string sessionId, string ownerActorId, CancellationToken ct);
+
     Task<EllaiUtteranceOutboxItem?> ClaimNextAsync(
         DateTimeOffset nowUtc, DateTimeOffset leaseExpiresAtUtc, CancellationToken ct);
 
-    Task CompleteAsync(
+    Task<EllaiUtteranceResolution?> CompleteAsync(
         string sessionId, string clientUtteranceId, int attemptCount,
-        DateTimeOffset completedAtUtc, CancellationToken ct);
+        DateTimeOffset completedAtUtc, CancellationToken ct, EllaiUtteranceResolution? resolution = null);
 
     Task FailAsync(
         string sessionId, string clientUtteranceId, int attemptCount,
@@ -154,7 +158,7 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
             }
 
             _utterances.Add((nextRecord.SessionId, clientUtteranceId),
-                new InMemoryOutboxEntry(outboxPayloadJson, null, 0, null));
+                new InMemoryOutboxEntry(outboxPayloadJson, null, 0, null) { Sequence = nextRecord.SessionVersion, UserText = ReadUserText(outboxPayloadJson) });
             _sessions[nextRecord.SessionId] = nextRecord;
             return Task.FromResult<EllaiUtteranceStoreResult?>(
                 new EllaiUtteranceStoreResult(nextRecord, false));
@@ -176,6 +180,7 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
                     PayloadJson = null,
                     LeaseExpiresAtUtc = null,
                     CompletedAtUtc = nowUtc,
+                    Outcome = "TerminalFailure",
                 };
             }
 
@@ -207,34 +212,61 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
             _utterances[next.Key] = next.Value with
             {
                 AttemptCount = attempts,
+                Outcome = "Processing",
                 LeaseExpiresAtUtc = leaseExpiresAtUtc,
             };
             return Task.FromResult<EllaiUtteranceOutboxItem?>(new(
-                next.Key.SessionId, next.Key.ClientUtteranceId, next.Value.PayloadJson!, attempts));
+                next.Key.SessionId, next.Key.ClientUtteranceId, next.Value.PayloadJson!, attempts, next.Value.AcceptedAtUtc));
         }
     }
 
-    public Task CompleteAsync(
-        string sessionId, string clientUtteranceId, int attemptCount,
-        DateTimeOffset completedAtUtc, CancellationToken ct)
+    public Task<IReadOnlyList<EllaiConversationTurn>> ReadConversationAsync(
+        string sessionId, string ownerActorId, CancellationToken ct)
     {
+        lock (_gate)
+        {
+            if (!_sessions.TryGetValue(sessionId, out var session) || session.OwnerActorId != ownerActorId)
+                return Task.FromResult<IReadOnlyList<EllaiConversationTurn>>(Array.Empty<EllaiConversationTurn>());
+            return Task.FromResult<IReadOnlyList<EllaiConversationTurn>>(_utterances
+                .Where(pair => pair.Key.SessionId == sessionId)
+                .OrderByDescending(pair => pair.Value.Sequence).Take(100).Reverse()
+                .Select(pair => new EllaiConversationTurn(sessionId, pair.Key.ClientUtteranceId,
+                    pair.Value.Sequence, pair.Value.UserText, pair.Value.AssistantText,
+                    pair.Value.Outcome, pair.Value.AttemptCount, pair.Value.CompletedAtUtc)).ToArray());
+        }
+    }
+
+    private static string? ReadUserText(string? payload)
+    {
+        if (payload is null) return null;
+        try { return EllaiUtteranceWorkEnvelope.Deserialize(payload).Utterance; }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidOperationException) { return null; }
+    }
+
+    public Task<EllaiUtteranceResolution?> CompleteAsync(
+        string sessionId, string clientUtteranceId, int attemptCount,
+        DateTimeOffset completedAtUtc, CancellationToken ct, EllaiUtteranceResolution? resolution = null)
+    {
+        resolution ??= EllaiUtteranceResolution.Failed;
+        resolution.Validate();
         lock (_gate)
         {
             var key = (sessionId, clientUtteranceId);
             if (_utterances.TryGetValue(key, out var item)
-                && item.CompletedAtUtc is null
-                && item.AttemptCount == attemptCount)
+                && item.CompletedAtUtc is null && item.AttemptCount == attemptCount)
             {
+                if (resolution.ExpectedInteractionEpoch.HasValue && (!_sessions.TryGetValue(sessionId, out var session)
+                    || session.Status != "Active" || session.InteractionEpoch != resolution.ExpectedInteractionEpoch))
+                    resolution = EllaiUtteranceResolution.Cancelled;
                 _utterances[key] = item with
                 {
-                    PayloadJson = null,
-                    LeaseExpiresAtUtc = null,
-                    CompletedAtUtc = completedAtUtc,
+                    PayloadJson = null, LeaseExpiresAtUtc = null, CompletedAtUtc = completedAtUtc,
+                    Outcome = resolution.Outcome, AssistantText = resolution.AssistantText,
                 };
+                return Task.FromResult<EllaiUtteranceResolution?>(resolution);
             }
         }
-
-        return Task.CompletedTask;
+        return Task.FromResult<EllaiUtteranceResolution?>(null);
     }
 
     public Task FailAsync(
@@ -249,8 +281,8 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
                 && item.AttemptCount == attemptCount)
             {
                 _utterances[key] = terminal || item.AttemptCount >= 3
-                    ? item with { PayloadJson = null, LeaseExpiresAtUtc = null, CompletedAtUtc = retryAtUtc }
-                    : item with { LeaseExpiresAtUtc = retryAtUtc };
+                    ? item with { PayloadJson = null, LeaseExpiresAtUtc = null, CompletedAtUtc = retryAtUtc, Outcome = "TerminalFailure" }
+                    : item with { LeaseExpiresAtUtc = retryAtUtc, Outcome = "RetryableFailure" };
             }
         }
 
@@ -264,6 +296,10 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
         DateTimeOffset? CompletedAtUtc)
     {
         public DateTimeOffset AcceptedAtUtc { get; } = DateTimeOffset.UtcNow;
+        public long Sequence { get; init; }
+        public string? UserText { get; init; }
+        public string? AssistantText { get; init; }
+        public string Outcome { get; init; } = "Queued";
     }
 
     public Task SaveCheckpointAsync(EllaiCheckpoint checkpoint, CancellationToken ct)
@@ -286,9 +322,10 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
 /// restart creates a new session/epoch. (ELL-T04 groundwork.)</summary>
 public sealed class EllaiSessionService(IEllaiSessionStore store, EllaiConsentService? consent = null)
 {
-    /// <summary>Enclosing per-session cycle ceiling (§8.1: 12 cycles,
-    /// matching ck_ellai_sessions_cycles). Stricter investigation caps win.</summary>
+    /// <summary>Signed-in session cycle ceiling. Anonymous guest sessions do
+    /// not have an arbitrary turn-count ceiling.</summary>
     public const int DefaultCyclesAllowed = 12;
+    public const int GuestCyclesAllowed = int.MaxValue;
 
     public async Task<EllaiSessionView?> GetOwnedViewAsync(
         string sessionId, System.Security.Claims.ClaimsPrincipal principal, CancellationToken ct)
@@ -328,9 +365,15 @@ public sealed class EllaiSessionService(IEllaiSessionStore store, EllaiConsentSe
         var scopeDisplay = scope.Grants.Count == 0
             ? $"ellai-help-identity-epoch-{scope.AccessEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
             : $"access-epoch-{scope.AccessEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+        var cyclesAllowed = string.Equals(
+            principal.FindFirst("swiftaid_ellai_guest")?.Value,
+            "true",
+            StringComparison.Ordinal)
+            ? GuestCyclesAllowed
+            : DefaultCyclesAllowed;
         var record = new EllaiSessionRecord(
             $"ellai-{Guid.NewGuid():N}", request.Mode, "Active", 1, 1, 1, 1,
-            0, DefaultCyclesAllowed, actor.ActorId,
+            0, cyclesAllowed, actor.ActorId,
             scopeDisplay,
             null, null, now);
         await store.CreateAsync(record, ct);

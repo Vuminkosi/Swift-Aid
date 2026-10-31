@@ -15,6 +15,16 @@ public interface IEllaiSpeechSynthesisClient
         CancellationToken cancellationToken);
 }
 
+internal static class EllaiSpeechResponseContract
+{
+    public static bool IsValidPcmResponse(HttpResponseMessage response) =>
+        response.IsSuccessStatusCode
+        && string.Equals(response.Content.Headers.ContentType?.MediaType,
+            "application/vnd.swiftaid.pcm", StringComparison.OrdinalIgnoreCase)
+        && response.Headers.Contains("X-SwiftAid-Voice-Id")
+        && response.Headers.Contains("X-SwiftAid-Sample-Rate");
+}
+
 /// <summary>Server-side client for the private Gateway voice engine. Text and
 /// credentials are never sent to clients or written to logs.</summary>
 public sealed class EllaiSpeechSynthesisClient : IEllaiSpeechSynthesisClient

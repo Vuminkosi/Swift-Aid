@@ -8,7 +8,9 @@ namespace SwiftAid.Application.Ellai;
 public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null)
 {
     public const int MaximumTextLength = 2000;
-    public const int MaximumResponsesPerSession = 16;
+    public const int MaximumResponsesPerSession = 64;
+    public string StreamId { get; } = Guid.NewGuid().ToString("N");
+
     public static readonly TimeSpan Lifetime = TimeSpan.FromHours(1);
 
     private readonly object _gate = new();
@@ -37,13 +39,14 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null)
                 session = new SessionResponses(_timeProvider.GetUtcNow());
                 _sessions.Add(sessionId, session);
             }
-            else if (string.Equals(session.LastClientUtteranceId, clientUtteranceId, StringComparison.Ordinal))
+            else if (session.Items.LastOrDefault(item => item.IsFinal
+                && string.Equals(item.ClientUtteranceId, clientUtteranceId, StringComparison.Ordinal)) is { } existing)
             {
-                return session.Items.Last?.Value;
+                return existing;
             }
 
             var response = new EllaiSessionResponseDto(
-                ++session.Sequence, sessionId, boundedText, _timeProvider.GetUtcNow());
+                ++session.Sequence, sessionId, boundedText, _timeProvider.GetUtcNow(), clientUtteranceId);
             session.LastUpdatedAtUtc = response.CreatedAtUtc;
             session.LastClientUtteranceId = clientUtteranceId;
             session.Items.AddLast(response);
@@ -52,6 +55,120 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null)
                 session.Items.RemoveFirst();
             }
 
+            return response;
+        }
+    }
+
+    public EllaiSessionResponseDto? PublishChunk(
+        string sessionId, string clientUtteranceId, int chunkIndex, string text)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(clientUtteranceId);
+        if (chunkIndex < 1 || string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var boundedText = text.Trim();
+        if (boundedText.Length is 0 or > MaximumTextLength)
+        {
+            return null;
+        }
+
+        lock (_gate)
+        {
+            PruneExpired();
+            if (!_sessions.TryGetValue(sessionId, out var session))
+            {
+                session = new SessionResponses(_timeProvider.GetUtcNow());
+                _sessions.Add(sessionId, session);
+            }
+
+            var deliveryId = $"{clientUtteranceId}:chunk:{chunkIndex.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+            if (session.LastClientUtteranceId == deliveryId)
+            {
+                return session.Items.Last?.Value;
+            }
+
+            var response = new EllaiSessionResponseDto(
+                ++session.Sequence, sessionId, boundedText, _timeProvider.GetUtcNow(), clientUtteranceId, IsFinal: false);
+            session.LastUpdatedAtUtc = response.CreatedAtUtc;
+            session.LastClientUtteranceId = deliveryId;
+            session.Items.AddLast(response);
+            while (session.Items.Count > MaximumResponsesPerSession)
+            {
+                session.Items.RemoveFirst();
+            }
+            return response;
+        }
+    }
+
+    public bool ContainsUtterance(string sessionId, string clientUtteranceId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(clientUtteranceId);
+        lock (_gate)
+        {
+            PruneExpired();
+            return _sessions.TryGetValue(sessionId, out var session)
+                && session.Items.Any(item => string.Equals(
+                    item.ClientUtteranceId, clientUtteranceId, StringComparison.Ordinal));
+        }
+    }
+
+    public EllaiSessionResponseDto Reconcile(string sessionId, string utteranceId, EllaiUtteranceResolution resolution)
+    {
+        resolution.Validate();
+        lock (_gate)
+        {
+            PruneExpired();
+            if (!_sessions.TryGetValue(sessionId, out var session))
+            {
+                session = new SessionResponses(_timeProvider.GetUtcNow());
+                _sessions.Add(sessionId, session);
+            }
+            var existing = session.Items.LastOrDefault(item => item.IsReconciliation
+                && item.ClientUtteranceId == utteranceId);
+            if (existing is not null) return existing;
+            var response = new EllaiSessionResponseDto(++session.Sequence, sessionId,
+                resolution.AssistantText ?? string.Empty, _timeProvider.GetUtcNow(), utteranceId,
+                IsFinal: true, IsReconciliation: true, Outcome: resolution.Outcome);
+            session.Items.AddLast(response);
+            session.LastUpdatedAtUtc = response.CreatedAtUtc;
+            while (session.Items.Count > MaximumResponsesPerSession) session.Items.RemoveFirst();
+            return response;
+        }
+    }
+
+    public EllaiSessionResponseDto? CompleteUtterance(string sessionId, string clientUtteranceId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(clientUtteranceId);
+        lock (_gate)
+        {
+            PruneExpired();
+            if (!_sessions.TryGetValue(sessionId, out var session)
+                || !session.Items.Any(item => string.Equals(
+                    item.ClientUtteranceId, clientUtteranceId, StringComparison.Ordinal)))
+            {
+                return null;
+            }
+
+            if (session.Items.LastOrDefault(item => item.IsFinal && item.Text.Length == 0
+                && string.Equals(item.ClientUtteranceId, clientUtteranceId, StringComparison.Ordinal)) is { } existing)
+            {
+                return existing;
+            }
+
+            var response = new EllaiSessionResponseDto(
+                ++session.Sequence, sessionId, string.Empty, _timeProvider.GetUtcNow(), clientUtteranceId, IsFinal: true);
+            session.LastUpdatedAtUtc = response.CreatedAtUtc;
+            session.LastClientUtteranceId = $"{clientUtteranceId}:complete";
+            session.Items.AddLast(response);
+            while (session.Items.Count > MaximumResponsesPerSession)
+            {
+                session.Items.RemoveFirst();
+            }
             return response;
         }
     }

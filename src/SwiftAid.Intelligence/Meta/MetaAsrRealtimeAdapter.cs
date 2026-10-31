@@ -70,21 +70,50 @@ public sealed class MetaAsrRealtimeAdapter(EllaiOptions options)
         var receiver = ReceiveUntilCloseAsync(
             socket, transcripts, onPartialTranscript, onFinalTranscript, linked.Token);
 
-        var buffer = new byte[7680];
-        int read;
-        while ((read = await pcm24kMono16Bit.ReadAsync(buffer, linked.Token)) > 0)
+        var inputCompleted = false;
+        async Task SendAudioAsync()
         {
-            if (onAudioChunk is not null)
+            var buffer = new byte[7680];
+            try
             {
-                await onAudioChunk(buffer.AsMemory(0, read), linked.Token).ConfigureAwait(false);
+                int read;
+                while ((read = await pcm24kMono16Bit.ReadAsync(buffer, linked.Token)) > 0)
+                {
+                    if (onAudioChunk is not null)
+                    {
+                        await onAudioChunk(buffer.AsMemory(0, read), linked.Token).ConfigureAwait(false);
+                    }
+                    await socket.SendAsync(new ArraySegment<byte>(buffer, 0, read),
+                        WebSocketMessageType.Binary, true, linked.Token).ConfigureAwait(false);
+                }
+                inputCompleted = true;
+                await SendTextAsync(socket, """{"type":"endStream"}""", linked.Token).ConfigureAwait(false);
             }
-
-            await socket.SendAsync(new ArraySegment<byte>(buffer, 0, read),
-                WebSocketMessageType.Binary, true, linked.Token);
+            finally
+            {
+                Array.Clear(buffer);
+            }
         }
 
-        await SendTextAsync(socket, """{"type":"endStream"}""", linked.Token);
-        await receiver;
+        var sender = SendAudioAsync();
+        try
+        {
+            var first = await Task.WhenAny(sender, receiver).ConfigureAwait(false);
+            await first.ConfigureAwait(false);
+            if (first == receiver && !inputCompleted)
+            {
+                throw new InvalidOperationException("Ellai realtime ASR closed before the transcription request completed.");
+            }
+            await Task.WhenAll(sender, receiver).ConfigureAwait(false);
+        }
+        finally
+        {
+            // A failed receiver must release a sender waiting on an open microphone stream.
+            // This request owns the linked cancellation, never the parent capture session.
+            await linked.CancelAsync().ConfigureAwait(false);
+            try { await Task.WhenAll(sender, receiver).ConfigureAwait(false); }
+            catch { /* Both tasks are observed; preserve the primary failure above. */ }
+        }
         return new RealtimeAsrResult(sessionId, transcripts.Turns);
     }
 
@@ -127,15 +156,7 @@ public sealed class MetaAsrRealtimeAdapter(EllaiOptions options)
     {
         while (socket.State == WebSocketState.Open)
         {
-            string? text = null;
-            try
-            {
-                text = await ReceiveTextAsync(socket, ct);
-            }
-            catch (WebSocketException)
-            {
-                break;
-            }
+            var text = await ReceiveTextAsync(socket, ct).ConfigureAwait(false);
 
             if (text is null)
             {
@@ -150,9 +171,7 @@ public sealed class MetaAsrRealtimeAdapter(EllaiOptions options)
                     && type.ValueKind == JsonValueKind.String
                     && type.GetString() == "error")
                 {
-                    var message = root.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.String
-                        ? m.GetString() : "provider error";
-                    throw new InvalidOperationException($"Ellai realtime ASR error: {message}");
+                    throw new InvalidOperationException("Ellai realtime ASR rejected the transcription stream.");
                 }
 
             }

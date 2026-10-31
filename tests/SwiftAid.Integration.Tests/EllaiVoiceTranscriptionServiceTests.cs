@@ -19,6 +19,43 @@ namespace SwiftAid.Integration.Tests;
 public sealed class EllaiVoiceTranscriptionServiceTests
 {
     [Fact]
+    public async Task ProviderReceiverFailureDoesNotWaitForMicrophoneEof()
+    {
+        await using var server = await AudioForwardingWebSocketServer.CreateAsync(failAfterHandshake: true);
+        var adapter = new MetaAsrRealtimeAdapter(new EllaiOptions
+        {
+            Enabled = true, ApiKey = "synthetic-key", AsrModel = "muse-voice-transcribe-1.0",
+            AsrWebSocketUrl = server.WebSocketUrl, AsrMode = "DIARIZATION",
+        });
+        await using var microphone = new ProgressivePcmStream();
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            adapter.TranscribePcmAsync(microphone, cancellation.Token));
+        Assert.Contains("ASR", error.Message);
+        Assert.False(cancellation.IsCancellationRequested);
+    }
+
+    [Fact]
+    public async Task LiveGatewayReportsProviderFailureWithoutDrainingAnOpenMicrophone()
+    {
+        await using var server = await AudioForwardingWebSocketServer.CreateAsync(failAfterHandshake: true);
+        var options = new EllaiOptions
+        {
+            Enabled = true, ApiKey = "synthetic-key", AsrModel = "muse-voice-transcribe-1.0",
+            AsrWebSocketUrl = server.WebSocketUrl, AsrMode = "DIARIZATION",
+        };
+        using var provider = new ServiceCollection().AddSingleton(new EllaiVoiceTurnCoordinator())
+            .AddSingleton(new MetaAsrRealtimeAdapter(options)).BuildServiceProvider();
+        var service = new EllaiVoiceTranscriptionService(new EllaiConsentService(), new InMemoryEllaiConsentStore(), options, provider);
+        await service.GrantVoiceConsentAsync("receiver-failure", CancellationToken.None);
+        await using var microphone = new ProgressivePcmStream();
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+        var result = await service.TranscribeAsync("receiver-failure", EllaiVoiceCaptureMode.Live,
+            microphone, null, cancellation.Token);
+        Assert.Null(result);
+        Assert.False(cancellation.IsCancellationRequested);
+    }
+    [Fact]
     public async Task VoiceConsent_GrantsMicrophoneAndTranscriptionSeparatelyForOneHour()
     {
         var consent = new EllaiConsentService();
@@ -482,6 +519,7 @@ public sealed class EllaiVoiceTranscriptionServiceTests
     {
         private readonly bool _sendFinalTranscript;
         private readonly bool _sendPartialTranscript;
+        private readonly bool _failAfterHandshake;
         private WebApplication _application = null!;
         private readonly TaskCompletionSource _firstAudioReceived = new(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -490,16 +528,17 @@ public sealed class EllaiVoiceTranscriptionServiceTests
         public Task FirstAudioReceived => _firstAudioReceived.Task;
         public byte[] ReceivedPcm { get; private set; } = [];
 
-        private AudioForwardingWebSocketServer(bool sendFinalTranscript, bool sendPartialTranscript)
+        private AudioForwardingWebSocketServer(bool sendFinalTranscript, bool sendPartialTranscript, bool failAfterHandshake)
         {
             _sendFinalTranscript = sendFinalTranscript;
             _sendPartialTranscript = sendPartialTranscript;
+            _failAfterHandshake = failAfterHandshake;
         }
 
         public static async Task<AudioForwardingWebSocketServer> CreateAsync(
-            bool sendFinalTranscript = true, bool sendPartialTranscript = false)
+            bool sendFinalTranscript = true, bool sendPartialTranscript = false, bool failAfterHandshake = false)
         {
-            var result = new AudioForwardingWebSocketServer(sendFinalTranscript, sendPartialTranscript);
+            var result = new AudioForwardingWebSocketServer(sendFinalTranscript, sendPartialTranscript, failAfterHandshake);
             var builder = WebApplication.CreateBuilder();
             builder.Logging.ClearProviders();
             builder.WebHost.ConfigureKestrel(server => server.Listen(IPAddress.Loopback, 0));
@@ -532,6 +571,11 @@ public sealed class EllaiVoiceTranscriptionServiceTests
             using var socket = await context.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
             _ = await ReceiveTextAsync(socket).ConfigureAwait(false);
             await SendTextAsync(socket, "{\"sessionId\":\"stream-session\"}").ConfigureAwait(false);
+            if (_failAfterHandshake)
+            {
+                await SendTextAsync(socket, "{\"type\":\"error\",\"message\":\"synthetic receiver failure\"}").ConfigureAwait(false);
+                return;
+            }
 
             using var pcm = new MemoryStream();
             var buffer = new byte[4096];

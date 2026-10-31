@@ -173,6 +173,8 @@ public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext) : IEl
             ClientUtteranceId = clientUtteranceId,
             AcceptedAtUtc = DateTimeOffset.UtcNow,
             WorkPayloadJson = outboxPayloadJson,
+            Sequence = nextRecord.SessionVersion,
+            UserText = outboxPayloadJson is null ? null : EllaiUtteranceWorkEnvelope.Deserialize(outboxPayloadJson).Utterance,
         };
         utterances.Add(utteranceEntity);
 
@@ -278,7 +280,8 @@ public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext) : IEl
             UPDATE ellai_utterances
             SET work_payload_json = NULL,
                 lease_expires_at_utc = NULL,
-                completed_at_utc = {nowUtc}
+                completed_at_utc = {nowUtc},
+                outcome = 'TerminalFailure'
             WHERE work_payload_json IS NOT NULL
               AND completed_at_utc IS NULL
               AND attempt_count >= 3
@@ -308,7 +311,7 @@ public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext) : IEl
                 ORDER BY candidate.accepted_at_utc, candidate.session_id, candidate.client_utterance_id
                 LIMIT 1 FOR UPDATE OF candidate SKIP LOCKED
                 """)
-            .ToListAsync(ct)
+            .AsNoTracking().ToListAsync(ct)
             .ConfigureAwait(false);
         var candidate = candidates.FirstOrDefault();
         if (candidate is null)
@@ -318,63 +321,89 @@ public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext) : IEl
         }
 
         candidate.AttemptCount++;
+        candidate.Outcome = "Processing";
         candidate.LeaseExpiresAtUtc = leaseExpiresAtUtc;
-        await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
+        await _dbContext.Set<EllaiUtteranceEntity>()
+            .Where(turn => turn.SessionId == candidate.SessionId && turn.ClientUtteranceId == candidate.ClientUtteranceId)
+            .ExecuteUpdateAsync(update => update
+                .SetProperty(turn => turn.AttemptCount, candidate.AttemptCount)
+                .SetProperty(turn => turn.Outcome, "Processing")
+                .SetProperty(turn => turn.LeaseExpiresAtUtc, leaseExpiresAtUtc), ct).ConfigureAwait(false);
         await transaction.CommitAsync(ct).ConfigureAwait(false);
         return new EllaiUtteranceOutboxItem(
             candidate.SessionId,
             candidate.ClientUtteranceId,
             candidate.WorkPayloadJson!,
-            candidate.AttemptCount);
+            candidate.AttemptCount,
+            candidate.AcceptedAtUtc);
     }
 
-    public async Task CompleteAsync(
-        string sessionId, string clientUtteranceId, int attemptCount,
-        DateTimeOffset completedAtUtc, CancellationToken ct)
+    public async Task<IReadOnlyList<EllaiConversationTurn>> ReadConversationAsync(
+        string sessionId, string ownerActorId, CancellationToken ct)
     {
-        var entity = await FindOutboxEntityAsync(sessionId, clientUtteranceId, attemptCount, ct).ConfigureAwait(false);
-        if (entity is null || entity.CompletedAtUtc is not null)
+        // Keep the owner predicate in the query, including for completed sessions.
+        var rows = await _dbContext.Set<EllaiUtteranceEntity>().AsNoTracking()
+            .Where(turn => turn.SessionId == sessionId
+                && _dbContext.Set<EllaiSessionEntity>().Any(session =>
+                    session.SessionId == turn.SessionId && session.OwnerActorId == ownerActorId))
+            .OrderByDescending(turn => turn.Sequence).ThenByDescending(turn => turn.ClientUtteranceId)
+            .Take(100)
+            .Select(turn => new EllaiConversationTurn(turn.SessionId, turn.ClientUtteranceId,
+                turn.Sequence, turn.UserText, turn.AssistantText, turn.Outcome,
+                turn.AttemptCount, turn.CompletedAtUtc))
+            .ToListAsync(ct).ConfigureAwait(false);
+        rows.Reverse();
+        return rows;
+    }
+
+    public async Task<EllaiUtteranceResolution?> CompleteAsync(
+        string sessionId, string clientUtteranceId, int attemptCount,
+        DateTimeOffset completedAtUtc, CancellationToken ct, EllaiUtteranceResolution? resolution = null)
+    {
+        resolution ??= EllaiUtteranceResolution.Failed;
+        resolution.Validate();
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
+        // Serialize against session cancellation/epoch changes. Provider calls never hold this lock.
+        var sessions = await _dbContext.Set<EllaiSessionEntity>().FromSqlInterpolated($"""
+            SELECT * FROM ellai_sessions WHERE session_id = {sessionId} FOR UPDATE
+            """).AsNoTracking().ToListAsync(ct).ConfigureAwait(false);
+        var session = sessions.SingleOrDefault();
+        if (resolution.ExpectedInteractionEpoch.HasValue && (session is null || session.Status != "Active"
+            || session.InteractionEpoch != resolution.ExpectedInteractionEpoch))
         {
-            return;
+            resolution = EllaiUtteranceResolution.Cancelled;
         }
 
-        entity.WorkPayloadJson = null;
-        entity.LeaseExpiresAtUtc = null;
-        entity.CompletedAtUtc = completedAtUtc;
-        await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
+        // Compare the claim attempt in the UPDATE itself: a reclaimed worker cannot acknowledge
+        // or overwrite its successor. Response persistence and queue completion are one commit.
+        var changed = await _dbContext.Set<EllaiUtteranceEntity>()
+            .Where(turn => turn.SessionId == sessionId && turn.ClientUtteranceId == clientUtteranceId
+                && turn.AttemptCount == attemptCount && turn.CompletedAtUtc == null)
+            .ExecuteUpdateAsync(update => update
+                .SetProperty(turn => turn.Outcome, resolution.Outcome)
+                .SetProperty(turn => turn.AssistantText, resolution.AssistantText)
+                .SetProperty(turn => turn.WorkPayloadJson, (string?)null)
+                .SetProperty(turn => turn.LeaseExpiresAtUtc, (DateTimeOffset?)null)
+                .SetProperty(turn => turn.CompletedAtUtc, completedAtUtc), ct).ConfigureAwait(false);
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
+        return changed == 1 ? resolution : null;
     }
 
     public async Task FailAsync(
         string sessionId, string clientUtteranceId, int attemptCount,
         DateTimeOffset retryAtUtc, bool terminal, CancellationToken ct)
     {
-        var entity = await FindOutboxEntityAsync(sessionId, clientUtteranceId, attemptCount, ct).ConfigureAwait(false);
-        if (entity is null || entity.CompletedAtUtc is not null)
-        {
-            return;
-        }
-
-        if (terminal || entity.AttemptCount >= 3)
-        {
-            entity.WorkPayloadJson = null;
-            entity.LeaseExpiresAtUtc = null;
-            entity.CompletedAtUtc = retryAtUtc;
-        }
-        else
-        {
-            entity.LeaseExpiresAtUtc = retryAtUtc;
-        }
-
-        await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
+        var exhausted = terminal || attemptCount >= 3;
+        await _dbContext.Set<EllaiUtteranceEntity>()
+            .Where(turn => turn.SessionId == sessionId && turn.ClientUtteranceId == clientUtteranceId
+                && turn.AttemptCount == attemptCount && turn.CompletedAtUtc == null)
+            .ExecuteUpdateAsync(update => update
+                .SetProperty(turn => turn.Outcome, exhausted ? "TerminalFailure" : "RetryableFailure")
+                .SetProperty(turn => turn.WorkPayloadJson, turn => exhausted ? null : turn.WorkPayloadJson)
+                .SetProperty(turn => turn.LeaseExpiresAtUtc, exhausted ? (DateTimeOffset?)null : retryAtUtc)
+                .SetProperty(turn => turn.CompletedAtUtc, exhausted ? retryAtUtc : (DateTimeOffset?)null), ct)
+            .ConfigureAwait(false);
     }
-
-    private Task<EllaiUtteranceEntity?> FindOutboxEntityAsync(
-        string sessionId, string clientUtteranceId, int attemptCount, CancellationToken ct) =>
-        _dbContext.Set<EllaiUtteranceEntity>()
-            .SingleOrDefaultAsync(entity => entity.SessionId == sessionId
-                && entity.ClientUtteranceId == clientUtteranceId
-                && entity.AttemptCount == attemptCount, ct);
-
 
     public async Task SaveCheckpointAsync(EllaiCheckpoint checkpoint, CancellationToken ct)
     {

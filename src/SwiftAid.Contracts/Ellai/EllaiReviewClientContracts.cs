@@ -60,11 +60,22 @@ public sealed record EllaiSessionResponseDto(
     long Sequence,
     string SessionId,
     string Text,
-    DateTimeOffset CreatedAtUtc);
+    DateTimeOffset CreatedAtUtc,
+    string? ClientUtteranceId = null,
+    bool IsFinal = true,
+    bool IsReconciliation = false,
+    string? Outcome = null);
 
 public sealed record EllaiSessionResponsePageDto(
     IReadOnlyList<EllaiSessionResponseDto> Responses,
-    long Cursor);
+    long Cursor,
+    string? StreamId = null,
+    IReadOnlyList<EllaiConversationTurnDto>? Conversation = null);
+
+/// <summary>Owner-authorized durable turn. A provisional chunk is never a completed turn.</summary>
+public sealed record EllaiConversationTurnDto(
+    string ClientUtteranceId, long Sequence, string? UserText, string? AssistantText,
+    string Outcome, int AttemptCount, DateTimeOffset? CompletedAtUtc);
 
 /// <summary>Bounded little-endian, mono PCM response streamed from the Gateway.</summary>
 public sealed record EllaiResponseAudio(byte[] Pcm, int SampleRate, string VoiceId, long Sequence);
@@ -173,6 +184,9 @@ public interface IEllaiReviewClient
     /// view is classified so confirmed denials are not presented as ambiguous
     /// remote outcomes; callers never invent a session id.</summary>
     Task<EllaiSessionStartResult> StartSessionAsync(EllaiMode mode, CancellationToken cancellationToken);
+
+    Task<EllaiSessionStartResult> ResumeSessionAsync(string sessionId, CancellationToken cancellationToken) =>
+        Task.FromResult(new EllaiSessionStartResult(EllaiClientOperationStatus.Unavailable));
 
     /// <summary>Submits one finalized user utterance through the authenticated
     /// session contract. Null means the request was unavailable, invalid, or

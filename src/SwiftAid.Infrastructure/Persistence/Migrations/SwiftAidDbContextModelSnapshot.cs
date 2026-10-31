@@ -1300,7 +1300,7 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
 
                     b.ToTable("ellai_sessions", null, t =>
                         {
-                            t.HasCheckConstraint("ck_ellai_sessions_cycles", "cycles_used >= 0 AND cycles_allowed BETWEEN 1 AND 12");
+                            t.HasCheckConstraint("ck_ellai_sessions_cycles", "cycles_used >= 0 AND cycles_allowed >= 1");
 
                             t.HasCheckConstraint("ck_ellai_sessions_ids_nonempty", "length(btrim(session_id)) > 0 AND length(btrim(scope_epoch)) > 0");
 
@@ -1421,6 +1421,10 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("accepted_at_utc");
 
+                    b.Property<string>("AssistantText")
+                        .HasColumnType("text")
+                        .HasColumnName("assistant_text");
+
                     b.Property<int>("AttemptCount")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
@@ -1434,6 +1438,21 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset?>("LeaseExpiresAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("lease_expires_at_utc");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("Queued")
+                        .HasColumnName("outcome");
+
+                    b.Property<long>("Sequence")
+                        .HasColumnType("bigint")
+                        .HasColumnName("sequence");
+
+                    b.Property<string>("UserText")
+                        .HasColumnType("text")
+                        .HasColumnName("user_text");
 
                     b.Property<string>("WorkPayloadJson")
                         .HasColumnType("jsonb")
@@ -1452,7 +1471,11 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("ck_ellai_utterances_attempt_count", "attempt_count >= 0");
 
+                            t.HasCheckConstraint("ck_ellai_utterances_completed_response", "outcome <> 'Completed' OR (assistant_text IS NOT NULL AND length(btrim(assistant_text)) > 0 AND completed_at_utc IS NOT NULL)");
+
                             t.HasCheckConstraint("ck_ellai_utterances_ids_nonempty", "length(btrim(session_id)) > 0 AND length(btrim(client_utterance_id)) > 0");
+
+                            t.HasCheckConstraint("ck_ellai_utterances_outcome", "outcome IN ('Queued', 'Processing', 'RetryableFailure', 'Completed', 'TerminalFailure', 'Cancelled', 'LegacyUnknown')");
 
                             t.HasCheckConstraint("ck_ellai_utterances_payload_size", "work_payload_json IS NULL OR octet_length(work_payload_json::text) <= 16384");
                         });

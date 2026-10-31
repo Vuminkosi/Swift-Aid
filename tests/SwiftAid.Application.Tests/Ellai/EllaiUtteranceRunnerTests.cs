@@ -169,6 +169,24 @@ public sealed class EllaiUtteranceRunnerTests
     }
 
     [Fact]
+    public async Task FinalDecisionFansOutCompleteDisplaySentencesInOrder()
+    {
+        const string answer = "First sentence. Second sentence.";
+        var completions = new ScriptedCompletions(DecisionTurn.Replace("Hi there.", answer));
+        var (consent, loop) = Services(completions, grant: true);
+        var chunks = new List<string>();
+        var services = new EllaiUtteranceServices(
+            loop, new EllaiActivityStatusCoordinator(), new EllaiSessionEventJournal(), consent,
+            OnTextDelta: (text, _) => { chunks.Add(text); return ValueTask.CompletedTask; });
+
+        var outcome = await EllaiUtteranceRunner.RunOneAsync(Work(), services, 256, CancellationToken.None);
+
+        Assert.True(outcome.Completed);
+        Assert.Equal(answer, outcome.DisplayText);
+        Assert.Equal(["First sentence.", "Second sentence."], chunks);
+    }
+
+    [Fact]
     public async Task GrantedToolTurnReadsLiveClock()
     {
         var completions = new ScriptedCompletions(

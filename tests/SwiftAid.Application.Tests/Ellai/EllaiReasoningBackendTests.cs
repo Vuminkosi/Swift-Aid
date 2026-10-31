@@ -102,6 +102,37 @@ public sealed class EllaiReasoningBackendTests
     }
 
     [Fact]
+    public async Task OllamaStreamingProviderForwardsNdjsonChunksAndFinalUsage()
+    {
+        var options = Bind(new Dictionary<string, string?>
+        {
+            ["Ellai_Enabled"] = "true",
+            ["Ellai__ReasoningBackend"] = "ollama",
+            ["Ellai__Reasoning__Ollama__Endpoint"] = "http://localhost:11434",
+            ["Ellai__Reasoning__Ollama__Model"] = "llama3.2:3b",
+        });
+        const string body = "{\"model\":\"llama3.2:3b\",\"message\":{\"content\":\"part one\"},\"done\":false}\n" +
+            "{\"message\":{\"content\":\" part two\"},\"done\":false}\n" +
+            "{\"done\":true,\"prompt_eval_count\":10,\"eval_count\":4}\n";
+        var handler = new StubHandler(body);
+        using var http = new HttpClient(handler);
+        var provider = new OllamaEllaiReasoningProvider(http, options);
+        var deltas = new List<string>();
+
+        var result = await provider.CompleteStreamingAsync(
+            [new EllaiChatMessage("user", "hello")], 64,
+            (text, _) => { deltas.Add(text); return ValueTask.CompletedTask; },
+            CancellationToken.None);
+
+        Assert.Equal(["part one", " part two"], deltas);
+        Assert.Equal("part one part two", result.Text);
+        Assert.Equal(10, result.Usage.PromptTokens);
+        Assert.Equal(4, result.Usage.CompletionTokens);
+        using var request = JsonDocument.Parse(handler.RequestBody!);
+        Assert.True(request.RootElement.GetProperty("stream").GetBoolean());
+    }
+
+    [Fact]
     public async Task MetaProviderSerializesCorrelatedToolCallsAndResults()
     {
         const string response = """{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}""";
@@ -138,6 +169,38 @@ public sealed class EllaiReasoningBackendTests
         Assert.Equal("tool", wireMessages[2].GetProperty("role").GetString());
         Assert.Equal("call-1", wireMessages[2].GetProperty("tool_call_id").GetString());
         Assert.Equal("tool result", wireMessages[2].GetProperty("content").GetString());
+    }
+
+    [Fact]
+    public async Task MetaStreamingAdapterForwardsTextDeltasAndFinalUsage()
+    {
+        const string body = "data: {\"model\":\"muse-spark\",\"choices\":[{\"delta\":{\"content\":\"part one\"}}]}\n\n" +
+            "data: {\"choices\":[{\"delta\":{\"content\":\" part two\"}}]}\n\n" +
+            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":5,\"total_tokens\":17}}\n\n" +
+            "data: [DONE]\n\n";
+        var options = Bind(new Dictionary<string, string?>
+        {
+            ["Ellai__Enabled"] = "true",
+            ["Ellai__ApiKey"] = "test-key",
+            ["Ellai__ApiUrl"] = "https://api.meta.ai/v1",
+            ["Ellai__ReasoningModel"] = "muse-spark-1.3-contributor",
+        });
+        var handler = new StubHandler(body);
+        using var http = new HttpClient(handler);
+        var adapter = new EllaiReasoningAdapter(http, options);
+        var deltas = new List<string>();
+
+        var result = await adapter.CompleteStreamingAsync(
+            [new EllaiChatMessage("user", "hello")], 64,
+            (text, _) => { deltas.Add(text); return ValueTask.CompletedTask; },
+            CancellationToken.None);
+
+        Assert.Equal(["part one", " part two"], deltas);
+        Assert.Equal("part one part two", result.Text);
+        Assert.Equal(12, result.Usage.PromptTokens);
+        Assert.Equal(5, result.Usage.CompletionTokens);
+        using var request = JsonDocument.Parse(handler.RequestBody!);
+        Assert.True(request.RootElement.GetProperty("stream").GetBoolean());
     }
 
     [Fact]

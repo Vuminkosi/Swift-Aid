@@ -1,7 +1,6 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Mvc;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Ellai;
@@ -19,7 +18,6 @@ public static class EllaiGuestEndpoints
     public const string AuthenticationScheme = "SwiftAid.EllaiGuest";
     public const string GuestClaim = "swiftaid_ellai_guest";
     private const string GuestActorPrefix = "ellai-guest-";
-    private static readonly TimeSpan GuestSessionLifetime = TimeSpan.FromHours(2);
 
     public static IResult ReadVoiceTurnState(
         HttpContext http, string sessionId, EllaiVoiceTurnCoordinator coordinator,
@@ -115,19 +113,15 @@ public static class EllaiGuestEndpoints
         });
 
         group.MapGet("/antiforgery", GetAntiforgeryToken)
-            .RequireRateLimiting("ellai-guest-read")
             .WithName("GetEllaiGuestAntiforgeryToken")
             .Produces<EllaiGuestAntiforgeryToken>(StatusCodes.Status200OK);
         group.MapPost("/sessions", StartSessionAsync)
-            .RequireRateLimiting("ellai-guest-write")
             .WithMetadata(new RequestSizeLimitAttribute(8 * 1024))
             .WithName("StartEllaiGuestSession")
             .Accepts<StartSessionRequest>("application/json")
             .Produces<EllaiSessionView>(StatusCodes.Status200OK)
-            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
-            .Produces<ProblemDetails>(StatusCodes.Status429TooManyRequests);
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest);
         group.MapPost("/sessions/{sessionId}/consents", GrantPublicHelpConsentAsync)
-            .RequireRateLimiting("ellai-guest-write")
             .WithMetadata(new RequestSizeLimitAttribute(8 * 1024))
             .WithName("GrantEllaiGuestPublicHelpConsent")
             .Accepts<GrantEllaiConsentApiRequest>("application/json")
@@ -136,7 +130,6 @@ public static class EllaiGuestEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
         group.MapPost("/sessions/{sessionId}/voice/{mode}", TranscribeVoiceAsync)
-            .RequireRateLimiting("ellai-guest-write")
             .WithMetadata(new RequestSizeLimitAttribute(EllaiVoiceTranscriptionService.MaximumAudioBytes))
             .WithName("TranscribeEllaiGuestVoiceCapture")
             .Accepts<byte[]>("audio/wav", "application/octet-stream")
@@ -145,7 +138,6 @@ public static class EllaiGuestEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
             .Produces<ProblemDetails>(StatusCodes.Status503ServiceUnavailable);
         group.MapPost("/sessions/{sessionId}/utterances", SubmitUtteranceAsync)
-            .RequireRateLimiting("ellai-guest-write")
             .WithMetadata(new RequestSizeLimitAttribute(8 * 1024))
             .WithName("SubmitEllaiGuestUtterance")
             .Accepts<SubmitUtteranceRequest>("application/json")
@@ -155,25 +147,29 @@ public static class EllaiGuestEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
         group.MapGet("/sessions/{sessionId}/events", ReadEvents)
-            .RequireRateLimiting("ellai-guest-read")
             .WithName("PollEllaiGuestSessionEvents")
             .Produces<EllaiSessionEventPageDto>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
         group.MapGet("/sessions/{sessionId}/voice/state", ReadVoiceTurnState)
-            .RequireRateLimiting("ellai-guest-read")
             .WithName("ReadEllaiGuestVoiceTurnState")
             .Produces<EllaiVoiceTurnStatusDto>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
-        group.MapGet("/sessions/{sessionId}/responses", ReadResponses)
-            .RequireRateLimiting("ellai-guest-read")
+        group.MapGet("/sessions/{sessionId}/voice/live-stream", EllaiVoiceWebSocketEndpoint.HandleAsync)
+            .WithName("StreamEllaiGuestLiveVoiceWebSocket")
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
+        group.MapGet("/sessions/{sessionId}", EllaiConversationFeed.ReadSessionAsync);
+
+        group.MapGet("/sessions/{sessionId}/responses", EllaiConversationFeed.ReadAsync)
             .WithName("ReadEllaiGuestSessionResponses")
             .Produces<EllaiSessionResponsePageDto>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
         group.MapGet("/sessions/{sessionId}/responses/{sequence:long}/audio", StreamResponseAudioAsync)
-            .RequireRateLimiting("ellai-guest-read")
             .WithName("StreamEllaiGuestResponseAudio")
             .Produces(StatusCodes.Status200OK, contentType: "application/vnd.swiftaid.pcm")
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
@@ -181,20 +177,17 @@ public static class EllaiGuestEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status503ServiceUnavailable);
         group.MapPost("/sessions/{sessionId}/responses/{sequence:long}/audio/{playbackId:guid}/interrupt",
                 InterruptResponseAudioAsync)
-            .RequireRateLimiting("ellai-guest-write")
             .WithMetadata(new RequestSizeLimitAttribute(8 * 1024))
             .WithName("InterruptEllaiGuestResponseAudio")
             .Produces(StatusCodes.Status204NoContent)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
         group.MapGet("/sessions/{sessionId}/voice/greeting/audio", StreamListeningGreetingAudioAsync)
-            .RequireRateLimiting("ellai-guest-read")
             .WithName("StreamEllaiGuestListeningGreeting")
             .Produces(StatusCodes.Status200OK, contentType: "application/vnd.swiftaid.pcm")
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status503ServiceUnavailable);
         group.MapPost("/sessions/{sessionId}/cancel", CancelSessionAsync)
-            .RequireRateLimiting("ellai-guest-write")
             .WithMetadata(new RequestSizeLimitAttribute(8 * 1024))
             .WithName("CancelEllaiGuestSession")
             .Accepts<CancelEllaiSessionApiRequest>("application/json")
@@ -256,8 +249,6 @@ public static class EllaiGuestEndpoints
                 new AuthenticationProperties
                 {
                     IsPersistent = false,
-                    AllowRefresh = false,
-                    ExpiresUtc = now.Add(GuestSessionLifetime),
                 }).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -403,16 +394,6 @@ public static class EllaiGuestEndpoints
             page.Cursor));
     }
 
-    private static IResult ReadResponses(
-        string sessionId,
-        long cursor,
-        IServiceProvider services)
-    {
-        var store = services.GetService<EllaiSessionResponseStore>();
-        var page = store?.ReadSince(sessionId, Math.Max(0, cursor))
-            ?? new EllaiSessionResponsePageDto(Array.Empty<EllaiSessionResponseDto>(), Math.Max(0, cursor));
-        return Results.Json(page);
-    }
 
     public static async Task<IResult> StreamResponseAudioAsync(
         string sessionId,
@@ -451,11 +432,12 @@ public static class EllaiGuestEndpoints
             turnCoordinator.SetAssistantPlayback(sessionId, sequence, activePlaybackId, isPlaying: true);
         }
         var synthesisCancellation = playback?.Token ?? http.RequestAborted;
+        var speechSentences = EllaiSpeechSentenceChunker.Split(response.Text);
         HttpResponseMessage upstream;
         try
         {
             upstream = await speech.SynthesizeAsync(
-                $"{sessionId}-{sequence}", response.Text, synthesisCancellation).ConfigureAwait(false);
+                $"{sessionId}-{sequence}-0", speechSentences[0], synthesisCancellation).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested)
         {
@@ -507,8 +489,7 @@ public static class EllaiGuestEndpoints
             throw;
         }
 
-        if (!upstream.IsSuccessStatusCode
-            || upstream.Content.Headers.ContentType?.MediaType != "application/vnd.swiftaid.pcm")
+        if (!EllaiSpeechResponseContract.IsValidPcmResponse(upstream))
         {
             upstream.Dispose();
             playback?.Dispose();
@@ -536,7 +517,8 @@ public static class EllaiGuestEndpoints
         Stream audioStream;
         try
         {
-            audioStream = await upstream.Content.ReadAsStreamAsync(synthesisCancellation).ConfigureAwait(false);
+            audioStream = new EllaiSentencePcmStream(
+                speech, speechSentences, upstream, $"{sessionId}-{sequence}", synthesisCancellation);
         }
         catch (OperationCanceledException) when (synthesisCancellation.IsCancellationRequested)
         {

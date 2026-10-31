@@ -58,6 +58,7 @@ public sealed class EllaiUtteranceSubmissionServiceTests
         var work = EllaiUtteranceWorkEnvelope.Deserialize(item!.PayloadJson);
         Assert.Equal("consent/0", work.ConsentVersion);
         Assert.Equal(EllaiProcessingClassification.UserProvidedNonSensitive, work.ProcessingLabel);
+        Assert.True(EllaiResponsePublicationPolicy.CanPublish(work.ToWork()));
     }
 
     [Fact]

@@ -7,6 +7,29 @@ namespace SwiftAid.Application.Tests.Ellai;
 [Trait("Task", "ELL-T06")]
 public sealed class EllaiCycleRunnerTests
 {
+    [Fact]
+    public async Task InvalidToolArgumentsReturnToModelForBoundedRepair()
+    {
+        var observations = new List<EllaiToolResult>();
+        var runner = new EllaiCycleRunner(GrantedBroker());
+        var outcome = await runner.RunAsync(Context, iteration => Task.FromResult(iteration switch
+        {
+            1 => new EllaiModelTurn([
+                new(EllaiToolNames.ProductFacts, new Dictionary<string, string> { ["query"] = "volunteer" }),
+                new(EllaiToolNames.Now, new Dictionary<string, string>()),
+            ], ValidDecision()),
+            2 => new EllaiModelTurn([new(EllaiToolNames.ProductFacts, new Dictionary<string, string>())], null),
+            _ => new EllaiModelTurn([], ValidDecision()),
+        }), EllaiDecisionValidator.Validate, CancellationToken.None,
+            onToolResult: (_, result) => observations.Add(result));
+        Assert.True(outcome.Completed);
+        Assert.Equal(3, outcome.IterationsUsed);
+        Assert.Equal(3, outcome.ToolCallsUsed);
+        Assert.Equal(EllaiToolReasonCodes.InvalidArguments, observations[0].ReasonCode);
+        Assert.True(observations[1].Allowed);
+        Assert.True(observations[2].Allowed);
+    }
+
     private static readonly EllaiToolContext Context = new(
         "session-1", "epoch-1", "cases", "case-1", 4, true, "consent/1", EllaiProcessingClassification.SyntheticDemo);
 

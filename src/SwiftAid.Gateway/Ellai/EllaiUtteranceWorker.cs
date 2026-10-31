@@ -65,6 +65,10 @@ public sealed class EllaiUtteranceWorker(
         CancellationToken stoppingToken)
     {
         EllaiUtteranceWork work;
+        if (item.AcceptedAtUtc is { } acceptedAt)
+        {
+            EllaiPipelineMetrics.Record("admission_to_pickup", (DateTimeOffset.UtcNow - acceptedAt).TotalMilliseconds);
+        }
         try
         {
             var envelope = EllaiUtteranceWorkEnvelope.Deserialize(item.PayloadJson);
@@ -98,34 +102,37 @@ public sealed class EllaiUtteranceWorker(
                 _logger.LogInformation(
                     "Skipping stale Ellai outbox work for session {SessionId}.", work.SessionId);
                 await outbox.CompleteAsync(item.SessionId, item.ClientUtteranceId, item.AttemptCount,
-                    DateTimeOffset.UtcNow, stoppingToken).ConfigureAwait(false);
+                    DateTimeOffset.UtcNow, stoppingToken, EllaiUtteranceResolution.Cancelled).ConfigureAwait(false);
                 return;
             }
 
+            var started = System.Diagnostics.Stopwatch.StartNew();
             var outcome = await RunWorkAsync(work, scopedServices, stoppingToken).ConfigureAwait(false);
-            if (outcome.Completed
-                && !string.IsNullOrWhiteSpace(outcome.DisplayText)
-                && string.Equals(work.ConsentPurpose, EllaiConsentPurposes.PublicProductHelp, StringComparison.Ordinal)
-                && string.Equals(work.ProcessingLabel, EllaiProcessingClassification.ConsentedNonSensitive, StringComparison.Ordinal)
-                && string.Equals(work.DataClassification, EllaiProcessingClassification.ConsentedNonSensitive, StringComparison.Ordinal))
+            if (!outcome.Completed)
             {
-                var current = await sessions.GetAsync(work.SessionId, stoppingToken).ConfigureAwait(false);
-                if (current is not null
-                    && string.Equals(current.Status, "Active", StringComparison.Ordinal)
-                    && current.InteractionEpoch == work.ControllerEpoch
-                    && string.Equals(current.ScopeEpoch, work.ScopeEpoch, StringComparison.Ordinal)
-                    && string.Equals(current.OwnerActorId, work.Actor.ActorId, StringComparison.Ordinal))
-                {
-                    scopedServices.GetService<EllaiSessionResponseStore>()?
-                        .Publish(work.SessionId, item.ClientUtteranceId, outcome.DisplayText);
-                }
+                _logger.LogWarning("Ellai turn {SessionId}/{UtteranceId} stopped with {FailureCode}.",
+                    work.SessionId, item.ClientUtteranceId, outcome.FailureCode ?? "AdmissionDenied");
             }
-
+            var resolution = outcome.Completed && !string.IsNullOrWhiteSpace(outcome.DisplayText)
+                && EllaiResponsePublicationPolicy.CanPublish(work)
+                ? EllaiUtteranceResolution.Completed(outcome.DisplayText, work.ControllerEpoch)
+                : EllaiUtteranceResolution.Failed with { ExpectedInteractionEpoch = work.ControllerEpoch };
+            var providerElapsed = started.Elapsed.TotalMilliseconds;
+            var committed = await outbox.CompleteAsync(item.SessionId, item.ClientUtteranceId, item.AttemptCount,
+                DateTimeOffset.UtcNow, stoppingToken, resolution).ConfigureAwait(false);
+            EllaiPipelineMetrics.Record("outcome_commit", started.Elapsed.TotalMilliseconds - providerElapsed);
+            if (committed is not null)
+            {
+                using var publication = EllaiPipelineMetrics.Measure("publication");
+                // Transient delivery is only a hint; the owner can recover the committed outcome
+                // from PostgreSQL even when this process exits before this publication.
+                scopedServices.GetService<EllaiSessionResponseStore>()?.Reconcile(
+                    work.SessionId, item.ClientUtteranceId, committed);
+            }
             _logger.LogInformation(
-                "Ellai utterance run for session {SessionId} finished: started {Started}, completed {Completed}.",
-                work.SessionId, outcome.Started, outcome.Completed);
-            await outbox.CompleteAsync(item.SessionId, item.ClientUtteranceId, item.AttemptCount,
-                DateTimeOffset.UtcNow, stoppingToken).ConfigureAwait(false);
+                "Ellai turn {SessionId}/{UtteranceId} attempt {Attempt} outcome {Outcome}; processing {ProcessingMs}ms, commit {CommitMs}ms.",
+                work.SessionId, item.ClientUtteranceId, item.AttemptCount, committed?.Outcome ?? "StaleClaim",
+                providerElapsed, started.Elapsed.TotalMilliseconds - providerElapsed);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -185,8 +192,26 @@ public sealed class EllaiUtteranceWorker(
             scopedServices.GetService<EllaiSessionEventJournal>(),
             consent,
             scopedServices.GetRequiredService<IEllaiSessionStore>(),
-            consentStore);
+            consentStore,
+            CreateTextDeltaPublisher(work, scopedServices.GetRequiredService<EllaiSessionResponseStore>()),
+            scopedServices.GetRequiredService<IEllaiUtteranceOutboxStore>());
         return await EllaiUtteranceRunner.RunOneAsync(
             work, dependencies, MaxTokensPerTurn, stoppingToken).ConfigureAwait(false);
+    }
+
+    private static Func<string, CancellationToken, ValueTask>? CreateTextDeltaPublisher(
+        EllaiUtteranceWork work, EllaiSessionResponseStore? responses)
+    {
+        if (responses is null || !EllaiResponsePublicationPolicy.CanPublish(work))
+        {
+            return null;
+        }
+
+        var chunkIndex = 0;
+        return (text, _) =>
+        {
+            responses.PublishChunk(work.SessionId, work.ClientUtteranceId, ++chunkIndex, text);
+            return ValueTask.CompletedTask;
+        };
     }
 }

@@ -8,6 +8,47 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiUtteranceOutboxTests
 {
     [Fact]
+    public async Task ConversationRetainsMessagesAndFencesLateCompletion()
+    {
+        var store = await CreateStoreAsync();
+        var payload = System.Text.Json.JsonSerializer.Serialize(new EllaiUtteranceWorkEnvelope(
+            1, "ellai-outbox-test", "durable", "scope-1", "Hello", "public.product-help", null,
+            EllaiMode.Ask, 2, "cycle-1", "actor-one", 0, true, "consent/0",
+            "user-provided-nonsensitive", "user-provided-nonsensitive", "public-product-help", []),
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        await AcceptAsync(store, "durable", 1, payload);
+        var now = DateTimeOffset.UtcNow;
+        var item = (await store.ClaimNextAsync(now, now.AddSeconds(1), CancellationToken.None))!;
+        var processing = Assert.Single(await store.ReadConversationAsync(item.SessionId, "actor-one", CancellationToken.None));
+        Assert.Equal("Processing", processing.Outcome);
+        Assert.Equal("Hello", processing.UserText);
+        var retry = (await store.ClaimNextAsync(now.AddSeconds(2), now.AddMinutes(1), CancellationToken.None))!;
+        await store.CompleteAsync(item.SessionId, item.ClientUtteranceId, item.AttemptCount, now,
+            CancellationToken.None, EllaiUtteranceResolution.Completed("stale answer", 2));
+        Assert.Null(Assert.Single(await store.ReadConversationAsync(item.SessionId, "actor-one", CancellationToken.None)).AssistantText);
+        await store.CompleteAsync(retry.SessionId, retry.ClientUtteranceId, retry.AttemptCount, now,
+            CancellationToken.None, EllaiUtteranceResolution.Completed("Hello back", 2));
+        var completed = Assert.Single(await store.ReadConversationAsync(item.SessionId, "actor-one", CancellationToken.None));
+        Assert.Equal("Hello", completed.UserText);
+        Assert.Equal("Hello back", completed.AssistantText);
+        Assert.Equal("Completed", completed.Outcome);
+        Assert.Empty(await store.ReadConversationAsync(item.SessionId, "another-owner", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AcknowledgementWithoutValidatedAnswerIsTerminalFailure()
+    {
+        var store = await CreateStoreAsync();
+        await AcceptAsync(store, "no-answer", 1, "synthetic payload");
+        var now = DateTimeOffset.UtcNow;
+        var item = (await store.ClaimNextAsync(now, now.AddMinutes(1), CancellationToken.None))!;
+        await store.CompleteAsync(item.SessionId, item.ClientUtteranceId, item.AttemptCount, now, CancellationToken.None);
+        var turn = Assert.Single(await store.ReadConversationAsync(item.SessionId, "actor-one", CancellationToken.None));
+        Assert.Equal("TerminalFailure", turn.Outcome);
+        Assert.Null(turn.AssistantText);
+    }
+
+    [Fact]
     public async Task AcceptedPayloadIsClaimedOnceAndRecoverableAfterLeaseExpiry()
     {
         var store = await CreateStoreAsync();

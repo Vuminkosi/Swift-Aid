@@ -103,7 +103,15 @@ public static class EllaiEndpoints
             .Produces<EllaiVoiceTurnStatusDto>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
-        group.MapGet("/sessions/{sessionId}/responses", ReadResponses)
+        group.MapGet("/sessions/{sessionId}/voice/live-stream", EllaiVoiceWebSocketEndpoint.HandleAsync)
+            .WithName("StreamEllaiLiveVoiceWebSocket")
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
+        group.MapGet("/sessions/{sessionId}", EllaiConversationFeed.ReadSessionAsync);
+
+        group.MapGet("/sessions/{sessionId}/responses", EllaiConversationFeed.ReadAsync)
             .WithName("ReadEllaiSessionResponses")
             .Produces<EllaiSessionResponsePageDto>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
@@ -441,23 +449,6 @@ public static class EllaiEndpoints
             Math.Clamp(waitSeconds ?? 20, 0, 30), journals, cancellationToken);
     }
 
-    private static IResult ReadResponses(
-        string sessionId,
-        long? cursor,
-        IServiceProvider services)
-    {
-        if (string.IsNullOrWhiteSpace(sessionId))
-        {
-            return Results.Problem(
-                statusCode: StatusCodes.Status400BadRequest,
-                title: "The Ellai response request is invalid.");
-        }
-
-        var store = services.GetService<EllaiSessionResponseStore>();
-        var page = store?.ReadSince(sessionId, Math.Max(0, cursor ?? 0))
-            ?? new EllaiSessionResponsePageDto(Array.Empty<EllaiSessionResponseDto>(), Math.Max(0, cursor ?? 0));
-        return Results.Json(page, statusCode: StatusCodes.Status200OK);
-    }
 
     private static async Task<IResult> PollEventsLoopAsync(
         string sessionId, long position, int waitSeconds,

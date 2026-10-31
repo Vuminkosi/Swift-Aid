@@ -11,7 +11,7 @@ public sealed class EllaiSessionEntityConfiguration : IEntityTypeConfiguration<E
         {
             table.HasCheckConstraint("ck_ellai_sessions_version", "version > 0");
             table.HasCheckConstraint("ck_ellai_sessions_status", "status IN ('Active', 'Completed', 'Cancelled')");
-            table.HasCheckConstraint("ck_ellai_sessions_cycles", "cycles_used >= 0 AND cycles_allowed BETWEEN 1 AND 12");
+            table.HasCheckConstraint("ck_ellai_sessions_cycles", "cycles_used >= 0 AND cycles_allowed >= 1");
             table.HasCheckConstraint(
                 "ck_ellai_sessions_ids_nonempty",
                 "length(btrim(session_id)) > 0 AND length(btrim(scope_epoch)) > 0");
@@ -50,6 +50,10 @@ public sealed class EllaiUtteranceEntityConfiguration : IEntityTypeConfiguration
             table.HasCheckConstraint(
                 "ck_ellai_utterances_attempt_count",
                 "attempt_count >= 0");
+            table.HasCheckConstraint("ck_ellai_utterances_outcome",
+                "outcome IN ('Queued', 'Processing', 'RetryableFailure', 'Completed', 'TerminalFailure', 'Cancelled', 'LegacyUnknown')");
+            table.HasCheckConstraint("ck_ellai_utterances_completed_response",
+                "outcome <> 'Completed' OR (assistant_text IS NOT NULL AND length(btrim(assistant_text)) > 0 AND completed_at_utc IS NOT NULL)");
             table.HasCheckConstraint(
                 "ck_ellai_utterances_payload_size",
                 $"work_payload_json IS NULL OR octet_length(work_payload_json::text) <= {MaximumWorkPayloadBytes}");
@@ -66,6 +70,10 @@ public sealed class EllaiUtteranceEntityConfiguration : IEntityTypeConfiguration
         builder.Property(entity => entity.ClientUtteranceId).HasColumnName("client_utterance_id").HasColumnType("text");
         builder.Property(entity => entity.AcceptedAtUtc).HasColumnName("accepted_at_utc").HasColumnType("timestamp with time zone");
         builder.Property(entity => entity.WorkPayloadJson).HasColumnName("work_payload_json").HasColumnType("jsonb");
+        builder.Property(entity => entity.Sequence).HasColumnName("sequence");
+        builder.Property(entity => entity.UserText).HasColumnName("user_text").HasColumnType("text");
+        builder.Property(entity => entity.AssistantText).HasColumnName("assistant_text").HasColumnType("text");
+        builder.Property(entity => entity.Outcome).HasColumnName("outcome").HasColumnType("text").HasDefaultValue("Queued");
         builder.Property(entity => entity.LeaseExpiresAtUtc).HasColumnName("lease_expires_at_utc").HasColumnType("timestamp with time zone");
         builder.Property(entity => entity.AttemptCount).HasColumnName("attempt_count").HasDefaultValue(0);
         builder.Property(entity => entity.CompletedAtUtc).HasColumnName("completed_at_utc").HasColumnType("timestamp with time zone");

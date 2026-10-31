@@ -29,6 +29,10 @@ public sealed class EllaiUtteranceEntity
     public string ClientUtteranceId { get; set; } = "";
     public DateTimeOffset AcceptedAtUtc { get; set; }
     public string? WorkPayloadJson { get; set; }
+    public long Sequence { get; set; }
+    public string? UserText { get; set; }
+    public string? AssistantText { get; set; }
+    public string Outcome { get; set; } = "Queued";
     public DateTimeOffset? LeaseExpiresAtUtc { get; set; }
     public int AttemptCount { get; set; }
     public DateTimeOffset? CompletedAtUtc { get; set; }

@@ -34,6 +34,94 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
 
     public Task InitializeAsync() => Task.CompletedTask;
 
+    [EllaiPostgresFact]
+    public async Task DurableConversationSurvivesRestartAndRejectsStaleAcknowledgement()
+    {
+        var id = $"pg-conversation-{Guid.NewGuid():N}";
+        _sessionIds.Add(id);
+        var now = DateTimeOffset.UtcNow;
+        await using var firstDb = CreateDbContext();
+        var first = new PostgresEllaiSessionStore(firstDb);
+        var session = new EllaiSessionRecord(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
+            0, 12, Actor.ActorId, "scope-test", null, null, now);
+        await first.CreateAsync(session, CancellationToken.None);
+        var next = session with { SessionVersion = 2, CyclesUsed = 1 };
+        const string payload = "{\"utterance\":\"Synthetic question\"}";
+        Assert.NotNull(await first.TryAcceptUtteranceAsync(next, 1, "u-1", CancellationToken.None, payload));
+        var claim = (await first.ClaimNextAsync(now, now.AddSeconds(1), CancellationToken.None))!;
+
+        await using var secondDb = CreateDbContext();
+        var second = new PostgresEllaiSessionStore(secondDb);
+        var retry = (await second.ClaimNextAsync(now.AddSeconds(2), now.AddMinutes(1), CancellationToken.None))!;
+        Assert.Equal(2, retry.AttemptCount);
+        Assert.Null(await first.CompleteAsync(id, "u-1", claim.AttemptCount, now, CancellationToken.None,
+            EllaiUtteranceResolution.Completed("Stale response", 1)));
+        Assert.NotNull(await second.CompleteAsync(id, "u-1", retry.AttemptCount, now, CancellationToken.None,
+            EllaiUtteranceResolution.Completed("Validated synthetic response", 1)));
+
+        await using var restartedDb = CreateDbContext();
+        var restarted = new PostgresEllaiSessionStore(restartedDb);
+        var turn = Assert.Single(await restarted.ReadConversationAsync(id, Actor.ActorId, CancellationToken.None));
+        Assert.Equal("Completed", turn.Outcome);
+        Assert.Equal("Synthetic question", turn.UserText);
+        Assert.Equal("Validated synthetic response", turn.AssistantText);
+        Assert.Empty(await restarted.ReadConversationAsync(id, "wrong-owner", CancellationToken.None));
+        var row = await restartedDb.Set<EllaiUtteranceEntity>().SingleAsync(turn => turn.SessionId == id);
+        Assert.Null(row.WorkPayloadJson);
+        Assert.NotNull(row.CompletedAtUtc);
+        Assert.Null(await restarted.ClaimNextAsync(now.AddMinutes(2), now.AddMinutes(3), CancellationToken.None));
+        Assert.True((await restarted.TryAcceptUtteranceAsync(next, 1, "u-1", CancellationToken.None, payload))!.Replay);
+    }
+
+    [EllaiPostgresFact]
+    public async Task CancellationFencesCompletedAnswerAndRetryFailureIsObservable()
+    {
+        var id = $"pg-outcome-{Guid.NewGuid():N}";
+        _sessionIds.Add(id);
+        var now = DateTimeOffset.UtcNow;
+        await using var db = CreateDbContext();
+        var store = new PostgresEllaiSessionStore(db);
+        var session = new EllaiSessionRecord(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
+            0, 12, Actor.ActorId, "scope-test", null, null, now);
+        await store.CreateAsync(session, CancellationToken.None);
+        session = session with { SessionVersion = 2, CyclesUsed = 1 };
+        await store.TryAcceptUtteranceAsync(session, 1, "u-1", CancellationToken.None, "{\"utterance\":\"Question\"}");
+        var claim = (await store.ClaimNextAsync(now, now.AddSeconds(1), CancellationToken.None))!;
+        await store.FailAsync(id, "u-1", claim.AttemptCount, now, false, CancellationToken.None);
+        Assert.Equal("RetryableFailure", (await store.ReadConversationAsync(id, Actor.ActorId, CancellationToken.None))[0].Outcome);
+        await store.TryUpdateAsync(session with { Status = "Cancelled", SessionVersion = 3 }, 2, CancellationToken.None);
+        var result = await store.CompleteAsync(id, "u-1", claim.AttemptCount, now, CancellationToken.None,
+            EllaiUtteranceResolution.Completed("Late answer", 1));
+        Assert.Equal("Cancelled", result!.Outcome);
+        Assert.Null((await store.ReadConversationAsync(id, Actor.ActorId, CancellationToken.None))[0].AssistantText);
+    }
+
+    [EllaiPostgresFact]
+    public async Task SupersededFailureIsCommittedAsCancellation()
+    {
+        var id = $"pg-superseded-{Guid.NewGuid():N}";
+        _sessionIds.Add(id);
+        var now = DateTimeOffset.UtcNow;
+        await using var db = CreateDbContext();
+        var store = new PostgresEllaiSessionStore(db);
+        var session = new EllaiSessionRecord(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
+            0, 12, Actor.ActorId, "scope-test", null, null, now);
+        await store.CreateAsync(session, CancellationToken.None);
+        Assert.NotNull(await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 }, 1, "u-1",
+            CancellationToken.None, "{\"utterance\":\"Synthetic question\"}"));
+        var claim = (await store.ClaimNextAsync(now, now.AddMinutes(1), CancellationToken.None))!;
+        Assert.NotNull(await store.TryUpdateAsync(session with { SessionVersion = 3, InteractionEpoch = 2, CyclesUsed = 1 },
+            2, CancellationToken.None));
+        var result = await store.CompleteAsync(id, "u-1", claim.AttemptCount, now, CancellationToken.None,
+            EllaiUtteranceResolution.Failed with { ExpectedInteractionEpoch = 1 });
+        Assert.Equal("Cancelled", result!.Outcome);
+        await using var reconnectedDb = CreateDbContext();
+        var restored = Assert.Single(await new PostgresEllaiSessionStore(reconnectedDb)
+            .ReadConversationAsync(id, Actor.ActorId, CancellationToken.None));
+        Assert.Equal("Cancelled", restored.Outcome);
+        Assert.Null(restored.AssistantText);
+    }
+
     public async Task DisposeAsync()
     {
         if (!Enabled()) return;

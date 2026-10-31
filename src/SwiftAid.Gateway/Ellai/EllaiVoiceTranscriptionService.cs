@@ -87,7 +87,7 @@ public sealed class EllaiVoiceTranscriptionService(
             try
             {
                 return await TranscribeLiveStreamAsync(
-                    audio, turn, voiceCaptureOffsetSamples, liveCancellation.Token)
+                    audio, turn, voiceCaptureOffsetSamples, contentLength.HasValue || audio.CanSeek, liveCancellation.Token)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (durationCts.IsCancellationRequested
@@ -153,6 +153,7 @@ public sealed class EllaiVoiceTranscriptionService(
         Stream audio,
         EllaiVoiceTurnCoordinator.VoiceStreamLease? turn,
         long voiceCaptureOffsetSamples,
+        bool finiteInput,
         CancellationToken cancellationToken)
     {
         using var capturedPcm = new MemoryStream();
@@ -220,6 +221,13 @@ public sealed class EllaiVoiceTranscriptionService(
                     logger?.LogWarning(
                         "Ellai realtime transcription failed ({FailureType}); checking upload fallback.",
                         ex.GetType().Name);
+                    if (!finiteInput && !boundedAudio.InputCompleted)
+                    {
+                        // The client owns the still-running microphone and its recovery copy.
+                        // Waiting for EOF here hides provider failure for the entire conversation.
+                        turn?.MarkRecovering();
+                        return null;
+                    }
                 }
                 finally
                 {
@@ -460,6 +468,7 @@ public sealed class EllaiVoiceTranscriptionService(
         private bool _overflowChecked;
 
         public bool LimitExceeded { get; private set; }
+        public bool InputCompleted { get; private set; }
 
         public override bool CanRead => source.CanRead;
         public override bool CanSeek => false;
@@ -494,6 +503,7 @@ public sealed class EllaiVoiceTranscriptionService(
             }
 
             var read = await source.ReadAsync(buffer[..allowed], cancellationToken).ConfigureAwait(false);
+            if (read == 0 && allowed > 0) InputCompleted = true;
             Capture(buffer.Span[..read]);
             return read;
         }

@@ -13,7 +13,33 @@ public sealed class EllaiProviderTurnClient(EllaiReasoningRouter router) : IElla
         IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(messages);
+        using var timing = EllaiPipelineMetrics.Measure("provider_request");
         var result = await _router.Resolve().CompleteAsync(messages, maxTokens, ct).ConfigureAwait(false);
+        return new EllaiTurnCompletion(
+            result.Text, result.Usage.PromptTokens, result.Usage.CompletionTokens);
+    }
+
+    public async Task<EllaiTurnCompletion> CompleteStreamingAsync(
+        IReadOnlyList<EllaiChatMessage> messages,
+        int maxTokens,
+        Func<string, CancellationToken, ValueTask> onText,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(messages);
+        ArgumentNullException.ThrowIfNull(onText);
+        using var timing = EllaiPipelineMetrics.Measure("provider_request");
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        var first = true;
+        var result = await _router.CompleteStreamingAsync(messages, maxTokens, (text, token) =>
+            {
+                if (first && text.Length > 0)
+                {
+                    first = false;
+                    EllaiPipelineMetrics.Record("provider_first_token", System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                }
+                return onText(text, token);
+            }, ct)
+            .ConfigureAwait(false);
         return new EllaiTurnCompletion(
             result.Text, result.Usage.PromptTokens, result.Usage.CompletionTokens);
     }

@@ -19,6 +19,8 @@ public sealed record EllaiReasoningResult(string Text, string Model, string Fini
 /// non-sensitive prompts may be sent — enforced by the caller policy.</summary>
 public sealed class EllaiReasoningAdapter(HttpClient http, EllaiOptions options)
 {
+    private const int MaximumStreamLineLength = 64 * 1024;
+
     public async Task<EllaiReasoningResult> CompleteAsync(
         IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct)
     {
@@ -89,6 +91,148 @@ public sealed class EllaiReasoningAdapter(HttpClient http, EllaiOptions options)
         catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException or IndexOutOfRangeException)
         {
             throw new InvalidOperationException("Ellai reasoning returned an unreadable envelope.");
+        }
+    }
+
+    public async Task<EllaiReasoningResult> CompleteStreamingAsync(
+        IReadOnlyList<EllaiChatMessage> messages,
+        int maxTokens,
+        Func<string, CancellationToken, ValueTask> onText,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(messages);
+        ArgumentNullException.ThrowIfNull(onText);
+        if (!options.HasReasoningRoute)
+        {
+            throw new MetaConfigurationException("Ellai reasoning route is not configured.");
+        }
+
+        if (messages.Count == 0 || maxTokens is < 1 or > 16384)
+        {
+            throw new ArgumentException("A non-empty message list and 1..16384 max tokens are required.");
+        }
+
+        var payload = new
+        {
+            model = options.ReasoningModel,
+            messages = messages.Select(MetaCompatibleChatMessage.ToPayload).ToList(),
+            max_tokens = maxTokens,
+            stream = true,
+            stream_options = new { include_usage = true },
+        };
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post, options.ApiUrl.TrimEnd('/') + "/chat/completions");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new InvalidOperationException($"Ellai reasoning transport failed ({ex.GetType().Name}).");
+        }
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                var diagnostic = ReadSafeErrorMetadata(body);
+                throw new InvalidOperationException(
+                    $"Ellai reasoning refused the request (HTTP {(int)response.StatusCode}{diagnostic}).");
+            }
+
+            var text = new StringBuilder();
+            var model = string.Empty;
+            var promptTokens = 0;
+            var completionTokens = 0;
+            var reasoningTokens = 0;
+            await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false,
+                bufferSize: 4096, leaveOpen: false);
+            while (await reader.ReadLineAsync(ct).ConfigureAwait(false) is { } line)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (line.Length > MaximumStreamLineLength)
+                {
+                    throw new InvalidOperationException("Ellai reasoning returned an oversized stream event.");
+                }
+                if (!line.StartsWith("data:", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var data = line.AsSpan(5).Trim();
+                if (data.SequenceEqual("[DONE]"))
+                {
+                    break;
+                }
+                if (data.IsEmpty)
+                {
+                    continue;
+                }
+
+                JsonDocument document;
+                try
+                {
+                    document = JsonDocument.Parse(data.ToString());
+                }
+                catch (JsonException)
+                {
+                    throw new InvalidOperationException("Ellai reasoning returned an unreadable stream event.");
+                }
+
+                using (document)
+                {
+                    var root = document.RootElement;
+                    if (root.TryGetProperty("model", out var modelValue)
+                        && modelValue.ValueKind == JsonValueKind.String)
+                    {
+                        model = modelValue.GetString() ?? model;
+                    }
+                    if (root.TryGetProperty("usage", out var usage))
+                    {
+                        (promptTokens, completionTokens, _, reasoningTokens) = ReadUsage(usage);
+                    }
+
+                    if (!root.TryGetProperty("choices", out var choices)
+                        || choices.ValueKind != JsonValueKind.Array
+                        || choices.GetArrayLength() == 0)
+                    {
+                        continue;
+                    }
+
+                    var choice = choices[0];
+                    if (!choice.TryGetProperty("delta", out var delta)
+                        || !delta.TryGetProperty("content", out var content)
+                        || content.ValueKind != JsonValueKind.String)
+                    {
+                        continue;
+                    }
+
+                    var piece = content.GetString() ?? string.Empty;
+                    if (piece.Length == 0)
+                    {
+                        continue;
+                    }
+                    text.Append(piece);
+                    if (text.Length > Math.Max(64 * 1024, maxTokens * 32))
+                    {
+                        throw new InvalidOperationException("Ellai reasoning exceeded the response size limit.");
+                    }
+                    await onText(piece, ct).ConfigureAwait(false);
+                }
+            }
+
+            return new EllaiReasoningResult(text.ToString(), model, "stop",
+                new EllaiReasoningUsage(promptTokens, completionTokens,
+                    promptTokens + completionTokens, reasoningTokens));
         }
     }
 

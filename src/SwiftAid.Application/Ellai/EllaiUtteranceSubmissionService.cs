@@ -23,6 +23,7 @@ public sealed class EllaiUtteranceSubmissionService(
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(principal);
+        using var admission = EllaiPipelineMetrics.Measure("submission_to_admission");
 
         ActorContext actor;
         try

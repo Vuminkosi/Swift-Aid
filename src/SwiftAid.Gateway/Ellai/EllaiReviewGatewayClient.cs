@@ -24,6 +24,17 @@ public sealed class EllaiReviewGatewayClient(
     private readonly EllaiGuestSessionIdentity _guestSessionIdentity =
         guestSessionIdentity ?? new EllaiGuestSessionIdentity();
 
+    public async Task<EllaiSessionStartResult> ResumeSessionAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+        var principal = ResolvePrincipal(state.User, sessionId);
+        if (principal is null) return new(EllaiClientOperationStatus.Unauthorized);
+        var session = await _serviceProvider.GetRequiredService<EllaiSessionService>()
+            .GetOwnedViewAsync(sessionId, principal, cancellationToken).ConfigureAwait(false);
+        return session is null ? new(EllaiClientOperationStatus.Unauthorized)
+            : new(EllaiClientOperationStatus.Accepted, session);
+    }
+
     public async Task<EllaiSessionStartResult> StartSessionAsync(
         EllaiMode mode, CancellationToken cancellationToken)
     {
@@ -423,7 +434,19 @@ public sealed class EllaiReviewGatewayClient(
         }
 
         var store = _serviceProvider.GetService<EllaiSessionResponseStore>();
-        return store?.ReadSince(sessionId, Math.Max(0, cursor));
+        if (store is null) return null;
+        var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+        var principal = ResolvePrincipal(state.User, sessionId);
+        if (principal is null) return null;
+        var actor = ActorContext.FromValidatedPrincipal(principal);
+        var outbox = _serviceProvider.GetRequiredService<IEllaiUtteranceOutboxStore>();
+        var conversation = await outbox.ReadConversationAsync(sessionId, actor.ActorId, cancellationToken).ConfigureAwait(false);
+        return store.ReadSince(sessionId, Math.Max(0, cursor)) with
+        {
+            StreamId = store.StreamId,
+            Conversation = conversation.Select(turn => new EllaiConversationTurnDto(turn.ClientUtteranceId,
+                turn.Sequence, turn.UserText, turn.AssistantText, turn.Outcome, turn.AttemptCount, turn.CompletedAtUtc)).ToArray(),
+        };
     }
 
     public async Task<bool> InterruptResponseAudioAsync(

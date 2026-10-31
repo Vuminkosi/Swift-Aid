@@ -6,7 +6,7 @@ namespace SwiftAid.Application.Ellai;
 /// is false only when the run was refused before any model call; the refusals journal a blocked activity event
 /// so the composer never goes silently dead.</summary>
 public sealed record EllaiUtteranceOutcome(
-    bool Started, bool Completed, string? StopReason, string? DisplayText = null);
+    bool Started, bool Completed, string? StopReason, string? DisplayText = null, string? FailureCode = null);
 
 /// <summary>Dependencies for one background run, resolved per scope by the
 /// hosting worker. Null activity/journal degrades to local-only progress.</summary>
@@ -16,7 +16,9 @@ public sealed record EllaiUtteranceServices(
     EllaiSessionEventJournal? Journal,
     EllaiConsentService Consent,
     IEllaiSessionStore? Sessions = null,
-    IEllaiConsentStore? ConsentStore = null);
+    IEllaiConsentStore? ConsentStore = null,
+    Func<string, CancellationToken, ValueTask>? OnTextDelta = null,
+    IEllaiUtteranceOutboxStore? Outbox = null);
 
 /// <summary>Background execution of one accepted utterance with ledger,
 /// activity and journal wiring. Ordinary typed messages need no separate
@@ -71,10 +73,13 @@ public static class EllaiUtteranceRunner
             work.SessionId, work.ScopeEpoch, work.FeatureId, work.ResourceId,
             EllaiCycleRunner.MaxToolCalls, work.ContributorEligible,
             work.ConsentVersion, work.DataClassification, work.Actor, work.AllowedTools, work.ConsentPurpose);
+        var conversation = services.Outbox is null ? [] : await services.Outbox.ReadConversationAsync(
+            work.SessionId, work.Actor.ActorId, ct).ConfigureAwait(false);
         var request = new EllaiLoopRequest(
             context, work.Utterance, ForMode(work.Mode),
             EllaiToolBroker.DescribeCatalogue(work.AllowedTools), maxTokensPerTurn,
-            work.CycleId, work.ControllerEpoch);
+            work.CycleId, work.ControllerEpoch,
+            EllaiConversationContext.Build(conversation, work.ClientUtteranceId));
 
         async Task<bool> IsExecutionCurrentAsync(CancellationToken fenceCt)
         {
@@ -112,13 +117,23 @@ public static class EllaiUtteranceRunner
             reauthorizeAsync: services.Sessions is null ? null : ReauthorizeAsync,
             activity: services.Activity,
             journal: services.Journal,
-            isExecutionCurrentAsync: services.Sessions is null ? null : IsExecutionCurrentAsync)
+            isExecutionCurrentAsync: services.Sessions is null ? null : IsExecutionCurrentAsync,
+            onTextDelta: services.OnTextDelta is null
+                ? null
+                : async (text, deltaCt) =>
+                {
+                    if (await IsExecutionCurrentAsync(deltaCt).ConfigureAwait(false))
+                    {
+                        await services.OnTextDelta(text, deltaCt).ConfigureAwait(false);
+                    }
+                })
             .ConfigureAwait(false);
         return new EllaiUtteranceOutcome(
             true,
             outcome.Completed,
             outcome.StopReason,
-            outcome.Completed ? outcome.Decision?.DisplayText : null);
+            outcome.Completed ? outcome.Decision?.DisplayText : null,
+            outcome.FailureCode);
     }
 
     private static EllaiRoleOverlay ForMode(EllaiMode mode) => mode switch

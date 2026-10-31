@@ -18,6 +18,21 @@ public interface IEllaiReasoningProvider
 
     Task<EllaiReasoningResult> CompleteAsync(
         IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct);
+
+    async Task<EllaiReasoningResult> CompleteStreamingAsync(
+        IReadOnlyList<EllaiChatMessage> messages,
+        int maxTokens,
+        Func<string, CancellationToken, ValueTask> onText,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(onText);
+        var result = await CompleteAsync(messages, maxTokens, ct).ConfigureAwait(false);
+        if (!string.IsNullOrEmpty(result.Text))
+        {
+            await onText(result.Text, ct).ConfigureAwait(false);
+        }
+        return result;
+    }
 }
 
 /// <summary>Meta-hosted reasoning lane. Key travels in the Authorization
@@ -32,10 +47,16 @@ public sealed class MetaEllaiReasoningProvider(
     public Task<EllaiReasoningResult> CompleteAsync(
         IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct) =>
         inner.CompleteAsync(messages, maxTokens, ct);
+
+    public Task<EllaiReasoningResult> CompleteStreamingAsync(
+        IReadOnlyList<EllaiChatMessage> messages,
+        int maxTokens,
+        Func<string, CancellationToken, ValueTask> onText,
+        CancellationToken ct) => inner.CompleteStreamingAsync(messages, maxTokens, onText, ct);
 }
 
 /// <summary>Local Ollama open-weight lane (default model llama3.2:3b). Talks
-/// to <c>{endpoint}/api/chat</c> with <c>stream:false</c>. No credential is
+/// to <c>{endpoint}/api/chat</c>. No credential is
 /// attached; loopback http is accepted, remote https preferred.</summary>
 public sealed class OllamaEllaiReasoningProvider(HttpClient http, EllaiOptions options) : IEllaiReasoningProvider
 {
@@ -116,6 +137,116 @@ public sealed class OllamaEllaiReasoningProvider(HttpClient http, EllaiOptions o
         catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException)
         {
             throw new InvalidOperationException("Ellai Ollama returned an unreadable envelope.");
+        }
+    }
+
+    public async Task<EllaiReasoningResult> CompleteStreamingAsync(
+        IReadOnlyList<EllaiChatMessage> messages,
+        int maxTokens,
+        Func<string, CancellationToken, ValueTask> onText,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(messages);
+        ArgumentNullException.ThrowIfNull(onText);
+        if (!options.HasOllamaRoute)
+        {
+            throw new MetaConfigurationException("Ellai Ollama reasoning route is not configured.");
+        }
+        if (messages.Count == 0 || maxTokens is < 1 or > 16384)
+        {
+            throw new ArgumentException("A non-empty message list and 1..16384 max tokens are required.");
+        }
+
+        var payload = new
+        {
+            model = options.OllamaModel,
+            stream = true,
+            options = new { num_predict = maxTokens },
+            messages = messages.Select(m => new { role = m.Role, content = m.Content }).ToList(),
+        };
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post, options.OllamaEndpoint.TrimEnd('/') + "/api/chat")
+        {
+            Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"),
+        };
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new InvalidOperationException($"Ellai Ollama transport failed ({ex.GetType().Name}).");
+        }
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException($"Ellai Ollama refused the request (HTTP {(int)response.StatusCode}).");
+            }
+
+            var text = new StringBuilder();
+            var model = options.OllamaModel;
+            var promptTokens = 0;
+            var completionTokens = 0;
+            await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false,
+                bufferSize: 4096, leaveOpen: false);
+            while (await reader.ReadLineAsync(ct).ConfigureAwait(false) is { } line)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (line.Length > 64 * 1024)
+                {
+                    throw new InvalidOperationException("Ellai Ollama returned an oversized stream event.");
+                }
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    using var document = JsonDocument.Parse(line);
+                    var root = document.RootElement;
+                    if (root.TryGetProperty("model", out var modelValue)
+                        && modelValue.ValueKind == JsonValueKind.String)
+                    {
+                        model = modelValue.GetString() ?? model;
+                    }
+                    if (root.TryGetProperty("message", out var message)
+                        && message.ValueKind == JsonValueKind.Object
+                        && message.TryGetProperty("content", out var content)
+                        && content.ValueKind == JsonValueKind.String)
+                    {
+                        var piece = content.GetString() ?? string.Empty;
+                        text.Append(piece);
+                        if (text.Length > Math.Max(64 * 1024, maxTokens * 32))
+                        {
+                            throw new InvalidOperationException("Ellai Ollama exceeded the response size limit.");
+                        }
+                        if (piece.Length > 0)
+                        {
+                            await onText(piece, ct).ConfigureAwait(false);
+                        }
+                    }
+                    if (root.TryGetProperty("done", out var done)
+                        && done.ValueKind == JsonValueKind.True)
+                    {
+                        promptTokens = GetInt(root, "prompt_eval_count");
+                        completionTokens = GetInt(root, "eval_count");
+                    }
+                }
+                catch (JsonException)
+                {
+                    throw new InvalidOperationException("Ellai Ollama returned an unreadable stream event.");
+                }
+            }
+
+            return new EllaiReasoningResult(text.ToString(), model, "stop",
+                new EllaiReasoningUsage(promptTokens, completionTokens, promptTokens + completionTokens, 0));
         }
     }
 
@@ -284,6 +415,13 @@ public sealed class EllaiReasoningRouter(
 
         return new MetaEllaiReasoningProvider(meta, options);
     }
+
+    public Task<EllaiReasoningResult> CompleteStreamingAsync(
+        IReadOnlyList<EllaiChatMessage> messages,
+        int maxTokens,
+        Func<string, CancellationToken, ValueTask> onText,
+        CancellationToken ct) =>
+        Resolve().CompleteStreamingAsync(messages, maxTokens, onText, ct);
 
     /// <summary>Mandatory guarded call: the pinned runtime policy becomes
     /// the system message on every call. Caller-supplied system messages
