@@ -123,6 +123,23 @@ public sealed class EllaiGuestReviewHttpClientTests
     }
 
     [Fact]
+    public async Task BufferedLiveVoiceRecoveryUsesExistingLiveRouteAndRawPcmContentType()
+    {
+        var handler = new TranscriptionHandler();
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost/") };
+        var client = new EllaiReviewHttpClient(http, useGuestRoutes: true);
+
+        var transcript = await client.TranscribeVoiceAsync(
+            "guest-session", [1, 2, 3, 4], EllaiVoiceCaptureMode.Live, CancellationToken.None);
+
+        Assert.Equal("heard words", transcript?.Transcript);
+        Assert.Equal("/api/v1/ellai/guest/sessions/guest-session/voice/live", handler.PostPath);
+        Assert.Equal("application/octet-stream", handler.ContentType);
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, handler.AudioBytes);
+        Assert.Equal("csrf-test", handler.CsrfToken);
+    }
+
+    [Fact]
     public async Task LiveVoiceUsesStreamingGuestRequestOnExistingSessionRoute()
     {
         var handler = new LiveTranscriptionHandler();

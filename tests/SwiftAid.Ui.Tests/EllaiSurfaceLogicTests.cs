@@ -61,6 +61,114 @@ public sealed class EllaiSurfaceLogicTests
     }
 
     [Fact]
+    public async Task InterruptedLiveStreamRetriesPcmOnceAndSubmitsTranscriptOnce()
+    {
+        var client = new FakeReviewClient(
+            new EllaiUtteranceSubmitResult(
+                EllaiClientOperationStatus.Accepted,
+                CreateSession(version: 2)))
+        {
+            LiveTranscriptionHandler = (_, _) => Task.FromResult<EllaiVoiceTranscriptionResult?>(null),
+            VoiceTranscriptionHandler = (_, _, _, _) =>
+                Task.FromResult<EllaiVoiceTranscriptionResult?>(new("recovered words")),
+        };
+        using var host = await CreateHost(client, CreateSession(version: 1), string.Empty);
+        SetField(host, "_capturedPcm", new MemoryStream());
+        SetField(host, "_captureMode", EllaiVoiceCaptureMode.Live);
+        SetField(host, "_isRecordingAudio", true);
+        await InvokeAsync(host, "StartLiveVoiceStream", "session-1");
+
+        await InvokeAsync(host, "ReceiveVoicePcmChunk", new[] { 1234, -2345 });
+        await InvokeAsync(host, "StopVoiceCaptureAsync");
+
+        var recovery = Assert.Single(client.VoiceTranscriptions);
+        Assert.Equal("session-1", recovery.SessionId);
+        Assert.Equal(EllaiVoiceCaptureMode.Live, recovery.Mode);
+        Assert.Equal(new byte[] { 0xD2, 0x04, 0xD7, 0xF6 }, recovery.Audio);
+        var submitted = Assert.Single(client.Submissions);
+        Assert.Equal("recovered words", submitted.FinalizedText);
+    }
+
+    [Fact]
+    public async Task FailedLiveStreamRecoveryExplainsThatTheTurnWasNotSent()
+    {
+        var client = new FakeReviewClient
+        {
+            LiveTranscriptionHandler = (_, _) => Task.FromResult<EllaiVoiceTranscriptionResult?>(null),
+            VoiceTranscriptionHandler = (_, _, _, _) => Task.FromResult<EllaiVoiceTranscriptionResult?>(null),
+        };
+        using var host = await CreateHost(client, CreateSession(version: 1), "draft");
+        SetField(host, "_capturedPcm", new MemoryStream());
+        SetField(host, "_captureMode", EllaiVoiceCaptureMode.Live);
+        SetField(host, "_isRecordingAudio", true);
+        await InvokeAsync(host, "StartLiveVoiceStream", "session-1");
+
+        await InvokeAsync(host, "ReceiveVoicePcmChunk", new[] { 100 });
+        await InvokeAsync(host, "StopVoiceCaptureAsync");
+
+        Assert.Single(client.VoiceTranscriptions);
+        Assert.Contains("was not sent", GetField<string?>(host, "StatusText"), StringComparison.Ordinal);
+        Assert.Equal("draft", GetField<string?>(host, "InputText"));
+        Assert.Empty(client.Submissions);
+    }
+
+    [Fact]
+    public async Task BrowserChannelBackpressureSwitchesToBoundedPcmRecovery()
+    {
+        var streamCompletion = new TaskCompletionSource<EllaiVoiceTranscriptionResult?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var client = new FakeReviewClient
+        {
+            LiveTranscriptionHandler = (_, _) => streamCompletion.Task,
+            VoiceTranscriptionHandler = (_, _, _, _) => Task.FromResult<EllaiVoiceTranscriptionResult?>(null),
+        };
+        using var host = await CreateHost(client, CreateSession(version: 1), "draft");
+        SetField(host, "_capturedPcm", new MemoryStream());
+        SetField(host, "_captureMode", EllaiVoiceCaptureMode.Live);
+        SetField(host, "_isRecordingAudio", true);
+        await InvokeAsync(host, "StartLiveVoiceStream", "session-1");
+
+        for (var sample = 0; sample < 9; sample++)
+        {
+            await InvokeAsync(host, "ReceiveVoicePcmChunk", new[] { sample + 1 });
+        }
+
+        Assert.True(GetField<bool>(host, "_liveVoiceReconnectRequired"));
+        streamCompletion.SetResult(null);
+        await InvokeAsync(host, "StopVoiceCaptureAsync");
+
+        var recovery = Assert.Single(client.VoiceTranscriptions);
+        Assert.Equal(18, recovery.Audio.Length);
+        Assert.Equal("draft", GetField<string?>(host, "InputText"));
+        Assert.Empty(client.Submissions);
+    }
+
+    [Fact]
+    public async Task BrowserCaptureQueueOverflowProcessesBufferedLiveTurnInsteadOfDiscardingIt()
+    {
+        var client = new FakeReviewClient
+        {
+            LiveTranscriptionHandler = (_, _) => Task.FromResult<EllaiVoiceTranscriptionResult?>(null),
+            VoiceTranscriptionHandler = (_, _, _, _) =>
+                Task.FromResult<EllaiVoiceTranscriptionResult?>(new("buffered words")),
+        };
+        using var host = await CreateHost(client, CreateSession(version: 1), "draft");
+        var pcm = new MemoryStream([1, 2, 3, 4]);
+        SetField(host, "_capturedPcm", pcm);
+        SetField(host, "_capturedVoiceBytes", 4L);
+        SetField(host, "_captureMode", EllaiVoiceCaptureMode.Live);
+        SetField(host, "_isRecordingAudio", true);
+        await InvokeAsync(host, "StartLiveVoiceStream", "session-1");
+
+        await InvokeAsync(host, "OnVoiceCaptureBackpressure");
+
+        Assert.Single(client.VoiceTranscriptions);
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, client.VoiceTranscriptions[0].Audio);
+        Assert.Equal("draft\nbuffered words", GetField<string?>(host, "InputText"));
+        Assert.Empty(client.Submissions);
+    }
+
+    [Fact]
     public async Task EmptyComposerShowsLiveVoiceControlInsteadOfSend()
     {
         var markup = await RenderComposerAsync(inputText: string.Empty, canUseMicrophone: true,
@@ -873,6 +981,13 @@ public sealed class EllaiSurfaceLogicTests
 
         public List<SubmitUtteranceRequest> Submissions { get; } = [];
 
+        public List<(string SessionId, byte[] Audio, EllaiVoiceCaptureMode Mode)> VoiceTranscriptions { get; } = [];
+
+        public Func<string, byte[], EllaiVoiceCaptureMode, CancellationToken,
+            Task<EllaiVoiceTranscriptionResult?>>? VoiceTranscriptionHandler { get; init; }
+
+        public Func<string, Stream, Task<EllaiVoiceTranscriptionResult?>>? LiveTranscriptionHandler { get; init; }
+
         public int ProductHelpConsentGrants { get; private set; }
 
         public List<(string SessionId, long ExpectedSessionVersion)> Cancellations { get; } = [];
@@ -900,6 +1015,27 @@ public sealed class EllaiSurfaceLogicTests
         public bool RejectionResult { get; init; }
 
         public Exception? RejectionException { get; init; }
+
+        public Task<bool> GrantVoiceCaptureConsentAsync(string sessionId, CancellationToken cancellationToken) =>
+            Task.FromResult(true);
+
+        public Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceAsync(
+            string sessionId,
+            byte[] audio,
+            EllaiVoiceCaptureMode mode,
+            CancellationToken cancellationToken)
+        {
+            VoiceTranscriptions.Add((sessionId, audio.ToArray(), mode));
+            return VoiceTranscriptionHandler?.Invoke(sessionId, audio, mode, cancellationToken)
+                ?? Task.FromResult<EllaiVoiceTranscriptionResult?>(null);
+        }
+
+        public Task<EllaiVoiceTranscriptionResult?> TranscribeLiveVoiceStreamAsync(
+            string sessionId,
+            Stream audio,
+            CancellationToken cancellationToken) =>
+            LiveTranscriptionHandler?.Invoke(sessionId, audio)
+                ?? Task.FromResult<EllaiVoiceTranscriptionResult?>(null);
 
         public Task<EllaiSessionStartResult> StartSessionAsync(EllaiMode mode, CancellationToken cancellationToken)
         {

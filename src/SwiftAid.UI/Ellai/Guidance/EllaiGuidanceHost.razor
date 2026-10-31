@@ -103,6 +103,8 @@
     private Channel<byte[]>? _liveVoiceChunks;
     private Stream? _liveVoiceStream;
     private Task<EllaiVoiceTranscriptionResult?>? _liveVoiceTranscriptionTask;
+    private volatile bool _liveVoiceReconnectRequired;
+    private volatile bool _liveVoiceCaptureEnding;
     private CancellationTokenSource? _liveVoiceCts;
     private CancellationTokenSource? _voiceTurnStatusCts;
     private Task? _voiceTurnStatusTask;
@@ -250,8 +252,8 @@
             _voiceCaptureConsentGranted = true;
         }
 
-        _capturedPcm?.Dispose();
-        _capturedPcm = mode == EllaiVoiceCaptureMode.Recorded ? new MemoryStream() : null;
+        DiscardCapturedAudio();
+        _capturedPcm = new MemoryStream();
         _capturedVoiceBytes = 0;
         _captureMode = mode;
         _captureDotnetReference ??= Microsoft.JSInterop.DotNetObjectReference.Create(this);
@@ -367,6 +369,66 @@
             _cts?.Token ?? CancellationToken.None);
         _liveVoiceTranscriptionTask = ReviewClient.TranscribeLiveVoiceStreamAsync(
             sessionId, _liveVoiceStream, _liveVoiceCts.Token);
+        _liveVoiceReconnectRequired = false;
+        _liveVoiceCaptureEnding = false;
+        _ = ObserveLiveVoiceStreamAsync(sessionId, _liveVoiceTranscriptionTask);
+    }
+
+    private async Task ObserveLiveVoiceStreamAsync(
+        string sessionId,
+        Task<EllaiVoiceTranscriptionResult?> streamTask)
+    {
+        try
+        {
+            await streamTask.ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Keep observing only for completion; the bounded capture copy can recover on stop.
+        }
+
+        if (_liveVoiceCaptureEnding || !ReferenceEquals(_liveVoiceTranscriptionTask, streamTask))
+        {
+            return;
+        }
+
+        _liveVoiceReconnectRequired = true;
+        try
+        {
+            await InvokeAsync(() =>
+            {
+                if (_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Live
+                    && string.Equals(_sessionView?.SessionId, sessionId, StringComparison.Ordinal))
+                {
+                    SetLiveVoiceRecoveryStatus();
+                    StateHasChanged();
+                }
+            }).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Component disposal can race an advisory connection status update.
+        }
+    }
+
+    private void SetLiveVoiceRecoveryStatus()
+    {
+        StatusText = "Connection interrupted. Keep speaking; this turn is held in memory and will retry once when you stop.";
+        Phase = EllaiStatusPhases.Active;
+    }
+
+    private void EnterLiveVoiceRecovery()
+    {
+        _liveVoiceReconnectRequired = true;
+        _liveVoiceChunks?.Writer.TryComplete();
+        _ = InvokeAsync(() =>
+        {
+            if (_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Live)
+            {
+                SetLiveVoiceRecoveryStatus();
+                StateHasChanged();
+            }
+        });
     }
 
     private async Task CancelLiveVoiceStreamAsync()
@@ -573,35 +635,49 @@
             BinaryPrimitives.WriteInt16LittleEndian(bytes.AsSpan(index * sizeof(short), sizeof(short)), sample);
         }
         _capturedVoiceBytes += bytes.Length;
+        if (_capturedPcm is not null)
+        {
+            _capturedPcm.Write(bytes);
+        }
+
         if (_captureMode == EllaiVoiceCaptureMode.Live && _liveVoiceChunks is not null)
         {
             if (_liveVoiceTranscriptionTask?.IsCompleted == true)
             {
+                EnterLiveVoiceRecovery();
                 Array.Clear(bytes);
-                throw new InvalidOperationException("The live voice stream ended before capture completed.");
+                return;
+            }
+
+            if (_liveVoiceReconnectRequired)
+            {
+                Array.Clear(bytes);
+                return;
             }
 
             try
             {
-                await _liveVoiceChunks.Writer.WriteAsync(bytes, _liveVoiceCts?.Token ?? CancellationToken.None)
-                    .ConfigureAwait(false);
+                using var enqueueCts = CancellationTokenSource.CreateLinkedTokenSource(
+                    _liveVoiceCts?.Token ?? CancellationToken.None);
+                enqueueCts.CancelAfter(EllaiLiveVoiceChunkEnqueueTimeout);
+                await _liveVoiceChunks.Writer.WriteAsync(bytes, enqueueCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (_liveVoiceCts?.IsCancellationRequested != true)
+            {
+                EnterLiveVoiceRecovery();
+                Array.Clear(bytes);
+                return;
             }
             catch
             {
+                EnterLiveVoiceRecovery();
                 Array.Clear(bytes);
-                throw;
+                return;
             }
         }
-        else if (_capturedPcm is not null)
+        else
         {
-            try
-            {
-                await _capturedPcm.WriteAsync(bytes).ConfigureAwait(false);
-            }
-            finally
-            {
-                Array.Clear(bytes);
-            }
+            Array.Clear(bytes);
         }
     }
 
@@ -615,11 +691,6 @@
             return;
         }
 
-        if (_liveVoiceTranscriptionTask?.IsCompleted == true)
-        {
-            throw new InvalidOperationException("The live voice stream ended before capture completed.");
-        }
-
         if (_capturedVoiceBytes + pcm.Length > EllaiVoiceTranscriptionMaximumBytes)
         {
             _ = InvokeAsync(StopVoiceCaptureAsync);
@@ -627,17 +698,41 @@
         }
 
         var bytes = pcm.ToArray();
+        if (_capturedPcm is not null)
+        {
+            _capturedPcm.Write(bytes);
+        }
+        _capturedVoiceBytes += bytes.Length;
+        if (_liveVoiceTranscriptionTask?.IsCompleted == true)
+        {
+            EnterLiveVoiceRecovery();
+        }
+        if (_liveVoiceReconnectRequired)
+        {
+            Array.Clear(bytes);
+            return;
+        }
+
         using var enqueueCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        enqueueCts.CancelAfter(TimeSpan.FromMilliseconds(500));
+        enqueueCts.CancelAfter(EllaiLiveVoiceChunkEnqueueTimeout);
         try
         {
             await _liveVoiceChunks.Writer.WriteAsync(bytes, enqueueCts.Token).ConfigureAwait(false);
-            _capturedVoiceBytes += bytes.Length;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             Array.Clear(bytes);
-            throw new IOException("Android voice audio could not be sent reliably.");
+            EnterLiveVoiceRecovery();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            Array.Clear(bytes);
+            EnterLiveVoiceRecovery();
+        }
+        catch (ChannelClosedException)
+        {
+            Array.Clear(bytes);
+            EnterLiveVoiceRecovery();
         }
         catch
         {
@@ -684,6 +779,13 @@
     [Microsoft.JSInterop.JSInvokable]
     public Task OnVoiceCaptureBackpressure() => InvokeAsync(async () =>
     {
+        if (_captureMode == EllaiVoiceCaptureMode.Live && _isRecordingAudio)
+        {
+            EnterLiveVoiceRecovery();
+            await StopVoiceCaptureAsync();
+            return;
+        }
+
         if (_captureModule is not null)
         {
             await _captureModule.InvokeVoidAsync("cancelCapture");
@@ -730,6 +832,7 @@
     }
 
     private const int EllaiVoiceTranscriptionMaximumBytes = 32 * 1024 * 1024;
+    private static readonly TimeSpan EllaiLiveVoiceChunkEnqueueTimeout = TimeSpan.FromMilliseconds(500);
 
     private async Task StopVoiceCaptureAsync()
     {
@@ -768,12 +871,41 @@
             Phase = EllaiStatusPhases.Active;
             await InvokeAsync(StateHasChanged);
             EllaiVoiceTranscriptionResult? result;
+            var usedLiveVoiceUploadRecovery = false;
             if (mode == EllaiVoiceCaptureMode.Live)
             {
+                _liveVoiceCaptureEnding = true;
                 _liveVoiceChunks?.Writer.TryComplete();
-                result = _liveVoiceTranscriptionTask is null
-                    ? null
-                    : await _liveVoiceTranscriptionTask.ConfigureAwait(false);
+                try
+                {
+                    result = _liveVoiceTranscriptionTask is null
+                        ? null
+                        : await _liveVoiceTranscriptionTask.ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    result = null;
+                }
+
+                if (result is null || _liveVoiceReconnectRequired)
+                {
+                    usedLiveVoiceUploadRecovery = true;
+                    StatusText = "Retrying this voice turn once from its temporary in-memory copy.";
+                    await InvokeAsync(StateHasChanged);
+                    var pcm = _capturedPcm?.ToArray() ?? [];
+                    try
+                    {
+                        result = await ReviewClient.TranscribeVoiceAsync(
+                            session.SessionId,
+                            pcm,
+                            EllaiVoiceCaptureMode.Live,
+                            _cts?.Token ?? CancellationToken.None).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        Array.Clear(pcm);
+                    }
+                }
                 await ReleaseLiveVoiceStreamAsync();
             }
             else
@@ -794,6 +926,13 @@
 
             if (result is null || string.IsNullOrWhiteSpace(result.Transcript))
             {
+                if (usedLiveVoiceUploadRecovery)
+                {
+                    StatusText = "Connection unavailable. This voice turn was only held in memory and was not sent. Try again or type your message.";
+                    Phase = EllaiStatusPhases.NeedsInput;
+                    return;
+                }
+
                 var failedTurnStatus = mode == EllaiVoiceCaptureMode.Live
                     ? await ReviewClient.GetVoiceTurnStatusAsync(
                         session.SessionId, _cts?.Token ?? CancellationToken.None).ConfigureAwait(false)
@@ -851,6 +990,7 @@
             _isRecordingAudio = false;
             _voiceTranscriptionInProgress = false;
             _captureMode = null;
+            _liveVoiceCaptureEnding = true;
             if (_liveVoiceChunks is not null)
             {
                 await CancelLiveVoiceStreamAsync();
