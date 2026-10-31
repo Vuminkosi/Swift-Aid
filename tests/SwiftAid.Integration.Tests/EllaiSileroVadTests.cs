@@ -55,6 +55,60 @@ public sealed class EllaiSileroVadTests
     }
 
     [Fact]
+    public async Task ConcurrentSessionsKeepIndependentStateOnTheSharedOnnxModel()
+    {
+        using var detector = new SileroOnnxVoiceActivityDetector();
+        const int frameCount = 32;
+        var silence = new float[512];
+        var voicedTone = Enumerable.Range(0, 512)
+            .Select(index => 0.35f * MathF.Sin(2f * MathF.PI * 210f * index / 16_000f))
+            .ToArray();
+
+        async Task<VoiceActivityResult[]> AnalyzeSequenceAsync(
+            IVoiceActivityDetectionSession session,
+            float[] input)
+        {
+            var results = new VoiceActivityResult[frameCount];
+            for (var frameIndex = 0; frameIndex < frameCount; frameIndex++)
+            {
+                results[frameIndex] = await session.AnalyzeAsync(
+                    CreateFrame(frameIndex, input));
+            }
+            return results;
+        }
+
+        VoiceActivityResult[][] expected = new VoiceActivityResult[2][];
+        using (var silenceSession = detector.CreateSession())
+        {
+            expected[0] = await AnalyzeSequenceAsync(silenceSession, silence);
+        }
+        using (var toneSession = detector.CreateSession())
+        {
+            expected[1] = await AnalyzeSequenceAsync(toneSession, voicedTone);
+        }
+
+        var concurrentSessions = Enumerable.Range(0, 12)
+            .Select(sessionIndex => Task.Run(async () =>
+            {
+                using var session = detector.CreateSession();
+                var fixtureIndex = sessionIndex % expected.Length;
+                var input = fixtureIndex == 0 ? silence : voicedTone;
+                return await AnalyzeSequenceAsync(session, input);
+            }))
+            .ToArray();
+        var actual = await Task.WhenAll(concurrentSessions);
+
+        for (var sessionIndex = 0; sessionIndex < actual.Length; sessionIndex++)
+        {
+            var fixtureIndex = sessionIndex % expected.Length;
+            Assert.Equal(
+                expected[fixtureIndex].Select(result => result.SpeechProbability),
+                actual[sessionIndex].Select(result => result.SpeechProbability));
+            Assert.All(actual[sessionIndex], result => Assert.False(result.StateWasReset));
+        }
+    }
+
+    [Fact]
     public async Task SessionRejectsWrongFrameRateAndFrameSize()
     {
         using var detector = new SileroOnnxVoiceActivityDetector();
