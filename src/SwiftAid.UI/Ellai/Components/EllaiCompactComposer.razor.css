@@ -70,11 +70,6 @@
     line-height: 1.35;
 }
 
-.ellai-composer__partial-transcript span {
-    color: var(--mud-palette-text-primary);
-    font-weight: 600;
-}
-
 .ellai-composer__handle {
     touch-action: none;
     cursor: grab;

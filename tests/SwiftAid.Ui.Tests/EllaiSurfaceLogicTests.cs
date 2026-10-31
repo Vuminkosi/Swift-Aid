@@ -169,38 +169,85 @@ public sealed class EllaiSurfaceLogicTests
     }
 
     [Fact]
-    public async Task ConnectivityRestorationKeepsTurnBufferedUntilExplicitStop()
+    public async Task ConnectivityRestorationReplaysBufferedAudioAndResumesLiveCapture()
     {
-        var streamCompletion = new TaskCompletionSource<EllaiVoiceTranscriptionResult?>(
-            TaskCreationOptions.RunContinuationsAsynchronously);
+        var call = 0;
+        var streams = new List<byte[]>();
         var client = new FakeReviewClient
         {
-            LiveTranscriptionHandler = (_, _) => streamCompletion.Task,
-            VoiceTranscriptionHandler = (_, _, _, _) =>
-                Task.FromResult<EllaiVoiceTranscriptionResult?>(new("recovered words")),
+            LiveTranscriptionHandler = async (_, stream) =>
+            {
+                var callNumber = Interlocked.Increment(ref call);
+                using var replayed = new MemoryStream();
+                await stream.CopyToAsync(replayed);
+                streams.Add(replayed.ToArray());
+                if (callNumber == 1)
+                {
+                    return null;
+                }
+
+                return new EllaiVoiceTranscriptionResult("resumed words");
+            },
         };
         using var host = await CreateHost(client, CreateSession(version: 1), "draft");
-        SetField(host, "_capturedPcm", new MemoryStream([10, 11]));
-        SetField(host, "_capturedVoiceBytes", 2L);
+        SetField(host, "_capturedPcm", new MemoryStream());
         SetField(host, "_captureMode", EllaiVoiceCaptureMode.Live);
         SetField(host, "_isRecordingAudio", true);
         SetField(host, "_voiceNetworkOnline", true);
         await InvokeAsync(host, "StartLiveVoiceStream", "session-1");
+        await InvokeAsync(host, "ReceiveVoicePcmChunk", new[] { 10, 11 });
 
         await InvokeAsync(host, "OnVoiceConnectivityChanged", false);
         await InvokeAsync(host, "OnVoiceConnectivityChanged", true);
+        await InvokeAsync(host, "ReceiveVoicePcmChunk", new[] { 12 });
 
-        Assert.True(GetField<bool>(host, "_liveVoiceReconnectRequired"));
+        Assert.False(GetField<bool>(host, "_liveVoiceReconnectRequired"));
         Assert.True(GetField<bool>(host, "_voiceNetworkOnline"));
-        Assert.Contains("remains buffered", GetField<string?>(host, "StatusText"), StringComparison.Ordinal);
-        Assert.Equal(1, client.LiveTranscriptionCalls);
+        Assert.Contains("resumed", GetField<string?>(host, "StatusText"), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(2, client.LiveTranscriptionCalls);
 
-        streamCompletion.SetResult(null);
         await InvokeAsync(host, "StopVoiceCaptureAsync");
 
-        Assert.Single(client.VoiceTranscriptions);
-        Assert.Equal("draft\nrecovered words", GetField<string?>(host, "InputText"));
-        Assert.Equal(1, client.LiveTranscriptionCalls);
+        Assert.Empty(client.VoiceTranscriptions);
+        Assert.Equal("draft\nresumed words", GetField<string?>(host, "InputText"));
+        Assert.Equal(2, client.LiveTranscriptionCalls);
+        Assert.Equal(new byte[] { 10, 0, 11, 0, 12, 0 }, Assert.Single(streams.Skip(1)));
+        Assert.Empty(client.Submissions);
+    }
+
+    [Fact]
+    public async Task FailedLiveReconnectFallsBackToOneBufferedUpload()
+    {
+        var call = 0;
+        var client = new FakeReviewClient
+        {
+            LiveTranscriptionHandler = async (_, stream) =>
+            {
+                Interlocked.Increment(ref call);
+                await stream.CopyToAsync(Stream.Null);
+                return null;
+            },
+            VoiceTranscriptionHandler = (_, _, _, _) =>
+                Task.FromResult<EllaiVoiceTranscriptionResult?>(new("uploaded words")),
+        };
+        using var host = await CreateHost(client, CreateSession(version: 1), "draft");
+        SetField(host, "_capturedPcm", new MemoryStream());
+        SetField(host, "_captureMode", EllaiVoiceCaptureMode.Live);
+        SetField(host, "_isRecordingAudio", true);
+        SetField(host, "_voiceNetworkOnline", true);
+        await InvokeAsync(host, "StartLiveVoiceStream", "session-1");
+        await InvokeAsync(host, "ReceiveVoicePcmChunk", new[] { 21, 22 });
+
+        await InvokeAsync(host, "OnVoiceConnectivityChanged", false);
+        await InvokeAsync(host, "OnVoiceConnectivityChanged", true);
+        await InvokeAsync(host, "ReceiveVoicePcmChunk", new[] { 23 });
+        await InvokeAsync(host, "StopVoiceCaptureAsync");
+
+        var upload = Assert.Single(client.VoiceTranscriptions);
+        Assert.Equal(new byte[] { 21, 0, 22, 0, 23, 0 }, upload.Audio);
+        Assert.Equal("draft\nuploaded words", GetField<string?>(host, "InputText"));
+        Assert.Equal(2, client.LiveTranscriptionCalls);
+        Assert.Empty(client.Submissions);
     }
 
     [Fact]
