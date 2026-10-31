@@ -43,6 +43,27 @@ public sealed class EllaiBrokerBoundsTests
     }
 
     [Fact]
+    public async Task OrdinaryTypedMessageCanUseItsAllowedPublicFactToolWithoutConsentGrant()
+    {
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService());
+        var context = Context with
+        {
+            ConsentPurpose = EllaiConsentService.PublicProductHelpPurpose,
+            ConsentVersion = "consent/0",
+            DataClassification = EllaiProcessingClassification.UserProvidedNonSensitive,
+            AllowedTools = new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.ProductFacts },
+        };
+
+        var result = await broker.InvokeAsync(context,
+            new EllaiToolRequest(EllaiToolNames.ProductFacts,
+                new Dictionary<string, string> { ["topic"] = "guest" }),
+            CancellationToken.None);
+
+        Assert.True(result.Allowed);
+        Assert.Contains(result.Evidence, evidence => evidence.SourceKind == "ProductFact");
+    }
+
+    [Fact]
     public async Task DenialsCarryMachineReadableReasonCodes()
     {
         var broker = GrantedBroker();

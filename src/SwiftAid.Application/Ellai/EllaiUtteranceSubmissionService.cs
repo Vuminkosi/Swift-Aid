@@ -9,8 +9,7 @@ namespace SwiftAid.Application.Ellai;
 /// Blazor Server adapter use this operation so their fences and policy match.</summary>
 public sealed class EllaiUtteranceSubmissionService(
     IEllaiSessionStore sessionStore,
-    EllaiConsentService consent,
-    IEllaiConsentStore? consentStore = null)
+    EllaiConsentService consent)
 {
     private const string PublicHelpFeatureId = "public.product-help";
     private const int MaximumUtteranceLength = 8_000;
@@ -54,12 +53,7 @@ public sealed class EllaiUtteranceSubmissionService(
                     routeSessionId, principal, cancellationToken).ConfigureAwait(false));
         }
 
-        const string dataClassification = EllaiProcessingClassification.ConsentedNonSensitive;
-        if (!await EnsureReasoningGrantAsync(routeSessionId, dataClassification, cancellationToken)
-                .ConfigureAwait(false))
-        {
-            return new(EllaiClientOperationStatus.Unavailable, null);
-        }
+        const string dataClassification = EllaiProcessingClassification.UserProvidedNonSensitive;
 
         var allowedTools = HasWorkspaceScope(current.ScopeEpoch)
             ? new HashSet<string>(EllaiToolNames.All, StringComparer.Ordinal)
@@ -76,8 +70,8 @@ public sealed class EllaiUtteranceSubmissionService(
             Guid.NewGuid().ToString("N"),
             actor,
             ContributorEligible: true,
-            consent.VersionLabel(routeSessionId),
-            EllaiProcessingClassification.ConsentedNonSensitive,
+            "consent/0",
+            EllaiProcessingClassification.UserProvidedNonSensitive,
             dataClassification,
             allowedTools,
             EllaiConsentService.PublicProductHelpPurpose,
@@ -103,41 +97,6 @@ public sealed class EllaiUtteranceSubmissionService(
         }
 
         return new(EllaiClientOperationStatus.Accepted, acceptance.View);
-    }
-
-    private async Task<bool> EnsureReasoningGrantAsync(
-        string sessionId, string dataClassification, CancellationToken cancellationToken)
-    {
-        if (consentStore is not null)
-        {
-            await consent.HydrateAsync(sessionId, consentStore, cancellationToken).ConfigureAwait(false);
-        }
-
-        if (consent.IsGranted(sessionId, EllaiConsentDimension.ReasoningText,
-                EllaiConsentService.PublicProductHelpPurpose, dataClassification, DateTimeOffset.UtcNow))
-        {
-            return true;
-        }
-
-        var grant = consent.Grant(
-            sessionId, EllaiConsentDimension.ReasoningText,
-            EllaiConsentService.PublicProductHelpPurpose, dataClassification,
-            TimeSpan.FromHours(1));
-        if (consentStore is null)
-        {
-            return true;
-        }
-
-        try
-        {
-            await consentStore.RecordAsync(grant, cancellationToken).ConfigureAwait(false);
-            return true;
-        }
-        catch
-        {
-            consent.Revoke(grant.GrantId);
-            return false;
-        }
     }
 
     private static bool HasWorkspaceScope(string scopeEpoch) =>

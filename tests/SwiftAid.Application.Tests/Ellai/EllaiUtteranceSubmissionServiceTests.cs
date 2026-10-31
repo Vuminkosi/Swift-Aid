@@ -38,7 +38,7 @@ public sealed class EllaiUtteranceSubmissionServiceTests
     }
 
     [Fact]
-    public async Task TypedSubmissionDoesNotRequireAnExtraConsentPrompt()
+    public async Task TypedSubmissionDoesNotCreateOrRequireAReasoningConsentGrant()
     {
         var store = new InMemoryEllaiSessionStore();
         var consent = new EllaiConsentService();
@@ -49,9 +49,15 @@ public sealed class EllaiUtteranceSubmissionServiceTests
             AuthenticatedPrincipal("actor-one"), CancellationToken.None);
 
         Assert.Equal(EllaiClientOperationStatus.Accepted, result.Status);
-        Assert.True(consent.IsGranted(session.SessionId, EllaiConsentDimension.ReasoningText,
+        Assert.False(consent.IsGranted(session.SessionId, EllaiConsentDimension.ReasoningText,
             EllaiConsentPurposes.PublicProductHelp,
-            EllaiProcessingClassification.ConsentedNonSensitive, DateTimeOffset.UtcNow));
+            EllaiProcessingClassification.UserProvidedNonSensitive, DateTimeOffset.UtcNow));
+        var item = await store.ClaimNextAsync(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(1),
+            CancellationToken.None);
+        Assert.NotNull(item);
+        var work = EllaiUtteranceWorkEnvelope.Deserialize(item!.PayloadJson);
+        Assert.Equal("consent/0", work.ConsentVersion);
+        Assert.Equal(EllaiProcessingClassification.UserProvidedNonSensitive, work.ProcessingLabel);
     }
 
     [Fact]
@@ -102,7 +108,7 @@ public sealed class EllaiUtteranceSubmissionServiceTests
     }
 
     [Fact]
-    public async Task ExplicitPublicHelpConsentAcceptsOriginalDynamicPromptIntoOutbox()
+    public async Task ExplicitPublicHelpConsentDoesNotChangeOrdinaryTypedSubmission()
     {
         var store = new InMemoryEllaiSessionStore();
         var consent = new EllaiConsentService();
@@ -127,7 +133,7 @@ public sealed class EllaiUtteranceSubmissionServiceTests
         Assert.Equal(originalText, envelope.Utterance);
         Assert.Equal(EllaiConsentPurposes.PublicProductHelp, envelope.ConsentPurpose);
         Assert.Equal([EllaiToolNames.ProductFacts], envelope.AllowedTools);
-        Assert.Equal(EllaiProcessingClassification.ConsentedNonSensitive, envelope.DataClassification);
+        Assert.Equal(EllaiProcessingClassification.UserProvidedNonSensitive, envelope.DataClassification);
     }
 
     [Fact]

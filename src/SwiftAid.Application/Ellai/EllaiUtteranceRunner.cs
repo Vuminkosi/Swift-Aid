@@ -3,8 +3,7 @@ using SwiftAid.Contracts.Ellai;
 namespace SwiftAid.Application.Ellai;
 
 /// <summary>Outcome of one background utterance run. <see cref="Started"/>
-/// is false only when the run was refused before any model call (missing
-/// reasoning-text consent); the refusals journal a blocked activity event
+/// is false only when the run was refused before any model call; the refusals journal a blocked activity event
 /// so the composer never goes silently dead.</summary>
 public sealed record EllaiUtteranceOutcome(
     bool Started, bool Completed, string? StopReason, string? DisplayText = null);
@@ -19,11 +18,10 @@ public sealed record EllaiUtteranceServices(
     IEllaiSessionStore? Sessions = null,
     IEllaiConsentStore? ConsentStore = null);
 
-/// <summary>Background execution of one accepted utterance: consent-gated
-/// reasoning loop with ledger, activity and journal wiring. The utterance
-/// reaches the provider only under a live ReasoningText grant for
-/// the work item's explicit consent purpose; without one the run refuses and projects the
-/// blocked template. Pure small talk answers with no activity (RT-53).</summary>
+/// <summary>Background execution of one accepted utterance with ledger,
+/// activity and journal wiring. Ordinary typed messages need no separate
+/// reasoning-consent grant; consent-scoped processing lanes retain their
+/// grant check. Pure small talk answers with no activity (RT-53).</summary>
 public static class EllaiUtteranceRunner
 {
     /// <summary>Processing label recorded when a live consent grant covers
@@ -59,7 +57,7 @@ public static class EllaiUtteranceRunner
         }
 
         var now = DateTimeOffset.UtcNow;
-        if (!services.Consent.IsGranted(
+        if (!IsOrdinaryTypedMessage(work) && !services.Consent.IsGranted(
                 work.SessionId, EllaiConsentDimension.ReasoningText,
                 work.ConsentPurpose, work.DataClassification, now))
         {
@@ -97,12 +95,12 @@ public static class EllaiUtteranceRunner
                 && current.InteractionEpoch == work.ControllerEpoch
                 && string.Equals(current.ScopeEpoch, work.ScopeEpoch, StringComparison.Ordinal)
                 && string.Equals(current.OwnerActorId, work.Actor.ActorId, StringComparison.Ordinal)
-                && services.Consent.IsGranted(
+                && (IsOrdinaryTypedMessage(work) || services.Consent.IsGranted(
                     work.SessionId,
                     EllaiConsentDimension.ReasoningText,
                     work.ConsentPurpose,
                     work.DataClassification,
-                    DateTimeOffset.UtcNow);
+                    DateTimeOffset.UtcNow));
         }
 
         Task<bool> ReauthorizeAsync(int _, CancellationToken fenceCt) =>
@@ -132,4 +130,9 @@ public static class EllaiUtteranceRunner
         EllaiMode.ReviewEvidence => new EllaiRoleOverlay("reviewer", "Review the evidence and report what it shows."),
         _ => new EllaiRoleOverlay("ask", "Answer the user's question directly and briefly."),
     };
+
+    private static bool IsOrdinaryTypedMessage(EllaiUtteranceWork work) =>
+        string.Equals(work.ConsentPurpose, EllaiConsentService.PublicProductHelpPurpose, StringComparison.Ordinal)
+        && string.Equals(work.ProcessingLabel, EllaiProcessingClassification.UserProvidedNonSensitive, StringComparison.Ordinal)
+        && string.Equals(work.DataClassification, EllaiProcessingClassification.UserProvidedNonSensitive, StringComparison.Ordinal);
 }

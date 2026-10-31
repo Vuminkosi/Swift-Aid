@@ -151,7 +151,8 @@ public sealed class EllaiToolBroker
 
     /// <summary>Deterministic tool catalogue summary for the reasoning
     /// system prompt: canonical names with argument hints. The model still
-    /// passes the same consent, budget and byte-bound pipeline per call.</summary>
+    /// passes scope, authorization, budget and byte-bound checks per call;
+    /// consent applies only to explicitly consent-scoped processing lanes.</summary>
     private static readonly string[] ToolDescriptions =
     {
         $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, ref?) — permitted feature or live work queue.",
@@ -190,9 +191,9 @@ public sealed class EllaiToolBroker
     private readonly IEllaiUiObservationStore? _uiObservations;
     private readonly EllaiProductFactCatalog _productFacts;
 
-    /// <summary>Consent infrastructure is mandatory: a missing service fails
-    /// closed instead of silently bypassing the ReasoningText grant check.
-    /// The documentation source is optional: docs tools report an explicit
+    /// <summary>Consent infrastructure is mandatory for consent-scoped reads.
+    /// Ordinary typed messages use their own explicit classification and do
+    /// not require a reasoning-text grant. The documentation source is optional: docs tools report an explicit
     /// unavailable outcome while it is unconfigured. The domain queue, topic
     /// ledger and receipt authority are optional: live projections report
     /// unavailable without them, and no Ellai-only unrestricted query is
@@ -261,7 +262,11 @@ public sealed class EllaiToolBroker
             }
         }
 
-        if (!_consent.IsGranted(
+        var ordinaryTypedMessage = string.Equals(context.ConsentPurpose,
+                EllaiConsentService.PublicProductHelpPurpose, StringComparison.Ordinal)
+            && string.Equals(context.DataClassification,
+                EllaiProcessingClassification.UserProvidedNonSensitive, StringComparison.Ordinal);
+        if (!ordinaryTypedMessage && !_consent.IsGranted(
                 context.SessionId, EllaiConsentDimension.ReasoningText, context.ConsentPurpose,
                 context.DataClassification, DateTimeOffset.UtcNow))
         {

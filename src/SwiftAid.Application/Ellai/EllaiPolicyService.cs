@@ -8,6 +8,7 @@ public static class EllaiProcessingClassification
     public const string RealSensitive = "real-sensitive";
     public const string SyntheticDemo = "synthetic-demo";
     public const string ConsentedNonSensitive = "consented-nonsensitive";
+    public const string UserProvidedNonSensitive = "user-provided-nonsensitive";
 }
 
 /// <summary>Effective-authority request for one Ellai operation.</summary>
@@ -82,14 +83,17 @@ public sealed class EllaiPolicyService
         return new EllaiAuthorizationResult(true, null, PolicyVersion, request.ScopeEpoch);
     }
 
-    /// <summary>Contributor route is restricted to approved synthetic/non-sensitive
-    /// inputs; unknown provenance or real-sensitive content is ineligible.</summary>
+    /// <summary>Contributor route is restricted to synthetic demo inputs,
+    /// ordinary user-provided message text, or explicitly consented
+    /// non-sensitive inputs; unknown provenance or real-sensitive content is ineligible.</summary>
     public static bool IsContributorEligible(string processingLabel, string dataClassification)
     {
         return (string.Equals(processingLabel, EllaiProcessingClassification.SyntheticDemo, StringComparison.Ordinal)
                 && string.Equals(dataClassification, EllaiProcessingClassification.SyntheticDemo, StringComparison.Ordinal))
             || (string.Equals(processingLabel, EllaiProcessingClassification.ConsentedNonSensitive, StringComparison.Ordinal)
-                && string.Equals(dataClassification, EllaiProcessingClassification.ConsentedNonSensitive, StringComparison.Ordinal));
+                && string.Equals(dataClassification, EllaiProcessingClassification.ConsentedNonSensitive, StringComparison.Ordinal))
+            || (string.Equals(processingLabel, EllaiProcessingClassification.UserProvidedNonSensitive, StringComparison.Ordinal)
+                && string.Equals(dataClassification, EllaiProcessingClassification.UserProvidedNonSensitive, StringComparison.Ordinal));
     }
 
     private static bool IsClinicalText(string? text)

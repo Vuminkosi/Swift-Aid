@@ -144,6 +144,31 @@ public sealed class EllaiUtteranceRunnerTests
     }
 
     [Fact]
+    public async Task OrdinaryTypedMessageRunsWithoutReasoningConsentGrant()
+    {
+        var completions = new ScriptedCompletions(DecisionTurn);
+        var (consent, loop) = Services(completions, grant: false);
+        var services = new EllaiUtteranceServices(
+            loop, new EllaiActivityStatusCoordinator(), new EllaiSessionEventJournal(), consent);
+        var work = Work() with
+        {
+            ConsentPurpose = EllaiConsentService.PublicProductHelpPurpose,
+            ConsentVersion = "consent/0",
+            ProcessingLabel = EllaiProcessingClassification.UserProvidedNonSensitive,
+            DataClassification = EllaiProcessingClassification.UserProvidedNonSensitive,
+        };
+
+        var outcome = await EllaiUtteranceRunner.RunOneAsync(work, services, 256, CancellationToken.None);
+
+        Assert.True(outcome.Started);
+        Assert.True(outcome.Completed);
+        Assert.Single(completions.Threads);
+        Assert.False(consent.IsGranted("session-1", EllaiConsentDimension.ReasoningText,
+            EllaiConsentService.PublicProductHelpPurpose,
+            EllaiProcessingClassification.UserProvidedNonSensitive, DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
     public async Task GrantedToolTurnReadsLiveClock()
     {
         var completions = new ScriptedCompletions(
