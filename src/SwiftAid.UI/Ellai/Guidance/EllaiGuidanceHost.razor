@@ -285,6 +285,7 @@
         }
         _captureMode = mode;
         _captureDotnetReference ??= Microsoft.JSInterop.DotNetObjectReference.Create(this);
+        var capturingAlongsidePlayback = mode == EllaiVoiceCaptureMode.Live && _isPlayingResponse;
         try
         {
             if (mode == EllaiVoiceCaptureMode.Live)
@@ -292,8 +293,11 @@
                 StatusText = "Hi, What's on your mind!";
                 Phase = EllaiStatusPhases.Active;
                 await InvokeAsync(StateHasChanged);
-                StopResponseAudio();
-                if (!_isPlayingResponse
+                if (!capturingAlongsidePlayback)
+                {
+                    StopResponseAudio();
+                }
+                if (!capturingAlongsidePlayback
                     && !string.Equals(_greetedLiveSessionId, session.SessionId, StringComparison.Ordinal)
                     && await PlayListeningGreetingAsync(session.SessionId))
                 {
@@ -366,8 +370,10 @@
             else
             {
                 StatusText = mode == EllaiVoiceCaptureMode.Recorded
-                ? $"Recording for transcription. {processingStatus} Stop when you are ready."
-                : $"I’m listening. I’ll transcribe when you stop. {processingStatus}";
+                    ? $"Recording for transcription. {processingStatus} Stop when you are ready."
+                    : capturingAlongsidePlayback
+                        ? $"I’m listening while Ellai speaks. Speak to interrupt, then stop to send your turn. {processingStatus}"
+                        : $"I’m listening. I’ll transcribe when you stop. {processingStatus}";
             }
             Phase = EllaiStatusPhases.Active;
             await InvokeAsync(StateHasChanged);
@@ -465,6 +471,7 @@
             await InvokeAsync(() =>
             {
                 if (_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Live
+                    && _liveVoiceReconnectRequired
                     && string.Equals(_sessionView?.SessionId, sessionId, StringComparison.Ordinal))
                 {
                     SetLiveVoiceRecoveryStatus();
@@ -1393,7 +1400,9 @@
         }
         catch (OperationCanceledException) when (playbackCts.IsCancellationRequested)
         {
-            StatusText = "Speech playback stopped.";
+            StatusText = _isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Live
+                ? "You interrupted Ellai. Keep speaking, then stop to send your turn."
+                : "Speech playback stopped.";
         }
         catch (Exception)
         {

@@ -61,6 +61,47 @@ public sealed class EllaiSurfaceLogicTests
     }
 
     [Fact]
+    public async Task LiveCaptureCanStartAlongsideEllaiPlaybackForBargeIn()
+    {
+        var streamCompletion = new TaskCompletionSource<EllaiVoiceTranscriptionResult?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var client = new FakeReviewClient
+        {
+            LiveTranscriptionHandler = (_, _) => streamCompletion.Task,
+        };
+        using var host = await CreateHost(client, CreateSession(version: 1), string.Empty);
+        var captureModule = new RecordingJsModule();
+        const string playbackId = "playback-current";
+        SetField(host, "_captureModule", captureModule);
+        SetField(host, "_microphoneCaptureAvailable", true);
+        SetField(host, "_voiceNetworkOnline", true);
+        SetField(host, "_isPlayingResponse", true);
+        SetField(host, "_activeResponseSequence", 7L);
+        SetField(host, "_activeResponsePlaybackId", playbackId);
+
+        await InvokeAsync(host, "StartLiveCaptureAsync");
+
+        Assert.True(GetField<bool>(host, "_isRecordingAudio"));
+        Assert.True(GetField<bool>(host, "_isPlayingResponse"),
+            $"Response playback was cancelled. Status: {GetField<string?>(host, "StatusText")}");
+        Assert.Equal(7L, GetField<long>(host, "_activeResponseSequence"));
+        Assert.Equal(playbackId, GetField<string?>(host, "_activeResponsePlaybackId"));
+        Assert.Contains("setPlaybackState", captureModule.Invocations);
+        Assert.Contains("I’m listening while Ellai speaks", GetField<string?>(host, "StatusText"),
+            StringComparison.Ordinal);
+
+        await InvokeAsync(host, "OnVoiceBargeInDetected", 7L, playbackId);
+
+        Assert.False(GetField<bool>(host, "_isPlayingResponse"));
+        Assert.True(GetField<bool>(host, "_isRecordingAudio"));
+        Assert.Contains("You interrupted Ellai", GetField<string?>(host, "StatusText"),
+            StringComparison.Ordinal);
+
+        streamCompletion.SetResult(null);
+        await InvokeAsync(host, "StopAndDiscardVoiceCaptureAsync");
+    }
+
+    [Fact]
     public async Task InterruptedLiveStreamRetriesPcmOnceAndSubmitsTranscriptOnce()
     {
         var client = new FakeReviewClient(
@@ -1025,6 +1066,27 @@ public sealed class EllaiSurfaceLogicTests
             CancellationToken cancellationToken,
             object?[]? args) =>
             ValueTask.FromResult(default(TValue)!);
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class RecordingJsModule : IJSObjectReference
+    {
+        public List<string> Invocations { get; } = [];
+
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args)
+        {
+            Invocations.Add(identifier);
+            var result = identifier == "startCapture" && typeof(TValue) == typeof(string)
+                ? (TValue)(object)"Microphone active; test capture."
+                : default!;
+            return ValueTask.FromResult(result);
+        }
+
+        public ValueTask<TValue> InvokeAsync<TValue>(
+            string identifier,
+            CancellationToken cancellationToken,
+            object?[]? args) => InvokeAsync<TValue>(identifier, args);
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
