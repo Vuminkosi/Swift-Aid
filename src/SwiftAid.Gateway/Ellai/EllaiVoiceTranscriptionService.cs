@@ -3,6 +3,7 @@ using SwiftAid.Contracts.Ellai;
 using SwiftAid.Intelligence.Meta;
 using System.Buffers.Binary;
 using Microsoft.Extensions.Logging;
+using System.Threading.Channels;
 
 namespace SwiftAid.Gateway.Ellai;
 
@@ -53,6 +54,7 @@ public sealed class EllaiVoiceTranscriptionService(
     {
         ArgumentNullException.ThrowIfNull(audio);
         if (string.IsNullOrWhiteSpace(sessionId)
+            || !Enum.IsDefined(mode)
             || (mode == EllaiVoiceCaptureMode.Recorded && !options.HasUploadAsrRoute)
             || (mode == EllaiVoiceCaptureMode.Live && !options.HasRealtimeAsrRoute)
             || contentLength is < 1 or > MaximumAudioBytes)
@@ -63,6 +65,11 @@ public sealed class EllaiVoiceTranscriptionService(
         if (!await HasConsentAsync(sessionId, cancellationToken).ConfigureAwait(false))
         {
             return null;
+        }
+
+        if (mode == EllaiVoiceCaptureMode.Live)
+        {
+            return await TranscribeLiveStreamAsync(audio, cancellationToken).ConfigureAwait(false);
         }
 
         using var bounded = new MemoryStream();
@@ -84,69 +91,135 @@ public sealed class EllaiVoiceTranscriptionService(
 
         try
         {
-            string transcript;
-            if (mode == EllaiVoiceCaptureMode.Recorded)
+            if (bounded.Length < 44 || !IsWaveFile(bounded))
             {
-                if (bounded.Length < 44 || !IsWaveFile(bounded))
-                {
-                    return null;
-                }
-                bounded.Position = 0;
-                var adapter = services.GetService<MetaAsrUploadAdapter>();
-                if (adapter is null)
-                {
-                    return null;
-                }
-                var result = await adapter.TranscribeAsync(bounded, "ellai-capture.wav", "audio/wav", cancellationToken)
-                    .ConfigureAwait(false);
-                transcript = result.Transcript;
+                return null;
             }
-            else
+            bounded.Position = 0;
+            var adapter = services.GetService<MetaAsrUploadAdapter>();
+            if (adapter is null)
             {
-                if (bounded.Length % 2 != 0)
+                return null;
+            }
+
+            var result = await adapter.TranscribeAsync(
+                bounded, "ellai-capture.wav", "audio/wav", cancellationToken).ConfigureAwait(false);
+            var transcript = result.Transcript.Trim();
+            return transcript.Length is > 0 and <= 8_000
+                ? new EllaiVoiceTranscriptionResult(transcript)
+                : null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning("Ellai {CaptureMode} transcription failed ({FailureType}).",
+                mode, ex.GetType().Name);
+            return null;
+        }
+    }
+
+    private async Task<EllaiVoiceTranscriptionResult?> TranscribeLiveStreamAsync(
+        Stream audio,
+        CancellationToken cancellationToken)
+    {
+        using var capturedPcm = new MemoryStream();
+        using var boundedAudio = new CapturingLimitReadStream(audio, capturedPcm, MaximumAudioBytes);
+        try
+        {
+            var adapter = services.GetService<MetaAsrRealtimeAdapter>();
+            var transcript = string.Empty;
+            if (adapter is not null)
+            {
+                var vadStream = services.GetService<SileroVoiceActivityAudioStream>();
+                Channel<byte[]>? vadChunks = null;
+                Task? vadWorker = null;
+                if (vadStream is not null)
                 {
-                    return null;
-                }
-                var adapter = services.GetService<MetaAsrRealtimeAdapter>();
-                transcript = string.Empty;
-                if (adapter is not null)
-                {
-                    try
+                    vadChunks = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(8)
                     {
-                        var result = await adapter.TranscribePcmAsync(bounded, cancellationToken).ConfigureAwait(false);
-                        transcript = string.Join(" ", result.FinalTranscripts.Where(text => !string.IsNullOrWhiteSpace(text)));
-                    }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                    {
-                        throw;
-                    }
-                    catch (Exception ex)
-                    {
-                        logger?.LogWarning("Ellai realtime transcription failed ({FailureType}); checking upload fallback.",
-                            ex.GetType().Name);
-                    }
+                        FullMode = BoundedChannelFullMode.Wait,
+                        SingleReader = true,
+                        SingleWriter = true,
+                        AllowSynchronousContinuations = false,
+                    });
+                    vadWorker = ProcessVadChunksAsync(vadChunks.Reader, vadStream, cancellationToken);
                 }
 
-                if (string.IsNullOrWhiteSpace(transcript) && options.HasUploadAsrRoute)
+                try
+                {
+                    var result = await adapter.TranscribePcmAsync(
+                        boundedAudio,
+                        cancellationToken,
+                        vadChunks is null
+                            ? null
+                            : (chunk, ct) => vadChunks.Writer.WriteAsync(chunk.ToArray(), ct))
+                        .ConfigureAwait(false);
+                    transcript = string.Join(" ", result.FinalTranscripts
+                        .Where(text => !string.IsNullOrWhiteSpace(text)));
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    logger?.LogWarning(
+                        "Ellai realtime transcription failed ({FailureType}); checking upload fallback.",
+                        ex.GetType().Name);
+                }
+                finally
+                {
+                    vadChunks?.Writer.TryComplete();
+                    if (vadWorker is not null)
+                    {
+                        await vadWorker.ConfigureAwait(false);
+                    }
+                    vadStream?.Dispose();
+                }
+            }
+
+            // A provider connection can fail before it consumes the live body.
+            // Keep draining into the bounded transient capture so fallback can
+            // run and the client-side producer cannot remain blocked.
+            var drainBuffer = new byte[32 * 1024];
+            while (await boundedAudio.ReadAsync(drainBuffer, cancellationToken).ConfigureAwait(false) > 0)
+            {
+            }
+
+            if (boundedAudio.LimitExceeded)
+            {
+                return null;
+            }
+
+            if ((capturedPcm.Length & 1) != 0)
+            {
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(transcript) && options.HasUploadAsrRoute
+                && capturedPcm.Length > 0 && capturedPcm.Length <= MaximumAudioBytes - 44)
+            {
+                logger?.LogInformation(
+                    "Ellai realtime transcription returned no final words; using the configured upload route.");
+                var wave = CreateWavePayload(capturedPcm);
+                try
                 {
                     var uploadAdapter = services.GetService<MetaAsrUploadAdapter>();
-                    if (uploadAdapter is not null && bounded.Length <= MaximumAudioBytes - 44)
+                    if (uploadAdapter is not null)
                     {
-                        logger?.LogInformation("Ellai realtime transcription returned no final words; using the configured upload route.");
-                        var wave = CreateWavePayload(bounded);
-                        try
-                        {
-                            using var waveStream = new MemoryStream(wave, writable: false);
-                            var result = await uploadAdapter.TranscribeAsync(
-                                waveStream, "ellai-live-fallback.wav", "audio/wav", cancellationToken)
-                                .ConfigureAwait(false);
-                            transcript = result.Transcript;
-                        }
-                        finally
-                        {
-                            Array.Clear(wave);
-                        }
+                        using var waveStream = new MemoryStream(wave, writable: false);
+                        var result = await uploadAdapter.TranscribeAsync(
+                            waveStream, "ellai-live-fallback.wav", "audio/wav", cancellationToken)
+                            .ConfigureAwait(false);
+                        transcript = result.Transcript;
                     }
+                }
+                finally
+                {
+                    Array.Clear(wave);
                 }
             }
 
@@ -161,9 +234,55 @@ public sealed class EllaiVoiceTranscriptionService(
         }
         catch (Exception ex)
         {
-            logger?.LogWarning("Ellai {CaptureMode} transcription failed ({FailureType}).",
-                mode, ex.GetType().Name);
+            logger?.LogWarning("Ellai live transcription failed ({FailureType}).", ex.GetType().Name);
             return null;
+        }
+        finally
+        {
+            if (capturedPcm.TryGetBuffer(out var buffer))
+            {
+                Array.Clear(buffer.Array!, buffer.Offset, buffer.Count);
+            }
+        }
+    }
+
+    private async Task ProcessVadChunksAsync(
+        ChannelReader<byte[]> chunks,
+        SileroVoiceActivityAudioStream vadStream,
+        CancellationToken cancellationToken)
+    {
+        var vadEnabled = true;
+        try
+        {
+            await foreach (var chunk in chunks.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                try
+                {
+                    if (vadEnabled)
+                    {
+                        _ = await vadStream.AppendPcm16Async(chunk, 24_000, cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    vadEnabled = false;
+                    logger?.LogWarning("Ellai voice activity processing failed ({FailureType}); continuing transcription.",
+                        ex.GetType().Name);
+                }
+                finally
+                {
+                    Array.Clear(chunk);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
     }
 
@@ -231,5 +350,109 @@ public sealed class EllaiVoiceTranscriptionService(
         samples.CopyTo(wave, 44);
         Array.Clear(samples);
         return wave;
+    }
+
+    private sealed class CapturingLimitReadStream(Stream source, MemoryStream capture, int maximumBytes) : Stream
+    {
+        private int _bytesRead;
+        private bool _overflowChecked;
+
+        public bool LimitExceeded { get; private set; }
+
+        public override bool CanRead => source.CanRead;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var allowed = GetAllowedReadCount(count);
+            if (allowed == 0)
+            {
+                return CheckEndOfInput();
+            }
+
+            var read = source.Read(buffer, offset, allowed);
+            Capture(buffer.AsSpan(offset, read));
+            return read;
+        }
+
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var allowed = GetAllowedReadCount(buffer.Length);
+            if (allowed == 0)
+            {
+                return await CheckEndOfInputAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            var read = await source.ReadAsync(buffer[..allowed], cancellationToken).ConfigureAwait(false);
+            Capture(buffer.Span[..read]);
+            return read;
+        }
+
+        public override Task<int> ReadAsync(
+            byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override void Flush() => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        private int GetAllowedReadCount(int requested)
+        {
+            if (_bytesRead == maximumBytes)
+            {
+                return 0;
+            }
+
+            return Math.Min(requested, maximumBytes - _bytesRead);
+        }
+
+        private int CheckEndOfInput()
+        {
+            if (_overflowChecked)
+            {
+                return 0;
+            }
+
+            _overflowChecked = true;
+            Span<byte> extra = stackalloc byte[1];
+            if (source.Read(extra) != 0)
+            {
+                LimitExceeded = true;
+                throw new InvalidDataException("Live voice audio exceeded the configured size limit.");
+            }
+            return 0;
+        }
+
+        private async ValueTask<int> CheckEndOfInputAsync(CancellationToken cancellationToken)
+        {
+            if (_overflowChecked)
+            {
+                return 0;
+            }
+
+            _overflowChecked = true;
+            var extra = new byte[1];
+            if (await source.ReadAsync(extra, cancellationToken).ConfigureAwait(false) != 0)
+            {
+                LimitExceeded = true;
+                throw new InvalidDataException("Live voice audio exceeded the configured size limit.");
+            }
+            return 0;
+        }
+
+        private void Capture(ReadOnlySpan<byte> bytes)
+        {
+            _bytesRead += bytes.Length;
+            capture.Write(bytes);
+        }
     }
 }

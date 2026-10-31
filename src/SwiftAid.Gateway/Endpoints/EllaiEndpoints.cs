@@ -110,6 +110,13 @@ public static class EllaiEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status503ServiceUnavailable);
+        group.MapPost("/sessions/{sessionId}/responses/{sequence:long}/audio/{playbackId:guid}/interrupt",
+                EllaiGuestEndpoints.InterruptResponseAudioAsync)
+            .WithMetadata(new RequestSizeLimitAttribute(8 * 1024))
+            .WithName("InterruptEllaiResponseAudio")
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
         group.MapGet("/sessions/{sessionId}/voice/greeting/audio",
                 EllaiGuestEndpoints.StreamListeningGreetingAudioAsync)
             .WithName("StreamEllaiListeningGreeting")

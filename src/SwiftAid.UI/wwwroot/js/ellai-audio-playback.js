@@ -57,12 +57,15 @@ export async function disposeAudioPlayback() {
     await context?.close();
 }
 
-function makeUrl(sessionId, sequence, guest, purpose) {
+function makeUrl(sessionId, sequence, guest, purpose, playbackId) {
     const route = guest ? "api/v1/ellai/guest" : "api/v1/ellai";
     const audioRoute = purpose === "live-activation"
         ? "voice/greeting/audio"
         : `responses/${sequence}/audio`;
-    return `/${route}/sessions/${encodeURIComponent(sessionId)}/${audioRoute}`;
+    const playback = purpose === null && playbackId
+        ? `?playbackId=${encodeURIComponent(playbackId)}`
+        : "";
+    return `/${route}/sessions/${encodeURIComponent(sessionId)}/${audioRoute}${playback}`;
 }
 
 function stopRecord(record) {
@@ -84,15 +87,15 @@ export function stopResponse(sessionId) {
     }
 }
 
-export async function playResponse(sessionId, sequence) {
-    return playPcm(sessionId, sequence, null);
+export async function playResponse(sessionId, sequence, playbackId) {
+    return playPcm(sessionId, sequence, null, playbackId);
 }
 
 export async function playListeningGreeting(sessionId) {
-    return playPcm(sessionId, 0, "live-activation");
+    return playPcm(sessionId, 0, "live-activation", "");
 }
 
-async function playPcm(sessionId, sequence, purpose) {
+async function playPcm(sessionId, sequence, purpose, playbackId) {
     stopResponse(sessionId);
     const record = {
         controller: new AbortController(),
@@ -101,14 +104,14 @@ async function playPcm(sessionId, sequence, purpose) {
     activePlayback.set(sessionId, record);
 
     try {
-        let response = await fetch(makeUrl(sessionId, sequence, true, purpose), {
+        let response = await fetch(makeUrl(sessionId, sequence, true, purpose, playbackId), {
             credentials: "same-origin",
             cache: "no-store",
             signal: record.controller.signal,
         });
         if (response.status === 401) {
             await response.body?.cancel();
-            response = await fetch(makeUrl(sessionId, sequence, false, purpose), {
+            response = await fetch(makeUrl(sessionId, sequence, false, purpose, playbackId), {
                 credentials: "same-origin",
                 cache: "no-store",
                 signal: record.controller.signal,
@@ -123,6 +126,8 @@ async function playPcm(sessionId, sequence, purpose) {
         }
         if (response.headers.get("x-swiftaid-session-id") !== sessionId
             || response.headers.get("x-swiftaid-response-sequence") !== String(sequence)
+            || (purpose === null && playbackId
+                && response.headers.get("x-swiftaid-playback-id") !== playbackId)
             || response.headers.get("x-swiftaid-sample-format") !== "s16le"
             || response.headers.get("x-swiftaid-channels") !== "1"
             || (purpose !== null

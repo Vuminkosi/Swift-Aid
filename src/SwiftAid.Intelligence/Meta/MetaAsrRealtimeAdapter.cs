@@ -37,26 +37,31 @@ public sealed class MetaAsrRealtimeAdapter(EllaiOptions options)
     }
 
     public async Task<RealtimeAsrResult> TranscribePcmAsync(
-        Stream pcm24kMono16Bit, CancellationToken ct)
+        Stream pcm24kMono16Bit,
+        CancellationToken ct,
+        Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask>? onAudioChunk = null)
     {
         ArgumentNullException.ThrowIfNull(pcm24kMono16Bit);
         var handshake = BuildHandshake();
 
         using var socket = new ClientWebSocket();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(9));
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
+        using var handshakeTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(HandshakeTimeoutSeconds));
+        using var handshakeLinked = CancellationTokenSource.CreateLinkedTokenSource(
+            linked.Token, handshakeTimeout.Token);
 
         try
         {
-            await socket.ConnectAsync(new Uri(options.AsrWebSocketUrl), linked.Token);
+            await socket.ConnectAsync(new Uri(options.AsrWebSocketUrl), handshakeLinked.Token);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             throw new InvalidOperationException($"Ellai realtime ASR connect failed ({ex.GetType().Name}).");
         }
 
-        await SendTextAsync(socket, handshake, linked.Token);
-        var sessionId = await ReadHandshakeAckAsync(socket, linked.Token);
+        await SendTextAsync(socket, handshake, handshakeLinked.Token);
+        var sessionId = await ReadHandshakeAckAsync(socket, handshakeLinked.Token);
 
         var transcripts = new MetaAsrRealtimeTranscriptCollector();
         var receiver = ReceiveUntilCloseAsync(socket, transcripts, linked.Token);
@@ -65,6 +70,11 @@ public sealed class MetaAsrRealtimeAdapter(EllaiOptions options)
         int read;
         while ((read = await pcm24kMono16Bit.ReadAsync(buffer, linked.Token)) > 0)
         {
+            if (onAudioChunk is not null)
+            {
+                await onAudioChunk(buffer.AsMemory(0, read), linked.Token).ConfigureAwait(false);
+            }
+
             await socket.SendAsync(new ArraySegment<byte>(buffer, 0, read),
                 WebSocketMessageType.Binary, true, linked.Token);
         }

@@ -116,6 +116,10 @@ public interface IEllaiReviewClient
         string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken) =>
         Task.FromResult<EllaiVoiceTranscriptionResult?>(null);
 
+    Task<EllaiVoiceTranscriptionResult?> TranscribeLiveVoiceStreamAsync(
+        string sessionId, Stream audio, CancellationToken cancellationToken) =>
+        Task.FromResult<EllaiVoiceTranscriptionResult?>(null);
+
     Task<EllaiSessionCancelResult> CancelSessionAsync(
         string sessionId, long expectedSessionVersion, CancellationToken cancellationToken);
 
@@ -129,6 +133,14 @@ public interface IEllaiReviewClient
     Task<EllaiResponseAudio?> DownloadResponseAudioAsync(
         string sessionId, long sequence, CancellationToken cancellationToken) =>
         Task.FromResult<EllaiResponseAudio?>(null);
+
+    Task<EllaiResponseAudio?> DownloadResponseAudioAsync(
+        string sessionId, long sequence, string playbackId, CancellationToken cancellationToken) =>
+        DownloadResponseAudioAsync(sessionId, sequence, cancellationToken);
+
+    Task<bool> InterruptResponseAudioAsync(
+        string sessionId, long sequence, string playbackId, CancellationToken cancellationToken) =>
+        Task.FromResult(false);
 
     Task<EllaiResponseAudio?> DownloadListeningGreetingAudioAsync(
         string sessionId, CancellationToken cancellationToken) =>

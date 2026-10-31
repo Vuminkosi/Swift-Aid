@@ -15,6 +15,11 @@
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" />
     <PackageReference Include="CommunityToolkit.Datasync.Server" />
     <PackageReference Include="NATS.Net" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" />
+    <Content Include="Ellai\Voice\Models\silero_vad_16k_op15.onnx"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest"
+             Link="Ellai\Voice\Models\silero_vad_16k_op15.onnx" />
   </ItemGroup>
 
   <PropertyGroup>

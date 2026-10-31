@@ -212,6 +212,50 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
         }
     }
 
+    public async Task<EllaiVoiceTranscriptionResult?> TranscribeLiveVoiceStreamAsync(
+        string sessionId, Stream audio, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId) || audio is null || !audio.CanRead)
+        {
+            return null;
+        }
+
+        var content = new StreamContent(audio, 8_192);
+        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+        using (content)
+        using (var request = new HttpRequestMessage(
+            HttpMethod.Post, $"{SessionRoute(sessionId)}/voice/live") { Content = content })
+        {
+            if (_useGuestRoutes)
+            {
+                var token = await GetGuestAntiforgeryTokenAsync(cancellationToken).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(token))
+                {
+                    return null;
+                }
+                request.Headers.TryAddWithoutValidation("X-CSRF-TOKEN", token);
+            }
+
+            try
+            {
+                using var response = await _http.SendAsync(request,
+                    HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+                return response.IsSuccessStatusCode
+                    ? await response.Content.ReadFromJsonAsync<EllaiVoiceTranscriptionResult>(Json, cancellationToken)
+                        .ConfigureAwait(false)
+                    : null;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+    }
+
     public async Task<EllaiSessionCancelResult> CancelSessionAsync(
         string sessionId, long expectedSessionVersion, CancellationToken cancellationToken)
     {
@@ -312,6 +356,10 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
 
     public async Task<EllaiResponseAudio?> DownloadResponseAudioAsync(
         string sessionId, long sequence, CancellationToken cancellationToken)
+        => await DownloadResponseAudioAsync(sessionId, sequence, string.Empty, cancellationToken).ConfigureAwait(false);
+
+    public async Task<EllaiResponseAudio?> DownloadResponseAudioAsync(
+        string sessionId, long sequence, string playbackId, CancellationToken cancellationToken)
     {
         if (sequence < 1)
         {
@@ -319,21 +367,48 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
         }
 
         return await DownloadPcmAudioAsync(
-            sessionId, $"{SessionRoute(sessionId)}/responses/{sequence}/audio", sequence,
-            expectedPurpose: null, cancellationToken).ConfigureAwait(false);
+            sessionId, $"{SessionRoute(sessionId)}/responses/{sequence}/audio"
+                + (Guid.TryParseExact(playbackId, "N", out _) ? $"?playbackId={Uri.EscapeDataString(playbackId)}" : string.Empty), sequence,
+            expectedPurpose: null, expectedPlaybackId: playbackId, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<bool> InterruptResponseAudioAsync(
+        string sessionId, long sequence, string playbackId, CancellationToken cancellationToken)
+    {
+        if (sequence < 1 || !Guid.TryParseExact(playbackId, "N", out _))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var response = await PostAsJsonAsync(
+                $"{SessionRoute(sessionId)}/responses/{sequence}/audio/{Uri.EscapeDataString(playbackId)}/interrupt",
+                new { }, cancellationToken).ConfigureAwait(false);
+            return response.IsSuccessStatusCode;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     public Task<EllaiResponseAudio?> DownloadListeningGreetingAudioAsync(
         string sessionId, CancellationToken cancellationToken) =>
         DownloadPcmAudioAsync(
             sessionId, $"{SessionRoute(sessionId)}/voice/greeting/audio", 0,
-            "live-activation", cancellationToken);
+            "live-activation", expectedPlaybackId: null, cancellationToken);
 
     private async Task<EllaiResponseAudio?> DownloadPcmAudioAsync(
         string sessionId,
         string requestUri,
         long expectedSequence,
         string? expectedPurpose,
+        string? expectedPlaybackId,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(sessionId))
@@ -354,6 +429,9 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
                 || !response.Headers.TryGetValues("X-SwiftAid-Response-Sequence", out var sequences)
                 || !long.TryParse(sequences.FirstOrDefault(), out var actualSequence)
                 || actualSequence != expectedSequence
+                || (!string.IsNullOrWhiteSpace(expectedPlaybackId)
+                    && (!response.Headers.TryGetValues("X-SwiftAid-Playback-Id", out var playbackIds)
+                        || !playbackIds.Contains(expectedPlaybackId, StringComparer.Ordinal)))
                 || (expectedPurpose is not null
                     && (!response.Headers.TryGetValues("X-SwiftAid-Speech-Purpose", out var purposes)
                         || !purposes.Contains(expectedPurpose, StringComparer.Ordinal)))

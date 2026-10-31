@@ -253,6 +253,43 @@ public sealed class EllaiReviewGatewayClient(
         }
     }
 
+    public async Task<EllaiVoiceTranscriptionResult?> TranscribeLiveVoiceStreamAsync(
+        string sessionId, Stream audio, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId) || audio is null || !audio.CanRead
+            || !await OwnsSessionAsync(sessionId, cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        try
+        {
+            var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+            var principal = ResolvePrincipal(state.User, sessionId);
+            var sessions = _serviceProvider.GetService<EllaiSessionService>();
+            var voice = _serviceProvider.GetService<EllaiVoiceTranscriptionService>();
+            if (principal is null || sessions is null || voice is null
+                || await sessions.GetOwnedViewAsync(sessionId, principal, cancellationToken)
+                    .ConfigureAwait(false) is not { Status: "Active" })
+            {
+                return null;
+            }
+
+            return await voice.TranscribeAsync(
+                sessionId, EllaiVoiceCaptureMode.Live, audio, contentLength: null,
+                cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public async Task<EllaiSessionCancelResult> CancelSessionAsync(
         string sessionId, long expectedSessionVersion, CancellationToken cancellationToken)
     {
@@ -345,6 +382,27 @@ public sealed class EllaiReviewGatewayClient(
 
         var store = _serviceProvider.GetService<EllaiSessionResponseStore>();
         return store?.ReadSince(sessionId, Math.Max(0, cursor));
+    }
+
+    public async Task<bool> InterruptResponseAudioAsync(
+        string sessionId, long sequence, string playbackId, CancellationToken cancellationToken)
+    {
+        if (sequence < 1 || !Guid.TryParseExact(playbackId, "N", out var parsedPlaybackId)
+            || !await OwnsSessionAsync(sessionId, cancellationToken).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        var responses = _serviceProvider.GetService<EllaiSessionResponseStore>();
+        var response = responses?.ReadSince(sessionId, sequence - 1, take: 1)
+            .Responses.FirstOrDefault(item => item.Sequence == sequence);
+        if (response is null)
+        {
+            return false;
+        }
+
+        return _serviceProvider.GetService<EllaiResponseSpeechCoordinator>()
+            ?.Interrupt(sessionId, sequence, parsedPlaybackId) == true;
     }
 
     public async Task<EllaiReviewDto?> GetActiveReviewAsync(string sessionId, CancellationToken cancellationToken)

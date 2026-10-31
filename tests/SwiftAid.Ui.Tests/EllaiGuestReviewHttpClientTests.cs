@@ -43,6 +43,32 @@ public sealed class EllaiGuestReviewHttpClientTests
     }
 
     [Fact]
+    public async Task ResponsePlaybackCarriesPlaybackIdentityAndInterruptUsesGuestAntiforgery()
+    {
+        var playbackId = Guid.NewGuid().ToString("N");
+        var audioHandler = new AudioHandler();
+        using var audioHttp = new HttpClient(audioHandler) { BaseAddress = new Uri("https://localhost/") };
+        var audioClient = new EllaiReviewHttpClient(audioHttp, useGuestRoutes: true);
+        var audio = await audioClient.DownloadResponseAudioAsync(
+            "guest-session", 7, playbackId, CancellationToken.None);
+
+        Assert.NotNull(audio);
+        Assert.Equal($"/api/v1/ellai/guest/sessions/guest-session/responses/7/audio?playbackId={playbackId}",
+            audioHandler.Path);
+
+        var interruptHandler = new RecordingHandler();
+        using var interruptHttp = new HttpClient(interruptHandler) { BaseAddress = new Uri("https://localhost/") };
+        var interruptClient = new EllaiReviewHttpClient(interruptHttp, useGuestRoutes: true);
+        Assert.True(await interruptClient.InterruptResponseAudioAsync(
+            "guest-session", 7, playbackId, CancellationToken.None));
+
+        Assert.Equal(new[] { HttpMethod.Get, HttpMethod.Post }, interruptHandler.Methods);
+        Assert.Equal($"/api/v1/ellai/guest/sessions/guest-session/responses/7/audio/{playbackId}/interrupt",
+            interruptHandler.Paths[1]);
+        Assert.Equal("csrf-test", interruptHandler.CsrfHeaders[1]);
+    }
+
+    [Fact]
     public async Task ListeningGreetingUsesSessionScopedGuestRouteAndValidatesPurpose()
     {
         var handler = new GreetingAudioHandler();
@@ -96,6 +122,25 @@ public sealed class EllaiGuestReviewHttpClientTests
         Assert.Equal("csrf-test", handler.CsrfToken);
     }
 
+    [Fact]
+    public async Task LiveVoiceUsesStreamingGuestRequestOnExistingSessionRoute()
+    {
+        var handler = new LiveTranscriptionHandler();
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost/") };
+        var client = new EllaiReviewHttpClient(http, useGuestRoutes: true);
+        using var audio = new NonSeekableStream([1, 2, 3, 4, 5, 6]);
+
+        var result = await client.TranscribeLiveVoiceStreamAsync(
+            "guest-session", audio, CancellationToken.None);
+
+        Assert.Equal("streamed words", result?.Transcript);
+        Assert.Equal("/api/v1/ellai/guest/sessions/guest-session/voice/live", handler.Path);
+        Assert.Equal("application/octet-stream", handler.ContentType);
+        Assert.Null(handler.ContentLength);
+        Assert.Equal("csrf-test", handler.CsrfToken);
+        Assert.Equal(new byte[] { 1, 2, 3, 4, 5, 6 }, handler.AudioBytes);
+    }
+
     private sealed class RecordingHandler : HttpMessageHandler
     {
         public List<HttpMethod> Methods { get; } = [];
@@ -144,6 +189,16 @@ public sealed class EllaiGuestReviewHttpClientTests
             response.Headers.Add("X-SwiftAid-Channels", "1");
             response.Headers.Add("X-SwiftAid-Voice-Id", "swiftaid-mms-english-v1");
             response.Headers.Add("X-SwiftAid-Sample-Rate", "16000");
+            var playbackId = request.RequestUri?.Query.TrimStart('?')
+                .Split('&', StringSplitOptions.RemoveEmptyEntries)
+                .Select(part => part.Split('=', 2))
+                .Where(parts => parts.Length == 2 && parts[0] == "playbackId")
+                .Select(parts => Uri.UnescapeDataString(parts[1]))
+                .FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(playbackId))
+            {
+                response.Headers.Add("X-SwiftAid-Playback-Id", playbackId);
+            }
             return Task.FromResult(response);
         }
     }
@@ -200,6 +255,50 @@ public sealed class EllaiGuestReviewHttpClientTests
             {
                 Content = new StringContent("{\"transcript\":\"heard words\"}", Encoding.UTF8, "application/json"),
             };
+        }
+    }
+
+    private sealed class LiveTranscriptionHandler : HttpMessageHandler
+    {
+        public string? Path { get; private set; }
+        public string? ContentType { get; private set; }
+        public long? ContentLength { get; private set; }
+        public string? CsrfToken { get; private set; }
+        public byte[] AudioBytes { get; private set; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri?.AbsolutePath.EndsWith("/antiforgery", StringComparison.Ordinal) == true)
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"requestToken\":\"csrf-test\"}", Encoding.UTF8, "application/json"),
+                };
+            }
+
+            Path = request.RequestUri?.PathAndQuery;
+            ContentType = request.Content?.Headers.ContentType?.MediaType;
+            ContentLength = request.Content?.Headers.ContentLength;
+            CsrfToken = request.Headers.TryGetValues("X-CSRF-TOKEN", out var values)
+                ? values.Single()
+                : null;
+            AudioBytes = await request.Content!.ReadAsByteArrayAsync(cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"transcript\":\"streamed words\"}", Encoding.UTF8, "application/json"),
+            };
+        }
+    }
+
+    private sealed class NonSeekableStream(byte[] bytes) : MemoryStream(bytes)
+    {
+        public override bool CanSeek => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
         }
     }
 }

@@ -143,6 +143,14 @@ public static class EllaiGuestEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status503ServiceUnavailable);
+        group.MapPost("/sessions/{sessionId}/responses/{sequence:long}/audio/{playbackId:guid}/interrupt",
+                InterruptResponseAudioAsync)
+            .RequireRateLimiting("ellai-guest-write")
+            .WithMetadata(new RequestSizeLimitAttribute(8 * 1024))
+            .WithName("InterruptEllaiGuestResponseAudio")
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
         group.MapGet("/sessions/{sessionId}/voice/greeting/audio", StreamListeningGreetingAudioAsync)
             .RequireRateLimiting("ellai-guest-read")
             .WithName("StreamEllaiGuestListeningGreeting")
@@ -367,14 +375,16 @@ public static class EllaiGuestEndpoints
         return Results.Json(page);
     }
 
-    internal static async Task<IResult> StreamResponseAudioAsync(
+    public static async Task<IResult> StreamResponseAudioAsync(
         string sessionId,
         long sequence,
         HttpContext http,
         EllaiSessionResponseStore responses,
-        IEllaiSpeechSynthesisClient speech)
+        IEllaiSpeechSynthesisClient speech,
+        EllaiResponseSpeechCoordinator speechCoordinator,
+        Guid? playbackId = null)
     {
-        if (sequence < 1)
+        if (sequence < 1 || playbackId == Guid.Empty)
         {
             return Results.NotFound();
         }
@@ -393,33 +403,51 @@ public static class EllaiGuestEndpoints
                 title: "Ellai speech is unavailable for this session.");
         }
 
+        var playback = playbackId is Guid id
+            ? speechCoordinator.Begin(sessionId, sequence, id, http.RequestAborted)
+            : null;
+        var synthesisCancellation = playback?.Token ?? http.RequestAborted;
         HttpResponseMessage upstream;
         try
         {
             upstream = await speech.SynthesizeAsync(
-                $"{sessionId}-{sequence}", response.Text, http.RequestAborted).ConfigureAwait(false);
+                $"{sessionId}-{sequence}", response.Text, synthesisCancellation).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested)
         {
+            playback?.Dispose();
+            return Results.Empty;
+        }
+        catch (OperationCanceledException) when (playback?.Token.IsCancellationRequested == true)
+        {
+            playback?.Dispose();
             return Results.Empty;
         }
         catch (HttpRequestException)
         {
+            playback?.Dispose();
             return Results.Problem(
                 statusCode: StatusCodes.Status503ServiceUnavailable,
                 title: "Ellai speech is temporarily unavailable.");
         }
         catch (InvalidOperationException)
         {
+            playback?.Dispose();
             return Results.Problem(
                 statusCode: StatusCodes.Status503ServiceUnavailable,
                 title: "Ellai speech is temporarily unavailable.");
+        }
+        catch
+        {
+            playback?.Dispose();
+            throw;
         }
 
         if (!upstream.IsSuccessStatusCode
             || upstream.Content.Headers.ContentType?.MediaType != "application/vnd.swiftaid.pcm")
         {
             upstream.Dispose();
+            playback?.Dispose();
             return Results.Problem(
                 statusCode: StatusCodes.Status503ServiceUnavailable,
                 title: "Ellai speech is temporarily unavailable.");
@@ -431,15 +459,55 @@ public static class EllaiGuestEndpoints
         CopySpeechHeader(upstream, http.Response, "X-SwiftAid-Sample-Format");
         http.Response.Headers["X-SwiftAid-Session-Id"] = sessionId;
         http.Response.Headers["X-SwiftAid-Response-Sequence"] = sequence.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (playbackId is Guid responsePlaybackId)
+        {
+            http.Response.Headers["X-SwiftAid-Playback-Id"] = responsePlaybackId.ToString("N");
+        }
         http.Response.Headers.CacheControl = "no-store";
         http.Response.Headers["X-Content-Type-Options"] = "nosniff";
-        var audioStream = await upstream.Content.ReadAsStreamAsync(http.RequestAborted).ConfigureAwait(false);
-        http.Response.OnCompleted(() =>
+        Stream audioStream;
+        try
+        {
+            audioStream = await upstream.Content.ReadAsStreamAsync(synthesisCancellation).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (synthesisCancellation.IsCancellationRequested)
         {
             upstream.Dispose();
-            return Task.CompletedTask;
-        });
-        return Results.Stream(audioStream, contentType: "application/vnd.swiftaid.pcm");
+            playback?.Dispose();
+            return Results.Empty;
+        }
+        catch
+        {
+            upstream.Dispose();
+            playback?.Dispose();
+            throw;
+        }
+
+        return new EllaiResponseAudioStreamResult(audioStream, upstream, playback);
+    }
+
+    public static IResult InterruptResponseAudioAsync(
+        string sessionId,
+        long sequence,
+        Guid playbackId,
+        EllaiSessionResponseStore responses,
+        EllaiResponseSpeechCoordinator speechCoordinator)
+    {
+        if (sequence < 1 || playbackId == Guid.Empty)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status400BadRequest,
+                title: "The Ellai playback interruption was invalid.");
+        }
+
+        var response = responses.ReadSince(sessionId, sequence - 1, take: 1)
+            .Responses.FirstOrDefault(item => item.Sequence == sequence);
+        if (response is null)
+        {
+            return Results.NotFound();
+        }
+
+        speechCoordinator.Interrupt(sessionId, sequence, playbackId);
+        return Results.NoContent();
     }
 
     internal static async Task<IResult> StreamListeningGreetingAudioAsync(
@@ -555,6 +623,33 @@ public static class EllaiGuestEndpoints
         await http.SignOutAsync(AuthenticationScheme).ConfigureAwait(false);
         return Results.Ok(await sessions.GetOwnedViewAsync(sessionId, http.User, cancellationToken)
             .ConfigureAwait(false));
+    }
+}
+
+internal sealed class EllaiResponseAudioStreamResult(
+    Stream audioStream,
+    HttpResponseMessage upstream,
+    EllaiResponseSpeechCoordinator.PlaybackLease? playback) : IResult
+{
+    public async Task ExecuteAsync(HttpContext httpContext)
+    {
+        httpContext.Response.ContentType = "application/vnd.swiftaid.pcm";
+        using (playback)
+        using (upstream)
+        using (audioStream)
+        using (var cancellation = playback is null
+            ? CancellationTokenSource.CreateLinkedTokenSource(httpContext.RequestAborted)
+            : CancellationTokenSource.CreateLinkedTokenSource(httpContext.RequestAborted, playback.Token))
+        {
+            try
+            {
+                await audioStream.CopyToAsync(httpContext.Response.Body, cancellation.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+            {
+                // An explicit playback stop or disconnected client ends only this response stream.
+            }
+        }
     }
 }
 
