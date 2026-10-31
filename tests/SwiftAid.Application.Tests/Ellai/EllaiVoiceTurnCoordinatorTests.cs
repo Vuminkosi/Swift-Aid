@@ -30,7 +30,35 @@ public sealed class EllaiVoiceTurnCoordinatorTests
         var final = coordinator.AcceptFinalTranscript(stream, "turn-7", "  The animal needs assistance.  ");
 
         Assert.Equal("The animal needs assistance.", final?.Text);
-        Assert.Equal(EllaiVoiceTurnState.Processing, coordinator.GetSnapshot("session-1").State);
+        Assert.Equal(EllaiVoiceTurnState.TurnCompleted, coordinator.GetSnapshot("session-1").State);
+        var completed = Assert.Single(coordinator.GetCompletedTurns("session-1"));
+        Assert.Equal("turn-7", completed.ProviderTurnId);
+        Assert.Equal("The animal needs assistance.", completed.Transcript);
+        Assert.Empty(coordinator.GetCompletedTurns("session-1", afterSequence: completed.Sequence));
+    }
+
+    [Fact]
+    public void MuseFinalBeforeSileroEndpointIsNotPublishedUntilSileroConfirmsSilence()
+    {
+        var coordinator = new EllaiVoiceTurnCoordinator();
+        using var stream = coordinator.BeginStream("session-final-first", CancellationToken.None);
+        for (var sequence = 0; sequence < 4; sequence++)
+        {
+            coordinator.ObserveAcousticFrame(stream, Speech(sequence), VadFrameDuration);
+        }
+
+        Assert.NotNull(stream.AcceptFinalTranscript("muse-turn-8", "Follow up on my report."));
+        Assert.Empty(coordinator.GetCompletedTurns("session-final-first"));
+
+        for (var sequence = 4; sequence < 26; sequence++)
+        {
+            coordinator.ObserveAcousticFrame(stream, Silence(sequence), VadFrameDuration);
+        }
+
+        Assert.Equal(EllaiVoiceTurnState.TurnCompleted,
+            coordinator.GetSnapshot("session-final-first").State);
+        Assert.Equal("Follow up on my report.",
+            Assert.Single(coordinator.GetCompletedTurns("session-final-first")).Transcript);
     }
 
     [Fact]
@@ -161,6 +189,31 @@ public sealed class EllaiVoiceTurnCoordinatorTests
     }
 
     [Fact]
+    public void CompletedTurnEventsKeepSessionSequenceAndHistoryAcrossProviderReconnects()
+    {
+        var coordinator = new EllaiVoiceTurnCoordinator();
+        EllaiCompletedVoiceTurn firstTurn;
+        using (var firstStream = coordinator.BeginStream("session-reconnect", CancellationToken.None))
+        {
+            CompleteTurn(coordinator, firstStream, "muse-1", "Show my assigned cases.");
+            firstTurn = Assert.Single(coordinator.GetCompletedTurns("session-reconnect"));
+        }
+
+        using var secondStream = coordinator.BeginStream("session-reconnect", CancellationToken.None);
+        Assert.True(secondStream.Epoch > firstTurn.StreamEpoch);
+        Assert.Contains(firstTurn, coordinator.GetCompletedTurns("session-reconnect"));
+
+        CompleteTurn(coordinator, secondStream, "muse-1", "Show urgent cases only.");
+        var turns = coordinator.GetCompletedTurns("session-reconnect");
+
+        Assert.Equal(2, turns.Count);
+        Assert.Equal(firstTurn.Sequence + 1, turns[1].Sequence);
+        Assert.NotEqual(firstTurn.TurnId, turns[1].TurnId);
+        Assert.Equal(secondStream.Epoch, turns[1].StreamEpoch);
+        Assert.Equal([turns[1]], coordinator.GetCompletedTurns("session-reconnect", firstTurn.Sequence));
+    }
+
+    [Fact]
     public void FailedTurnCanEnterRecoveryAndTheNextStreamReturnsToListening()
     {
         var coordinator = new EllaiVoiceTurnCoordinator();
@@ -203,8 +256,10 @@ public sealed class EllaiVoiceTurnCoordinatorTests
         Assert.NotNull(coordinator.AcceptFinalTranscript(first, "turn-1", "heard once"));
         Assert.Null(coordinator.AcceptFinalTranscript(first, "turn-1", "duplicate"));
         Assert.NotNull(coordinator.AcceptFinalTranscript(other, "turn-1", "separate session"));
-        Assert.Equal(EllaiVoiceTurnState.Processing, coordinator.GetSnapshot("session-1").State);
-        Assert.Equal(EllaiVoiceTurnState.Processing, coordinator.GetSnapshot("session-2").State);
+        Assert.Equal(EllaiVoiceTurnState.Listening, coordinator.GetSnapshot("session-1").State);
+        Assert.Equal(EllaiVoiceTurnState.Listening, coordinator.GetSnapshot("session-2").State);
+        Assert.Empty(coordinator.GetCompletedTurns("session-1"));
+        Assert.Empty(coordinator.GetCompletedTurns("session-2"));
     }
 
     [Fact]
@@ -235,6 +290,57 @@ public sealed class EllaiVoiceTurnCoordinatorTests
             ?.ActivePlaybackId);
     }
 
+    [Fact]
+    public void ClientBargeInMustMatchTheActiveStreamAndPlaybackAndBindsTheNextCompletedTurn()
+    {
+        var coordinator = new EllaiVoiceTurnCoordinator();
+        const string sessionId = "session-client-barge-in";
+        const long responseSequence = 12;
+        var playbackId = Guid.NewGuid();
+        var interruptionTurnId = Guid.NewGuid();
+        coordinator.SetAssistantPlayback(sessionId, responseSequence, playbackId, isPlaying: true);
+        using var stream = coordinator.BeginStream(sessionId, CancellationToken.None);
+
+        Assert.False(coordinator.ConfirmClientBargeIn(
+            sessionId, stream.Epoch + 1, responseSequence, playbackId, interruptionTurnId));
+        Assert.False(coordinator.ConfirmClientBargeIn(
+            sessionId, stream.Epoch, responseSequence + 1, playbackId, interruptionTurnId));
+        Assert.True(coordinator.ConfirmClientBargeIn(
+            sessionId, stream.Epoch, responseSequence, playbackId, interruptionTurnId));
+        Assert.Equal(EllaiVoiceTurnState.AssistantSpeaking, coordinator.GetSnapshot(sessionId).State);
+
+        for (var sequence = 0; sequence < 6; sequence++)
+        {
+            coordinator.ObserveAcousticFrame(stream, Speech(sequence), VadFrameDuration);
+        }
+        Assert.Equal(EllaiVoiceTurnState.UserSpeaking, coordinator.GetSnapshot(sessionId).State);
+
+        CompleteTurn(coordinator, stream, "muse-turn-1", "Actually, show urgent cases only.", 6);
+
+        var completed = Assert.Single(coordinator.GetCompletedTurns(sessionId));
+        Assert.Equal(interruptionTurnId, completed.TurnId);
+        Assert.Equal(stream.Epoch, completed.StreamEpoch);
+    }
+
     private static VoiceActivityResult Speech(long sequence) => new(sequence, 0.9f, true, false);
     private static VoiceActivityResult Silence(long sequence) => new(sequence, 0.05f, false, false);
+
+    private static void CompleteTurn(
+        EllaiVoiceTurnCoordinator coordinator,
+        EllaiVoiceTurnCoordinator.VoiceStreamLease stream,
+        string providerTurnId,
+        string transcript,
+        long firstSequence = 0)
+    {
+        for (var sequence = firstSequence; sequence < firstSequence + 4; sequence++)
+        {
+            coordinator.ObserveAcousticFrame(stream, Speech(sequence), VadFrameDuration);
+        }
+        for (var sequence = firstSequence + 4; sequence < firstSequence + 26; sequence++)
+        {
+            coordinator.ObserveAcousticFrame(stream, Silence(sequence), VadFrameDuration);
+        }
+
+        Assert.NotNull(stream.AcceptFinalTranscript(providerTurnId, transcript));
+    }
 }

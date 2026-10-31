@@ -597,7 +597,8 @@
           "Bit.Bonboarding": "[10.7.0, )",
           "Blazor.Lottie.Player": "[1.0.6, )",
           "MudBlazor": "[9.11.0, )",
-          "SwiftAid.Contracts": "[1.0.0, )"
+          "SwiftAid.Contracts": "[1.0.0, )",
+          "WebRtcVad.NET": "[1.0.0, )"
         }
       },
       "Bit.Bonboarding": {
@@ -794,6 +795,12 @@
           "RESPite": "3.4.20",
           "System.IO.Hashing": "10.0.13"
         }
+      },
+      "WebRtcVad.NET": {
+        "type": "CentralTransitive",
+        "requested": "[1.0.0, )",
+        "resolved": "1.0.0",
+        "contentHash": "vXvB0zKbTUjbD9BSQ8rboq4Usfgz3dFvb/Q23WsQv1G0EVYXTVZP148scmXMalsWIv7hYHF6IH8anAX3dZ+O3Q=="
       }
     }
   }

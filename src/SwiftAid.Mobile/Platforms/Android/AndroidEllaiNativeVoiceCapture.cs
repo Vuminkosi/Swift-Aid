@@ -1,7 +1,6 @@
 using Android.Media;
 using Android.Media.Audiofx;
 using Android.OS;
-using System.Diagnostics;
 using SwiftAid.UI.Ellai;
 
 namespace SwiftAid.Mobile.Platforms.Android;
@@ -12,8 +11,6 @@ namespace SwiftAid.Mobile.Platforms.Android;
 public sealed class AndroidEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, IAsyncDisposable
 {
     private const int TargetSampleRate = 24_000;
-    private const double BargeInRmsThreshold = 0.025;
-    private static readonly TimeSpan BargeInConfirmation = TimeSpan.FromMilliseconds(180);
     private readonly SemaphoreSlim _gate = new(1, 1);
     private AudioRecord? _record;
     private global::Android.Media.IAudioRoutingOnRoutingChangedListener? _routingChangedListener;
@@ -29,8 +26,8 @@ public sealed class AndroidEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, I
     private bool _disposed;
 
     public bool IsAvailable => !_disposed;
+    public bool IsEchoCancellationEnabled => _echoCanceler?.Enabled == true;
     public event Action<string>? Interrupted;
-    public event Action? SpeechDetected;
     public event Action? RouteChanged;
 
     public async Task<string> StartAsync(
@@ -264,8 +261,6 @@ public sealed class AndroidEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, I
         var inputRate = record.SampleRate;
         var samplesPerChunk = inputRate / 50;
         var samples = new short[samplesPerChunk];
-        var lastVoiceActivityTimestamp = Stopwatch.GetTimestamp();
-        var bargeInDetector = new EllaiSpeechConfirmation(BargeInRmsThreshold, BargeInConfirmation);
         try
         {
             while (!cancellationToken.IsCancellationRequested)
@@ -284,33 +279,6 @@ public sealed class AndroidEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, I
                     continue;
                 }
 
-                var voiceLevel = MeasureRms(samples.AsSpan(0, read));
-                if (voiceLevel >= 0.025)
-                {
-                    lastVoiceActivityTimestamp = Stopwatch.GetTimestamp();
-                }
-                else if (Stopwatch.GetElapsedTime(lastVoiceActivityTimestamp) >= TimeSpan.FromMinutes(1))
-                {
-                    Interrupted?.Invoke(
-                        "No speech detected. The microphone stopped; you can try again or type instead.");
-                    break;
-                }
-
-                if (bargeInDetector.Observe(
-                        voiceLevel,
-                        TimeSpan.FromSeconds(read / (double)inputRate),
-                        _echoCanceler?.Enabled == true))
-                {
-                    try
-                    {
-                        SpeechDetected?.Invoke();
-                    }
-                    catch (Exception)
-                    {
-                        // A UI listener must not stop the native capture loop.
-                    }
-                }
-
                 var pcm = ConvertToTargetRate(samples.AsSpan(0, read), inputRate);
                 try
                 {
@@ -326,22 +294,6 @@ public sealed class AndroidEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, I
         {
             Array.Clear(samples);
         }
-    }
-
-    private static double MeasureRms(ReadOnlySpan<short> samples)
-    {
-        if (samples.IsEmpty)
-        {
-            return 0;
-        }
-
-        double sumSquares = 0;
-        foreach (var sample in samples)
-        {
-            var normalized = sample / 32768d;
-            sumSquares += normalized * normalized;
-        }
-        return Math.Sqrt(sumSquares / samples.Length);
     }
 
     private static byte[] ConvertToTargetRate(ReadOnlySpan<short> input, int inputRate)

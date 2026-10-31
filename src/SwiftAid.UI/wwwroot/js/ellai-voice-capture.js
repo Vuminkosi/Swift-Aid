@@ -1,8 +1,7 @@
 const activeCaptures = new Set();
 const targetRate = 24000;
-const chunkSamples = 2048;
+const chunkSamples = 960;
 const maximumDurationMs = 8 * 60 * 1000;
-const noSpeechTimeoutMs = 60 * 1000;
 const maximumQueuedChunks = 8;
 
 export function isSupported() {
@@ -38,9 +37,9 @@ export async function startCapture(dotnet, showLiveVoiceLevel = false, sessionId
     const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
             channelCount: { ideal: 1 },
-            echoCancellation: { ideal: true },
-            noiseSuppression: { ideal: true },
-            autoGainControl: { ideal: true }
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
         },
         video: false
     });
@@ -68,17 +67,29 @@ export async function startCapture(dotnet, showLiveVoiceLevel = false, sessionId
     });
     const sink = context.createGain();
     sink.gain.value = 0;
-    const settings = stream.getAudioTracks()[0]?.getSettings?.() ?? {};
+    const track = stream.getAudioTracks()[0];
+    const settings = track?.getSettings?.() ?? {};
+    const unavailableProcessing = ["echoCancellation", "noiseSuppression", "autoGainControl"]
+        .filter(name => settings[name] !== true);
+    if (unavailableProcessing.length > 0) {
+        for (const audioTrack of stream.getTracks()) audioTrack.stop();
+        try { await context.close(); } catch { }
+        throw new Error(`Microphone processing is unavailable: ${unavailableProcessing.join(", " )}.`);
+    }
+    await dotnet.invokeMethodAsync(
+        "OnVoiceAudioProcessingChanged",
+        settings.echoCancellation === true,
+        settings.noiseSuppression === true,
+        settings.autoGainControl === true);
     const state = {
         stream, context, source, processor, sink, dotnet,
         showLiveVoiceLevel: showLiveVoiceLevel === true,
         sessionId,
-        playbackSessionId: "",
-        playbackSequence: 0,
-        playbackId: "",
-        echoCancellationEnabled: settings.echoCancellation === true,
-        bargeInTimer: 0,
-        bargeInSignaled: false,
+        audioProcessingSettings: {
+            echoCancellation: settings.echoCancellation === true,
+            noiseSuppression: settings.noiseSuppression === true,
+            autoGainControl: settings.autoGainControl === true
+        },
         voiceLevel: 0,
         active: true,
         pending: [],
@@ -86,8 +97,7 @@ export async function startCapture(dotnet, showLiveVoiceLevel = false, sessionId
         phase: 0,
         queue: Promise.resolve(),
         queuedChunks: 0,
-        limitTimer: 0,
-        noSpeechTimer: 0
+        limitTimer: 0
     };
 
     source.connect(processor);
@@ -97,14 +107,6 @@ export async function startCapture(dotnet, showLiveVoiceLevel = false, sessionId
     state.limitTimer = globalThis.setTimeout(() => {
         if (state.active) void dotnet.invokeMethodAsync("OnVoiceCaptureLimitReached");
     }, maximumDurationMs);
-    if (state.showLiveVoiceLevel) {
-        state.noSpeechTimer = globalThis.setTimeout(() => {
-            if (!state.active) return;
-            state.active = false;
-            void dotnet.invokeMethodAsync("OnVoiceCaptureNoSpeechTimeout");
-        }, noSpeechTimeoutMs);
-    }
-
     activeCaptures.add(state);
     const processing = ["echoCancellation", "noiseSuppression", "autoGainControl"]
         .map(name => `${name === "autoGainControl" ? "automatic gain control" : name.replace(/[A-Z]/g, value => ` ${value.toLowerCase()}`)} ${settings[name] === true ? "on" : settings[name] === false ? "off" : "not reported"}`)
@@ -117,7 +119,6 @@ function processAudio(state, input) {
 
     if (state.showLiveVoiceLevel) {
         updateLiveSpeakGlow(state, input);
-        if (state.voiceLevel >= 0.025) globalThis.clearTimeout(state.noSpeechTimer);
     }
 
     const ratio = state.context.sampleRate / targetRate;
@@ -147,24 +148,6 @@ function updateLiveSpeakGlow(state, input) {
     const rms = Math.sqrt(squaredTotal / Math.max(1, input.length));
     const normalizedLevel = Math.max(0, Math.min(1, (rms - 0.008) / 0.16));
     state.voiceLevel = state.voiceLevel * 0.58 + normalizedLevel * 0.42;
-
-    const bargeInCandidate = state.showLiveVoiceLevel
-        && state.echoCancellationEnabled
-        && state.playbackSessionId === state.sessionId
-        && state.voiceLevel >= 0.12;
-    if (!bargeInCandidate) {
-        globalThis.clearTimeout(state.bargeInTimer);
-        state.bargeInTimer = 0;
-        state.bargeInSignaled = false;
-    } else if (!state.bargeInTimer && !state.bargeInSignaled) {
-        state.bargeInTimer = globalThis.setTimeout(() => {
-            state.bargeInTimer = 0;
-            if (!state.active || state.playbackSessionId !== state.sessionId) return;
-            state.bargeInSignaled = true;
-            void state.dotnet.invokeMethodAsync(
-                "OnVoiceBargeInDetected", state.playbackSequence, state.playbackId).catch(() => { });
-        }, 180);
-    }
 
     for (const button of document.querySelectorAll('[data-ellai-live-speak="true"]')) {
         const visibleLevel = state.voiceLevel < 0.025 ? 0 : state.voiceLevel;
@@ -206,8 +189,6 @@ export async function stopCapture() {
         state.active = false;
         clearLiveSpeakGlow();
         globalThis.clearTimeout(state.limitTimer);
-        globalThis.clearTimeout(state.noSpeechTimer);
-        globalThis.clearTimeout(state.bargeInTimer);
         state.processor.port.onmessage = null;
         state.source.disconnect();
         state.processor.disconnect();
@@ -220,18 +201,6 @@ export async function stopCapture() {
         try { await state.context.close(); } catch { }
         await state.queue;
         activeCaptures.delete(state);
-    }
-}
-
-export function setPlaybackState(isPlaying, sessionId, sequence, playbackId) {
-    for (const state of activeCaptures) {
-        if (state.sessionId !== sessionId) continue;
-        state.playbackSessionId = isPlaying ? sessionId : "";
-        state.playbackSequence = isPlaying ? sequence : 0;
-        state.playbackId = isPlaying ? playbackId : "";
-        state.bargeInSignaled = false;
-        globalThis.clearTimeout(state.bargeInTimer);
-        state.bargeInTimer = 0;
     }
 }
 

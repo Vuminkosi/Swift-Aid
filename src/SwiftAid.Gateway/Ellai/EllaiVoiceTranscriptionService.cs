@@ -153,6 +153,8 @@ public sealed class EllaiVoiceTranscriptionService(
             var transcript = string.Empty;
             if (adapter is not null)
             {
+                var finalizedTurns = new List<(string ProviderTurnId, string Text)>();
+                var unscopedTurnSequence = 0L;
                 var vadStream = services.GetService<SileroVoiceActivityAudioStream>();
                 Channel<byte[]>? vadChunks = null;
                 Task? vadWorker = null;
@@ -170,7 +172,7 @@ public sealed class EllaiVoiceTranscriptionService(
 
                 try
                 {
-                    var result = await adapter.TranscribePcmAsync(
+                    await adapter.TranscribePcmAsync(
                         boundedAudio,
                         cancellationToken,
                         vadChunks is null
@@ -182,27 +184,21 @@ public sealed class EllaiVoiceTranscriptionService(
                                 System.Globalization.CultureInfo.InvariantCulture) ?? "unscoped";
                             turn?.ObservePartialTranscript(providerTurnId, partial.Text);
                             return ValueTask.CompletedTask;
+                        },
+                        (finalTurn, _) =>
+                        {
+                            var providerTurnId = finalTurn.TurnId?.ToString(
+                                System.Globalization.CultureInfo.InvariantCulture)
+                                ?? $"unscoped:{Interlocked.Increment(ref unscopedTurnSequence)}";
+                            var accepted = turn?.AcceptFinalTranscript(providerTurnId, finalTurn.Text);
+                            if (turn is null || accepted is not null)
+                            {
+                                finalizedTurns.Add((providerTurnId, accepted?.Text ?? finalTurn.Text.Trim()));
+                            }
+                            return ValueTask.CompletedTask;
                         })
                         .ConfigureAwait(false);
-                    var finalizedTurns = new List<string>();
-                    for (var index = 0; index < result.Turns.Count; index++)
-                    {
-                        var finalTurn = result.Turns[index];
-                        if (string.IsNullOrWhiteSpace(finalTurn.Text))
-                        {
-                            continue;
-                        }
-
-                        var providerTurnId = finalTurn.TurnId?.ToString(System.Globalization.CultureInfo.InvariantCulture)
-                            ?? $"{result.SessionId}:{index}";
-                        var accepted = turn?.AcceptFinalTranscript(providerTurnId, finalTurn.Text);
-                        if (turn is null || accepted is not null)
-                        {
-                            finalizedTurns.Add(accepted?.Text ?? finalTurn.Text.Trim());
-                        }
-                    }
-
-                    transcript = string.Join(" ", finalizedTurns);
+                    transcript = string.Join(" ", finalizedTurns.Select(turn => turn.Text));
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -222,6 +218,18 @@ public sealed class EllaiVoiceTranscriptionService(
                         await vadWorker.ConfigureAwait(false);
                     }
                     vadStream?.Dispose();
+                }
+
+                if (turn is not null)
+                {
+                    var completedProviderTurnIds = services.GetService<EllaiVoiceTurnCoordinator>()
+                        ?.GetCompletedTurns(turn.SessionId)
+                        .Select(completed => completed.ProviderTurnId)
+                        .ToHashSet(StringComparer.Ordinal)
+                        ?? [];
+                    transcript = string.Join(" ", finalizedTurns
+                        .Where(finalized => !completedProviderTurnIds.Contains(finalized.ProviderTurnId))
+                        .Select(finalized => finalized.Text));
                 }
             }
 
@@ -259,11 +267,20 @@ public sealed class EllaiVoiceTranscriptionService(
                             waveStream, "ellai-live-fallback.wav", "audio/wav", cancellationToken)
                             .ConfigureAwait(false);
                         var fallbackTranscript = result.Transcript.Trim();
+                        var fallbackProviderTurnId = $"{result.SessionId}:upload-fallback";
                         var acceptedFallback = turn?.AcceptFinalTranscript(
-                            $"{result.SessionId}:upload-fallback", fallbackTranscript);
+                            fallbackProviderTurnId, fallbackTranscript);
                         if (turn is null || acceptedFallback is not null)
                         {
-                            transcript = acceptedFallback?.Text ?? fallbackTranscript;
+                            var fallbackWasTurnCompleted = turn is not null
+                                && services.GetService<EllaiVoiceTurnCoordinator>()
+                                    ?.GetCompletedTurns(turn.SessionId)
+                                    .Any(completed => string.Equals(
+                                        completed.ProviderTurnId, fallbackProviderTurnId,
+                                        StringComparison.Ordinal)) == true;
+                            transcript = fallbackWasTurnCompleted
+                                ? string.Empty
+                                : acceptedFallback?.Text ?? fallbackTranscript;
                         }
                     }
                 }

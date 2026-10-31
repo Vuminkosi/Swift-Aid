@@ -87,8 +87,8 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
         ClientFor(sessionId).TranscribeLiveVoiceStreamAsync(sessionId, audio, cancellationToken);
 
     public Task<EllaiVoiceTurnStatusDto?> GetVoiceTurnStatusAsync(
-        string sessionId, CancellationToken cancellationToken) =>
-        ClientFor(sessionId).GetVoiceTurnStatusAsync(sessionId, cancellationToken);
+        string sessionId, CancellationToken cancellationToken, long afterSequence = 0) =>
+        ClientFor(sessionId).GetVoiceTurnStatusAsync(sessionId, cancellationToken, afterSequence);
 
     public async Task<EllaiSessionCancelResult> CancelSessionAsync(
         string sessionId, long expectedSessionVersion, CancellationToken cancellationToken)
@@ -125,8 +125,14 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
             sessionId, sequence, playbackId, cancellationToken);
 
     public Task<bool> InterruptResponseAudioAsync(
-        string sessionId, long sequence, string playbackId, CancellationToken cancellationToken) =>
-        ClientFor(sessionId).InterruptResponseAudioAsync(sessionId, sequence, playbackId, cancellationToken);
+        string sessionId,
+        long sequence,
+        string playbackId,
+        CancellationToken cancellationToken,
+        string? turnId = null,
+        long streamEpoch = 0) =>
+        ClientFor(sessionId).InterruptResponseAudioAsync(
+            sessionId, sequence, playbackId, cancellationToken, turnId, streamEpoch);
 
     public Task<EllaiResponseAudio?> DownloadListeningGreetingAudioAsync(
         string sessionId, CancellationToken cancellationToken) =>

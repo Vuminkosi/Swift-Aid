@@ -27,6 +27,7 @@
         <div class="ellai-composer__field-wrap">
             <MudTextField T="string" Value="@InputText" ValueChanged="OnInputChanged"
                           Label="Message Ellai" Placeholder="Ask Ellai…" MaxLength="8000" Lines="1" Sizing="InputSizing.Auto" MaxLines="5"
+                          Disabled="@(IsRecordingAudio || IsLiveSpeaking)"
                           Immediate="true"
                           @onkeydown="OnInputKeyDown" />
             <span class="ellai-composer__field-actions">
@@ -40,16 +41,16 @@
                     <MudIconButton Icon="@Icons.Material.Filled.Mic" Color="Color.Default" Size="Size.Small"
                                    OnClick="OnStartVoice"
                                    Disabled="@(!CanUseMicrophone || !OnStartVoice.HasDelegate || IsLiveSpeaking)"
-                                   aria-label="@(CanUseMicrophone && OnStartVoice.HasDelegate ? "Record audio for transcription" : "Audio transcription unavailable")"
-                                   title="@(CanUseMicrophone && OnStartVoice.HasDelegate ? "Record audio for transcription" : "Audio transcription is unavailable")" />
+                                   aria-label="@(CanUseMicrophone && OnStartVoice.HasDelegate ? "Record a voice question" : "Voice recording unavailable")"
+                                   title="@(CanUseMicrophone && OnStartVoice.HasDelegate ? "After you stop recording, Ellai transcribes and sends your question automatically." : "Voice recording is unavailable.")" />
                 }
                 @if (IsLiveSpeaking && OnStopVoice.HasDelegate)
                 {
                     <MudIconButton Icon="@Icons.Material.Filled.GraphicEq" Color="Color.Primary"
                                    Class="ellai-composer__live-speak ellai-composer__live-speak--active"
                                    OnClick="OnStopVoice" data-ellai-live-speak="true"
-                                   aria-pressed="true" aria-label="Finish this voice turn now"
-                                   title="Listening. Select to finish and transcribe this turn." />
+                                   aria-pressed="true" aria-label="Finish and send this voice turn now"
+                                   title="Listening. Pause to send automatically, or select to finish now." />
                 }
                 else if (string.IsNullOrWhiteSpace(InputText))
                 {
@@ -58,8 +59,8 @@
                                    OnClick="OnStartRealtimeVoice"
                                    Disabled="@(!CanUseRealtimeMicrophone || !OnStartRealtimeVoice.HasDelegate)"
                                    data-ellai-audio-unlock="true"
-                                   aria-label="@(CanUseRealtimeMicrophone && OnStartRealtimeVoice.HasDelegate ? "Start realtime voice dialog" : "Realtime voice dialog unavailable")"
-                                   title="@(CanUseRealtimeMicrophone && OnStartRealtimeVoice.HasDelegate ? "Start realtime voice dialog" : "Realtime voice dialog is unavailable")" />
+                                   aria-label="@(CanUseRealtimeMicrophone && OnStartRealtimeVoice.HasDelegate ? "Start live voice question" : "Live voice question unavailable")"
+                                   title="@(CanUseRealtimeMicrophone && OnStartRealtimeVoice.HasDelegate ? "Speak normally. A pause finishes and sends your question automatically." : "Live voice questions are unavailable.")" />
                 }
                 else
                 {

@@ -22,29 +22,6 @@ namespace SwiftAid.Ui.Tests;
 public sealed class EllaiSurfaceLogicTests
 {
     [Fact]
-    public void LocalBargeInRequiresSustainedSpeechAndActiveEchoCancellation()
-    {
-        var detector = new EllaiSpeechConfirmation(0.025, TimeSpan.FromMilliseconds(180));
-        var frame = TimeSpan.FromMilliseconds(20);
-
-        for (var index = 0; index < 8; index++)
-        {
-            Assert.False(detector.Observe(0.08, frame, echoCancellationEnabled: true));
-        }
-        Assert.False(detector.Observe(0.08, frame, echoCancellationEnabled: false));
-        Assert.False(detector.Observe(0.08, TimeSpan.FromMilliseconds(160), echoCancellationEnabled: true));
-        Assert.True(detector.Observe(0.08, frame, echoCancellationEnabled: true));
-        Assert.False(detector.Observe(0.08, frame, echoCancellationEnabled: true));
-        Assert.False(detector.Observe(0.01, frame, echoCancellationEnabled: true));
-
-        for (var index = 0; index < 8; index++)
-        {
-            Assert.False(detector.Observe(0.08, frame, echoCancellationEnabled: true));
-        }
-        Assert.True(detector.Observe(0.08, frame, echoCancellationEnabled: true));
-    }
-
-    [Fact]
     public async Task PublicLayoutExposesOnlyGuestAskModeToUnauthenticatedVisitors()
     {
         var markup = await RenderPublicLayoutAsync();
@@ -84,13 +61,19 @@ public sealed class EllaiSurfaceLogicTests
     }
 
     [Fact]
-    public async Task LiveCaptureCanStartAlongsideEllaiPlaybackForBargeIn()
+    public async Task LiveCaptureKeepsPlaybackUntilGatewayConfirmsSpeech()
     {
+        var statusReads = 0;
         var streamCompletion = new TaskCompletionSource<EllaiVoiceTranscriptionResult?>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         var client = new FakeReviewClient
         {
             LiveTranscriptionHandler = (_, _) => streamCompletion.Task,
+            VoiceTurnStatusHandler = (_, _) =>
+            {
+                var state = Interlocked.Increment(ref statusReads) == 1 ? "Listening" : "UserSpeaking";
+                return Task.FromResult<EllaiVoiceTurnStatusDto?>(new(state, 1, 320, 0, null));
+            },
         };
         using var host = await CreateHost(client, CreateSession(version: 1), string.Empty);
         var captureModule = new RecordingJsModule();
@@ -109,16 +92,19 @@ public sealed class EllaiSurfaceLogicTests
             $"Response playback was cancelled. Status: {GetField<string?>(host, "StatusText")}");
         Assert.Equal(7L, GetField<long>(host, "_activeResponseSequence"));
         Assert.Equal(playbackId, GetField<string?>(host, "_activeResponsePlaybackId"));
-        Assert.Contains("setPlaybackState", captureModule.Invocations);
         Assert.Contains("I’m listening while Ellai speaks", GetField<string?>(host, "StatusText"),
             StringComparison.Ordinal);
 
-        await InvokeAsync(host, "OnVoiceBargeInDetected", 7L, playbackId);
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (GetField<bool>(host, "_isPlayingResponse") && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(10);
+        }
 
         Assert.False(GetField<bool>(host, "_isPlayingResponse"));
         Assert.True(GetField<bool>(host, "_isRecordingAudio"));
-        Assert.Contains("You interrupted Ellai", GetField<string?>(host, "StatusText"),
-            StringComparison.Ordinal);
+        Assert.Contains("listening to your message", GetField<string?>(host, "StatusText"),
+            StringComparison.OrdinalIgnoreCase);
 
         streamCompletion.SetResult(null);
         await InvokeAsync(host, "StopAndDiscardVoiceCaptureAsync");
@@ -155,30 +141,6 @@ public sealed class EllaiSurfaceLogicTests
     }
 
     [Fact]
-    public async Task NativeSpeechCallbackStopsMatchingPlaybackWhileCaptureContinues()
-    {
-        using var host = await CreateHost(new FakeReviewClient(), CreateSession(version: 1), string.Empty);
-        SetField(host, "_isRecordingAudio", true);
-        SetField(host, "_captureMode", EllaiVoiceCaptureMode.Live);
-        SetField(host, "_isPlayingResponse", true);
-        SetField(host, "_activeResponseSequence", 9L);
-        SetField(host, "_activeResponsePlaybackId", "native-playback");
-
-        await InvokeAsync(host, "OnNativeVoiceSpeechDetected");
-
-        var deadline = DateTime.UtcNow.AddSeconds(2);
-        while (GetField<bool>(host, "_isPlayingResponse") && DateTime.UtcNow < deadline)
-        {
-            await Task.Delay(10);
-        }
-
-        Assert.False(GetField<bool>(host, "_isPlayingResponse"));
-        Assert.True(GetField<bool>(host, "_isRecordingAudio"));
-        Assert.Contains("You interrupted Ellai", GetField<string?>(host, "StatusText"),
-            StringComparison.Ordinal);
-    }
-
-    [Fact]
     public async Task InterruptedLiveStreamRetriesPcmOnceAndSubmitsTranscriptOnce()
     {
         var client = new FakeReviewClient(
@@ -205,6 +167,123 @@ public sealed class EllaiSurfaceLogicTests
         Assert.Equal(new byte[] { 0xD2, 0x04, 0xD7, 0xF6 }, recovery.Audio);
         var submitted = Assert.Single(client.Submissions);
         Assert.Equal("recovered words", submitted.FinalizedText);
+    }
+
+    [Fact]
+    public async Task RecordedVoiceTranscriptUsesTheSameAutomaticSubmissionFlowAsLiveVoice()
+    {
+        var client = new FakeReviewClient(
+            new EllaiUtteranceSubmitResult(
+                EllaiClientOperationStatus.Accepted,
+                CreateSession(version: 2)))
+        {
+            VoiceTranscriptionHandler = (_, _, _, _) =>
+                Task.FromResult<EllaiVoiceTranscriptionResult?>(new("Can I submit a report without an account?")),
+        };
+        using var host = await CreateHost(client, CreateSession(version: 1), string.Empty);
+        SetField(host, "_publicProductHelpConsentGranted", true);
+        SetField(host, "_capturedPcm", new MemoryStream([1, 2, 3, 4]));
+        SetField(host, "_captureMode", EllaiVoiceCaptureMode.Recorded);
+        SetField(host, "_isRecordingAudio", true);
+
+        await InvokeAsync(host, "StopVoiceCaptureAsync");
+
+        Assert.Equal(EllaiVoiceCaptureMode.Recorded, Assert.Single(client.VoiceTranscriptions).Mode);
+        var submitted = Assert.Single(client.Submissions);
+        Assert.Equal("Can I submit a report without an account?", submitted.FinalizedText);
+        Assert.Null(GetField<string?>(host, "InputText"));
+        Assert.Contains("Your message was accepted", GetField<string?>(host, "StatusText"),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ConfirmedGatewayTurnAutoSubmitsAndKeepsTheMicrophoneSessionOpen()
+    {
+        var client = new FakeReviewClient(
+            new EllaiUtteranceSubmitResult(
+                EllaiClientOperationStatus.Accepted,
+                CreateSession(version: 2)))
+        {
+            VoiceTurnStatusHandler = (_, _) => Task.FromResult<EllaiVoiceTurnStatusDto?>(new(
+                "TurnCompleted", 1, 1_200, 800, null,
+                [new EllaiCompletedVoiceTurnDto(1, "muse-turn-1", "How do I follow up on a report?")])),
+        };
+        using var host = await CreateHost(client, CreateSession(version: 1), string.Empty);
+        SetField(host, "_publicProductHelpConsentGranted", true);
+        SetField(host, "_capturedPcm", new MemoryStream());
+        SetField(host, "_captureMode", EllaiVoiceCaptureMode.Live);
+        SetField(host, "_isRecordingAudio", true);
+        SetField(host, "_voiceNetworkOnline", true);
+        await InvokeAsync(host, "StartVoiceTurnStatusPollingAsync", "session-1");
+
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (client.Submissions.Count == 0 && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(10);
+        }
+
+        Assert.Equal("How do I follow up on a report?", Assert.Single(client.Submissions).FinalizedText);
+        Assert.True(GetField<bool>(host, "_isRecordingAudio"));
+        Assert.Equal(EllaiVoiceCaptureMode.Live, GetField<EllaiVoiceCaptureMode?>(host, "_captureMode"));
+        await InvokeAsync(host, "SubmitConfirmedGatewayVoiceTurnsAsync",
+            new EllaiVoiceTurnStatusDto("TurnCompleted", 1, 1_200, 800, null,
+                [new EllaiCompletedVoiceTurnDto(1, "muse-turn-1", "How do I follow up on a report?")]),
+            "session-1", false);
+        Assert.Single(client.Submissions);
+        await InvokeAsync(host, "StopVoiceTurnStatusPollingAsync");
+    }
+
+    [Fact]
+    public async Task EndpointCandidateWithoutCompletedTurnDoesNotSubmitOrStopCapture()
+    {
+        var client = new FakeReviewClient
+        {
+            VoiceTurnStatusHandler = (_, _) => Task.FromResult<EllaiVoiceTurnStatusDto?>(
+                new("EndpointCandidate", 1, 1_200, 800, "unfinished words")),
+        };
+        using var host = await CreateHost(client, CreateSession(version: 1), string.Empty);
+        SetField(host, "_captureMode", EllaiVoiceCaptureMode.Live);
+        SetField(host, "_isRecordingAudio", true);
+
+        await InvokeAsync(host, "StartVoiceTurnStatusPollingAsync", "session-1");
+        await Task.Delay(50);
+        await InvokeAsync(host, "StopVoiceTurnStatusPollingAsync");
+
+        Assert.Empty(client.Submissions);
+        Assert.True(GetField<bool>(host, "_isRecordingAudio"));
+    }
+
+    [Fact]
+    public async Task ReconnectedProviderEpochSubmitsTheNextSessionSequenceOnceWithItsStableTurnId()
+    {
+        var turnId = Guid.NewGuid();
+        var client = new FakeReviewClient(
+            new EllaiUtteranceSubmitResult(
+                EllaiClientOperationStatus.Accepted,
+                CreateSession(version: 2)));
+        using var host = await CreateHost(client, CreateSession(version: 1), string.Empty);
+        SetField(host, "_publicProductHelpConsentGranted", true);
+        SetField(host, "_captureMode", EllaiVoiceCaptureMode.Live);
+        SetField(host, "_isRecordingAudio", true);
+        SetField(host, "_voiceTurnCursorSessionId", "session-1");
+        SetField(host, "_lastCompletedVoiceTurnSequence", 4L);
+        SetField(host, "_lastVoiceTurnStatusEpoch", 1L);
+
+        var status = new EllaiVoiceTurnStatusDto(
+            "TurnCompleted", 2, 900, 700, null,
+            [new EllaiCompletedVoiceTurnDto(
+                5, "muse-turn-1", "Actually, show only urgent cases.",
+                "session-1", turnId.ToString("N"), 2)],
+            "session-1");
+
+        await InvokeAsync(host, "SubmitConfirmedGatewayVoiceTurnsAsync", status, "session-1", false);
+        await InvokeAsync(host, "SubmitConfirmedGatewayVoiceTurnsAsync", status, "session-1", false);
+
+        var submitted = Assert.Single(client.Submissions);
+        Assert.Equal("Actually, show only urgent cases.", submitted.FinalizedText);
+        Assert.Equal(turnId.ToString("N"), submitted.ClientUtteranceId);
+        Assert.True(GetField<bool>(host, "_isRecordingAudio"));
+        Assert.Equal(5L, GetField<long>(host, "_lastCompletedVoiceTurnSequence"));
     }
 
     [Fact]
@@ -402,7 +481,7 @@ public sealed class EllaiSurfaceLogicTests
             onStartRealtimeVoice: EventCallback.Factory.Create(new object(), () => Task.CompletedTask),
             isLiveSpeaking: false);
 
-        Assert.Contains("aria-label=\"Start realtime voice dialog\"", markup, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Start live voice question\"", markup, StringComparison.Ordinal);
         Assert.DoesNotContain("aria-label=\"Send to Ellai\"", markup, StringComparison.Ordinal);
     }
 
@@ -412,8 +491,8 @@ public sealed class EllaiSurfaceLogicTests
         var markup = await RenderComposerAsync(inputText: string.Empty, canUseMicrophone: false,
             isLiveSpeaking: false);
 
-        Assert.Contains("aria-label=\"Realtime voice dialog unavailable\"", markup, StringComparison.Ordinal);
-        Assert.Matches("""(?s)<button(?=[^>]*aria-label="Realtime voice dialog unavailable")(?=[^>]*disabled)[^>]*>""", markup);
+        Assert.Contains("aria-label=\"Live voice question unavailable\"", markup, StringComparison.Ordinal);
+        Assert.Matches("""(?s)<button(?=[^>]*aria-label="Live voice question unavailable")(?=[^>]*disabled)[^>]*>""", markup);
         Assert.DoesNotContain("aria-label=\"Send to Ellai\"", markup, StringComparison.Ordinal);
     }
 
@@ -428,9 +507,9 @@ public sealed class EllaiSurfaceLogicTests
             onStartRealtimeVoice: callback,
             isLiveSpeaking: false);
 
-        Assert.Matches("""(?s)<button(?=[^>]*aria-label="Audio transcription unavailable")(?=[^>]*disabled)[^>]*>""", markup);
-        Assert.Contains("aria-label=\"Start realtime voice dialog\"", markup, StringComparison.Ordinal);
-        Assert.DoesNotContain("aria-label=\"Realtime voice dialog unavailable\"", markup, StringComparison.Ordinal);
+        Assert.Matches("""(?s)<button(?=[^>]*aria-label="Voice recording unavailable")(?=[^>]*disabled)[^>]*>""", markup);
+        Assert.Contains("aria-label=\"Start live voice question\"", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("aria-label=\"Live voice question unavailable\"", markup, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -446,8 +525,8 @@ public sealed class EllaiSurfaceLogicTests
             isLiveSpeaking: false);
 
         var fieldActionsStart = markup.IndexOf("ellai-composer__field-actions", StringComparison.Ordinal);
-        var microphoneIndex = markup.IndexOf("Record audio for transcription", fieldActionsStart, StringComparison.Ordinal);
-        var liveVoiceIndex = markup.IndexOf("Start realtime voice dialog", fieldActionsStart, StringComparison.Ordinal);
+        var microphoneIndex = markup.IndexOf("Record a voice question", fieldActionsStart, StringComparison.Ordinal);
+        var liveVoiceIndex = markup.IndexOf("Start live voice question", fieldActionsStart, StringComparison.Ordinal);
         Assert.True(microphoneIndex > fieldActionsStart);
         Assert.True(liveVoiceIndex > microphoneIndex);
 
@@ -1243,7 +1322,7 @@ public sealed class EllaiSurfaceLogicTests
         public int VoiceTurnStatusReads { get; private set; }
 
         public Task<EllaiVoiceTurnStatusDto?> GetVoiceTurnStatusAsync(
-            string sessionId, CancellationToken cancellationToken)
+            string sessionId, CancellationToken cancellationToken, long afterSequence = 0)
         {
             VoiceTurnStatusReads++;
             return VoiceTurnStatusHandler?.Invoke(sessionId, cancellationToken)

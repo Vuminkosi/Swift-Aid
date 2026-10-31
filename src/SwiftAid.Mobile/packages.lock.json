@@ -1926,7 +1926,8 @@
           "Microsoft.AspNetCore.Components.Authorization": "[10.0.14, )",
           "Microsoft.AspNetCore.Components.Web": "[10.0.14, )",
           "MudBlazor": "[9.11.0, )",
-          "SwiftAid.Contracts": "[1.0.0, )"
+          "SwiftAid.Contracts": "[1.0.0, )",
+          "WebRtcVad.NET": "[1.0.0, )"
         }
       },
       "Bit.Bonboarding": {
@@ -2024,6 +2025,12 @@
           "SQLitePCLRaw.bundle_e_sqlite3": "2.1.13",
           "SQLitePCLRaw.core": "2.1.13"
         }
+      },
+      "WebRtcVad.NET": {
+        "type": "CentralTransitive",
+        "requested": "[1.0.0, )",
+        "resolved": "1.0.0",
+        "contentHash": "vXvB0zKbTUjbD9BSQ8rboq4Usfgz3dFvb/Q23WsQv1G0EVYXTVZP148scmXMalsWIv7hYHF6IH8anAX3dZ+O3Q=="
       }
     },
     "net10.0-android36.0/android-arm64": {},
@@ -2634,7 +2641,8 @@
           "Microsoft.AspNetCore.Components.Authorization": "[10.0.14, )",
           "Microsoft.AspNetCore.Components.Web": "[10.0.14, )",
           "MudBlazor": "[9.11.0, )",
-          "SwiftAid.Contracts": "[1.0.0, )"
+          "SwiftAid.Contracts": "[1.0.0, )",
+          "WebRtcVad.NET": "[1.0.0, )"
         }
       },
       "Bit.Bonboarding": {
@@ -2732,6 +2740,12 @@
           "SQLitePCLRaw.bundle_e_sqlite3": "2.1.13",
           "SQLitePCLRaw.core": "2.1.13"
         }
+      },
+      "WebRtcVad.NET": {
+        "type": "CentralTransitive",
+        "requested": "[1.0.0, )",
+        "resolved": "1.0.0",
+        "contentHash": "vXvB0zKbTUjbD9BSQ8rboq4Usfgz3dFvb/Q23WsQv1G0EVYXTVZP148scmXMalsWIv7hYHF6IH8anAX3dZ+O3Q=="
       }
     },
     "net10.0-ios26.5/android-arm64": {},

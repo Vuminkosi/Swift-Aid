@@ -257,7 +257,7 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
     }
 
     public async Task<EllaiVoiceTurnStatusDto?> GetVoiceTurnStatusAsync(
-        string sessionId, CancellationToken cancellationToken)
+        string sessionId, CancellationToken cancellationToken, long afterSequence = 0)
     {
         if (string.IsNullOrWhiteSpace(sessionId))
         {
@@ -267,7 +267,7 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
         try
         {
             using var response = await _http.GetAsync(
-                $"{SessionRoute(sessionId)}/voice/state", cancellationToken).ConfigureAwait(false);
+                $"{SessionRoute(sessionId)}/voice/state?afterSequence={afterSequence}", cancellationToken).ConfigureAwait(false);
             return response.IsSuccessStatusCode
                 ? await response.Content.ReadFromJsonAsync<EllaiVoiceTurnStatusDto>(Json, cancellationToken)
                     .ConfigureAwait(false)
@@ -473,7 +473,12 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
     }
 
     public async Task<bool> InterruptResponseAudioAsync(
-        string sessionId, long sequence, string playbackId, CancellationToken cancellationToken)
+        string sessionId,
+        long sequence,
+        string playbackId,
+        CancellationToken cancellationToken,
+        string? turnId = null,
+        long streamEpoch = 0)
     {
         if (sequence < 1 || !Guid.TryParseExact(playbackId, "N", out _))
         {
@@ -482,8 +487,14 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
 
         try
         {
+            var route = $"{SessionRoute(sessionId)}/responses/{sequence}/audio/{Uri.EscapeDataString(playbackId)}/interrupt";
+            if (!string.IsNullOrWhiteSpace(turnId) && streamEpoch > 0)
+            {
+                route += $"?turnId={Uri.EscapeDataString(turnId)}&streamEpoch={streamEpoch}";
+            }
+
             using var response = await PostAsJsonAsync(
-                $"{SessionRoute(sessionId)}/responses/{sequence}/audio/{Uri.EscapeDataString(playbackId)}/interrupt",
+                route,
                 new { }, cancellationToken).ConfigureAwait(false);
             return response.IsSuccessStatusCode;
         }

@@ -14,5 +14,6 @@
     <PackageReference Include="Microsoft.AspNetCore.Components.Web" />
     <PackageReference Include="MudBlazor" />
     <PackageReference Include="Blazor.Lottie.Player" />
+    <PackageReference Include="WebRtcVad.NET" />
   </ItemGroup>
 </Project>

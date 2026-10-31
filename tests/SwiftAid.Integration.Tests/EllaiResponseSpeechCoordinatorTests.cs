@@ -83,6 +83,54 @@ public sealed class EllaiResponseSpeechCoordinatorTests
         Assert.Equal(EllaiVoiceTurnState.Interrupted, turnCoordinator.GetSnapshot(sessionId).State);
     }
 
+    [Fact]
+    public async Task ClientBargeInCandidateLeavesServerSpeechRunningUntilGatewayVadConfirms()
+    {
+        const string sessionId = "session-client-candidate";
+        const long sequence = 1;
+        var playbackId = Guid.NewGuid();
+        var interruptionTurnId = Guid.NewGuid();
+        var responses = new EllaiSessionResponseStore();
+        responses.Publish(sessionId, "turn-3", "Assigned cases");
+        var speechStream = new BlockingReadStream();
+        var speech = new BlockingSpeechSynthesisClient(speechStream);
+        var speechCoordinator = new EllaiResponseSpeechCoordinator();
+        var turnCoordinator = new EllaiVoiceTurnCoordinator();
+        var voiceStream = turnCoordinator.BeginStream(sessionId, CancellationToken.None);
+        var http = new DefaultHttpContext();
+        http.Response.Body = new MemoryStream();
+
+        var audio = await EllaiGuestEndpoints.StreamResponseAudioAsync(
+            sessionId, sequence, http, responses, speech, speechCoordinator, turnCoordinator, playbackId);
+        var execution = audio.ExecuteAsync(http);
+        await speechStream.ReadStarted.WaitAsync(TimeSpan.FromSeconds(2));
+
+        var candidate = EllaiGuestEndpoints.InterruptResponseAudioAsync(
+            sessionId, sequence, playbackId, responses, speechCoordinator, turnCoordinator,
+            interruptionTurnId.ToString("N"), voiceStream.Epoch);
+
+        Assert.Equal(StatusCodes.Status204NoContent,
+            Assert.IsAssignableFrom<IStatusCodeHttpResult>(candidate).StatusCode);
+        Assert.False(speech.SynthesisToken.IsCancellationRequested);
+        Assert.Equal(EllaiVoiceTurnState.AssistantSpeaking, turnCoordinator.GetSnapshot(sessionId).State);
+
+        EllaiBargeInDecision? confirmed = null;
+        for (var sequenceNumber = 0; sequenceNumber < 6; sequenceNumber++)
+        {
+            confirmed = turnCoordinator.ObserveAcousticFrame(
+                voiceStream,
+                new VoiceActivityResult(sequenceNumber, 0.9f, true, false),
+                TimeSpan.FromMilliseconds(32));
+        }
+
+        Assert.NotNull(confirmed);
+        Assert.True(speechCoordinator.Interrupt(
+            confirmed.SessionId, confirmed.ResponseSequence, confirmed.PlaybackId));
+        await execution.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.True(speech.SynthesisToken.IsCancellationRequested);
+        Assert.Equal(EllaiVoiceTurnState.UserSpeaking, turnCoordinator.GetSnapshot(sessionId).State);
+    }
+
     private sealed class BlockingSpeechSynthesisClient(BlockingReadStream stream) : IEllaiSpeechSynthesisClient
     {
         public bool IsConfigured => true;

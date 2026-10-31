@@ -14,14 +14,27 @@ public enum EllaiVoiceCaptureMode
 
 public sealed record EllaiVoiceTranscriptionResult(string Transcript);
 
-/// <summary>Transient state for the active voice stream. Contains no audio or
-/// transcript content and is scoped to the owning Ellai session.</summary>
+/// <summary>Transient state for the active voice stream, scoped to the owning
+/// Ellai session. Completed transcripts are returned only to that session owner.</summary>
 public sealed record EllaiVoiceTurnStatusDto(
     string State,
     long Epoch,
     int ConfirmedSpeechMilliseconds,
     int SilenceMilliseconds,
-    string? PartialTranscript);
+    string? PartialTranscript,
+    IReadOnlyList<EllaiCompletedVoiceTurnDto>? CompletedTurns = null,
+    string? SessionId = null);
+
+/// <summary>A provider-final transcript confirmed by Gateway Silero endpointing.
+/// Sequence is monotonic for the parent Ellai session across provider stream reconnects.</summary>
+public sealed record EllaiCompletedVoiceTurnDto(
+    long Sequence,
+    string ProviderTurnId,
+    string Transcript,
+    string? SessionId = null,
+    string? TurnId = null,
+    long StreamEpoch = 0,
+    string Kind = "TurnCompleted");
 
 /// <summary>Session UI event as delivered by the review event transport.</summary>
 public sealed record EllaiSessionEventDto(
@@ -181,7 +194,7 @@ public interface IEllaiReviewClient
         Task.FromResult<EllaiVoiceTranscriptionResult?>(null);
 
     Task<EllaiVoiceTurnStatusDto?> GetVoiceTurnStatusAsync(
-        string sessionId, CancellationToken cancellationToken) =>
+        string sessionId, CancellationToken cancellationToken, long afterSequence = 0) =>
         Task.FromResult<EllaiVoiceTurnStatusDto?>(null);
 
     Task<EllaiSessionCancelResult> CancelSessionAsync(
@@ -217,7 +230,12 @@ public interface IEllaiReviewClient
     }
 
     Task<bool> InterruptResponseAudioAsync(
-        string sessionId, long sequence, string playbackId, CancellationToken cancellationToken) =>
+        string sessionId,
+        long sequence,
+        string playbackId,
+        CancellationToken cancellationToken,
+        string? turnId = null,
+        long streamEpoch = 0) =>
         Task.FromResult(false);
 
     Task<EllaiResponseAudio?> DownloadListeningGreetingAudioAsync(

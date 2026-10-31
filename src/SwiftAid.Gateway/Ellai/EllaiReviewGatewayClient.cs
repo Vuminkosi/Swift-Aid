@@ -291,7 +291,7 @@ public sealed class EllaiReviewGatewayClient(
     }
 
     public async Task<EllaiVoiceTurnStatusDto?> GetVoiceTurnStatusAsync(
-        string sessionId, CancellationToken cancellationToken)
+        string sessionId, CancellationToken cancellationToken, long afterSequence = 0)
     {
         if (string.IsNullOrWhiteSpace(sessionId)
             || !await OwnsSessionAsync(sessionId, cancellationToken).ConfigureAwait(false))
@@ -308,7 +308,17 @@ public sealed class EllaiReviewGatewayClient(
         var snapshot = coordinator.GetSnapshot(sessionId);
         return new EllaiVoiceTurnStatusDto(snapshot.State.ToString(), snapshot.Epoch,
             ToMilliseconds(snapshot.ConfirmedSpeech), ToMilliseconds(snapshot.Silence),
-            snapshot.PartialTranscript);
+            snapshot.PartialTranscript,
+            coordinator.GetCompletedTurns(sessionId, afterSequence)
+                .Select(turn => new EllaiCompletedVoiceTurnDto(
+                    turn.Sequence,
+                    turn.ProviderTurnId,
+                    turn.Transcript,
+                    sessionId,
+                    turn.TurnId.ToString("N"),
+                    turn.StreamEpoch))
+                .ToArray(),
+            snapshot.SessionId);
     }
 
     private static int ToMilliseconds(TimeSpan duration) =>
@@ -409,7 +419,12 @@ public sealed class EllaiReviewGatewayClient(
     }
 
     public async Task<bool> InterruptResponseAudioAsync(
-        string sessionId, long sequence, string playbackId, CancellationToken cancellationToken)
+        string sessionId,
+        long sequence,
+        string playbackId,
+        CancellationToken cancellationToken,
+        string? turnId = null,
+        long streamEpoch = 0)
     {
         if (sequence < 1 || !Guid.TryParseExact(playbackId, "N", out var parsedPlaybackId)
             || !await OwnsSessionAsync(sessionId, cancellationToken).ConfigureAwait(false))
@@ -425,11 +440,35 @@ public sealed class EllaiReviewGatewayClient(
             return false;
         }
 
-        var interrupted = _serviceProvider.GetService<EllaiResponseSpeechCoordinator>()
-            ?.Interrupt(sessionId, sequence, parsedPlaybackId) == true;
-        _serviceProvider.GetService<EllaiVoiceTurnCoordinator>()
-            ?.InterruptPlayback(sessionId, sequence, parsedPlaybackId);
-        return interrupted;
+        var turnCoordinator = _serviceProvider.GetService<EllaiVoiceTurnCoordinator>();
+        var clientConfirmed = false;
+        if (!string.IsNullOrWhiteSpace(turnId) || streamEpoch > 0)
+        {
+            if (!Guid.TryParse(turnId, out var parsedTurnId) || streamEpoch < 1
+                || turnCoordinator is null)
+            {
+                return false;
+            }
+
+            clientConfirmed = turnCoordinator.ConfirmClientBargeIn(
+                sessionId, streamEpoch, sequence, parsedPlaybackId, parsedTurnId);
+            if (!clientConfirmed)
+            {
+                return false;
+            }
+        }
+
+        // Local VAD only registers a candidate identity. Silero confirms it
+        // from the continuing microphone stream before response generation is
+        // cancelled. Calls without client-turn identity are explicit stops.
+        var interrupted = false;
+        if (!clientConfirmed)
+        {
+            turnCoordinator?.InterruptPlayback(sessionId, sequence, parsedPlaybackId);
+            interrupted = _serviceProvider.GetService<EllaiResponseSpeechCoordinator>()
+                ?.Interrupt(sessionId, sequence, parsedPlaybackId) == true;
+        }
+        return interrupted || clientConfirmed;
     }
 
     public async Task<EllaiReviewDto?> GetActiveReviewAsync(string sessionId, CancellationToken cancellationToken)

@@ -68,7 +68,11 @@ public sealed class MetaAsrRealtimeTranscriptCollector
     }
 
     public bool TryAppend(string json)
+        => TryAppend(json, out _);
+
+    public bool TryAppend(string json, out MetaAsrRealtimeTranscript? appended)
     {
+        appended = null;
         if (string.IsNullOrWhiteSpace(json))
         {
             return false;
@@ -104,7 +108,8 @@ public sealed class MetaAsrRealtimeTranscriptCollector
                     return false;
                 }
 
-                _transcripts.Add(new MetaAsrRealtimeTranscript(turnId, transcript));
+                appended = new MetaAsrRealtimeTranscript(turnId, transcript);
+                _transcripts.Add(appended);
                 return true;
             }
 
@@ -129,7 +134,8 @@ public sealed class MetaAsrRealtimeTranscriptCollector
                 finalTurnId = parsedTurnId;
             }
 
-            _transcripts.Add(new MetaAsrRealtimeTranscript(finalTurnId, transcript));
+            appended = new MetaAsrRealtimeTranscript(finalTurnId, transcript);
+            _transcripts.Add(appended);
             return true;
         }
         catch (JsonException)

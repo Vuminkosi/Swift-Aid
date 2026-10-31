@@ -56,6 +56,12 @@
           "Microsoft.Extensions.Localization": "10.0.1"
         }
       },
+      "WebRtcVad.NET": {
+        "type": "Direct",
+        "requested": "[1.0.0, )",
+        "resolved": "1.0.0",
+        "contentHash": "vXvB0zKbTUjbD9BSQ8rboq4Usfgz3dFvb/Q23WsQv1G0EVYXTVZP148scmXMalsWIv7hYHF6IH8anAX3dZ+O3Q=="
+      },
       "Microsoft.AspNetCore.Authorization": {
         "type": "Transitive",
         "resolved": "10.0.14",

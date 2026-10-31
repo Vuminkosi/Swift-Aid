@@ -41,7 +41,8 @@ public sealed class MetaAsrRealtimeAdapter(EllaiOptions options)
         Stream pcm24kMono16Bit,
         CancellationToken ct,
         Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask>? onAudioChunk = null,
-        Func<MetaAsrRealtimePartialTranscript, CancellationToken, ValueTask>? onPartialTranscript = null)
+        Func<MetaAsrRealtimePartialTranscript, CancellationToken, ValueTask>? onPartialTranscript = null,
+        Func<MetaAsrRealtimeTranscript, CancellationToken, ValueTask>? onFinalTranscript = null)
     {
         ArgumentNullException.ThrowIfNull(pcm24kMono16Bit);
         var handshake = BuildHandshake();
@@ -66,7 +67,8 @@ public sealed class MetaAsrRealtimeAdapter(EllaiOptions options)
         var sessionId = await ReadHandshakeAckAsync(socket, handshakeLinked.Token);
 
         var transcripts = new MetaAsrRealtimeTranscriptCollector();
-        var receiver = ReceiveUntilCloseAsync(socket, transcripts, onPartialTranscript, linked.Token);
+        var receiver = ReceiveUntilCloseAsync(
+            socket, transcripts, onPartialTranscript, onFinalTranscript, linked.Token);
 
         var buffer = new byte[7680];
         int read;
@@ -120,6 +122,7 @@ public sealed class MetaAsrRealtimeAdapter(EllaiOptions options)
         ClientWebSocket socket,
         MetaAsrRealtimeTranscriptCollector transcripts,
         Func<MetaAsrRealtimePartialTranscript, CancellationToken, ValueTask>? onPartialTranscript,
+        Func<MetaAsrRealtimeTranscript, CancellationToken, ValueTask>? onFinalTranscript,
         CancellationToken ct)
     {
         while (socket.State == WebSocketState.Open)
@@ -174,9 +177,24 @@ public sealed class MetaAsrRealtimeAdapter(EllaiOptions options)
                     // Display-only partials must not interrupt provider audio or final transcription.
                 }
             }
-            else
+            else if (transcripts.TryAppend(text, out var finalTranscript)
+                && finalTranscript is not null)
             {
-                transcripts.TryAppend(text);
+                if (onFinalTranscript is not null)
+                {
+                    try
+                    {
+                        await onFinalTranscript(finalTranscript, ct).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch
+                    {
+                        // Turn notification is advisory to the caller; keep consuming provider output.
+                    }
+                }
             }
 
             ct.ThrowIfCancellationRequested();

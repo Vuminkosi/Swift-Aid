@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using AVFoundation;
@@ -16,8 +15,6 @@ public sealed class IosEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, IAsyn
     private const int MaximumInputFrames = 8_192;
     private const int MaximumQueuedChunks = 8;
     private const int PcmSampleRate = 24_000;
-    private const double SpeechRmsThreshold = 0.025;
-    private static readonly TimeSpan BargeInConfirmation = TimeSpan.FromMilliseconds(180);
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private AVAudioEngine? _engine;
@@ -39,11 +36,11 @@ public sealed class IosEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, IAsyn
     private int _stopRequested;
 
     public bool IsAvailable => !_disposed;
+    public bool IsEchoCancellationEnabled => _engine is not null && _voiceProcessingEnabled;
 
     public bool IsCapturing => _engine is not null;
 
     public event Action<string>? Interrupted;
-    public event Action? SpeechDetected;
     public event Action? RouteChanged;
 
     public async Task<string> StartAsync(
@@ -266,9 +263,6 @@ public sealed class IosEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, IAsyn
         Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask> onPcmChunk,
         CancellationToken cancellationToken)
     {
-        var lastSpeechTimestamp = Stopwatch.GetTimestamp();
-        var bargeInDetector = new EllaiSpeechConfirmation(
-            SpeechRmsThreshold, BargeInConfirmation);
         try
         {
             await foreach (var pcm in reader.ReadAllAsync().ConfigureAwait(false))
@@ -278,33 +272,6 @@ public sealed class IosEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, IAsyn
                     if (cancellationToken.IsCancellationRequested)
                     {
                         continue;
-                    }
-
-                    var voiceLevel = MeasureRms(pcm);
-                    if (voiceLevel >= SpeechRmsThreshold)
-                    {
-                        lastSpeechTimestamp = Stopwatch.GetTimestamp();
-                    }
-                    else if (Stopwatch.GetElapsedTime(lastSpeechTimestamp) >= TimeSpan.FromMinutes(1))
-                    {
-                        InterruptAndStop(
-                            "No speech detected. The microphone stopped; you can try again or type instead.");
-                        continue;
-                    }
-
-                    if (bargeInDetector.Observe(
-                            voiceLevel,
-                            TimeSpan.FromSeconds(pcm.Length / (double)(PcmSampleRate * sizeof(short))),
-                            _voiceProcessingEnabled))
-                    {
-                        try
-                        {
-                            SpeechDetected?.Invoke();
-                        }
-                        catch (Exception)
-                        {
-                            // Keep capture moving if a UI subscriber has already been disposed.
-                        }
                     }
 
                     await onPcmChunk(pcm, cancellationToken).ConfigureAwait(false);
@@ -326,24 +293,6 @@ public sealed class IosEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, IAsyn
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
         }
-    }
-
-    private static double MeasureRms(ReadOnlySpan<byte> pcm)
-    {
-        var sampleCount = pcm.Length / sizeof(short);
-        if (sampleCount == 0)
-        {
-            return 0;
-        }
-
-        double sumSquares = 0;
-        for (var index = 0; index < sampleCount; index++)
-        {
-            var sample = (short)(pcm[index * 2] | (pcm[index * 2 + 1] << 8));
-            var normalized = sample / 32768d;
-            sumSquares += normalized * normalized;
-        }
-        return Math.Sqrt(sumSquares / sampleCount);
     }
 
     private void RegisterAudioNotifications()

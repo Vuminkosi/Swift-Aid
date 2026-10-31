@@ -22,7 +22,8 @@ public static class EllaiGuestEndpoints
     private static readonly TimeSpan GuestSessionLifetime = TimeSpan.FromHours(2);
 
     public static IResult ReadVoiceTurnState(
-        HttpContext http, string sessionId, EllaiVoiceTurnCoordinator coordinator)
+        HttpContext http, string sessionId, EllaiVoiceTurnCoordinator coordinator,
+        long afterSequence = 0)
     {
         var snapshot = coordinator.GetSnapshot(sessionId);
         http.Response.Headers.CacheControl = "no-store, private";
@@ -31,7 +32,17 @@ public static class EllaiGuestEndpoints
             snapshot.Epoch,
             ToMilliseconds(snapshot.ConfirmedSpeech),
             ToMilliseconds(snapshot.Silence),
-            snapshot.PartialTranscript));
+            snapshot.PartialTranscript,
+            coordinator.GetCompletedTurns(sessionId, afterSequence)
+                .Select(turn => new EllaiCompletedVoiceTurnDto(
+                    turn.Sequence,
+                    turn.ProviderTurnId,
+                    turn.Transcript,
+                    sessionId,
+                    turn.TurnId.ToString("N"),
+                    turn.StreamEpoch))
+                .ToArray(),
+            snapshot.SessionId));
     }
 
     private static int ToMilliseconds(TimeSpan duration) =>
@@ -552,7 +563,9 @@ public static class EllaiGuestEndpoints
         Guid playbackId,
         EllaiSessionResponseStore responses,
         EllaiResponseSpeechCoordinator speechCoordinator,
-        EllaiVoiceTurnCoordinator turnCoordinator)
+        EllaiVoiceTurnCoordinator turnCoordinator,
+        string? turnId = null,
+        long? streamEpoch = null)
     {
         if (sequence < 1 || playbackId == Guid.Empty)
         {
@@ -567,9 +580,31 @@ public static class EllaiGuestEndpoints
             return Results.NotFound();
         }
 
-        speechCoordinator.Interrupt(sessionId, sequence, playbackId);
-        turnCoordinator.InterruptPlayback(sessionId, sequence, playbackId);
-        return Results.NoContent();
+        var clientConfirmed = false;
+        if (!string.IsNullOrWhiteSpace(turnId) || streamEpoch.HasValue)
+        {
+            if (!Guid.TryParse(turnId, out var parsedTurnId) || streamEpoch is not > 0
+                || !turnCoordinator.ConfirmClientBargeIn(
+                    sessionId, streamEpoch.Value, sequence, playbackId, parsedTurnId))
+            {
+                return Results.Conflict();
+            }
+
+            clientConfirmed = true;
+        }
+
+        // A local client detector can stop playback promptly, but it is only
+        // a candidate. Gateway Silero VAD remains responsible for confirming
+        // speech and cancelling server-side response generation.
+        var playbackInterrupted = false;
+        if (!clientConfirmed)
+        {
+            turnCoordinator.InterruptPlayback(sessionId, sequence, playbackId);
+            playbackInterrupted = speechCoordinator.Interrupt(sessionId, sequence, playbackId);
+        }
+        return playbackInterrupted || clientConfirmed
+            ? Results.NoContent()
+            : Results.Conflict();
     }
 
     internal static async Task<IResult> StreamListeningGreetingAudioAsync(

@@ -16,6 +16,22 @@ public sealed class MetaAsrRealtimeTranscriptCollectorTests
     }
 
     [Fact]
+    public void FinalTranscriptCanBeDeliveredAsItArrivesOnTheLiveProviderStream()
+    {
+        var collector = new MetaAsrRealtimeTranscriptCollector();
+
+        Assert.True(collector.TryAppend(
+            """{"type":"speechComplete","turnId":42,"transcript":"Submit this turn."}""",
+            out var completed));
+
+        Assert.Equal(42, completed?.TurnId);
+        Assert.Equal("Submit this turn.", completed?.Text);
+        Assert.False(collector.TryAppend(
+            """{"type":"speechComplete","turnId":42,"transcript":"Duplicate."}""",
+            out _));
+    }
+
+    [Fact]
     public void PartialTranscriptCanBeReadForDisplayWithoutEnteringFinalCollection()
     {
         var collector = new MetaAsrRealtimeTranscriptCollector();
