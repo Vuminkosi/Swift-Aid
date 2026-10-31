@@ -59,6 +59,31 @@ public sealed class EllaiVoiceTranscriptionServiceTests
     }
 
     [Fact]
+    public async Task LiveTranscriptionFailsClosedWithoutTheAuthoritativeTurnCoordinator()
+    {
+        var options = new EllaiOptions
+        {
+            Enabled = true,
+            ApiKey = "test-key",
+            AsrModel = "muse-voice-transcribe-1.0",
+            AsrWebSocketUrl = "wss://transcription.test/asr/realtime",
+            AsrMode = "DIARIZATION",
+        };
+        var consent = new EllaiConsentService();
+        var consentStore = new InMemoryEllaiConsentStore();
+        var service = new EllaiVoiceTranscriptionService(
+            consent, consentStore, options, new ServiceCollection().BuildServiceProvider());
+        await service.GrantVoiceConsentAsync("session-no-coordinator", CancellationToken.None);
+        await using var audio = new MemoryStream(new byte[24_000]);
+
+        var result = await service.TranscribeAsync(
+            "session-no-coordinator", EllaiVoiceCaptureMode.Live, audio, audio.Length, CancellationToken.None);
+
+        Assert.Null(result);
+        Assert.Equal(0, audio.Position);
+    }
+
+    [Fact]
     public async Task LiveTranscription_FallsBackToConfiguredUploadWhenRealtimeSocketFails()
     {
         var options = new EllaiOptions
@@ -86,9 +111,9 @@ public sealed class EllaiVoiceTranscriptionServiceTests
         var result = await service.TranscribeAsync(
             "session-fallback", EllaiVoiceCaptureMode.Live, audio, audio.Length, CancellationToken.None);
 
-        Assert.Equal("recognized fallback words", result?.Transcript);
+        Assert.Null(result);
         Assert.True(handler.ReceivedWaveAudio);
-        Assert.Equal(EllaiVoiceTurnState.Listening,
+        Assert.Equal(EllaiVoiceTurnState.Recovering,
             turnCoordinator.GetSnapshot("session-fallback").State);
         Assert.Empty(turnCoordinator.GetCompletedTurns("session-fallback"));
     }
@@ -132,9 +157,9 @@ public sealed class EllaiVoiceTranscriptionServiceTests
             audio.Complete();
             var result = await transcription.WaitAsync(TimeSpan.FromSeconds(15));
 
-            Assert.Equal("streamed words", result?.Transcript);
+            Assert.Null(result);
             Assert.Equal(expectedPcm, server.ReceivedPcm);
-            Assert.Equal(EllaiVoiceTurnState.Listening,
+            Assert.Equal(EllaiVoiceTurnState.Recovering,
                 turnCoordinator.GetSnapshot("session-stream").State);
             Assert.Empty(turnCoordinator.GetCompletedTurns("session-stream"));
         }
@@ -142,6 +167,42 @@ public sealed class EllaiVoiceTranscriptionServiceTests
         {
             audio.Complete();
         }
+    }
+
+    [Fact]
+    public async Task LiveTranscriptionReturnsOnlyMuseFinalsConfirmedByGatewayWithinTheSameCapture()
+    {
+        await using var server = await AudioForwardingWebSocketServer.CreateAsync();
+        var options = new EllaiOptions
+        {
+            Enabled = true,
+            ApiKey = "test-key",
+            AsrModel = "muse-voice-transcribe-1.0",
+            AsrWebSocketUrl = server.WebSocketUrl,
+            AsrMode = "DIARIZATION",
+        };
+        const string sessionId = "session-confirmed-final";
+        const string captureId = "capture-confirmed-final";
+        var turns = new EllaiVoiceTurnCoordinator();
+        var providerServices = new ServiceCollection();
+        providerServices.AddSingleton(turns);
+        providerServices.AddSingleton(new MetaAsrRealtimeAdapter(options));
+        providerServices.AddSingleton<IVoiceActivityDetector, SpeechThenSilenceDetector>();
+        providerServices.AddTransient<SileroVoiceActivityAudioStream>();
+        using var provider = providerServices.BuildServiceProvider();
+        var service = new EllaiVoiceTranscriptionService(
+            new EllaiConsentService(), new InMemoryEllaiConsentStore(), options, provider);
+        await service.GrantVoiceConsentAsync(sessionId, CancellationToken.None);
+        await using var audio = new MemoryStream(new byte[24_000 * sizeof(short)]);
+
+        var result = await service.TranscribeAsync(
+            sessionId, EllaiVoiceCaptureMode.Live, audio, audio.Length, CancellationToken.None, captureId);
+
+        Assert.Equal("streamed words", result?.Transcript);
+        var completed = Assert.Single(turns.GetCompletedTurns(sessionId));
+        Assert.Equal("streamed words", completed.Transcript);
+        Assert.Equal(captureId, completed.VoiceCaptureId);
+        Assert.Equal(turns.GetSnapshot(sessionId).Epoch, completed.StreamEpoch);
     }
 
     [Fact]
@@ -252,7 +313,7 @@ public sealed class EllaiVoiceTranscriptionServiceTests
             audio.Complete();
             var result = await transcription.WaitAsync(TimeSpan.FromSeconds(15));
 
-            Assert.Equal("streamed words", result?.Transcript);
+            Assert.Null(result);
             Assert.Null(turns.GetSnapshot("session-partial").PartialTranscript);
         }
         finally
@@ -308,9 +369,9 @@ public sealed class EllaiVoiceTranscriptionServiceTests
         var result = await service.TranscribeAsync(
             sessionId, EllaiVoiceCaptureMode.Live, audio, audio.Length, CancellationToken.None);
 
-        Assert.Equal("streamed words", result?.Transcript);
+        Assert.Null(result);
         Assert.True(playback.Token.IsCancellationRequested);
-        Assert.Equal(EllaiVoiceTurnState.UserSpeaking, turns.GetSnapshot(sessionId).State);
+        Assert.Equal(EllaiVoiceTurnState.Recovering, turns.GetSnapshot(sessionId).State);
         Assert.Empty(turns.GetCompletedTurns(sessionId));
     }
 
@@ -528,5 +589,26 @@ public sealed class EllaiVoiceTranscriptionServiceTests
 
         private static Task SendTextAsync(WebSocket socket, string text) =>
             socket.SendAsync(Encoding.UTF8.GetBytes(text), WebSocketMessageType.Text, true, CancellationToken.None);
+    }
+
+    private sealed class SpeechThenSilenceDetector : IVoiceActivityDetector
+    {
+        public IVoiceActivityDetectionSession CreateSession() => new Session();
+
+        private sealed class Session : IVoiceActivityDetectionSession
+        {
+            private long _sequence;
+
+            public ValueTask<VoiceActivityResult> AnalyzeAsync(
+                VoiceActivityFrame frame, CancellationToken cancellationToken = default)
+            {
+                var sequence = _sequence++;
+                return ValueTask.FromResult(new VoiceActivityResult(
+                    sequence, sequence < 4 ? 0.95f : 0f, sequence < 4, false));
+            }
+
+            public void Reset() => _sequence = 0;
+            public void Dispose() { }
+        }
     }
 }

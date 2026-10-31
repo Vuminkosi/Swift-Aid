@@ -70,8 +70,15 @@ public sealed class EllaiVoiceTranscriptionService(
 
         if (mode == EllaiVoiceCaptureMode.Live)
         {
-            using var turn = services.GetService<EllaiVoiceTurnCoordinator>()
-                ?.BeginStream(sessionId, cancellationToken, voiceCaptureId);
+            var turnCoordinator = services.GetService<EllaiVoiceTurnCoordinator>();
+            if (turnCoordinator is null)
+            {
+                logger?.LogWarning(
+                    "Ellai live transcription is unavailable because the authoritative turn coordinator is not registered.");
+                return null;
+            }
+
+            using var turn = turnCoordinator.BeginStream(sessionId, cancellationToken, voiceCaptureId);
             var turnOptions = services.GetService<EllaiVoiceTurnOptions>() ?? new EllaiVoiceTurnOptions();
             using var durationCts = new CancellationTokenSource(
                 TimeSpan.FromMilliseconds(turnOptions.MaximumTurnDurationMs));
@@ -223,18 +230,6 @@ public sealed class EllaiVoiceTranscriptionService(
                     }
                     vadStream?.Dispose();
                 }
-
-                if (turn is not null)
-                {
-                    var completedProviderTurnIds = services.GetService<EllaiVoiceTurnCoordinator>()
-                        ?.GetCompletedTurns(turn.SessionId)
-                        .Select(completed => completed.ProviderTurnId)
-                        .ToHashSet(StringComparer.Ordinal)
-                        ?? [];
-                    transcript = string.Join(" ", finalizedTurns
-                        .Where(finalized => !completedProviderTurnIds.Contains(finalized.ProviderTurnId))
-                        .Select(finalized => finalized.Text));
-                }
             }
 
             // A provider connection can fail before it consumes the live body.
@@ -292,6 +287,21 @@ public sealed class EllaiVoiceTranscriptionService(
                 {
                     Array.Clear(wave);
                 }
+            }
+
+            if (turn is not null)
+            {
+                // Provider-final text is still provisional until Gateway has
+                // confirmed the acoustic endpoint. Return only turns bound to
+                // this capture and stream epoch; status polling remains the
+                // authoritative client submission contract.
+                var completedTurns = services.GetService<EllaiVoiceTurnCoordinator>()
+                    ?.GetCompletedTurns(turn.SessionId)
+                    .Where(completed => completed.StreamEpoch == turn.Epoch
+                        && string.Equals(completed.VoiceCaptureId, turn.VoiceCaptureId, StringComparison.Ordinal))
+                    .Select(completed => completed.Transcript)
+                    ?? [];
+                transcript = string.Join(" ", completedTurns);
             }
 
             transcript = transcript.Trim();
