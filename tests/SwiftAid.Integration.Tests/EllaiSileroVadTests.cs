@@ -1,11 +1,23 @@
 using SwiftAid.Application.Ellai;
 using SwiftAid.Gateway.Ellai;
 using System.Buffers.Binary;
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
+using System.Globalization;
+using System.Security.Cryptography;
+using Xunit.Abstractions;
 
 namespace SwiftAid.Integration.Tests;
 
 public sealed class EllaiSileroVadTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public EllaiSileroVadTests(ITestOutputHelper output)
+    {
+        _output = output;
+    }
+
     [Fact]
     public async Task SileroModelAcceptsFramesAndRecognizesDigitalSilence()
     {
@@ -66,6 +78,78 @@ public sealed class EllaiSileroVadTests
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
             await session.AnalyzeAsync(CreateFrame(-1, new float[512])));
     }
+
+    [Fact]
+    public async Task InferenceAndFrameGapMetricsContainNoAudioOrSessionDimensions()
+    {
+        var inferenceMeasurements = new List<double>();
+        long frameGaps = 0;
+        var nonEmptyTagSets = 0;
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, meterListener) =>
+        {
+            if (instrument.Meter.Name == "SwiftAid.Gateway.Ellai.Voice")
+            {
+                meterListener.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<double>((instrument, measurement, tags, _) =>
+        {
+            if (instrument.Name == "swiftaid.ellai.voice.vad.inference.duration")
+            {
+                inferenceMeasurements.Add(measurement);
+            }
+            if (tags.Length != 0)
+            {
+                nonEmptyTagSets++;
+            }
+        });
+        listener.SetMeasurementEventCallback<long>((instrument, measurement, tags, _) =>
+        {
+            if (instrument.Name == "swiftaid.ellai.voice.audio.frame.sequence.gap")
+            {
+                frameGaps += measurement;
+            }
+            if (tags.Length != 0)
+            {
+                nonEmptyTagSets++;
+            }
+        });
+        listener.Start();
+
+        using var detector = new SileroOnnxVoiceActivityDetector();
+        using var session = detector.CreateSession();
+        var baselineStarted = Stopwatch.GetTimestamp();
+        for (var frameIndex = 0; frameIndex < 200; frameIndex++)
+        {
+            var sequence = frameIndex < 100 ? frameIndex : frameIndex + 1;
+            await session.AnalyzeAsync(CreateFrame(sequence, new float[512]));
+        }
+        var elapsed = Stopwatch.GetElapsedTime(baselineStarted);
+
+        Assert.Equal(200, inferenceMeasurements.Count);
+        Assert.All(inferenceMeasurements, measurement => Assert.True(double.IsFinite(measurement) && measurement >= 0));
+        Assert.Equal(1, frameGaps);
+        Assert.Equal(0, nonEmptyTagSets);
+
+        var sortedInferenceTimes = inferenceMeasurements.Order().ToArray();
+        var modelPath = Path.Combine(
+            AppContext.BaseDirectory, "Ellai", "Voice", "Models", "silero_vad_16k_op15.onnx");
+        var modelHash = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(modelPath)));
+        _output.WriteLine(string.Format(
+            CultureInfo.InvariantCulture,
+            "Synthetic Silero CPU baseline: model=silero_vad_16k_op15.onnx "
+            + "sha256={0} frames=200 elapsed_ms={1:F2} logical_processors={2} "
+            + "inference_p50_ms={3:F3} inference_p95_ms={4:F3}",
+            modelHash,
+            elapsed.TotalMilliseconds,
+            Environment.ProcessorCount,
+            Percentile(sortedInferenceTimes, 0.50),
+            Percentile(sortedInferenceTimes, 0.95)));
+    }
+
+    private static double Percentile(IReadOnlyList<double> values, double percentile) =>
+        values[Math.Clamp((int)Math.Ceiling(values.Count * percentile) - 1, 0, values.Count - 1)];
 
     [Fact]
     public async Task AudioStreamResamplesChunkedPcm24KhzAndMaintainsFrameSequence()

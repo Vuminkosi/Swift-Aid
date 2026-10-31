@@ -1,5 +1,6 @@
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
+using System.Diagnostics;
 using SwiftAid.Application.Ellai;
 
 namespace SwiftAid.Gateway.Ellai;
@@ -78,6 +79,7 @@ public sealed class SileroOnnxVoiceActivityDetector : IVoiceActivityDetector, ID
                 var discontinuity = _lastSequence >= 0 && frame.Sequence != _lastSequence + 1;
                 if (discontinuity)
                 {
+                    SileroVoiceMetrics.FrameSequenceGapDetected();
                     ResetState();
                 }
 
@@ -95,7 +97,9 @@ public sealed class SileroOnnxVoiceActivityDetector : IVoiceActivityDetector, ID
                         "sr", new DenseTensor<long>(new long[] { SampleRate }, new[] { 1 }))
                 };
 
+                var inferenceStarted = Stopwatch.GetTimestamp();
                 using var outputs = inference.Run(inputs);
+                SileroVoiceMetrics.InferenceCompleted(Stopwatch.GetElapsedTime(inferenceStarted).TotalMilliseconds);
                 var probabilityTensor = outputs.FirstOrDefault(output => output.Name == "output")?.AsTensor<float>()
                     ?? throw new InvalidOperationException("Silero VAD did not return its speech probability output.");
                 var nextState = outputs.FirstOrDefault(output => output.Name == "stateN")?.AsTensor<float>()
