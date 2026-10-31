@@ -1,40 +1,43 @@
 @using Microsoft.AspNetCore.Components.Web
 @using SwiftAid.Contracts.Ellai
 
-<div class="ellai-composer" role="dialog" aria-label="Ellai assistant composer"
+<div class="ellai-composer" role="region" aria-label="Ellai voice and text controls"
      style="@PositionStyle" @onpointermove="OnPointerMove" @onpointerup="OnPointerUp">
     <div class="ellai-composer__move-row">
         <span class="ellai-composer__handle" tabindex="0" role="button" aria-label="Move Ellai composer. Drag in any direction, or use the arrow keys to move and Home to reset."
-              @onpointerdown="OnPointerDown" @onkeydown="OnHandleKeyDown" title="Drag to move">
+              @onpointerdown="OnPointerDown" @onpointerdown:preventDefault @onkeydown="OnHandleKeyDown" title="Drag to move">
             <MudIcon Icon="@Icons.Material.Filled.OpenWith" Size="Size.Small" />
         </span>
+        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" Color="Color.Default"
+                       OnClick="OnCancel" Disabled="@(!CanCancel)" aria-label="Cancel Ellai session" />
     </div>
     <div class="ellai-composer__input-row">
         <div class="ellai-composer__field-wrap">
             <MudTextField T="string" Value="@InputText" ValueChanged="OnInputChanged"
-                          Placeholder="Ask Ellai…" MaxLength="8000" Lines="2"
-                          Label="Message for Ellai" Immediate="true"
+                          Label="Message Ellai" Placeholder="Ask Ellai…" MaxLength="8000" Lines="1" Sizing="InputSizing.Auto" MaxLines="5"
+                          Immediate="true"
                           @onkeydown="OnInputKeyDown" />
             <span class="ellai-composer__field-actions">
-                @if (IsLiveSpeaking)
+                @if (IsLiveSpeaking && OnStopVoice.HasDelegate)
                 {
                     <MudIconButton Icon="@Icons.Material.Filled.StopCircle" Color="Color.Primary"
                                    OnClick="OnStopVoice" aria-label="Stop live voice" />
                 }
+                else if (string.IsNullOrWhiteSpace(InputText))
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.RecordVoiceOver" Color="Color.Default"
+                                   OnClick="OnStartVoice"
+                                   Disabled="@(!CanUseMicrophone || !OnStartVoice.HasDelegate)"
+                                   aria-label="@(CanUseMicrophone && OnStartVoice.HasDelegate ? "Start live voice" : "Live voice unavailable")"
+                                   title="@(CanUseMicrophone && OnStartVoice.HasDelegate ? "Start live voice" : "Live voice is unavailable on this connection")" />
+                }
                 else
                 {
-                    @if (CanUseMicrophone)
-                    {
-                        <MudIconButton Icon="@Icons.Material.Filled.Mic" Color="Color.Default"
-                                       OnClick="OnStartVoice" aria-label="Start voice input" />
-                    }
                     <MudIconButton Icon="@Icons.Material.Filled.Send" Color="Color.Primary"
                                    OnClick="OnSend" Disabled="@(!CanSend)" aria-label="Send to Ellai" />
                 }
             </span>
         </div>
-        <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Default"
-                       OnClick="OnCancel" aria-label="Cancel Ellai session" />
     </div>
     <EllaiStatusLine StatusText="@StatusText" Phase="@Phase" Placement="@Placement" />
 </div>
@@ -60,6 +63,9 @@
 
     [Parameter]
     public bool CanSend { get; set; }
+
+    [Parameter]
+    public bool CanCancel { get; set; } = true;
 
     [Parameter]
     public bool CanUseMicrophone { get; set; }

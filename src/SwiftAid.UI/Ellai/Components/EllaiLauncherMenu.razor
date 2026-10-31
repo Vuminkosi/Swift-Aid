@@ -3,11 +3,11 @@
 <div class="ellai-launcher-menu">
     <MudFabMenu Class="ellai-launcher-menu__control"
                 ButtonClass="ellai-launcher-menu__button"
-                @bind-Open="_menuOpen"
                 StartIcon="@Icons.Material.Filled.SmartToy"
                 Color="Color.Primary"
                 AlignItems="AlignItems.End"
                 Direction="Direction.Top"
+                CloseOnMenuItemClicked="true"
                 DropShadow="false"
                 OpenOnMouseHover="false"
                 DampenItemsBackgroundColor="false"
@@ -20,6 +20,8 @@
                         StartIcon="@Icons.Material.Outlined.QuestionAnswer"
                         Color="Color.Primary"
                         DropShadow="false" />
+        @if (!PublicHelpOnly)
+        {
         <MudFabMenuItem OnClick="() => SelectMode(EllaiMode.ShowMe)"
                         Size="Size.Small"
                         Variant="Variant.Filled"
@@ -55,21 +57,22 @@
                         StartIcon="@Icons.Material.Outlined.FactCheck"
                         Color="Color.Primary"
                         DropShadow="false" />
+        }
     </MudFabMenu>
 </div>
 
 @code {
-    private bool _menuOpen;
-
     [Parameter]
     public EventCallback<EllaiMode> OnModeSelected { get; set; }
 
     [Parameter]
     public EventCallback OnCreateGuide { get; set; }
 
+    [Parameter]
+    public bool PublicHelpOnly { get; set; }
+
     private async Task SelectMode(EllaiMode mode)
     {
-        _menuOpen = false;
         await OnModeSelected.InvokeAsync(mode);
     }
 }
