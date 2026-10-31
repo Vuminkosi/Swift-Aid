@@ -109,10 +109,7 @@ public sealed class EllaiSurfaceLogicTests
             $"Response playback was cancelled. Status: {GetField<string?>(host, "StatusText")}");
         Assert.Equal(7L, GetField<long>(host, "_activeResponseSequence"));
         Assert.Equal(playbackId, GetField<string?>(host, "_activeResponsePlaybackId"));
-        Assert.Contains("I’m listening while Ellai speaks", GetField<string?>(host, "StatusText"),
-            StringComparison.Ordinal);
-        Assert.Contains("completed turns are sent automatically", GetField<string?>(host, "StatusText"),
-            StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("Ready", GetField<string?>(host, "StatusText"));
 
         var deadline = DateTime.UtcNow.AddSeconds(2);
         while (GetField<bool>(host, "_isPlayingResponse") && DateTime.UtcNow < deadline)
@@ -122,11 +119,29 @@ public sealed class EllaiSurfaceLogicTests
 
         Assert.False(GetField<bool>(host, "_isPlayingResponse"));
         Assert.True(GetField<bool>(host, "_isRecordingAudio"));
-        Assert.Contains("listening to your message", GetField<string?>(host, "StatusText"),
-            StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("Ready", GetField<string?>(host, "StatusText"));
 
         streamCompletion.SetResult(null);
         await InvokeAsync(host, "StopAndDiscardVoiceCaptureAsync");
+    }
+
+    [Fact]
+    public async Task ComposerVoiceStatusUsesOnlyReadyConnectingOrReconnecting()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(version: 1), string.Empty);
+        var testHost = Assert.IsType<TestComponentHost<EllaiGuidanceHost>>(host);
+        var statusMethod = typeof(EllaiGuidanceHost).GetMethod(
+            "GetComposerStatusText", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        async Task<string?> GetStatus() => await testHost.Dispatcher.InvokeAsync(
+            () => (string?)statusMethod.Invoke(testHost.Component, null));
+
+        Assert.Equal("Ready", await GetStatus());
+        SetField(host, "_startingSession", true);
+        Assert.Equal("Connecting…", await GetStatus());
+        SetField(host, "_startingSession", false);
+        SetField(host, "_liveVoiceReconnectRequired", true);
+        Assert.Equal("Reconnecting…", await GetStatus());
     }
 
     [Fact]
@@ -156,7 +171,7 @@ public sealed class EllaiSurfaceLogicTests
 
         Assert.True(client.VoiceTurnStatusReads > 0);
         Assert.False(GetField<bool>(host, "_isPlayingResponse"));
-        Assert.Equal("I’m listening to your message.", GetField<string?>(host, "StatusText"));
+        Assert.Equal("Ready", GetField<string?>(host, "StatusText"));
     }
 
     [Fact]
@@ -415,7 +430,7 @@ public sealed class EllaiSurfaceLogicTests
 
         Assert.False(GetField<bool>(host, "_liveVoiceReconnectRequired"));
         Assert.True(GetField<bool>(host, "_voiceNetworkOnline"));
-        Assert.Equal("Connection restored. Keep speaking.", GetField<string?>(host, "StatusText"));
+        Assert.Equal("Ready", GetField<string?>(host, "StatusText"));
         Assert.Equal(2, client.LiveTranscriptionCalls);
 
         await InvokeAsync(host, "StopVoiceCaptureAsync");

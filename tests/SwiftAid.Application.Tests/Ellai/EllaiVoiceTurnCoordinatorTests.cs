@@ -20,10 +20,12 @@ public sealed class EllaiVoiceTurnCoordinatorTests
         }
         Assert.Equal(EllaiVoiceTurnState.UserSpeaking, coordinator.GetSnapshot("session-1").State);
 
-        for (var sequence = 4; sequence < 26; sequence++)
+        for (var sequence = 4; sequence < 18; sequence++)
         {
             coordinator.ObserveAcousticFrame(stream, Silence(sequence), VadFrameDuration);
         }
+        Assert.Equal(EllaiVoiceTurnState.UserSpeaking, coordinator.GetSnapshot("session-1").State);
+        coordinator.ObserveAcousticFrame(stream, Silence(18), VadFrameDuration);
         Assert.Equal(EllaiVoiceTurnState.EndpointCandidate, coordinator.GetSnapshot("session-1").State);
 
         Assert.Null(coordinator.AcceptFinalTranscript(stream, "turn-7", ""));
@@ -35,6 +37,27 @@ public sealed class EllaiVoiceTurnCoordinatorTests
         Assert.Equal("turn-7", completed.ProviderTurnId);
         Assert.Equal("The animal needs assistance.", completed.Transcript);
         Assert.Empty(coordinator.GetCompletedTurns("session-1", afterSequence: completed.Sequence));
+    }
+
+    [Fact]
+    public void DefaultEndpointCandidateStartsAfterAboutHalfASecondOfSilence()
+    {
+        var coordinator = new EllaiVoiceTurnCoordinator();
+        using var stream = coordinator.BeginStream("session-fast-endpoint", CancellationToken.None);
+        for (var sequence = 0; sequence < 4; sequence++)
+        {
+            coordinator.ObserveAcousticFrame(stream, Speech(sequence), VadFrameDuration);
+        }
+
+        for (var sequence = 4; sequence < 19; sequence++)
+        {
+            coordinator.ObserveAcousticFrame(stream, Silence(sequence), VadFrameDuration);
+        }
+
+        Assert.Equal(EllaiVoiceTurnState.EndpointCandidate,
+            coordinator.GetSnapshot("session-fast-endpoint").State);
+        Assert.Equal(TimeSpan.FromMilliseconds(480),
+            coordinator.GetSnapshot("session-fast-endpoint").Silence);
     }
 
     [Fact]

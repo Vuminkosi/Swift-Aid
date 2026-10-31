@@ -28,7 +28,7 @@
     {
         <div class="ellai-host__attached">
             <EllaiCompactComposer Placement="EllaiSurfacePlacement.Attached"
-                                  StatusText="@StatusText" Phase="@Phase"
+                                  StatusText="@GetComposerStatusText()" Phase="null"
                                   ResponseText="@_latestResponseText"
                                   LivePartialTranscript="@_livePartialVoiceTranscript"
                                   InputText="@InputText" InputTextChanged="OnInputChanged"
@@ -48,7 +48,7 @@
     {
         <div class="ellai-host__floating">
             <EllaiCompactComposer Placement="EllaiSurfacePlacement.Floating"
-                                  StatusText="@StatusText" Phase="@Phase"
+                                  StatusText="@GetComposerStatusText()" Phase="null"
                                   ResponseText="@_latestResponseText"
                                   LivePartialTranscript="@_livePartialVoiceTranscript"
                                   InputText="@InputText" InputTextChanged="OnInputChanged"
@@ -71,10 +71,30 @@
     private CancellationTokenSource? _cts;
     private bool ShowComposer;
     private bool IsActive;
-    private string? StatusText = "Ellai is ready.";
+    private string? StatusText = "Ready";
     private string? Phase = EllaiStatusPhases.Ready;
     private string? InputText;
     private EllaiComposerPosition? Position;
+
+    private string? GetComposerStatusText()
+    {
+        if (_liveVoiceReconnectRequired)
+        {
+            return "Reconnecting…";
+        }
+
+        if (_startingSession || _startingVoiceCapture || _submittingUtterance)
+        {
+            return "Connecting…";
+        }
+
+        if (_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Live)
+        {
+            return "Ready";
+        }
+
+        return "Ready";
+    }
     private EllaiSessionView? _sessionView;
     private string? _pendingUtteranceId;
     private string? _pendingUtteranceText;
@@ -361,12 +381,11 @@
             }
 
             _isRecordingAudio = true;
-            string processingStatus;
             if (useNativeLiveCapture)
             {
                 try
                 {
-                    processingStatus = await _nativeVoiceCapture!.StartAsync(
+                    _ = await _nativeVoiceCapture!.StartAsync(
                         QueueNativePcmChunkAsync, _cts?.Token ?? CancellationToken.None);
                     _audioProcessingStatus = _nativeVoiceCapture.AudioProcessingStatus;
                     _captureEchoCancellationEnabled = _audioProcessingStatus.EchoCancellationEnabled == true;
@@ -378,15 +397,13 @@
                 catch (Exception) when (_microphoneCaptureAvailable && _captureModule is not null)
                 {
                     useNativeLiveCapture = false;
-                    var browserStatus = await _captureModule.InvokeAsync<string>(
+                    _ = await _captureModule.InvokeAsync<string>(
                         "startCapture", _captureDotnetReference, true, session.SessionId);
-                    processingStatus = "Native voice capture is unavailable; browser capture is active. "
-                        + browserStatus;
                 }
             }
             else
             {
-                processingStatus = await _captureModule!.InvokeAsync<string>(
+                _ = await _captureModule!.InvokeAsync<string>(
                     "startCapture", _captureDotnetReference, mode == EllaiVoiceCaptureMode.Live, session.SessionId);
             }
             _nativeVoiceCaptureActive = useNativeLiveCapture;
@@ -397,15 +414,11 @@
             _startingVoiceCapture = false;
             if (mode == EllaiVoiceCaptureMode.Live && _liveVoiceReconnectRequired)
             {
-                StatusText = "No internet connection. Keep speaking; Ellai will try to reconnect.";
+                StatusText = "Reconnecting…";
             }
             else
             {
-                StatusText = mode == EllaiVoiceCaptureMode.Recorded
-                    ? $"Recording for transcription. {processingStatus} Stop when you are ready."
-                    : capturingAlongsidePlayback
-                        ? $"I’m listening while Ellai speaks. Speak to interrupt; completed turns are sent automatically. {processingStatus}"
-                        : $"I’m listening. Completed turns are sent automatically, and the microphone stays ready for your next turn. {processingStatus}";
+                StatusText = "Ready";
             }
             Phase = EllaiStatusPhases.Active;
             await InvokeAsync(StateHasChanged);
@@ -519,7 +532,7 @@
 
     private void SetLiveVoiceRecoveryStatus()
     {
-        StatusText = "Connection interrupted. Keep speaking; Ellai will try to reconnect. If it cannot, stop and try sending your voice message again.";
+        StatusText = "Reconnecting…";
         Phase = EllaiStatusPhases.Active;
     }
 
@@ -596,7 +609,7 @@
             }
 
             _liveVoiceReconnectRequired = false;
-            StatusText = "Connection restored. Keep speaking.";
+            StatusText = "Ready";
             Phase = EllaiStatusPhases.Active;
             await InvokeAsync(StateHasChanged).ConfigureAwait(false);
             return true;
@@ -819,7 +832,7 @@
     {
         try
         {
-            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(250));
             do
             {
                 var status = await ReviewClient.GetVoiceTurnStatusAsync(
@@ -853,9 +866,7 @@
 
                         if (_liveVoiceReconnectRequired)
                         {
-                            var recoveryText = _voiceNetworkOnline
-                                ? "Your device reports a network connection; this turn remains buffered and will be transcribed once when you stop."
-                                : "Your device reports no network connection. This voice turn is held in memory and will be sent once when you stop.";
+                            var recoveryText = "Reconnecting…";
                             if (!string.Equals(StatusText, recoveryText, StringComparison.Ordinal))
                             {
                                 StatusText = recoveryText;
@@ -983,14 +994,9 @@
 
     private static string? GetVoiceTurnStatusText(string state) => state switch
     {
-        "Listening" => "I’m listening. Speak at your own pace.",
-        "SpeechCandidate" => "Speech detected. Keep speaking.",
-        "UserSpeaking" => "I’m listening to your message.",
-        "EndpointCandidate" => "Checking if you’re finished…",
-        "Processing" => "Finishing live transcription…",
-        "AssistantSpeaking" => "Ellai is speaking. You can interrupt by talking.",
-        "Interrupted" => "Ellai was interrupted. I’m listening.",
-        "Recovering" => "I couldn’t confirm that voice turn. Try again or type your message.",
+        "Listening" or "SpeechCandidate" or "UserSpeaking" or "EndpointCandidate"
+            or "Processing" or "AssistantSpeaking" or "Interrupted" => "Ready",
+        "Recovering" => "Reconnecting…",
         _ => null,
     };
 
@@ -1140,7 +1146,7 @@
 
         if (_liveVoiceReconnectRequired)
         {
-            StatusText = "Connection restored. This turn remains safely buffered and will be transcribed once when you stop.";
+            StatusText = "Ready";
             Phase = EllaiStatusPhases.Active;
             StateHasChanged();
         }
@@ -1268,9 +1274,7 @@
                 return;
             }
 
-            StatusText = mode == EllaiVoiceCaptureMode.Live
-                ? "Finishing your voice message…"
-                : "Sending your voice message…";
+            StatusText = "Connecting…";
             Phase = EllaiStatusPhases.Active;
             await InvokeAsync(StateHasChanged);
             EllaiVoiceTranscriptionResult? result;
@@ -1305,7 +1309,7 @@
                         && (result is null || _liveVoiceReconnectRequired))
                     {
                         usedLiveVoiceUploadRecovery = true;
-                        StatusText = "Trying again to send the unfinished part of your voice message…";
+                        StatusText = "Reconnecting…";
                         await InvokeAsync(StateHasChanged);
                         try
                         {
@@ -1756,7 +1760,7 @@
 
             _sessionView = view;
             TrackSession(view.SessionId);
-            StatusText = "Ellai is ready. Enter a question to continue.";
+            StatusText = "Ready";
         }
         catch (Exception)
         {

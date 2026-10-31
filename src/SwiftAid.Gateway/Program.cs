@@ -130,7 +130,7 @@ var voiceTurnOptions = new SwiftAid.Application.Ellai.EllaiVoiceTurnOptions(
     SpeechStartConfirmationMs: builder.Configuration.GetValue(
         "Ellai:VoiceTurn:SpeechStartConfirmationMs", 120),
     EndOfTurnSilenceMs: builder.Configuration.GetValue(
-        "Ellai:VoiceTurn:EndOfTurnSilenceMs", 650),
+        "Ellai:VoiceTurn:EndOfTurnSilenceMs", 450),
     BargeInConfirmationMs: builder.Configuration.GetValue(
         "Ellai:VoiceTurn:BargeInConfirmationMs", 180),
     MaximumTurnDurationMs: builder.Configuration.GetValue(

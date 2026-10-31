@@ -16,7 +16,7 @@ public enum EllaiVoiceTurnState
 
 public sealed record EllaiVoiceTurnOptions(
     int SpeechStartConfirmationMs = 120,
-    int EndOfTurnSilenceMs = 650,
+    int EndOfTurnSilenceMs = 450,
     int BargeInConfirmationMs = 180,
     int MaximumTurnDurationMs = 480_000)
 {
