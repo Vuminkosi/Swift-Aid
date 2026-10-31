@@ -37,9 +37,9 @@ export async function startCapture(dotnet, showLiveVoiceLevel = false, sessionId
     const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
             channelCount: { ideal: 1 },
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
+            echoCancellation: { ideal: true },
+            noiseSuppression: { ideal: true },
+            autoGainControl: { ideal: true }
         },
         video: false
     });
@@ -69,27 +69,21 @@ export async function startCapture(dotnet, showLiveVoiceLevel = false, sessionId
     sink.gain.value = 0;
     const track = stream.getAudioTracks()[0];
     const settings = track?.getSettings?.() ?? {};
-    const unavailableProcessing = ["echoCancellation", "noiseSuppression", "autoGainControl"]
-        .filter(name => settings[name] !== true);
-    if (unavailableProcessing.length > 0) {
-        for (const audioTrack of stream.getTracks()) audioTrack.stop();
-        try { await context.close(); } catch { }
-        throw new Error(`Microphone processing is unavailable: ${unavailableProcessing.join(", " )}.`);
-    }
+    const echoCancellationEnabled = settings.echoCancellation === true
+        || settings.echoCancellation === "all";
     await dotnet.invokeMethodAsync(
         "OnVoiceAudioProcessingChanged",
-        settings.echoCancellation === true,
-        settings.noiseSuppression === true,
-        settings.autoGainControl === true);
+        {
+            platform: "Web",
+            echoCancellationEnabled,
+            noiseSuppressionEnabled: typeof settings.noiseSuppression === "boolean" ? settings.noiseSuppression : null,
+            automaticGainControlEnabled: typeof settings.autoGainControl === "boolean" ? settings.autoGainControl : null,
+            captureActive: true
+        });
     const state = {
         stream, context, source, processor, sink, dotnet,
         showLiveVoiceLevel: showLiveVoiceLevel === true,
         sessionId,
-        audioProcessingSettings: {
-            echoCancellation: settings.echoCancellation === true,
-            noiseSuppression: settings.noiseSuppression === true,
-            autoGainControl: settings.autoGainControl === true
-        },
         voiceLevel: 0,
         active: true,
         pending: [],
@@ -108,10 +102,10 @@ export async function startCapture(dotnet, showLiveVoiceLevel = false, sessionId
         if (state.active) void dotnet.invokeMethodAsync("OnVoiceCaptureLimitReached");
     }, maximumDurationMs);
     activeCaptures.add(state);
-    const processing = ["echoCancellation", "noiseSuppression", "autoGainControl"]
-        .map(name => `${name === "autoGainControl" ? "automatic gain control" : name.replace(/[A-Z]/g, value => ` ${value.toLowerCase()}`)} ${settings[name] === true ? "on" : settings[name] === false ? "off" : "not reported"}`)
-        .join(", ");
-    return `Microphone active; ${processing}.`;
+    const formatState = value => value === true || value === "all"
+        ? "on"
+        : value === false ? "off" : value ?? "not reported";
+    return `Web audio processing: echo cancellation ${formatState(settings.echoCancellation)}, noise suppression ${formatState(settings.noiseSuppression)}, automatic gain control ${formatState(settings.autoGainControl)}.`;
 }
 
 function processAudio(state, input) {

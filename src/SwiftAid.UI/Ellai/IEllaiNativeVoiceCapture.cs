@@ -7,6 +7,7 @@ public interface IEllaiNativeVoiceCapture
 {
     bool IsAvailable { get; }
     bool IsEchoCancellationEnabled => false;
+    EllaiAudioProcessingStatus AudioProcessingStatus => EllaiAudioProcessingStatus.Unknown;
     event Action<string>? Interrupted;
     event Action? RouteChanged;
 

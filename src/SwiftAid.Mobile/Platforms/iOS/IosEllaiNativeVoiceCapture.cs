@@ -37,6 +37,12 @@ public sealed class IosEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, IAsyn
 
     public bool IsAvailable => !_disposed;
     public bool IsEchoCancellationEnabled => _engine is not null && _voiceProcessingEnabled;
+    public EllaiAudioProcessingStatus AudioProcessingStatus => new(
+        "iOS",
+        _engine is not null && _voiceProcessingEnabled,
+        null,
+        null,
+        _engine is not null);
 
     public bool IsCapturing => _engine is not null;
 
@@ -108,10 +114,9 @@ public sealed class IosEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, IAsyn
                 }
                 GetErrorDescription(startError);
 
-                return voiceProcessingEnabled
-                    ? "iOS voice chat capture active; system voice processing enabled."
-                    : "iOS voice chat capture active; system voice processing is unavailable on this route."
-                        + (voiceProcessingError is null ? string.Empty : " Use a headset or type your message.");
+                return AudioProcessingStatus.ToStatusText()
+                    + (voiceProcessingEnabled ? string.Empty
+                        : " System voice processing is unavailable on this route; use a headset if echo is present.");
             }
             catch
             {

@@ -27,6 +27,12 @@ public sealed class AndroidEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, I
 
     public bool IsAvailable => !_disposed;
     public bool IsEchoCancellationEnabled => _echoCanceler?.Enabled == true;
+    public EllaiAudioProcessingStatus AudioProcessingStatus => new(
+        "Android",
+        _echoCanceler?.Enabled == true,
+        _noiseSuppressor is null ? null : _noiseSuppressor.Enabled,
+        _gainControl is null ? null : _gainControl.Enabled,
+        _record?.RecordingState == RecordState.Recording);
     public event Action<string>? Interrupted;
     public event Action? RouteChanged;
 
@@ -237,8 +243,7 @@ public sealed class AndroidEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, I
         Enable(_noiseSuppressor);
         Enable(_gainControl);
 
-        return $"Android voice communication capture; echo cancellation {StateOf(_echoCanceler)}, "
-            + $"noise suppression {StateOf(_noiseSuppressor)}, gain control {StateOf(_gainControl)}.";
+        return AudioProcessingStatus.ToStatusText();
     }
 
     private static void Enable(AudioEffect? effect)
@@ -248,10 +253,6 @@ public sealed class AndroidEllaiNativeVoiceCapture : IEllaiNativeVoiceCapture, I
             effect.SetEnabled(true);
         }
     }
-
-    private static string StateOf(AudioEffect? effect) => effect is null
-        ? "unavailable"
-        : effect.Enabled ? "on" : "off";
 
     private async Task ReadCaptureLoopAsync(
         AudioRecord record,

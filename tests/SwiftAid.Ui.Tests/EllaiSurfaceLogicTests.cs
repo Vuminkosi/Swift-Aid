@@ -22,6 +22,17 @@ namespace SwiftAid.Ui.Tests;
 public sealed class EllaiSurfaceLogicTests
 {
     [Fact]
+    public void AudioProcessingStatusShowsEffectiveAndUnreportedCapabilities()
+    {
+        var status = new EllaiAudioProcessingStatus("iOS", true, null, null, true);
+
+        Assert.Equal(
+            "iOS audio processing: echo cancellation on, noise suppression not reported, automatic gain control not reported.",
+            status.ToStatusText());
+        Assert.False(EllaiAudioProcessingStatus.Unknown.CaptureActive);
+    }
+
+    [Fact]
     public async Task PublicLayoutExposesOnlyGuestAskModeToUnauthenticatedVisitors()
     {
         var markup = await RenderPublicLayoutAsync();
