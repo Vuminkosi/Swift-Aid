@@ -81,6 +81,10 @@ public sealed class EllaiClientBargeInDetector : IDisposable
         _frameCount = 0;
         _consecutiveSpeechFrames = 0;
         _speechConfirmed = false;
+        _inputSampleIndex = 0;
+        _nextVadSamplePosition = 0;
+        _previousInputSample = 0;
+        _hasPreviousInputSample = false;
     }
 
     public void Dispose()

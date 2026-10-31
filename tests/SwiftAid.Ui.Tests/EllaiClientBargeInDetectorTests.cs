@@ -45,22 +45,32 @@ public sealed class EllaiClientBargeInDetectorTests
     }
 
     [Fact]
-    public void ResetClearsAdaptiveSpeechStateWithoutResettingCapture()
+    public void ResetAllowsAnotherBargeInAfterConfirmedSpeechWithoutRestartingCapture()
     {
         using var detector = new EllaiClientBargeInDetector();
         var voiced = CreateVoicedSignal(durationMilliseconds: 400);
+        var silence = new byte[960 * sizeof(short) * 10];
         const int chunkBytes = 960 * sizeof(short);
-        for (var offset = 0; offset < 4 * chunkBytes; offset += chunkBytes)
+        var firstTurnConfirmed = false;
+        for (var offset = 0; offset < voiced.Length; offset += chunkBytes)
         {
-            Assert.False(detector.ObservePcm24Khz(voiced.AsSpan(offset, chunkBytes)));
+            firstTurnConfirmed |= detector.ObservePcm24Khz(voiced.AsSpan(offset, chunkBytes));
         }
+        Assert.True(firstTurnConfirmed);
 
         detector.ResetSpeechConfirmation();
 
-        for (var offset = 4 * chunkBytes; offset < 8 * chunkBytes; offset += chunkBytes)
+        for (var offset = 0; offset < silence.Length; offset += chunkBytes)
         {
-            Assert.False(detector.ObservePcm24Khz(voiced.AsSpan(offset, chunkBytes)));
+            Assert.False(detector.ObservePcm24Khz(silence.AsSpan(offset, chunkBytes)));
         }
+
+        var secondTurnConfirmed = false;
+        for (var offset = 0; offset < voiced.Length; offset += chunkBytes)
+        {
+            secondTurnConfirmed |= detector.ObservePcm24Khz(voiced.AsSpan(offset, chunkBytes));
+        }
+        Assert.True(secondTurnConfirmed);
     }
 
     private static byte[] CreateTransientNoise(int durationMilliseconds)
