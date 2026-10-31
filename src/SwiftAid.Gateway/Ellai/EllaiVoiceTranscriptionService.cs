@@ -71,8 +71,24 @@ public sealed class EllaiVoiceTranscriptionService(
         {
             using var turn = services.GetService<EllaiVoiceTurnCoordinator>()
                 ?.BeginStream(sessionId, cancellationToken);
-            return await TranscribeLiveStreamAsync(
-                audio, turn, turn?.CancellationToken ?? cancellationToken).ConfigureAwait(false);
+            var turnOptions = services.GetService<EllaiVoiceTurnOptions>() ?? new EllaiVoiceTurnOptions();
+            using var durationCts = new CancellationTokenSource(
+                TimeSpan.FromMilliseconds(turnOptions.MaximumTurnDurationMs));
+            using var liveCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                turn?.CancellationToken ?? cancellationToken, durationCts.Token);
+            try
+            {
+                return await TranscribeLiveStreamAsync(audio, turn, liveCancellation.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (durationCts.IsCancellationRequested
+                && !cancellationToken.IsCancellationRequested
+                && turn?.CancellationToken.IsCancellationRequested != true)
+            {
+                turn?.MarkRecovering();
+                logger?.LogInformation("Ellai live voice turn reached its configured duration limit.");
+                return null;
+            }
         }
 
         using var bounded = new MemoryStream();

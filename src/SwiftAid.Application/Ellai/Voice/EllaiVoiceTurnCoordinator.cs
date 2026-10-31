@@ -16,13 +16,15 @@ public enum EllaiVoiceTurnState
 public sealed record EllaiVoiceTurnOptions(
     int SpeechStartConfirmationMs = 120,
     int EndOfTurnSilenceMs = 650,
-    int BargeInConfirmationMs = 180)
+    int BargeInConfirmationMs = 180,
+    int MaximumTurnDurationMs = 480_000)
 {
     public void Validate()
     {
         if (SpeechStartConfirmationMs is < 1 or > 2_000
             || EndOfTurnSilenceMs is < 100 or > 5_000
-            || BargeInConfirmationMs is < 1 or > 2_000)
+            || BargeInConfirmationMs is < 1 or > 2_000
+            || MaximumTurnDurationMs is < 1_000 or > 900_000)
         {
             throw new ArgumentOutOfRangeException(nameof(EllaiVoiceTurnOptions));
         }

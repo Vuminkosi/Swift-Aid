@@ -68,12 +68,16 @@ public sealed class EllaiVoiceTurnCoordinatorTests
     }
 
     [Theory]
-    [InlineData(0, 650, 180)]
-    [InlineData(120, 99, 180)]
-    [InlineData(120, 650, 2001)]
-    public void InvalidThresholdsAreRejected(int speechStartMs, int silenceMs, int bargeInMs)
+    [InlineData(0, 650, 180, 480_000)]
+    [InlineData(120, 99, 180, 480_000)]
+    [InlineData(120, 650, 2001, 480_000)]
+    [InlineData(120, 650, 180, 999)]
+    [InlineData(120, 650, 180, 900_001)]
+    public void InvalidThresholdsAreRejected(
+        int speechStartMs, int silenceMs, int bargeInMs, int maximumTurnDurationMs)
     {
-        var options = new EllaiVoiceTurnOptions(speechStartMs, silenceMs, bargeInMs);
+        var options = new EllaiVoiceTurnOptions(
+            speechStartMs, silenceMs, bargeInMs, maximumTurnDurationMs);
 
         Assert.Throws<ArgumentOutOfRangeException>(options.Validate);
     }

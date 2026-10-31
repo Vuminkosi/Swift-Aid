@@ -132,7 +132,9 @@ var voiceTurnOptions = new SwiftAid.Application.Ellai.EllaiVoiceTurnOptions(
     EndOfTurnSilenceMs: builder.Configuration.GetValue(
         "Ellai:VoiceTurn:EndOfTurnSilenceMs", 650),
     BargeInConfirmationMs: builder.Configuration.GetValue(
-        "Ellai:VoiceTurn:BargeInConfirmationMs", 180));
+        "Ellai:VoiceTurn:BargeInConfirmationMs", 180),
+    MaximumTurnDurationMs: builder.Configuration.GetValue(
+        "Ellai:VoiceTurn:MaximumTurnDurationMs", 480_000));
 voiceTurnOptions.Validate();
 builder.Services.AddSingleton(voiceTurnOptions);
 builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiVoiceTurnCoordinator>();

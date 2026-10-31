@@ -172,6 +172,49 @@ public sealed class EllaiVoiceTranscriptionServiceTests
     }
 
     [Fact]
+    public async Task LiveTranscriptionDurationLimitCancelsProviderAndLeavesTurnRecovering()
+    {
+        await using var server = await AudioForwardingWebSocketServer.CreateAsync(sendFinalTranscript: false);
+        var options = new EllaiOptions
+        {
+            Enabled = true,
+            ApiKey = "test-key",
+            AsrModel = "muse-voice-transcribe-1.0",
+            AsrWebSocketUrl = server.WebSocketUrl,
+            AsrMode = "DIARIZATION",
+        };
+        var turns = new EllaiVoiceTurnCoordinator();
+        var providerServices = new ServiceCollection();
+        providerServices.AddSingleton(turns);
+        providerServices.AddSingleton(new EllaiVoiceTurnOptions(MaximumTurnDurationMs: 750));
+        providerServices.AddSingleton(new MetaAsrRealtimeAdapter(options));
+        using var provider = providerServices.BuildServiceProvider();
+        var service = new EllaiVoiceTranscriptionService(
+            new EllaiConsentService(), new InMemoryEllaiConsentStore(), options, provider);
+        await service.GrantVoiceConsentAsync("session-turn-timeout", CancellationToken.None);
+        await using var audio = new ProgressivePcmStream();
+        var transcription = service.TranscribeAsync(
+            "session-turn-timeout", EllaiVoiceCaptureMode.Live, audio,
+            contentLength: null, cancellationToken: CancellationToken.None);
+
+        try
+        {
+            await audio.WriteAsync(new byte[24_000 * sizeof(short)]);
+            await server.FirstAudioReceived.WaitAsync(TimeSpan.FromSeconds(10));
+
+            var result = await transcription.WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.Null(result);
+            Assert.Equal(EllaiVoiceTurnState.Recovering,
+                turns.GetSnapshot("session-turn-timeout").State);
+        }
+        finally
+        {
+            audio.Complete();
+        }
+    }
+
+    [Fact]
     public async Task LiveProviderPartialIsVisibleDuringCaptureButFinalRemainsAuthoritative()
     {
         await using var server = await AudioForwardingWebSocketServer.CreateAsync(
