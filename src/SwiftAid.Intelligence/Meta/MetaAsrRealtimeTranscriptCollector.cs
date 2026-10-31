@@ -50,7 +50,7 @@ public sealed class MetaAsrRealtimeTranscriptCollector
             {
                 if (turnValue.ValueKind != JsonValueKind.Number
                     || !turnValue.TryGetInt64(out var parsedTurnId)
-                    || parsedTurnId < 1)
+                    || parsedTurnId < 0)
                 {
                     return false;
                 }
@@ -102,7 +102,7 @@ public sealed class MetaAsrRealtimeTranscriptCollector
                 if (!root.TryGetProperty("turnId", out var turnValue)
                     || turnValue.ValueKind != JsonValueKind.Number
                     || !turnValue.TryGetInt64(out var turnId)
-                    || turnId < 1
+                    || turnId < 0
                     || !_completedTurnIds.Add(turnId))
                 {
                     return false;
@@ -125,7 +125,7 @@ public sealed class MetaAsrRealtimeTranscriptCollector
             {
                 if (finalTurnValue.ValueKind != JsonValueKind.Number
                     || !finalTurnValue.TryGetInt64(out var parsedTurnId)
-                    || parsedTurnId < 1
+                    || parsedTurnId < 0
                     || !_completedTurnIds.Add(parsedTurnId))
                 {
                     return false;

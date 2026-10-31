@@ -6,6 +6,26 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class MetaAsrRealtimeTranscriptCollectorTests
 {
     [Fact]
+    public void FirstZeroBasedProviderTurnIsDeliveredOnceWithoutClosingTheStream()
+    {
+        var collector = new MetaAsrRealtimeTranscriptCollector();
+
+        Assert.True(collector.TryReadPartial(
+            """{"type":"transcript","turnId":0,"final":false,"transcript":"Hello"}""",
+            out var partial));
+        Assert.Equal(0, partial?.TurnId);
+        Assert.True(collector.TryAppend(
+            """{"type":"speechComplete","turnId":0,"transcript":"Hello Ellai."}""",
+            out var first));
+        Assert.Equal(0, first?.TurnId);
+        Assert.False(collector.TryAppend(
+            """{"type":"transcript","turnId":0,"final":true,"transcript":"Hello Ellai."}"""));
+        Assert.True(collector.TryAppend(
+            """{"type":"speechComplete","turnId":1,"transcript":"Another question."}"""));
+        Assert.Equal([0L, 1L], collector.Turns.Select(turn => turn.TurnId));
+    }
+
+    [Fact]
     public void PushToTalkIgnoresPartialsAndCollectsOnlyFinalTranscript()
     {
         var collector = new MetaAsrRealtimeTranscriptCollector();
@@ -47,7 +67,7 @@ public sealed class MetaAsrRealtimeTranscriptCollectorTests
             """{"type":"transcript","transcript":"final words","final":true,"turnId":4}""",
             out _));
         Assert.False(collector.TryReadPartial(
-            """{"type":"transcript","transcript":"too long","final":false,"turnId":0}""",
+            """{"type":"transcript","transcript":"invalid turn","final":false,"turnId":-1}""",
             out _));
     }
 
@@ -79,7 +99,7 @@ public sealed class MetaAsrRealtimeTranscriptCollectorTests
     [Theory]
     [InlineData("not-json")]
     [InlineData("""{"type":"speechComplete","transcript":"missing turn id"}""")]
-    [InlineData("""{"type":"transcript","transcript":"partial","final":true,"turnId":0}""")]
+    [InlineData("""{"type":"transcript","transcript":"partial","final":true,"turnId":-1}""")]
     public void RejectsMalformedOrUnidentifiableCompletion(string payload)
     {
         var collector = new MetaAsrRealtimeTranscriptCollector();
