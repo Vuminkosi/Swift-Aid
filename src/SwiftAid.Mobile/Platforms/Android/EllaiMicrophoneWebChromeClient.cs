@@ -6,7 +6,7 @@ namespace SwiftAid.Mobile.Platforms.Android;
 /// only after MAUI has already obtained the app-level microphone permission.</summary>
 internal sealed class EllaiMicrophoneWebChromeClient : WebChromeClient
 {
-    public override void OnPermissionRequest(PermissionRequest? request)
+    public override async void OnPermissionRequest(PermissionRequest? request)
     {
         if (request is null)
         {
@@ -14,22 +14,35 @@ internal sealed class EllaiMicrophoneWebChromeClient : WebChromeClient
         }
 
         var resources = request.GetResources() ?? Array.Empty<string>();
-        if (resources.Any(resource => string.Equals(
-                resource, PermissionRequest.ResourceAudioCapture, StringComparison.OrdinalIgnoreCase)))
+        if (resources.Length != 1 || !string.Equals(
+                resources[0], PermissionRequest.ResourceAudioCapture, StringComparison.OrdinalIgnoreCase))
         {
-            var granted = Permissions.CheckStatusAsync<Permissions.Microphone>()
-                .GetAwaiter().GetResult() == PermissionStatus.Granted;
-            if (granted)
-            {
-                request.Grant([PermissionRequest.ResourceAudioCapture]);
-            }
-            else
-            {
-                request.Deny();
-            }
+            await DenyOnMainThreadAsync(request).ConfigureAwait(false);
             return;
         }
 
-        request.Deny();
+        try
+        {
+            var granted = await Permissions.CheckStatusAsync<Permissions.Microphone>().ConfigureAwait(false)
+                == PermissionStatus.Granted;
+            await MainThread.InvokeOnMainThreadAsync(() =>
+            {
+                if (granted)
+                {
+                    request.Grant([PermissionRequest.ResourceAudioCapture]);
+                }
+                else
+                {
+                    request.Deny();
+                }
+            }).ConfigureAwait(false);
+        }
+        catch
+        {
+            await DenyOnMainThreadAsync(request).ConfigureAwait(false);
+        }
     }
+
+    private static Task DenyOnMainThreadAsync(PermissionRequest request) =>
+        MainThread.InvokeOnMainThreadAsync(request.Deny);
 }
