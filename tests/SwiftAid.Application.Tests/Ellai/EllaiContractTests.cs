@@ -72,6 +72,22 @@ public sealed class EllaiContractTests
     }
 
     [Fact]
+    public void MalformedNullCollectionsAndClaimsAreRejectedWithoutThrowing()
+    {
+        var decision = new EllaiDecision(
+            2, DecisionKind.Answer, "A grounded answer.", "A grounded answer.",
+            new GroundedClaim[] { null! }, null!, null!, null,
+            null!, null, null);
+
+        var errors = EllaiDecisionValidator.Validate(decision);
+
+        Assert.Contains(errors, error => error.Contains("Claims entries", StringComparison.Ordinal));
+        Assert.Contains(errors, error => error.Contains("Questions must be an array", StringComparison.Ordinal));
+        Assert.Contains(errors, error => error.Contains("UiIntents must be an array", StringComparison.Ordinal));
+        Assert.Contains(errors, error => error.Contains("TopicRefs must be an array", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void PlanDraftRejectsBadStepGraph()
     {
         var draft = new EllaiGuidancePlanDraft(

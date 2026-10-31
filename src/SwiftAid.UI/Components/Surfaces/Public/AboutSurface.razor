@@ -6,9 +6,7 @@
 
 <MudPaper Class="pa-4 mb-4" Elevation="0">
     <MudStack AlignItems="AlignItems.Center" Spacing="2">
-        <MudAvatar Size="Size.Large" Color="Color.Primary">
-            <MudIcon Icon="@Icons.Material.Filled.VolunteerActivism" />
-        </MudAvatar>
+        <img class="about-surface__brand-mark" src="_content/SwiftAid.UI/assets/swiftaid-icon.png" alt="" aria-hidden="true" />
         <MudText Typo="Typo.h6" Align="Align.Center">@AppName</MudText>
         <MudText Typo="Typo.body2" Align="Align.Center">Healthier people. Safer communities. Brighter tomorrows.</MudText>
     </MudStack>
@@ -23,9 +21,9 @@
     {
         <SwiftAidSettingsRow Title="Terms" Href="@TermsHref" AriaLabel="Terms of use" />
     }
-    @if (!string.IsNullOrWhiteSpace(EducationHref))
+    @if (!string.IsNullOrWhiteSpace(CommunityHref))
     {
-        <SwiftAidSettingsRow Title="Education" Href="@EducationHref" AriaLabel="Community education" />
+        <SwiftAidSettingsRow Title="Communities" Href="@CommunityHref" AriaLabel="Communities" />
     }
 </SwiftAidSettingsGroup>
 
@@ -39,5 +37,5 @@
 
     [Parameter] public string? TermsHref { get; set; }
 
-    [Parameter] public string? EducationHref { get; set; }
+    [Parameter] public string? CommunityHref { get; set; }
 }

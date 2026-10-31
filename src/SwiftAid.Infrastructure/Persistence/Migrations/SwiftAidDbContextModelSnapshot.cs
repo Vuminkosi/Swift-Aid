@@ -1261,6 +1261,10 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("mode");
 
+                    b.Property<string>("OwnerActorId")
+                        .HasColumnType("text")
+                        .HasColumnName("owner_actor_id");
+
                     b.Property<string>("PendingCheckpointId")
                         .HasColumnType("text")
                         .HasColumnName("pending_checkpoint_id");
@@ -1417,15 +1421,40 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("accepted_at_utc");
 
+                    b.Property<int>("AttemptCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("attempt_count");
+
+                    b.Property<DateTimeOffset?>("CompletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at_utc");
+
+                    b.Property<DateTimeOffset?>("LeaseExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_expires_at_utc");
+
+                    b.Property<string>("WorkPayloadJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("work_payload_json");
+
                     b.HasKey("SessionId", "ClientUtteranceId")
                         .HasName("pk_ellai_utterances");
 
                     b.HasIndex("SessionId")
                         .HasDatabaseName("ix_ellai_utterances_session");
 
+                    b.HasIndex("CompletedAtUtc", "LeaseExpiresAtUtc", "AcceptedAtUtc")
+                        .HasDatabaseName("ix_ellai_utterances_outbox_claim");
+
                     b.ToTable("ellai_utterances", null, t =>
                         {
+                            t.HasCheckConstraint("ck_ellai_utterances_attempt_count", "attempt_count >= 0");
+
                             t.HasCheckConstraint("ck_ellai_utterances_ids_nonempty", "length(btrim(session_id)) > 0 AND length(btrim(client_utterance_id)) > 0");
+
+                            t.HasCheckConstraint("ck_ellai_utterances_payload_size", "work_payload_json IS NULL OR octet_length(work_payload_json::text) <= 16384");
                         });
                 });
 

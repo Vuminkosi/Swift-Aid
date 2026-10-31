@@ -12,6 +12,7 @@ using MudBlazor.Services;
 using SwiftAid.Contracts.Ellai;
 using SwiftAid.UI.Components.Layout;
 using SwiftAid.UI.Ellai;
+using SwiftAid.UI.Ellai.Components;
 using SwiftAid.UI.Ellai.Guidance;
 
 namespace SwiftAid.Ui.Tests;
@@ -19,12 +20,43 @@ namespace SwiftAid.Ui.Tests;
 #pragma warning disable BL0006 // Render-tree access is required to exercise the real component event callback.
 public sealed class AuthorizedLayoutNavigationAccessibilityTests
 {
-    private const string DrawerId = "swiftaid-authorized-navigation";
+    private const string NavigationDrawerId = "swiftaid-authorized-navigation";
+
+    [Fact]
+    public async Task AuthorizedLayout_RendersEllaiLauncherConnectedToGuidanceHost()
+    {
+        await using var serviceProvider = CreateServices(Breakpoint.Md, out _);
+        var launcher = serviceProvider.GetRequiredService<EllaiLauncher>();
+        EllaiMode? requestedMode = null;
+        launcher.Requested += mode => requestedMode = mode;
+        var renderer = new TestRenderer(serviceProvider, serviceProvider.GetRequiredService<ILoggerFactory>());
+        try
+        {
+            var host = await renderer.RenderAsync<AuthorizedLayout>();
+            await renderer.Dispatcher.InvokeAsync(async () =>
+            {
+                Assert.True(launcher.HasSubscribers);
+                var selected = (EventCallback<EllaiMode>)renderer.GetComponentParameter(
+                    host.ComponentId,
+                    typeof(EllaiLauncherMenu),
+                    nameof(EllaiLauncherMenu.OnModeSelected))!;
+
+                await selected.InvokeAsync(EllaiMode.ReviewEvidence);
+                Assert.True(launcher.HasSubscribers);
+                Assert.Equal(EllaiMode.ReviewEvidence, requestedMode);
+            });
+            host.Dispose();
+        }
+        finally
+        {
+            await renderer.DisposeAsync();
+        }
+    }
 
     [Fact]
     public async Task Toggle_ExposesDrawerRelationshipAndCurrentExpandedState()
     {
-        await using var serviceProvider = CreateServices(Breakpoint.Xs, out var viewport);
+        await using var serviceProvider = CreateServices(Breakpoint.Xs, out _);
         var renderer = new TestRenderer(serviceProvider, serviceProvider.GetRequiredService<ILoggerFactory>());
         try
         {
@@ -34,14 +66,22 @@ public sealed class AuthorizedLayoutNavigationAccessibilityTests
                 var initialDrawerOpen = (bool)renderer.GetComponentParameter(
                     host.ComponentId,
                     typeof(MudDrawer),
-                    nameof(MudDrawer.Open))!;
+                    nameof(MudDrawer.Open),
+                    NavigationDrawerId)!;
                 Assert.False(initialDrawerOpen);
+                Assert.Equal(1, renderer.GetComponentCount(host.ComponentId, typeof(MudDrawer)));
+                Assert.Equal(DrawerVariant.Responsive, renderer.GetComponentParameter(
+                    host.ComponentId,
+                    typeof(MudDrawer),
+                    nameof(MudDrawer.Variant)));
                 Assert.Equal(
                     initialDrawerOpen ? "true" : "false",
                     renderer.GetRenderedAttribute(host.ComponentId, typeof(MudIconButton), "aria-expanded"));
-                Assert.Equal(DrawerId, renderer.GetRenderedAttribute(host.ComponentId, typeof(MudIconButton), "aria-controls"));
-                Assert.Equal(DrawerId, renderer.GetComponentParameter(host.ComponentId, typeof(MudDrawer), "id"));
-                Assert.Equal(DrawerId, renderer.GetRenderedAttribute(host.ComponentId, typeof(MudDrawer), "id"));
+                Assert.Equal("Open navigation",
+                    renderer.GetRenderedAttribute(host.ComponentId, typeof(MudIconButton), "aria-label"));
+                Assert.Equal(NavigationDrawerId, renderer.GetRenderedAttribute(host.ComponentId, typeof(MudIconButton), "aria-controls"));
+                Assert.Equal(NavigationDrawerId, renderer.GetComponentParameter(host.ComponentId, typeof(MudDrawer), "id", NavigationDrawerId));
+                Assert.Equal(NavigationDrawerId, renderer.GetRenderedAttribute(host.ComponentId, typeof(MudDrawer), "id", NavigationDrawerId));
 
                 var callback = (EventCallback<MouseEventArgs>)renderer.GetComponentParameter(
                     host.ComponentId,
@@ -52,12 +92,15 @@ public sealed class AuthorizedLayoutNavigationAccessibilityTests
                 var drawerOpenAfterToggle = (bool)renderer.GetComponentParameter(
                     host.ComponentId,
                     typeof(MudDrawer),
-                    nameof(MudDrawer.Open))!;
+                    nameof(MudDrawer.Open),
+                    NavigationDrawerId)!;
                 Assert.NotEqual(initialDrawerOpen, drawerOpenAfterToggle);
                 Assert.Equal(
                     drawerOpenAfterToggle ? "true" : "false",
                     renderer.GetRenderedAttribute(host.ComponentId, typeof(MudIconButton), "aria-expanded"));
-                Assert.Equal(DrawerId, renderer.GetRenderedAttribute(host.ComponentId, typeof(MudIconButton), "aria-controls"));
+                Assert.Equal("Close navigation",
+                    renderer.GetRenderedAttribute(host.ComponentId, typeof(MudIconButton), "aria-label"));
+                Assert.Equal(NavigationDrawerId, renderer.GetRenderedAttribute(host.ComponentId, typeof(MudIconButton), "aria-controls"));
             });
             host.Dispose();
         }
@@ -67,21 +110,76 @@ public sealed class AuthorizedLayoutNavigationAccessibilityTests
         }
     }
 
-    [Theory]
-    [InlineData(Breakpoint.Xs, false)]
-    [InlineData(Breakpoint.Sm, false)]
-    [InlineData(Breakpoint.Md, true)]
-    [InlineData(Breakpoint.Lg, true)]
-    public async Task InitialViewport_SetsResponsiveDrawerDefault(Breakpoint breakpoint, bool expectedOpen)
+    [Fact]
+    public async Task Layout_UsesOneResponsiveDrawerAtDesktopBreakpoint()
     {
-        await using var serviceProvider = CreateServices(breakpoint, out _);
+        await using var serviceProvider = CreateServices(Breakpoint.Md, out var viewport);
         var renderer = new TestRenderer(serviceProvider, serviceProvider.GetRequiredService<ILoggerFactory>());
         try
         {
             var host = await renderer.RenderAsync<AuthorizedLayout>();
+            await viewport.ChangeBreakpointAsync(Breakpoint.Sm);
+            await viewport.ChangeBreakpointAsync(Breakpoint.Md);
             await renderer.Dispatcher.InvokeAsync(() =>
             {
-                Assert.Equal(expectedOpen, renderer.GetComponentParameter(
+                Assert.Equal(1, renderer.GetComponentCount(host.ComponentId, typeof(MudDrawer)));
+                Assert.Equal(DrawerVariant.Responsive, renderer.GetComponentParameter(
+                    host.ComponentId,
+                    typeof(MudDrawer),
+                    nameof(MudDrawer.Variant)));
+                Assert.Equal(true, renderer.GetComponentParameter(
+                    host.ComponentId,
+                    typeof(MudDrawer),
+                    nameof(MudDrawer.Open)));
+                Assert.Equal(Breakpoint.Md, renderer.GetComponentParameter(
+                    host.ComponentId,
+                    typeof(MudDrawer),
+                    nameof(MudDrawer.Breakpoint)));
+            });
+            host.Dispose();
+        }
+        finally
+        {
+            await renderer.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Layout_KeepsOneResponsiveDrawerWhenViewportCrossesDesktopBreakpoint()
+    {
+        await using var serviceProvider = CreateServices(Breakpoint.Xs, out var viewport);
+        var renderer = new TestRenderer(serviceProvider, serviceProvider.GetRequiredService<ILoggerFactory>());
+        try
+        {
+            var host = await renderer.RenderAsync<AuthorizedLayout>();
+            await renderer.Dispatcher.InvokeAsync(async () =>
+            {
+                Assert.Equal(1, renderer.GetComponentCount(host.ComponentId, typeof(MudDrawer)));
+                Assert.Equal(DrawerVariant.Responsive, renderer.GetComponentParameter(
+                    host.ComponentId,
+                    typeof(MudDrawer),
+                    nameof(MudDrawer.Variant)));
+
+                await viewport.ChangeBreakpointAsync(Breakpoint.Md);
+
+                Assert.Equal(1, renderer.GetComponentCount(host.ComponentId, typeof(MudDrawer)));
+                Assert.Equal(DrawerVariant.Responsive, renderer.GetComponentParameter(
+                    host.ComponentId,
+                    typeof(MudDrawer),
+                    nameof(MudDrawer.Variant)));
+                Assert.Equal(true, renderer.GetComponentParameter(
+                    host.ComponentId,
+                    typeof(MudDrawer),
+                    nameof(MudDrawer.Open)));
+
+                await viewport.ChangeBreakpointAsync(Breakpoint.Sm);
+
+                Assert.Equal(1, renderer.GetComponentCount(host.ComponentId, typeof(MudDrawer)));
+                Assert.Equal(DrawerVariant.Responsive, renderer.GetComponentParameter(
+                    host.ComponentId,
+                    typeof(MudDrawer),
+                    nameof(MudDrawer.Variant)));
+                Assert.Equal(false, renderer.GetComponentParameter(
                     host.ComponentId,
                     typeof(MudDrawer),
                     nameof(MudDrawer.Open)));
@@ -95,9 +193,9 @@ public sealed class AuthorizedLayoutNavigationAccessibilityTests
     }
 
     [Fact]
-    public async Task BreakpointCrossingsChangeDrawerDefaultButResizesWithinRangePreserveChoice()
+    public async Task MobileDrawerToggleControlsTheSingleResponsiveDrawer()
     {
-        await using var serviceProvider = CreateServices(Breakpoint.Xs, out var viewport);
+        await using var serviceProvider = CreateServices(Breakpoint.Xs, out _);
         var renderer = new TestRenderer(serviceProvider, serviceProvider.GetRequiredService<ILoggerFactory>());
         try
         {
@@ -108,23 +206,12 @@ public sealed class AuthorizedLayoutNavigationAccessibilityTests
                     host.ComponentId,
                     typeof(MudIconButton),
                     nameof(MudIconButton.OnClick))!;
+                Assert.Equal(1, renderer.GetComponentCount(host.ComponentId, typeof(MudDrawer)));
                 await toggle.InvokeAsync(new MouseEventArgs());
-                Assert.True(GetDrawerOpen(renderer, host.ComponentId));
-
-                await viewport.ChangeBreakpointAsync(Breakpoint.Sm);
-                Assert.True(GetDrawerOpen(renderer, host.ComponentId));
-
-                await viewport.ChangeBreakpointAsync(Breakpoint.Md);
-                Assert.True(GetDrawerOpen(renderer, host.ComponentId));
-                Assert.Equal("true", renderer.GetRenderedAttribute(host.ComponentId, typeof(MudIconButton), "aria-expanded"));
+                Assert.True(GetDrawerOpen(renderer, host.ComponentId, NavigationDrawerId));
 
                 await toggle.InvokeAsync(new MouseEventArgs());
-                Assert.False(GetDrawerOpen(renderer, host.ComponentId));
-                await viewport.ChangeBreakpointAsync(Breakpoint.Lg);
-                Assert.False(GetDrawerOpen(renderer, host.ComponentId));
-
-                await viewport.ChangeBreakpointAsync(Breakpoint.Sm);
-                Assert.False(GetDrawerOpen(renderer, host.ComponentId));
+                Assert.False(GetDrawerOpen(renderer, host.ComponentId, NavigationDrawerId));
                 Assert.Equal("false", renderer.GetRenderedAttribute(host.ComponentId, typeof(MudIconButton), "aria-expanded"));
             });
             host.Dispose();
@@ -135,8 +222,8 @@ public sealed class AuthorizedLayoutNavigationAccessibilityTests
         }
     }
 
-    private static bool GetDrawerOpen(TestRenderer renderer, int componentId) =>
-        (bool)renderer.GetComponentParameter(componentId, typeof(MudDrawer), nameof(MudDrawer.Open))!;
+    private static bool GetDrawerOpen(TestRenderer renderer, int componentId, string drawerId) =>
+        (bool)renderer.GetComponentParameter(componentId, typeof(MudDrawer), nameof(MudDrawer.Open), drawerId)!;
 
     private static ServiceProvider CreateServices(Breakpoint initialBreakpoint, out FakeBrowserViewportService viewport)
     {
@@ -179,24 +266,34 @@ public sealed class AuthorizedLayoutNavigationAccessibilityTests
             return new RenderedComponent<TComponent>(this, component, componentId);
         }
 
-        public object? GetComponentParameter(int rootId, Type componentType, string name)
+        public object? GetComponentParameter(int rootId, Type componentType, string name, string? componentId = null)
         {
-            return FindComponentParameter(rootId, componentType, name);
+            return FindComponentParameter(rootId, componentType, name, componentId);
         }
 
-        public string? GetRenderedAttribute(int rootId, Type componentType, string attributeName)
+        public int GetComponentCount(int rootId, Type componentType) => FindComponentIds(rootId, componentType).Count();
+
+        public string? GetRenderedAttribute(int rootId, Type componentType, string attributeName, string? componentId = null)
         {
-            foreach (var componentId in FindComponentIds(rootId, componentType))
+            foreach (var currentComponentId in FindComponentIds(rootId, componentType))
             {
-                var frames = GetCurrentRenderTreeFrames(componentId);
+                var frames = GetCurrentRenderTreeFrames(currentComponentId);
+                string? candidateId = null;
+                string? candidateValue = null;
                 for (var index = 0; index < frames.Count; index++)
                 {
                     var frame = frames.Array[index];
-                    if (frame.FrameType == RenderTreeFrameType.Attribute && frame.AttributeName == attributeName)
+                    if (frame.FrameType == RenderTreeFrameType.Attribute && frame.AttributeName == "id")
                     {
-                        return frame.AttributeValue?.ToString();
+                        candidateId = frame.AttributeValue?.ToString();
                     }
+
+                    if (frame.FrameType == RenderTreeFrameType.Attribute && frame.AttributeName == attributeName)
+                        candidateValue = frame.AttributeValue?.ToString();
                 }
+
+                if (candidateValue is not null && (componentId is null || candidateId == componentId))
+                    return candidateValue;
             }
 
             return null;
@@ -225,7 +322,7 @@ public sealed class AuthorizedLayoutNavigationAccessibilityTests
             }
         }
 
-        private object? FindComponentParameter(int parentId, Type componentType, string name)
+        private object? FindComponentParameter(int parentId, Type componentType, string name, string? componentId)
         {
             var frames = GetCurrentRenderTreeFrames(parentId);
             for (var index = 0; index < frames.Count; index++)
@@ -238,6 +335,8 @@ public sealed class AuthorizedLayoutNavigationAccessibilityTests
 
                 if (componentType.IsAssignableFrom(frame.ComponentType))
                 {
+                    string? candidateId = null;
+                    object? candidateValue = null;
                     for (var attributeIndex = index + 1; attributeIndex < frames.Count; attributeIndex++)
                     {
                         var attribute = frames.Array[attributeIndex];
@@ -246,14 +345,24 @@ public sealed class AuthorizedLayoutNavigationAccessibilityTests
                             break;
                         }
 
+                        if (attribute.AttributeName == "id")
+                        {
+                            candidateId = attribute.AttributeValue?.ToString();
+                        }
+
                         if (attribute.AttributeName == name)
                         {
-                            return attribute.AttributeValue;
+                            candidateValue = attribute.AttributeValue;
                         }
+                    }
+
+                    if (candidateValue is not null && (componentId is null || candidateId == componentId))
+                    {
+                        return candidateValue;
                     }
                 }
 
-                var nestedValue = FindComponentParameter(frame.ComponentId, componentType, name);
+                var nestedValue = FindComponentParameter(frame.ComponentId, componentType, name, componentId);
                 if (nestedValue is not null)
                 {
                     return nestedValue;
@@ -342,7 +451,26 @@ public sealed class AuthorizedLayoutNavigationAccessibilityTests
             Task.FromResult(_currentBreakpoint == breakpoint);
 
         public Task<bool> IsBreakpointWithinReferenceSizeAsync(Breakpoint breakpoint, Breakpoint reference) =>
-            Task.FromResult(_currentBreakpoint == breakpoint);
+            Task.FromResult(breakpoint switch
+            {
+                Breakpoint.None => false,
+                Breakpoint.Always => true,
+                Breakpoint.Xs => reference == Breakpoint.Xs,
+                Breakpoint.Sm => reference == Breakpoint.Sm,
+                Breakpoint.Md => reference == Breakpoint.Md,
+                Breakpoint.Lg => reference == Breakpoint.Lg,
+                Breakpoint.Xl => reference == Breakpoint.Xl,
+                Breakpoint.Xxl => reference == Breakpoint.Xxl,
+                Breakpoint.SmAndDown => reference <= Breakpoint.Sm,
+                Breakpoint.MdAndDown => reference <= Breakpoint.Md,
+                Breakpoint.LgAndDown => reference <= Breakpoint.Lg,
+                Breakpoint.XlAndDown => reference <= Breakpoint.Xl,
+                Breakpoint.SmAndUp => reference >= Breakpoint.Sm,
+                Breakpoint.MdAndUp => reference >= Breakpoint.Md,
+                Breakpoint.LgAndUp => reference >= Breakpoint.Lg,
+                Breakpoint.XlAndUp => reference >= Breakpoint.Xl,
+                _ => false
+            });
 
         public Task<Breakpoint> GetCurrentBreakpointAsync() => Task.FromResult(_currentBreakpoint);
 

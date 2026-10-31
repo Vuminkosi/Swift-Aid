@@ -1,4 +1,8 @@
 @page "/"
+@using SwiftAid.Contracts.Intake
+@using SwiftAid.UI.Components.Public
+@using SwiftAid.UI.Components.Public.GuidedReportStepper
+@using SwiftAid.UI.Components.Theme
 
 <PageTitle>SwiftAid shared component test fixture</PageTitle>
 
@@ -24,12 +28,70 @@
                     UseLottie="_useLottie"
                     StatusText="Synthetic fixture loading status" />
     <SwiftAidServiceBoundaryNotice />
+
+    <section aria-label="State panel accessibility fixture" data-testid="state-panel-fixture">
+        <SwiftAidStatePanel State="SwiftAidViewState.Denied" Title="Coordinator access unavailable" />
+        <SwiftAidStatePanel State="SwiftAidViewState.Error" Title="Reports could not be loaded" />
+    </section>
+
+    <section aria-label="Guided report fixture" data-testid="guided-report-fixture">
+        <GuidedReportStepper Draft="_reportDraft"
+                             Countries="_countries"
+                             CountryCatalogueVersion="fixture-country-list-1"
+                             CountryCatalogueIsCurrent="true"
+                             PrivacyNoticeReference="/synthetic-privacy"
+                             ProcessingPolicyReference="synthetic-policy"
+                             ProcessingPolicyVersion="fixture-policy-1"
+                             PrivacyNoticeIsCurrent="true"
+                             OnSaveDraft="SaveDraftAsync"
+                             OnContinue="ContinueAsync"
+                             OnReview="ReviewAsync"
+                             OnSubmit="SubmitAsync" />
+        <p data-testid="report-callback-status" role="status">@_reportCallbackStatus</p>
+    </section>
 </main>
 
 @code {
     private bool _isLoading;
     private bool _useLottie;
+    private readonly PublicReportDraft _reportDraft = new()
+    {
+        CountryCode = "XX",
+        CountryConfirmed = true,
+        LocationUnknown = false
+    };
+    private readonly IReadOnlyList<PublicCountryOption> _countries =
+    [
+        new("ZW", "Zimbabwe"),
+        new("SZ", "Eswatini")
+    ];
+    private string _reportCallbackStatus = "No report callback has run.";
+
     private void ToggleLoading() => _isLoading = !_isLoading;
 
     private void ToggleLottie() => _useLottie = !_useLottie;
+
+    private Task SaveDraftAsync(PublicReportSaveRequest request)
+    {
+        _reportCallbackStatus = $"Synthetic draft callback: {request.Submission.Narrative}";
+        return Task.CompletedTask;
+    }
+
+    private Task ContinueAsync(PublicReportDraft draft)
+    {
+        _reportCallbackStatus = $"Synthetic step callback: {draft.SubjectScope}";
+        return Task.CompletedTask;
+    }
+
+    private Task ReviewAsync(PublicReportDraft draft)
+    {
+        _reportCallbackStatus = $"Synthetic review callback: {draft.Narrative}";
+        return Task.CompletedTask;
+    }
+
+    private Task SubmitAsync(IntakeSubmission submission)
+    {
+        _reportCallbackStatus = $"Synthetic submit callback: {submission.Narrative}";
+        return Task.CompletedTask;
+    }
 }

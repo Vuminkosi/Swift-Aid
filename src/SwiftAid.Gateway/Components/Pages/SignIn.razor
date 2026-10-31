@@ -1,15 +1,17 @@
 @page "/sign-in"
+@using System.ComponentModel.DataAnnotations
 @implements IAsyncDisposable
 @inject IJSRuntime JS
 @inject NavigationManager Navigation
 
 <PageTitle>Sign in | SwiftAid</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.Small" Class="sign-in-page">
+<div class="sign-in-page">
+<AccountEntrySurface>
     <MudPaper Class="sign-in-panel" Elevation="0">
         <SwiftAidPageHeading Eyebrow="Your SwiftAid account"
-                             Title="Sign in to SwiftAid"
-                             Description="Sign in to follow public sessions and use the features available to you."
+                             Title="Welcome back"
+                             Description="Sign in to your account."
                              HeadingId="sign-in-heading" />
 
         <MudText Typo="Typo.body2" Class="sign-in-privacy-note">
@@ -43,13 +45,25 @@
         </div>
         @if (string.IsNullOrEmpty(_errorMessage) && !_isLoading)
         {
+            @if (!_passwordSignInAvailable)
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="sign-in-alert">
+                    Email and password sign-in is currently unavailable. You can continue without an account.
+                </MudAlert>
+            }
+            else
+            {
+            <EditForm Model="_passwordForm" OnSubmit="PasswordSignInAsync">
+            <DataAnnotationsValidator />
             <div class="sign-in-password" role="group" aria-label="Sign in with email">
-                <MudTextField T="string" Label="Email address" @bind-Value="_email"
-                              Variant="Variant.Outlined" Required="true" Disabled="@_passwordBusy"
+                <MudTextField T="string" Label="Email address" @bind-Value="_passwordForm.Email"
+                              For="@(() => _passwordForm.Email)"
+                              Variant="Variant.Outlined" Disabled="@_passwordBusy"
                               InputType="InputType.Email" Immediate="true" autocomplete="email"
                               aria-label="Email address" />
-                <MudTextField T="string" Label="Password" @bind-Value="_password"
-                              Variant="Variant.Outlined" Required="true" Disabled="@_passwordBusy"
+                <MudTextField T="string" Label="Password" @bind-Value="_passwordForm.Password"
+                              For="@(() => _passwordForm.Password)"
+                              Variant="Variant.Outlined" Disabled="@_passwordBusy"
                               InputType="@(_showPassword ? InputType.Text : InputType.Password)"
                               Adornment="Adornment.End" AdornmentIcon="@(_showPassword ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
                               OnAdornmentClick="() => _showPassword = !_showPassword"
@@ -66,13 +80,15 @@
                                Label="Remember me" Disabled="@_passwordBusy" />
                     <MudLink Href="/forgot-password">Forgot password?</MudLink>
                 </MudStack>
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
-                           OnClick="PasswordSignInAsync" Disabled="@(!CanPasswordSignIn)"
+                <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                           Disabled="@(_isLoading || _passwordBusy)"
                            Class="sign-in-provider-button auth-cta" StartIcon="@Icons.Material.Filled.Login">
                     @(_passwordBusy ? "Signing in…" : "Sign in")
                 </MudButton>
-                <MudLink Href="/register">Don't have an account? Sign up</MudLink>
+                <MudLink Href="@RegisterHref">Don't have an account? Sign up</MudLink>
             </div>
+            </EditForm>
+            }
             <MudText Typo="Typo.body2" Class="sign-in-divider-text">Or continue with</MudText>
             <div class="sign-in-provider-list" role="group" aria-label="Choose a sign-in option">
                 @foreach (var provider in _providers)
@@ -151,11 +167,12 @@
             </div>
         }
 
-        <p id="sign-in-live-status" class="sign-in-live-status" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">@(!string.IsNullOrEmpty(_errorMessage) ? string.Empty : _liveMessage)</p>
+        <p id="sign-in-live-status" class="sign-in-live-status" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">@_liveMessage</p>
 
         <MudDivider Class="sign-in-divider" />
 
         <MudButton Href="/report"
+                   id="continue-without-account"
                    Variant="Variant.Text"
                    Color="Color.Primary"
                    FullWidth="true"
@@ -170,23 +187,24 @@
             </MudStack>
         </nav>
     </MudPaper>
-</MudContainer>
+</AccountEntrySurface>
+</div>
 
 @code {
     private const string FacebookProviderId = "facebook";
     private const string GoogleProviderId = "google";
     private IJSObjectReference? _module;
     private bool _isLoading = true;
+    private bool _passwordSignInAvailable;
     private bool _facebookAvailable;
     private bool _facebookWired;
     private bool _isRetrying;
     private bool _focusPrimaryOptionOnNextRender;
     private string? _requestToken;
     private string? _errorMessage;
-    private string? _email;
-    private string? _password;
+    private readonly PasswordSignInForm _passwordForm = new();
     private bool _showPassword;
-    private bool _rememberMe;
+    private bool _rememberMe = true;
     private bool _passwordBusy;
     private string? _passwordError;
     private string _liveMessage = string.Empty;
@@ -194,7 +212,8 @@
     [SupplyParameterFromQuery(Name = "returnUrl")]
     private string? RequestedReturnUrl { get; set; }
 
-    private string SafeReturnUrl => IsLocalReturnUrl(RequestedReturnUrl) ? RequestedReturnUrl! : "/";
+    private string SafeReturnUrl => SwiftAid.Client.Navigation.LocalReturnUrlPolicy.Resolve(RequestedReturnUrl, "/dashboard");
+    private string RegisterHref => $"/register?returnUrl={Uri.EscapeDataString(SafeReturnUrl)}";
     private bool ShowRetryButton => _errorMessage is not null || _isRetrying;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -242,14 +261,9 @@
         ? Task.CompletedTask
         : LoadOptionsAsync(isRetry: true);
 
-    private bool CanPasswordSignIn =>
-        !_isLoading && !_passwordBusy &&
-        !string.IsNullOrWhiteSpace(_email) &&
-        !string.IsNullOrWhiteSpace(_password);
-
-    private async Task PasswordSignInAsync()
+    private async Task PasswordSignInAsync(EditContext editContext)
     {
-        if (!CanPasswordSignIn)
+        if (_isLoading || _passwordBusy || !_passwordSignInAvailable || !editContext.Validate())
         {
             return;
         }
@@ -269,8 +283,8 @@
         {
             var result = await _module.InvokeAsync<PasswordSignInResult>(
                 "passwordSignIn",
-                _email?.Trim(),
-                _password,
+                _passwordForm.Email?.Trim(),
+                _passwordForm.Password,
                 _rememberMe,
                 SafeReturnUrl);
             if (result.Ok)
@@ -327,6 +341,7 @@
                 SafeReturnUrl);
 
             _providers = NormalizeProviders(result.Providers);
+            _passwordSignInAvailable = result.PasswordSignInAvailable;
             var facebookProviderAvailable = result.Providers?.Any(provider =>
                 string.Equals(provider.Id, FacebookProviderId, StringComparison.OrdinalIgnoreCase) &&
                 provider.Available) == true;
@@ -335,10 +350,7 @@
                                  !string.IsNullOrWhiteSpace(result.RequestToken);
             _requestToken = string.IsNullOrWhiteSpace(result.RequestToken) ? null : result.RequestToken;
             _errorMessage = result.OptionsError;
-            _liveMessage = _errorMessage is null
-                ? "Sign-in methods are ready."
-                : "We couldn't load sign-in methods.";
-            _focusPrimaryOptionOnNextRender = isRetry && _errorMessage is null;
+            _liveMessage = BuildOptionsStatusMessage();
         }
         catch (JSException)
         {
@@ -348,8 +360,26 @@
         {
             _isLoading = false;
             _isRetrying = false;
+            _focusPrimaryOptionOnNextRender = isRetry;
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    private string BuildOptionsStatusMessage()
+    {
+        if (_errorMessage is not null)
+        {
+            return "Use Try again to reload sign-in methods.";
+        }
+
+        var socialSignInAvailable = _facebookAvailable ||
+            _providers.Any(provider => provider.Available && !IsSocialProvider(provider.Id));
+        if (!_passwordSignInAvailable && !socialSignInAvailable)
+        {
+            return "Password sign-in is unavailable, and no other sign-in methods are available. You can continue without an account.";
+        }
+
+        return "Available sign-in methods are ready.";
     }
 
     private string GetChallengeAction(string providerId) =>
@@ -357,20 +387,13 @@
 
     private void SetOptionsUnavailable()
     {
+        _passwordSignInAvailable = false;
         _providers = CreateUnavailableProviders();
         _facebookAvailable = false;
         _requestToken = null;
         _errorMessage = "We couldn't load sign-in methods. Try again.";
-        _liveMessage = "We couldn't load sign-in methods.";
+        _liveMessage = "Use Try again to reload sign-in methods.";
     }
-
-    private static bool IsLocalReturnUrl(string? value) =>
-        value is { Length: > 0 and <= 2048 } &&
-        value[0] == '/' &&
-        (value.Length == 1 || value[1] is not ('/' or '\\')) &&
-        !value.Contains('\\') &&
-        !value.Contains('\r') &&
-        !value.Contains('\n');
 
     private static IReadOnlyList<ProviderChoice> NormalizeProviders(IReadOnlyList<ProviderChoice>? configured)
     {
@@ -429,9 +452,22 @@
 
     private sealed record SignInOptionsResult(
         IReadOnlyList<ProviderChoice>? Providers,
+        bool PasswordSignInAvailable,
         bool FacebookWebAvailable,
         string? RequestToken,
         string? OptionsError);
 
     private sealed record PasswordSignInResult(bool Ok, string? Error);
+
+    private sealed class PasswordSignInForm
+    {
+        [Required(ErrorMessage = "Enter your email address.")]
+        [EmailAddress(ErrorMessage = "Enter a valid email address.")]
+        [StringLength(256)]
+        public string? Email { get; set; }
+
+        [Required(ErrorMessage = "Enter your password.")]
+        [StringLength(256)]
+        public string? Password { get; set; }
+    }
 }

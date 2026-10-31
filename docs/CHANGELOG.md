@@ -1,5 +1,9 @@
 # SwiftAid paired-document changelog
 
+## 31 October 2026 — spec 1.5 / implementation plan 2.5
+
+Added Ellai conversational speech requirements SA-ELV-01–14 and scenarios AT-77–AT-86, plus implementation contract §14.10 and gated task P8.7. The inventory now contains 379 unique SA requirements, 86 acceptance scenarios, and 45 tasks (37 original plus eight additive). Speech synthesis remains disabled pending owner confirmation of the exact MMS-TTS checkpoint and applicable usage/distribution rights; OS TTS fallback is prohibited. This document revision establishes requirements and evidence ownership only; it does not prove synthesis, browser/device playback, or an end-to-end voice journey. The paired hashes and document check counts are recorded in [DOCUMENT-INTEGRITY.md](DOCUMENT-INTEGRITY.md).
+
 ## 26 October 2026 — spec 1.4 / implementation plan 2.4
 
 This source pair adds the bounded P0 P8.6 durable multi-turn investigation and clarification capability, with 15 SA-LOOP requirements and AT-73–AT-76. The full inventory is 365 unique SA-* requirements, 76 acceptance scenarios and 44 implementation tasks. P8.6 requires persistent PostgreSQL checkpoints, current-per-turn authorization/version checks, bounded loops and costs, approval/receipt reuse, scoped retrieval, and separate simulated-versus-real Meta evidence. Optional transcription and health-pattern analysis are not prerequisites; medical-advice routes and chain-of-thought persistence remain excluded.

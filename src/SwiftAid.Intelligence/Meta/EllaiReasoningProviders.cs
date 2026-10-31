@@ -17,7 +17,7 @@ public interface IEllaiReasoningProvider
     string Model { get; }
 
     Task<EllaiReasoningResult> CompleteAsync(
-        IReadOnlyList<(string Role, string Content)> messages, int maxTokens, CancellationToken ct);
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct);
 }
 
 /// <summary>Meta-hosted reasoning lane. Key travels in the Authorization
@@ -30,7 +30,7 @@ public sealed class MetaEllaiReasoningProvider(
     public string Model => options.ReasoningModel;
 
     public Task<EllaiReasoningResult> CompleteAsync(
-        IReadOnlyList<(string Role, string Content)> messages, int maxTokens, CancellationToken ct) =>
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct) =>
         inner.CompleteAsync(messages, maxTokens, ct);
 }
 
@@ -44,7 +44,7 @@ public sealed class OllamaEllaiReasoningProvider(HttpClient http, EllaiOptions o
     public string Model => options.OllamaModel;
 
     public async Task<EllaiReasoningResult> CompleteAsync(
-        IReadOnlyList<(string Role, string Content)> messages, int maxTokens, CancellationToken ct)
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(messages);
         if (!options.HasOllamaRoute)
@@ -134,7 +134,7 @@ public sealed class ServerlessEllaiReasoningProvider(HttpClient http, EllaiOptio
     public string Model => options.ServerlessModel;
 
     public async Task<EllaiReasoningResult> CompleteAsync(
-        IReadOnlyList<(string Role, string Content)> messages, int maxTokens, CancellationToken ct)
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(messages);
         if (!options.HasServerlessRoute)
@@ -150,7 +150,7 @@ public sealed class ServerlessEllaiReasoningProvider(HttpClient http, EllaiOptio
         var payload = new
         {
             model = options.ServerlessModel,
-            messages = messages.Select(m => new { role = m.Role, content = m.Content }).ToList(),
+            messages = messages.Select(MetaCompatibleChatMessage.ToPayload).ToList(),
             max_tokens = maxTokens,
         };
 
@@ -203,6 +203,56 @@ public sealed class ServerlessEllaiReasoningProvider(HttpClient http, EllaiOptio
     }
 }
 
+/// <summary>Maps validated Ellai turns to OpenAI-compatible provider message
+/// history. Tool outputs are correlated with the assistant calls that caused
+/// them; raw model text and tool observations remain separate.</summary>
+internal static class MetaCompatibleChatMessage
+{
+    public static object ToPayload(EllaiChatMessage message)
+    {
+        if (message.ToolCalls is { Count: > 0 })
+        {
+            if (!string.Equals(message.Role, "assistant", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Only an assistant turn can carry tool calls.");
+            }
+
+            return new
+            {
+                role = message.Role,
+                content = (string?)null,
+                tool_calls = message.ToolCalls.Select(call => new
+                {
+                    id = call.CallId ?? throw new InvalidOperationException("A tool call is missing its correlation id."),
+                    type = "function",
+                    function = new
+                    {
+                        name = call.ToolName,
+                        arguments = JsonSerializer.Serialize(call.Arguments),
+                    },
+                }).ToList(),
+            };
+        }
+
+        if (string.Equals(message.Role, "tool", StringComparison.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(message.ToolCallId))
+            {
+                throw new InvalidOperationException("A tool result is missing its correlation id.");
+            }
+
+            return new
+            {
+                role = message.Role,
+                tool_call_id = message.ToolCallId,
+                content = message.Content,
+            };
+        }
+
+        return new { role = message.Role, content = message.Content };
+    }
+}
+
 /// <summary>Selects the configured reasoning lane. Unknown backend values
 /// fail closed to Meta semantics; unconfigured lanes throw
 /// <see cref="MetaConfigurationException"/> instead of silently falling back,
@@ -243,7 +293,7 @@ public sealed class EllaiReasoningRouter(
         EllaiRoleOverlay role,
         string capabilitySummary,
         string limitsSummary,
-        IReadOnlyList<(string Role, string Content)> userMessages,
+        IReadOnlyList<EllaiChatMessage> userMessages,
         int maxTokens,
         CancellationToken ct)
     {
@@ -256,7 +306,7 @@ public sealed class EllaiReasoningRouter(
         }
 
         var system = policyBuilder.Build(role, capabilitySummary, limitsSummary);
-        var messages = new List<(string Role, string Content)> { ("system", system) };
+        var messages = new List<EllaiChatMessage> { new("system", system) };
         messages.AddRange(userMessages.Where(m =>
             !string.Equals(m.Role, "system", StringComparison.OrdinalIgnoreCase)));
         return Resolve().CompleteAsync(messages, maxTokens, ct);

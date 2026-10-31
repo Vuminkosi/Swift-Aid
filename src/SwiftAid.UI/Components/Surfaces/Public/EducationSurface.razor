@@ -1,0 +1,300 @@
+@using SwiftAid.UI.Components.Theme
+@using SwiftAid.UI.Components
+
+<MudContainer Fixed="true" Class="public-resource-surface education-surface">
+    <SwiftAidPageHeading Eyebrow="Human · Animal · One Health"
+                         Title="Education"
+                         Description="Browse fixed, source-linked materials. This library does not diagnose conditions or recommend treatment."
+                         HeadingId="education-heading" />
+
+    @if (IsAvailable)
+    {
+        <section class="education-surface__filters" aria-label="Filter education materials">
+            <MudTextField T="string" Label="Search materials" Value="@Query.Search"
+                          ValueChanged="SearchChangedAsync" Variant="Variant.Outlined"
+                          Immediate="true" DebounceInterval="300" Clearable="true"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                          aria-describedby="education-search-help" />
+            <span id="education-search-help" class="education-surface__hint">Search titles, summaries, categories, sources, and languages.</span>
+
+            <div class="education-surface__filter-row">
+                <MudSelect T="string" Label="Category" Value="@Query.Category" ValueChanged="CategoryChangedAsync"
+                           Variant="Variant.Outlined" Dense="true" Clearable="true">
+                    @foreach (var category in Categories)
+                    {
+                        <MudSelectItem T="string" Value="@category">@category</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudSelect T="string" Label="Language" Value="@Query.Language" ValueChanged="LanguageChangedAsync"
+                           Variant="Variant.Outlined" Dense="true" Clearable="true">
+                    @foreach (var language in Languages)
+                    {
+                        <MudSelectItem T="string" Value="@language">@language</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudCheckBox T="bool" Label="Available offline only" Value="@Query.OfflineOnly"
+                             ValueChanged="OfflineOnlyChangedAsync" Color="Color.Primary" />
+            </div>
+        </section>
+    }
+
+    @if (IsLoading)
+    {
+        <SwiftAidStatePanel State="SwiftAidViewState.Loading" Title="Loading education materials" Description="Checking the approved public resource list." />
+    }
+    else if (!IsAvailable)
+    {
+        <SwiftAidStatePanel State="UnavailableState"
+                            Title="Education library is unavailable"
+                            Description="@UnavailableDescription"
+                            OnRetry="OnRetry" />
+    }
+    else if (VisibleMaterials.Count == 0)
+    {
+        <SwiftAidStatePanel State="SwiftAidViewState.Empty"
+                            Title="No matching materials"
+                            Description="@EmptyDescription" />
+        @if (HasActiveFilters)
+        {
+            <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="ClearFiltersAsync" StartIcon="@Icons.Material.Filled.FilterAltOff">Clear filters</MudButton>
+        }
+    }
+    else
+    {
+        <div class="education-surface__results" role="list" aria-label="Education materials">
+            @foreach (var material in VisibleMaterials)
+            {
+                <article @key="material.Id" class="education-surface__item" role="listitem">
+                    <div class="education-surface__item-heading">
+                        <div>
+                            <MudText Typo="Typo.subtitle1" HtmlTag="h2">@material.Title</MudText>
+                            <MudText Typo="Typo.body2" Class="education-surface__summary">@material.Summary</MudText>
+                        </div>
+                        @if (!material.IsApproved)
+                        {
+                            <MudChip T="string" Color="Color.Warning" Variant="Variant.Outlined" Size="Size.Small">
+                                Review needed
+                            </MudChip>
+                        }
+                    </div>
+
+                    <details class="education-surface__details">
+                        <summary>Details for @material.Title</summary>
+                        <div class="education-surface__details-content">
+                            <dl class="education-surface__metadata">
+                                <div><dt>Category</dt><dd>@DisplayValue(material.Category)</dd></div>
+                                <div><dt>Language</dt><dd>@DisplayValue(material.Language)</dd></div>
+                                <div><dt>Source</dt><dd>@DisplayValue(material.Source)</dd></div>
+                                <div><dt>Review status</dt><dd>@DisplayValue(material.ReviewStatus ?? (material.IsApproved ? "Approved for public display" : "Not verified"))</dd></div>
+                                <div><dt>Reuse rights</dt><dd>@DisplayValue(material.ReuseRights)</dd></div>
+                            </dl>
+
+                            @if (!string.IsNullOrWhiteSpace(material.ContentStatus))
+                            {
+                                <MudAlert Severity="material.ContentStatusIsError ? Severity.Warning : Severity.Info"
+                                          Variant="Variant.Outlined" Dense="true" role="status" aria-live="polite">
+                                    @material.ContentStatus
+                                </MudAlert>
+                            }
+
+                            @if (material.IsContentLoading)
+                            {
+                                <SwiftAidStatePanel State="SwiftAidViewState.Loading" Title="Loading education material" Description="Opening the selected material…" />
+                            }
+                            else if (!string.IsNullOrWhiteSpace(material.Content))
+                            {
+                                <section class="education-surface__content" aria-label="Fixed source material">
+                                    <MudText Typo="Typo.subtitle2" HtmlTag="h3">Material text</MudText>
+                                    <MudText Typo="Typo.body2">@material.Content</MudText>
+                                </section>
+                            }
+
+                            <div class="education-surface__item-footer">
+                                @if (material.OfflineState == EducationOfflinePresentationState.SavedOnDevice)
+                                {
+                                    <MudChip T="string" Color="Color.Success" Variant="Variant.Text" Size="Size.Small" Icon="@Icons.Material.Filled.CloudDone">
+                                        Saved on this device
+                                    </MudChip>
+                                }
+                                else if (material.OfflineState == EducationOfflinePresentationState.SessionPreviewOnly)
+                                {
+                                    <MudText Typo="Typo.caption" Class="education-surface__hint">Preview only; not downloaded</MudText>
+                                }
+                                else if (material.IsAvailableOffline)
+                                {
+                                    <MudText Typo="Typo.caption" Class="education-surface__hint">Library reports offline availability; this device's saved state is not confirmed</MudText>
+                                }
+                                else
+                                {
+                                    <MudText Typo="Typo.caption" Class="education-surface__hint">@OfflineStateLabel(material.OfflineState)</MudText>
+                                }
+
+                                @if (TryGetSourceUri(material.SourceUrl ?? material.Source) is { } sourceUri)
+                                {
+                                    <MudLink Href="@sourceUri.AbsoluteUri" Target="_blank" rel="noopener noreferrer"
+                                    aria-label="@($"Open publisher source for {material.Title}")">
+                                        Open publisher source
+                                    </MudLink>
+                                }
+                                else
+                                {
+                                    <MudText Typo="Typo.caption" Class="education-surface__hint">Publisher link unavailable</MudText>
+                                }
+                            </div>
+
+                            <div class="education-surface__actions">
+                                @if (OnViewContent.HasDelegate)
+                                {
+                                    <MudButton Variant="Variant.Text" Color="Color.Primary"
+                                               Disabled="@material.IsContentLoading"
+                                               OnClick="() => ViewContentAsync(material)"
+                                               aria-label="@($"View {material.Title}")" StartIcon="@Icons.Material.Filled.Visibility">
+                                        View material
+                                    </MudButton>
+                                }
+                                @if (OnDownload.HasDelegate && material.CanDownload)
+                                {
+                                    <MudButton Variant="Variant.Text" Color="Color.Primary"
+                                               Disabled="@material.IsDownloadPending"
+                                               OnClick="() => DownloadAsync(material)"
+                                               aria-label="@($"Download {material.Title}")" StartIcon="@Icons.Material.Filled.Download">
+                                        @(material.IsDownloadPending ? "Downloading…" : "Download material")
+                                    </MudButton>
+                                }
+                                else if (OnDownload.HasDelegate)
+                                {
+                                    <MudText Typo="Typo.caption" Class="education-surface__hint">Download is unavailable for this source.</MudText>
+                                }
+                                @if (material.OfflineState == EducationOfflinePresentationState.SavedOnDevice && material.CanRemoveOffline && OnRemoveOffline.HasDelegate)
+                                {
+                                    <MudButton Variant="Variant.Text" Color="Color.Primary"
+                                               Disabled="@material.IsOfflineActionPending"
+                                               OnClick="() => RemoveOfflineAsync(material)"
+                                               aria-label="@($"Remove offline copy of {material.Title}")" StartIcon="@Icons.Material.Filled.DeleteOutline">
+                                        Remove offline copy
+                                    </MudButton>
+                                }
+                                else if (OnSaveOffline.HasDelegate && material.CanSaveOffline && !string.IsNullOrWhiteSpace(material.ContentHash) && material.OfflineState != EducationOfflinePresentationState.SavedOnDevice)
+                                {
+                                    <MudButton Variant="Variant.Text" Color="Color.Primary"
+                                               Disabled="@material.IsOfflineActionPending"
+                                               OnClick="() => SaveOfflineAsync(material)"
+                                               aria-label="@($"Save {material.Title} for offline use")" StartIcon="@Icons.Material.Filled.DownloadForOffline">
+                                        @(material.IsOfflineActionPending ? "Saving offline…" : "Save for offline")
+                                    </MudButton>
+                                }
+                            </div>
+                        </div>
+                    </details>
+                </article>
+            }
+        </div>
+
+        <nav class="education-surface__pagination" aria-label="Education result pages">
+            <MudText Typo="Typo.caption">Page @Query.PageNumber · @TotalCount materials</MudText>
+            <div>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@(Query.PageNumber <= 1)" OnClick="PreviousPageAsync" StartIcon="@Icons.Material.Filled.ArrowBack">Previous</MudButton>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@(!HasMore)" OnClick="NextPageAsync" StartIcon="@Icons.Material.Filled.ArrowForward">Next</MudButton>
+            </div>
+        </nav>
+    }
+</MudContainer>
+
+@code {
+    [Parameter] public IReadOnlyList<EducationMaterialPresentation> Materials { get; set; } = [];
+    [Parameter] public EducationBrowseRequest Query { get; set; } = new();
+    [Parameter] public bool IsLoading { get; set; }
+    [Parameter] public bool IsAvailable { get; set; }
+    [Parameter] public SwiftAidViewState UnavailableState { get; set; } = SwiftAidViewState.Information;
+    [Parameter] public string? CapabilityMessage { get; set; }
+    [Parameter] public int TotalCount { get; set; }
+    [Parameter] public bool HasMore { get; set; }
+    [Parameter] public EventCallback<EducationBrowseRequest> OnQueryChanged { get; set; }
+    [Parameter] public EventCallback OnRetry { get; set; }
+    [Parameter] public EventCallback<EducationMaterialVersionPresentation> OnViewContent { get; set; }
+    [Parameter] public EventCallback<EducationMaterialVersionPresentation> OnDownload { get; set; }
+    [Parameter] public EventCallback<EducationMaterialVersionPresentation> OnSaveOffline { get; set; }
+    [Parameter] public EventCallback<EducationMaterialVersionPresentation> OnRemoveOffline { get; set; }
+
+    private IReadOnlyList<string> Categories => Materials
+        .Select(item => item.Category)
+        .Where(value => !string.IsNullOrWhiteSpace(value))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .Order(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+
+    private IReadOnlyList<string> Languages => Materials
+        .Select(item => item.Language)
+        .Where(value => !string.IsNullOrWhiteSpace(value))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .Order(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+
+    private IReadOnlyList<EducationMaterialPresentation> VisibleMaterials => Materials
+        .ToArray();
+
+    private bool HasActiveFilters => !string.IsNullOrWhiteSpace(Query.Search) ||
+        !string.IsNullOrWhiteSpace(Query.Category) || !string.IsNullOrWhiteSpace(Query.Language) || Query.OfflineOnly;
+
+    private string UnavailableDescription => string.IsNullOrWhiteSpace(CapabilityMessage)
+        ? "The education library is not available right now. No health or veterinary instructions will be generated."
+        : CapabilityMessage;
+
+    private const string EmptyDescription = "No materials match these filters. Missing or unreviewed content is not replaced with generated guidance.";
+
+    private async Task SearchChangedAsync(string? value) =>
+        await ApplyQueryAsync(Query with { Search = value, PageNumber = 1 });
+
+    private async Task CategoryChangedAsync(string? value) =>
+        await ApplyQueryAsync(Query with { Category = value, PageNumber = 1 });
+
+    private async Task LanguageChangedAsync(string? value) =>
+        await ApplyQueryAsync(Query with { Language = value, PageNumber = 1 });
+
+    private async Task OfflineOnlyChangedAsync(bool value) =>
+        await ApplyQueryAsync(Query with { OfflineOnly = value, PageNumber = 1 });
+
+    private async Task PreviousPageAsync() =>
+        await ApplyQueryAsync(Query with { PageNumber = Math.Max(1, Query.PageNumber - 1) });
+
+    private async Task NextPageAsync() =>
+        await ApplyQueryAsync(Query with { PageNumber = Query.PageNumber + 1 });
+
+    private async Task ClearFiltersAsync() =>
+        await ApplyQueryAsync(Query with { PageNumber = 1, Category = null, Language = null, Search = null, OfflineOnly = false });
+
+    private Task ApplyQueryAsync(EducationBrowseRequest request) => OnQueryChanged.InvokeAsync(request);
+
+    private static string DisplayValue(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "Not provided" : value;
+
+    private static string OfflineStateLabel(EducationOfflinePresentationState state) => state switch
+    {
+        EducationOfflinePresentationState.Unavailable => "Offline storage is unavailable",
+        EducationOfflinePresentationState.Unknown => "This device's saved state is not confirmed",
+        EducationOfflinePresentationState.NotSaved => "Not saved on this device",
+        EducationOfflinePresentationState.SessionPreviewOnly => "Preview only; not downloaded",
+        EducationOfflinePresentationState.SavedOnDevice => "Saved on this device",
+        _ => "Offline state unavailable"
+    };
+
+    private Task ViewContentAsync(EducationMaterialPresentation material) =>
+        OnViewContent.InvokeAsync(ToVersionRequest(material));
+
+    private Task DownloadAsync(EducationMaterialPresentation material) =>
+        OnDownload.InvokeAsync(ToVersionRequest(material));
+
+    private Task SaveOfflineAsync(EducationMaterialPresentation material) =>
+        OnSaveOffline.InvokeAsync(ToVersionRequest(material));
+
+    private Task RemoveOfflineAsync(EducationMaterialPresentation material) =>
+        OnRemoveOffline.InvokeAsync(ToVersionRequest(material));
+
+    private static EducationMaterialVersionPresentation ToVersionRequest(EducationMaterialPresentation material) =>
+        new(material.Id, material.SourceVersion);
+
+    private static Uri? TryGetSourceUri(string? source) =>
+        Uri.TryCreate(source, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps
+            ? uri
+            : null;
+}

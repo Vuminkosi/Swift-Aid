@@ -1,0 +1,660 @@
+@using SwiftAid.UI.Components.Theme
+@using SwiftAid.UI.Components.Surfaces.Operations
+
+<section class="operations-organization" aria-labelledby="organization-title">
+    <div class="operations-organization__heading">
+        <div>
+            <MudText Typo="Typo.overline" Color="Color.Secondary">Organization workspace</MudText>
+            <MudText Typo="Typo.h4" HtmlTag="h1" id="organization-title">Organizations and members</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Manage organization details and review membership activity.</MudText>
+        </div>
+        @Actions
+    </div>
+    @if (!string.IsNullOrWhiteSpace(StatusMessage))
+    {
+        <MudAlert Severity="StatusSeverity" Variant="Variant.Outlined" role="status">@StatusMessage</MudAlert>
+    }
+
+    <MudTabs Rounded="true" KeepPanelsAlive="true" ApplyEffectsToContainer="true" Class="operations-organization__tabs">
+        <MudTabPanel Text="Members" Icon="@Icons.Material.Outlined.People">
+            <section class="operations-organization__panel" aria-labelledby="members-title">
+                <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="members-title">Members</MudText>
+                @if (WorkspaceState != OperationsSurfaceState.Populated)
+                {
+                    <SwiftAidStatePanel State="WorkspaceState.ToSwiftAidViewState()" Title="Members" Description="@WorkspaceMessage" OnRetry="OnRetry" />
+                }
+                else if (Members.Count == 0)
+                {
+                    <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="No members found" Description="There are no members to display." />
+                }
+                else
+                {
+                    <div class="operations-organization__managed-members">
+                        @foreach (var member in Members)
+                        {
+                            var editor = GetEditor(member);
+                            <MudPaper Class="operations-organization__scenario-member" Outlined="true">
+                                <div class="operations-organization__scenario-member-summary">
+                                    <MudText Typo="Typo.subtitle2">@member.DisplayName</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@RoleLabel(member.Role) · @CountryLabel(member.Country) · @RegionLabel(member.Region) · @member.Status</MudText>
+                                </div>
+                                @if (CanManageCurrent)
+                                {
+                                    <div class="operations-organization__scenario-member-controls">
+                                        <MudSelect T="OrganizationRole" Label="Role" Value="@editor.Role" ValueChanged="@(role => editor.Role = role)" Dense="true">
+                                            @foreach (var role in AssignableRoles)
+                                            {
+                                                <MudSelectItem Value="@role">@role</MudSelectItem>
+                                            }
+                                            @if (editor.Role == OrganizationRole.Administrator)
+                                            {
+                                                <MudSelectItem Value="@OrganizationRole.Administrator" Disabled="true">Administrator (current)</MudSelectItem>
+                                            }
+                                        </MudSelect>
+                                        <MudTextField T="string" Label="Reason for role change" @bind-Value="editor.Reason" MaxLength="300" />
+                                        <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Save" Disabled="@(!CanUpdateMember(member, editor))" OnClick="@(() => UpdateRoleAsync(member, editor))">Save role</MudButton>
+
+                                        <MudSelect T="OrganizationCountry" Label="New country" Value="@editor.Country" ValueChanged="@(country => SetCountry(editor, country))" Dense="true">
+                                            @foreach (var country in Enum.GetValues<OrganizationCountry>())
+                                            {
+                                                <MudSelectItem Value="@country">@CountryLabel(country)</MudSelectItem>
+                                            }
+                                        </MudSelect>
+                                        <MudSelect T="OrganizationRegion" Label="New region" @bind-Value="editor.Region" Dense="true">
+                                            @foreach (var region in RegionChoices(editor.Country))
+                                            {
+                                                <MudSelectItem Value="@region">@RegionLabel(region)</MudSelectItem>
+                                            }
+                                        </MudSelect>
+                                        <MudTextField T="string" Label="Reason for region change" @bind-Value="editor.RegionReason" MaxLength="300" />
+                                        <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Save" Disabled="@(!CanUpdateMemberRegion(member, editor))" OnClick="@(() => UpdateRegionAsync(member, editor))">Save country and region</MudButton>
+                                        @if (string.Equals(member.Status, "Active", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.PersonRemove" OnClick="@(() => BeginRevocation(member))">Review removal</MudButton>
+                                        }
+                                    </div>
+                                }
+                            </MudPaper>
+                        }
+                    </div>
+                }
+
+                @if (_pendingRevocationId is not null)
+                {
+                    <MudPaper Class="operations-organization__confirmation" Outlined="true" role="group" aria-label="Confirm membership removal">
+                        <MudText Typo="Typo.subtitle2">Remove @_pendingRevocationName?</MudText>
+                        <MudText Typo="Typo.body2">This submits a request to remove this member.</MudText>
+                        <MudTextField T="string" Label="Reason" @bind-Value="_revocationReason" MaxLength="300" />
+                        <MudStack Row="true" Spacing="1" Class="mt-2" AlignItems="AlignItems.Center">
+                            <MudButton Color="Color.Error" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.PersonRemove" Disabled="@(!CanConfirmRevocation)" OnClick="ConfirmRevocationAsync">Confirm removal</MudButton>
+                            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Close" OnClick="CancelRevocation">Cancel</MudButton>
+                        </MudStack>
+                    </MudPaper>
+                }
+            </section>
+        </MudTabPanel>
+
+        <MudTabPanel Text="Profile" Icon="@Icons.Material.Outlined.Business">
+            <section class="operations-organization__panel" aria-labelledby="profile-title">
+                <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="profile-title">Organization profile</MudText>
+                @if (ProfileState != OperationsSurfaceState.Populated || Profile is null)
+                {
+                    <SwiftAidStatePanel State="ProfileState.ToSwiftAidViewState()" Title="Profile unavailable" Description="@ProfileMessage" OnRetry="OnRetry" />
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2">@Profile.DisplayName · @CountryLabel(Profile.Country) · @RegionLabel(Profile.Region)</MudText>
+                    @if (CanManageCurrent)
+                    {
+                        <div class="operations-organization__scenario-form">
+                            <MudTextField T="string" Label="Organization name" @bind-Value="_profileName" MaxLength="100" />
+                            <MudSelect T="OrganizationCountry" Label="Country" Value="@_profileCountry" ValueChanged="SetProfileCountry">
+                                @foreach (var country in Enum.GetValues<OrganizationCountry>())
+                                {
+                                    <MudSelectItem Value="@country">@CountryLabel(country)</MudSelectItem>
+                                }
+                            </MudSelect>
+                            <MudSelect T="OrganizationRegion" Label="Region" @bind-Value="_profileRegion">
+                                @foreach (var region in RegionChoices(_profileCountry))
+                                {
+                                    <MudSelectItem Value="@region">@RegionLabel(region)</MudSelectItem>
+                                }
+                            </MudSelect>
+                            <MudTextField T="string" Label="Reason" @bind-Value="_profileReason" MaxLength="300" />
+                            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Save" Disabled="@(!CanUpdateProfile)" OnClick="UpdateProfileAsync">Save profile</MudButton>
+                        </div>
+                    }
+                }
+            </section>
+
+        </MudTabPanel>
+
+        <MudTabPanel Text="Requests" Icon="@Icons.Material.Outlined.PersonAdd">
+            <section class="operations-organization__panel" aria-labelledby="requests-title">
+                <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="requests-title">Membership requests</MudText>
+                @if (RequestState is OperationsSurfaceState.Loading or OperationsSurfaceState.Offline or OperationsSurfaceState.Denied or OperationsSurfaceState.Error or OperationsSurfaceState.Unavailable)
+                {
+                    <SwiftAidStatePanel State="RequestState.ToSwiftAidViewState()" Title="Membership requests unavailable" Description="@RequestMessage" OnRetry="OnRetry" />
+                }
+                else if (MembershipRequests.Count == 0)
+                {
+                    <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="No membership requests" Description="There are no membership requests to review." />
+                }
+                else
+                {
+                    @foreach (var request in MembershipRequests)
+                    {
+                        <div class="operations-organization__request">
+                            <div>
+                                <MudText Typo="Typo.body2">@request.RequesterName</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@RoleLabel(request.RequestedRole) · @CountryLabel(request.Country) · @RegionLabel(request.Region) · @request.Status</MudText>
+                            </div>
+                            @if (CanManageCurrent && OnReviewMembershipRequest.HasDelegate && request.Status == OrganizationMembershipRequestStatus.Pending)
+                            {
+                                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                                    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ThumbUp" OnClick="@(() => BeginRequestReview(request, true))">Review approval</MudButton>
+                                    <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ThumbDown" OnClick="@(() => BeginRequestReview(request, false))">Review decline</MudButton>
+                                </MudStack>
+                            }
+                        </div>
+                    }
+                }
+                @if (_pendingReviewId is not null)
+                {
+                    <MudPaper Class="operations-organization__confirmation" Outlined="true" role="group" aria-label="Confirm membership request decision">
+                        <MudText Typo="Typo.subtitle2">Confirm @(_pendingReviewApprove ? "approval" : "decline") for @_pendingReviewName</MudText>
+                        <MudTextField T="string" Label="Reason" @bind-Value="_reviewReason" MaxLength="300" />
+                        <MudStack Row="true" Spacing="1" Class="mt-2" AlignItems="AlignItems.Center">
+                            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.CheckCircle" Disabled="@(!CanConfirmRequestReview)" OnClick="ConfirmRequestReviewAsync">Confirm decision</MudButton>
+                            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Close" OnClick="CancelRequestReview">Cancel</MudButton>
+                        </MudStack>
+                    </MudPaper>
+                }
+                <div class="operations-organization__scenario-form">
+                    <MudText Typo="Typo.subtitle2">Request membership</MudText>
+                    <MudTextField T="string" Label="Your name" @bind-Value="_requesterName" MaxLength="100" />
+                    <MudSelect T="OrganizationCountry" Label="Country" Value="@_requestCountry" ValueChanged="SetRequestCountry">
+                        @foreach (var country in Enum.GetValues<OrganizationCountry>())
+                        {
+                            <MudSelectItem Value="@country">@CountryLabel(country)</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudSelect T="OrganizationRegion" Label="Region" @bind-Value="_requestRegion">
+                        @foreach (var region in RegionChoices(_requestCountry))
+                        {
+                            <MudSelectItem Value="@region">@RegionLabel(region)</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudSelect T="OrganizationRole" @bind-Value="_requestedRole" Label="Requested role">
+                        @foreach (var role in Enum.GetValues<OrganizationRole>())
+                        {
+                            <MudSelectItem Value="@role">@RoleLabel(role)</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudTextField T="string" Label="Reason" @bind-Value="_requestReason" MaxLength="300" />
+                    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Send" Disabled="@(!CanSubmitMembershipRequest)" OnClick="SubmitMembershipRequestAsync">Submit request</MudButton>
+                </div>
+            </section>
+
+        </MudTabPanel>
+
+        <MudTabPanel Text="Invitations" Icon="@Icons.Material.Outlined.MailOutline">
+            <section class="operations-organization__panel" aria-labelledby="invitations-title">
+                <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="invitations-title">Invitations</MudText>
+                @if (InvitationState is OperationsSurfaceState.Loading or OperationsSurfaceState.Offline or OperationsSurfaceState.Denied or OperationsSurfaceState.Error or OperationsSurfaceState.Unavailable)
+                {
+                    <SwiftAidStatePanel State="InvitationState.ToSwiftAidViewState()" Title="Invitations unavailable" Description="@InvitationMessage" OnRetry="OnRetry" />
+                }
+                else if (Invitations.Count == 0)
+                {
+                    <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="No invitations" Description="There are no invitations to show." />
+                }
+                else
+                {
+                    @foreach (var invitation in Invitations)
+                    {
+                        <div class="operations-organization__invitation">
+                            <div><MudText Typo="Typo.body2">@invitation.Email</MudText><MudText Typo="Typo.caption" Color="Color.Secondary">@invitation.Role · @invitation.Status</MudText></div>
+                        </div>
+                    }
+                }
+                @if (CanManageCurrent)
+                {
+                    <div class="operations-organization__scenario-form">
+                        <MudText Typo="Typo.subtitle2">Send an invitation</MudText>
+                        <MudTextField T="string" Label="Email address" InputType="InputType.Email" @bind-Value="_invitationEmail" MaxLength="254" />
+                        <MudSelect T="OrganizationCountry" Label="Country" Value="@_invitationCountry" ValueChanged="SetInvitationCountry">
+                            @foreach (var country in Enum.GetValues<OrganizationCountry>())
+                            {
+                                <MudSelectItem Value="@country">@CountryLabel(country)</MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudSelect T="OrganizationRegion" Label="Region" @bind-Value="_invitationRegion">
+                            @foreach (var region in RegionChoices(_invitationCountry))
+                            {
+                                <MudSelectItem Value="@region">@RegionLabel(region)</MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudSelect T="OrganizationRole" @bind-Value="_invitationRole" Label="Role">
+                            @foreach (var role in Enum.GetValues<OrganizationRole>())
+                            {
+                                <MudSelectItem Value="@role">@RoleLabel(role)</MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudTextField T="string" Label="Reason" @bind-Value="_invitationReason" MaxLength="300" />
+                        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Mail" Disabled="@(!CanSendInvitation)" OnClick="SendInvitationAsync">Send invitation</MudButton>
+                    </div>
+                }
+            </section>
+        </MudTabPanel>
+
+        <MudTabPanel Text="Sign-in" Icon="@Icons.Material.Outlined.Security">
+            <section class="operations-organization__panel" aria-labelledby="sso-title">
+                <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="sso-title">Organization sign-in</MudText>
+                @if (SsoState is OperationsSurfaceState.Loading or OperationsSurfaceState.Offline or OperationsSurfaceState.Denied or OperationsSurfaceState.Error or OperationsSurfaceState.Unavailable || SsoConfiguration is null)
+                {
+                    <SwiftAidStatePanel State="SsoState.ToSwiftAidViewState()" Title="Sign-in settings unavailable" Description="@SsoMessage" OnRetry="OnRetry" />
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2">@SsoStatusLabel(SsoConfiguration.Status)</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@SsoConfiguration.Description</MudText>
+                    @if (CanManageCurrent && SsoConfiguration.Status != OrganizationSsoStatus.SetupPending)
+                    {
+                        <MudTextField T="string" Label="Reason to request sign-in setup" @bind-Value="_ssoReason" MaxLength="300" />
+                        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Settings" Disabled="@(!CanRequestSsoSetup)" OnClick="RequestSsoSetupAsync">Request setup</MudButton>
+                    }
+                }
+            </section>
+        </MudTabPanel>
+
+        <MudTabPanel Text="Activity" Icon="@Icons.Material.Outlined.History">
+            <section class="operations-organization__panel" aria-labelledby="audit-title">
+                <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="audit-title">Organization activity</MudText>
+                @if (AuditState is OperationsSurfaceState.Loading or OperationsSurfaceState.Offline or OperationsSurfaceState.Denied or OperationsSurfaceState.Error or OperationsSurfaceState.Unavailable)
+                {
+                    <SwiftAidStatePanel State="AuditState.ToSwiftAidViewState()" Title="Activity unavailable" Description="@AuditMessage" OnRetry="OnRetry" />
+                }
+                else if (AuditEntries.Count == 0)
+                {
+                    <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="No activity recorded" Description="There is no organization activity to show." />
+                }
+                else
+                {
+                    <MudList T="string" Dense="true" aria-label="Organization activity">
+                        @foreach (var entry in AuditEntries.OrderByDescending(item => item.OccurredAtUtc))
+                        {
+                            <MudListItem T="string" Text="@AuditActionLabel(entry.Action)" SecondaryText="@($"{entry.Summary} · {entry.OccurredAtUtc.ToLocalTime():g}")" />
+                        }
+                    </MudList>
+                }
+            </section>
+        </MudTabPanel>
+    </MudTabs>
+</section>
+
+@code {
+    private readonly Dictionary<string, MemberEditor> _memberEditors = new(StringComparer.Ordinal);
+    private OrganizationProfile? _loadedProfile;
+    private string _profileName = string.Empty;
+    private OrganizationCountry _profileCountry = OrganizationCountry.Zimbabwe;
+    private OrganizationRegion _profileRegion = OrganizationRegion.Harare;
+    private string _profileReason = string.Empty;
+    private string _requesterName = string.Empty;
+    private OrganizationCountry _requestCountry = OrganizationCountry.Zimbabwe;
+    private OrganizationRegion _requestRegion = OrganizationRegion.Harare;
+    private OrganizationRole _requestedRole = OrganizationRole.Member;
+    private string _requestReason = string.Empty;
+    private string _invitationEmail = string.Empty;
+    private OrganizationRole _invitationRole = OrganizationRole.Member;
+    private OrganizationCountry _invitationCountry = OrganizationCountry.Zimbabwe;
+    private OrganizationRegion _invitationRegion = OrganizationRegion.Harare;
+    private string _invitationReason = string.Empty;
+    private string _ssoReason = string.Empty;
+    private string? _pendingReviewId;
+    private string _pendingReviewName = string.Empty;
+    private bool _pendingReviewApprove;
+    private string _reviewReason = string.Empty;
+    private string? _pendingRevocationId;
+    private string _pendingRevocationName = string.Empty;
+    private string _revocationReason = string.Empty;
+
+    [Parameter] public OperationsSurfaceState WorkspaceState { get; set; } = OperationsSurfaceState.Loading;
+    [Parameter] public IReadOnlyList<ManagedOrganizationMember> Members { get; set; } = Array.Empty<ManagedOrganizationMember>();
+    [Parameter] public OperationsSurfaceState ProfileState { get; set; } = OperationsSurfaceState.Loading;
+    [Parameter] public OrganizationProfile? Profile { get; set; }
+    [Parameter] public OperationsSurfaceState RequestState { get; set; } = OperationsSurfaceState.Loading;
+    [Parameter] public IReadOnlyList<OrganizationMembershipRequest> MembershipRequests { get; set; } = Array.Empty<OrganizationMembershipRequest>();
+    [Parameter] public OperationsSurfaceState InvitationState { get; set; } = OperationsSurfaceState.Loading;
+    [Parameter] public IReadOnlyList<OrganizationInvitation> Invitations { get; set; } = Array.Empty<OrganizationInvitation>();
+    [Parameter] public OperationsSurfaceState SsoState { get; set; } = OperationsSurfaceState.Loading;
+    [Parameter] public OrganizationSsoConfiguration? SsoConfiguration { get; set; }
+    [Parameter] public OperationsSurfaceState AuditState { get; set; } = OperationsSurfaceState.Loading;
+    [Parameter] public IReadOnlyList<OrganizationAuditEntry> AuditEntries { get; set; } = Array.Empty<OrganizationAuditEntry>();
+    [Parameter] public bool CanManageMembers { get; set; }
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public string? StatusMessage { get; set; }
+    [Parameter] public Severity StatusSeverity { get; set; } = Severity.Info;
+    [Parameter] public string WorkspaceMessage { get; set; } = "Organization information is unavailable.";
+    [Parameter] public string ProfileMessage { get; set; } = "The organization profile is unavailable.";
+    [Parameter] public string RequestMessage { get; set; } = "Membership requests are unavailable.";
+    [Parameter] public string InvitationMessage { get; set; } = "Invitation previews are unavailable.";
+    [Parameter] public string SsoMessage { get; set; } = "Sign-in settings are unavailable.";
+    [Parameter] public string AuditMessage { get; set; } = "Organization activity is unavailable.";
+    [Parameter] public EventCallback OnRetry { get; set; }
+    [Parameter] public EventCallback<OrganizationProfileUpdate> OnUpdateProfile { get; set; }
+    [Parameter] public EventCallback<OrganizationMembershipRequestSubmission> OnSubmitMembershipRequest { get; set; }
+    [Parameter] public EventCallback<OrganizationMembershipRequestReview> OnReviewMembershipRequest { get; set; }
+    [Parameter] public EventCallback<OrganizationMemberChange> OnUpdateMember { get; set; }
+    [Parameter] public EventCallback<OrganizationMembershipRevocation> OnRevokeMembership { get; set; }
+    [Parameter] public EventCallback<string> OnRequestSsoSetup { get; set; }
+    [Parameter] public EventCallback<OrganizationInvitationRequest> OnSendInvitation { get; set; }
+    [Parameter] public RenderFragment? Actions { get; set; }
+
+    private IReadOnlyList<OrganizationRole> AssignableRoles => Enum.GetValues<OrganizationRole>()
+        .Where(role => role != OrganizationRole.Administrator).ToArray();
+
+    private bool CanManageCurrent => CanManageMembers && WorkspaceState == OperationsSurfaceState.Populated;
+    private bool CanRequestSsoSetup => !Busy && CanManageCurrent && OnRequestSsoSetup.HasDelegate && !string.IsNullOrWhiteSpace(_ssoReason);
+
+    private bool CanUpdateProfile => !Busy && CanManageCurrent && OnUpdateProfile.HasDelegate && !string.IsNullOrWhiteSpace(_profileName) &&
+        !string.IsNullOrWhiteSpace(_profileReason) && RegionChoices(_profileCountry).Contains(_profileRegion);
+    private bool CanSubmitMembershipRequest => !Busy && !string.IsNullOrWhiteSpace(_requesterName) &&
+        OnSubmitMembershipRequest.HasDelegate && !string.IsNullOrWhiteSpace(_requestReason) && RegionChoices(_requestCountry).Contains(_requestRegion);
+    private bool CanSendInvitation => !Busy && CanManageCurrent && OnSendInvitation.HasDelegate &&
+        _invitationEmail.Contains('@', StringComparison.Ordinal) && _invitationEmail.Contains('.', StringComparison.Ordinal) &&
+        !string.IsNullOrWhiteSpace(_invitationReason) && RegionChoices(_invitationCountry).Contains(_invitationRegion);
+    private bool CanConfirmRevocation => !Busy && CanManageCurrent &&
+        OnRevokeMembership.HasDelegate && !string.IsNullOrWhiteSpace(_revocationReason) && CurrentRevocationMember is not null;
+    private bool CanConfirmRequestReview => !Busy && CanManageCurrent &&
+        RequestState == OperationsSurfaceState.Populated && OnReviewMembershipRequest.HasDelegate &&
+        !string.IsNullOrWhiteSpace(_reviewReason) && CurrentReviewRequest is not null;
+    private ManagedOrganizationMember? CurrentRevocationMember => _pendingRevocationId is null
+        ? null
+        : Members.FirstOrDefault(member => string.Equals(member.Id, _pendingRevocationId, StringComparison.Ordinal) && string.Equals(member.Status, "Active", StringComparison.OrdinalIgnoreCase));
+    private OrganizationMembershipRequest? CurrentReviewRequest => _pendingReviewId is null
+        ? null
+        : MembershipRequests.FirstOrDefault(request => string.Equals(request.Id, _pendingReviewId, StringComparison.Ordinal) && request.Status == OrganizationMembershipRequestStatus.Pending);
+
+    protected override void OnParametersSet()
+    {
+        if (Profile is not null && Profile != _loadedProfile)
+        {
+            _loadedProfile = Profile;
+            _profileName = Profile.DisplayName;
+            _profileCountry = Profile.Country;
+            _profileRegion = Profile.Region;
+        }
+
+        if (!CanManageCurrent)
+        {
+            _memberEditors.Clear();
+            _loadedProfile = null;
+            _profileName = string.Empty;
+            _profileCountry = OrganizationCountry.Zimbabwe;
+            _profileRegion = OrganizationRegion.Harare;
+        }
+
+        if (!CanManageCurrent || CurrentRevocationMember is null)
+        {
+            CancelRevocation();
+        }
+
+        if (!CanManageCurrent ||
+            RequestState != OperationsSurfaceState.Populated || CurrentReviewRequest is null)
+        {
+            CancelRequestReview();
+        }
+    }
+
+    private MemberEditor GetEditor(ManagedOrganizationMember member)
+    {
+        if (_memberEditors.TryGetValue(member.Id, out var editor))
+        {
+            return editor;
+        }
+
+        editor = new MemberEditor
+        {
+            Role = member.Role,
+            Country = member.Country,
+            Region = member.Region
+        };
+        _memberEditors[member.Id] = editor;
+        return editor;
+    }
+
+    private bool CanUpdateMember(ManagedOrganizationMember member, MemberEditor editor) => !Busy && CanManageCurrent && IsCurrentActiveMember(member) && OnUpdateMember.HasDelegate &&
+        !string.IsNullOrWhiteSpace(editor.Reason) && editor.Role != OrganizationRole.Administrator;
+
+    private bool CanUpdateMemberRegion(ManagedOrganizationMember member, MemberEditor editor) => !Busy && CanManageCurrent && IsCurrentActiveMember(member) && OnUpdateMember.HasDelegate &&
+        !string.IsNullOrWhiteSpace(editor.RegionReason) && RegionChoices(editor.Country).Contains(editor.Region);
+
+    private bool IsCurrentActiveMember(ManagedOrganizationMember member) => Members.Any(current =>
+        string.Equals(current.Id, member.Id, StringComparison.Ordinal) &&
+        string.Equals(current.Status, "Active", StringComparison.OrdinalIgnoreCase) &&
+        current.Role == member.Role && current.Country == member.Country && current.Region == member.Region);
+
+    private async Task UpdateRoleAsync(ManagedOrganizationMember member, MemberEditor editor)
+    {
+        if (CanUpdateMember(member, editor))
+        {
+            await OnUpdateMember.InvokeAsync(new OrganizationMemberChange(member.Id, editor.Role, null, null, editor.Reason));
+            editor.Reason = string.Empty;
+        }
+    }
+
+    private async Task UpdateRegionAsync(ManagedOrganizationMember member, MemberEditor editor)
+    {
+        if (CanUpdateMemberRegion(member, editor))
+        {
+            await OnUpdateMember.InvokeAsync(new OrganizationMemberChange(member.Id, null, editor.Country, editor.Region, editor.RegionReason));
+            editor.RegionReason = string.Empty;
+        }
+    }
+
+    private void SetCountry(MemberEditor editor, OrganizationCountry country)
+    {
+        editor.Country = country;
+        var regions = RegionChoices(country);
+        if (!regions.Contains(editor.Region))
+        {
+            editor.Region = regions.FirstOrDefault();
+        }
+    }
+
+    private void SetProfileCountry(OrganizationCountry country)
+    {
+        _profileCountry = country;
+        if (!RegionChoices(country).Contains(_profileRegion))
+        {
+            _profileRegion = RegionChoices(country).FirstOrDefault();
+        }
+    }
+
+    private void SetRequestCountry(OrganizationCountry country)
+    {
+        _requestCountry = country;
+        if (!RegionChoices(country).Contains(_requestRegion))
+        {
+            _requestRegion = RegionChoices(country).FirstOrDefault();
+        }
+    }
+
+    private async Task UpdateProfileAsync()
+    {
+        if (CanUpdateProfile && OnUpdateProfile.HasDelegate)
+        {
+            await OnUpdateProfile.InvokeAsync(new OrganizationProfileUpdate(_profileName.Trim(), _profileCountry, _profileRegion, _profileReason.Trim()));
+            _profileReason = string.Empty;
+        }
+    }
+
+    private async Task SubmitMembershipRequestAsync()
+    {
+        if (CanSubmitMembershipRequest && OnSubmitMembershipRequest.HasDelegate)
+        {
+            await OnSubmitMembershipRequest.InvokeAsync(new OrganizationMembershipRequestSubmission(
+                _requesterName.Trim(), _requestCountry, _requestRegion, _requestedRole, _requestReason.Trim()));
+            _requestReason = string.Empty;
+        }
+    }
+
+    private void BeginRequestReview(OrganizationMembershipRequest request, bool approve)
+    {
+        if (Busy || !CanManageCurrent ||
+            RequestState != OperationsSurfaceState.Populated || request.Status != OrganizationMembershipRequestStatus.Pending ||
+            !MembershipRequests.Any(current => string.Equals(current.Id, request.Id, StringComparison.Ordinal) && current.Status == OrganizationMembershipRequestStatus.Pending))
+        {
+            CancelRequestReview();
+            return;
+        }
+
+        _pendingReviewId = request.Id;
+        _pendingReviewName = request.RequesterName;
+        _pendingReviewApprove = approve;
+        _reviewReason = string.Empty;
+    }
+
+    private async Task ConfirmRequestReviewAsync()
+    {
+        var request = CurrentReviewRequest;
+        if (!CanConfirmRequestReview || request is null || _pendingReviewId is null)
+        {
+            CancelRequestReview();
+            return;
+        }
+
+        await OnReviewMembershipRequest.InvokeAsync(new OrganizationMembershipRequestReview(_pendingReviewId, _pendingReviewApprove, _reviewReason.Trim()));
+        CancelRequestReview();
+    }
+
+    private void CancelRequestReview()
+    {
+        _pendingReviewId = null;
+        _pendingReviewName = string.Empty;
+        _reviewReason = string.Empty;
+    }
+
+    private void SetInvitationCountry(OrganizationCountry country)
+    {
+        _invitationCountry = country;
+        if (!RegionChoices(country).Contains(_invitationRegion))
+        {
+            _invitationRegion = RegionChoices(country).FirstOrDefault();
+        }
+    }
+
+    private async Task SendInvitationAsync()
+    {
+        if (CanSendInvitation)
+        {
+            await OnSendInvitation.InvokeAsync(new OrganizationInvitationRequest(
+                _invitationEmail.Trim(), _invitationRole, _invitationCountry, _invitationRegion, _invitationReason.Trim()));
+            _invitationEmail = string.Empty;
+            _invitationReason = string.Empty;
+        }
+    }
+
+    private void BeginRevocation(ManagedOrganizationMember member)
+    {
+        if (Busy || !CanManageCurrent || !string.Equals(member.Status, "Active", StringComparison.OrdinalIgnoreCase) ||
+            !Members.Any(current => string.Equals(current.Id, member.Id, StringComparison.Ordinal) && string.Equals(current.Status, "Active", StringComparison.OrdinalIgnoreCase)))
+        {
+            CancelRevocation();
+            return;
+        }
+
+        _pendingRevocationId = member.Id;
+        _pendingRevocationName = member.DisplayName;
+        _revocationReason = string.Empty;
+    }
+
+    private async Task ConfirmRevocationAsync()
+    {
+        var member = CurrentRevocationMember;
+        if (!CanConfirmRevocation || member is null || _pendingRevocationId is null)
+        {
+            CancelRevocation();
+            return;
+        }
+
+        await OnRevokeMembership.InvokeAsync(new OrganizationMembershipRevocation(_pendingRevocationId, _revocationReason.Trim()));
+        CancelRevocation();
+    }
+
+    private void CancelRevocation()
+    {
+        _pendingRevocationId = null;
+        _pendingRevocationName = string.Empty;
+        _revocationReason = string.Empty;
+    }
+
+    private async Task RequestSsoSetupAsync()
+    {
+        if (CanRequestSsoSetup)
+        {
+            await OnRequestSsoSetup.InvokeAsync(_ssoReason.Trim());
+            _ssoReason = string.Empty;
+        }
+    }
+
+    private static IReadOnlyList<OrganizationRegion> RegionChoices(OrganizationCountry country) => country switch
+    {
+        OrganizationCountry.Zimbabwe => [OrganizationRegion.Harare, OrganizationRegion.Bulawayo, OrganizationRegion.Manicaland, OrganizationRegion.MashonalandCentral, OrganizationRegion.MashonalandEast, OrganizationRegion.MashonalandWest, OrganizationRegion.Masvingo, OrganizationRegion.MatabelelandNorth, OrganizationRegion.MatabelelandSouth, OrganizationRegion.Midlands, OrganizationRegion.Other],
+        OrganizationCountry.Eswatini => [OrganizationRegion.Hhohho, OrganizationRegion.Lubombo, OrganizationRegion.Manzini, OrganizationRegion.Shiselweni, OrganizationRegion.Other],
+        _ => [OrganizationRegion.Other]
+    };
+
+    private static string CountryLabel(OrganizationCountry value) => value switch
+    {
+        OrganizationCountry.Zimbabwe => "Zimbabwe",
+        OrganizationCountry.Eswatini => "Eswatini",
+        _ => "Other supported country"
+    };
+
+    private static string RegionLabel(OrganizationRegion value) => value switch
+    {
+        OrganizationRegion.MashonalandCentral => "Mashonaland Central",
+        OrganizationRegion.MashonalandEast => "Mashonaland East",
+        OrganizationRegion.MashonalandWest => "Mashonaland West",
+        OrganizationRegion.MatabelelandNorth => "Matabeleland North",
+        OrganizationRegion.MatabelelandSouth => "Matabeleland South",
+        _ => value.ToString()
+    };
+
+    private static string RoleLabel(OrganizationRole value) => value.ToString();
+
+    private static string SsoStatusLabel(OrganizationSsoStatus value) => value switch
+    {
+        OrganizationSsoStatus.NotConfigured => "Not configured",
+        OrganizationSsoStatus.SetupPending => "Setup request pending",
+        OrganizationSsoStatus.VerificationRequired => "Verification required",
+        _ => "Unavailable"
+    };
+
+    private static string AuditActionLabel(OrganizationAuditAction action) => action switch
+    {
+        OrganizationAuditAction.ProfileUpdated => "Organization profile updated",
+        OrganizationAuditAction.MembershipRequested => "Membership requested",
+        OrganizationAuditAction.MembershipApproved => "Membership request approved",
+        OrganizationAuditAction.MembershipDeclined => "Membership request declined",
+        OrganizationAuditAction.InvitationPreviewCreated => "Invitation preview created",
+        OrganizationAuditAction.InvitationPreviewCancelled => "Invitation preview cancelled",
+        OrganizationAuditAction.MemberRoleChanged => "Member role changed",
+        OrganizationAuditAction.MemberRegionChanged => "Member region changed",
+        OrganizationAuditAction.MembershipRevoked => "Membership removed",
+        OrganizationAuditAction.SsoConfigurationChanged => "Sign-in setup request changed",
+        _ => "Organization activity"
+    };
+
+    private sealed class MemberEditor
+    {
+        public OrganizationRole Role { get; set; }
+        public OrganizationCountry Country { get; set; } = OrganizationCountry.Zimbabwe;
+        public OrganizationRegion Region { get; set; } = OrganizationRegion.Harare;
+        public string Reason { get; set; } = string.Empty;
+        public string RegionReason { get; set; } = string.Empty;
+    }
+}
+

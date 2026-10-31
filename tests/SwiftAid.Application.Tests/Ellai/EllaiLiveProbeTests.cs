@@ -43,7 +43,8 @@ public sealed class EllaiLiveProbeTests
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
         var adapter = new EllaiReasoningAdapter(http, options!);
         var result = await adapter.CompleteAsync(
-            new[] { ("user", "Reply with the single word: ok") }, 512, CancellationToken.None);
+            [new SwiftAid.Application.Ellai.EllaiChatMessage("user", "Reply with the single word: ok")],
+            1024, CancellationToken.None);
 
         Assert.Equal("stop", result.FinishReason);
         Assert.Equal(options!.ReasoningModel, result.Model);

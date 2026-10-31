@@ -1,22 +1,27 @@
 @inherits LayoutComponentBase
 @using Microsoft.AspNetCore.Components.Authorization
+@using SwiftAid.UI.Ellai
+@using SwiftAid.UI.Ellai.Components
 @using SwiftAid.UI.Ellai.Guidance
 @using SwiftAid.UI.Theme
+@inject NavigationManager Navigation
 
 <SwiftAidThemeProvider />
 <MudPopoverProvider />
 <MudDialogProvider />
 <MudSnackbarProvider />
 
+<div class="swiftaid-public-layout-root">
 <MudLayout>
+    @if (!IsIdentityJourney)
+    {
     <MudAppBar Elevation="1" Color="Color.Transparent" Dense="true" Class="swiftaid-public-appbar">
         <div class="swiftaid-public-header" @onkeydown="HandleMobileNavigationKeyDown">
             <MudButton Href="/" Variant="Variant.Text" Color="Color.Primary" Class="swiftaid-brand-link">
-                <MudIcon Icon="@Icons.Material.Filled.VolunteerActivism" Class="mr-2" aria-hidden="true" />
+                <img class="swiftaid-public-brand-mark" src="_content/SwiftAid.UI/assets/swiftaid-icon.png" alt="" />
                 SwiftAid
             </MudButton>
             <nav class="swiftaid-public-desktop-navigation" aria-label="Public navigation">
-                <MudButton Href="/education" Variant="Variant.Text" Color="Color.Default">Education</MudButton>
                 <MudButton Href="/sessions" Variant="Variant.Text" Color="Color.Default">Community</MudButton>
             </nav>
             <MudButton Variant="Variant.Text"
@@ -29,35 +34,73 @@
                        aria-controls="swiftaid-public-mobile-navigation">
                 <MudIcon Icon="@(_mobileMenuOpen ? Icons.Material.Filled.Close : Icons.Material.Filled.Menu)" aria-hidden="true" />
             </MudButton>
-            <MudButton Href="/sign-in" Variant="Variant.Filled" Color="Color.Primary" Class="swiftaid-public-sign-in">Sign in</MudButton>
+            <AuthorizeView>
+                <Authorized>
+                    <MudButton Href="/dashboard" Variant="Variant.Filled" Color="Color.Primary" Class="swiftaid-public-sign-in">Dashboard</MudButton>
+                </Authorized>
+                <NotAuthorized>
+                    <MudButton Href="/sign-in?returnUrl=%2Fdashboard" Variant="Variant.Filled" Color="Color.Primary" Class="swiftaid-public-sign-in">Sign in</MudButton>
+                </NotAuthorized>
+            </AuthorizeView>
             <nav id="swiftaid-public-mobile-navigation"
                  class="swiftaid-public-mobile-navigation"
                  aria-label="Public navigation"
                  aria-hidden="@(_mobileMenuOpen ? "false" : "true")"
                  hidden="@(!_mobileMenuOpen)">
-                <MudButton Href="/education" Variant="Variant.Text" Color="Color.Default"
-                           Class="swiftaid-public-mobile-link" OnClick="CloseMobileNavigation">Education</MudButton>
                 <MudButton Href="/sessions" Variant="Variant.Text" Color="Color.Default"
                            Class="swiftaid-public-mobile-link" OnClick="CloseMobileNavigation">Community</MudButton>
             </nav>
         </div>
     </MudAppBar>
-    <MudMainContent Class="swiftaid-public-main">
-        <MudContainer MaxWidth="MaxWidth.Large" Class="swiftaid-public-body">
+    }
+    <MudMainContent Class="@(IsIdentityJourney ? "swiftaid-public-main swiftaid-public-main--identity" : "swiftaid-public-main")">
+        <MudContainer MaxWidth="MaxWidth.Large" Class="@(IsIdentityJourney ? "swiftaid-public-body swiftaid-public-body--identity" : "swiftaid-public-body")">
             @(ChildContent ?? Body)
         </MudContainer>
     </MudMainContent>
 </MudLayout>
+</div>
 
 <AuthorizeView>
     <Authorized>
         <EllaiGuidanceHost />
+        <EllaiLauncherMenu OnModeSelected="RequestEllaiMode" />
     </Authorized>
+    <NotAuthorized>
+        @if (!IsIdentityJourney)
+        {
+            <EllaiGuidanceHost />
+            <EllaiLauncherMenu PublicHelpOnly="true" OnModeSelected="RequestEllaiMode" />
+        }
+    </NotAuthorized>
 </AuthorizeView>
 
 @code {
+    private static readonly string[] IdentityJourneyRoutes =
+    [
+        "sign-in",
+        "register",
+        "forgot-password",
+        "reset-password",
+        "verify-email",
+        "welcome-complete"
+    ];
+
     private bool _mobileMenuOpen;
     private MudButton? _mobileMenuToggle;
+    private bool IsIdentityJourney
+    {
+        get
+        {
+            var path = Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].Trim('/');
+            return IdentityJourneyRoutes.Contains(path, StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    [Inject]
+    private EllaiLauncher EllaiLauncher { get; set; } = default!;
+
+    private void RequestEllaiMode(SwiftAid.Contracts.Ellai.EllaiMode mode) => EllaiLauncher.Request(mode);
 
     private void ToggleMobileNavigation() => _mobileMenuOpen = !_mobileMenuOpen;
 

@@ -1,45 +1,59 @@
 @page "/sessions"
+@using SwiftAid.Client.Presentation
+@using SwiftAid.Client.Presentation.PublicWorkflows
 @using SwiftAid.Contracts.Sessions
-@using SwiftAid.UI.Components.Sessions
-@using SwiftAid.Client.Sessions
-@inject CommunitySessionHttpClient SessionClient
+@using SwiftAid.Mobile.Services.Authentication
+@using SwiftAid.UI.Components.Surfaces.Public
+@inject IPublicCommunitySessionClient SessionClient
+@inject ISubscriptionClient SubscriptionClient
+@inject IMobileAuthenticationSession AuthenticationSession
 
 <PageTitle>Community sessions | SwiftAid</PageTitle>
 
-<div class="sessions-page">
-    <h1>Community sessions</h1>
-    <p>
-        Published community education sessions. Copying an invitation never sends anything
-        and never marks anyone as attending. Officer planning stays on the web workspace;
-        this page shows the public list only.
-    </p>
-
-    <PublicSessionList Sessions="_sessions"
+<PublicSessionsSurface Sessions="_sessions"
                        Loading="_loading"
-                       ErrorMessage="ListError"
+                       ErrorMessage="@_listError"
                        OnRetry="LoadAsync"
                        LoadInvitationTextAsync="LoadInvitationAsync"
-                       ShareTextAsync="ShareAsync" />
-</div>
+                       ShareTextAsync="ShareAsync"
+                       LoadSubscriptionStateAsync="LoadSubscriptionStateAsync"
+                       ExecuteSubscriptionActionAsync="ExecuteSubscriptionActionAsync"
+                       OnRequestSignIn="RequestSignInAsync" />
 
 @code {
     private IReadOnlyList<PublicSessionView> _sessions = Array.Empty<PublicSessionView>();
     private bool _loading = true;
-    private string? ListError { get; set; }
+    private string? _listError;
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    protected override Task OnInitializedAsync() => LoadAsync();
 
     private async Task LoadAsync()
     {
         _loading = true;
-        ListError = null;
+        _listError = null;
         try
         {
-            _sessions = await SessionClient.ListPublicAsync(null);
+            var result = await SessionClient.ListPublicAsync();
+            if (result.Succeeded && result.Value is { } sessions)
+            {
+                _sessions = sessions;
+            }
+            else
+            {
+                _sessions = Array.Empty<PublicSessionView>();
+                _listError = result.Message ?? result.Metadata.Notice ??
+                    "Published sessions are temporarily unavailable. Check your connection and try again.";
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            _sessions = Array.Empty<PublicSessionView>();
+            _listError = "Loading sessions was cancelled.";
         }
         catch (Exception)
         {
-            ListError = "Published sessions are temporarily unavailable. Check your connection and try again.";
+            _sessions = Array.Empty<PublicSessionView>();
+            _listError = "Published sessions are temporarily unavailable. Check your connection and try again.";
         }
         finally
         {
@@ -47,8 +61,145 @@
         }
     }
 
-    private Task<string?> LoadInvitationAsync(Guid sessionId) =>
-        SessionClient.GetInvitationTextAsync(sessionId);
+    private async Task<string?> LoadInvitationAsync(Guid sessionId)
+    {
+        try
+        {
+            var result = await SessionClient.GetInvitationTextAsync(sessionId);
+            return result.Succeeded ? result.Value : null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private async Task<PublicSessionsSurface.SessionSubscriptionPanelState?> LoadSubscriptionStateAsync(Guid sessionId)
+    {
+        var subscriptionTask = SubscriptionClient.GetAsync(sessionId);
+        var optionsTask = SubscriptionClient.GetSubscriptionOptionsAsync(sessionId);
+        try
+        {
+            await Task.WhenAll(subscriptionTask, optionsTask);
+            var subscription = await subscriptionTask;
+            var options = await optionsTask;
+            var status = subscription.Code switch
+            {
+                UiCapabilityResultCode.Denied => PublicSessionsSurface.SessionSubscriptionStatus.RequiresAuthentication,
+                UiCapabilityResultCode.Success when subscription.Value?.Status == SubscriptionStatus.Active => PublicSessionsSurface.SessionSubscriptionStatus.Active,
+                UiCapabilityResultCode.Success => PublicSessionsSurface.SessionSubscriptionStatus.Unsubscribed,
+                _ => PublicSessionsSurface.SessionSubscriptionStatus.Unavailable
+            };
+
+            return new PublicSessionsSurface.SessionSubscriptionPanelState(
+                sessionId,
+                status,
+                subscription.Value?.Version ?? options.Value?.Version ?? 0,
+                options.Succeeded && options.Value is { } value ? ToSurfaceOptions(value) : null,
+                status == PublicSessionsSurface.SessionSubscriptionStatus.Unavailable
+                    ? subscription.Message ?? subscription.Metadata.Notice ?? "Reminder status is unavailable."
+                    : options.Succeeded ? subscription.Message : options.Message ?? options.Metadata.Notice,
+                IsError: status == PublicSessionsSurface.SessionSubscriptionStatus.Unavailable ||
+                    !options.Succeeded && status != PublicSessionsSurface.SessionSubscriptionStatus.RequiresAuthentication);
+        }
+        catch (OperationCanceledException)
+        {
+            return ErrorSubscriptionState(sessionId, "Loading reminder status was cancelled.");
+        }
+        catch (Exception)
+        {
+            return ErrorSubscriptionState(sessionId, "Reminder status is unavailable. Try again.");
+        }
+    }
+
+    private async Task<PublicSessionsSurface.SessionSubscriptionPanelState?> ExecuteSubscriptionActionAsync(
+        PublicSessionsSurface.SessionSubscriptionAction action)
+    {
+        try
+        {
+            UiCapabilityResult<SubscriptionView> result;
+            if (action.Kind == PublicSessionsSurface.SessionSubscriptionActionKind.Subscribe)
+            {
+                var currentOptions = await SubscriptionClient.GetSubscriptionOptionsAsync(action.SessionId);
+                if (!currentOptions.Succeeded || currentOptions.Value is not { IsCurrent: true } options ||
+                    action.ConsentReference is null || action.Channel is null ||
+                    !string.Equals(options.ConsentReference, action.ConsentReference, StringComparison.Ordinal) ||
+                    options.Version != action.ExpectedVersion ||
+                    !options.Channels.Any(channel => channel == ToClientChannel(action.Channel.Value)))
+                {
+                    return await LoadSubscriptionStateAsync(action.SessionId) is { } stale
+                        ? stale with { IsError = true, Message = "Reminder terms changed. Refresh and review the current options." }
+                        : ErrorSubscriptionState(action.SessionId, "Reminder terms changed. Refresh and review the current options.");
+                }
+
+                result = await SubscriptionClient.SubscribeAsync(new SubscriptionRequest(
+                    action.SessionId,
+                    options.ConsentReference,
+                    action.ExpectedVersion,
+                    ToClientChannel(action.Channel.Value)));
+            }
+            else
+            {
+                result = await SubscriptionClient.UnsubscribeAsync(action.SessionId, action.ExpectedVersion);
+            }
+
+            var updatedState = await LoadSubscriptionStateAsync(action.SessionId);
+            if (updatedState is null) return null;
+            return result.Succeeded
+                ? updatedState with { Message = result.Message, IsError = false }
+                : updatedState with { Message = result.Message ?? result.Metadata.Notice ?? "Reminder preference could not be updated.", IsError = true };
+        }
+        catch (OperationCanceledException)
+        {
+            return ErrorSubscriptionState(action.SessionId, "Updating the reminder choice was cancelled.");
+        }
+        catch (Exception)
+        {
+            return ErrorSubscriptionState(action.SessionId, "The reminder choice could not be updated. Try again.");
+        }
+    }
+
+    private async Task RequestSignInAsync(Guid _)
+    {
+        try
+        {
+            await AuthenticationSession.SignInAsync();
+        }
+        catch (Exception)
+        {
+            // The shared session surface retains its current state and offers retry/sign-in again.
+        }
+    }
+
+    private static PublicSessionsSurface.SessionSubscriptionOptions ToSurfaceOptions(SubscriptionOptions options) => new(
+        options.SessionId,
+        options.ConsentReference,
+        options.Version,
+        options.ConsentText,
+        options.Channels.Select(ToSurfaceChannel).ToArray(),
+        options.IsCurrent);
+
+    private static PublicSessionsSurface.SessionReminderChannel ToSurfaceChannel(SubscriptionChannel channel) => channel switch
+    {
+        SubscriptionChannel.Email => PublicSessionsSurface.SessionReminderChannel.Email,
+        SubscriptionChannel.MobilePush => PublicSessionsSurface.SessionReminderChannel.MobilePush,
+        _ => throw new ArgumentOutOfRangeException(nameof(channel))
+    };
+
+    private static SubscriptionChannel ToClientChannel(PublicSessionsSurface.SessionReminderChannel channel) => channel switch
+    {
+        PublicSessionsSurface.SessionReminderChannel.Email => SubscriptionChannel.Email,
+        PublicSessionsSurface.SessionReminderChannel.MobilePush => SubscriptionChannel.MobilePush,
+        _ => throw new ArgumentOutOfRangeException(nameof(channel))
+    };
+
+    private static PublicSessionsSurface.SessionSubscriptionPanelState ErrorSubscriptionState(Guid sessionId, string message) => new(
+        sessionId,
+        PublicSessionsSurface.SessionSubscriptionStatus.Unavailable,
+        0,
+        null,
+        message,
+        IsError: true);
 
     private static Task ShareAsync(string text) =>
         Share.Default.RequestAsync(new ShareTextRequest(text, "Community session invitation"));

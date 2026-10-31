@@ -12,13 +12,17 @@ using SwiftAid.Contracts.Sessions;
 
 namespace SwiftAid.Gateway.Endpoints;
 
-/// <summary>Maps the authenticated staff endpoints for community-session commands.</summary>
+/// <summary>Marks officer-only session routes that require a trusted scoped
+/// authorization capability, which is not currently available in Gateway.</summary>
+public sealed record CommunitySessionScopedAuthorizationRequiredMetadata;
+
+/// <summary>Maps community-session officer command endpoints. These routes fail
+/// closed until a trusted scoped-staff authorization capability is available.</summary>
 /// <remarks>
 /// Every command carries the officer-provided expected version; a stale version fails
 /// with 409 so a retry re-reads before writing. State-rule violations (for example a
-/// past start or a missing self-review acknowledgement) fail with 422. The service is
-/// resolved per request so a deployment without the session pipeline fails closed
-/// with the same generic 404 used by the other staff queues.
+/// past start or a missing self-review acknowledgement) fail with 422. The scoped
+/// authorization metadata gate returns a generic 404 before command services are called.
 /// </remarks>
 public static class CommunitySessionEndpoints
 {
@@ -34,8 +38,21 @@ public static class CommunitySessionEndpoints
             OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
 
         var group = endpoints.MapGroup("/api/v1/sessions");
+        group.AddEndpointFilter(async (context, next) =>
+        {
+            if (context.HttpContext.GetEndpoint()?.Metadata
+                .GetMetadata<CommunitySessionScopedAuthorizationRequiredMetadata>() is not null)
+            {
+                // Authentication alone does not establish officer authority.
+                // Return the same generic denial regardless of session identity.
+                return Results.NotFound();
+            }
+
+            return await next(context);
+        });
         group.MapPost("/", CreateDraftAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .WithMetadata(new CommunitySessionScopedAuthorizationRequiredMetadata())
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("CreateCommunitySessionDraft")
             .Accepts<CreateSessionApiRequest>("application/json")
@@ -47,6 +64,7 @@ public static class CommunitySessionEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
         group.MapPut("/{sessionId:guid}", UpdateAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .WithMetadata(new CommunitySessionScopedAuthorizationRequiredMetadata())
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("UpdateCommunitySession")
             .Accepts<UpdateSessionApiRequest>("application/json")
@@ -58,6 +76,7 @@ public static class CommunitySessionEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
         group.MapPost("/{sessionId:guid}/review", ReviewAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .WithMetadata(new CommunitySessionScopedAuthorizationRequiredMetadata())
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("ReviewCommunitySession")
             .Accepts<ReviewSessionApiRequest>("application/json")
@@ -69,6 +88,7 @@ public static class CommunitySessionEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
         group.MapPost("/{sessionId:guid}/schedule", ScheduleAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .WithMetadata(new CommunitySessionScopedAuthorizationRequiredMetadata())
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("ScheduleCommunitySession")
             .Accepts<ScheduleSessionApiRequest>("application/json")
@@ -80,6 +100,7 @@ public static class CommunitySessionEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
         group.MapPost("/{sessionId:guid}/cancel", CancelAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .WithMetadata(new CommunitySessionScopedAuthorizationRequiredMetadata())
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("CancelCommunitySession")
             .Accepts<CancelSessionApiRequest>("application/json")
@@ -91,6 +112,7 @@ public static class CommunitySessionEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
         group.MapPost("/{sessionId:guid}/complete", CompleteAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .WithMetadata(new CommunitySessionScopedAuthorizationRequiredMetadata())
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("CompleteCommunitySession")
             .Accepts<CompleteSessionApiRequest>("application/json")

@@ -35,14 +35,15 @@ public sealed class GuestSubmissionCoordinator(
                 {
                     if (!HasValidPayloadHash(item))
                     {
-                        await persistence.SaveAsync(item with
+                        var updatedRecord = item with
                         {
                             State = GuestSubmissionLocalState.NeedsAttention,
                             IntakeCapability = null,
                             CapabilityExpiresAtUtc = null,
                             UpdatedAtUtc = _timeProvider.GetUtcNow(),
                             Version = checked(item.Version + 1)
-                        }, cancellationToken).ConfigureAwait(false);
+                        };
+                        await persistence.SaveVersionedAsync(updatedRecord, item.Version, cancellationToken).ConfigureAwait(false);
                         needsAttention++;
                         continue;
                     }
@@ -52,6 +53,7 @@ public sealed class GuestSubmissionCoordinator(
                     if (item.SessionId == Guid.Empty)
                     {
                         // Upgrade pre-session drafts once, persisting the stable ID before I/O.
+                        var versionBeforeSession = item.Version;
                         item = item with
                         {
                             SessionId = Guid.NewGuid(),
@@ -60,7 +62,7 @@ public sealed class GuestSubmissionCoordinator(
                             UpdatedAtUtc = _timeProvider.GetUtcNow(),
                             Version = checked(item.Version + 1)
                         };
-                        await persistence.SaveAsync(item, cancellationToken).ConfigureAwait(false);
+                        await persistence.SaveVersionedAsync(item, versionBeforeSession, cancellationToken).ConfigureAwait(false);
                         capability = null;
                         capabilityExpiry = null;
                     }
@@ -80,6 +82,7 @@ public sealed class GuestSubmissionCoordinator(
 
                         capability = session.Capability;
                         capabilityExpiry = session.ExpiresAtUtc;
+                        var versionBeforeCapability = item.Version;
                         item = item with
                         {
                             IntakeCapability = capability,
@@ -87,7 +90,7 @@ public sealed class GuestSubmissionCoordinator(
                             UpdatedAtUtc = _timeProvider.GetUtcNow(),
                             Version = checked(item.Version + 1)
                         };
-                        await persistence.SaveAsync(item, cancellationToken).ConfigureAwait(false);
+                        await persistence.SaveVersionedAsync(item, versionBeforeCapability, cancellationToken).ConfigureAwait(false);
                     }
 
                     var receipt = await transport.SubmitAsync(
@@ -106,6 +109,7 @@ public sealed class GuestSubmissionCoordinator(
                         continue;
                     }
 
+                    var previousVersion = item.Version;
                     var acknowledged = item with
                     {
                         State = GuestSubmissionLocalState.Received,
@@ -115,7 +119,7 @@ public sealed class GuestSubmissionCoordinator(
                         UpdatedAtUtc = _timeProvider.GetUtcNow(),
                         Version = checked(item.Version + 1)
                     };
-                    await persistence.SaveAsync(acknowledged, cancellationToken).ConfigureAwait(false);
+                    await persistence.SaveVersionedAsync(acknowledged, previousVersion, cancellationToken).ConfigureAwait(false);
                     received++;
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -124,14 +128,15 @@ public sealed class GuestSubmissionCoordinator(
                 }
                 catch (GuestIntakeTransportException exception) when (!exception.IsRetryable)
                 {
-                    await persistence.SaveAsync(item with
+                    var updatedRecord = item with
                     {
                         State = GuestSubmissionLocalState.NeedsAttention,
                         IntakeCapability = null,
                         CapabilityExpiresAtUtc = null,
                         UpdatedAtUtc = _timeProvider.GetUtcNow(),
                         Version = checked(item.Version + 1)
-                    }, cancellationToken).ConfigureAwait(false);
+                    };
+                    await persistence.SaveVersionedAsync(updatedRecord, item.Version, cancellationToken).ConfigureAwait(false);
                     needsAttention++;
                 }
                 catch (Exception)
@@ -181,12 +186,13 @@ public sealed class GuestSubmissionCoordinator(
 
                     if (receipt != currentReceipt)
                     {
-                        await persistence.SaveAsync(item with
+                        var updatedRecord = item with
                         {
                             Receipt = receipt,
                             UpdatedAtUtc = _timeProvider.GetUtcNow(),
                             Version = checked(item.Version + 1)
-                        }, cancellationToken).ConfigureAwait(false);
+                        };
+                        await persistence.SaveVersionedAsync(updatedRecord, item.Version, cancellationToken).ConfigureAwait(false);
                         updated++;
                     }
                 }

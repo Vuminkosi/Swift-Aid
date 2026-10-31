@@ -14,9 +14,16 @@ public sealed class EllaiEventPollerTests
         public EllaiSessionEventPageDto? Page { get; set; } =
             new EllaiSessionEventPageDto(Array.Empty<EllaiSessionEventDto>(), 0);
 
+        public EllaiSessionResponsePageDto? ResponsePage { get; set; } =
+            new EllaiSessionResponsePageDto(Array.Empty<EllaiSessionResponseDto>(), 0);
+
         public string? LastSession { get; private set; }
 
         public long LastCursor { get; private set; }
+
+        public Task<EllaiSessionResponsePageDto?> PollResponsesAsync(
+            string sessionId, long cursor, CancellationToken cancellationToken) =>
+            Task.FromResult(ResponsePage);
 
         public Task<EllaiSessionEventPageDto?> PollEventsAsync(
             string sessionId, long cursor, int waitSeconds, CancellationToken cancellationToken)
@@ -26,8 +33,19 @@ public sealed class EllaiEventPollerTests
             return Task.FromResult(Page);
         }
 
-        public Task<EllaiSessionView?> StartSessionAsync(EllaiMode mode, CancellationToken cancellationToken) =>
-            Task.FromResult<EllaiSessionView?>(null);
+        public Task<EllaiSessionStartResult> StartSessionAsync(EllaiMode mode, CancellationToken cancellationToken) =>
+            Task.FromResult(new EllaiSessionStartResult(EllaiClientOperationStatus.OutcomeUnknown));
+
+        public Task<EllaiUtteranceSubmitResult> SubmitUtteranceAsync(
+            SubmitUtteranceRequest request, CancellationToken cancellationToken) =>
+            Task.FromResult(new EllaiUtteranceSubmitResult(EllaiClientOperationStatus.Unavailable, null));
+
+        public Task<bool> GrantPublicProductHelpConsentAsync(
+            string sessionId, CancellationToken cancellationToken) => Task.FromResult(true);
+
+        public Task<EllaiSessionCancelResult> CancelSessionAsync(
+            string sessionId, long expectedSessionVersion, CancellationToken cancellationToken) =>
+            Task.FromResult(new EllaiSessionCancelResult(EllaiClientOperationStatus.Unavailable));
 
         public Task<EllaiReviewDto?> GetActiveReviewAsync(string sessionId, CancellationToken cancellationToken) =>
             Task.FromResult<EllaiReviewDto?>(null);
@@ -74,6 +92,23 @@ public sealed class EllaiEventPollerTests
             {
                 Content = new StringContent(_json, Encoding.UTF8, "application/json"),
             });
+        }
+    }
+
+    private sealed class QueuedHandler(params HttpResponseMessage[] responses) : HttpMessageHandler
+    {
+        private readonly Queue<HttpResponseMessage> _responses = new(responses);
+
+        public List<(string Method, string? Path, string? RequestToken)> Requests { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Requests.Add((
+                request.Method.Method,
+                request.RequestUri?.PathAndQuery,
+                request.Headers.TryGetValues("X-CSRF-TOKEN", out var values) ? values.Single() : null));
+            return Task.FromResult(_responses.Dequeue());
         }
     }
 
@@ -173,6 +208,26 @@ public sealed class EllaiEventPollerTests
     }
 
     [Fact]
+    public async Task ModelResponseIsDeliveredSeparatelyFromActivityAndDeduplicatedByCursor()
+    {
+        var response = new EllaiSessionResponseDto(1, "s-1", "A dynamic answer.", DateTimeOffset.UtcNow);
+        var reviews = new FakeReviews
+        {
+            ResponsePage = new EllaiSessionResponsePageDto([response], 1),
+        };
+        var poller = new EllaiEventPoller(reviews);
+        var received = new List<EllaiSessionResponseDto>();
+        poller.ResponseReceived += received.Add;
+        poller.TrackSession("s-1");
+
+        await poller.PollOnceAsync(0, CancellationToken.None);
+        await poller.PollOnceAsync(0, CancellationToken.None);
+
+        Assert.Equal(response, Assert.Single(received));
+        Assert.Equal(1, poller.ResponseCursor);
+    }
+
+    [Fact]
     public async Task HttpClientParsesWirePayloadAndBuildsUrl()
     {
         const string json = """
@@ -196,6 +251,29 @@ public sealed class EllaiEventPollerTests
     }
 
     [Fact]
+    public async Task HttpClientParsesSessionResponseAndBuildsCursorUrl()
+    {
+        const string json = """
+            {"responses":[{"sequence":4,"sessionId":"s-9","text":"A dynamic answer.","createdAtUtc":"2026-10-30T08:00:00Z"}],"cursor":4}
+            """;
+        var handler = new FakeHandler(json);
+        var client = new EllaiReviewHttpClient(new HttpClient(handler)
+        {
+            BaseAddress = new Uri("https://loopback.test/"),
+        });
+
+        var page = await client.PollResponsesAsync("s-9", 3, CancellationToken.None);
+
+        Assert.NotNull(page);
+        Assert.Equal(4, page.Cursor);
+        var response = Assert.Single(page.Responses);
+        Assert.Equal("A dynamic answer.", response.Text);
+        Assert.Equal("s-9", response.SessionId);
+        Assert.Equal("GET", handler.LastMethod);
+        Assert.Contains("api/v1/ellai/sessions/s-9/responses?cursor=3", handler.LastPath, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task HttpClientReturnsNullOnFailure()
     {
         var handler = new FakeHandler("{}", HttpStatusCode.Unauthorized);
@@ -205,7 +283,8 @@ public sealed class EllaiEventPollerTests
         });
 
         Assert.Null(await client.PollEventsAsync("s-9", 0, 0, CancellationToken.None));
-        Assert.Null(await client.StartSessionAsync(EllaiMode.Ask, CancellationToken.None));
+        Assert.Equal(EllaiClientOperationStatus.Unauthorized,
+            (await client.StartSessionAsync(EllaiMode.Ask, CancellationToken.None)).Status);
         Assert.Null(await client.GetActiveReviewAsync("s-9", CancellationToken.None));
         Assert.Null(await client.ApproveSelectedAsync("s-9", "req-9", new[] { "a-1" }, CancellationToken.None));
         Assert.False(await client.RejectReviewAsync("s-9", "req-9", CancellationToken.None));
@@ -272,13 +351,58 @@ public sealed class EllaiEventPollerTests
             BaseAddress = new Uri("https://loopback.test/"),
         });
 
-        var view = await client.StartSessionAsync(EllaiMode.Ask, CancellationToken.None);
+        var result = await client.StartSessionAsync(EllaiMode.Ask, CancellationToken.None);
 
-        Assert.NotNull(view);
-        Assert.Equal("s-9", view.SessionId);
-        Assert.Equal(EllaiMode.Ask, view.Mode);
+        Assert.Equal(EllaiClientOperationStatus.Accepted, result.Status);
+        Assert.NotNull(result.Session);
+        Assert.Equal("s-9", result.Session.SessionId);
+        Assert.Equal(EllaiMode.Ask, result.Session.Mode);
         Assert.Equal("POST", handler.LastMethod);
         Assert.Contains("api/v1/ellai/sessions", handler.LastPath, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GuestHttpClientRefreshesAntiforgeryTokenAndRetriesOnlyAntiforgeryRejection()
+    {
+        const string sessionJson = """
+            {"sessionId":"s-9","mode":0,"activeInvestigationId":null,"status":"Open","scopeDisplay":"Guest","consentVersion":"v1","capabilityVersion":"v1","cyclesUsed":0,"cyclesAllowed":100,"controlOwner":null,"lastEventSequence":0,"sessionVersion":1}
+            """;
+        var handler = new QueuedHandler(
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"requestToken\":\"stale\"}", Encoding.UTF8, "application/json"),
+            },
+            new HttpResponseMessage(HttpStatusCode.BadRequest)
+            {
+                Content = new StringContent(
+                    "{\"title\":\"The guest Ellai request could not be validated.\"}",
+                    Encoding.UTF8,
+                    "application/problem+json"),
+            },
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"requestToken\":\"fresh\"}", Encoding.UTF8, "application/json"),
+            },
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(sessionJson, Encoding.UTF8, "application/json"),
+            });
+        var client = new EllaiReviewHttpClient(new HttpClient(handler)
+        {
+            BaseAddress = new Uri("https://loopback.test/"),
+        }, useGuestRoutes: true);
+
+        var result = await client.StartSessionAsync(EllaiMode.Ask, CancellationToken.None);
+
+        Assert.Equal(EllaiClientOperationStatus.Accepted, result.Status);
+        Assert.Equal("s-9", result.Session?.SessionId);
+        Assert.Equal(4, handler.Requests.Count);
+        Assert.Equal("GET", handler.Requests[0].Method);
+        Assert.Equal("POST", handler.Requests[1].Method);
+        Assert.Equal("stale", handler.Requests[1].RequestToken);
+        Assert.Equal("GET", handler.Requests[2].Method);
+        Assert.Equal("POST", handler.Requests[3].Method);
+        Assert.Equal("fresh", handler.Requests[3].RequestToken);
     }
 
     [Fact]
@@ -336,7 +460,7 @@ public sealed class EllaiEventPollerTests
     }
 
     [Fact]
-    public async Task HttpClientStartSessionReturnsNullOnFailure()
+    public async Task HttpClientStartSessionDistinguishesDeniedFromAmbiguousFailure()
     {
         var handler = new FakeHandler("{}", HttpStatusCode.Unauthorized);
         var client = new EllaiReviewHttpClient(new HttpClient(handler)
@@ -344,6 +468,18 @@ public sealed class EllaiEventPollerTests
             BaseAddress = new Uri("https://loopback.test/"),
         });
 
-        Assert.Null(await client.StartSessionAsync(EllaiMode.Ask, CancellationToken.None));
+        var denied = await client.StartSessionAsync(EllaiMode.Ask, CancellationToken.None);
+        Assert.Equal(EllaiClientOperationStatus.Unauthorized, denied.Status);
+        Assert.Null(denied.Session);
+
+        var failedHandler = new FakeHandler("{}", HttpStatusCode.InternalServerError);
+        var failedClient = new EllaiReviewHttpClient(new HttpClient(failedHandler)
+        {
+            BaseAddress = new Uri("https://loopback.test/"),
+        });
+
+        var unknown = await failedClient.StartSessionAsync(EllaiMode.Ask, CancellationToken.None);
+        Assert.Equal(EllaiClientOperationStatus.OutcomeUnknown, unknown.Status);
+        Assert.Null(unknown.Session);
     }
 }

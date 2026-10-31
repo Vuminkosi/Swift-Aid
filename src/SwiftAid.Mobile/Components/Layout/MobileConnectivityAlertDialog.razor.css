@@ -1,0 +1,13 @@
+.mobile-connectivity-alert-dialog {
+    border-color: var(--sa-border);
+    background: var(--sa-surface);
+}
+
+.mobile-connectivity-alert-dialog ::deep .mud-card-content {
+    display: grid;
+    gap: .5rem;
+}
+
+.mobile-connectivity-alert-dialog ::deep .mud-card-actions {
+    justify-content: flex-end;
+}

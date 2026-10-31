@@ -8,7 +8,7 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiReasoningLoopTests
 {
     private static readonly EllaiToolContext Context = new(
-        "session-1", "epoch-1", "cases", "case-1", 4, true);
+        "session-1", "epoch-1", "cases", "case-1", 4, true, "consent/1", EllaiProcessingClassification.SyntheticDemo);
 
     private sealed class ScriptedCompletions : IEllaiTurnCompletionClient
     {
@@ -33,7 +33,7 @@ public sealed class EllaiReasoningLoopTests
     {
         var consent = new EllaiConsentService();
         consent.Grant("session-1", EllaiConsentDimension.ReasoningText,
-            EllaiToolBroker.ToolReadPurpose, "synthetic", TimeSpan.FromHours(1));
+            EllaiToolBroker.ToolReadPurpose, EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
         return new EllaiToolBroker(new EllaiPolicyService(), consent);
     }
 
@@ -67,9 +67,52 @@ public sealed class EllaiReasoningLoopTests
         Assert.Equal(2, completions.Calls);
         var second = completions.Threads[1];
         var toolMessage = Assert.Single(second, m => m.Role == "tool");
+        Assert.Equal("c1", toolMessage.ToolCallId);
         Assert.Contains("c1", toolMessage.Content, StringComparison.Ordinal);
         Assert.Contains("ellai_now", toolMessage.Content, StringComparison.Ordinal);
         Assert.Contains("Current server time", toolMessage.Content, StringComparison.Ordinal);
+        var assistantMessage = Assert.Single(second, m => m.Role == "assistant");
+        Assert.Equal("c1", Assert.Single(assistantMessage.ToolCalls!).CallId);
+    }
+
+    [Fact]
+    public async Task InvalidFinalDecisionAfterToolObservationGetsARepairTurn()
+    {
+        const string invalidDecision = """{"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"A report can be submitted.","spokenText":"","claims":[null],"questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}""";
+        var completions = new ScriptedCompletions(
+            """{"tool_calls":[{"id":"c1","name":"ellai_now","args":{}}]}""",
+            invalidDecision,
+            DecisionTurn);
+        var loop = Loop(completions);
+
+        var outcome = await loop.RunAsync(Request(), CancellationToken.None);
+
+        Assert.True(outcome.Completed);
+        Assert.Equal(3, completions.Calls);
+        Assert.Contains(completions.Threads[2], message => message.Role == "user"
+            && message.Content.Contains("Turn rejected", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RestrictedSessionPromptAdvertisesOnlyItsAllowedTools()
+    {
+        var completions = new ScriptedCompletions(DecisionTurn);
+        var loop = Loop(completions);
+        var request = Request(Context with
+        {
+            AllowedTools = new HashSet<string>(StringComparer.Ordinal)
+            {
+                EllaiToolNames.ProductFacts,
+            },
+        });
+
+        var outcome = await loop.RunAsync(request, CancellationToken.None);
+
+        Assert.True(outcome.Completed);
+        var systemPrompt = Assert.Single(completions.Threads[0], message => message.Role == "system").Content;
+        Assert.Contains(EllaiToolNames.ProductFacts, systemPrompt, StringComparison.Ordinal);
+        Assert.DoesNotContain(EllaiToolNames.State, systemPrompt, StringComparison.Ordinal);
+        Assert.DoesNotContain(EllaiToolNames.Evidence, systemPrompt, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -90,6 +133,20 @@ public sealed class EllaiReasoningLoopTests
     public async Task BudgetExhaustionStopsWithBudgetDetail()
     {
         var ledger = new EllaiUsageLedger(sessionTokenBudget: 5);
+        var completions = new ScriptedCompletions(DecisionTurn);
+        var loop = Loop(completions, ledger);
+
+        var outcome = await loop.RunAsync(Request(), CancellationToken.None);
+
+        Assert.False(outcome.Completed);
+        Assert.Equal(0, completions.Calls);
+        Assert.Contains("authorization", outcome.StopReason ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ReservationIncludesPromptAndCompletionBeforeProviderDispatch()
+    {
+        var ledger = new EllaiUsageLedger(sessionTokenBudget: 256);
         var completions = new ScriptedCompletions(DecisionTurn);
         var loop = Loop(completions, ledger);
 

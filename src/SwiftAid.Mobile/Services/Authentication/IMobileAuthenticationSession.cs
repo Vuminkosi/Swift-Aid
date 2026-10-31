@@ -17,6 +17,7 @@ public interface IMobileAuthenticationSession
     /// <summary>
     /// Re-reads the current session (native tokens or gateway cookie) and
     /// notifies subscribers so the shell refreshes without an app restart.
+    /// The default keeps fail-closed hosts unchanged.
     /// </summary>
-    Task RefreshAsync(CancellationToken cancellationToken = default);
+    Task RefreshAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }

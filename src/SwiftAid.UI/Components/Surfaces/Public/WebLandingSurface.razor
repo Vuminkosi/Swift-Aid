@@ -1,0 +1,112 @@
+@using SwiftAid.UI.Components
+@using Microsoft.AspNetCore.Components.Web
+
+<PageTitle>SwiftAid — Healthier people. Safer communities.</PageTitle>
+<HeadContent>
+    <meta name="description" content="SwiftAid helps communities report human and animal health concerns, find community sessions, and support accountable follow-through." />
+    <meta property="og:title" content="SwiftAid — Healthier people. Safer communities." />
+    <meta property="og:description" content="A community health support platform for reporting, community connection, and accountable follow-through." />
+</HeadContent>
+
+@code {
+    [Parameter]
+    public bool IsSignedIn { get; set; }
+}
+
+<div class="web-landing">
+    <section class="web-landing__hero" aria-labelledby="web-landing-title">
+        <div class="web-landing__hero-copy">
+            <p class="web-landing__eyebrow">Community health, connected</p>
+            <h1 id="web-landing-title">Healthier people.<br />Safer communities.<br /><span>Brighter tomorrows.</span></h1>
+            <p class="web-landing__lead">
+                SwiftAid helps communities share health concerns about people and animals,
+                connect through published sessions, and support accountable follow-through.
+            </p>
+            <div class="web-landing__actions" aria-label="Get started">
+                <a class="web-landing__button web-landing__button--primary" href="/report">Report a concern</a>
+                <a class="web-landing__button web-landing__button--secondary" href="#how-swiftaid-works">Explore SwiftAid</a>
+            </div>
+            <p class="web-landing__access-note">You can report without signing in. Unknown details can stay unknown.</p>
+        </div>
+
+        <div class="web-landing__hero-art" aria-hidden="true">
+            <div class="web-landing__art-orbit web-landing__art-orbit--outer"></div>
+            <div class="web-landing__art-orbit web-landing__art-orbit--inner"></div>
+            <div class="web-landing__art-core"><MudIcon Icon="@Icons.Material.Filled.VolunteerActivism" /></div>
+            <div class="web-landing__art-node web-landing__art-node--people"><MudIcon Icon="@Icons.Material.Filled.Groups" /></div>
+            <div class="web-landing__art-node web-landing__art-node--animal"><MudIcon Icon="@Icons.Material.Filled.Pets" /></div>
+            <div class="web-landing__art-node web-landing__art-node--community"><MudIcon Icon="@Icons.Material.Filled.EventAvailable" /></div>
+            <div class="web-landing__art-caption">People · Animals · Communities</div>
+        </div>
+    </section>
+
+    <section class="web-landing__intro" aria-labelledby="what-is-swiftaid-title">
+        <div>
+            <p class="web-landing__eyebrow">What SwiftAid is about</p>
+            <h2 id="what-is-swiftaid-title">Make the next step clearer.</h2>
+        </div>
+        <p>
+            SwiftAid is a community health support platform. It brings public reporting,
+            community connection, and authorized case workflows into one service while
+            keeping people in control of what they share and what happens next.
+        </p>
+    </section>
+
+    <section id="how-swiftaid-works" class="web-landing__features" aria-label="How SwiftAid supports communities">
+        <article class="web-landing__feature">
+            <span class="web-landing__feature-icon" aria-hidden="true"><MudIcon Icon="@Icons.Material.Filled.AssignmentTurnedIn" /></span>
+            <p class="web-landing__feature-label">For authorized teams</p>
+            <h3>Manage cases</h3>
+            <p>Teams see and act on cases only when their account has the required access.</p>
+            @if (IsSignedIn)
+            {
+                <a href="/dashboard">Open your workspace <span aria-hidden="true">→</span></a>
+            }
+            else
+            {
+                <a href="/sign-in?returnUrl=%2Fdashboard">Sign in to your workspace <span aria-hidden="true">→</span></a>
+            }
+        </article>
+        <article class="web-landing__feature">
+            <span class="web-landing__feature-icon" aria-hidden="true"><MudIcon Icon="@Icons.Material.Filled.MenuBook" /></span>
+            <p class="web-landing__feature-label">For shared learning</p>
+            <h3>Educate communities</h3>
+            <p>Browse source-linked reference materials and understand how to use SwiftAid.</p>
+            <a href="/education">Explore the reference library <span aria-hidden="true">→</span></a>
+        </article>
+        <article class="web-landing__feature">
+            <span class="web-landing__feature-icon" aria-hidden="true"><MudIcon Icon="@Icons.Material.Filled.Pets" /></span>
+            <p class="web-landing__feature-label">One Health</p>
+            <h3>People and animals</h3>
+            <p>Share a concern about a person or an animal through the same guided report flow.</p>
+            <a href="/report">Start a report <span aria-hidden="true">→</span></a>
+        </article>
+    </section>
+
+    <section class="web-landing__journey" aria-labelledby="how-it-works-title">
+        <div class="web-landing__journey-heading">
+            <p class="web-landing__eyebrow">A clear path forward</p>
+            <h2 id="how-it-works-title">From concern to follow-through.</h2>
+            <p>SwiftAid keeps each step and its status clear.</p>
+        </div>
+        <ol class="web-landing__steps">
+            <li><span>01</span><div><h3>Share what was observed</h3><p>Use the guided report and leave uncertain details blank.</p></div></li>
+            <li><span>02</span><div><h3>Save or send</h3><p>Keep a draft on this device or submit it to the service when available.</p></div></li>
+            <li><span>03</span><div><h3>Track the result</h3><p>A report is marked received only after the service confirms submission.</p></div></li>
+        </ol>
+    </section>
+
+    <section class="web-landing__community" aria-labelledby="community-title">
+        <div>
+            <p class="web-landing__eyebrow">Learn and connect</p>
+            <h2 id="community-title">Community is part of the work.</h2>
+            <p>Browse published community sessions and see what is available to you.</p>
+        </div>
+        <a class="web-landing__button web-landing__button--light" href="/sessions">Explore Community</a>
+    </section>
+
+    <aside class="web-landing__boundary" aria-label="Service boundary">
+        <MudIcon Icon="@Icons.Material.Filled.Info" aria-hidden="true" />
+        <p>SwiftAid records and supports community workflows. It does not provide medical or veterinary diagnosis, treatment, or emergency dispatch.</p>
+    </aside>
+</div>

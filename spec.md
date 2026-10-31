@@ -7,8 +7,8 @@
 | Document control | Value |
 |---|---|
 | File | `spec.md` |
-| Version | 1.4 — Multi-turn reasoning loops, product access, federation, Qdrant memory and cache |
-| Prepared | 26 October 2026 |
+| Version | 1.5 — Ellai conversational speech extension |
+| Prepared | 31 October 2026 |
 | Product | SwiftAid 2.0 |
 | Target communities | Initial organizational service focus: Zimbabwe and Eswatini; account-free reporting from any country |
 | Primary application | Android-first native .NET MAUI Blazor Hybrid application |
@@ -38,7 +38,7 @@ This document defines **what SwiftAid must do, who can do it, what people must s
 
 **Revision boundary:** This is a substantive scope update, not a cosmetic rename. AI diagnosis, symptom-derived severity/priority, medical/veterinary advice, advice-generating RAG, and AI-authored health education are excluded even when a professional could approve the output. An unchanged original recording or faithful transcript remains attributed evidence, not SwiftAid's recommendation. The main AI demonstration is administrative case continuity; the full foundational support system remains intact. Eligibility is not certified by these documents. Read [competition source and decision record](docs/RULES-SOURCE-REGISTER.md).
 
-**Paired revision:** Use this spec **v1.4** with implementation **v2.4**. Stable requirement/task IDs are retained but superseded capability behavior is explicitly replaced. Read the [change log](docs/CHANGELOG.md) before resuming work.
+**Paired revision:** Use this spec **v1.5** with implementation **v2.5**. Stable requirement/task IDs are retained; this additive voice extension adds SA-ELV requirements, AT-77–AT-86 and task P8.7. Read the [change log](docs/CHANGELOG.md) before resuming work.
 
 ## Product revision decisions — 26 October 2026
 
@@ -651,6 +651,31 @@ For users, present simple independent labels: **On this device**, **Waiting to u
 **Acceptance:** record a note, restart offline, play it, upload with interruption, play the returned original, compare hashes, fail transcription, and still play the original. Revoke access and verify unauthorized playback is denied. [I P4.1–P4.3].
 
 **Basis:** [I §9].
+
+### 13.4 Ellai conversational speech — additive owner requirement (31 October 2026)
+
+Ellai's conversational voice is a separate derived output capability. It never replaces an original case recording, becomes evidence, or proves a SwiftAid action. Keep the existing compact composer and one active Bonboarding-owned guidance surface; do not add a chat page, full-screen conversation feed, or second tour engine. Text and captions remain usable whenever voice is unavailable.
+
+**Owner-directed delivery (31 October 2026):** run speech synthesis behind the SwiftAid Gateway and stream bounded audio to the web and mobile clients. Clients may capture microphone input and play received audio, but must not run a local Ellai TTS model or substitute operating-system/browser TTS. Server-side synthesis and delivery remain subject to the exact checkpoint and rights gate in SA-ELV-08.
+
+| ID | Priority | Requirement |
+|---|---|---|
+| SA-ELV-01 | P0 | A spoken user turn uses the existing bounded Ellai investigation, authorization, scope, consent, budget, tool and approval rules. Partial transcripts cannot invoke tools; each finalized provider turn is deduplicated and fenced against late results. |
+| SA-ELV-02 | P0 | Keep user-visible `displayText`, sanitized `spokenText`, evidence references and any typed UI/action proposal separate. Never speak hidden reasoning, credentials, raw protected values, markup or unsupported health conclusions. |
+| SA-ELV-03 | P0 | Obtain distinct microphone permission and processing notice for capture, transcription, downstream reasoning, memory and playback. A guest voice turn may use only the guest public-help profile; it cannot enter a case, staff tool, or long-term personal memory. Speech is not automatically an original case voice note. |
+| SA-ELV-04 | P0 | Cancel, sign-out, permission revocation, session expiry and genuine barge-in stop capture/playback and fence queued or late chunks by session/turn/epoch. They do not claim to reverse an already accepted business command. |
+| SA-ELV-05 | P0 | Narrate only the current validated Ellai/Bonboarding step. Pause advancement on interruption or pending human review. Audio completion never marks a business task complete; authoritative UI state and verified receipts control completion. |
+| SA-ELV-06 | P0 | A deterministic Voice Director validates/redacts speech, normalizes pronunciation, segments text and clamps any delivery metadata. Contributor-proposed emotion is untrusted input; unsupported styles fall back to a truthful neutral label. |
+| SA-ELV-07 | P0 | Use one versioned English `voiceId` and recorded model/asset hash for supported web and Android output. Synthesize behind the Gateway and stream bounded PCM to both clients for playback with synchronized captions. Clients do not run local TTS inference or silently substitute browser, Android or iOS operating-system TTS. |
+| SA-ELV-08 | Gate | The owner approved noncommercial use only. Do not fetch, package, train, or deploy MMS-TTS weights until the exact checkpoint and its use, attribution, and distribution obligations are confirmed for Gateway deployment. The proposed `facebook/mms-tts-eng` checkpoint is CC BY-NC 4.0; commercial use is not permitted by that license. Stock VITS is not assumed emotion-conditioned. |
+| SA-ELV-09 | P0 | Every PCM frame binds session, turn, utterance, sequence, generation epoch, sample rate, sample format, channel count and final marker; enforce authorization, rate/size limits, backpressure, ordering and cancellation on transport and playback. |
+| SA-ELV-10 | P0 | Microphone denial, unsupported platform, network/provider failure, muted output and exhausted budget leave typing and captions available with an explicit truthful status; no fake transcript, synthesized-audio success, or hidden fallback. |
+| SA-ELV-11 | P1 | Reuse the same compact composer under the active validated Bonboarding card. Preserve focus, keyboard use, safe-area bounds, adjustable playback controls, reduced motion, and one composer per active session. |
+| SA-ELV-12 | P1 | Measure mic-to-final transcript, final-to-reasoned response, first-audio latency, stop latency, underruns, resource use and audio continuity on synthetic fixtures before setting performance claims. |
+| SA-ELV-13 | Gate | Verify the exact Muse transcription model/endpoint, supported formats, languages and account eligibility independently from text reasoning and synthesis; diarization never establishes a person's identity. |
+| SA-ELV-14 | P1 | Web and Android use the same approved voice profile and PCM contract. Hosted synthesis is labelled hosted; do not claim offline/local speech without a licensed on-device model and an actual network-off test. |
+
+The exact speech pipeline, typed records, compatibility rules and dependency-ordered implementation tasks are in [`docs/ellai/requirements/ellai-voice-implementation.md`](docs/ellai/requirements/ellai-voice-implementation.md) and task P8.7 in `implementation.md`. The companion is a task contract, not evidence that any provider, TTS model, license, or device capability is available.
 
 ## 14. Offline behavior, synchronization, and conflict recovery
 
@@ -1464,6 +1489,16 @@ These scenarios complement, not replace, the implementation plan's named unit/in
 | AT-74 — Interruption, restart and stale context | Worker disconnects, worker process restarts, then an external case correction arrives | Persisted checkpoint resumes without duplicate effect; stale input invalidates old proposal; changed scope or consent denies next step | SA-LOOP-05, SA-LOOP-08, SA-LOOP-11 |
 | AT-75 — Approval/receipt and loop budget | Agent plans three operational actions; one fails; user requests another iteration | No protected action without valid approval, partial receipt truthful, bounded cycles/tool calls and credits, no repeated accepted effects | SA-LOOP-07, SA-LOOP-09, SA-LOOP-12 |
 | AT-76 — Memory and tenant isolation across turns | Two organizations share similar narratives; Qdrant is unavailable or returns stale scope | No cross-scope evidence; fallback/current evidence or unavailable; audit shows factual provenance without chain-of-thought or sensitive payloads | SA-LOOP-04, SA-LOOP-10, SA-LOOP-14, SA-LOOP-15 |
+| AT-77 — Mic permission denied | User declines microphone access or platform has no supported capture | Typed input/captions remain usable; no capture or false listening state begins | SA-ELV-03, SA-ELV-10 |
+| AT-78 — Voice Q&A and duplicate finals | Synthetic user speaks a safe product question and provider repeats a finalized transcript event | One authorized turn is accepted; partials do not dispatch; transcript and model/provider identity are truthful | SA-ELV-01, SA-ELV-02, SA-ELV-13 |
+| AT-79 — Barge-in and checkpoint revisit | User speaks while Ellai narrates an active validated Bonboarding step | Audio stops promptly, late chunks are fenced, current checkpoint is preserved, and user can revisit before resuming | SA-ELV-04, SA-ELV-05, SA-ELV-11 |
+| AT-80 — Cancel with queued audio | Session is cancelled while PCM is queued or playback is active | Capture and playback stop; old session/epoch chunks never resume; accepted business effects are reported from receipts only | SA-ELV-04, SA-ELV-09 |
+| AT-81 — Auth or consent revoked mid-speech | User signs out, loses scope, or revokes processing permission while audio is active | New capture/reasoning/synthesis is denied; active output stops and queued callbacks are fenced | SA-ELV-03, SA-ELV-04 |
+| AT-82 — STT/TTS/network/budget outage | Provider, Gateway, network, or budget is unavailable | No fake transcript/audio; typing and captions stay available with explicit unavailable status; no OS TTS fallback | SA-ELV-10, SA-ELV-12, SA-ELV-13 |
+| AT-83 — MMS rights and checkpoint gate | `facebook/mms-tts-eng` is proposed without owner-confirmed checkpoint and usage rights | No weights are downloaded, packaged or deployed; synthetic speech remains disabled and limitation is disclosed | SA-ELV-08 |
+| AT-84 — Web/Android PCM conformance | The same licensed synthetic fixture is played on web and Android Release | Voice ID, sample format, ordering, cancellation and captions match the approved contract; timing/resource measurements are recorded | SA-ELV-07, SA-ELV-09, SA-ELV-12, SA-ELV-14 |
+| AT-85 — Speech is not action proof | Ellai narrates a proposed or pending administrative action | No narration/caption changes workflow state; only normal authenticated approval and authoritative receipt can report an effect | SA-ELV-02, SA-ELV-05 |
+| AT-86 — Accessible conversation | User uses keyboard, screen reader, captions, mute, adjustable playback or reduced motion | Composer focus and controls remain reachable; text path works without microphone/audio; status is not conveyed by color alone | SA-ELV-10, SA-ELV-11 |
 
 ### 26.1 Acceptance evidence record
 
@@ -1530,6 +1565,8 @@ P2 requires institutional partnerships, approved professional procedures, real c
 ### 28.1 Confirmed product/architecture decisions
 
 The plan and conversation establish the fresh SwiftAid implementation, human-and-animal support, Android-first mobile application, .NET application authority, Python workers, Microsoft AI/MCP tooling, gateway-side NATS JetStream, Datasync, immutable/versioned case records, original voice as retained evidence, restricted worker/officer/public access, and officer-led education with Facebook/WhatsApp options.
+
+Ellai synthesis is Gateway-hosted and streams audio to web and mobile clients; clients perform capture and playback only. The owner has limited the approved TTS use scope to noncommercial use. The exact checkpoint and distribution obligations remain gated.
 
 Qdrant, public intake, social authentication and organizational SSO are now active product decisions; the former prohibition on public intake and deferred SSO are superseded. The earlier PowerSync/Dexie/PWA alternatives and ForgeAI/FieldMind directions are not active requirements. The original SwiftAid code is a domain reference, not authorization to replace the fresh-implementation requirement. No special multi-agent development framework is required.
 
@@ -1631,11 +1668,11 @@ Every existing task ID is retained. The implementation index assigns a primary o
 | P12.2 — Package a reproducible hosted demo and installable APK | SA-SCP-05, SA-SEC-12, SA-QLT-08, SA-QLT-09, SA-EVL-06, SA-REL-03, SA-CMP-08 | Targeted tests in task; shared scenarios per implementation §18.4 |
 | P12.3 — Freeze scope and prepare honest demonstration evidence | SA-SCP-03, SA-SEC-13, SA-REL-01, SA-REL-02, SA-REL-04, SA-REL-05, SA-CMP-04, SA-CMP-07, SA-CMP-10, SA-CMP-13 | AT-36, AT-43, AT-44, AT-47 |
 
-The earlier product revision added six tasks to the original 37, bringing that revision's total to 43; P8.6 is the seventh addition in the current plan, for 44 tasks. P8.1–P8.4 and P12 preserve the nonclinical product boundary. P9.1–P9.3 positive inference work is optional and disabled pending product approval/validation; event-specific clearance is separately conditional. This is not permission to mark older medical-advice features complete under a new label.
+The earlier product revision added six tasks to the original 37, bringing that revision's total to 43; P8.6 was the seventh and P8.7 is the eighth addition, for 45 tasks. P8.1–P8.4 and P12 preserve the nonclinical product boundary. P9.1–P9.3 positive inference work is optional and disabled pending product approval/validation; event-specific clearance is separately conditional. This is not permission to mark older medical-advice features complete under a new label.
 
 ### 29.1a Additive implementation tasks
 
-All original task IDs remain valid; these seven tasks implement the new owner decisions without replacing the existing coordinator. They extend the plan to 44 tasks.
+All original task IDs remain valid; these eight tasks implement the new owner decisions without replacing the existing coordinator. They extend the plan to 45 tasks.
 
 | Task | Product requirements | Principal scenarios |
 |---|---|---|
@@ -1645,6 +1682,7 @@ All original task IDs remain valid; these seven tasks implement the new owner de
 | P7.4 — Implement Qdrant memory and cache index infrastructure | SA-MEM-01, SA-MEM-02, SA-MEM-03, SA-MEM-04, SA-MEM-05, SA-MEM-06, SA-MEM-07, SA-MEM-08, SA-MEM-14, SA-MEM-16 | AT-66, AT-67, AT-69, AT-72 |
 | P8.5 — Integrate authorized AI recall and context-safe cache reuse | SA-MEM-09, SA-MEM-10, SA-MEM-11, SA-MEM-12, SA-MEM-13, SA-MEM-15 | AT-68, AT-70, AT-71 |
 | P8.6 — Durable multi-turn reasoning and clarification | SA-LOOP-01–SA-LOOP-15; §15.8 | AT-73–AT-76 |
+| P8.7 — Implement licensed Ellai speech turns and synchronized playback | SA-ELV-01–SA-ELV-14; §13.4 | AT-77–AT-86 |
 | P10.3 — Implement authenticated event subscriptions and account preferences | SA-SUB-01, SA-SUB-02, SA-SUB-03, SA-SUB-04, SA-SUB-05, SA-SUB-06, SA-SUB-07 | AT-64, AT-65 |
 
 ### 29.2 Requirements-family index
@@ -1690,6 +1728,7 @@ All original task IDs remain valid; these seven tasks implement the new owner de
 | SA-GEO | Global location/date/time and honest coverage | P2.4 |
 | SA-MEM | Qdrant memory/cache lifecycle and authority | P7.4, P8.5 |
 | SA-LOOP | Multi-turn investigation, checkpoints, evidence, human approval and stop conditions | P8.6 |
+| SA-ELV | Ellai voice identity, safe speech, audio transport, interruption and cross-client synchronization | P8.7 |
 | SA-SUB | Login-required subscriptions and organization actions | P10.3 |
 
 ## 30. How to use this specification with the implementation plan
@@ -1698,11 +1737,11 @@ All original task IDs remain valid; these seven tasks implement the new owner de
 
 Place `spec.md` beside `implementation.md` at the fresh repository root. Keep both versioned. `spec.md` owns user-visible behavior, scope and acceptance; `implementation.md` owns the existing task sequence, exact implementation interfaces/files and dependency guidance. This revision updates both companions together; earlier source hashes remain historical provenance only. Current paired hashes are in `docs/DOCUMENT-INTEGRITY.md`.
 
-Use paired spec v1.4 and implementation v2.4. Historical single-document/Superpowers handoffs and generated visual concepts are superseded. The supplied Participant Guide and bonus slide inform explicit competition requirements; core implementation is not gated by organizers or dates. Restricted optional capabilities stay disabled pending their product approval and validation. Retain the owner's existing multi-agent system.
+Use paired spec v1.5 and implementation v2.5. Historical single-document/Superpowers handoffs and generated visual concepts are superseded. The supplied Participant Guide and bonus slide inform explicit competition requirements; core implementation is not gated by organizers or dates. Restricted optional capabilities stay disabled pending their product approval and validation. Retain the owner's existing multi-agent system.
 
 ### 30.2 Ready-to-use agent handoff
 
-> Read `spec.md` v1.4 and `implementation.md` v2.4 completely, inspect AGENTS.md, repository state and our existing coordinator records, then implement the first dependency-ready product task. Do not wait for event dates, prize/publicity tasks or organizer replies to build core functionality. Preserve old task IDs and implement the seven additive product tasks with their SA/AT contracts. Use our existing multi-agent system; do not install a replacement. Qdrant is the required scoped memory/cache index; PostgreSQL owns records, grants and invalidation. Implement account-free global human/animal reporting with date/location/area/region/country, private intake/receipt and honest coverage. Implement Facebook/Google login and configured organizational OIDC SSO; identity never grants staff roles by itself. Require login for subscriptions and approved membership/action grants for organization assignments/escalations. Preserve original voice, immutable staff history, nonclinical AI, exact-source versions and Meta-only inference including any learned encoder. Keep optional semantic cache disabled until a permitted encoder is proven; retain exact Qdrant paths without fake vectors. Keep guest drafts isolated from staff sync. Run named tests and actual required Android/provider/Qdrant checks; record missing configuration and continue independent work. No invented APIs, paid provisioning, real-data processing, public publication, real external messaging or destructive action without authorization. Record task/requirement/scenario evidence and commits; no mock result satisfies a live capability. Deliver tested product increments, not another roadmap.
+> Read `spec.md` v1.5 and `implementation.md` v2.5 completely, inspect AGENTS.md, repository state and our existing coordinator records, then implement the first dependency-ready product task. Do not wait for event dates, prize/publicity tasks or organizer replies to build core functionality. Preserve old task IDs and implement the eight additive product tasks with their SA/AT contracts. Use our existing multi-agent system; do not install a replacement. Qdrant is the required scoped memory/cache index; PostgreSQL owns records, grants and invalidation. Implement account-free global human/animal reporting with date/location/area/region/country, private intake/receipt and honest coverage. Implement Facebook/Google login and configured organizational OIDC SSO; identity never grants staff roles by itself. Require login for subscriptions and approved membership/action grants for organization assignments/escalations. Preserve original voice, immutable staff history, nonclinical AI, exact-source versions and Meta-only inference including any learned encoder. Keep optional semantic cache disabled until a permitted encoder is proven; retain exact Qdrant paths without fake vectors. Keep guest drafts isolated from staff sync. Implement P8.7 speech only behind the stated exact model/checkpoint rights gate; no OS TTS fallback. Run named tests and actual required Android/provider/Qdrant checks; record missing configuration and continue independent work. No invented APIs, paid provisioning, real-data processing, public publication, real external messaging or destructive action without authorization. Record task/requirement/scenario evidence and commits; no mock result satisfies a live capability. Deliver tested product increments, not another roadmap.
 
 ### 30.3 Multi-agent coordination contract
 
@@ -1783,11 +1822,11 @@ The following is copied by identifier/link from `implementation.md` §24 for imp
 
 ## Appendix B. Document provenance and review record
 
-**Primary basis:** the agreed conversation and `implementation.md`, version/date and content hash recorded at the start of this document. The original 37 task definitions and the product revision's seven additions were reconciled against the requirements, privacy/failure tests, source register, capability gates and deferred work.
+**Primary basis:** the agreed conversation and `implementation.md`, version/date and content hash recorded at the start of this document. The original 37 task definitions and the product revision's eight additions were reconciled against the requirements, privacy/failure tests, source register, capability gates and deferred work.
 
 **Visual basis:** previously generated web/mobile concepts are illustrative. They do not authorize self-selected staff roles, offline cloud inference, unapproved disease classification, real-location synthetic outbreaks, unsupported numerical disease confidence, or unverified message delivery. Screen contracts in §20 are the functional reference.
 
-**New content in this companion:** stable requirement IDs; product behavior and edge-case wording; screen contracts; operational success-measure definitions; 76 end-to-end acceptance scenarios; task traceability; and PC-01 through PC-08, explicitly identified rather than presented as previously approved decisions.
+**New content in this companion:** stable requirement IDs; product behavior and edge-case wording; screen contracts; operational success-measure definitions; 86 end-to-end acceptance scenarios; task traceability; and PC-01 through PC-08, explicitly identified rather than presented as previously approved decisions.
 
 **Not performed by preparation of this document:** application implementation, package restore/compatibility tests, device execution, model/account provisioning, source-rights adjudication, professional clinical/veterinary review, real health-data collection, or social-message sending. Acceptance checklists and scenarios describe work to verify, not completed tests.
 

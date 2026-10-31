@@ -126,7 +126,7 @@ def synthesize(
     pcm = (np.clip(waveform, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
     return StreamingResponse(
         _frames(pcm),
-        media_type="audio/L16",
+        media_type="application/vnd.swiftaid.pcm",
         headers={
             "X-SwiftAid-Voice-Id": VOICE_ID,
             "X-SwiftAid-Sample-Rate": str(voice.sample_rate),

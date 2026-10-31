@@ -1,4 +1,7 @@
-﻿<Router AppAssembly="typeof(MauiProgram).Assembly" NotFoundPage="typeof(Pages.NotFound)" OnNavigateAsync="OnNavigateAsync">
+<Router AppAssembly="typeof(MauiProgram).Assembly"
+        AdditionalAssemblies="@(new[] { typeof(SwiftAid.UI.Ellai.Pages.EllaiSettingsAbout).Assembly })"
+        NotFoundPage="typeof(Pages.NotFound)"
+        OnNavigateAsync="OnNavigateAsync">
     <Found Context="routeData">
         <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
         <FocusOnNavigate RouteData="routeData" Selector="h1" />

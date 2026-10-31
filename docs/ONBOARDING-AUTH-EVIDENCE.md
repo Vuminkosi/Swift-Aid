@@ -5,6 +5,14 @@ Rule applied: provider integrations are **Blocked / Not provisioned** until exer
 against real credentials. Nothing below claims a live provider, device, or
 browser verification that did not run.
 
+**Status note (2026-10-31):** The initial negative probes below are a historical
+snapshot from 29 October and are superseded by the dated implementation and
+verification sections later in this file. Password sign-in/registration,
+recovery, OTP verification, profile persistence and organization join-request
+contracts have since been implemented. The later evidence sections govern
+current capability claims; unresolved mail, provider, browser and device checks
+remain explicitly open.
+
 ## Backend probes (exact searches, `src/` tree)
 
 - `ForgotPassword|ResetPassword|ConfirmEmail|CreateAsync.*User|CheckPasswordAsync|PasswordSignInAsync|GeneratePasswordResetToken|AddPasswordAsync`

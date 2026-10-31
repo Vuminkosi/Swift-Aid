@@ -248,6 +248,7 @@
             item.Denominator,
             item.IsSuppressed)).ToArray(),
         overview.RecentCases.Select(item => new DashboardCaseView(
+            item.CaseId,
             item.DisplayReference,
             ToView(item.SubjectSector),
             item.ReportedConditionLabel,

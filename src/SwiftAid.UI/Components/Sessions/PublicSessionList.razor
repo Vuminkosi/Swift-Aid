@@ -6,14 +6,14 @@
     {
         <div class="session-public-list__state" role="status" aria-live="polite">
             <MudProgressCircular Indeterminate="true" Size="Size.Small" aria-label="Loading community sessions" />
-            <MudText Typo="Typo.body2">Loading published sessions…</MudText>
+            <MudText Typo="Typo.body2">Loading sessions…</MudText>
         </div>
     }
     else if (ErrorMessage is not null)
     {
         <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" role="alert">
             @ErrorMessage
-            <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="OnRetry" aria-label="Retry loading community sessions">Retry</MudButton>
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Color="Color.Error" OnClick="OnRetry" aria-label="Retry loading community sessions">Retry</MudButton>
         </MudAlert>
     }
     else if (Sessions.Count == 0)
@@ -29,6 +29,73 @@
             {
                 <MudCard Elevation="0" Outlined="true" Class="session-public-list__card" aria-label="@($"Community session: {session.Title}")">
                     <MudCardContent>
+                        <MudHidden Breakpoint="Breakpoint.MdAndUp">
+                            <div class="session-public-list__mobile">
+                                <div class="session-public-list__mobile-heading">
+                                    <MudText Typo="Typo.subtitle1" HtmlTag="h2">@session.Title</MudText>
+                                    @if (IsCancelled(session))
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Error">Cancelled</MudText>
+                                    }
+                                </div>
+
+                                <div class="session-public-list__mobile-facts">
+                                    <div>
+                                        <MudIcon Icon="@Icons.Material.Filled.Event" aria-hidden="true" />
+                                        <span>@FormatWhenCompact(session)</span>
+                                    </div>
+                                    <div>
+                                        <MudIcon Icon="@Icons.Material.Filled.Place" aria-hidden="true" />
+                                        <span>@FormatLocation(session)</span>
+                                    </div>
+                                </div>
+
+                                @if (IsCancelled(session))
+                                {
+                                    <p class="session-public-list__mobile-cancelled">This session was cancelled.</p>
+                                }
+
+                                <div class="session-public-list__mobile-actions">
+                                    @if (!IsCancelled(session) && !string.IsNullOrWhiteSpace(session.ChannelLink))
+                                    {
+                                        <a class="session-public-list__mobile-action session-public-list__mobile-action--destination"
+                                           href="@session.ChannelLink" target="_blank" rel="noopener noreferrer">
+                                            <MudIcon Icon="@Icons.Material.Filled.OpenInNew" aria-hidden="true" />
+                                            @ChannelLabel(session.ChannelType)
+                                        </a>
+                                    }
+                                    @if (!IsCancelled(session) && ShareTextAsync is not null && LoadInvitationTextAsync is not null)
+                                    {
+                                        <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Share"
+                                                   OnClick="() => ShareInvitationAsync(session)" aria-label="@($"Share invitation for {session.Title}")">
+                                            Share
+                                        </MudButton>
+                                    }
+                                    @if (!IsCancelled(session))
+                                    {
+                                        <a class="session-public-list__mobile-action" href="@CalendarHref(session.SessionId)"
+                                           download="@($"session-{session.SessionId:D}.ics")">
+                                            <MudIcon Icon="@Icons.Material.Filled.CalendarMonth" aria-hidden="true" />
+                                            Add to calendar
+                                        </a>
+                                    }
+                                </div>
+
+                                @if (_openInvitationId == session.SessionId && _openInvitationText is not null)
+                                {
+                                    <MudPaper Elevation="0" Outlined="true" Class="session-public-list__invitation">
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">Copy this text to invite someone. Opening this panel does not send anything.</MudText>
+                                        <pre class="session-public-list__invitation-text">@_openInvitationText</pre>
+                                    </MudPaper>
+                                }
+                                @if (_openInvitationId == session.SessionId && _invitationError is not null)
+                                {
+                                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true">@_invitationError</MudAlert>
+                                }
+                            </div>
+                        </MudHidden>
+
+                        <MudHidden Breakpoint="Breakpoint.SmAndDown">
                         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="session-public-list__heading">
                             <MudText Typo="Typo.h6" HtmlTag="h2">@session.Title</MudText>
                             @if (IsCancelled(session))
@@ -56,14 +123,14 @@
                             </div>
                         }
 
-                        @if (IsCancelled(session) && !string.IsNullOrWhiteSpace(session.CancellationReason))
+                        @if (IsCancelled(session))
                         {
                             <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-2">
-                                This session was cancelled. Reason: @session.CancellationReason
+                                This session was cancelled.
                             </MudAlert>
                         }
 
-                        @if (!string.IsNullOrWhiteSpace(session.ChannelLink))
+                        @if (!IsCancelled(session) && !string.IsNullOrWhiteSpace(session.ChannelLink))
                         {
                             <MudText Typo="Typo.body2" Class="mt-2">
                                 Join here: <MudLink Href="@session.ChannelLink" Target="_blank" rel="noopener">@session.ChannelLink</MudLink>
@@ -71,22 +138,25 @@
                         }
 
                         <div class="session-public-list__actions">
-                            <a class="mud-button-root mud-button mud-button-text mud-button-text-default mud-button-text-size-medium mud-ripple"
-                               href="@CalendarHref(session.SessionId)"
-                               download="@($"session-{session.SessionId:D}.ics")">
-                                <span class="mud-button-label">Download calendar file</span>
-                            </a>
-                            @if (LoadInvitationTextAsync is not null)
+                            @if (!IsCancelled(session))
                             {
-                                <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="() => CopyInvitationAsync(session)" aria-label="@($"Copy invitation for {session.Title}")">
-                                    @(_copiedSessionId == session.SessionId ? "Copied" : "Copy invitation")
-                                </MudButton>
-                            }
-                            @if (ShareTextAsync is not null && LoadInvitationTextAsync is not null)
-                            {
-                                <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="() => ShareInvitationAsync(session)" aria-label="@($"Share invitation for {session.Title}")">
-                                    Share
-                                </MudButton>
+                                <a class="mud-button-root mud-button mud-button-text mud-button-text-default mud-button-text-size-medium mud-ripple"
+                                   href="@CalendarHref(session.SessionId)"
+                                   download="@($"session-{session.SessionId:D}.ics")">
+                                    <span class="mud-button-label">Download calendar file</span>
+                                </a>
+                                @if (LoadInvitationTextAsync is not null)
+                                {
+                                    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ContentCopy" Color="Color.Primary" OnClick="() => CopyInvitationAsync(session)" aria-label="@($"Copy invitation for {session.Title}")">
+                                        @(_copiedSessionId == session.SessionId ? "Copied" : "Copy invitation")
+                                    </MudButton>
+                                }
+                                @if (ShareTextAsync is not null && LoadInvitationTextAsync is not null)
+                                {
+                                    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Share" Color="Color.Primary" OnClick="() => ShareInvitationAsync(session)" aria-label="@($"Share invitation for {session.Title}")">
+                                        Share
+                                    </MudButton>
+                                }
                             }
                         </div>
 
@@ -101,6 +171,7 @@
                         {
                             <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true">@_invitationError</MudAlert>
                         }
+                        </MudHidden>
                     </MudCardContent>
                 </MudCard>
             }
@@ -137,6 +208,27 @@
 
     private string CalendarHref(Guid sessionId) => $"{PublicBasePath.TrimEnd('/')}/{sessionId:D}/calendar";
 
+    private static string FormatLocation(PublicSessionView session)
+    {
+        if (string.IsNullOrWhiteSpace(session.RegionId) && string.IsNullOrWhiteSpace(session.CountryCode))
+        {
+            return "Location not provided";
+        }
+
+        return string.IsNullOrWhiteSpace(session.RegionId)
+            ? session.CountryCode
+            : string.IsNullOrWhiteSpace(session.CountryCode)
+                ? session.RegionId
+                : $"{session.RegionId}, {session.CountryCode}";
+    }
+
+    private static string ChannelLabel(SessionChannelType channelType) => channelType switch
+    {
+        SessionChannelType.FacebookPage => "Open Facebook",
+        SessionChannelType.WhatsAppGroup => "Open WhatsApp",
+        _ => "Open session destination"
+    };
+
     private static bool IsCancelled(PublicSessionView session) =>
         string.Equals(session.Status, "Cancelled", StringComparison.OrdinalIgnoreCase);
 
@@ -151,6 +243,22 @@
         catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException or ArgumentException)
         {
             return $"{session.StartUtc:dddd, d MMMM yyyy HH:mm} UTC · {session.DurationMinutes} minutes";
+        }
+    }
+
+    private static string FormatWhenCompact(PublicSessionView session)
+    {
+        try
+        {
+            var zone = TimeZoneInfo.FindSystemTimeZoneById(session.TimeZoneId);
+            var localStart = TimeZoneInfo.ConvertTime(session.StartUtc, zone);
+            var localEnd = TimeZoneInfo.ConvertTime(session.StartUtc.AddMinutes(session.DurationMinutes), zone);
+            return $"{localStart:d MMM yyyy}, {localStart:HH:mm}–{localEnd:HH:mm} · {session.TimeZoneId}";
+        }
+        catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException or ArgumentException)
+        {
+            var startUtc = session.StartUtc.UtcDateTime;
+            return $"{startUtc:d MMM yyyy}, {startUtc:HH:mm}–{startUtc.AddMinutes(session.DurationMinutes):HH:mm} UTC";
         }
     }
 

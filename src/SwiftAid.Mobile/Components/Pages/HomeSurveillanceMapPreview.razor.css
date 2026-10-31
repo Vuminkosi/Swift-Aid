@@ -1,0 +1,31 @@
+.home-surveillance-preview {
+    display: grid;
+    gap: 0.75rem;
+    min-width: 0;
+    padding: 0.85rem;
+    border: 1px solid var(--sa-border);
+    border-radius: var(--sa-radius-card, 0.75rem);
+    background: var(--sa-surface);
+}
+
+.home-surveillance-preview__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.home-surveillance-preview__header > div {
+    min-width: 0;
+}
+
+@media (max-width: 360px) {
+    .home-surveillance-preview__header {
+        align-items: flex-start;
+    }
+
+    .home-surveillance-preview__header ::deep .mud-button-root {
+        flex-shrink: 0;
+    }
+}

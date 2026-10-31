@@ -13,8 +13,8 @@ public sealed class EllaiConsentServiceTests
         var consent = new EllaiConsentService();
         consent.Grant("s-1", EllaiConsentDimension.Microphone, "demo", "synthetic", TimeSpan.FromHours(1));
 
-        Assert.True(consent.IsGranted("s-1", EllaiConsentDimension.Microphone, "demo", DateTimeOffset.UtcNow));
-        Assert.False(consent.IsGranted("s-1", EllaiConsentDimension.ReasoningText, "demo", DateTimeOffset.UtcNow));
+        Assert.True(consent.IsGranted("s-1", EllaiConsentDimension.Microphone, "demo", "synthetic", DateTimeOffset.UtcNow));
+        Assert.False(consent.IsGranted("s-1", EllaiConsentDimension.ReasoningText, "demo", "synthetic", DateTimeOffset.UtcNow));
     }
 
     [Fact]
@@ -22,10 +22,10 @@ public sealed class EllaiConsentServiceTests
     {
         var consent = new EllaiConsentService();
         var grant = consent.Grant("s-1", EllaiConsentDimension.Transcription, "demo", "synthetic", TimeSpan.FromHours(1));
-        Assert.True(consent.IsGranted("s-1", EllaiConsentDimension.Transcription, "demo", DateTimeOffset.UtcNow));
+        Assert.True(consent.IsGranted("s-1", EllaiConsentDimension.Transcription, "demo", "synthetic", DateTimeOffset.UtcNow));
 
         consent.Revoke(grant.GrantId);
-        Assert.False(consent.IsGranted("s-1", EllaiConsentDimension.Transcription, "demo", DateTimeOffset.UtcNow));
+        Assert.False(consent.IsGranted("s-1", EllaiConsentDimension.Transcription, "demo", "synthetic", DateTimeOffset.UtcNow));
     }
 
     [Fact]
@@ -35,7 +35,7 @@ public sealed class EllaiConsentServiceTests
         consent.Grant("s-1", EllaiConsentDimension.Export, "demo", "synthetic", TimeSpan.FromMilliseconds(1));
         Thread.Sleep(50);
 
-        Assert.False(consent.IsGranted("s-1", EllaiConsentDimension.Export, "demo", DateTimeOffset.UtcNow));
+        Assert.False(consent.IsGranted("s-1", EllaiConsentDimension.Export, "demo", "synthetic", DateTimeOffset.UtcNow));
     }
 
     [Fact]
@@ -46,7 +46,7 @@ public sealed class EllaiConsentServiceTests
         consent.Grant("s-1", EllaiConsentDimension.HistoryRetention, "demo", "synthetic", TimeSpan.FromHours(1));
 
         Assert.Equal(2, consent.RevokeSession("s-1"));
-        Assert.False(consent.IsGranted("s-1", EllaiConsentDimension.Microphone, "demo", DateTimeOffset.UtcNow));
+        Assert.False(consent.IsGranted("s-1", EllaiConsentDimension.Microphone, "demo", "synthetic", DateTimeOffset.UtcNow));
     }
 }
 

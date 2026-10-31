@@ -1,6 +1,8 @@
 @using Microsoft.AspNetCore.Components.Authorization
 
-<Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+<Router AppAssembly="typeof(Program).Assembly"
+        AdditionalAssemblies="new[] { typeof(SwiftAid.UI.Ellai.Pages.EllaiSettingsAbout).Assembly }"
+        NotFoundPage="typeof(Pages.NotFound)">
     <Found Context="routeData">
         <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(SwiftAid.Gateway.Components.Layout.AuthorizedWorkspaceLayout)">
             <Authorizing>

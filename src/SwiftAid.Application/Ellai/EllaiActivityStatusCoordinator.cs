@@ -159,6 +159,7 @@ public sealed class EllaiActivityStatusCoordinator
             "denied" => "I can't check that with the current permissions.",
             "unavailable" => "That information isn't available right now.",
             "budget" => "The trusted budget for this request is used up.",
+            "iterations" => "Ellai reached this request's reasoning limit before it could finish. Try a narrower question.",
             "timeout" => "Still checking; the connection is taking longer than expected…",
             "unreviewed" => "I found information, but need another authorized step to finish reviewing it.",
             _ => "Checking stopped before finishing.",

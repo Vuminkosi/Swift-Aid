@@ -43,6 +43,27 @@ public sealed class CaseTimelineQueryTests
     }
 
     [Fact]
+    public async Task CursorPages_ReturnNewestFirstThenContinueWithOlderEntries()
+    {
+        var header = new CaseTimelineHeader(
+            Guid.NewGuid(), "org-zw-1", "workspace-1", "ZW", "Active", "officer-1", 4, 1,
+            new DateTimeOffset(2026, 10, 27, 12, 0, 0, TimeSpan.Zero));
+        var store = new StubStore(header, null, [Row(1, "CaseReported"), Row(2, "CaseAssigned"), Row(3, "CaseResolved"), Row(4, "CaseReopened")]);
+        var query = new CaseTimelineQuery(store, new AllowPolicy(), new StubUnitOfWork());
+
+        var newestPage = await query.GetAsync(CreateOfficer(), header.CaseId, 2, CancellationToken.None);
+        var olderCursor = Assert.IsType<long>(newestPage.Timeline!.OlderThanAggregateVersion);
+        var olderPage = await query.GetAsync(CreateOfficer(), header.CaseId, 2, CancellationToken.None, olderCursor);
+
+        Assert.Equal([3L, 4L], newestPage.Timeline.Entries.Select(entry => entry.AggregateVersion));
+        Assert.True(newestPage.Timeline.HasOlderEntries);
+        Assert.Equal(3, olderCursor);
+        Assert.Equal([1L, 2L], olderPage.Timeline!.Entries.Select(entry => entry.AggregateVersion));
+        Assert.False(olderPage.Timeline.HasOlderEntries);
+        Assert.Null(olderPage.Timeline.OlderThanAggregateVersion);
+    }
+
+    [Fact]
     public async Task Denied_ReturnsNotFoundWithoutReadingStore()
     {
         var store = new StubStore(null, null, []);
@@ -90,6 +111,21 @@ public sealed class CaseTimelineQueryTests
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
             () => query.GetAsync(CreateOfficer(), Guid.NewGuid(), limit, CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task InvalidCursor_ThrowsBeforeOpeningCaseLease(long cursor)
+    {
+        var unitOfWork = new StubUnitOfWork();
+        var query = new CaseTimelineQuery(
+            new StubStore(null, null, []), new AllowPolicy(), unitOfWork);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => query.GetAsync(CreateOfficer(), Guid.NewGuid(), null, CancellationToken.None, cursor));
+
+        Assert.Equal(0, unitOfWork.BeginCalls);
     }
 
     [Fact]
@@ -156,8 +192,13 @@ public sealed class CaseTimelineQueryTests
             return Task.FromResult(header);
         }
 
-        public Task<IReadOnlyList<CaseTimelineRow>> GetEventsAsync(Guid caseId, int limit, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<CaseTimelineRow>>(rows.Take(limit).ToArray());
+        public Task<IReadOnlyList<CaseTimelineRow>> GetEventsAsync(
+            Guid caseId, int limit, long? beforeAggregateVersion, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<CaseTimelineRow>>(rows
+                .Where(row => beforeAggregateVersion is null || row.AggregateVersion < beforeAggregateVersion.Value)
+                .OrderByDescending(row => row.AggregateVersion)
+                .Take(limit)
+                .ToArray());
 
         public Task<Guid?> GetPromotingReceiptAsync(Guid caseId, CancellationToken ct) =>
             Task.FromResult(receiptId);

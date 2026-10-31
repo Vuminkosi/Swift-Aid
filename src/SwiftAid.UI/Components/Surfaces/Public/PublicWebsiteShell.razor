@@ -1,0 +1,39 @@
+<div class="public-website-shell">
+    <a class="public-website-shell__skip" href="#guest-main">Skip to main content</a>
+    <header class="public-website-shell__header">
+        <a class="public-website-shell__brand" href="/" aria-label="SwiftAid home">
+            <img src="_content/SwiftAid.UI/assets/swiftaid-icon.png" alt="" />
+            <span>SwiftAid</span>
+        </a>
+        <nav class="public-website-shell__navigation" aria-label="Main navigation">
+            <a href="/sessions">Community</a>
+            <AuthorizeView>
+                <Authorized>
+                    <a class="public-website-shell__sign-in" href="/dashboard">Workspace</a>
+                </Authorized>
+                <NotAuthorized>
+                    <a class="public-website-shell__sign-in" href="/sign-in">Sign in</a>
+                </NotAuthorized>
+            </AuthorizeView>
+        </nav>
+    </header>
+
+    <main id="guest-main" class="public-website-shell__main" tabindex="-1">
+        @ChildContent
+    </main>
+
+    <footer class="public-website-shell__footer">
+        <a class="public-website-shell__footer-brand" href="/">SwiftAid</a>
+        <span>Community health support for people and animals.</span>
+        <nav aria-label="Footer navigation">
+            <a href="/sessions">Community</a>
+            <a href="/privacy">Privacy</a>
+            <a href="/terms">Terms</a>
+        </nav>
+    </footer>
+</div>
+
+@code {
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+}

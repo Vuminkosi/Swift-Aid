@@ -55,7 +55,9 @@ public sealed record CaseTimelineHeader(
 /// <summary>Ordered oldest-first immutable history for one managed case.</summary>
 public sealed record CaseTimeline(
     CaseTimelineHeader Header,
-    IReadOnlyList<CaseTimelineEntry> Entries);
+    IReadOnlyList<CaseTimelineEntry> Entries,
+    bool HasOlderEntries = false,
+    long? OlderThanAggregateVersion = null);
 
 /// <summary>Timeline read outcome; denial and absence share one value for privacy.</summary>
 public enum CaseTimelineAccess
@@ -71,5 +73,9 @@ public sealed record CaseTimelineResult(
 /// <summary>Staff timeline client. Servers enforce ReadCase; clients only render.</summary>
 public interface ICaseTimelineClient
 {
-    Task<CaseTimelineResult> GetAsync(Guid caseId, int? limit, CancellationToken cancellationToken = default);
+    Task<CaseTimelineResult> GetAsync(
+        Guid caseId,
+        int? limit,
+        CancellationToken cancellationToken = default,
+        long? beforeAggregateVersion = null);
 }

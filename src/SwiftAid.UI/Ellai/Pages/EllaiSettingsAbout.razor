@@ -1,100 +1,83 @@
-@using SwiftAid.Contracts.Ellai
 @using SwiftAid.UI.Ellai.Components
 @page "/ellai/about"
 
 <MudContainer MaxWidth="MaxWidth.Medium" Class="ellai-settings">
-    <MudText Typo="Typo.h5" HtmlTag="h1">About Ellai</MudText>
-    <MudText Typo="Typo.body2">
-        Ellai is SwiftAid's permission-aware application assistant. It answers product
-        questions, demonstrates features, and proposes bounded administrative work
-        that a person reviews and the application verifies.
-    </MudText>
-    <MudTabs Class="mt-4" aria-label="Ellai information">
-        <MudTabPanel Text="About">
-    <MudDivider Class="my-4" />
-    <MudText Typo="Typo.subtitle1" HtmlTag="h2">Defaults</MudText>
-    <MudText Typo="Typo.body2">
-        Text input and typed output unless you choose voice. Memory is session-scoped;
-        nothing is retained across sessions without your explicit memory permission.
-    </MudText>
-    <MudDivider Class="my-4" />
-    <MudText Typo="Typo.subtitle1" HtmlTag="h2">Voice</MudText>
-    <MudText Typo="Typo.body2">
-        Voice input uses on-device capture with server transcription only after you
-        grant the microphone permission. Spoken answers are short summaries; the full
-        answer stays on screen. This preview plays no audio until permissions exist:
-    </MudText>
-    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
-        Voice preview is unavailable until the microphone permission is granted.
-    </MudAlert>
-    <MudDivider Class="my-4" />
-    <MudText Typo="Typo.subtitle1" HtmlTag="h2">Interaction</MudText>
-    <MudText Typo="Typo.body2">
-        One compact composer with its status beneath it. It floats where you place it
-        and attaches beneath the active guidance card during demonstrations. Cancel
-        ends the session and removes the composer.
-    </MudText>
-    <MudDivider Class="my-4" />
-    <MudText Typo="Typo.subtitle1" HtmlTag="h2">Guidance</MudText>
-    <MudText Typo="Typo.body2">
-        Demonstrations narrate each step and wait for you. Skipping, pausing, and
-        stopping never lose completed work; receipts record what was verified.
-    </MudText>
-    <MudDivider Class="my-4" />
-    <MudText Typo="Typo.subtitle1" HtmlTag="h2">Capabilities</MudText>
-    @if (Capabilities is null || Capabilities.Count == 0)
-    {
-        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
-            Capability status is loading.
-        </MudAlert>
-    }
-    else
-    {
-        <MudList T="VoiceCapability" Dense="true" aria-label="Ellai capabilities">
-            @foreach (var capability in Capabilities)
-            {
-                <MudListItem T="VoiceCapability" Text="@($"{capability.Modality} · {capability.Language} · {capability.Availability}")" />
-            }
-        </MudList>
-    }
-    <MudDivider Class="my-4" />
-    <MudText Typo="Typo.subtitle1" HtmlTag="h2">Privacy</MudText>
-    <MudText Typo="Typo.body2">
-        Microphone access, transcription, reasoning, memory, and each business action
-        are separate permissions. Opening Ellai does not grant them. Sensitive case
-        content is never sent to the default reasoning route.
-    </MudText>
-        </MudTabPanel>
-        <MudTabPanel Text="History" aria-label="Previous Ellai sessions">
-            @if (PastSessions is null || PastSessions.Count == 0)
-            {
-                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status" Class="mt-4">
-                    No previous sessions yet. Past conversations appear here when memory permission is granted.
-                </MudAlert>
-            }
-            else
-            {
-                @foreach (var session in PastSessions.OrderByDescending(s => s.StartedAt))
-                {
-                    <MudText Typo="Typo.subtitle2" Class="mt-4">
-                        @session.Mode · @session.Status · started @session.StartedAt.ToLocalTime().ToString("dd MMM yyyy HH:mm")
+    <section class="ellai-settings__hero" aria-labelledby="ellai-settings-title">
+        <MudText Typo="Typo.overline" Class="ellai-settings__eyebrow">YOUR SWIFTAID GUIDE</MudText>
+        <MudText Typo="Typo.h3" HtmlTag="h1" id="ellai-settings-title" Class="ellai-settings__title">
+            Meet Ellai
+        </MudText>
+        <MudText Typo="Typo.body1" Class="ellai-settings__intro">
+            A helpful voice for finding your way around SwiftAid, understanding its features,
+            and taking the next step. You stay in control of what you share and what happens next.
+        </MudText>
+    </section>
+
+    <MudTabs Class="ellai-settings__tabs" aria-label="Ellai information and settings">
+        <MudTabPanel Text="About & settings">
+            <div class="ellai-settings__content">
+                <MudPaper Outlined="true" Class="ellai-settings__card">
+                    <MudText Typo="Typo.h6" HtmlTag="h2">A little help, when you need it</MudText>
+                    <MudText Typo="Typo.body2">
+                        Ask Ellai a question, explore SwiftAid, or get guidance through a supported task.
+                        Ellai explains what is happening and leaves important choices with you.
                     </MudText>
-                    @if (CostCaption(session) is { } caption)
-                    {
-                        <MudText Typo="Typo.caption" Class="ellai-history__cost">@caption</MudText>
-                    }
-                    <EllaiActivityDisclosure Entries="@session.Entries" />
-                    <MudDivider Class="my-4" />
+                </MudPaper>
+
+                <MudPaper Outlined="true" Class="ellai-settings__card">
+                    <MudText Typo="Typo.h6" HtmlTag="h2">Choose how to connect</MudText>
+                    <MudText Typo="Typo.body2">
+                        Type a message or use the microphone to speak. SwiftAid asks before recording and
+                        only sends your voice to turn it into text after you agree. If voice is unavailable,
+                        you can keep typing.
+                    </MudText>
+                </MudPaper>
+
+                <MudPaper Outlined="true" Class="ellai-settings__card">
+                    <MudText Typo="Typo.h6" HtmlTag="h2">Your choices stay yours</MudText>
+                    <MudText Typo="Typo.body2">
+                        Ellai can help prepare a next step, but you review and approve actions that change
+                        information. Microphone, transcription, and remembering past sessions each have
+                        their own choices.
+                    </MudText>
+                </MudPaper>
+
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="ellai-settings__boundary">
+                    Ellai helps with SwiftAid and its workflows. It does not provide medical or veterinary
+                    advice, diagnosis, or emergency response.
+                </MudAlert>
+            </div>
+        </MudTabPanel>
+
+        <MudTabPanel Text="Session history" aria-label="Previous Ellai sessions">
+            <div class="ellai-settings__history">
+                @if (PastSessions is null || PastSessions.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+                        No saved sessions yet. Past sessions appear here only when you choose to allow Ellai
+                        to remember them.
+                    </MudAlert>
                 }
-            }
+                else
+                {
+                    @foreach (var session in PastSessions.OrderByDescending(s => s.StartedAt))
+                    {
+                        <MudPaper Outlined="true" Class="ellai-settings__session">
+                            <div class="ellai-settings__session-heading">
+                                <MudText Typo="Typo.subtitle1" HtmlTag="h2">@DisplayMode(session.Mode)</MudText>
+                                <MudText Typo="Typo.caption">@session.StartedAt.ToLocalTime().ToString("dd MMM yyyy · HH:mm")</MudText>
+                            </div>
+                            <MudText Typo="Typo.body2" Class="ellai-settings__session-status">@DisplayStatus(session.Status)</MudText>
+                            <EllaiActivityDisclosure Entries="@session.Entries" />
+                        </MudPaper>
+                    }
+                }
+            </div>
         </MudTabPanel>
     </MudTabs>
 </MudContainer>
 
 @code {
-    [Parameter]
-    public IReadOnlyList<VoiceCapability>? Capabilities { get; set; }
-
     [Parameter]
     public IReadOnlyList<EllaiPastSession>? PastSessions { get; set; }
 
@@ -107,16 +90,19 @@
         decimal? UsageCostDollars = null,
         int? UsageTokens = null);
 
-    private static string? CostCaption(EllaiPastSession session) =>
-        session.UsageCostDollars is { } cost && session.UsageTokens is { } count
-            ? $"{FormatCost(cost)} | {FormatTokens(count)}"
-            : null;
-
-    private static string FormatCost(decimal dollars)
+    private static string DisplayMode(string mode) => mode switch
     {
-        var cents = (int)decimal.Round(dollars * 100, MidpointRounding.AwayFromZero);
-        return $"${cents / 100}:{cents % 100:00}";
-    }
+        "Ask" => "Asked Ellai",
+        "Guide" => "Guided session",
+        "HelpMeWork" => "Task assistance",
+        _ => "Ellai session",
+    };
 
-    private static string FormatTokens(int tokens) => $"{tokens / 1000}:{tokens % 1000:000}t";
+    private static string DisplayStatus(string status) => status switch
+    {
+        "Active" or "Open" => "In progress",
+        "Completed" or "Closed" => "Completed",
+        "Canceled" or "Cancelled" => "Ended",
+        _ => "Saved session",
+    };
 }

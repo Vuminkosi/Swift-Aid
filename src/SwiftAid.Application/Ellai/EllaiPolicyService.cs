@@ -2,6 +2,14 @@ using SwiftAid.Contracts.Ellai;
 
 namespace SwiftAid.Application.Ellai;
 
+public static class EllaiProcessingClassification
+{
+    public const string UnknownOrigin = "unknown-origin";
+    public const string RealSensitive = "real-sensitive";
+    public const string SyntheticDemo = "synthetic-demo";
+    public const string ConsentedNonSensitive = "consented-nonsensitive";
+}
+
 /// <summary>Effective-authority request for one Ellai operation.</summary>
 public sealed record EllaiAuthorizationRequest(
     string SessionId,
@@ -78,14 +86,10 @@ public sealed class EllaiPolicyService
     /// inputs; unknown provenance or real-sensitive content is ineligible.</summary>
     public static bool IsContributorEligible(string processingLabel, string dataClassification)
     {
-        if (string.Equals(dataClassification, "real-sensitive", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(dataClassification, "unknown-origin", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        return string.Equals(processingLabel, "synthetic-demo", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(processingLabel, "consented-nonsensitive", StringComparison.OrdinalIgnoreCase);
+        return (string.Equals(processingLabel, EllaiProcessingClassification.SyntheticDemo, StringComparison.Ordinal)
+                && string.Equals(dataClassification, EllaiProcessingClassification.SyntheticDemo, StringComparison.Ordinal))
+            || (string.Equals(processingLabel, EllaiProcessingClassification.ConsentedNonSensitive, StringComparison.Ordinal)
+                && string.Equals(dataClassification, EllaiProcessingClassification.ConsentedNonSensitive, StringComparison.Ordinal));
     }
 
     private static bool IsClinicalText(string? text)

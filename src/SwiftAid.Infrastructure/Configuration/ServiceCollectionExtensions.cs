@@ -466,22 +466,34 @@ public static class ServiceCollectionExtensions
         services.AddAntiforgery(options => options.HeaderName = "X-CSRF-TOKEN");
 
         services.AddAuthorization();
+        var allowInsecureDevelopmentCookies = hostEnvironment?.IsDevelopment() == true &&
+            configuration.GetValue<bool>("Authentication:AllowInsecureDevelopmentCookies");
+        var authCookieSecurePolicy = allowInsecureDevelopmentCookies
+            ? CookieSecurePolicy.SameAsRequest
+            : CookieSecurePolicy.Always;
+        var authCookieName = allowInsecureDevelopmentCookies
+            ? "SwiftAid.Auth.Dev"
+            : "__Host-SwiftAid.Auth";
+        var externalCookieName = allowInsecureDevelopmentCookies
+            ? "SwiftAid.External.Dev"
+            : "__Host-SwiftAid.External";
         var authentication = services.AddAuthentication(IdentityConstants.ApplicationScheme)
             .AddCookie(IdentityConstants.ApplicationScheme, cookie =>
             {
-                cookie.Cookie.Name = "__Host-SwiftAid.Auth";
+                cookie.Cookie.Name = authCookieName;
                 cookie.Cookie.HttpOnly = true;
-                cookie.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+                cookie.Cookie.SecurePolicy = authCookieSecurePolicy;
                 cookie.Cookie.SameSite = SameSiteMode.Lax;
                 cookie.Cookie.Path = "/";
+                cookie.ExpireTimeSpan = TimeSpan.FromDays(30);
                 cookie.LoginPath = "/auth/providers";
                 cookie.SlidingExpiration = false;
             })
             .AddCookie(IdentityConstants.ExternalScheme, cookie =>
             {
-                cookie.Cookie.Name = "__Host-SwiftAid.External";
+                cookie.Cookie.Name = externalCookieName;
                 cookie.Cookie.HttpOnly = true;
-                cookie.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+                cookie.Cookie.SecurePolicy = authCookieSecurePolicy;
                 cookie.Cookie.SameSite = SameSiteMode.Lax;
                 cookie.Cookie.Path = "/";
                 cookie.ExpireTimeSpan = TimeSpan.FromMinutes(10);

@@ -1,0 +1,106 @@
+@using SwiftAid.UI.Components.Theme
+
+<section class="operations-capability" aria-labelledby="operations-capability-title">
+    <div class="operations-capability__header">
+        <div>
+            <MudText Typo="Typo.overline" Color="Color.Secondary">@Eyebrow</MudText>
+            <MudText Typo="Typo.h4" HtmlTag="h1" id="operations-capability-title">@Title</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@Description</MudText>
+        </div>
+        <MudStack Row="true" Spacing="2" Class="operations-capability__actions" AlignItems="AlignItems.Center">
+            @Actions
+            @if (OnRetry.HasDelegate)
+            {
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Primary" OnClick="OnRetry" aria-label="@RefreshLabel" />
+            }
+        </MudStack>
+    </div>
+
+    @if (FilterContent is not null)
+    {
+        <div class="operations-capability__filters" aria-label="Filter @Title">@FilterContent</div>
+    }
+
+    @if (State != OperationsSurfaceState.Populated)
+    {
+        <SwiftAidStatePanel State="State.ToSwiftAidViewState()" Title="@StateTitle" Description="@StateDescription" OnRetry="OnRetry" />
+    }
+    else if (Items.Count == 0)
+    {
+        <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="@EmptyTitle" Description="@EmptyDescription" />
+    }
+    else
+    {
+        <MudHidden Breakpoint="Breakpoint.MdAndDown">
+            <MudTable Items="Items" Hover="true" Dense="true" RowsPerPage="10" aria-label="@($"{Title} results")">
+                <HeaderContent><MudTh>Item</MudTh><MudTh>Category</MudTh><MudTh>Value</MudTh><MudTh>Location</MudTh><MudTh>Status</MudTh><MudTh>Updated</MudTh></HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Item"><MudText Typo="Typo.body2">@context.Title</MudText>@if (!string.IsNullOrWhiteSpace(context.Summary)) { <MudText Typo="Typo.caption" Color="Color.Secondary">@context.Summary</MudText> }</MudTd>
+                    <MudTd DataLabel="Category">@context.Category</MudTd>
+                    <MudTd DataLabel="Value">@context.Value</MudTd>
+                    <MudTd DataLabel="Location">@(context.Location ?? "—")</MudTd>
+                    <MudTd DataLabel="Status">@(context.Status ?? "—")</MudTd>
+                    <MudTd DataLabel="Updated">@(context.OccurredAtUtc?.ToLocalTime().ToString("g") ?? "—")</MudTd>
+                </RowTemplate>
+                <PagerContent><MudTablePager PageSizeOptions="new int[] { 10, 25, 50 }" /></PagerContent>
+            </MudTable>
+        </MudHidden>
+        <MudHidden Breakpoint="Breakpoint.MdAndDown" Invert="true">
+            <MudList T="string" Dense="true" aria-label="@($"{Title} results")">
+                @foreach (var item in Items)
+                {
+                    <MudListItem T="string" Text="@item.Title" SecondaryText="@MobileDescription(item)" />
+                }
+            </MudList>
+        </MudHidden>
+    }
+
+    @if (UpdatedAtUtc.HasValue)
+    {
+        <MudText Typo="Typo.caption" Color="Color.Secondary">Data updated @UpdatedAtUtc.Value.ToLocalTime().ToString("g").</MudText>
+    }
+</section>
+
+@code {
+    [Parameter] public string Eyebrow { get; set; } = "Operations";
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Description { get; set; } = string.Empty;
+    [Parameter] public string EmptyTitle { get; set; } = "No results";
+    [Parameter] public string EmptyDescription { get; set; } = "There is no information to show.";
+    [Parameter] public OperationsSurfaceState State { get; set; } = OperationsSurfaceState.Loading;
+    [Parameter] public IReadOnlyList<OperationsListItemView> Items { get; set; } = Array.Empty<OperationsListItemView>();
+    [Parameter] public DateTimeOffset? UpdatedAtUtc { get; set; }
+    [Parameter] public string? StatusMessage { get; set; }
+    [Parameter] public EventCallback OnRetry { get; set; }
+    [Parameter] public RenderFragment? FilterContent { get; set; }
+    [Parameter] public RenderFragment? Actions { get; set; }
+
+    private string RefreshLabel => $"Refresh {Title}";
+
+    private string StateTitle => State switch
+    {
+        OperationsSurfaceState.Loading => $"Loading {Title.ToLowerInvariant()}",
+        OperationsSurfaceState.Offline => "You are offline",
+        OperationsSurfaceState.Denied => "You do not have access to this information",
+        OperationsSurfaceState.Error => $"{Title} could not be loaded",
+        OperationsSurfaceState.Unavailable => $"{Title} is not available right now",
+        _ => Title
+    };
+
+    private string StateDescription => StatusMessage ?? State switch
+    {
+        OperationsSurfaceState.Loading => "Loading the latest information available to your account.",
+        OperationsSurfaceState.Offline => "Reconnect and try again to refresh this information.",
+        OperationsSurfaceState.Denied => "Your account does not have access to this information.",
+        OperationsSurfaceState.Error => "Check your connection and try again.",
+        OperationsSurfaceState.Unavailable => "This information is not available right now.",
+        _ => string.Empty
+    };
+
+    private static string MobileDescription(OperationsListItemView item)
+    {
+        var details = new[] { item.Category, item.Value, item.Location, item.Status }
+            .Where(value => !string.IsNullOrWhiteSpace(value));
+        return string.Join(" · ", details);
+    }
+}

@@ -17,6 +17,10 @@ services:
       # Production deployments must override this to Production with TLS endpoints.
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_HTTP_PORTS: "8080"
+      AllowedHosts: "localhost;127.0.0.1;[::1];10.0.2.2;swiftaid.online"
+      # The local emulator uses HTTP. Session cookies are explicitly development-only;
+      # production keeps Secure __Host- cookies unless it overrides this setting.
+      Authentication__AllowInsecureDevelopmentCookies: "true"
 
       # Transport Security
       TransportSecurity__AllowPlaintextDevelopment: "true"
@@ -128,9 +132,9 @@ services:
       CaseCommandProcessing__Enabled: "true"
       CaseCommandProcessing__MaximumTransactionAttempts: "${CaseCommandProcessing__MaximumTransactionAttempts:-3}" 
 
-      # Local-dev key ring: unencrypted dev keys on an ephemeral tmpfs mount
-      # (mode 700, app uid 1654). Sealed payloads do not survive gateway restarts;
-      # production must use a certificate-protected persistent key ring instead.
+      # Development-only unencrypted keys persist in the dedicated Docker volume
+      # so auth cookies and protected payloads survive Gateway restarts. Production
+      # must use a certificate-protected key ring instead.
       DataProtection__Enabled: "true"
       DataProtection__ApplicationName: "${DataProtection__ApplicationName:-SwiftAid}"
       DataProtection__KeysPath: "/var/swiftaid/keys"
@@ -144,6 +148,16 @@ services:
       # Override the host source with SWIFTAID_POLICY_FILE if the repo lives
       # elsewhere; the default is relative to this compose file (infra/).
       Ellai__Enabled: "${Ellai_Enabled:-true}"
+      Ellai__ApiKey: "${Ellai__ApiKey:-}"
+      Ellai__ApiUrl: "${Ellai__ApiUrl:-}"
+      Ellai__ReasoningModel: "${Ellai__ReasoningModel:-}"
+      Ellai__ASR_MODEL: "${Ellai__ASR_MODEL:-}"
+      Ellai__Asr__Language: "${Ellai__Asr__Language:-en}"
+      Ellai__ASR_WSS: "${Ellai__ASR_WSS:-}"
+      Ellai__ASR_Transcription__URL: "${Ellai__ASR_Transcription__URL:-}"
+      Ellai__ASRMode: "${Ellai__ASRMode:-DIARIZATION}"
+      EllaiTts__Endpoint: "http://ellai-tts:8090/"
+      EllaiTts__InternalKey: "${ELLAI_TTS_INTERNAL_KEY:-}"
       Ellai__Policy__Path: "/etc/swiftaid/policy/ellai-system-instruction.md"
       Ellai__Policy__Version: "${Ellai__Policy__Version:-1.5}"
       Ellai__ReasoningBackend: "${Ellai__ReasoningBackend:-meta}"
@@ -157,9 +171,8 @@ services:
         target: swiftaid-fcm-service-account.json
     ports:
       - "127.0.0.1:${GATEWAY_PORT:-8080}:8080"
-    tmpfs:
-      - /var/swiftaid/keys:rw,noexec,nosuid,uid=1654,gid=1654,mode=700
     volumes:
+      - dataprotection-keys:/var/swiftaid/keys
       - type: bind
         source: ${SWIFTAID_POLICY_FILE:-../docs/ellai/ellai-system-instruction.md}
         target: /etc/swiftaid/policy/ellai-system-instruction.md
@@ -181,6 +194,27 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    networks:
+      - application
+    restart: unless-stopped
+
+  ellai-tts:
+    build:
+      context: ./ellai-tts
+      dockerfile: Dockerfile
+    image: swiftaid/ellai-tts:mms-eng-pinned
+    profiles: ["ellai-voice"]
+    environment:
+      ELLAI_TTS_MODEL_PATH: /models
+      ELLAI_TTS_INTERNAL_KEY: ${ELLAI_TTS_INTERNAL_KEY:-}
+    volumes:
+      - ellai-tts-model-data:/models:ro
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health/ready', timeout=3).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
     networks:
       - application
     restart: unless-stopped
@@ -379,9 +413,11 @@ networks:
 
 volumes:
   postgres-data:
+  dataprotection-keys:
   qdrant-data:
   nats-data:
   minio-data:
+  ellai-tts-model-data:
 
 secrets:
   fcm-service-account:

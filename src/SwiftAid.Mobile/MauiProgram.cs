@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Maui.LifecycleEvents;
 using Microsoft.Maui.Networking;
 using Microsoft.Maui.Storage;
+using Bit.Bonboarding;
 using Duende.IdentityModel.OidcClient.Browser;
 using SwiftAid.Client.LocalStore;
 using SwiftAid.Client.Authentication;
@@ -22,8 +23,16 @@ using SwiftAid.Mobile.Services.Connectivity;
 using SwiftAid.Mobile.Services.Account;
 using SwiftAid.Mobile.Services.Presentation;
 using SwiftAid.Mobile.Services.Welcome;
+using SwiftAid.Mobile.Services.Ellai;
+using SwiftAid.Mobile.Services.Http;
+using SwiftAid.Mobile.Services.Theme;
+using SwiftAid.UI.Components.Theme;
+using SwiftAid.Contracts.Ellai;
+using SwiftAid.UI.Ellai;
+using SwiftAid.UI.Ellai.Guidance;
 using Plugin.Firebase.CloudMessaging;
 #if ANDROID
+using SwiftAid.Mobile.Platforms.Android;
 using Plugin.Firebase.Core.Platforms.Android;
 #elif IOS
 using Plugin.Firebase.Core.Platforms.iOS;
@@ -81,7 +90,10 @@ public static class MauiProgram
 			});
 
 		builder.Services.AddMauiBlazorWebView();
+		builder.Services.AddSingleton<IThemeAppearanceSink, MobileThemeAppearanceSink>();
 		builder.Services.AddMudServices();
+        BitBonboarding.AddBitBonboardingServices(builder.Services, _ => { });
+        BitBonboarding.AddBitBonboardingInMemoryStore(builder.Services);
         Uri? gatewayBaseAddress = null;
         builder.Services.AddSingleton<IPublicIntakeProcessingPolicyClient, UnavailablePublicIntakeProcessingPolicyClient>();
         builder.Services.AddSingleton<IEducationClient, StaticEducationClient>();
@@ -107,28 +119,42 @@ public static class MauiProgram
         builder.Services.AddTransient<IPublicCommunitySessionClient, HttpPublicCommunitySessionClient>();
 
         var configuredGatewayAddress = builder.Configuration["SwiftAid:GatewayBaseAddress"];
-        var isAndroidEmulator = DeviceInfo.Current.Platform == DevicePlatform.Android;
-        if (!isAndroidEmulator && DeviceInfo.Current.Platform == DevicePlatform.Android && MobileGatewayAddress.IsLoopbackConfigured(configuredGatewayAddress))
+        var isAndroid = DeviceInfo.Current.Platform == DevicePlatform.Android;
+        var isAndroidEmulator = isAndroid && DeviceInfo.Current.DeviceType == DeviceType.Virtual;
+        if (isAndroid && !isAndroidEmulator && MobileGatewayAddress.IsLoopbackConfigured(configuredGatewayAddress))
         {
                 throw new InvalidOperationException(
                     "SwiftAid:GatewayBaseAddress points at the device loopback, which is unreachable from a physical Android device. Set a reachable gateway address (LAN hostname or IP).");
         }
 
+#if DEBUG
+        var allowHttpForDevelopmentGateway = isAndroidEmulator;
+#else
+        const bool allowHttpForDevelopmentGateway = false;
+#endif
         gatewayBaseAddress = MobileGatewayAddress.Resolve(
                 configuredGatewayAddress,
                 "SwiftAid:GatewayBaseAddress",
-                rewriteLoopbackForAndroidEmulator: isAndroidEmulator);
+                rewriteLoopbackForAndroidEmulator: isAndroidEmulator,
+                allowHttpForDevelopmentGateway: allowHttpForDevelopmentGateway);
 
         var notificationHttp = builder.Services.AddHttpClient("SwiftAid.NotificationApi", client =>
         {
                 if (gatewayBaseAddress is not null)
-                    client.BaseAddress = new NativeSessionHttpOptions(gatewayBaseAddress).GatewayBaseAddress;
+                    client.BaseAddress = new NativeSessionHttpOptions(
+                        gatewayBaseAddress, allowInsecureTransport: allowHttpForDevelopmentGateway).GatewayBaseAddress;
                 client.Timeout = TimeSpan.FromSeconds(30);
         });
         notificationHttp.ConfigurePrimaryHttpMessageHandler(static () => new HttpClientHandler { AllowAutoRedirect = false });
+        builder.Services.AddSingleton<IGatewayAuthCookiePersistence, SecureGatewayAuthCookiePersistence>();
+        builder.Services.AddSingleton(sp => CookieSessionHttpClient.Shared(
+            gatewayBaseAddress?.ToString(),
+            sp.GetRequiredService<IGatewayAuthCookiePersistence>(),
+            sp.GetRequiredService<TimeProvider>()));
         if (gatewayBaseAddress is not null)
         {
-                builder.Services.AddSingleton(new NativeSessionHttpOptions(gatewayBaseAddress));
+                builder.Services.AddSingleton(new NativeSessionHttpOptions(
+                    gatewayBaseAddress, allowInsecureTransport: allowHttpForDevelopmentGateway));
                 builder.Services.AddTransient<NativeSessionBearerHandler>();
                 notificationHttp.AddHttpMessageHandler(sp => new NativeSessionBearerHandler(
                     sp.GetRequiredService<INativeSessionReader>(),
@@ -136,11 +162,43 @@ public static class MauiProgram
                     sp.GetRequiredService<NativeLoginClient>(),
                     sp.GetRequiredService<TimeProvider>()));
 
-                builder.Services.AddHttpClient<IGuestIntakeTransport, GuestIntakeHttpClient>(client =>
+                builder.Services.AddTransient<CookieSessionRelayHandler>();
+                builder.Services.AddHttpClient("SwiftAid.Ellai.Authenticated", client =>
+                {
+                    client.BaseAddress = gatewayBaseAddress;
+                    client.Timeout = TimeSpan.FromSeconds(30);
+                })
+                    .ConfigurePrimaryHttpMessageHandler(static () => new HttpClientHandler
+                    {
+                        AllowAutoRedirect = false,
+                        UseCookies = false,
+                    })
+                    .AddHttpMessageHandler(sp => new NativeSessionBearerHandler(
+                        sp.GetRequiredService<INativeSessionReader>(),
+                        sp.GetRequiredService<NativeSessionHttpOptions>(),
+                        sp.GetRequiredService<NativeLoginClient>(),
+                        sp.GetRequiredService<TimeProvider>()))
+                    .AddHttpMessageHandler<CookieSessionRelayHandler>();
+                builder.Services.AddHttpClient("SwiftAid.Ellai.Guest", client =>
+                {
+                    client.BaseAddress = gatewayBaseAddress;
+                    client.Timeout = TimeSpan.FromSeconds(30);
+                })
+                    .ConfigurePrimaryHttpMessageHandler(static () => new HttpClientHandler
+                    {
+                        AllowAutoRedirect = false,
+                        UseCookies = false,
+                    })
+                    .AddHttpMessageHandler<CookieSessionRelayHandler>();
+
+                builder.Services.AddHttpClient("SwiftAid.GuestIntake", client =>
                 {
                     client.BaseAddress = gatewayBaseAddress;
                     client.Timeout = TimeSpan.FromSeconds(30);
                 }).ConfigurePrimaryHttpMessageHandler(static () => new HttpClientHandler { AllowAutoRedirect = false });
+                builder.Services.AddTransient<IGuestIntakeTransport>(services => new GuestIntakeHttpClient(
+                    services.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.GuestIntake"),
+                    allowInsecureTransport: allowHttpForDevelopmentGateway));
                 builder.Services.AddHttpClient<IGeoLookupClient, HttpGeoLookupClient>(client =>
                 {
                     client.BaseAddress = gatewayBaseAddress;
@@ -232,7 +290,26 @@ public static class MauiProgram
             sp.GetRequiredService<TimeProvider>(),
             sp.GetRequiredService<IGuestDraftMutationGate>()));
 
-        var offlineDbFactory = new SwiftAidOfflineDbContextFactory(FileSystem.AppDataDirectory, gatewayBaseAddress);
+        builder.Services.AddSingleton<IEllaiReviewClient>(sp => new MobileEllaiReviewClient(
+            gatewayBaseAddress is null
+                ? null
+                : sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.Ellai.Authenticated"),
+            gatewayBaseAddress is null
+                ? null
+                : sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.Ellai.Guest"),
+            sp.GetRequiredService<IMobileAuthenticationSession>()));
+        builder.Services.AddSingleton<IEllaiMicrophonePermission, MobileEllaiMicrophonePermission>();
+#if ANDROID
+        builder.Services.AddSingleton<IEllaiPcmAudioPlayer, AndroidEllaiPcmAudioPlayer>();
+#endif
+        builder.Services.AddSingleton<EllaiLauncher>();
+        builder.Services.AddSingleton<EllaiEventPoller>();
+        builder.Services.AddSingleton<IEllaiGuidanceControl, UnavailableMobileEllaiGuidanceControl>();
+
+        var offlineDbFactory = new SwiftAidOfflineDbContextFactory(
+            FileSystem.AppDataDirectory,
+            gatewayBaseAddress,
+            allowInsecureTransport: allowHttpForDevelopmentGateway);
         builder.Services.AddSingleton(offlineDbFactory);
         builder.Services.AddSingleton<IDbContextFactory<SwiftAidOfflineDbContext>>(offlineDbFactory);
 

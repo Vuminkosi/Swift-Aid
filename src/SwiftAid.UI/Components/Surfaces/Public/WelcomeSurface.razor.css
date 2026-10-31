@@ -1,7 +1,7 @@
 .welcome-surface {
     display: grid;
-    grid-template-rows: max(7.5rem, 18svh) minmax(0, 1fr);
-    align-content: stretch;
+    grid-template-rows: max(7.5rem, 18svh) auto;
+    align-content: start;
     gap: 0;
     width: min(100%, 28rem);
     height: 100dvh;
@@ -21,7 +21,7 @@
     padding: 0.5rem;
     border-radius: 0;
     background: transparent;
-    color: #fff;
+    color: var(--ais-text-strong);
 }
 
 .welcome-surface__brand-mark {
@@ -51,12 +51,12 @@
     min-height: 0;
     box-sizing: border-box;
     justify-self: center;
-    align-self: center;
+    align-self: start;
     padding: 0;
     border: 0;
     border-radius: 0;
     background: transparent;
-    color: #172b40;
+    color: var(--ais-text-primary);
     box-shadow: none;
 }
 
@@ -97,10 +97,10 @@
     min-height: 3.125rem;
     padding: 0.5rem 0.75rem;
     border: 0;
-    border-block-end: 1px solid #e4e9ef;
+    border-block-end: 1px solid var(--ais-border-subtle);
     border-radius: 0;
     background: transparent;
-    color: #26384a;
+    color: var(--ais-text-primary);
     font: inherit;
     text-align: start;
     cursor: pointer;
@@ -109,7 +109,7 @@
 
 .welcome-surface__choice ::deep .mud-icon-root {
     flex: 0 0 auto;
-    color: #516477;
+    color: var(--ais-text-secondary);
     font-size: 1.25rem;
 }
 
@@ -121,27 +121,26 @@
 }
 
 .welcome-surface__choice:hover {
-    border-color: #78a9ee;
-    background: #f1f6ff;
+    border-color: var(--ais-border-default);
+    background: var(--ais-bg-hover);
 }
 
 .welcome-surface__choice.is-selected,
 .welcome-surface__choice[aria-pressed="true"] {
-    border: 1px solid #0875e1;
-    border-color: #0875e1;
-    border-radius: 0.625rem;
-    background: #0875e1;
-    color: #fff;
+    border: 1px solid var(--ais-action-primary);
+    border-radius: var(--ais-radius-control);
+    background: var(--ais-action-primary);
+    color: var(--ais-action-on-primary);
     box-shadow: none;
 }
 
 .welcome-surface__choice.is-selected ::deep .mud-icon-root,
 .welcome-surface__choice[aria-pressed="true"] ::deep .mud-icon-root {
-    color: #fff;
+    color: var(--ais-action-on-primary);
 }
 
 .welcome-surface__choice:focus-visible {
-    outline: 3px solid #82b5ff;
+    outline: 2px solid var(--ais-focus);
     outline-offset: 2px;
 }
 
@@ -156,12 +155,12 @@
 }
 
 .welcome-surface__country ::deep .mud-input-outlined-border {
-    border-color: #dce3eb;
+    border-color: var(--ais-border-control);
 }
 
 .welcome-surface__country ::deep .mud-input-slot,
 .welcome-surface__country ::deep .mud-input-label {
-    color: #26384a;
+    color: var(--ais-text-primary);
 }
 
 .welcome-surface__actions {

@@ -97,7 +97,47 @@ stand and that handoff item is recorded as owner-deferred, not implemented.
 Sessions persist in PostgreSQL (`EllaiSessionEntity`, `EllaiCheckpointEntity`,
 `EllaiUtteranceEntity`, `PostgresEllaiSessionStore`) with version-fenced
 compare-and-set and idempotent utterance/checkpoint identities; restart and
-second-gateway visibility hold. Replaying an accepted (session,
+second-gateway visibility hold. Accepted public product-help utterances use
+`EllaiPublicHelpClassifier` to reduce typed input locally to approved product
+topics. The composer obtains explicit session-scoped `ReasoningText` consent
+for the fixed `ellai-public-product-help` purpose before submission; the
+endpoint assigns `consented-nonsensitive` only for that fixed purpose and
+dimension. The classifier remains mandatory, so consent never permits
+arbitrary or sensitive text. `EllaiUtteranceWorkEnvelope` stores only the
+sanitized topic prompt, fixed `ellai_productfacts` tool allowlist and
+server-captured actor/session fences in the same transaction as the session
+version update. `EllaiUtteranceWorker` claims this PostgreSQL outbox with
+leases, preserves per-session order, checks the current owner/session/scope
+epoch before provider dispatch, retries transient failures up to three times,
+and clears payload text when work completes or is terminally rejected. The
+`20261031062124_EllaiUtteranceOutbox` migration adds this state. Its migration
+application and real PostgreSQL worker recovery remain **NOT VERIFIED** while
+the Docker database is unavailable. Anonymous public help is implemented on
+`/api/v1/ellai/guest`: `GET .../antiforgery` issues a request token;
+`POST .../sessions` accepts Ask mode only and returns a two-hour, server-signed,
+HttpOnly, SameSite=Strict guest identity cookie with an empty workspace scope.
+Session-bound consent, typed utterances, event reads and cancellation require
+that cookie plus antiforgery validation. Guest writes are rate-limited to 10
+per IP per minute and reads to 120 per IP per minute. The WebAssembly public
+root renders the shared compact launcher in public-help-only mode. No guest
+case, receipt, organizational, approval or generated-navigation tools are
+registered. The API/UI path and cookie isolation pass TestServer and HTTP
+client tests; browser cookie behavior and the live Docker/provider journey
+remain **NOT VERIFIED**. Anonymous public pages rendered through Blazor Server
+also expose the same Ask-only launcher. Their guest actor is server-created
+and scoped to the Blazor circuit; the scope manifest has no workspace grants,
+and guest UI-observation writes are denied. This in-process path shares the
+sanitized submission and consent services and passes the focused anonymous
+gateway-client integration test. The browser-rendered Blazor Server journey
+remains **NOT VERIFIED**. MAUI `MainLayout` now renders the shared host and an
+Ask-only launcher. Its authenticated HTTP client carries native bearer or the
+existing password-session cookie; its separate guest client relays the
+antiforgery and signed guest cookies through that same cookie store. Each
+accepted guest session remains pinned to guest routes if account state later
+changes. The Android source build passes, but cookie behavior on-device and
+the Mobile guest/provider journey remain **NOT VERIFIED**. Dynamic guidance
+control is not exposed on Mobile until a remote control contract exists.
+Replaying an accepted (session,
 client-utterance) identity returns the current view without consuming
 another cycle or re-triggering reasoning (§7.1). Approvals carry a 15-minute expiry and idempotent durable receipts
 (`EllaiApprovalService` over `IEllaiApprovalStore`, PostgreSQL
@@ -170,8 +210,12 @@ stay excluded fail-closed (no scope-capability source yet).
 `Authorization` header; realtime ASR authenticates in the WebSocket
 handshake frame. Reasoning backends: `meta` (default hosted API), `ollama`
 (local-first, `llama3.2:3b`), `serverless` (locked disabled until the Meta
-default is fully tested). Local TTS stays disabled pending the ED-EL-05
-decision; text fallback applies when voice is down. The multi-turn loop
+default is fully tested). Custom speech synthesis is disabled pending exact
+MMS-TTS checkpoint/hash and deployment, attribution, and distribution review.
+Owner direction is Gateway-hosted synthesis streamed to Web/Mobile; clients
+capture/play audio but do not run local TTS or OS voice fallback. Noncommercial
+use only is approved. Text/captions remain available.
+The multi-turn loop
 (`EllaiReasoningLoop` over `EllaiCycleRunner`, `IEllaiTurnCompletionClient`
 adapted from the routed provider) parses each text turn to typed tool calls
 or a validated final decision through `EllaiModelTurnParser` (single JSON

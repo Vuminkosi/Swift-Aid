@@ -5,6 +5,58 @@
     padding-block: 1.25rem;
 }
 
+.public-home-surface ::deep .mobile-home-quick-links {
+    width: 100%;
+    min-width: 0;
+}
+
+.public-home-surface ::deep .mobile-home-quick-links__rail {
+    display: flex;
+    gap: 0.5rem;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    padding: 0.25rem 0.125rem 0.75rem;
+    scroll-snap-type: inline proximity;
+    scrollbar-width: thin;
+}
+
+.public-home-surface ::deep .mobile-home-quick-link {
+    display: flex;
+    flex: 0 0 5.75rem;
+    min-height: 5.5rem;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    padding: 0.5rem 0.375rem;
+    border: 1px solid var(--sa-border);
+    border-radius: 0.875rem;
+    background: var(--sa-surface);
+    color: var(--sa-text-primary);
+    font-size: 0.75rem;
+    line-height: 1.15;
+    text-align: center;
+    text-decoration: none;
+    scroll-snap-align: start;
+}
+
+.public-home-surface ::deep .mobile-home-quick-link .mud-icon-root {
+    color: var(--sa-action-primary);
+    font-size: 1.375rem;
+}
+
+.public-home-surface ::deep .mobile-home-quick-link:focus-visible {
+    outline: 3px solid var(--sa-focus);
+    outline-offset: 2px;
+}
+
+@media (min-width: 768px) {
+    .public-home-surface ::deep .mobile-home-quick-links {
+        display: none;
+    }
+}
+
 .public-home-fab-menu {
     position: fixed;
     z-index: 15;
@@ -248,31 +300,19 @@
     min-width: 0;
     min-height: 7.1rem;
     padding: 0.7rem;
-    border: 0;
-    border-radius: 0.875rem;
-    color: #fff;
+    border: 1px solid var(--ais-border-default);
+    border-radius: var(--ais-radius-panel);
+    background: var(--ais-bg-surface);
+    color: var(--ais-text-primary);
     box-shadow: none;
 }
 
-.public-home-surface ::deep .signed-home-action--blue {
-    background: color-mix(in srgb, var(--sa-brand-blue) 82%, var(--sa-brand-navy));
+.public-home-surface ::deep .signed-home-action .mud-typography {
+    color: var(--ais-text-primary);
 }
 
-.public-home-surface ::deep .signed-home-action--green {
-    background: color-mix(in srgb, var(--sa-brand-green) 72%, var(--sa-brand-navy));
-}
-
-.public-home-surface ::deep .signed-home-action--teal {
-    background: color-mix(in srgb, var(--sa-brand-teal) 72%, var(--sa-brand-navy));
-}
-
-.public-home-surface ::deep .signed-home-action--orange {
-    background: #b54708;
-}
-
-.public-home-surface ::deep .signed-home-action .mud-typography,
 .public-home-surface ::deep .signed-home-action .mud-icon-root {
-    color: #fff;
+    color: var(--ais-action-primary);
 }
 
 .public-home-surface ::deep .signed-home-action .mud-typography-subtitle2 {
@@ -294,7 +334,7 @@
 }
 
 .public-home-surface ::deep .signed-home-action:focus-within {
-    outline: 3px solid var(--sa-brand-navy);
+    outline: 3px solid var(--ais-focus);
     outline-offset: 2px;
 }
 

@@ -2,9 +2,19 @@ html,
 body {
     min-width: 320px;
     min-height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
     color: var(--sa-text-primary);
     background: var(--sa-canvas);
-    font-family: "Segoe UI", system-ui, sans-serif;
+    font-family: var(--ais-font-sans, system-ui, "Segoe UI", sans-serif);
+}
+
+#app {
+    width: 100%;
+    min-height: 100dvh;
+    margin: 0;
+    padding: 0;
 }
 
 a,
@@ -30,6 +40,44 @@ a,
     border-color: var(--sa-action-active);
 }
 
+.form-control,
+.form-select {
+    border-color: var(--ais-border-control);
+    border-radius: var(--ais-radius-control);
+    color: var(--ais-text-primary);
+    background-color: var(--ais-bg-surface);
+}
+
+.form-control::placeholder {
+    color: var(--ais-text-muted);
+    opacity: 1;
+}
+
+.form-control:disabled,
+.form-select:disabled {
+    border-color: var(--ais-border-default);
+    color: var(--ais-text-disabled);
+    background-color: var(--ais-bg-disabled);
+}
+
+.form-check-input {
+    border-color: var(--ais-border-control);
+    background-color: var(--ais-bg-surface);
+}
+
+.form-check-input:checked {
+    border-color: var(--ais-action-primary);
+    background-color: var(--ais-action-primary);
+}
+
+.dropdown-menu,
+.modal-content,
+.card {
+    border-color: var(--ais-border-default);
+    color: var(--ais-text-primary);
+    background-color: var(--ais-bg-surface);
+}
+
 .form-control:focus-visible,
 .form-check-input:focus-visible {
     outline: 2px solid var(--sa-focus);
@@ -47,6 +95,98 @@ a,
 
 .content {
     padding-top: 1.1rem;
+}
+
+/* Mobile identity routes reuse the same branded account-entry surface as web. */
+.mobile-auth-page {
+    display: flex;
+    width: 100%;
+    min-height: 100dvh;
+    min-width: 0;
+    justify-content: stretch;
+    margin: 0;
+    padding: 0;
+}
+
+.mobile-auth-page .account-entry-surface {
+    box-sizing: border-box !important;
+    width: 100% !important;
+    max-width: none !important;
+    min-height: 100dvh !important;
+    margin: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+}
+
+.mobile-auth-page .account-entry-surface__header {
+    min-height: 5.5rem !important;
+    padding-block-start: max(1.5rem, env(safe-area-inset-top));
+    border-block-end-color: var(--ais-border-default);
+    background: var(--ais-bg-sidebar);
+    color: var(--ais-text-primary);
+}
+
+.mobile-auth-page .account-entry-surface__back,
+.mobile-auth-page .account-entry-surface__brand-lockup {
+    color: inherit !important;
+}
+
+@media (max-width: 960px) {
+    .swiftaid-app-shell__header {
+        min-height: 5rem !important;
+        padding-block-start: max(1.5rem, env(safe-area-inset-top));
+        background: var(--ais-bg-sidebar);
+        color: var(--ais-text-primary);
+    }
+}
+
+.mobile-auth-page .mobile-auth-panel {
+    display: grid;
+    align-content: start;
+    width: 100%;
+    gap: 1rem;
+    padding: clamp(1rem, 5vw, 1.5rem) !important;
+    background: transparent;
+}
+
+.mobile-auth-page .mobile-auth-password {
+    display: grid;
+    width: 100%;
+    gap: .55rem;
+}
+
+.mobile-auth-page .mobile-auth-privacy-note {
+    padding: .75rem .85rem;
+    border-inline-start: 3px solid var(--sa-border);
+    color: var(--sa-text-muted);
+}
+
+.mobile-auth-page .mobile-auth-divider-text {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    color: var(--sa-text-muted);
+    text-align: center;
+}
+
+.mobile-auth-page .mobile-auth-divider-text::before,
+.mobile-auth-page .mobile-auth-divider-text::after {
+    flex: 1;
+    border-block-start: 1px solid var(--sa-border);
+    content: "";
+}
+
+.mobile-auth-page .mobile-auth-divider {
+    margin-block: .25rem;
+}
+
+.mobile-auth-page .mobile-auth-validation-summary {
+    color: var(--sa-danger);
+}
+
+.mobile-auth-page .auth-cta {
+    min-height: 3rem;
 }
 
 h1:focus {
@@ -80,10 +220,23 @@ h1:focus {
 }
 
 #blazor-error-ui .dismiss {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 1.25rem;
     cursor: pointer;
     position: absolute;
     right: 0.75rem;
     top: 0.5rem;
+}
+
+#blazor-error-ui .dismiss:focus-visible {
+    outline: 3px solid var(--sa-focus);
+    outline-offset: 2px;
 }
 
 .blazor-error-boundary {

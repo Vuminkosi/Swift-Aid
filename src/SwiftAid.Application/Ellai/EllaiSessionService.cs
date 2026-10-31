@@ -13,6 +13,7 @@ public sealed record EllaiSessionRecord(
     long SpeechEpoch,
     int CyclesUsed,
     int CyclesAllowed,
+    string? OwnerActorId,
     string ScopeEpoch,
     string? ActiveInvestigationId,
     string? PendingCheckpointId,
@@ -37,10 +38,15 @@ public interface IEllaiSessionStore
     /// <summary>Compare-and-set by expected version; returns null on fence conflict.</summary>
     Task<EllaiSessionRecord?> TryUpdateAsync(EllaiSessionRecord record, long expectedVersion, CancellationToken ct);
 
-    /// <summary>Claims one accepted utterance per (session, client-utterance)
-    /// identity. True is first acceptance; false is an idempotent replay that
-    /// must not consume another cycle.</summary>
-    Task<bool> TryClaimUtteranceAsync(string sessionId, string clientUtteranceId, DateTimeOffset now, CancellationToken ct);
+    /// <summary>Atomically fences the session update and idempotency identity.
+    /// An existing identity returns its current accepted record even when the
+    /// caller retries with the pre-acceptance version.</summary>
+    Task<EllaiUtteranceStoreResult?> TryAcceptUtteranceAsync(
+        EllaiSessionRecord nextRecord,
+        long expectedVersion,
+        string clientUtteranceId,
+        CancellationToken ct,
+        string? outboxPayloadJson = null);
 
     Task SaveCheckpointAsync(EllaiCheckpoint checkpoint, CancellationToken ct);
 }
@@ -50,14 +56,38 @@ public interface IEllaiSessionStore
 /// current view without consuming a cycle or re-triggering reasoning.</summary>
 public sealed record EllaiUtteranceAcceptance(EllaiSessionView View, bool Replay);
 
+public sealed record EllaiUtteranceStoreResult(EllaiSessionRecord Record, bool Replay);
+
+/// <summary>Lease-protected work item recovered from the durable accepted-turn
+/// outbox. Payloads are server-created and contain only approved/sanitized input.</summary>
+public sealed record EllaiUtteranceOutboxItem(
+    string SessionId,
+    string ClientUtteranceId,
+    string PayloadJson,
+    int AttemptCount);
+
+public interface IEllaiUtteranceOutboxStore
+{
+    Task<EllaiUtteranceOutboxItem?> ClaimNextAsync(
+        DateTimeOffset nowUtc, DateTimeOffset leaseExpiresAtUtc, CancellationToken ct);
+
+    Task CompleteAsync(
+        string sessionId, string clientUtteranceId, int attemptCount,
+        DateTimeOffset completedAtUtc, CancellationToken ct);
+
+    Task FailAsync(
+        string sessionId, string clientUtteranceId, int attemptCount,
+        DateTimeOffset retryAtUtc, bool terminal, CancellationToken ct);
+}
+
 /// <summary>Thread-safe in-memory store for tests and local development.
 /// Production persistence (PostgreSQL, ELL-T04) must implement the same
 /// interface with transactional outbox writes.</summary>
-public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore
+public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUtteranceOutboxStore
 {
     private readonly object _gate = new();
     private readonly Dictionary<string, EllaiSessionRecord> _sessions = new(StringComparer.Ordinal);
-    private readonly HashSet<(string SessionId, string ClientUtteranceId)> _utterances = new();
+    private readonly Dictionary<(string SessionId, string ClientUtteranceId), InMemoryOutboxEntry> _utterances = new();
     private readonly List<EllaiCheckpoint> _checkpoints = new();
 
     public Task<EllaiSessionRecord?> GetAsync(string sessionId, CancellationToken ct)
@@ -93,15 +123,147 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore
         }
     }
 
-    public Task<bool> TryClaimUtteranceAsync(
-        string sessionId, string clientUtteranceId, DateTimeOffset now, CancellationToken ct)
+    public Task<EllaiUtteranceStoreResult?> TryAcceptUtteranceAsync(
+        EllaiSessionRecord nextRecord,
+        long expectedVersion,
+        string clientUtteranceId,
+        CancellationToken ct,
+        string? outboxPayloadJson = null)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentNullException.ThrowIfNull(nextRecord);
         ArgumentException.ThrowIfNullOrWhiteSpace(clientUtteranceId);
         lock (_gate)
         {
-            return Task.FromResult(_utterances.Add((sessionId, clientUtteranceId)));
+            if (!_sessions.TryGetValue(nextRecord.SessionId, out var current)
+                || current.Status is "Cancelled" or "Completed")
+            {
+                return Task.FromResult<EllaiUtteranceStoreResult?>(null);
+            }
+
+            if (_utterances.TryGetValue((nextRecord.SessionId, clientUtteranceId), out var existing))
+            {
+                return Task.FromResult<EllaiUtteranceStoreResult?>(
+                    new EllaiUtteranceStoreResult(current, true));
+            }
+
+            if (current.SessionVersion != expectedVersion
+                || current.CyclesUsed >= current.CyclesAllowed
+                || !string.Equals(current.OwnerActorId, nextRecord.OwnerActorId, StringComparison.Ordinal))
+            {
+                return Task.FromResult<EllaiUtteranceStoreResult?>(null);
+            }
+
+            _utterances.Add((nextRecord.SessionId, clientUtteranceId),
+                new InMemoryOutboxEntry(outboxPayloadJson, null, 0, null));
+            _sessions[nextRecord.SessionId] = nextRecord;
+            return Task.FromResult<EllaiUtteranceStoreResult?>(
+                new EllaiUtteranceStoreResult(nextRecord, false));
         }
+    }
+
+    public Task<EllaiUtteranceOutboxItem?> ClaimNextAsync(
+        DateTimeOffset nowUtc, DateTimeOffset leaseExpiresAtUtc, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            foreach (var entry in _utterances.Where(pair => pair.Value.PayloadJson is not null
+                && pair.Value.CompletedAtUtc is null
+                && pair.Value.AttemptCount >= 3
+                && (pair.Value.LeaseExpiresAtUtc is null || pair.Value.LeaseExpiresAtUtc <= nowUtc)).ToArray())
+            {
+                _utterances[entry.Key] = entry.Value with
+                {
+                    PayloadJson = null,
+                    LeaseExpiresAtUtc = null,
+                    CompletedAtUtc = nowUtc,
+                };
+            }
+
+            var next = _utterances
+                .Where(pair => pair.Value.PayloadJson is not null
+                    && pair.Value.CompletedAtUtc is null
+                    && pair.Value.AttemptCount < 3
+                    && (pair.Value.LeaseExpiresAtUtc is null || pair.Value.LeaseExpiresAtUtc <= nowUtc)
+                    && !_utterances.Any(other => other.Key.SessionId == pair.Key.SessionId
+                        && other.Value.PayloadJson is not null
+                        && other.Value.CompletedAtUtc is null
+                        && (other.Value.LeaseExpiresAtUtc is null || other.Value.LeaseExpiresAtUtc > nowUtc)
+                        && (other.Value.AcceptedAtUtc < pair.Value.AcceptedAtUtc
+                            || other.Value.AcceptedAtUtc == pair.Value.AcceptedAtUtc
+                                && string.CompareOrdinal(other.Key.ClientUtteranceId, pair.Key.ClientUtteranceId) < 0))
+                    && !_utterances.Any(other => other.Key.SessionId == pair.Key.SessionId
+                        && !ReferenceEquals(other.Value, pair.Value)
+                        && other.Value.PayloadJson is not null
+                        && other.Value.CompletedAtUtc is null
+                        && other.Value.LeaseExpiresAtUtc > nowUtc))
+                .OrderBy(pair => pair.Value.AcceptedAtUtc)
+                .FirstOrDefault();
+            if (next.Value is null)
+            {
+                return Task.FromResult<EllaiUtteranceOutboxItem?>(null);
+            }
+
+            var attempts = next.Value.AttemptCount + 1;
+            _utterances[next.Key] = next.Value with
+            {
+                AttemptCount = attempts,
+                LeaseExpiresAtUtc = leaseExpiresAtUtc,
+            };
+            return Task.FromResult<EllaiUtteranceOutboxItem?>(new(
+                next.Key.SessionId, next.Key.ClientUtteranceId, next.Value.PayloadJson!, attempts));
+        }
+    }
+
+    public Task CompleteAsync(
+        string sessionId, string clientUtteranceId, int attemptCount,
+        DateTimeOffset completedAtUtc, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            var key = (sessionId, clientUtteranceId);
+            if (_utterances.TryGetValue(key, out var item)
+                && item.CompletedAtUtc is null
+                && item.AttemptCount == attemptCount)
+            {
+                _utterances[key] = item with
+                {
+                    PayloadJson = null,
+                    LeaseExpiresAtUtc = null,
+                    CompletedAtUtc = completedAtUtc,
+                };
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task FailAsync(
+        string sessionId, string clientUtteranceId, int attemptCount,
+        DateTimeOffset retryAtUtc, bool terminal, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            var key = (sessionId, clientUtteranceId);
+            if (_utterances.TryGetValue(key, out var item)
+                && item.CompletedAtUtc is null
+                && item.AttemptCount == attemptCount)
+            {
+                _utterances[key] = terminal || item.AttemptCount >= 3
+                    ? item with { PayloadJson = null, LeaseExpiresAtUtc = null, CompletedAtUtc = retryAtUtc }
+                    : item with { LeaseExpiresAtUtc = retryAtUtc };
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private sealed record InMemoryOutboxEntry(
+        string? PayloadJson,
+        DateTimeOffset? LeaseExpiresAtUtc,
+        int AttemptCount,
+        DateTimeOffset? CompletedAtUtc)
+    {
+        public DateTimeOffset AcceptedAtUtc { get; } = DateTimeOffset.UtcNow;
     }
 
     public Task SaveCheckpointAsync(EllaiCheckpoint checkpoint, CancellationToken ct)
@@ -128,9 +290,63 @@ public sealed class EllaiSessionService(IEllaiSessionStore store, EllaiConsentSe
     /// matching ck_ellai_sessions_cycles). Stricter investigation caps win.</summary>
     public const int DefaultCyclesAllowed = 12;
 
-    public async Task<EllaiSessionView> StartAsync(StartSessionRequest request, CancellationToken ct)
+    public async Task<EllaiSessionView?> GetOwnedViewAsync(
+        string sessionId, System.Security.Claims.ClaimsPrincipal principal, CancellationToken ct)
+    {
+        Authorization.ActorContext actor;
+        try { actor = Authorization.ActorContext.FromValidatedPrincipal(principal); }
+        catch (UnauthorizedAccessException) { return null; }
+        var record = await store.GetAsync(sessionId, ct).ConfigureAwait(false);
+        return record is not null
+            && !string.IsNullOrWhiteSpace(record.OwnerActorId)
+            && string.Equals(record.OwnerActorId, actor.ActorId, StringComparison.Ordinal)
+            ? ToView(record)
+            : null;
+    }
+
+    public async Task<EllaiSessionView> StartAsync(
+        StartSessionRequest request,
+        System.Security.Claims.ClaimsPrincipal principal,
+        SwiftAid.Contracts.Sync.ScopeManifest scope,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(scope);
+        var actor = Authorization.ActorContext.FromValidatedPrincipal(principal);
+        if (scope.AccessEpoch != actor.AccessEpoch
+            || scope.ExpiresAtUtc <= DateTimeOffset.UtcNow)
+        {
+            throw new UnauthorizedAccessException("A current account scope is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ClientRequestId))
+        {
+            throw new ArgumentException("ClientRequestId is required.", nameof(request));
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var scopeDisplay = scope.Grants.Count == 0
+            ? $"ellai-help-identity-epoch-{scope.AccessEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
+            : $"access-epoch-{scope.AccessEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+        var record = new EllaiSessionRecord(
+            $"ellai-{Guid.NewGuid():N}", request.Mode, "Active", 1, 1, 1, 1,
+            0, DefaultCyclesAllowed, actor.ActorId,
+            scopeDisplay,
+            null, null, now);
+        await store.CreateAsync(record, ct);
+        return ToView(record);
+    }
+
+    /// <summary>Test-only start path for lifecycle tests that do not exercise
+    /// trusted scope resolution. Production callers must supply the current
+    /// grant snapshot to the overload above.</summary>
+    internal async Task<EllaiSessionView> StartAsync(
+        StartSessionRequest request,
+        System.Security.Claims.ClaimsPrincipal principal,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var actor = Authorization.ActorContext.FromValidatedPrincipal(principal);
         if (string.IsNullOrWhiteSpace(request.ClientRequestId))
         {
             throw new ArgumentException("ClientRequestId is required.", nameof(request));
@@ -139,7 +355,7 @@ public sealed class EllaiSessionService(IEllaiSessionStore store, EllaiConsentSe
         var now = DateTimeOffset.UtcNow;
         var record = new EllaiSessionRecord(
             $"ellai-{Guid.NewGuid():N}", request.Mode, "Active", 1, 1, 1, 1,
-            0, DefaultCyclesAllowed, $"scope-{now:yyyyMMddHHmmss}",
+            0, DefaultCyclesAllowed, actor.ActorId, $"test-scope-{actor.AccessEpoch}",
             null, null, now);
         await store.CreateAsync(record, ct);
         return ToView(record);
@@ -149,9 +365,14 @@ public sealed class EllaiSessionService(IEllaiSessionStore store, EllaiConsentSe
     /// rejected so late turns cannot overwrite newer state. Replaying an
     /// already-accepted (session, client-utterance) identity returns the
     /// current view without consuming another cycle (§7.1).</summary>
-    public async Task<EllaiUtteranceAcceptance?> SubmitUtteranceAsync(SubmitUtteranceRequest request, CancellationToken ct)
+    internal async Task<EllaiUtteranceAcceptance?> SubmitUtteranceAsync(
+        SubmitUtteranceRequest request,
+        Authorization.ActorContext actor,
+        CancellationToken ct,
+        string? outboxPayloadJson = null)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(actor);
         if (string.IsNullOrWhiteSpace(request.ClientUtteranceId))
         {
             throw new ArgumentException("ClientUtteranceId is required.", nameof(request));
@@ -163,20 +384,9 @@ public sealed class EllaiSessionService(IEllaiSessionStore store, EllaiConsentSe
             return null;
         }
 
-        if (current.SessionVersion != request.ExpectedSessionVersion)
+        if (!string.Equals(current.OwnerActorId, actor.ActorId, StringComparison.Ordinal))
         {
             return null;
-        }
-
-        if (current.CyclesUsed >= current.CyclesAllowed)
-        {
-            return null;
-        }
-
-        if (!await store.TryClaimUtteranceAsync(
-                request.SessionId, request.ClientUtteranceId, DateTimeOffset.UtcNow, ct).ConfigureAwait(false))
-        {
-            return new EllaiUtteranceAcceptance(ToView(current), true);
         }
 
         var next = current with
@@ -186,8 +396,11 @@ public sealed class EllaiSessionService(IEllaiSessionStore store, EllaiConsentSe
             CyclesUsed = current.CyclesUsed + 1,
             UpdatedAtUtc = DateTimeOffset.UtcNow
         };
-        var updated = await store.TryUpdateAsync(next, request.ExpectedSessionVersion, ct);
-        return updated is null ? null : new EllaiUtteranceAcceptance(ToView(updated), false);
+        var accepted = await store.TryAcceptUtteranceAsync(
+            next, request.ExpectedSessionVersion, request.ClientUtteranceId, ct, outboxPayloadJson).ConfigureAwait(false);
+        return accepted is null
+            ? null
+            : new EllaiUtteranceAcceptance(ToView(accepted.Record), accepted.Replay);
     }
 
     public async Task<EllaiCheckpoint?> SaveCheckpointAsync(
@@ -217,13 +430,23 @@ public sealed class EllaiSessionService(IEllaiSessionStore store, EllaiConsentSe
 
     /// <summary>Cancel terminates the session and revokes unused authority;
     /// committed effects are reconciled separately, never undone here.</summary>
-    public async Task<bool> CancelAsync(string sessionId, long expectedVersion, CancellationToken ct)
+    public async Task<bool> CancelAsync(
+        string sessionId,
+        long expectedVersion,
+        System.Security.Claims.ClaimsPrincipal principal,
+        CancellationToken ct)
     {
+        var actor = Authorization.ActorContext.FromValidatedPrincipal(principal);
         var current = await store.GetAsync(sessionId, ct);
-        if (current is null || current.Status == "Cancelled")
+        if (current is null
+            || !string.Equals(current.OwnerActorId, actor.ActorId, StringComparison.Ordinal))
         {
             return false;
         }
+
+        if (current.Status == "Cancelled") return true;
+        if (current.Status == "Completed") return false;
+        if (current.SessionVersion != expectedVersion) return false;
 
         var next = current with
         {

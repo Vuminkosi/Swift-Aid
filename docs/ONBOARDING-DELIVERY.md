@@ -10,7 +10,8 @@ is marked Blocked — never simulated.
 |---|---|---|---|
 | M-ONB-01–03 | Brand welcome + Manage Cases + Educate Communities + Report-concern intro | `/welcome` on Mobile (MAUI Hybrid) and Gateway (InteractiveServer) | Done, committed |
 | M-ONB-04 / W-PUB-01 | Public entry hub (guest report, tracking, sessions, account) | `/` via existing `PublicHomeSurface` on both hosts | Pre-existing, preserved untouched |
-| M-AUTH-01/02/04/05/09, W-AUTH-03, M-PRF, M-DONE | Password sign-in/create/recovery, OTP, profile, completion | — | **Blocked**: no backend (see below) |
+| M-AUTH-01/02/04/05/09, W-AUTH-03 | Password sign-in/create/recovery and OTP | `/sign-in`, `/register`, `/forgot-password`, `/reset-password`, `/verify-email` | Real Gateway-backed request/confirm flows exist on Web and Mobile; both now switch to the shared neutral “Check your inbox” state after accepted requests. Gateway and Android builds pass; device, mailbox-delivery, and full visual journey acceptance remain **Partial / Not verified** |
+| M-PRF, M-DONE | Profile, membership choices and account completion | `/profile`, `/organizations`, `/welcome-complete` | Real contracts and pages implemented; real-user journey acceptance remains **Partial / Not verified** |
 | D12 / M-ACC-01 | Sign-out confirmation | Shared `AccountSurface` (both hosts' `/account`) | Done, uncommitted (takeover, see below) |
 | D02/D03/D11 | Provider availability, loading/cancel, offline states | Existing `SignIn.razor`, `MobileAuthenticationControl`, `AccountSurface` | Pre-existing, preserved |
 
@@ -40,12 +41,16 @@ package, auth system, navigation system, or identity client.
 
 ## Authentication/provider capability status
 
-- Federated sign-in (Google/Facebook/org SSO): UI wired to real endpoints.
-  Live credential provisioning per environment: **Blocked / Not provisioned**.
-- Password registration/sign-in, reset, email confirmation, OTP verification,
-  profile persistence, organization join/request/approval: **Blocked — no
-  backend contract exists** (exact negative probes in
-  `docs/ONBOARDING-AUTH-EVIDENCE.md`). No fake forms were built.
+- Federated sign-in (Google/Facebook/org SSO): UI reads live Gateway provider
+  configuration and uses real challenge endpoints. Each provider remains
+  unavailable until its current environment passes registration and callback
+  verification; see the dated evidence in `docs/ONBOARDING-AUTH-EVIDENCE.md`.
+- Password registration/sign-in, reset, OTP verification, profile persistence,
+  and organization join/request have real Gateway contracts and host pages;
+  their availability and validation are capability-backed. Mailbox delivery,
+  real interactive provider/password journeys, Android device acceptance and
+  end-to-end design parity remain separately **Not verified** as recorded in
+  the dated evidence below.
 - Professional role/participation selection grants nothing; only verified
   membership confers authority (enforced by backend, disclosed in UI copy).
 
@@ -92,9 +97,11 @@ package, auth system, navigation system, or identity client.
   edit, `AccountSurface.razor` D12 confirmation edit,
   `tests/.../WelcomeSurfaceFramingTests.cs`,
   `tests/.../AccountSurfaceSignOutTests.cs`.
-- Blocked on backend: password auth, recovery, verification, profile,
-  membership/org joining, linked-identity listing, completion routing by
-  membership.
+- Remaining backend/product gaps: invitation issuance/redeem lifecycle and
+  staff-side membership review/approval UI; see the linked evidence sections.
+- Remaining acceptance gaps: interactive browser/device journeys, actual
+  mailbox entry for verification/reset, and visual comparison at supported
+  viewports.
 - Blocked on environment: live provider callbacks, Android device runs,
   browser E2E, screenshots.
 

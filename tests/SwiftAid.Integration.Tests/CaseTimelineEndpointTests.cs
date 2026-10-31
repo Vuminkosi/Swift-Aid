@@ -71,7 +71,7 @@ public sealed class CaseTimelineEndpointTests
     {
         await using var host = await TestTimelineHost.StartAsync();
         using var request = new HttpRequestMessage(
-            HttpMethod.Get, $"/api/v1/cases/{TestTimelineQuery.FixedCaseId:D}/timeline?limit=50");
+            HttpMethod.Get, $"/api/v1/cases/{TestTimelineQuery.FixedCaseId:D}/timeline?limit=50&beforeAggregateVersion=2");
         TestAuthenticationHandler.AddCookieAuthentication(request);
 
         using var response = await host.Client.SendAsync(request);
@@ -83,7 +83,25 @@ public sealed class CaseTimelineEndpointTests
         Assert.Equal(TestTimelineQuery.FixedCaseId, timeline!.Header.CaseId);
         Assert.Equal(2, timeline.Entries.Count);
         Assert.Equal(50, host.Service.LastLimit);
+        Assert.Equal(2, host.Service.LastBeforeAggregateVersion);
         Assert.DoesNotContain("ProtectedBytes", body, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-2")]
+    [InlineData("not-a-number")]
+    public async Task InvalidHistoryCursor_IsRejected(string cursor)
+    {
+        await using var host = await TestTimelineHost.StartAsync();
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get, $"/api/v1/cases/{TestTimelineQuery.FixedCaseId:D}/timeline?beforeAggregateVersion={cursor}");
+        TestAuthenticationHandler.AddCookieAuthentication(request);
+
+        using var response = await host.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, host.Service.Calls);
     }
 
     [Theory]
@@ -221,14 +239,18 @@ internal sealed class TestTimelineQuery(bool found) : ICaseTimelineQuery
 
     public int? LastLimit { get; private set; }
 
+    public long? LastBeforeAggregateVersion { get; private set; }
+
     public Task<CaseTimelineResult> GetAsync(
         ActorContext actor,
         Guid caseId,
         int? limit,
-        CancellationToken ct)
+        CancellationToken ct,
+        long? beforeAggregateVersion = null)
     {
         Calls++;
         LastLimit = limit;
+        LastBeforeAggregateVersion = beforeAggregateVersion;
         if (!found)
         {
             return Task.FromResult(new CaseTimelineResult(CaseTimelineAccess.NotFoundOrNotAuthorized, null));

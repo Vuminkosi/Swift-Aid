@@ -5,6 +5,25 @@
                 <AccountSettingsNav />
             </div>
         </MudHidden>
+        <MudHidden Breakpoint="Breakpoint.MdAndUp">
+            <MudTabs ActivePanelIndex="_activeMobileTab"
+                     ActivePanelIndexChanged="NavigateToMobileTabAsync"
+                     Class="account-settings-layout__mobile-tabs"
+                     Elevation="0"
+                     Rounded="false"
+                     ApplyEffectsToContainer="false"
+                     aria-label="Account and settings sections">
+                <MudTabPanel Text="Overview" Icon="@Icons.Material.Outlined.Home" />
+                <MudTabPanel Text="Profile" Icon="@Icons.Material.Outlined.Person" />
+                <MudTabPanel Text="Organizations" Icon="@Icons.Material.Outlined.Groups" />
+                <MudTabPanel Text="Participation" Icon="@Icons.Material.Outlined.Badge" />
+                <MudTabPanel Text="Security" Icon="@Icons.Material.Outlined.Lock" />
+                <MudTabPanel Text="Notifications" Icon="@Icons.Material.Outlined.Notifications" />
+                <MudTabPanel Text="Sync" Icon="@Icons.Material.Outlined.CloudSync" />
+                <MudTabPanel Text="Privacy" Icon="@Icons.Material.Outlined.Policy" />
+                <MudTabPanel Text="About" Icon="@Icons.Material.Outlined.Info" />
+            </MudTabs>
+        </MudHidden>
     </MudItem>
     <MudItem xs="12" md="9">
         @ChildContent
@@ -12,6 +31,33 @@
 </MudGrid>
 
 @code {
+    private static readonly string[] MobileSettingsRoutes = [
+        "/account", "/profile", "/organizations", "/participation", "/security",
+        "/notifications", "/sync", "/privacy", "/about"
+    ];
+
+    private int _activeMobileTab;
+
     [Parameter]
     public RenderFragment? ChildContent { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        var currentPath = new Uri(Navigation.Uri).AbsolutePath.TrimEnd('/');
+        _activeMobileTab = Array.FindIndex(MobileSettingsRoutes,
+            route => string.Equals(route, currentPath, StringComparison.OrdinalIgnoreCase));
+        if (_activeMobileTab < 0)
+            _activeMobileTab = 0;
+    }
+
+    [Inject]
+    private NavigationManager Navigation { get; set; } = default!;
+
+    private Task NavigateToMobileTabAsync(int tabIndex)
+    {
+        if (tabIndex >= 0 && tabIndex < MobileSettingsRoutes.Length)
+            Navigation.NavigateTo(MobileSettingsRoutes[tabIndex]);
+
+        return Task.CompletedTask;
+    }
 }

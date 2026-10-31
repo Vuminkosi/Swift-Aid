@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using System.Security.Claims;
+using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Ellai;
 using SwiftAid.Contracts.Ellai;
 using SwiftAid.Infrastructure.Persistence;
@@ -24,6 +26,10 @@ public sealed class EllaiPostgresFactAttribute : FactAttribute
 /// Cleans up its own rows; never touches other data.</summary>
 public sealed class EllaiPostgresTests : IAsyncLifetime
 {
+    private static readonly ClaimsPrincipal Principal = new(new ClaimsIdentity(
+        [new Claim(ClaimTypes.NameIdentifier, "ellai-pg-test-actor"),
+            new Claim(ActorContext.AccessEpochClaimType, "1")], "test"));
+    private static ActorContext Actor => ActorContext.FromValidatedPrincipal(Principal);
     private readonly List<string> _sessionIds = new();
 
     public Task InitializeAsync() => Task.CompletedTask;
@@ -49,13 +55,13 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         var service = new EllaiSessionService(new PostgresEllaiSessionStore(db));
         var view = await service.StartAsync(
             new StartSessionRequest(EllaiMode.Ask, "pg-1", "cases", null, "text", "text"),
-            CancellationToken.None);
+            Principal, CancellationToken.None);
         _sessionIds.Add(view.SessionId);
 
         var accepted = await service.SubmitUtteranceAsync(
             new SubmitUtteranceRequest("u-1", view.SessionId, view.SessionVersion,
                 "What is overdue?", null, "typed", 1),
-            CancellationToken.None);
+            Actor, CancellationToken.None);
         Assert.NotNull(accepted);
 
         var checkpoint = await service.SaveCheckpointAsync(
@@ -67,8 +73,9 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         var replay = await service.SubmitUtteranceAsync(
             new SubmitUtteranceRequest("u-1", view.SessionId, view.SessionVersion,
                 "What is overdue?", null, "typed", 1),
-            CancellationToken.None);
-        Assert.Null(replay);
+            Actor, CancellationToken.None);
+        Assert.NotNull(replay);
+        Assert.True(replay.Replay);
 
         // Fresh context (simulated restart) sees exactly one checkpoint.
         await using var db2 = CreateDbContext();
@@ -87,7 +94,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         var service = new EllaiSessionService(new PostgresEllaiSessionStore(db));
         var view = await service.StartAsync(
             new StartSessionRequest(EllaiMode.Ask, "pg-2", "cases", null, "text", "text"),
-            CancellationToken.None);
+            Principal, CancellationToken.None);
         _sessionIds.Add(view.SessionId);
 
         await using var dbA = CreateDbContext();
@@ -98,13 +105,13 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         var first = await serviceA.SubmitUtteranceAsync(
             new SubmitUtteranceRequest("u-a", view.SessionId, view.SessionVersion,
                 "first", null, "typed", 1),
-            CancellationToken.None);
+            Actor, CancellationToken.None);
         Assert.NotNull(first);
 
         var stale = await serviceB.SubmitUtteranceAsync(
             new SubmitUtteranceRequest("u-b", view.SessionId, view.SessionVersion,
                 "stale", null, "typed", 1),
-            CancellationToken.None);
+            Actor, CancellationToken.None);
         Assert.Null(stale);
     }
 
@@ -115,13 +122,13 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         var service = new EllaiSessionService(new PostgresEllaiSessionStore(db));
         var view = await service.StartAsync(
             new StartSessionRequest(EllaiMode.Ask, "pg-4", "cases", null, "text", "text"),
-            CancellationToken.None);
+            Principal, CancellationToken.None);
         _sessionIds.Add(view.SessionId);
 
         var first = await service.SubmitUtteranceAsync(
             new SubmitUtteranceRequest("u-1", view.SessionId, view.SessionVersion,
                 "What is overdue?", null, "typed", 1),
-            CancellationToken.None);
+            Actor, CancellationToken.None);
         Assert.NotNull(first);
         Assert.False(first.Replay);
 
@@ -129,9 +136,9 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         // no new cycle.
         await using var db2 = CreateDbContext();
         var replay = await new EllaiSessionService(new PostgresEllaiSessionStore(db2)).SubmitUtteranceAsync(
-            new SubmitUtteranceRequest("u-1", view.SessionId, first.View.SessionVersion,
+            new SubmitUtteranceRequest("u-1", view.SessionId, view.SessionVersion,
                 "What is overdue?", null, "typed", 1),
-            CancellationToken.None);
+            Actor, CancellationToken.None);
         Assert.NotNull(replay);
         Assert.True(replay.Replay);
         Assert.Equal(1, replay.View.CyclesUsed);
@@ -162,7 +169,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         await fresh.HydrateAsync(sessionId, new PostgresEllaiConsentStore(db2), CancellationToken.None);
         Assert.True(fresh.IsGranted(
             sessionId, EllaiConsentDimension.ReasoningText,
-            EllaiToolBroker.ToolReadPurpose, DateTimeOffset.UtcNow));
+            EllaiToolBroker.ToolReadPurpose, "synthetic", DateTimeOffset.UtcNow));
 
         Assert.True(await store.SetRevokedAsync(sessionId, "grant-pg-1", CancellationToken.None));
         Assert.False(await store.SetRevokedAsync(sessionId, "grant-missing", CancellationToken.None));
@@ -172,7 +179,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         await revoked.HydrateAsync(sessionId, new PostgresEllaiConsentStore(db3), CancellationToken.None);
         Assert.False(revoked.IsGranted(
             sessionId, EllaiConsentDimension.ReasoningText,
-            EllaiToolBroker.ToolReadPurpose, DateTimeOffset.UtcNow));
+            EllaiToolBroker.ToolReadPurpose, "synthetic", DateTimeOffset.UtcNow));
     }
 
     [EllaiPostgresFact]
@@ -207,17 +214,17 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         var service = new EllaiSessionService(new PostgresEllaiSessionStore(db));
         var view = await service.StartAsync(
             new StartSessionRequest(EllaiMode.Ask, "pg-3", "cases", null, "text", "text"),
-            CancellationToken.None);
+            Principal, CancellationToken.None);
         _sessionIds.Add(view.SessionId);
 
-        Assert.True(await service.CancelAsync(view.SessionId, view.SessionVersion, CancellationToken.None));
+        Assert.True(await service.CancelAsync(view.SessionId, view.SessionVersion, Principal, CancellationToken.None));
 
         await using var db2 = CreateDbContext();
         var service2 = new EllaiSessionService(new PostgresEllaiSessionStore(db2));
         var after = await service2.SubmitUtteranceAsync(
             new SubmitUtteranceRequest("u-1", view.SessionId, view.SessionVersion + 1,
                 "hello?", null, "typed", 2),
-            CancellationToken.None);
+            Actor, CancellationToken.None);
         Assert.Null(after);
     }
 

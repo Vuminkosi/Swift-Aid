@@ -1,11 +1,13 @@
 @page "/register"
+@using System.ComponentModel.DataAnnotations
 @implements IAsyncDisposable
 @inject IJSRuntime JS
 @inject NavigationManager Navigation
 
 <PageTitle>Create account | SwiftAid</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.Small" Class="register-page">
+<div class="register-page">
+<AccountEntrySurface>
     <MudPaper Class="pa-4" Elevation="0">
         <SwiftAidPageHeading Eyebrow="Your SwiftAid account"
                              Title="Create an account"
@@ -18,22 +20,52 @@
             <MudText Typo="Typo.body2">Checking registration requirements…</MudText>
         }
 
-        @if (!string.IsNullOrEmpty(_errorMessage))
+        @if (!string.IsNullOrEmpty(_errorMessage) || _isRetrying)
         {
             <div role="alert" aria-atomic="true">
                 <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
                     <MudText>@_errorMessage</MudText>
                 </MudAlert>
             </div>
+            <MudButton Variant="Variant.Text"
+                       Color="Color.Primary"
+                       OnClick="RetryOptionsAsync"
+                       Disabled="@_isLoading"
+                       aria-busy="@_isLoading"
+                       StartIcon="@Icons.Material.Filled.Refresh">
+                Try again
+            </MudButton>
         }
 
-        @if (!_isLoading)
+        @if (!_isLoading && string.IsNullOrEmpty(_errorMessage) && !_passwordSignInAvailable)
         {
-            <MudTextField T="string" Label="Email address" @bind-Value="_email"
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+                Account registration is currently unavailable. You can still continue without an account.
+            </MudAlert>
+            <MudButton Href="@SignInHref" Variant="Variant.Text" Color="Color.Primary" FullWidth="true">
+                Return to sign in
+            </MudButton>
+            <MudButton Href="/report" Variant="Variant.Text" Color="Color.Primary" FullWidth="true">
+                Continue without an account
+            </MudButton>
+        }
+
+        @if (!_isLoading && string.IsNullOrEmpty(_errorMessage) && _passwordSignInAvailable)
+        {
+            <EditForm Model="_registrationForm" OnSubmit="RegisterAsync">
+            <DataAnnotationsValidator />
+            <MudTextField T="string" Label="Full name" @bind-Value="_registrationForm.DisplayName"
+                          For="@(() => _registrationForm.DisplayName)"
+                          Variant="Variant.Outlined" Required="true" Disabled="@_isSubmitting"
+                          Immediate="true" MaxLength="128" autocomplete="name"
+                          aria-label="Full name" />
+            <MudTextField T="string" Label="Email address" @bind-Value="_registrationForm.Email"
+                          For="@(() => _registrationForm.Email)"
                           Variant="Variant.Outlined" Required="true" Disabled="@_isSubmitting"
                           InputType="InputType.Email" Immediate="true" autocomplete="email"
                           aria-label="Email address" />
-            <MudTextField T="string" Label="Password" @bind-Value="_password"
+            <MudTextField T="string" Label="Password" @bind-Value="_registrationForm.Password"
+                          For="@(() => _registrationForm.Password)"
                           Variant="Variant.Outlined" Required="true" Disabled="@_isSubmitting"
                           InputType="@(_showPassword ? InputType.Text : InputType.Password)"
                           Adornment="Adornment.End" AdornmentIcon="@(_showPassword ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
@@ -42,67 +74,115 @@
                           aria-label="Password" />
             <MudText Typo="Typo.caption">@_policyHint</MudText>
             <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
-                       OnClick="RegisterAsync" Disabled="@(!CanSubmit)"
+                       ButtonType="ButtonType.Submit" Disabled="@(_isLoading || _isSubmitting)"
                        Class="auth-cta">
                 @(_isSubmitting ? "Creating account…" : "Sign up")
             </MudButton>
+            <MudStack Row="true" Spacing="2" Justify="Justify.Center" Class="register-legal-links">
+                <MudLink Href="/privacy">Privacy</MudLink>
+                <MudLink Href="/terms">Terms</MudLink>
+            </MudStack>
             <MudDivider Class="my-2" />
-            <MudButton Href="/sign-in" Variant="Variant.Text" Color="Color.Primary" FullWidth="true">
+            <MudButton Href="@SignInHref" Variant="Variant.Text" Color="Color.Primary" FullWidth="true">
                 Already have an account? Sign in
             </MudButton>
+            </EditForm>
         }
 
-        <p class="register-live-status" role="status" aria-live="polite">@_liveMessage</p>
+        <p class="register-live-status" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">@_liveMessage</p>
     </MudPaper>
-</MudContainer>
+</AccountEntrySurface>
+</div>
 
 @code {
     private IJSObjectReference? _module;
     private bool _isLoading = true;
+    private bool _passwordSignInAvailable;
+    private bool _isRetrying;
+    private bool _focusStatusAfterOptionsLoad;
     private bool _isSubmitting;
     private bool _showPassword;
-    private string? _email;
-    private string? _password;
+    private readonly RegistrationForm _registrationForm = new();
     private string? _errorMessage;
     private string _liveMessage = string.Empty;
-    private string _policyHint = "Use at least 8 characters with a number and symbol.";
+    private string _policyHint = string.Empty;
     [SupplyParameterFromQuery(Name = "returnUrl")]
     private string? RequestedReturnUrl { get; set; }
+    private string SafeReturnUrl => SwiftAid.Client.Navigation.LocalReturnUrlPolicy.Resolve(RequestedReturnUrl, "/");
+    private string SignInHref => $"/sign-in?returnUrl={Uri.EscapeDataString(SafeReturnUrl)}";
 
     private bool CanSubmit =>
         !_isLoading && !_isSubmitting &&
-        !string.IsNullOrWhiteSpace(_email) &&
-        !string.IsNullOrWhiteSpace(_password);
+        !string.IsNullOrWhiteSpace(_registrationForm.Email) &&
+        !string.IsNullOrWhiteSpace(_registrationForm.Password);
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender)
+        if (_focusStatusAfterOptionsLoad && _module is not null)
         {
-            return;
+            _focusStatusAfterOptionsLoad = false;
+            await _module.InvokeVoidAsync("focusRegistrationStatus");
         }
 
+        if (firstRender)
+        {
+            await LoadRegistrationOptionsAsync(isRetry: false);
+        }
+    }
+
+    private Task RetryOptionsAsync() => _isLoading ? Task.CompletedTask : LoadRegistrationOptionsAsync(isRetry: true);
+
+    private async Task LoadRegistrationOptionsAsync(bool isRetry)
+    {
+        _isLoading = true;
+        _isRetrying = isRetry;
+        _liveMessage = isRetry ? "Checking registration availability." : string.Empty;
+        if (!isRetry)
+        {
+            _errorMessage = null;
+        }
+
+        await InvokeAsync(StateHasChanged);
         try
         {
-            _module = await JS.InvokeAsync<IJSObjectReference>(
-                "import",
-                "./Components/Pages/Register.razor.js");
-            var policy = await _module.InvokeAsync<PasswordPolicyResult>("loadPasswordPolicy");
-            _policyHint = BuildHint(policy);
+            if (_module is null)
+            {
+                _module = await JS.InvokeAsync<IJSObjectReference>(
+                    "import",
+                    "./Components/Pages/Register.razor.js");
+            }
+
+            var options = await _module.InvokeAsync<RegistrationOptionsResult>("loadRegistrationOptions");
+            _errorMessage = null;
+            _passwordSignInAvailable = options.PasswordSignInAvailable;
+            if (_passwordSignInAvailable)
+            {
+                _policyHint = BuildHint(options.Policy ?? throw new JSException("Password policy is missing."));
+                _liveMessage = "Registration is available.";
+            }
+            else
+            {
+                _liveMessage = "Account registration is unavailable. You can return to sign in or continue without an account.";
+            }
         }
         catch (JSException)
         {
-            _errorMessage = "Registration is temporarily unavailable. Please try again.";
+            _passwordSignInAvailable = false;
+            _errorMessage = "Registration options could not be loaded. Try again.";
+            _liveMessage = "Registration options could not be loaded. Use Try again to retry.";
         }
         finally
         {
             _isLoading = false;
+            _isRetrying = false;
+            _focusStatusAfterOptionsLoad = isRetry;
             await InvokeAsync(StateHasChanged);
         }
     }
 
-    private async Task RegisterAsync()
+    private async Task RegisterAsync(EditContext editContext)
     {
-        if (!CanSubmit || _module is null)
+        if (!CanSubmit || _module is null || !editContext.Validate())
         {
             return;
         }
@@ -116,12 +196,13 @@
         {
             var result = await _module.InvokeAsync<PasswordAuthResult>(
                 "register",
-                _email?.Trim(),
-                _password);
+                _registrationForm.DisplayName?.Trim(),
+                _registrationForm.Email?.Trim(),
+                _registrationForm.Password);
             if (result.Ok)
             {
                 _liveMessage = "Account created. Taking you to SwiftAid.";
-                Navigation.NavigateTo("/welcome-complete", forceLoad: true);
+                Navigation.NavigateTo($"/welcome-complete?returnUrl={Uri.EscapeDataString(SafeReturnUrl)}", forceLoad: true);
                 return;
             }
 
@@ -148,6 +229,16 @@
         if (policy.RequireDigit)
         {
             parts.Add("a number");
+        }
+
+        if (policy.RequireLowercase)
+        {
+            parts.Add("a lowercase letter");
+        }
+
+        if (policy.RequireUppercase)
+        {
+            parts.Add("an uppercase letter");
         }
 
         if (policy.RequireSymbol)
@@ -179,5 +270,25 @@
         bool RequireUppercase,
         bool RequireSymbol);
 
+    private sealed record RegistrationOptionsResult(
+        bool PasswordSignInAvailable,
+        PasswordPolicyResult? Policy);
+
     private sealed record PasswordAuthResult(bool Ok, string? Error);
+
+    private sealed class RegistrationForm
+    {
+        [Required(ErrorMessage = "Enter your full name.")]
+        [StringLength(128, ErrorMessage = "Your name must be 128 characters or fewer.")]
+        public string? DisplayName { get; set; }
+
+        [Required(ErrorMessage = "Enter your email address.")]
+        [EmailAddress(ErrorMessage = "Enter a valid email address.")]
+        [StringLength(256)]
+        public string? Email { get; set; }
+
+        [Required(ErrorMessage = "Enter a password.")]
+        [StringLength(256)]
+        public string? Password { get; set; }
+    }
 }

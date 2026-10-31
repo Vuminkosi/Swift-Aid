@@ -5,6 +5,7 @@ namespace SwiftAid.Infrastructure.Persistence.Ellai;
 public sealed class EllaiSessionEntity
 {
     public string SessionId { get; set; } = "";
+    public string? OwnerActorId { get; set; }
     public long Version { get; set; }
     public string Mode { get; set; } = "";
     public string Status { get; set; } = "";
@@ -27,6 +28,10 @@ public sealed class EllaiUtteranceEntity
     public string SessionId { get; set; } = "";
     public string ClientUtteranceId { get; set; } = "";
     public DateTimeOffset AcceptedAtUtc { get; set; }
+    public string? WorkPayloadJson { get; set; }
+    public DateTimeOffset? LeaseExpiresAtUtc { get; set; }
+    public int AttemptCount { get; set; }
+    public DateTimeOffset? CompletedAtUtc { get; set; }
 }
 
 /// <summary>Durable accepted-turn checkpoint linkage.</summary>

@@ -44,6 +44,7 @@ export function setMotion(preference) {
     }
     const reduced = effectiveReduced(next);
     apply(reduced);
+    window.dispatchEvent(new Event("swiftaid-local-preferences-changed"));
     return reduced;
 }
 

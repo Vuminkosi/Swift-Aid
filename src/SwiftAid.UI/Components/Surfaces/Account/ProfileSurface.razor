@@ -55,7 +55,7 @@ else
                         @_photoError
                     </MudAlert>
                 }
-                <MudStack Row="true" Spacing="2">
+                <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
                     <MudButton HtmlTag="label" Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
                                Disabled="@Snapshot.IsSavingAvatar" for="profile-photo-picker">
                         @(Snapshot.IsSavingAvatar ? "Uploading…" : "Choose photo")

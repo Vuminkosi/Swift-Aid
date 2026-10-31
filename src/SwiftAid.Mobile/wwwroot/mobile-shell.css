@@ -1,0 +1,68 @@
+/* Keep the native mobile shell flush with the WebView edges. Page components
+   provide their own readable content spacing; the shell must not add a frame. */
+@media (max-width: 960px) {
+    .swiftaid-app-shell__header {
+        box-sizing: border-box;
+        min-height: calc(env(safe-area-inset-top) + 1.5rem) !important;
+        padding-block-start: max(0.5rem, calc(env(safe-area-inset-top) * 0.5)) !important;
+        padding-block-end: 0.125rem !important;
+    }
+
+    .swiftaid-app-shell {
+        box-sizing: border-box;
+        width: 100%;
+        max-width: none;
+        min-width: 0;
+        min-height: 100dvh;
+        margin: 0;
+        padding: 0;
+        overflow-x: clip;
+    }
+
+    .swiftaid-app-shell__workspace {
+        box-sizing: border-box;
+        width: 100%;
+        min-width: 0;
+        margin: 0;
+        padding: 0;
+    }
+
+    .swiftaid-app-shell__main {
+        box-sizing: border-box;
+        width: 100%;
+        max-width: none;
+        margin: 0;
+        padding: 0.75rem 0 calc(var(--sa-mobile-nav-height, 4.25rem) + 2rem + env(safe-area-inset-bottom)) !important;
+    }
+
+    .swiftaid-app-shell__main > .mud-layout,
+    .swiftaid-app-shell__main .mobile-page-viewport {
+        box-sizing: border-box;
+        width: 100%;
+        max-width: none;
+        min-width: 0;
+        min-height: 0 !important;
+        margin: 0;
+        padding: 0;
+        justify-content: flex-start !important;
+    }
+
+    .swiftaid-app-shell__main .mud-container,
+    .swiftaid-app-shell__main .public-home-container {
+        box-sizing: border-box;
+        width: 100% !important;
+        max-width: none !important;
+        min-width: 0;
+        margin-inline: 0 !important;
+        padding-inline: 0 !important;
+    }
+
+    .swiftaid-app-shell__main .mud-main-content {
+        box-sizing: border-box;
+        width: 100%;
+        max-width: none;
+        min-height: 0;
+        margin: 0;
+        padding: 0;
+    }
+}

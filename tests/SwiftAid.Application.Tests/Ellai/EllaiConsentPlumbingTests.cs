@@ -1,5 +1,7 @@
 using SwiftAid.Application.Ellai;
 using SwiftAid.Contracts.Ellai;
+using System.Security.Claims;
+using SwiftAid.Application.Authorization;
 
 namespace SwiftAid.Application.Tests.Ellai;
 
@@ -7,8 +9,10 @@ namespace SwiftAid.Application.Tests.Ellai;
 [Trait("Task", "ELL-T03")]
 public sealed class EllaiConsentPlumbingTests
 {
+    private static readonly ClaimsPrincipal Principal = new(new ClaimsIdentity(
+        [new Claim(ClaimTypes.NameIdentifier, "test-actor"), new Claim(ActorContext.AccessEpochClaimType, "1")], "test"));
     private static readonly EllaiToolContext Context = new(
-        "session-1", "epoch-1", "cases", "case-1", 4, true);
+        "session-1", "epoch-1", "cases", "case-1", 4, true, "consent/1", EllaiProcessingClassification.SyntheticDemo);
 
     [Fact]
     public async Task SessionViewReportsRealGrantVersion()
@@ -17,16 +21,16 @@ public sealed class EllaiConsentPlumbingTests
         var sessions = new EllaiSessionService(new InMemoryEllaiSessionStore(), consent);
         var start = await sessions.StartAsync(
             new StartSessionRequest(EllaiMode.Ask, "c-1", "cases", null, "text", "text"),
-            CancellationToken.None);
+            Principal, CancellationToken.None);
 
         Assert.Equal("consent/0", start.ConsentVersion);
 
         consent.Grant(start.SessionId, EllaiConsentDimension.ReasoningText,
-            EllaiToolBroker.ToolReadPurpose, "synthetic", TimeSpan.FromHours(1));
+            EllaiToolBroker.ToolReadPurpose, EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
         var after = await sessions.SubmitUtteranceAsync(
             new SubmitUtteranceRequest("u-1", start.SessionId, start.SessionVersion,
                 "What is overdue?", null, "typed", 1),
-            CancellationToken.None);
+            ActorContext.FromValidatedPrincipal(Principal), CancellationToken.None);
 
         Assert.NotNull(after);
         Assert.Equal("consent/1", after.View.ConsentVersion);
@@ -45,7 +49,7 @@ public sealed class EllaiConsentPlumbingTests
         Assert.Contains("consent", denied.DenialReason ?? string.Empty, StringComparison.OrdinalIgnoreCase);
 
         consent.Grant("session-1", EllaiConsentDimension.ReasoningText,
-            EllaiToolBroker.ToolReadPurpose, "synthetic", TimeSpan.FromHours(1));
+            EllaiToolBroker.ToolReadPurpose, EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
         var allowed = await broker.InvokeAsync(
             Context, new EllaiToolRequest(EllaiToolNames.State, new Dictionary<string, string>()),
             CancellationToken.None);

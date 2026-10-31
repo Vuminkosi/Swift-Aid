@@ -1,0 +1,219 @@
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.UI.Components.Theme
+
+<section class="operations-monitoring-queue" aria-labelledby="monitoring-queue-title">
+    <div class="operations-monitoring-queue__header">
+        <div>
+            <MudText Typo="Typo.overline" Color="Color.Secondary">Operations workspace</MudText>
+            <MudText Typo="Typo.h4" HtmlTag="h1" id="monitoring-queue-title">@Title</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@Description</MudText>
+        </div>
+        @if (OnRetry.HasDelegate)
+        {
+            <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Primary" OnClick="OnRetry" aria-label="Refresh work list" />
+        }
+    </div>
+
+    <div class="operations-monitoring-queue__filters" role="group" aria-label="Filter open work">
+        <MudTextField @bind-Value="_searchText" Immediate="true" Label="Search summary or status" Variant="Variant.Outlined" Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Clearable="true" />
+        <MudSelect T="string" @bind-Value="_kind" Label="Work type" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+            <MudSelectItem Value="@FollowUpFilter">Follow-up</MudSelectItem>
+            <MudSelectItem Value="@EscalationFilter">Escalation</MudSelectItem>
+        </MudSelect>
+        <MudSelect T="string" @bind-Value="_status" Label="Status" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+            @foreach (var value in Statuses)
+            {
+                <MudSelectItem Value="@value">@StatusLabel(value)</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="string" @bind-Value="_assignment" Label="Assignment" Variant="Variant.Outlined" Margin="Margin.Dense">
+            <MudSelectItem Value="@AllAssignments">All assignments</MudSelectItem>
+            <MudSelectItem Value="@Assigned">Assigned</MudSelectItem>
+            <MudSelectItem Value="@Unassigned">Unassigned</MudSelectItem>
+        </MudSelect>
+        <MudSelect T="string" @bind-Value="_dueFilter" Label="Due time" Variant="Variant.Outlined" Margin="Margin.Dense">
+            <MudSelectItem Value="@AllDueDates">Any due date</MudSelectItem>
+            <MudSelectItem Value="@OverdueFilter">Overdue</MudSelectItem>
+            <MudSelectItem Value="@ScheduledFilter">Scheduled or no date</MudSelectItem>
+        </MudSelect>
+    </div>
+
+    @if (State != OperationsSurfaceState.Populated)
+    {
+        <SwiftAidStatePanel State="State.ToSwiftAidViewState()" Title="@StateTitle" Description="@StateDescription" OnRetry="OnRetry" />
+    }
+    else if (FilteredItems.Count == 0)
+    {
+        <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="No matching work" Description="There are no items available to your account that match these filters." />
+    }
+    else
+    {
+        <MudHidden Breakpoint="Breakpoint.MdAndDown">
+            <MudTable Class="operations-monitoring-queue__table" Items="FilteredItems" Hover="true" Dense="true" RowsPerPage="10" aria-label="Follow-ups and escalations">
+                <HeaderContent><MudTh>Work</MudTh><MudTh>Case and summary</MudTh><MudTh>Assignment</MudTh><MudTh>Due</MudTh><MudTh>Status</MudTh></HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Work"><MudChip T="string" Color="@KindColor(context.Kind)" Size="Size.Small">@KindLabel(context.Kind)</MudChip></MudTd>
+                    <MudTd DataLabel="Case and summary">
+                        @{
+                            var openCaseLabel = $"Open case: {context.Summary}, {KindLabel(context.Kind)}, {StatusLabel(context.Status)}";
+                        }
+                        <div class="operations-monitoring-queue__case">
+                            <MudLink Href="@(CaseHref(context.CaseId))" aria-label="@openCaseLabel">@context.Summary</MudLink>
+                        </div>
+                    </MudTd>
+                    <MudTd DataLabel="Assignment">@AssignmentLabel(context.AssigneeActorId)</MudTd>
+                    <MudTd DataLabel="Due">@DueLabel(context)</MudTd>
+                    <MudTd DataLabel="Status"><MudChip T="string" Color="@(context.IsOverdue ? Color.Error : Color.Default)" Size="Size.Small">@StatusLabel(context.Status)</MudChip></MudTd>
+                </RowTemplate>
+                <PagerContent><MudTablePager PageSizeOptions="new int[] { 10, 25, 50 }" /></PagerContent>
+            </MudTable>
+        </MudHidden>
+        <MudHidden Breakpoint="Breakpoint.MdAndDown" Invert="true">
+            <MudStack Spacing="2" aria-label="Follow-ups and escalations">
+                @foreach (var item in MobilePageItems)
+                {
+                    var openCaseLabel = $"Open case: {item.Summary}, {KindLabel(item.Kind)}, {StatusLabel(item.Status)}";
+                    <MudPaper Class="pa-3" Elevation="0" Outlined="true">
+                        <div class="operations-monitoring-queue__mobile-heading">
+                            <MudText Typo="Typo.subtitle2">@item.Summary</MudText>
+                            <MudChip T="string" Color="@(item.IsOverdue ? Color.Error : Color.Default)" Size="Size.Small">@StatusLabel(item.Status)</MudChip>
+                        </div>
+                        <MudText Typo="Typo.body2">@KindLabel(item.Kind) · @AssignmentLabel(item.AssigneeActorId)</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@DueLabel(item)</MudText>
+                        <div class="operations-monitoring-queue__open-case">
+                            <MudLink Href="@(CaseHref(item.CaseId))" aria-label="@openCaseLabel">Open case</MudLink>
+                        </div>
+                    </MudPaper>
+                }
+            </MudStack>
+            @if (MobilePageCount > 1)
+            {
+                <MudPagination Count="@MobilePageCount" Selected="@ClampedMobilePage" SelectedChanged="SetMobilePage" />
+            }
+        </MudHidden>
+    }
+
+</section>
+
+@code {
+    private const int MobilePageSize = 10;
+    private const string FollowUpFilter = "follow-up";
+    private const string EscalationFilter = "escalation";
+    private const string AllAssignments = "all";
+    private const string Assigned = "assigned";
+    private const string Unassigned = "unassigned";
+    private const string AllDueDates = "all";
+    private const string OverdueFilter = "overdue";
+    private const string ScheduledFilter = "scheduled";
+    private string _searchText = string.Empty;
+    private string? _kind;
+    private string? _status;
+    private string _assignment = AllAssignments;
+    private string _dueFilter = AllDueDates;
+    private int _mobilePage = 1;
+
+    [Parameter] public string Title { get; set; } = "Open work";
+    [Parameter] public string Description { get; set; } = "Follow-ups and escalations available to your account.";
+    [Parameter] public OperationsSurfaceState State { get; set; } = OperationsSurfaceState.Loading;
+    [Parameter] public IReadOnlyList<MonitoringQueueItem> Items { get; set; } = Array.Empty<MonitoringQueueItem>();
+    [Parameter] public EventCallback OnRetry { get; set; }
+
+    private IEnumerable<string> Statuses => Items.Select(item => item.Status)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(value => value, StringComparer.OrdinalIgnoreCase);
+
+    private IReadOnlyList<MonitoringQueueItem> FilteredItems => Items
+        .Where(MatchesSearch)
+        .Where(item => string.IsNullOrWhiteSpace(_kind) || string.Equals(KindFilter(item.Kind), _kind, StringComparison.OrdinalIgnoreCase))
+        .Where(item => string.IsNullOrWhiteSpace(_status) || string.Equals(item.Status, _status, StringComparison.OrdinalIgnoreCase))
+        .Where(item => _assignment switch
+        {
+            Assigned => !string.IsNullOrWhiteSpace(item.AssigneeActorId),
+            Unassigned => string.IsNullOrWhiteSpace(item.AssigneeActorId),
+            _ => true
+        })
+        .Where(item => _dueFilter switch
+        {
+            OverdueFilter => item.IsOverdue,
+            ScheduledFilter => !item.IsOverdue,
+            _ => true
+        })
+        .OrderBy(item => item.DueAtUtc ?? DateTimeOffset.MaxValue)
+        .ThenBy(item => item.RecordedAtUtc)
+        .ToArray();
+
+    private int MobilePageCount => Math.Max(1, (FilteredItems.Count + MobilePageSize - 1) / MobilePageSize);
+    private int ClampedMobilePage => Math.Clamp(_mobilePage, 1, MobilePageCount);
+    private IReadOnlyList<MonitoringQueueItem> MobilePageItems => FilteredItems
+        .Skip((ClampedMobilePage - 1) * MobilePageSize)
+        .Take(MobilePageSize)
+        .ToArray();
+
+    private string StateTitle => State switch
+    {
+        OperationsSurfaceState.Loading => "Loading open work",
+        OperationsSurfaceState.Offline => "You are offline",
+        OperationsSurfaceState.Denied => "You do not have access to this work",
+        OperationsSurfaceState.Error => "Open work could not be loaded",
+        OperationsSurfaceState.Unavailable => "Open work is not available right now",
+        _ => "Open work"
+    };
+
+    private string StateDescription => State switch
+    {
+        OperationsSurfaceState.Loading => "Checking the latest work available to your account.",
+        OperationsSurfaceState.Offline => "Reconnect and try again to refresh this list.",
+        OperationsSurfaceState.Denied => "Your account does not have access to this work.",
+        OperationsSurfaceState.Error => "Check your connection and try again.",
+        OperationsSurfaceState.Unavailable => "This work list is not available right now.",
+        _ => string.Empty
+    };
+
+    private bool MatchesSearch(MonitoringQueueItem item) => string.IsNullOrWhiteSpace(_searchText) ||
+        item.Summary.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
+        StatusLabel(item.Status).Contains(_searchText, StringComparison.OrdinalIgnoreCase);
+
+    private Task SetMobilePage(int page)
+    {
+        _mobilePage = Math.Clamp(page, 1, MobilePageCount);
+        return Task.CompletedTask;
+    }
+
+    private static string CaseHref(Guid caseId) => $"/case/{caseId:D}";
+    private static string AssignmentLabel(string? assigneeActorId) => string.IsNullOrWhiteSpace(assigneeActorId)
+        ? "Unassigned"
+        : "Assigned";
+
+    private static string KindFilter(MonitoringQueueKind kind) => kind switch
+    {
+        MonitoringQueueKind.FollowUp => FollowUpFilter,
+        MonitoringQueueKind.Escalation => EscalationFilter,
+        _ => string.Empty
+    };
+
+    private static string KindLabel(MonitoringQueueKind kind) => kind switch
+    {
+        MonitoringQueueKind.FollowUp => "Follow-up",
+        MonitoringQueueKind.Escalation => "Escalation",
+        _ => "Open action"
+    };
+
+    private static string StatusLabel(string status) => status switch
+    {
+        "Scheduled" => "Scheduled",
+        "Completed" => "Completed",
+        "Missed" => "Missed",
+        "Unreachable" => "Unable to reach",
+        "Cancelled" => "Cancelled",
+        "Raised" => "Needs review",
+        "Acknowledged" => "Acknowledged",
+        "Closed" => "Closed",
+        _ => "Status unavailable"
+    };
+
+    private static string DueLabel(MonitoringQueueItem item) => item.DueAtUtc is null
+        ? "No due date"
+        : $"{(item.IsOverdue ? "Overdue · " : string.Empty)}{item.DueAtUtc.Value.ToLocalTime():g}";
+
+    private static Color KindColor(MonitoringQueueKind kind) => kind == MonitoringQueueKind.Escalation ? Color.Warning : Color.Primary;
+}

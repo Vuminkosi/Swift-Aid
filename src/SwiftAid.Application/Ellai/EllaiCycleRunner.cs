@@ -22,21 +22,21 @@ public sealed record EllaiModelTurn(
 /// "denied" for revoked scope or consent.</summary>
 public sealed record EllaiReauthorization(bool Permitted, string BlockedDetail);
 
-/// <summary>Generous multi-turn cycle runner (ELL-T06 groundwork). Safety
-/// ceilings sit far above normal use — 25 reasoning iterations, 60
-/// model-visible tool calls, 5 model-only schema repairs, 100 session
-/// cycles — so legitimate work never hits a quota wall; the $70/token
-/// budgets in <see cref="EllaiUsageLedger"/> are the real governors.
+/// <summary>Bounded multi-turn cycle runner. Each utterance is limited to
+/// 12 model iterations, 24 model-visible tool calls, and 2 model-only schema
+/// repairs so an unproductive provider loop cannot consume the session
+/// budget. The $70/token budgets in <see cref="EllaiUsageLedger"/> remain
+/// the hard spend governors.
 /// Counters never reset on role change, provider fallback or rephrased
 /// goals; one active request per investigation (concurrency safety, not
 /// a quota).</summary>
 public sealed class EllaiCycleRunner(EllaiToolBroker broker)
 {
-    public const int MaxIterations = 25;
+    public const int MaxIterations = 12;
 
-    public const int MaxToolCalls = 60;
+    public const int MaxToolCalls = 24;
 
-    public const int MaxRepairAttempts = 5;
+    public const int MaxRepairAttempts = 2;
 
     private int _activeRequests;
 
@@ -50,7 +50,8 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
         string cycleId = "cycle-1",
         long controllerEpoch = 1,
         EllaiSessionEventJournal? journal = null,
-        Action<EllaiToolRequest, EllaiToolResult>? onToolResult = null)
+        Action<EllaiToolRequest, EllaiToolResult>? onToolResult = null,
+        Func<CancellationToken, Task<bool>>? isExecutionCurrentAsync = null)
     {
         ArgumentNullException.ThrowIfNull(modelTurn);
         ArgumentNullException.ThrowIfNull(validate);
@@ -131,6 +132,13 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
 
                 foreach (var toolRequest in turn.ToolRequests)
                 {
+                    if (isExecutionCurrentAsync is not null
+                        && !await isExecutionCurrentAsync(ct).ConfigureAwait(false))
+                    {
+                        return Stop("The session or its processing permission changed before the tool call.",
+                            iteration, "denied");
+                    }
+
                     if (toolCallsUsed >= MaxToolCalls)
                     {
                         return Stop("Model-visible tool budget exhausted.", iteration, "budget");
@@ -179,8 +187,8 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
             // A final turn of reads with no decision and no room left is an
             // honest unreviewed stop (RT-55), not a budget exhaustion: the
             // observation was accepted and stored, but never reasoned on.
-            return Stop("Reasoning iteration budget exhausted.", MaxIterations,
-                lastTurnUnreviewed ? "unreviewed" : "budget");
+            return Stop("Reasoning iteration limit reached before a final decision.", MaxIterations,
+                lastTurnUnreviewed ? "unreviewed" : "iterations");
         }
         finally
         {

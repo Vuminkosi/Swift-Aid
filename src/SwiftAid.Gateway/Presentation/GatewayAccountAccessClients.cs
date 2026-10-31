@@ -1,22 +1,28 @@
 using System.Security.Claims;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
 using Microsoft.Extensions.Options;
 using SwiftAid.Client.Presentation;
 using SwiftAid.Infrastructure.Configuration;
+using SwiftAid.Infrastructure.Identity;
 
 namespace SwiftAid.Gateway.Presentation;
 
 /// <summary>Maps the existing Gateway sign-in routes and authenticated principal to account presentation.</summary>
 public sealed class GatewayAccountPresentationClient(
     AuthenticationStateProvider authenticationStateProvider,
+    UserManager<SwiftAidUser> userManager,
+    IUserProfileService profileService,
     IOptions<FederationOptions> federationOptions,
     NavigationManager navigationManager,
     IJSRuntime jsRuntime) : IAccountPresentationClient
 {
     private const string Capability = "account-session";
     private readonly AuthenticationStateProvider _authenticationStateProvider = authenticationStateProvider;
+    private readonly UserManager<SwiftAidUser> _userManager = userManager;
+    private readonly IUserProfileService _profileService = profileService;
     private readonly FederationOptions _federationOptions = federationOptions.Value;
     private readonly NavigationManager _navigationManager = navigationManager;
     private readonly IJSRuntime _jsRuntime = jsRuntime;
@@ -30,7 +36,7 @@ public sealed class GatewayAccountPresentationClient(
             var principal = authentication.User;
             var isSignedIn = principal.Identity?.IsAuthenticated == true;
             var displayName = isSignedIn
-                ? principal.FindFirst(ClaimTypes.Name)?.Value ?? principal.Identity?.Name
+                ? await ResolveCurrentAccountNameAsync(principal, cancellationToken).ConfigureAwait(false)
                 : null;
             var state = new AccountPresentationState(
                 isSignedIn,
@@ -64,7 +70,7 @@ public sealed class GatewayAccountPresentationClient(
                 "That sign-in option is unavailable."));
         }
 
-        var returnUrl = Uri.EscapeDataString("/account");
+        var returnUrl = Uri.EscapeDataString("/dashboard");
         _navigationManager.NavigateTo($"/sign-in?returnUrl={returnUrl}", forceLoad: true);
         return Task.FromResult(Success(new AccountPresentationState(
             false,
@@ -90,7 +96,7 @@ public sealed class GatewayAccountPresentationClient(
                     Metadata(),
                     "Sign-out could not be confirmed. Try again.");
 
-            _navigationManager.NavigateTo("/account", forceLoad: true);
+            _navigationManager.NavigateTo("/", forceLoad: true);
             return Success(new AccountPresentationState(false, null, GetProviders(), "You are signed out."));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -119,6 +125,52 @@ public sealed class GatewayAccountPresentationClient(
             string.IsNullOrWhiteSpace(provider.DisplayName) ? provider.ProviderId : provider.DisplayName,
             provider.CallbackVerified)));
         return providers;
+    }
+
+    private static string? ResolveDisplayName(ClaimsPrincipal principal)
+    {
+        var identity = principal.Identity;
+        var candidates = new[]
+        {
+            principal.FindFirst(ClaimTypes.Name)?.Value,
+            identity?.Name,
+            principal.FindFirst("name")?.Value,
+            principal.FindFirst("preferred_username")?.Value,
+            principal.FindFirst(ClaimTypes.Email)?.Value,
+            principal.FindFirst("email")?.Value
+        };
+
+        return candidates.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
+    }
+
+    private async Task<string?> ResolveCurrentAccountNameAsync(
+        ClaimsPrincipal principal,
+        CancellationToken cancellationToken)
+    {
+        var user = await _userManager.GetUserAsync(principal).ConfigureAwait(false);
+        if (user is null)
+        {
+            return ResolveDisplayName(principal);
+        }
+
+        string? profileDisplayName = null;
+        try
+        {
+            var profile = await _profileService.GetAsync(user.Id, cancellationToken).ConfigureAwait(false);
+            profileDisplayName = profile?.DisplayName;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // The Identity record still supplies a current account name if
+            // optional profile storage is temporarily unavailable.
+        }
+
+        return new[] { profileDisplayName, user.UserName, user.Email, ResolveDisplayName(principal) }
+            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
     }
 
     private static UiCapabilityResult<AccountPresentationState> Success(AccountPresentationState state) =>

@@ -49,7 +49,9 @@
 
     <EditForm EditContext="_editContext" OnSubmit="HandleSubmitAsync">
         <DataAnnotationsValidator />
-        <ValidationSummary class="guided-report__validation" />
+        <div class="guided-report__validation" tabindex="-1" aria-label="Report validation errors" @ref="_validationSummary">
+            <ValidationSummary />
+        </div>
 
         @if (_step == 0)
         {
@@ -426,8 +428,10 @@
     private ValidationMessageStore _messageStore = default!;
     private PublicReportDraft? _observedDraft;
     private ElementReference _stepHeading;
+    private ElementReference _validationSummary;
     private MudTextField<string>? _observationsField;
     private bool _focusStepHeadingAfterRender;
+    private bool _focusValidationSummaryAfterRender;
     private int _step;
     private string? _stepError;
     private bool _showManualPlaces;
@@ -524,6 +528,11 @@
         {
             _focusStepHeadingAfterRender = false;
             await _stepHeading.FocusAsync();
+        }
+        else if (_focusValidationSummaryAfterRender)
+        {
+            _focusValidationSummaryAfterRender = false;
+            await _validationSummary.FocusAsync();
         }
     }
 
@@ -985,6 +994,7 @@
         ClearStepValidation();
         if (!ValidateDetails())
         {
+            _focusValidationSummaryAfterRender = true;
             return;
         }
 

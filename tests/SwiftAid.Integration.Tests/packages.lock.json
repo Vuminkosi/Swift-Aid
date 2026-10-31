@@ -928,6 +928,7 @@
           "Microsoft.AspNetCore.Components.WebAssembly": "[10.0.14, )",
           "Microsoft.NET.Sdk.WebAssembly.Pack": "[10.0.14, )",
           "MudBlazor": "[9.11.0, )",
+          "SwiftAid.Client": "[1.0.0, )",
           "SwiftAid.Contracts": "[1.0.0, )",
           "SwiftAid.GuestIntake": "[1.0.0, )",
           "SwiftAid.UI": "[1.0.0, )"
@@ -1011,6 +1012,7 @@
         "dependencies": {
           "Bit.Bonboarding": "[10.7.0, )",
           "Blazor.Lottie.Player": "[1.0.6, )",
+          "Microsoft.AspNetCore.Components.Authorization": "[10.0.14, )",
           "Microsoft.AspNetCore.Components.Web": "[10.0.14, )",
           "MudBlazor": "[9.11.0, )",
           "SwiftAid.Contracts": "[1.0.0, )"
@@ -1117,6 +1119,16 @@
         "contentHash": "W5g9xaWjPudw7GNwxCqP9uLxpwE1+LkRf4f8i0aF6Ga1AY3qU2UvBa4+41Opz15sO5oTCLwYYXcvb477Ry8NZQ==",
         "dependencies": {
           "Microsoft.IdentityModel.Protocols.OpenIdConnect": "8.19.2"
+        }
+      },
+      "Microsoft.AspNetCore.Components.Authorization": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.14, )",
+        "resolved": "10.0.14",
+        "contentHash": "u7lHiI9Z7y9nch44Kfc60VMhzAXO2pxmRzDWTHM9ts4J2Oe9u+zgLucyxY/cZlIW6OjP8/GMvwR8YdnfQbfHRQ==",
+        "dependencies": {
+          "Microsoft.AspNetCore.Authorization": "10.0.14",
+          "Microsoft.AspNetCore.Components": "10.0.14"
         }
       },
       "Microsoft.AspNetCore.Components.Web": {

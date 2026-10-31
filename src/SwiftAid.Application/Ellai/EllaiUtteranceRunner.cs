@@ -6,7 +6,8 @@ namespace SwiftAid.Application.Ellai;
 /// is false only when the run was refused before any model call (missing
 /// reasoning-text consent); the refusals journal a blocked activity event
 /// so the composer never goes silently dead.</summary>
-public sealed record EllaiUtteranceOutcome(bool Started, bool Completed, string? StopReason);
+public sealed record EllaiUtteranceOutcome(
+    bool Started, bool Completed, string? StopReason, string? DisplayText = null);
 
 /// <summary>Dependencies for one background run, resolved per scope by the
 /// hosting worker. Null activity/journal degrades to local-only progress.</summary>
@@ -14,12 +15,14 @@ public sealed record EllaiUtteranceServices(
     EllaiReasoningLoop Loop,
     EllaiActivityStatusCoordinator? Activity,
     EllaiSessionEventJournal? Journal,
-    EllaiConsentService Consent);
+    EllaiConsentService Consent,
+    IEllaiSessionStore? Sessions = null,
+    IEllaiConsentStore? ConsentStore = null);
 
 /// <summary>Background execution of one accepted utterance: consent-gated
 /// reasoning loop with ledger, activity and journal wiring. The utterance
 /// reaches the provider only under a live ReasoningText grant for
-/// <c>ellai-tool-read</c>; without one the run refuses and projects the
+/// the work item's explicit consent purpose; without one the run refuses and projects the
 /// blocked template. Pure small talk answers with no activity (RT-53).</summary>
 public static class EllaiUtteranceRunner
 {
@@ -45,10 +48,20 @@ public static class EllaiUtteranceRunner
             throw new ArgumentOutOfRangeException(nameof(maxTokensPerTurn));
         }
 
+        if (!EllaiPolicyService.IsContributorEligible(
+                work.ProcessingLabel,
+                work.DataClassification))
+        {
+            services.Journal?.Append(work.SessionId, "activity", "blocked",
+                "This information cannot be processed by the configured assistant route.", DateTimeOffset.UtcNow);
+            return new EllaiUtteranceOutcome(false, false,
+                "Utterance classification is unknown or ineligible for the configured route.");
+        }
+
         var now = DateTimeOffset.UtcNow;
         if (!services.Consent.IsGranted(
                 work.SessionId, EllaiConsentDimension.ReasoningText,
-                EllaiToolBroker.ToolReadPurpose, now))
+                work.ConsentPurpose, work.DataClassification, now))
         {
             services.Journal?.Append(work.SessionId, "activity", "blocked",
                 "I can't check that with the current permissions.", now);
@@ -59,14 +72,55 @@ public static class EllaiUtteranceRunner
         var context = new EllaiToolContext(
             work.SessionId, work.ScopeEpoch, work.FeatureId, work.ResourceId,
             EllaiCycleRunner.MaxToolCalls, work.ContributorEligible,
-            work.ConsentVersion, "general", work.Actor);
+            work.ConsentVersion, work.DataClassification, work.Actor, work.AllowedTools, work.ConsentPurpose);
         var request = new EllaiLoopRequest(
             context, work.Utterance, ForMode(work.Mode),
-            EllaiToolBroker.DescribeCatalogue(), maxTokensPerTurn,
+            EllaiToolBroker.DescribeCatalogue(work.AllowedTools), maxTokensPerTurn,
             work.CycleId, work.ControllerEpoch);
+
+        async Task<bool> IsExecutionCurrentAsync(CancellationToken fenceCt)
+        {
+            if (services.Sessions is null)
+            {
+                return true;
+            }
+
+            if (services.ConsentStore is not null)
+            {
+                await services.Consent.HydrateAsync(work.SessionId, services.ConsentStore, fenceCt)
+                    .ConfigureAwait(false);
+            }
+
+            var current = await services.Sessions.GetAsync(work.SessionId, fenceCt).ConfigureAwait(false);
+            return current is not null
+                && string.Equals(current.Status, "Active", StringComparison.Ordinal)
+                && current.InteractionEpoch == work.ControllerEpoch
+                && string.Equals(current.ScopeEpoch, work.ScopeEpoch, StringComparison.Ordinal)
+                && string.Equals(current.OwnerActorId, work.Actor.ActorId, StringComparison.Ordinal)
+                && services.Consent.IsGranted(
+                    work.SessionId,
+                    EllaiConsentDimension.ReasoningText,
+                    work.ConsentPurpose,
+                    work.DataClassification,
+                    DateTimeOffset.UtcNow);
+        }
+
+        Task<bool> ReauthorizeAsync(int _, CancellationToken fenceCt) =>
+            IsExecutionCurrentAsync(fenceCt);
+
         var outcome = await services.Loop.RunAsync(
-            request, ct, activity: services.Activity, journal: services.Journal).ConfigureAwait(false);
-        return new EllaiUtteranceOutcome(true, outcome.Completed, outcome.StopReason);
+            request,
+            ct,
+            reauthorizeAsync: services.Sessions is null ? null : ReauthorizeAsync,
+            activity: services.Activity,
+            journal: services.Journal,
+            isExecutionCurrentAsync: services.Sessions is null ? null : IsExecutionCurrentAsync)
+            .ConfigureAwait(false);
+        return new EllaiUtteranceOutcome(
+            true,
+            outcome.Completed,
+            outcome.StopReason,
+            outcome.Completed ? outcome.Decision?.DisplayText : null);
     }
 
     private static EllaiRoleOverlay ForMode(EllaiMode mode) => mode switch

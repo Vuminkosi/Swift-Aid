@@ -171,6 +171,7 @@ public sealed class CaseDetailWorkActionRefreshTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddMudServices();
+        services.AddSingleton<NavigationManager, TestNavigationManager>();
         services.AddSingleton<IJSRuntime, NoOpJsRuntime>();
         services.AddSingleton<ICaseTimelineClient, EmptyCaseTimelineClient>();
         services.AddSingleton<ICaseDiscussionClient, EmptyCaseDiscussionClient>();
@@ -251,7 +252,7 @@ public sealed class CaseDetailWorkActionRefreshTests
 
     private sealed class EmptyCaseTimelineClient : ICaseTimelineClient
     {
-        public Task<CaseTimelineResult> GetAsync(Guid caseId, int? limit, CancellationToken cancellationToken = default) =>
+        public Task<CaseTimelineResult> GetAsync(Guid caseId, int? limit, CancellationToken cancellationToken = default, long? beforeAggregateVersion = null) =>
             Task.FromResult(new CaseTimelineResult(CaseTimelineAccess.NotFoundOrNotAuthorized, null));
     }
 
@@ -375,6 +376,15 @@ public sealed class CaseDetailWorkActionRefreshTests
             CancellationToken cancellationToken,
             object?[]? args) =>
             ValueTask.FromResult(default(TValue)!);
+    }
+
+    private sealed class TestNavigationManager : NavigationManager
+    {
+        public TestNavigationManager() => Initialize("http://localhost/", "http://localhost/cases");
+
+        protected override void NavigateToCore(string uri, bool forceLoad) => Uri = ToAbsoluteUri(uri).ToString();
+
+        protected override void NavigateToCore(string uri, NavigationOptions options) => Uri = ToAbsoluteUri(uri).ToString();
     }
 }
 #pragma warning restore BL0006

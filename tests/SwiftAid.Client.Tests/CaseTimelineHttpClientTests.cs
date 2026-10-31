@@ -87,11 +87,11 @@ public sealed class CaseTimelineHttpClientTests
         var client = new CaseTimelineHttpClient(
             new HttpClient(handler) { BaseAddress = new Uri("https://gateway.test/") });
 
-        await client.GetAsync(header.CaseId, 25);
+        await client.GetAsync(header.CaseId, 25, beforeAggregateVersion: 12);
 
         Assert.NotNull(handler.LastRequest);
         Assert.Equal(
-            $"/api/v1/cases/{header.CaseId:D}/timeline?limit=25",
+            $"/api/v1/cases/{header.CaseId:D}/timeline?limit=25&beforeAggregateVersion=12",
             handler.LastRequest!.RequestUri!.PathAndQuery);
     }
 

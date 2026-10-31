@@ -1,29 +1,55 @@
-export async function loadPasswordPolicy() {
-    try {
-        const response = await fetch("/auth/password/policy", {
-            credentials: "same-origin",
-            cache: "no-store",
-            headers: { Accept: "application/json" }
-        });
+export async function loadRegistrationOptions() {
+    const capabilityResponse = await fetch("/auth/capabilities", {
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { Accept: "application/json" }
+    });
 
-        if (!response.ok) {
-            return { minimumLength: 8, requireDigit: true, requireLowercase: true, requireUppercase: false, requireSymbol: true };
-        }
-
-        const policy = await response.json();
-        return {
-            minimumLength: Number.isInteger(policy?.minimumLength) ? policy.minimumLength : 8,
-            requireDigit: policy?.requireDigit !== false,
-            requireLowercase: policy?.requireLowercase === true,
-            requireUppercase: policy?.requireUppercase === true,
-            requireSymbol: policy?.requireSymbol !== false
-        };
-    } catch {
-        return { minimumLength: 8, requireDigit: true, requireLowercase: true, requireUppercase: false, requireSymbol: true };
+    if (!capabilityResponse.ok) {
+        throw new Error("Registration capabilities are unavailable.");
     }
+
+    const capability = await capabilityResponse.json();
+    if (typeof capability?.passwordSignInAvailable !== "boolean") {
+        throw new Error("Registration capabilities are invalid.");
+    }
+
+    if (!capability.passwordSignInAvailable) {
+        return { passwordSignInAvailable: false, policy: null };
+    }
+
+    const response = await fetch("/auth/password/policy", {
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { Accept: "application/json" }
+    });
+
+    if (!response.ok) {
+        throw new Error("Password policy is unavailable.");
+    }
+
+    const policy = await response.json();
+    if (!Number.isInteger(policy?.minimumLength) ||
+        typeof policy.requireDigit !== "boolean" ||
+        typeof policy.requireLowercase !== "boolean" ||
+        typeof policy.requireUppercase !== "boolean" ||
+        typeof policy.requireSymbol !== "boolean") {
+        throw new Error("Password policy is invalid.");
+    }
+
+    return {
+        passwordSignInAvailable: true,
+        policy: {
+            minimumLength: policy.minimumLength,
+            requireDigit: policy.requireDigit,
+            requireLowercase: policy.requireLowercase,
+            requireUppercase: policy.requireUppercase,
+            requireSymbol: policy.requireSymbol
+        }
+    };
 }
 
-export async function register(email, password) {
+export async function register(displayName, email, password) {
     let requestToken;
     try {
         requestToken = await fetchRequestToken();
@@ -42,7 +68,7 @@ export async function register(email, password) {
                 "Content-Type": "application/json",
                 "X-CSRF-TOKEN": requestToken
             },
-            body: JSON.stringify({ email, password })
+            body: JSON.stringify({ displayName, email, password })
         });
     } catch {
         return { ok: false, error: "Registration is temporarily unavailable. Check your connection and try again." };
@@ -57,6 +83,10 @@ export async function register(email, password) {
     }
 
     return { ok: false, error: await readErrorMessage(response) };
+}
+
+export function focusRegistrationStatus() {
+    document.querySelector(".register-live-status")?.focus();
 }
 
 async function fetchRequestToken() {

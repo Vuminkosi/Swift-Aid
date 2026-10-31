@@ -1,0 +1,23 @@
+.register-page {
+    min-height: calc(100svh - 4rem);
+    padding-block: clamp(1.25rem, 4vw, 3rem);
+}
+
+.register-live-status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+@media (max-width: 850px) {
+    .register-page {
+        min-height: calc(100svh - 4.25rem);
+        padding-block: 1.25rem;
+    }
+}

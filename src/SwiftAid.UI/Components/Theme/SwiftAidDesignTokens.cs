@@ -20,6 +20,8 @@ public static class SwiftAidDesignTokens
     public const string ActionTeal = "#045676";
     public const string DarkTeal = "#23A4DA";
     public const string DarkLink = "#23A4DA";
+    public const string TextSecondaryLight = "#535752";
+    public const string TextSecondaryDark = "#B3BDB4";
 
     // Status pills observed on the reference boards.
     public const string Escalated = "#B4233A";
@@ -39,7 +41,7 @@ public static class SwiftAidDesignTokens
     public const string SeriesCholera = "#1778EC";
     public const string SeriesMalaria = "#27A961";
     public const string SeriesMeasles = "#F59E0B";
-    public const string SeriesAnimal = "#8B5CF6";
+    public const string SeriesAnimal = "#10A3A8";
     public const string SeriesTb = "#EF4444";
 
     // Map cluster badges.

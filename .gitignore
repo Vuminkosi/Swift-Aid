@@ -467,3 +467,27 @@ swiftaid-fcm-service-account.json
 /docs/ellai
 /design
 infra/.env-backup
+/.tmp-smoke
+/infra/testing
+
+# Keep the owner-requested Ellai policy updates visible while retaining the
+# directory's existing ignore-by-default behavior.
+!/docs/ellai/
+/docs/ellai/*
+!/docs/ellai/DECISIONS.md
+!/docs/ellai/KNOWN-LIMITATIONS.md
+!/docs/ellai/CAPABILITIES.md
+!/docs/ellai/RUNBOOK.md
+!/docs/ellai/REPOSITORY-MAP.md
+!/docs/ellai/IMPLEMENTATION-STATUS.md
+!/docs/ellai/ellai-spec.md
+!/docs/ellai/ellai-implementation.md
+!/docs/ellai/ellai-system-instruction.md
+!/docs/ellai/requirements/
+/docs/ellai/requirements/*
+!/docs/ellai/requirements/ellai-voice-implementation.md
+!/docs/ellai/requirements/ellai-real-tools-multiturn-progress.md
+/docs/ellai
+implementation.md
+implementation.md
+spec.md

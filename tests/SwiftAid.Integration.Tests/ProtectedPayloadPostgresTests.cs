@@ -1,10 +1,15 @@
 using System.Collections.Immutable;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using SwiftAid.Application.Cases.Commands;
@@ -18,6 +23,47 @@ namespace SwiftAid.Integration.Tests;
 [Collection(CaseAuthorityPostgresCollection.Name)]
 public sealed class ProtectedPayloadPostgresTests
 {
+    [Fact]
+    public void PersistentCookieProviderReadsAuthenticationTicketAfterProviderRecreation()
+    {
+        using var keyRing = ProtectedPayloadTestKeyRing.Create();
+        var options = keyRing.CreateOptions();
+        var environment = new TestHostEnvironment(Environments.Production);
+        var firstProvider = ProtectedPayloadDataProtectionProviderFactory.Create(options, environment);
+        string protectedTicket;
+
+        using (var firstServices = CreateCookieServiceProvider(firstProvider))
+        {
+            var cookieOptions = firstServices
+                .GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
+                .Get(IdentityConstants.ApplicationScheme);
+            var identity = new ClaimsIdentity(
+                [new Claim(ClaimTypes.NameIdentifier, "synthetic-user")],
+                IdentityConstants.ApplicationScheme);
+            var ticket = new AuthenticationTicket(
+                new ClaimsPrincipal(identity),
+                new AuthenticationProperties
+                {
+                    IsPersistent = true,
+                    ExpiresUtc = DateTimeOffset.UtcNow.AddDays(1)
+                },
+                IdentityConstants.ApplicationScheme);
+
+            protectedTicket = cookieOptions.TicketDataFormat.Protect(ticket);
+        }
+
+        firstProvider.Dispose();
+        var restartedProvider = ProtectedPayloadDataProtectionProviderFactory.Create(options, environment);
+        using var restartedServices = CreateCookieServiceProvider(restartedProvider);
+        var restartedCookieOptions = restartedServices
+            .GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
+            .Get(IdentityConstants.ApplicationScheme);
+        var restoredTicket = restartedCookieOptions.TicketDataFormat.Unprotect(protectedTicket);
+
+        Assert.NotNull(restoredTicket);
+        Assert.Equal("synthetic-user", restoredTicket.Principal.FindFirstValue(ClaimTypes.NameIdentifier));
+    }
+
     [CaseAuthorityPostgresFact]
     public async Task StagesOnlyCiphertextAndRecreatedProviderOpensPersistedPayload()
     {
@@ -510,6 +556,19 @@ public sealed class ProtectedPayloadPostgresTests
                 Directory.Delete(_rootPath, recursive: true);
             }
         }
+    }
+
+    private static ServiceProvider CreateCookieServiceProvider(
+        ProtectedPayloadDataProtectionProvider dataProtectionProvider)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddDataProtection();
+        services.AddAuthentication(IdentityConstants.ApplicationScheme)
+            .AddCookie(IdentityConstants.ApplicationScheme);
+        services.AddSingleton(dataProtectionProvider);
+        GatewayAuthenticationRegistration.ConfigurePersistentCookieDataProtection(services);
+        return services.BuildServiceProvider();
     }
 
     private sealed class TestHostEnvironment(string environmentName) : IHostEnvironment

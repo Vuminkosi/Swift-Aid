@@ -1,9 +1,9 @@
 @using SwiftAid.UI.Components.Surfaces.Account
 @using SwiftAid.UI.Components.Theme
 
-<MudContainer MaxWidth="MaxWidth.Small" Class="public-resource-surface account-surface">
+<div class="public-resource-surface account-surface">
     <SwiftAidPageHeading Eyebrow="Account" Title="Your account"
-                         Description="Manage how you sign in and which workspace you view. Changing either never removes reports saved on this device."
+                         Description="@AccountDescription"
                          HeadingId="account-heading" />
 
     @if (Snapshot.ViewState == AccountViewState.Loading)
@@ -24,26 +24,19 @@
     }
     else
     {
-        <MudPaper Class="account-card account-hero" Elevation="0">
-            <MudAvatar Color="Color.Primary" Variant="Variant.Filled" Size="Size.Large" aria-hidden="true">
-                @AvatarInitials
-            </MudAvatar>
-            <div class="account-hero__identity">
-                <MudText Typo="Typo.subtitle1" HtmlTag="h2">@DisplayTitle</MudText>
-                <MudText Typo="Typo.body2">@DisplaySubtitle</MudText>
-            </div>
-            <div class="account-hero__side">
-                @if (Snapshot.IsSignedIn)
-                {
+        @if (Snapshot.IsSignedIn)
+        {
+            <MudPaper Class="account-card account-hero" Elevation="0">
+                <MudAvatar Color="Color.Primary" Variant="Variant.Filled" Size="Size.Large" aria-hidden="true">
+                    @AvatarInitials
+                </MudAvatar>
+                <div class="account-hero__identity">
+                    <MudText Typo="Typo.subtitle1" HtmlTag="h2">@DisplayTitle</MudText>
+                    <MudText Typo="Typo.body2">@DisplaySubtitle</MudText>
+                </div>
+                <div class="account-hero__side">
                     <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">Signed in</MudChip>
-                }
-                else
-                {
-                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">Guest</MudChip>
-                }
-            </div>
-            @if (Snapshot.IsSignedIn)
-            {
+                </div>
                 @if (OnSignOut.HasDelegate)
                 {
                     <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@_actionInProgress"
@@ -56,8 +49,57 @@
                 {
                     <MudText Typo="Typo.caption">Sign-out is unavailable right now.</MudText>
                 }
-            }
-        </MudPaper>
+            </MudPaper>
+        }
+
+        @if (!Snapshot.IsSignedIn && (!string.IsNullOrWhiteSpace(SignInHref)
+            || !string.IsNullOrWhiteSpace(RegisterHref)
+            || !string.IsNullOrWhiteSpace(GuestReportHref)))
+        {
+            <MudPaper Class="account-card account-guest-panel" Elevation="0">
+                <div class="account-guest-panel__identity">
+                    <MudAvatar Color="Color.Primary" Variant="Variant.Filled" Size="Size.Large" aria-hidden="true">G</MudAvatar>
+                    <div>
+                        <MudText Typo="Typo.subtitle1" HtmlTag="h2">Guest access</MudText>
+                        <MudText Typo="Typo.body2">Reports saved on this device stay here.</MudText>
+                    </div>
+                </div>
+                <div class="account-guest-panel__next">
+                    <MudText Typo="Typo.subtitle2" HtmlTag="h3">Choose how to continue</MudText>
+                    <div class="account-guest-panel__primary-actions">
+                        @if (!string.IsNullOrWhiteSpace(SignInHref))
+                        {
+                            <MudButton Href="@SignInHref" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Login">
+                                Sign in
+                            </MudButton>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(RegisterHref))
+                        {
+                            <MudButton Href="@RegisterHref" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.PersonAdd">
+                                Create account
+                            </MudButton>
+                        }
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(GuestReportHref))
+                    {
+                        <MudButton Href="@GuestReportHref" Variant="Variant.Text" Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Outlined.Assignment">
+                            Continue to a guest report
+                        </MudButton>
+                    }
+                </div>
+            </MudPaper>
+        }
+        else if (!Snapshot.IsSignedIn)
+        {
+            <MudPaper Class="account-card account-hero" Elevation="0">
+                <MudAvatar Color="Color.Primary" Variant="Variant.Filled" Size="Size.Large" aria-hidden="true">G</MudAvatar>
+                <div class="account-hero__identity">
+                    <MudText Typo="Typo.subtitle1" HtmlTag="h2">Guest access</MudText>
+                    <MudText Typo="Typo.body2">Reports saved on this device stay here.</MudText>
+                </div>
+            </MudPaper>
+        }
 
         <MudMessageBox @ref="_signOutBox" Title="Sign out?">
             <MessageContent>
@@ -72,7 +114,9 @@
             </NoButton>
         </MudMessageBox>
 
-        <SwiftAidSettingsGroup Label="Sign-in" HeadingId="account-signin-heading">
+        @if (Snapshot.IsSignedIn)
+        {
+        <SwiftAidSettingsGroup Label="Sign-in methods" HeadingId="account-signin-heading">
             @if (Snapshot.Providers.Count == 0)
             {
                 <li class="account-status-item">
@@ -109,9 +153,16 @@
             }
         </SwiftAidSettingsGroup>
         <MudText Typo="Typo.body2">Signing in never grants workspace access by itself.</MudText>
+        }
 
         <SwiftAidSettingsGroup Label="Workspace" HeadingId="account-workspace-heading">
-            @if (!Snapshot.WorkspacesAvailable)
+            @if (!Snapshot.IsSignedIn)
+            {
+                <SwiftAidSettingsRow Title="Sign-in required"
+                                     Description="Sign in to see available workspaces. Access still depends on your verified permissions."
+                                     Icon="@Icons.Material.Outlined.Lock" />
+            }
+            else if (!Snapshot.WorkspacesAvailable)
             {
                 <li class="account-status-item">
                     <SwiftAidSettingsStatus Title="Couldn't load workspaces."
@@ -155,7 +206,10 @@
                 }
             }
         </SwiftAidSettingsGroup>
-        <MudText Typo="Typo.body2">Switching changes only what you view, never what you can access.</MudText>
+        @if (Snapshot.IsSignedIn)
+        {
+            <MudText Typo="Typo.body2">Switching changes only what you view, never what you can access.</MudText>
+        }
 
         @if (Snapshot.IsSignedIn)
         {
@@ -243,7 +297,7 @@
             </MudAlert>
         }
     }
-</MudContainer>
+</div>
 
 @code {
     private bool _actionInProgress;
@@ -254,6 +308,15 @@
     [Parameter] public EventCallback OnSignOut { get; set; }
     [Parameter] public EventCallback<string> OnSelectWorkspace { get; set; }
     [Parameter] public EventCallback OnRefresh { get; set; }
+
+    /// <summary>Optional web sign-in entry point for signed-out visitors.</summary>
+    [Parameter] public string? SignInHref { get; set; }
+
+    /// <summary>Optional account registration entry point.</summary>
+    [Parameter] public string? RegisterHref { get; set; }
+
+    /// <summary>Optional guest report entry point.</summary>
+    [Parameter] public string? GuestReportHref { get; set; }
 
     /// <summary>
     /// Optional deep link to a dedicated sign-in methods page (web). When null
@@ -316,6 +379,10 @@
     [Parameter] public Func<Task<bool>>? ConfirmSignOutAsync { get; set; }
 
     private MudBlazor.MudMessageBox? _signOutBox;
+
+    private string AccountDescription => Snapshot.IsSignedIn
+        ? "Manage your account, workspace access, and preferences."
+        : "Manage preferences and local reports, or sign in to view workspace access.";
 
     private string DisplayTitle => Snapshot.IsSignedIn
         ? (string.IsNullOrWhiteSpace(Snapshot.DisplayName) ? "Signed in" : Snapshot.DisplayName)

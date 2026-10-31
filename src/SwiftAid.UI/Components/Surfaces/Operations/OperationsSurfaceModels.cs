@@ -95,6 +95,7 @@ public sealed record DashboardCategoryView(
     bool IsSuppressed);
 
 public sealed record DashboardCaseView(
+    string CaseId,
     string DisplayReference,
     DashboardSectorView SubjectSector,
     string ReportedConditionLabel,
@@ -102,7 +103,13 @@ public sealed record DashboardCaseView(
     string RegionLabel,
     DashboardWorkflowViewState WorkflowState,
     DashboardPriorityView AdministrativePriority,
-    DateTimeOffset ReportedAtUtc);
+    DateTimeOffset ReportedAtUtc)
+{
+    public static string? GetCaseHref(string? caseId) =>
+        Guid.TryParse(caseId, out var parsedCaseId)
+            ? $"/case/{parsedCaseId:D}"
+            : null;
+}
 
 public sealed record DashboardAlertView(
     DashboardAlertViewKind Kind,

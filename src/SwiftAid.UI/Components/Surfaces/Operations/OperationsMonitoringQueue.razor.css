@@ -1,0 +1,110 @@
+.operations-monitoring-queue {
+    display: grid;
+    gap: 1rem;
+    min-width: 0;
+}
+
+.operations-monitoring-queue__header,
+.operations-monitoring-queue__filters {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.operations-monitoring-queue__filters > * {
+    flex: 1 1 12rem;
+    min-width: 0;
+}
+
+.operations-monitoring-queue__case {
+    display: grid;
+    gap: 0.25rem;
+    min-width: 0;
+}
+
+.operations-monitoring-queue__case > a {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+::deep .operations-monitoring-queue .mud-table-cell,
+::deep .operations-monitoring-queue .mud-list-item,
+::deep .operations-monitoring-queue .mud-list-item-text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+::deep .operations-monitoring-queue__table .mud-table-container {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+}
+
+::deep .operations-monitoring-queue__table table {
+    width: 100%;
+    table-layout: fixed;
+}
+
+::deep .operations-monitoring-queue__table th,
+::deep .operations-monitoring-queue__table td {
+    min-width: 0;
+    padding-inline: 0.5rem;
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+
+::deep .operations-monitoring-queue__table th:nth-child(1),
+::deep .operations-monitoring-queue__table td:nth-child(1) {
+    width: 12%;
+}
+
+::deep .operations-monitoring-queue__table th:nth-child(2),
+::deep .operations-monitoring-queue__table td:nth-child(2) {
+    width: 42%;
+}
+
+::deep .operations-monitoring-queue__table th:nth-child(3),
+::deep .operations-monitoring-queue__table td:nth-child(3) {
+    width: 14%;
+}
+
+::deep .operations-monitoring-queue__table th:nth-child(4),
+::deep .operations-monitoring-queue__table td:nth-child(4) {
+    width: 17%;
+}
+
+::deep .operations-monitoring-queue__table th:nth-child(5),
+::deep .operations-monitoring-queue__table td:nth-child(5) {
+    width: 15%;
+}
+
+.operations-monitoring-queue__open-case,
+.operations-monitoring-queue__mobile-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.operations-monitoring-queue__open-case {
+    justify-content: flex-start;
+}
+
+@media (max-width: 600px) {
+    .operations-monitoring-queue__header {
+        align-items: flex-start;
+    }
+
+    .operations-monitoring-queue__filters {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .operations-monitoring-queue__filters > :last-child {
+        grid-column: 1 / -1;
+    }
+}

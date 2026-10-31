@@ -8,22 +8,49 @@
 @using SwiftAid.UI.Components.Geography
 @using SwiftAid.UI.Components.Surfaces.Public
 @using SwiftAid.UI.Components.Surfaces.Shell
+@using SwiftAid.UI.Ellai
 @using SwiftAid.UI.Ellai.Components
+@using SwiftAid.UI.Ellai.Guidance
 @implements IAsyncDisposable
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 @inject ICaseQueueClient CaseQueueClient
 @inject IPublicIntakeMetadataClient IntakeMetadataClient
 @inject IPublicIntakeProcessingPolicyClient ProcessingPolicyClient
+@inject IPublicCommunitySessionClient PublicCommunitySessions
 @inject SwiftAid.Client.Presentation.IGeoLookupClient GeoLookup
 @inject IGuestSubmissionStore SubmissionStore
 @inject IGuestSubmissionCoordinator SubmissionCoordinator
+@inject EllaiLauncher EllaiLauncher
 
 <SwiftAidThemeProvider />
 <MudPopoverProvider />
 <MudDialogProvider />
 <MudSnackbarProvider />
+<EllaiGuidanceHost />
+<EllaiLauncherMenu PublicHelpOnly="true" OnModeSelected="RequestEllaiMode" />
 
+@if (_isHome)
+{
+    <PublicWebsiteShell>
+        <ChildContent>
+            <WebLandingSurface />
+        </ChildContent>
+    </PublicWebsiteShell>
+}
+else if (_isSessions)
+{
+    <PublicWebsiteShell>
+        <ChildContent>
+            <PublicSessionsSurface Sessions="_publicSessions"
+                                   Loading="_publicSessionsLoading"
+                                   ErrorMessage="@_publicSessionsError"
+                                   OnRetry="LoadPublicSessionsAsync" />
+        </ChildContent>
+    </PublicWebsiteShell>
+}
+else
+{
 <SwiftAidApplicationShell BrandName="SwiftAid" HomeHref="/" PageLabel="Community support" MainContentId="guest-main">
     <DesktopNavigation>
         <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Home">Home</MudNavLink>
@@ -31,7 +58,6 @@
                     Icon="@Icons.Material.Filled.AddCircleOutline">Report a concern</MudNavLink>
         <MudNavLink Href="/report?view=tracking" ActiveClass="@(_isTracking ? "active" : string.Empty)"
                     Icon="@Icons.Material.Filled.ReceiptLong">My reports</MudNavLink>
-        <MudNavLink Href="/education" Icon="@Icons.Material.Filled.MenuBook">Education</MudNavLink>
         <MudNavLink Href="/sessions" Icon="@Icons.Material.Filled.Event">Community sessions</MudNavLink>
     </DesktopNavigation>
     <MobileNavigation>
@@ -42,34 +68,10 @@
             <MudIcon Icon="@Icons.Material.Filled.Add" aria-hidden="true" />
         </MudNavLink>
         <MudNavLink Href="/sessions" Icon="@Icons.Material.Filled.Groups">Community</MudNavLink>
-        <button type="button" class="mobile-more-trigger"
-                aria-expanded="@(_mobileMoreMenuOpen ? "true" : "false")" aria-controls="guest-more-destinations"
-                @ref="_mobileMoreTrigger"
-                @onclick="ToggleMobileMoreMenu"
-                @onkeydown="HandleMobileMoreKeyDown">
-            <MudIcon Icon="@Icons.Material.Filled.MoreHoriz" aria-hidden="true" />
-            <span>More</span>
-        </button>
-        @if (_mobileMoreMenuOpen)
-        {
-            <nav id="guest-more-destinations" class="mobile-more-menu" aria-label="More destinations"
-                 @onkeydown="HandleMobileMoreKeyDown">
-                <a href="/education" class="more-menu-link" @onclick="CloseMobileMoreMenu">Education</a>
-            </nav>
-        }
     </MobileNavigation>
     <ChildContent>
     <MudContainer Style="height:97vh;" MaxWidth="MaxWidth.Medium" Class="browser-guest__shell">
-        @if (_isHome)
-        {
-            <PublicHomeSurface IsSignedIn="false"
-                               CaseQueueClient="CaseQueueClient"
-                               StaffWorkspaceHref="/dashboard"
-                               GuestReportsHref="/report?view=tracking"
-                               GuestDataDescription="Share a concern without an account. Report details stay on this page and may be lost if you close or refresh it."
-                               GuestReportsDescription="Review drafts and confirmed receipts saved on this device when local storage is available." />
-        }
-        else if (_isTracking)
+        @if (_isTracking)
         {
             <MudContainer MaxWidth="MaxWidth.Medium" Class="browser-guest__tracking">
                 <SwiftAidPageHeading Eyebrow="Your reports" Title="My reports"
@@ -120,15 +122,13 @@
             </MudContainer>
         }
     </MudContainer>
-        <EllaiLauncherMenu OnModeSelected="NotifyEllaiUnavailable" />
-        @if (_ellaiNotice is not null)
-        {
-            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" ShowCloseIcon="true" CloseIconClicked="DismissEllaiNotice">@_ellaiNotice</MudAlert>
-        }
     </ChildContent>
 </SwiftAidApplicationShell>
+}
 
 @code {
+    private void RequestEllaiMode(SwiftAid.Contracts.Ellai.EllaiMode mode) => EllaiLauncher.Request(mode);
+
     private PublicReportDraft _draft = new() { CapturedAt = DateTimeOffset.Now };
     private IReadOnlyList<PublicCountryOption> _countries = [];
     private IReadOnlyList<GeoPlaceCountry> _geoCountries = [];
@@ -144,29 +144,75 @@
     private string? _feedback;
     private bool _feedbackIsError;
     private bool _isHome;
+    private bool _isSessions;
     private bool _isReport;
     private bool _isTracking;
-    private bool _mobileMoreMenuOpen;
-    private ElementReference _mobileMoreTrigger;
     private Guid? _activeDraftId;
     private IReadOnlyList<PublicReportHistorySurface.HistoryItem> _history = [];
     private bool _historyLoading;
     private bool _storageAvailable = true;
     private bool _busy;
     private bool _processingPolicyIsLive;
-    private bool CanSend => _storageAvailable && _countryCatalogueIsCurrent && _privacyNoticeIsCurrent &&
+    private IReadOnlyList<SwiftAid.Contracts.Sessions.PublicSessionView> _publicSessions = [];
+    private bool _publicSessionsLoading;
+    private string? _publicSessionsError;
+    private bool IsSecureIntakeTransportAvailable =>
+        Uri.TryCreate(Navigation.BaseUri, UriKind.Absolute, out var baseUri) &&
+        string.Equals(baseUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+    private bool CanSend => IsSecureIntakeTransportAvailable && _storageAvailable && _countryCatalogueIsCurrent && _privacyNoticeIsCurrent &&
         !string.IsNullOrWhiteSpace(_processingPolicyReference) && !string.IsNullOrWhiteSpace(_processingPolicyVersion) &&
         !string.IsNullOrWhiteSpace(_processingPolicyNoticeText) && _processingPolicyIsLive;
-    private string SendUnavailableMessage => !CanSend
-        ? "Sending is unavailable until current report information is available. You can save this report on this device."
-        : "Sending is temporarily unavailable. Your saved report remains on this device.";
+    private string SendUnavailableMessage => !IsSecureIntakeTransportAvailable
+        ? "Sending requires a secure HTTPS connection. You can save this report on this device and send it when using SwiftAid over HTTPS."
+        : !_storageAvailable
+            ? "Sending is unavailable because this browser cannot safely save the report first. Your entries remain on this page."
+            : !_countryCatalogueIsCurrent || !_privacyNoticeIsCurrent ||
+              string.IsNullOrWhiteSpace(_processingPolicyReference) ||
+              string.IsNullOrWhiteSpace(_processingPolicyVersion) ||
+              string.IsNullOrWhiteSpace(_processingPolicyNoticeText) || !_processingPolicyIsLive
+                ? "Sending is unavailable until current report information is available. You can save this report on this device."
+                : "Sending is temporarily unavailable. Your saved report remains on this device.";
     private IReadOnlyList<PublicReportHistorySurface.HistoryItem> HistoryItems => _history;
 
     protected override async Task OnInitializedAsync()
     {
         UpdateRoute();
+        if (_isSessions)
+        {
+            await LoadPublicSessionsAsync();
+            return;
+        }
+
         await LoadMetadataAsync();
         await ReloadHistoryAsync();
+    }
+
+    private async Task LoadPublicSessionsAsync()
+    {
+        _publicSessionsLoading = true;
+        _publicSessionsError = null;
+        StateHasChanged();
+        try
+        {
+            var result = await PublicCommunitySessions.ListPublicAsync();
+            if (result.Code == UiCapabilityResultCode.Success && result.Metadata.IsAvailable && result.Value is not null)
+            {
+                _publicSessions = result.Value;
+            }
+            else
+            {
+                _publicSessionsError = "Community sessions are unavailable right now. Please try again.";
+            }
+        }
+        catch (Exception)
+        {
+            _publicSessionsError = "Community sessions are unavailable right now. Please try again.";
+        }
+        finally
+        {
+            _publicSessionsLoading = false;
+            StateHasChanged();
+        }
     }
 
     private async Task LoadMetadataAsync()
@@ -404,9 +450,8 @@
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs args)
     {
-        _ = InvokeAsync(() =>
+        _ = InvokeAsync(async () =>
         {
-            _mobileMoreMenuOpen = false;
             if (!UpdateRoute())
             {
                 // The hosted guest boot owns only Home and Report. Let Gateway's
@@ -415,31 +460,14 @@
                 return;
             }
 
+            if (_isSessions)
+            {
+                await LoadPublicSessionsAsync();
+            }
+
             StateHasChanged();
         });
     }
-
-    private void ToggleMobileMoreMenu() => _mobileMoreMenuOpen = !_mobileMoreMenuOpen;
-
-    private async Task HandleMobileMoreKeyDown(KeyboardEventArgs args)
-    {
-        if (args.Key != "Escape" || !_mobileMoreMenuOpen)
-        {
-            return;
-        }
-
-        _mobileMoreMenuOpen = false;
-        await _mobileMoreTrigger.FocusAsync();
-    }
-
-    private string? _ellaiNotice;
-
-    private void NotifyEllaiUnavailable(SwiftAid.Contracts.Ellai.EllaiMode _) =>
-        _ellaiNotice = "Ellai is unavailable right now.";
-
-    private void DismissEllaiNotice() => _ellaiNotice = null;
-
-    private void CloseMobileMoreMenu() => _mobileMoreMenuOpen = false;
 
     private bool UpdateRoute()
     {
@@ -447,10 +475,11 @@
         var path = uri.AbsolutePath.TrimEnd('/');
         var query = Uri.UnescapeDataString(uri.Query);
         _isHome = path.Length == 0;
+        _isSessions = string.Equals(path, "/sessions", StringComparison.OrdinalIgnoreCase);
         _isTracking = string.Equals(path, "/report", StringComparison.OrdinalIgnoreCase) &&
             query.Contains("view=tracking", StringComparison.OrdinalIgnoreCase);
         _isReport = string.Equals(path, "/report", StringComparison.OrdinalIgnoreCase) && !_isTracking;
-        return _isHome || _isReport || _isTracking;
+        return _isHome || _isSessions || _isReport || _isTracking;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)

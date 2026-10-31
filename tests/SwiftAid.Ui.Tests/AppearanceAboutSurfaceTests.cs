@@ -7,11 +7,21 @@ using Microsoft.JSInterop.Infrastructure;
 using MudBlazor.Services;
 using SwiftAid.UI.Components.Surfaces.Public;
 using SwiftAid.UI.Components.Theme;
+using SwiftAid.UI.Theme;
 
 namespace SwiftAid.Ui.Tests;
 
 public sealed class AppearanceAboutSurfaceTests
 {
+    [Fact]
+    public void BrandThemeUsesNeutralSecondaryColorsForTextAndIcons()
+    {
+        var theme = SwiftAidBrandTheme.Create();
+
+        Assert.Equal(SwiftAidDesignTokens.TextSecondaryLight, theme.PaletteLight.Secondary);
+        Assert.Equal(SwiftAidDesignTokens.TextSecondaryDark, theme.PaletteDark.Secondary);
+    }
+
     [Fact]
     public async Task ThemePreferenceControl_OffersSystemLightDark()
     {
@@ -20,7 +30,7 @@ public sealed class AppearanceAboutSurfaceTests
         Assert.Contains("System", markup, StringComparison.Ordinal);
         Assert.Contains("Light", markup, StringComparison.Ordinal);
         Assert.Contains("Dark", markup, StringComparison.Ordinal);
-        Assert.Contains("Preview action", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Preview action", markup, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -44,12 +54,15 @@ public sealed class AppearanceAboutSurfaceTests
         {
             [nameof(AboutSurface.AppVersion)] = "1.2.3",
             [nameof(AboutSurface.PrivacyHref)] = "/privacy",
-            [nameof(AboutSurface.EducationHref)] = "/education"
+            [nameof(AboutSurface.CommunityHref)] = "/sessions"
         });
 
         Assert.Contains("1.2.3", markup, StringComparison.Ordinal);
         Assert.Contains("/privacy", markup, StringComparison.Ordinal);
-        Assert.Contains("/education", markup, StringComparison.Ordinal);
+        Assert.Contains("Communities", markup, StringComparison.Ordinal);
+        Assert.Contains("/sessions", markup, StringComparison.Ordinal);
+        Assert.Contains("_content/SwiftAid.UI/assets/swiftaid-icon.png", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Education", markup, StringComparison.Ordinal);
         Assert.DoesNotContain("/terms", markup, StringComparison.Ordinal);
     }
 

@@ -1,0 +1,6 @@
+.operations-investigation { display: grid; gap: 1rem; min-width: 0; }
+.operations-investigation__heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.operations-investigation__panel { display: grid; align-content: start; gap: .75rem; min-width: 0; padding: 1rem; border: 1px solid var(--sa-border-subtle, rgba(0,0,0,.12)); border-radius: var(--sa-card-radius, 12px); background: var(--mud-palette-surface); }
+.operations-investigation__summary { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.operations-investigation__question { display: grid; gap: .25rem; padding-block: .5rem; border-bottom: 1px solid var(--sa-border-subtle, rgba(0,0,0,.12)); }
+@media (max-width: 600px) { .operations-investigation__heading, .operations-investigation__summary { align-items: flex-start; flex-direction: column; } }

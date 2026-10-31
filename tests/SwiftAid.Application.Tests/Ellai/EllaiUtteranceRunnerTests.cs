@@ -15,12 +15,26 @@ public sealed class EllaiUtteranceRunnerTests
         public ScriptedCompletions(params string[] replies) => _replies = new Queue<string>(replies);
 
         public List<IReadOnlyList<EllaiChatMessage>> Threads { get; } = new();
+        public Func<int, Task>? AfterCompleteAsync { get; set; }
 
         public Task<EllaiTurnCompletion> CompleteAsync(
             IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct)
         {
             Threads.Add(messages.ToList());
-            return Task.FromResult(new EllaiTurnCompletion(_replies.Dequeue(), 10, 5));
+            var completion = new EllaiTurnCompletion(_replies.Dequeue(), 10, 5);
+            if (AfterCompleteAsync is { } callback)
+            {
+                return CompleteAndNotifyAsync(completion, callback, Threads.Count);
+            }
+
+            return Task.FromResult(completion);
+        }
+
+        private static async Task<EllaiTurnCompletion> CompleteAndNotifyAsync(
+            EllaiTurnCompletion completion, Func<int, Task> callback, int turn)
+        {
+            await callback(turn);
+            return completion;
         }
     }
 
@@ -47,7 +61,9 @@ public sealed class EllaiUtteranceRunnerTests
 
     private static EllaiUtteranceWork Work() => new(
         "session-1", "epoch-1", "Hello.", "cases", "case-1", EllaiMode.Ask, 1, "cycle-1",
-        TestActor(), true, "consent/1");
+        TestActor(), true, "consent/1",
+        EllaiProcessingClassification.SyntheticDemo,
+        EllaiProcessingClassification.SyntheticDemo);
 
     private static (EllaiConsentService Consent, EllaiReasoningLoop Loop) Services(
         ScriptedCompletions completions, bool grant, EllaiUsageLedger? ledger = null)
@@ -56,7 +72,7 @@ public sealed class EllaiUtteranceRunnerTests
         if (grant)
         {
             consent.Grant("session-1", EllaiConsentDimension.ReasoningText,
-                EllaiToolBroker.ToolReadPurpose, EllaiUtteranceRunner.ConsentedLabel,
+                EllaiToolBroker.ToolReadPurpose, EllaiProcessingClassification.SyntheticDemo,
                 TimeSpan.FromHours(1));
         }
 
@@ -88,6 +104,25 @@ public sealed class EllaiUtteranceRunnerTests
     }
 
     [Fact]
+    public async Task UnknownOriginRefusesBeforeAnyModelCallEvenWhenConsentExists()
+    {
+        var completions = new ScriptedCompletions(DecisionTurn);
+        var (consent, loop) = Services(completions, grant: true);
+        var services = new EllaiUtteranceServices(
+            loop, new EllaiActivityStatusCoordinator(), new EllaiSessionEventJournal(), consent);
+
+        var outcome = await EllaiUtteranceRunner.RunOneAsync(
+            Work() with
+            {
+                ProcessingLabel = EllaiProcessingClassification.UnknownOrigin,
+                DataClassification = EllaiProcessingClassification.UnknownOrigin,
+            }, services, 256, CancellationToken.None);
+
+        Assert.False(outcome.Started);
+        Assert.Empty(completions.Threads);
+    }
+
+    [Fact]
     public async Task GrantedSmallTalkCompletesWithSystemPrompt()
     {
         var completions = new ScriptedCompletions(DecisionTurn);
@@ -100,6 +135,7 @@ public sealed class EllaiUtteranceRunnerTests
 
         Assert.True(outcome.Started);
         Assert.True(outcome.Completed);
+        Assert.Equal("Hi there.", outcome.DisplayText);
         var system = Assert.Single(completions.Threads)[0];
         Assert.Equal("system", system.Role);
         Assert.Contains("Turn protocol", system.Content, StringComparison.Ordinal);
@@ -125,5 +161,51 @@ public sealed class EllaiUtteranceRunnerTests
         var second = completions.Threads[1];
         var toolMessage = Assert.Single(second, m => m.Role == "tool");
         Assert.Contains("call c1", toolMessage.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SessionCancellationAfterModelTurnFencesToolAndFurtherProviderCalls()
+    {
+        var store = new InMemoryEllaiSessionStore();
+        var active = new EllaiSessionRecord(
+            "session-1", EllaiMode.Ask, "Active", 1, 0, 1, 0, 1, 12,
+            "officer-1", "epoch-1", null, null, DateTimeOffset.UtcNow);
+        await store.CreateAsync(active, CancellationToken.None);
+
+        var completions = new ScriptedCompletions(
+            """{"tool_calls":[{"id":"c1","name":"ellai_now","args":{}}]}""",
+            DecisionTurn);
+        completions.AfterCompleteAsync = async turn =>
+        {
+            if (turn != 1)
+            {
+                return;
+            }
+
+            var current = await store.GetAsync("session-1", CancellationToken.None);
+            Assert.NotNull(current);
+            var cancelled = await store.TryUpdateAsync(current! with
+            {
+                SessionVersion = current.SessionVersion + 1,
+                InteractionEpoch = current.InteractionEpoch + 1,
+                Status = "Cancelled",
+            }, current.SessionVersion, CancellationToken.None);
+            Assert.NotNull(cancelled);
+        };
+
+        var (consent, loop) = Services(completions, grant: true);
+        var journal = new EllaiSessionEventJournal();
+        var services = new EllaiUtteranceServices(
+            loop, new EllaiActivityStatusCoordinator(), journal, consent, store);
+
+        var outcome = await EllaiUtteranceRunner.RunOneAsync(
+            Work() with { Utterance = "What time is it?" }, services, 256, CancellationToken.None);
+
+        Assert.True(outcome.Started);
+        Assert.False(outcome.Completed);
+        Assert.Single(completions.Threads);
+        var blocked = Assert.Single(journal.ReadSince("session-1", 0).Events,
+            item => item.Kind == "activity" && item.Ref == "blocked");
+        Assert.Equal("I can't check that with the current permissions.", blocked.Detail);
     }
 }

@@ -1,0 +1,104 @@
+@inject IJSRuntime JSRuntime
+@implements IAsyncDisposable
+
+<div class="swiftaid-reconnect-backdrop">
+    <section class="swiftaid-reconnect" role="dialog" aria-modal="true"
+             aria-labelledby="swiftaid-reconnect-title" @ref="_dialog">
+        <MudPaper Class="swiftaid-reconnect__surface" Elevation="0" Outlined="true">
+            <h2 id="swiftaid-reconnect-title" class="swiftaid-reconnect__title" tabindex="-1" @ref="_heading">
+                Reconnecting to SwiftAid
+            </h2>
+            <div class="swiftaid-reconnect__loader">
+                <SwiftAidLoader IsLoading="true" StatusText="@StatusText" />
+            </div>
+        </MudPaper>
+    </section>
+</div>
+
+@code {
+    private IJSObjectReference? _module;
+    private bool _focusTrapActive;
+    private ElementReference _dialog;
+    private ElementReference _heading;
+
+    [Parameter, EditorRequired]
+    public string StatusText { get; set; } = string.Empty;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            _module = await JSRuntime.InvokeAsync<IJSObjectReference>(
+                "import",
+                "./_content/SwiftAid.UI/Components/SwiftAidReconnectPanel.razor.js");
+            await _module.InvokeVoidAsync("activate", _dialog, _heading);
+            _focusTrapActive = true;
+        }
+        catch (Exception exception) when (exception is JSException or InvalidOperationException)
+        {
+            try
+            {
+                await _heading.FocusAsync();
+            }
+            catch (InvalidOperationException)
+            {
+                // Focus remains on the current page when JavaScript interop is unavailable.
+            }
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (_focusTrapActive)
+            {
+                await _module.InvokeVoidAsync("deactivate");
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+            // The WebView or browser circuit is already closing.
+        }
+        catch (JSException)
+        {
+            // Focus restoration is best effort if the modal was already removed.
+        }
+        catch (InvalidOperationException)
+        {
+            // The renderer can disconnect while this status panel is being removed.
+        }
+        finally
+        {
+            try
+            {
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // The WebView or browser circuit is already closing.
+            }
+            catch (JSException)
+            {
+                // The WebView or browser circuit is already closing.
+            }
+            catch (InvalidOperationException)
+            {
+                // The renderer can disconnect while disposing the module.
+            }
+
+            _module = null;
+            _focusTrapActive = false;
+        }
+    }
+}

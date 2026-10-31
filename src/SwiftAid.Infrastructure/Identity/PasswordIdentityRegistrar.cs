@@ -22,6 +22,7 @@ public interface IPasswordIdentityRegistrar
     Task<PasswordRegistrationResult> RegisterAsync(
         string email,
         string password,
+        string displayName,
         CancellationToken cancellationToken);
 }
 
@@ -42,9 +43,11 @@ public sealed class PasswordIdentityRegistrar(
     public async Task<PasswordRegistrationResult> RegisterAsync(
         string email,
         string password,
+        string displayName,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(email) || email.Length > 256 ||
+        if (string.IsNullOrWhiteSpace(displayName) || displayName.Trim().Length > 128 ||
+            string.IsNullOrWhiteSpace(email) || email.Length > 256 ||
             string.IsNullOrEmpty(password) || password.Length > 256)
         {
             return new PasswordRegistrationResult(PasswordRegistrationStatus.InvalidPassword);
@@ -87,6 +90,12 @@ public sealed class PasswordIdentityRegistrar(
                 ActorId = actorId,
                 AccessEpoch = 0,
                 Version = 1,
+                UpdatedAtUtc = now
+            });
+            _dbContext.UserProfiles.Add(new UserProfileEntity
+            {
+                UserId = actorId,
+                DisplayName = displayName.Trim(),
                 UpdatedAtUtc = now
             });
 

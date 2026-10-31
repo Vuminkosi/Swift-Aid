@@ -8,13 +8,13 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiCycleRunnerTests
 {
     private static readonly EllaiToolContext Context = new(
-        "session-1", "epoch-1", "cases", "case-1", 4, true);
+        "session-1", "epoch-1", "cases", "case-1", 4, true, "consent/1", EllaiProcessingClassification.SyntheticDemo);
 
     private static EllaiToolBroker GrantedBroker()
     {
         var consent = new EllaiConsentService();
         consent.Grant("session-1", EllaiConsentDimension.ReasoningText,
-            EllaiToolBroker.ToolReadPurpose, "synthetic", TimeSpan.FromHours(1));
+            EllaiToolBroker.ToolReadPurpose, EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
         return new EllaiToolBroker(new EllaiPolicyService(), consent);
     }
 
@@ -55,8 +55,8 @@ public sealed class EllaiCycleRunnerTests
         Assert.False(outcome.Completed);
         Assert.Contains("budget exhausted", outcome.StopReason ?? string.Empty, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(EllaiCycleRunner.MaxToolCalls, outcome.ToolCallsUsed);
-        Assert.Equal(21, outcome.IterationsUsed);
-        Assert.Equal(21, calls);
+        Assert.Equal((EllaiCycleRunner.MaxToolCalls / 3) + 1, outcome.IterationsUsed);
+        Assert.Equal((EllaiCycleRunner.MaxToolCalls / 3) + 1, calls);
     }
 
     [Fact]
@@ -163,6 +163,26 @@ public sealed class EllaiCycleRunnerTests
         Assert.Equal(
             "I found information, but need another authorized step to finish reviewing it.",
             status.Text);
+    }
+
+    [Fact]
+    public async Task ExhaustedReasoningIterationsDoNotClaimTheTokenBudgetWasUsed()
+    {
+        var runner = new EllaiCycleRunner(GrantedBroker());
+        var activity = new EllaiActivityStatusCoordinator();
+
+        var outcome = await runner.RunAsync(
+            Context,
+            _ => Task.FromResult(new EllaiModelTurn(Array.Empty<EllaiToolRequest>(), null)),
+            EllaiDecisionValidator.Validate,
+            CancellationToken.None,
+            activity: activity,
+            controllerEpoch: 1);
+
+        Assert.False(outcome.Completed);
+        Assert.Contains("iteration limit", outcome.StopReason ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("Ellai reached this request's reasoning limit before it could finish. Try a narrower question.",
+            activity.CurrentStatus("session-1", 1)?.Text);
     }
 
     [Fact]

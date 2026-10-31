@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
+using System.Security.Claims;
 using SwiftAid.Application.Ellai;
+using SwiftAid.Application.Authorization;
 using SwiftAid.Contracts.Ellai;
 
 namespace SwiftAid.Gateway.Ellai;
@@ -12,33 +14,121 @@ namespace SwiftAid.Gateway.Ellai;
 /// Guests have no approval reviews: unauthenticated calls return empty.</summary>
 public sealed class EllaiReviewGatewayClient(
     AuthenticationStateProvider authenticationStateProvider,
-    IServiceProvider serviceProvider) : IEllaiReviewClient
+    IServiceProvider serviceProvider,
+    EllaiGuestSessionIdentity? guestSessionIdentity = null) : IEllaiReviewClient
 {
     private readonly AuthenticationStateProvider _authenticationStateProvider =
         authenticationStateProvider ?? throw new ArgumentNullException(nameof(authenticationStateProvider));
     private readonly IServiceProvider _serviceProvider =
         serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+    private readonly EllaiGuestSessionIdentity _guestSessionIdentity =
+        guestSessionIdentity ?? new EllaiGuestSessionIdentity();
 
-    public async Task<EllaiSessionView?> StartSessionAsync(
+    public async Task<EllaiSessionStartResult> StartSessionAsync(
         EllaiMode mode, CancellationToken cancellationToken)
     {
-        if (!await IsAuthenticatedAsync().ConfigureAwait(false))
+        var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+        var isAuthenticated = state.User?.Identity?.IsAuthenticated == true;
+        if (!isAuthenticated && mode != EllaiMode.Ask)
         {
-            return null;
+            return new(EllaiClientOperationStatus.Unauthorized);
+        }
+
+        var principal = state.User;
+        if (principal is null)
+        {
+            return new(EllaiClientOperationStatus.Unauthorized);
+        }
+        ActorContext actor;
+        try
+        {
+            if (!isAuthenticated)
+            {
+                principal = _guestSessionIdentity.CreatePrincipal();
+            }
+            actor = ActorContext.FromValidatedPrincipal(principal);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return new(EllaiClientOperationStatus.Unauthorized);
+        }
+
+        var scopeResolver = _serviceProvider.GetService<EllaiSessionScopeResolver>();
+        if (scopeResolver is null)
+        {
+            return new(EllaiClientOperationStatus.Unavailable);
         }
 
         try
         {
+            var scope = isAuthenticated
+                ? await scopeResolver.GetAsync(actor, cancellationToken).ConfigureAwait(false)
+                : new SwiftAid.Contracts.Sync.ScopeManifest(
+                    Array.Empty<SwiftAid.Contracts.Sync.ScopeGrantManifest>(),
+                    actor.AccessEpoch,
+                    DateTimeOffset.UtcNow.AddHours(2));
             var sessions = _serviceProvider.GetService<EllaiSessionService>();
             if (sessions is null)
             {
-                return null;
+                return new(EllaiClientOperationStatus.Unavailable);
             }
 
-            return await sessions.StartAsync(
+            var session = await sessions.StartAsync(
                 new StartSessionRequest(
                     mode, Guid.NewGuid().ToString("N"), null, null, null, null),
+                principal,
+                scope,
                 cancellationToken).ConfigureAwait(false);
+            if (!isAuthenticated)
+            {
+                _guestSessionIdentity.Bind(session.SessionId, principal, scope.ExpiresAtUtc);
+            }
+            return new(EllaiClientOperationStatus.Accepted, session);
+        }
+        catch (OperationCanceledException)
+        {
+            return new(EllaiClientOperationStatus.OutcomeUnknown);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return new(EllaiClientOperationStatus.Unauthorized);
+        }
+        catch (ArgumentException)
+        {
+            return new(EllaiClientOperationStatus.InvalidRequest);
+        }
+        catch (ScopeUnavailableException)
+        {
+            return new(EllaiClientOperationStatus.PolicyBlocked);
+        }
+        catch (Exception)
+        {
+            // The session store may have accepted the write before an error
+            // interrupted the response. Keep this distinct from preflight
+            // denials so the UI can prevent an unsafe duplicate start.
+            return new(EllaiClientOperationStatus.OutcomeUnknown);
+        }
+    }
+
+    public async Task<EllaiUtteranceSubmitResult> SubmitUtteranceAsync(
+        SubmitUtteranceRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var state = await _authenticationStateProvider
+                .GetAuthenticationStateAsync().ConfigureAwait(false);
+            var principal = ResolvePrincipal(state.User, request?.SessionId ?? string.Empty);
+            if (principal is null)
+            {
+                return new(EllaiClientOperationStatus.Unauthorized, null);
+            }
+            var submissions = _serviceProvider.GetService<EllaiUtteranceSubmissionService>();
+            if (submissions is null)
+            {
+                return new(EllaiClientOperationStatus.Unavailable, null);
+            }
+            return await submissions.SubmitAsync(request?.SessionId ?? string.Empty,
+                request, principal, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -46,14 +136,168 @@ public sealed class EllaiReviewGatewayClient(
         }
         catch (Exception)
         {
+            return new(EllaiClientOperationStatus.Unavailable, null);
+        }
+    }
+
+    public async Task<bool> GrantPublicProductHelpConsentAsync(
+        string sessionId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+            var principal = ResolvePrincipal(state.User, sessionId);
+            if (principal is null)
+            {
+                return false;
+            }
+            var sessions = _serviceProvider.GetService<EllaiSessionService>();
+            var consent = _serviceProvider.GetService<EllaiConsentService>();
+            var consentStore = _serviceProvider.GetService<IEllaiConsentStore>();
+            if (sessions is null || consent is null || consentStore is null
+                || await sessions.GetOwnedViewAsync(sessionId, principal, cancellationToken)
+                    .ConfigureAwait(false) is not { Status: "Active" })
+            {
+                return false;
+            }
+
+            var grant = consent.Grant(
+                sessionId,
+                EllaiConsentDimension.ReasoningText,
+                EllaiConsentPurposes.PublicProductHelp,
+                EllaiProcessingClassification.ConsentedNonSensitive,
+                TimeSpan.FromHours(1));
+            try
+            {
+                await consentStore.RecordAsync(grant, cancellationToken).ConfigureAwait(false);
+                return true;
+            }
+            catch
+            {
+                consent.Revoke(grant.GrantId);
+                return false;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    public async Task<bool> GrantVoiceCaptureConsentAsync(
+        string sessionId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+            var principal = ResolvePrincipal(state.User, sessionId);
+            var sessions = _serviceProvider.GetService<EllaiSessionService>();
+            var voice = _serviceProvider.GetService<EllaiVoiceTranscriptionService>();
+            if (principal is null || sessions is null || voice is null
+                || await sessions.GetOwnedViewAsync(sessionId, principal, cancellationToken)
+                    .ConfigureAwait(false) is not { Status: "Active" })
+            {
+                return false;
+            }
+            return await voice.GrantVoiceConsentAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async Task<EllaiVoiceTranscriptionResult?> TranscribeVoiceAsync(
+        string sessionId, byte[] audio, EllaiVoiceCaptureMode mode, CancellationToken cancellationToken)
+    {
+        if (audio is null || audio.Length == 0 || audio.Length > EllaiVoiceTranscriptionService.MaximumAudioBytes
+            || !await OwnsSessionAsync(sessionId, cancellationToken).ConfigureAwait(false))
+        {
             return null;
         }
+        try
+        {
+            var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+            var principal = ResolvePrincipal(state.User, sessionId);
+            var sessions = _serviceProvider.GetService<EllaiSessionService>();
+            var voice = _serviceProvider.GetService<EllaiVoiceTranscriptionService>();
+            if (principal is null || sessions is null || voice is null
+                || await sessions.GetOwnedViewAsync(sessionId, principal, cancellationToken)
+                    .ConfigureAwait(false) is not { Status: "Active" })
+            {
+                return null;
+            }
+            using var stream = new MemoryStream(audio, writable: false);
+            return await voice.TranscribeAsync(sessionId, mode, stream, audio.LongLength, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public async Task<EllaiSessionCancelResult> CancelSessionAsync(
+        string sessionId, long expectedSessionVersion, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+            var principal = ResolvePrincipal(state.User, sessionId);
+            if (principal is null)
+            {
+                return new(EllaiClientOperationStatus.Unauthorized);
+            }
+            var sessions = _serviceProvider.GetService<EllaiSessionService>();
+            if (sessions is null)
+            {
+                return new(EllaiClientOperationStatus.Unavailable);
+            }
+            var cancelled = await sessions.CancelAsync(
+                sessionId, expectedSessionVersion, principal, cancellationToken).ConfigureAwait(false);
+            if (cancelled)
+            {
+                _guestSessionIdentity.Clear(sessionId);
+                var now = DateTimeOffset.UtcNow;
+                EllaiSessionCancellationEffects.Apply(
+                    sessionId,
+                    now,
+                    _serviceProvider.GetService<EllaiApprovalDialogCoordinator>(),
+                    _serviceProvider.GetService<EllaiSessionEventJournal>(),
+                    _serviceProvider.GetService<EllaiSessionResponseStore>());
+                return new(EllaiClientOperationStatus.Cancelled);
+            }
+            var current = await sessions.GetOwnedViewAsync(sessionId, principal, cancellationToken)
+                .ConfigureAwait(false);
+            return current is null
+                ? new(EllaiClientOperationStatus.Unauthorized)
+                : new(EllaiClientOperationStatus.Conflict, current);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (UnauthorizedAccessException) { return new(EllaiClientOperationStatus.Unauthorized); }
+        catch (Exception) { return new(EllaiClientOperationStatus.Unavailable); }
     }
 
     public async Task<EllaiSessionEventPageDto?> PollEventsAsync(
         string sessionId, long cursor, int waitSeconds, CancellationToken cancellationToken)
     {
-        if (!await IsAuthenticatedAsync().ConfigureAwait(false))
+        if (!await OwnsSessionAsync(sessionId, cancellationToken).ConfigureAwait(false))
         {
             return null;
         }
@@ -91,18 +335,36 @@ public sealed class EllaiReviewGatewayClient(
         }
     }
 
-    public Task<EllaiReviewDto?> GetActiveReviewAsync(string sessionId, CancellationToken cancellationToken) =>
-        WithAuthenticatedAsync<EllaiReviewDto?>(dialogs =>
+    public async Task<EllaiSessionResponsePageDto?> PollResponsesAsync(
+        string sessionId, long cursor, CancellationToken cancellationToken)
+    {
+        if (!await OwnsSessionAsync(sessionId, cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        var store = _serviceProvider.GetService<EllaiSessionResponseStore>();
+        return store?.ReadSince(sessionId, Math.Max(0, cursor));
+    }
+
+    public async Task<EllaiReviewDto?> GetActiveReviewAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        if (!await OwnsSessionAsync(sessionId, cancellationToken).ConfigureAwait(false)
+            || !await HasCurrentScopedStaffAuthorizationAsync(cancellationToken).ConfigureAwait(false))
+            return null;
+        return await WithAuthenticatedAsync<EllaiReviewDto?>(dialogs =>
         {
             var active = dialogs.TryGetActive(sessionId, DateTimeOffset.UtcNow);
             return Task.FromResult(active is null ? null : MapReview(active));
-        });
+        }).ConfigureAwait(false);
+    }
 
     public async Task<IReadOnlyList<EllaiApprovedReceiptDto>?> ApproveSelectedAsync(
         string sessionId, string requestId, IReadOnlyList<string> actionIds,
         CancellationToken cancellationToken)
     {
-        if (!await IsAuthenticatedAsync().ConfigureAwait(false))
+        if (!await OwnsSessionAsync(sessionId, cancellationToken).ConfigureAwait(false)
+            || !await HasCurrentScopedStaffAuthorizationAsync(cancellationToken).ConfigureAwait(false))
         {
             return null;
         }
@@ -153,7 +415,8 @@ public sealed class EllaiReviewGatewayClient(
     public async Task<bool> RejectReviewAsync(
         string sessionId, string requestId, CancellationToken cancellationToken)
     {
-        if (!await IsAuthenticatedAsync().ConfigureAwait(false))
+        if (!await OwnsSessionAsync(sessionId, cancellationToken).ConfigureAwait(false)
+            || !await HasCurrentScopedStaffAuthorizationAsync(cancellationToken).ConfigureAwait(false))
         {
             return false;
         }
@@ -193,7 +456,8 @@ public sealed class EllaiReviewGatewayClient(
             return null;
         }
 
-        if (!await IsAuthenticatedAsync().ConfigureAwait(false))
+        if (!await OwnsSessionAsync(sessionId, cancellationToken).ConfigureAwait(false)
+            || !await HasCurrentScopedStaffAuthorizationAsync(cancellationToken).ConfigureAwait(false))
         {
             return null;
         }
@@ -228,13 +492,21 @@ public sealed class EllaiReviewGatewayClient(
             return false;
         }
 
-        if (!await IsAuthenticatedAsync().ConfigureAwait(false))
+        if (!await OwnsSessionAsync(sessionId, cancellationToken).ConfigureAwait(false))
         {
             return false;
         }
 
         try
         {
+            var currentState = await _authenticationStateProvider
+                .GetAuthenticationStateAsync().ConfigureAwait(false);
+            var currentPrincipal = ResolvePrincipal(currentState.User, sessionId);
+            if (currentPrincipal is null || _guestSessionIdentity.IsGuestPrincipal(currentPrincipal))
+            {
+                return false;
+            }
+
             var observations = _serviceProvider.GetService<IEllaiUiObservationStore>();
             if (observations is null
                 || string.IsNullOrWhiteSpace(report.ViewInstanceId)
@@ -280,6 +552,47 @@ public sealed class EllaiReviewGatewayClient(
         {
             return false;
         }
+    }
+
+    private async Task<bool> OwnsSessionAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId)) return false;
+        try
+        {
+            var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+            var principal = ResolvePrincipal(state.User, sessionId);
+            if (principal is null) return false;
+            var actor = SwiftAid.Application.Authorization.ActorContext.FromValidatedPrincipal(principal);
+            var store = _serviceProvider.GetService<IEllaiSessionStore>();
+            if (store is null) return false;
+            var record = await store.GetAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            return record is not null
+                && !string.IsNullOrWhiteSpace(record.OwnerActorId)
+                && string.Equals(record.OwnerActorId, actor.ActorId, StringComparison.Ordinal);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception) { return false; }
+    }
+
+    private ClaimsPrincipal? ResolvePrincipal(ClaimsPrincipal? currentPrincipal, string sessionId)
+    {
+        if (currentPrincipal?.Identity?.IsAuthenticated == true)
+        {
+            return currentPrincipal;
+        }
+
+        return _guestSessionIdentity.TryGetPrincipal(sessionId, out var guestPrincipal)
+            ? guestPrincipal
+            : null;
+    }
+
+    private static Task<bool> HasCurrentScopedStaffAuthorizationAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        // SwiftAidStaffApi currently establishes authentication only. Until a
+        // trusted server-issued staff + active-scope capability is available,
+        // privileged review/evidence operations fail closed.
+        return Task.FromResult(false);
     }
 
     private async Task<T?> WithAuthenticatedAsync<T>(

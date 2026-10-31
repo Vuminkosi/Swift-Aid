@@ -1,0 +1,25 @@
+<MudCard Class="mobile-connectivity-alert-dialog" Elevation="0" Outlined="true">
+    <MudCardContent>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudIcon Icon="@Icons.Material.Outlined.CloudOff" Color="Color.Warning" aria-hidden="true" />
+            <MudText Typo="Typo.h6" HtmlTag="h2">Connection unavailable</MudText>
+        </MudStack>
+        <MudText Typo="Typo.body1" Class="mt-3">@StatusText</MudText>
+        <MudText Typo="Typo.body2" Class="mt-2" Color="Color.Secondary">
+            No report is marked received until SwiftAid confirms it.
+        </MudText>
+    </MudCardContent>
+    <MudCardActions Class="justify-end">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Dismiss">Dismiss</MudButton>
+    </MudCardActions>
+</MudCard>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance DialogInstance { get; set; } = default!;
+
+    [Parameter]
+    public string StatusText { get; set; } = string.Empty;
+
+    private void Dismiss() => DialogInstance.Close();
+}

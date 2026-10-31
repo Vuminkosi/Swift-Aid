@@ -321,7 +321,7 @@ public sealed class CaseCommandOfflineTransportTests
     private sealed class FuncTimelineClient : ICaseTimelineClient
     {
         public CaseTimelineResult Result { get; set; } = new(CaseTimelineAccess.NotFoundOrNotAuthorized, null);
-        public Task<CaseTimelineResult> GetAsync(Guid caseId, int? limit, CancellationToken cancellationToken = default) =>
+        public Task<CaseTimelineResult> GetAsync(Guid caseId, int? limit, CancellationToken cancellationToken = default, long? beforeAggregateVersion = null) =>
             Task.FromResult(Result);
     }
 

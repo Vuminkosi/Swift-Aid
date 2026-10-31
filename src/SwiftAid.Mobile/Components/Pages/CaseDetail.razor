@@ -14,7 +14,7 @@
 
 <PageTitle>Case details | SwiftAid</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.Large" Class="mobile-work-page">
+ <MudContainer Fixed="true" Class="mobile-work-page">
     @if (Guid.TryParse(CaseId, out var caseId) && caseId != Guid.Empty)
     {
         <OperationsCaseDetailSurface CaseId="caseId"

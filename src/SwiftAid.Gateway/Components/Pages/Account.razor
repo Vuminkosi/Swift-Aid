@@ -12,6 +12,9 @@
                         OnSignOut="SignOutAsync"
                         OnSelectWorkspace="SelectWorkspaceAsync"
                         OnRefresh="RefreshAsync"
+                        SignInHref="/sign-in?returnUrl=%2Fdashboard"
+                        RegisterHref="/register"
+                        GuestReportHref="/report"
                         ManageMethodsHref="/sign-in-methods"
                         EditProfileHref="/profile"
                         OrganizationsHref="/organizations"
@@ -139,7 +142,8 @@
             workspaces is null
                 ? null
                 : workspaces.Workspaces.FirstOrDefault(x => x.Id == workspaces.SelectedWorkspaceId)?.Name,
-            account.StatusMessage ?? workspaceResult.Message,
-            account.StatusIsError || (workspaceResult.Code is not UiCapabilityResultCode.Success and not UiCapabilityResultCode.Unavailable));
+            account.StatusMessage ?? (account.IsSignedIn ? workspaceResult.Message : null),
+            account.StatusIsError || (account.IsSignedIn
+                && workspaceResult.Code is not UiCapabilityResultCode.Success and not UiCapabilityResultCode.Unavailable));
     }
 }

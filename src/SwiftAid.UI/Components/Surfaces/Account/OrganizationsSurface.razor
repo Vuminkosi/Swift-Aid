@@ -47,7 +47,7 @@ else
         {
             <MudPaper Class="pa-3 mb-2" Elevation="0" Outlined="true">
                 <MudText Typo="Typo.subtitle2">@membership.OrganizationId</MudText>
-                <MudStack Row="true" Spacing="1">
+                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
                     <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@membership.MembershipStatus</MudChip>
                     @foreach (var workspace in membership.WorkspaceIds)
                     {

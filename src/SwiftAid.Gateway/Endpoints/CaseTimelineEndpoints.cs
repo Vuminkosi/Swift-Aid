@@ -91,9 +91,21 @@ public static class CaseTimelineEndpoints
             limit = Math.Min(parsed, CaseTimelineQuery.MaxLimit);
         }
 
+        long? beforeAggregateVersion = null;
+        if (context.Request.Query.TryGetValue("beforeAggregateVersion", out var cursorText) &&
+            cursorText.Count > 0 && !string.IsNullOrWhiteSpace(cursorText[0]))
+        {
+            if (!long.TryParse(cursorText[0], out var parsed) || parsed < 1)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "The history cursor is invalid.");
+            }
+
+            beforeAggregateVersion = parsed;
+        }
+
         try
         {
-            var result = await query.GetAsync(actor, caseId, limit, cancellationToken).ConfigureAwait(false);
+            var result = await query.GetAsync(actor, caseId, limit, cancellationToken, beforeAggregateVersion).ConfigureAwait(false);
             return MapResult(result);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

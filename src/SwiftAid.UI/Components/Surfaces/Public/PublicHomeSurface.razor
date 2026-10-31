@@ -4,7 +4,7 @@
 @using SwiftAid.UI.Components.Public
 
 <div class="public-home-surface @(IsWelcomeExperience ? "public-home-surface--welcome" : null)">
-    <MudContainer MaxWidth="MaxWidth.Large" Class="public-home-container">
+    <MudContainer Fixed="true" Class="public-home-container">
     @if (!IsSignedIn && (!ShowWelcome || !OnWelcomeContinue.HasDelegate))
     {
         <SwiftAidPageHeading Eyebrow="Community health support"
@@ -33,6 +33,19 @@
                         </MudText>
                     }
                 </header>
+
+                @if (MobileQuickActions is not null)
+                {
+                    <div class="mobile-home-quick-links">
+                        @MobileQuickActions
+                    </div>
+                }
+                @if (MobileSurveillancePreview is not null)
+                {
+                    <section class="signed-home-surveillance" aria-label="Recent activity by area">
+                        @MobileSurveillancePreview
+                    </section>
+                }
 
                 @if (HomeOverview?.State == PublicHomeOverviewState.Loading)
                 {
@@ -209,6 +222,12 @@
 
     @if (!IsWelcomeExperience)
     {
+        @if (!IsSignedIn && MobileQuickActions is not null)
+        {
+            <div class="mobile-home-quick-links">
+                @MobileQuickActions
+            </div>
+        }
         <SwiftAidServiceBoundaryNotice />
     }
 </MudContainer>
@@ -228,6 +247,8 @@
         "Share a human or animal concern without creating an account. Saved drafts stay private on this device.";
     [Parameter] public string GuestReportsDescription { get; set; } =
         "Open reports and receipts saved on this device.";
+    [Parameter] public RenderFragment? MobileQuickActions { get; set; }
+    [Parameter] public RenderFragment? MobileSurveillancePreview { get; set; }
     [Parameter] public bool ShowWelcome { get; set; }
     [Parameter] public IReadOnlyList<PublicCountryOption> WelcomeCountryOptions { get; set; } = Array.Empty<PublicCountryOption>();
     [Parameter] public string? WelcomeSelectedCountryCode { get; set; }

@@ -1,22 +1,38 @@
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
+using Microsoft.AspNetCore.Components.Web;
+using Bit.Bonboarding;
 using MudBlazor.Services;
 using SwiftAid.Browser.Components;
 using SwiftAid.Browser.Services;
+using SwiftAid.Contracts.Ellai;
+using SwiftAid.UI.Ellai;
 using SwiftAid.Client.Intake;
 using SwiftAid.Client.Presentation.PublicWorkflows;
 using SwiftAid.Contracts.Cases;
+using SwiftAid.Client.Sessions;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<BrowserGuestRoot>("#guest-root");
+builder.RootComponents.Add<HeadOutlet>("head::after");
 
 builder.Services.AddMudServices();
 builder.Services.AddScoped(_ => new HttpClient
 {
     BaseAddress = new Uri(builder.HostEnvironment.BaseAddress)
 });
+BitBonboarding.AddBitBonboardingServices(builder.Services, _ => { });
+BitBonboarding.AddBitBonboardingInMemoryStore(builder.Services);
+builder.Services.AddScoped<EllaiLauncher>();
+builder.Services.AddScoped<EllaiEventPoller>();
+builder.Services.AddScoped<IEllaiReviewClient>(serviceProvider =>
+    new EllaiReviewHttpClient(serviceProvider.GetRequiredService<HttpClient>(), useGuestRoutes: true));
+builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.IEllaiGuidanceControl, BrowserGuestEllaiGuidanceControl>();
 builder.Services.AddScoped<IPublicIntakeMetadataClient, BrowserPublicIntakeMetadataClient>();
 builder.Services.AddScoped<IPublicIntakeProcessingPolicyClient, BrowserPublicIntakeProcessingPolicyClient>();
 builder.Services.AddScoped<IPublicIntakeSubmissionClient, BrowserPublicIntakeSubmissionClient>();
+builder.Services.AddScoped<IPublicCommunitySessionClient>(serviceProvider =>
+    new HttpPublicCommunitySessionClient(new CommunitySessionHttpClient(
+        serviceProvider.GetRequiredService<HttpClient>())));
 builder.Services.AddScoped<SwiftAid.Client.Presentation.IGeoLookupClient>(serviceProvider => new SwiftAid.Client.Presentation.HttpGeoLookupClient(
     serviceProvider.GetRequiredService<HttpClient>()));
 builder.Services.AddScoped<IGuestIntakeTransport>(serviceProvider =>

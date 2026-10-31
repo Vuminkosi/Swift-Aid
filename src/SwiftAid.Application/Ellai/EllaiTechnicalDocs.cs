@@ -36,6 +36,10 @@ public sealed class EllaiTechnicalDocs
     private static readonly Regex StatusPattern = new(
         @"\*\*Status:\s*([^*]+)\*\*", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    private static readonly Regex ApprovedDocumentPattern = new(
+        @"^\s*\*\*Status:\s*Approved(?:\s|[.!;]|$)[^*]*\*\*\s*$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Multiline);
+
     private readonly string _path;
 
     public EllaiTechnicalDocs(string path)
@@ -44,7 +48,10 @@ public sealed class EllaiTechnicalDocs
         _path = path;
     }
 
-    public bool IsAvailable => File.Exists(_path);
+    /// <summary>Only a reviewed document may be exposed to the model-facing
+    /// documentation tools. Section status describes implementation state;
+    /// it does not approve a draft document for runtime use.</summary>
+    public bool IsAvailable => File.Exists(_path) && IsApprovedDocument();
 
     /// <summary>Best-effort path resolution that never throws: an existing
     /// configured path wins, then the container reference mount, then a
@@ -91,6 +98,24 @@ public sealed class EllaiTechnicalDocs
         var bytes = File.ReadAllBytes(_path);
         var hash = SHA256.HashData(bytes);
         return Convert.ToHexString(hash)[..12].ToLowerInvariant();
+    }
+
+    private bool IsApprovedDocument()
+    {
+        if (!File.Exists(_path))
+        {
+            return false;
+        }
+
+        foreach (var line in File.ReadLines(_path).TakeWhile(line => !line.StartsWith("## ", StringComparison.Ordinal)))
+        {
+            if (ApprovedDocumentPattern.IsMatch(line))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>Searches section titles then bodies, case-insensitively.

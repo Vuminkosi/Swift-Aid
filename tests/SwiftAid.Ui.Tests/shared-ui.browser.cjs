@@ -137,11 +137,87 @@ async function main() {
         assert.equal(await page.getByRole("heading", { name: "Shared component verification fixture" }).count(), 1);
         assert.equal(await page.locator(".swiftaid-loader").count(), 0);
 
+        const deniedRegion = page.getByRole("region", { name: "Coordinator access unavailable" });
+        const errorRegion = page.getByRole("region", { name: "Reports could not be loaded" });
+        assert.equal(await deniedRegion.count(), 1, "Denied state panel needs an accessible region name");
+        assert.equal(await errorRegion.count(), 1, "Error state panel needs an accessible region name");
+        const panelLabels = await page.locator("[data-testid='state-panel-fixture'] .swiftaid-status-panel")
+            .evaluateAll(panels => panels.map(panel => {
+                const id = panel.getAttribute("aria-labelledby");
+                return { id, text: id ? document.getElementById(id)?.textContent.trim() : null };
+            }));
+        assert.equal(panelLabels.length, 2, "Expected both rendered state panels");
+        assert(panelLabels.every(label => label.id && label.text),
+            "Each state panel must reference a rendered heading");
+        assert.notEqual(panelLabels[0].id, panelLabels[1].id, "Rendered state panels must not reuse heading IDs");
+
+        const report = page.getByTestId("guided-report-fixture");
+        await report.getByRole("button", { name: "Continue to details" }).click();
+        assert.match(await report.getByRole("alert").innerText(), /Choose whether this concern is about a person or an animal/i,
+            "The guided report must require a subject before continuing");
+        await report.getByRole("radio", { name: "Human health — a person or people" }).check();
+        await report.getByRole("button", { name: "Continue to details" }).click();
+        await report.getByRole("heading", { name: "What did you notice?" }).waitFor({ state: "visible" });
+        await report.getByRole("button", { name: "Review report" }).click();
+        const emptyReviewAlert = await report.getByRole("alert").innerText();
+        const emptyReviewValidation = await report.locator(".guided-report__validation").innerText();
+        assert.match(emptyReviewAlert, /Review the highlighted information before continuing/i);
+        assert.match(emptyReviewValidation, /Describe what happened or add an observation/i,
+            "The guided report must require an observation before opening review");
+        await report.getByLabel("Describe what happened").fill("What I saw this morning");
+        await report.getByLabel("Separate observations (optional)").fill("Two animals were nearby");
+        assert.match(await report.getByText("This saved country is not in the current list.").innerText(),
+            /select a current country choice/i, "A saved country absent from the current list must be identified");
+        assert.equal(await report.locator("input[type='date']").count(), 0,
+            "Unknown occurrence time must not require a date");
+        await report.getByRole("button", { name: "Save draft" }).click();
+        await page.getByTestId("report-callback-status").getByText("Synthetic draft callback: What I saw this morning").waitFor();
+        await report.getByRole("button", { name: "Review report" }).click();
+        const reportSummary = report.locator(".guided-report__summary");
+        await report.getByRole("heading", { name: "Review your report" }).waitFor({ state: "visible" });
+        const staleCountrySummary = await reportSummary.innerText();
+        assert.match(staleCountrySummary, /What I saw this morning[\s\S]*Unknown/i,
+            "Review should preserve reported details and label unknown time as unknown");
+        assert.match(staleCountrySummary, /Country choice unavailable/i,
+            "Review must not treat a country absent from the current catalogue as valid");
+        assert.equal(await report.getByRole("button", { name: "Submit report" }).isDisabled(), true,
+            "Submission must remain disabled for a country code outside the current catalogue");
+        await report.getByRole("button", { name: "Back" }).click();
+        await report.getByLabel("Describe what happened").waitFor({ state: "visible" });
+        assert.equal(await report.getByLabel("Describe what happened").inputValue(), "What I saw this morning",
+            "Going back from review must preserve typed narrative");
+        await report.getByRole("combobox", { name: "Country where the event happened" }).click();
+        await page.getByRole("option", { name: "Zimbabwe" }).click();
+        await report.getByRole("button", { name: "Back" }).click();
+        await report.getByRole("button", { name: "Continue to details" }).click();
+        assert.equal(await report.getByLabel("Describe what happened").inputValue(), "What I saw this morning",
+            "Going back to type and continuing again must preserve typed narrative");
+        await report.getByRole("button", { name: "Review report" }).click();
+        await report.getByRole("checkbox", { name: "I have reviewed these details and they reflect what I observed." }).check();
+        await report.getByRole("checkbox", { name: "I confirm the selected event country." }).check();
+        await report.getByRole("checkbox", { name: "I have read how SwiftAid uses the details I share." }).check();
+        await report.getByRole("button", { name: "Submit report" }).click();
+        await page.getByTestId("report-callback-status").getByText("Synthetic submit callback: What I saw this morning").waitFor();
+        await report.locator(".mud-alert[role='status']")
+            .filter({ hasText: "Check the application receipt for the current server status" })
+            .waitFor();
+        console.log(JSON.stringify({
+            scenarioResults: {
+                statePanelAccessibleRegionNames: true,
+                statePanelHeadingIdsUnique: true,
+                guidedReportRequiresSubjectAndObservation: true,
+                guidedReportPreservesDraftAcrossBackAndSave: true,
+                guidedReportAllowsUnknownOccurrenceTime: true,
+                guidedReportBlocksStaleCountryUntilCurrentChoice: true,
+                guidedReportUsesSyntheticSubmitCallbackAndHonestReceiptCopy: true
+            }
+        }, null, 2));
+
         const stillImage = "./_content/SwiftAid.UI/assets/loading/swiftaid-loader-still.png";
         await page.emulateMedia({ reducedMotion: "reduce" });
         await page.getByTestId("toggle-loading").click();
         try {
-            await page.getByRole("status").getByText("Synthetic fixture loading status").waitFor({ state: "visible", timeout: 10000 });
+            await page.locator(".swiftaid-loader").getByText("Synthetic fixture loading status").waitFor({ state: "visible", timeout: 10000 });
         } catch {
             throw new Error(`Loader did not appear. Body: ${await page.locator("body").innerText()}\nConsole errors: ${consoleErrors.join(" | ")}\nFailed responses: ${failedResponses.join(" | ")}\nPage errors: ${JSON.stringify(errors)}\nHost output: ${hostOutput}`);
         }
@@ -156,12 +232,12 @@ async function main() {
         };
         await saveScreenshot("fixture-390-light-reduced-motion.png");
         await page.emulateMedia({ colorScheme: "dark" });
-        await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+        await page.waitForFunction(() => document.documentElement.dataset.theme === "agentic" && document.documentElement.dataset.colorMode === "dark");
         await saveScreenshot("fixture-390-dark-reduced-motion.png");
         await page.setViewportSize({ width: 1280, height: 900 });
         await saveScreenshot("fixture-1280-dark-reduced-motion.png");
         await page.emulateMedia({ colorScheme: "light" });
-        await page.waitForFunction(() => document.documentElement.dataset.theme === "light");
+        await page.waitForFunction(() => document.documentElement.dataset.theme === "agentic" && document.documentElement.dataset.colorMode === "light");
         await saveScreenshot("fixture-1280-light-reduced-motion.png");
 
         const stillResponse = await page.request.get(new URL(stillImage.replace(/^\.\//, "/"), baseUrl).toString());
@@ -196,7 +272,7 @@ async function main() {
         const lottieSvgOrCanvas = await page.locator(".swiftaid-loader__lottie svg, .swiftaid-loader__lottie canvas").count();
         await saveScreenshot("fixture-390-light-lottie-ready.png");
 
-        const statusText = await page.getByRole("status").innerText();
+        const statusText = await page.locator(".swiftaid-loader").innerText();
         browserPhase = "lottie-second-load-synthetic-error";
         await page.getByTestId("toggle-lottie").click();
         await page.locator(".swiftaid-loader__lottie").waitFor({ state: "detached" });
@@ -219,7 +295,7 @@ async function main() {
             && latePlayerState.className.includes("is-pending")
             && latePlayerState.opacity === "0"),
         `Late failure must remove the player or leave it hidden and pending: ${JSON.stringify({ latePlayerCount, latePlayerState })}`);
-        assert.equal(await page.getByRole("status").innerText(), statusText,
+        assert.equal(await page.locator(".swiftaid-loader").innerText(), statusText,
             "Late Lottie data failure changed or removed the loading status");
         await saveScreenshot("fixture-390-light-late-lottie-fallback.png");
         for (const error of candidateLateSyntheticRuntimeErrors) {
@@ -258,11 +334,11 @@ async function main() {
         }
 
         await page.emulateMedia({ colorScheme: "dark" });
-        await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+        await page.waitForFunction(() => document.documentElement.dataset.theme === "agentic" && document.documentElement.dataset.colorMode === "dark");
         await page.emulateMedia({ colorScheme: "light" });
-        await page.waitForFunction(() => document.documentElement.dataset.theme === "light");
+        await page.waitForFunction(() => document.documentElement.dataset.theme === "agentic" && document.documentElement.dataset.colorMode === "light");
 
-        const status = await page.getByRole("status").getAttribute("aria-live");
+        const status = await page.locator(".swiftaid-loader").getAttribute("aria-live");
         assert.equal(status, "polite");
         await page.getByTestId("toggle-loading").click();
         await page.locator(".swiftaid-loader").waitFor({ state: "detached" });
@@ -298,7 +374,7 @@ async function main() {
         await fallbackPage.route("**/_content/Blazor.Lottie.Player/lottie.min.js", route => route.abort());
         await fallbackPage.goto(baseUrl, { waitUntil: "networkidle" });
         await fallbackPage.getByTestId("toggle-loading").click();
-        await fallbackPage.getByRole("status").waitFor({ state: "visible" });
+        await fallbackPage.locator(".swiftaid-loader").waitFor({ state: "visible" });
         await fallbackPage.getByTestId("toggle-lottie").click();
         await fallbackPage.locator(".swiftaid-loader__fallback").waitFor({ state: "visible" });
         assert.equal(await fallbackPage.locator(".swiftaid-loader__lottie").count(), 0,
@@ -334,7 +410,7 @@ async function main() {
         await earlyFailurePage.emulateMedia({ reducedMotion: "no-preference" });
         await earlyFailurePage.goto(baseUrl, { waitUntil: "networkidle" });
         await earlyFailurePage.getByTestId("toggle-loading").click();
-        await earlyFailurePage.getByRole("status").waitFor({ state: "visible" });
+        await earlyFailurePage.locator(".swiftaid-loader").waitFor({ state: "visible" });
         await earlyFailurePage.waitForFunction(() => performance.getEntriesByType("resource")
             .some(entry => entry.name.includes("SwiftAidLoader.razor.js")), { timeout: 10000 });
         assert.equal(await earlyFailurePage.evaluate(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches), false,
@@ -360,7 +436,7 @@ async function main() {
             `Pre-ready failure unexpectedly marked Lottie ready: ${JSON.stringify(earlyFailureState)}`);
         assert.equal(earlyFailureState.opacity, "0",
             `Pre-ready failure did not hide the pending Lottie player behind the GIF: ${JSON.stringify(earlyFailureState)}`);
-        assert.equal(await earlyFailurePage.getByRole("status").innerText(), "Synthetic fixture loading status");
+        assert.equal(await earlyFailurePage.locator(".swiftaid-loader").innerText(), "Synthetic fixture loading status");
         assert.equal(earlyMalformedRequestSeen, true, "Pre-ready malformed animation response was not injected");
         assert.deepEqual(earlyFailureErrors, [], `Pre-ready failure produced an unexpected browser error: ${JSON.stringify(earlyFailureErrors)}`);
         await earlyFailurePage.screenshot({
@@ -374,6 +450,12 @@ async function main() {
         assert.deepEqual(externalRequests, [], `Unexpected external requests: ${JSON.stringify(externalRequests)}`);
         console.log(JSON.stringify({
             scenarioResults: {
+                statePanelAccessibleRegionNames: true,
+                statePanelHeadingIdsUnique: true,
+                guidedReportRequiresSubjectAndPreservesDraft: true,
+                guidedReportAllowsUnknownTime: true,
+                guidedReportBlocksStaleCountryUntilCurrentCountrySelected: true,
+                guidedReportSubmissionUsesSyntheticCallbackAndHonestReceiptCopy: true,
                 initialGifFallback: true,
                 lottieReady: lottieSvgOrCanvas > 0,
                 postReadySyntheticErrorRestoredFallbackAndStatus: true,

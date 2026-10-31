@@ -1,4 +1,5 @@
 @page "/sign-in"
+@using System.Net.Http.Json
 @using SwiftAid.Client.Authentication
 @using SwiftAid.Client.Navigation
 @using SwiftAid.Mobile.Services.Account
@@ -9,10 +10,16 @@
 
 <PageTitle>Sign in | SwiftAid</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.Small">
-    <MudPaper Class="pa-4" Elevation="0">
-        <MudText Typo="Typo.h5">Welcome back</MudText>
-        <MudText Typo="Typo.body2">Sign in to your account</MudText>
+<div class="mobile-auth-page">
+    <AccountEntrySurface>
+    <MudPaper Class="mobile-auth-panel" Elevation="0">
+        <SwiftAidPageHeading Eyebrow="Your SwiftAid account"
+                             Title="Welcome back"
+                             Description="Sign in to your account."
+                             HeadingId="sign-in-heading" />
+        <MudText Typo="Typo.body2" Class="mobile-auth-privacy-note">
+            Signing in does not by itself provide access to an organization’s records.
+        </MudText>
 
         @if (!string.IsNullOrWhiteSpace(_error))
         {
@@ -27,44 +34,105 @@
             </MudAlert>
         }
 
-        <MudTextField T="string" Label="Email address" @bind-Value="_email"
-                      Variant="Variant.Outlined" Required="true" Disabled="@_busy"
-                      InputType="InputType.Email" Immediate="true" autocomplete="email"
-                      aria-label="Email address" />
-        <MudTextField T="string" Label="Password" @bind-Value="_password"
-                      Variant="Variant.Outlined" Required="true" Disabled="@_busy"
-                      InputType="@(_showPassword ? InputType.Text : InputType.Password)"
-                      Adornment="Adornment.End" AdornmentIcon="@(_showPassword ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
-                      OnAdornmentClick="() => _showPassword = !_showPassword"
-                      Immediate="true" MaxLength="256" autocomplete="current-password"
-                      aria-label="Password" />
-        <MudSwitch T="bool" @bind-Value="_rememberMe" Color="Color.Primary"
-                   Label="Remember me" Disabled="@_busy" />
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
-                   OnClick="SignInAsync" Disabled="@(!CanSubmit)"
-                   Class="auth-cta">
-            @(_busy ? "Signing in…" : "Sign in")
-        </MudButton>
-        <MudButton Variant="Variant.Text" Color="Color.Primary" FullWidth="true"
-                   OnClick="ForgotAsync" Disabled="@_busy">
-            Forgot password?
-        </MudButton>
-        <MudDivider Class="my-2" />
-        <MudButton Href="/register" Variant="Variant.Text" Color="Color.Primary" FullWidth="true">
-            Don't have an account? Sign up
-        </MudButton>
+        @if (_loadingCapabilities)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" aria-label="Loading sign-in methods" />
+        }
+        else if (_capabilityError is not null)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert">
+                @_capabilityError
+            </MudAlert>
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" FullWidth="true"
+                       OnClick="LoadCapabilitiesAsync" Disabled="@_busy">
+                Try again
+            </MudButton>
+        }
+        else
+        {
+            @if (_passwordSignInAvailable)
+            {
+                <EditForm Model="_passwordForm" OnSubmit="HandlePasswordSubmitAsync">
+                    <div class="mobile-auth-password" role="group" aria-label="Sign in with email">
+                    <MudTextField T="string" Label="Email address" @bind-Value="_passwordForm.Email"
+                                  Variant="Variant.Outlined" Required="true" Disabled="@_busy"
+                                  InputType="InputType.Email" Immediate="true" autocomplete="email"
+                                  aria-label="Email address" />
+                    <MudTextField T="string" Label="Password" @bind-Value="_passwordForm.Password"
+                                  Variant="Variant.Outlined" Required="true" Disabled="@_busy"
+                                  InputType="@(_showPassword ? InputType.Text : InputType.Password)"
+                                  Adornment="Adornment.End" AdornmentIcon="@(_showPassword ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                                  OnAdornmentClick="() => _showPassword = !_showPassword"
+                                  Immediate="true" MaxLength="256" autocomplete="current-password"
+                                  aria-label="Password" />
+                    <MudStack Row="true" Spacing="2" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
+                        <MudSwitch T="bool" @bind-Value="_rememberMe" Color="Color.Primary"
+                                   Label="Remember me" Disabled="@(_busy || !CanRememberSignIn)" />
+                        <MudLink Href="/forgot-password">Forgot password?</MudLink>
+                    </MudStack>
+                    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                               Disabled="@(!CanSubmit)" Class="auth-cta" StartIcon="@Icons.Material.Filled.Login">
+                        @(_busy ? "Signing in…" : "Sign in")
+                    </MudButton>
+                    </div>
+                </EditForm>
+            }
+
+            @if (_passwordSignInAvailable && _nativeSignInAvailable)
+            {
+                <MudText Typo="Typo.body2" Class="mobile-auth-divider-text">Or continue with</MudText>
+            }
+
+            @if (_nativeSignInAvailable)
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" FullWidth="true"
+                           OnClick="StartNativeSignInAsync" Disabled="@_busy" Class="auth-cta" StartIcon="@Icons.Material.Filled.Login">
+                    @(_busy ? "Opening secure sign-in…" : "More sign-in options")
+                </MudButton>
+                <MudText Typo="Typo.caption" Align="Align.Center">
+                    Available provider and organization options are shown by the Gateway.
+                </MudText>
+            }
+
+            @if (!_passwordSignInAvailable && !_nativeSignInAvailable)
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+                    Sign-in is unavailable right now. You can continue without an account.
+                </MudAlert>
+            }
+
+            @if (_passwordSignInAvailable)
+            {
+                <MudButton Href="@RegisterHref" Variant="Variant.Text" Color="Color.Primary" FullWidth="true">
+                    Don't have an account? Sign up
+                </MudButton>
+            }
+        }
+
+        <MudDivider Class="mobile-auth-divider" />
+
         <MudButton Href="/report" Variant="Variant.Text" Color="Color.Primary" FullWidth="true">
             Continue without an account
         </MudButton>
+        <nav aria-label="Legal information">
+            <MudStack Row="true" Spacing="2" Justify="Justify.Center">
+                <MudLink Href="/privacy">Privacy</MudLink>
+                <MudLink Href="/terms">Terms</MudLink>
+            </MudStack>
+        </nav>
     </MudPaper>
-</MudContainer>
+    </AccountEntrySurface>
+</div>
 
 @code {
-    private string? _email;
-    private string? _password;
+    private readonly PasswordSignInForm _passwordForm = new();
     private bool _rememberMe;
     private bool _showPassword;
     private bool _busy;
+    private bool _loadingCapabilities = true;
+    private bool _passwordSignInAvailable;
+    private bool _nativeSignInAvailable;
+    private string? _capabilityError;
     private string? _error;
     private string? _notice;
 
@@ -72,12 +140,18 @@
         (HttpPasswordAuthClient?)ServiceProvider.GetService(typeof(HttpPasswordAuthClient))
         ?? CreateFallback();
 
-    private HttpPasswordAuthClient CreateFallback()
-    {
-        var options = (NativeSessionHttpOptions?)ServiceProvider.GetService(typeof(NativeSessionHttpOptions));
-        return new HttpPasswordAuthClient(
-            CookieSessionHttpClient.Shared(options?.GatewayBaseAddress?.ToString()));
-    }
+    private NativeSessionHttpOptions? SessionOptions =>
+        (NativeSessionHttpOptions?)ServiceProvider.GetService(typeof(NativeSessionHttpOptions));
+
+    private bool CanRememberSignIn => SessionOptions is { } options &&
+        GatewayAuthCookieSnapshot.SupportsPersistentSession(options.GatewayBaseAddress);
+
+    private CookieSessionHttpClient GatewayClient =>
+        CookieSessionHttpClient.Shared(
+            ((NativeSessionHttpOptions?)ServiceProvider.GetService(typeof(NativeSessionHttpOptions)))
+            ?.GatewayBaseAddress?.ToString());
+
+    private HttpPasswordAuthClient CreateFallback() => new(GatewayClient);
 
 
     private Task RefreshShellAsync()
@@ -90,13 +164,56 @@
 
     private bool CanSubmit =>
         !_busy &&
-        !string.IsNullOrWhiteSpace(_email) &&
-        !string.IsNullOrWhiteSpace(_password);
+        _passwordSignInAvailable &&
+        !string.IsNullOrWhiteSpace(_passwordForm.Email) &&
+        !string.IsNullOrWhiteSpace(_passwordForm.Password);
+
+    protected override Task OnInitializedAsync()
+    {
+        _rememberMe = CanRememberSignIn;
+        return LoadCapabilitiesAsync();
+    }
+
+    private async Task LoadCapabilitiesAsync()
+    {
+        _loadingCapabilities = true;
+        _capabilityError = null;
+        try
+        {
+            using var response = await GatewayClient.GetAsync("/auth/capabilities");
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new HttpRequestException("The gateway did not return sign-in capabilities.");
+            }
+
+            var capabilities = await response.Content.ReadFromJsonAsync<IdentityCapabilitiesResponse>();
+            if (capabilities is null)
+            {
+                throw new HttpRequestException("The gateway returned invalid sign-in capabilities.");
+            }
+
+            _passwordSignInAvailable = capabilities.PasswordSignInAvailable;
+            _nativeSignInAvailable = capabilities.NativeSignInAvailable;
+        }
+        catch (Exception)
+        {
+            _passwordSignInAvailable = false;
+            _nativeSignInAvailable = false;
+            _capabilityError = "We couldn't load sign-in methods. Check your connection and try again.";
+        }
+        finally
+        {
+            _loadingCapabilities = false;
+        }
+    }
+
+    private Task HandlePasswordSubmitAsync(EditContext _) => SignInAsync();
 
     [SupplyParameterFromQuery(Name = "returnUrl")]
     private string? ReturnUrl { get; set; }
 
-    private string SafeReturnUrl => LocalReturnUrlPolicy.Resolve(ReturnUrl, "/account");
+    private string SafeReturnUrl => LocalReturnUrlPolicy.Resolve(ReturnUrl, "/dashboard");
+    private string RegisterHref => $"/register?returnUrl={Uri.EscapeDataString(SafeReturnUrl)}";
 
     private async Task SignInAsync()
     {
@@ -110,7 +227,7 @@
         _notice = null;
         try
         {
-            var result = await AuthClient.LoginAsync(_email!.Trim(), _password!, _rememberMe);
+            var result = await AuthClient.LoginAsync(_passwordForm.Email!.Trim(), _passwordForm.Password!, _rememberMe);
             if (result.Status == PasswordAuthStatus.Succeeded)
             {
                 await RefreshShellAsync();
@@ -130,11 +247,17 @@
         }
     }
 
-    private async Task ForgotAsync()
+    private async Task StartNativeSignInAsync()
     {
-        if (string.IsNullOrWhiteSpace(_email))
+        if (_busy || !_nativeSignInAvailable)
         {
-            _error = "Enter your email address first, then choose Forgot password.";
+            return;
+        }
+
+        var session = (IMobileAuthenticationSession?)ServiceProvider.GetService(typeof(IMobileAuthenticationSession));
+        if (session is null)
+        {
+            _error = "Secure sign-in is unavailable right now.";
             return;
         }
 
@@ -143,16 +266,32 @@
         _notice = null;
         try
         {
-            var result = await AuthClient.RequestPasswordResetAsync(_email.Trim());
-            _notice = result.Message ?? "If an account matches this address, reset instructions have been sent.";
+            if (await session.SignInAsync())
+            {
+                Navigation.NavigateTo(SafeReturnUrl);
+                return;
+            }
+
+            _notice = "Sign-in did not complete. You can retry or use email and password.";
         }
         catch (Exception)
         {
-            _error = "Password reset is temporarily unavailable.";
+            _error = "Secure sign-in is temporarily unavailable. Try again or use email and password.";
         }
         finally
         {
             _busy = false;
         }
+    }
+
+    private sealed record IdentityCapabilitiesResponse(
+        bool PasswordSignInAvailable,
+        bool NativeSignInAvailable);
+
+    private sealed class PasswordSignInForm
+    {
+        public string? Email { get; set; }
+
+        public string? Password { get; set; }
     }
 }

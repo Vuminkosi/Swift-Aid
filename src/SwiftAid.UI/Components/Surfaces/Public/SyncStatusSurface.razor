@@ -1,7 +1,7 @@
 @using SwiftAid.UI.Components.Theme
 @using SwiftAid.UI.Components
 
-<MudContainer MaxWidth="MaxWidth.Small" Class="public-resource-surface">
+<MudContainer Fixed="true" Class="public-resource-surface">
     <SwiftAidPageHeading Eyebrow="Offline work" Title="Synchronization" Description="Saved reports stay on this device until SwiftAid confirms receiving them." HeadingId="sync-heading" />
 
     @if (!string.IsNullOrWhiteSpace(RetryFeedback))

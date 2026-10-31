@@ -1,0 +1,117 @@
+@implements IDisposable
+@using SwiftAid.Client.Presentation
+@using SwiftAid.UI.Components.Surfaces.Operations
+@inject IMapAggregateClient MapAggregateClient
+
+<MudPaper Class="home-surveillance-preview" Elevation="0">
+    <header class="home-surveillance-preview__header">
+        <div>
+            <MudText Typo="Typo.subtitle1" HtmlTag="h2">Recent activity by area</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                Authorized area totals · last 30 days
+            </MudText>
+        </div>
+        <MudButton Href="/surveillance" Variant="Variant.Text" Size="Size.Small"
+                   EndIcon="@Icons.Material.Filled.ArrowForward">
+            View map
+        </MudButton>
+    </header>
+
+    <OperationsMapSurface Title="Recent reported activity"
+                          Description="Country outlines show authorized area totals only. Report locations are not displayed."
+                          CompactPreview="true"
+                          State="_state"
+                          Areas="_areas"
+                          UpdatedAtUtc="_updatedAtUtc"
+                          PeriodLabel="the last 30 days (by record creation)"
+                          StatusMessage="@_message"
+                          OnRetry="LoadAsync" />
+</MudPaper>
+
+@code {
+    private readonly CancellationTokenSource _lifetime = new();
+    private IReadOnlyList<OperationsMapSurface.AreaAggregateView> _areas =
+        Array.Empty<OperationsMapSurface.AreaAggregateView>();
+    private OperationsSurfaceState _state = OperationsSurfaceState.Loading;
+    private DateTimeOffset? _updatedAtUtc;
+    private string? _message;
+    private bool _disposed;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _state = OperationsSurfaceState.Loading;
+        _areas = Array.Empty<OperationsMapSurface.AreaAggregateView>();
+        _updatedAtUtc = null;
+        _message = null;
+
+        try
+        {
+            var query = new MapAggregateQuery(new PageRequest(1, 100), RegionCode: null, MapAggregatePeriod.Days30);
+            var result = await MapAggregateClient.GetAsync(query, _lifetime.Token);
+            if (_disposed)
+            {
+                return;
+            }
+
+            if (!result.Succeeded)
+            {
+                _state = result.Code switch
+                {
+                    UiCapabilityResultCode.Denied => OperationsSurfaceState.Denied,
+                    UiCapabilityResultCode.Unavailable => OperationsSurfaceState.Unavailable,
+                    UiCapabilityResultCode.Cancelled or UiCapabilityResultCode.Retryable => OperationsSurfaceState.Offline,
+                    _ => OperationsSurfaceState.Error
+                };
+                return;
+            }
+
+            if (result.Value is not { IsValid: true } page)
+            {
+                _state = OperationsSurfaceState.Error;
+                _message = "Area totals could not be checked. Refresh to try again.";
+                return;
+            }
+
+            _areas = page.Areas.Items.Select(ToView).ToArray();
+            _updatedAtUtc = result.Metadata.UpdatedAtUtc;
+            _state = _areas.Count == 0 ? OperationsSurfaceState.Empty : OperationsSurfaceState.Populated;
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+            // The page was removed while its authorized aggregate request was in flight.
+        }
+        catch (Exception)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _areas = Array.Empty<OperationsMapSurface.AreaAggregateView>();
+            _state = OperationsSurfaceState.Error;
+            _message = "Area totals could not be loaded. Try again when your connection is available.";
+        }
+    }
+
+    private static OperationsMapSurface.AreaAggregateView ToView(MapAreaAggregate area) => new(
+        area.AreaCode,
+        area.AreaLabel,
+        area.Precision == MapAggregateAreaPrecision.Country
+            ? OperationsMapSurface.AggregatePrecision.Country
+            : OperationsMapSurface.AggregatePrecision.Region,
+        area.HumanCount,
+        area.AnimalCount,
+        area.Denominator,
+        area.IsSuppressed,
+        area.SuppressionReason,
+        area.AsOfUtc);
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _lifetime.Cancel();
+        _lifetime.Dispose();
+    }
+}

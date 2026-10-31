@@ -20,7 +20,9 @@ function effectiveTheme(preference) {
 }
 
 function apply(theme) {
-    document.documentElement.setAttribute("data-theme", theme);
+    const root = document.documentElement;
+    root.setAttribute("data-theme", "agentic");
+    root.setAttribute("data-color-mode", theme);
 }
 
 export function getTheme() {
@@ -40,6 +42,7 @@ export function setTheme(preference) {
     }
     const effective = effectiveTheme(next);
     apply(effective);
+    window.dispatchEvent(new Event("swiftaid-theme-preference-changed"));
     return effective;
 }
 

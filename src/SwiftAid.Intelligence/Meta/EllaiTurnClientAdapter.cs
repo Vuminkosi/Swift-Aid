@@ -13,8 +13,7 @@ public sealed class EllaiProviderTurnClient(EllaiReasoningRouter router) : IElla
         IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(messages);
-        var result = await _router.Resolve().CompleteAsync(
-            messages.Select(m => (m.Role, m.Content)).ToList(), maxTokens, ct).ConfigureAwait(false);
+        var result = await _router.Resolve().CompleteAsync(messages, maxTokens, ct).ConfigureAwait(false);
         return new EllaiTurnCompletion(
             result.Text, result.Usage.PromptTokens, result.Usage.CompletionTokens);
     }

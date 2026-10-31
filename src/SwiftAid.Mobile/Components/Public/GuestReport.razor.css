@@ -37,7 +37,7 @@
     display: grid;
     place-items: center;
     padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom));
-    background: color-mix(in srgb, var(--sa-brand-navy) 48%, transparent);
+    background: var(--ais-overlay);
 }
 
 .mobile-report-exit-prompt {
@@ -155,7 +155,7 @@
         margin: 0 -0.875rem;
         padding-inline: 0.5rem;
         background: var(--sa-action-primary);
-        color: #fff;
+        color: var(--sa-action-foreground);
     }
 
     #mobile-public-report .mobile-report__header ::deep .mud-typography {

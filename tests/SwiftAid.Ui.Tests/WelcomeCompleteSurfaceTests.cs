@@ -30,6 +30,7 @@ public sealed class WelcomeCompleteSurfaceTests
 
         Assert.Contains("Welcome to SwiftAid, Test User!", markup, StringComparison.Ordinal);
         Assert.Contains("Continue to SwiftAid", markup, StringComparison.Ordinal);
+        Assert.Contains("href=\"/\"", markup, StringComparison.Ordinal);
         Assert.Contains("Join an organization", markup, StringComparison.Ordinal);
         Assert.DoesNotContain("workspace", markup, StringComparison.OrdinalIgnoreCase);
     }
@@ -45,6 +46,43 @@ public sealed class WelcomeCompleteSurfaceTests
 
         Assert.Contains("Welcome to SwiftAid!", markup, StringComparison.Ordinal);
         Assert.Contains("Continue to your workspace", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WelcomeCompleteSurface_PreservesLocalReturnPathAfterReview()
+    {
+        const string returnUrl = "/case/123?tab=history&focus=notes#latest";
+        var markup = await RenderAsync(new WelcomeCompleteSnapshot(
+            WelcomeCompleteViewState.Ready,
+            DisplayName: null,
+            HasActiveWorkspace: true,
+            HasPendingRequest: false), returnUrl);
+
+        Assert.Contains("href=\"/case/123?tab=history&amp;focus=notes#latest\"", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WelcomeCompleteSurface_SignInLinkKeepsReturnPathEncoded()
+    {
+        const string returnUrl = "/case/123?tab=history#latest";
+        var markup = await RenderAsync(WelcomeCompleteSnapshot.SignedOut, returnUrl);
+
+        Assert.Contains("href=\"/sign-in?returnUrl=%2Fcase%2F123%3Ftab%3Dhistory%23latest\"", markup, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("https://attacker.example/path")]
+    [InlineData("//attacker.example/path")]
+    public async Task WelcomeCompleteSurface_RejectsExternalReturnPath(string returnUrl)
+    {
+        var markup = await RenderAsync(new WelcomeCompleteSnapshot(
+            WelcomeCompleteViewState.SignedOut,
+            DisplayName: null,
+            HasActiveWorkspace: false,
+            HasPendingRequest: false), returnUrl);
+
+        Assert.Contains("href=\"/sign-in?returnUrl=%2F\"", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain(returnUrl, markup, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -75,7 +113,7 @@ public sealed class WelcomeCompleteSurfaceTests
         }
     }
 
-    private static async Task<string> RenderAsync(WelcomeCompleteSnapshot snapshot)
+    private static async Task<string> RenderAsync(WelcomeCompleteSnapshot snapshot, string? returnUrl = null)
     {
         await using var services = CreateServices();
         await using var renderer = CreateRenderer(services);
@@ -85,6 +123,7 @@ public sealed class WelcomeCompleteSurfaceTests
                 ParameterView.FromDictionary(new Dictionary<string, object?>
                 {
                     [nameof(WelcomeCompleteSurface.Snapshot)] = snapshot,
+                    [nameof(WelcomeCompleteSurface.ReturnUrl)] = returnUrl,
                     [nameof(WelcomeCompleteSurface.OnRefresh)] = EventCallback.Factory.Create(
                         new object(), () => { })
                 }));

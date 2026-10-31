@@ -8,7 +8,7 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiBrokerBoundsTests
 {
     private static readonly EllaiToolContext Context = new(
-        "session-1", "epoch-1", "cases", "case-1", 4, true);
+        "session-1", "epoch-1", "cases", "case-1", 4, true, "consent/1", EllaiProcessingClassification.SyntheticDemo);
 
     private static readonly IReadOnlyDictionary<string, string> NoArgs =
         new Dictionary<string, string>();
@@ -17,7 +17,7 @@ public sealed class EllaiBrokerBoundsTests
     {
         var consent = new EllaiConsentService();
         consent.Grant("session-1", EllaiConsentDimension.ReasoningText,
-            EllaiToolBroker.ToolReadPurpose, "synthetic", TimeSpan.FromHours(1));
+            EllaiToolBroker.ToolReadPurpose, EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
         return new EllaiToolBroker(new EllaiPolicyService(), consent);
     }
 
@@ -68,6 +68,42 @@ public sealed class EllaiBrokerBoundsTests
                 Enumerable.Range(0, 9).ToDictionary(i => $"k{i}", i => "v")),
             CancellationToken.None);
         Assert.Equal(EllaiToolReasonCodes.InvalidArguments, args.ReasonCode);
+    }
+
+    [Fact]
+    public async Task SessionToolAllowlistHidesAndDeniesUnlistedTools()
+    {
+        var broker = GrantedBroker();
+        var profile = Context with
+        {
+            AllowedTools = new HashSet<string>(StringComparer.Ordinal)
+            {
+                EllaiToolNames.ProductFacts,
+            },
+        };
+
+        var catalogue = EllaiToolBroker.DescribeCatalogue(profile.AllowedTools);
+        Assert.Contains(EllaiToolNames.ProductFacts, catalogue, StringComparison.Ordinal);
+        Assert.DoesNotContain(EllaiToolNames.State, catalogue, StringComparison.Ordinal);
+        Assert.DoesNotContain(EllaiToolNames.Evidence, catalogue, StringComparison.Ordinal);
+
+        var denied = await broker.InvokeAsync(
+            profile, new EllaiToolRequest(EllaiToolNames.State, NoArgs), CancellationToken.None);
+        Assert.False(denied.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.DeniedByPolicy, denied.ReasonCode);
+
+        var deniedAlias = await broker.InvokeAsync(
+            profile, new EllaiToolRequest("ellai_guidance_session", NoArgs), CancellationToken.None);
+        Assert.False(deniedAlias.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.DeniedByPolicy, deniedAlias.ReasonCode);
+
+        var allowed = await broker.InvokeAsync(
+            profile,
+            new EllaiToolRequest(EllaiToolNames.ProductFacts,
+                new Dictionary<string, string> { ["topic"] = "guest" }),
+            CancellationToken.None);
+        Assert.True(allowed.Allowed);
+        Assert.Contains(allowed.Evidence, evidence => evidence.SourceKind == "ProductFact");
     }
 
     [Fact]

@@ -68,8 +68,8 @@
             <MudText Typo="Typo.caption" Color="Color.Secondary">
                 This preference applies only while SwiftAid is open.
             </MudText>
-            <MudButton Variant="Variant.Outlined" Color="Color.Default" OnClick="DisablePushAsync"
-                       Disabled="_settingsSaving" aria-label="Turn off SwiftAid notifications on this device">
+            <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="DisablePushAsync"
+                       Disabled="_settingsSaving" aria-label="Turn off SwiftAid notifications on this device" StartIcon="@Icons.Material.Filled.NotificationsOff">
                 Turn off on this device
             </MudButton>
         }
@@ -86,8 +86,8 @@
             <MudText Typo="Typo.caption" Color="Color.Secondary">
                 You can enable notifications for this device. SwiftAid asks for device permission only after you choose Enable.
             </MudText>
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="EnablePushAsync"
-                       Disabled="_settingsSaving || _platformState?.Permission == NotificationPermissionState.Denied">
+            <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="EnablePushAsync"
+                       Disabled="_settingsSaving || _platformState?.Permission == NotificationPermissionState.Denied" StartIcon="@Icons.Material.Filled.NotificationsActive">
                 @if (_settingsSaving)
                 {
                     <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="me-2" aria-label="Enabling notifications" />
@@ -121,7 +121,7 @@
     {
         <NotificationFeed Items="_notificationItems"
                           Loading="false"
-                          ErrorMessage="_feedError"
+                          ErrorMessage="@_feedError"
                           OnRetry="RefreshFeedAsync"
                           OnMarkRead="MarkReadAsync"
                           OnDismiss="DismissAsync"

@@ -29,7 +29,8 @@ public sealed class EllaiUsageDurabilityTests
             new EllaiPromptBuilder("Policy text.", "v-test"), completions, ledger, store);
 
     private static EllaiLoopRequest Request(string session = "session-1") => new(
-        new EllaiToolContext(session, "epoch-1", "cases", "case-1", 4, true),
+        new EllaiToolContext(session, "epoch-1", "cases", "case-1", 4, true,
+            "consent/1", EllaiProcessingClassification.SyntheticDemo),
         "Hello.", new EllaiRoleOverlay("ask", "Be brief."),
         "clock", 256, "cycle-1", 1);
 

@@ -14,13 +14,19 @@ public static class MobileGatewayAddress
     public const string AndroidEmulatorLoopback = "10.0.2.2";
 
     /// <summary>
-    /// Resolves a configured HTTPS base address, or null when unconfigured.
+    /// Resolves a configured HTTPS base address, or a development-only HTTP
+    /// address when explicitly enabled by the Android emulator host.
     /// </summary>
     /// <param name="configured">The configured address text (may be null/empty).</param>
     /// <param name="settingName">Configuration key, used in error messages.</param>
     /// <param name="rewriteLoopbackForAndroidEmulator">True on the Android emulator.</param>
-    /// <exception cref="InvalidOperationException">The address is not a bare HTTPS URL.</exception>
-    public static Uri? Resolve(string? configured, string settingName, bool rewriteLoopbackForAndroidEmulator)
+    /// <param name="allowHttpForDevelopmentGateway">True only for a local Android-emulator Debug build.</param>
+    /// <exception cref="InvalidOperationException">The address is not an allowed bare URL.</exception>
+    public static Uri? Resolve(
+        string? configured,
+        string settingName,
+        bool rewriteLoopbackForAndroidEmulator,
+        bool allowHttpForDevelopmentGateway = false)
     {
         if (string.IsNullOrWhiteSpace(settingName))
         {
@@ -33,12 +39,13 @@ public static class MobileGatewayAddress
         }
 
         if (!Uri.TryCreate(configured, UriKind.Absolute, out var address) ||
-            address.Scheme != Uri.UriSchemeHttps ||
+            (address.Scheme != Uri.UriSchemeHttps
+                && !(allowHttpForDevelopmentGateway && address.Scheme == Uri.UriSchemeHttp)) ||
             !string.IsNullOrEmpty(address.UserInfo) ||
             !string.IsNullOrEmpty(address.Query) ||
             !string.IsNullOrEmpty(address.Fragment))
         {
-            throw new InvalidOperationException($"{settingName} must be an HTTPS URL without credentials, query, or fragment.");
+            throw new InvalidOperationException($"{settingName} must be an HTTPS URL without credentials, query, or fragment. HTTP is available only for an explicitly enabled local Android-emulator development Gateway.");
         }
 
         if (rewriteLoopbackForAndroidEmulator && address.IsLoopback)

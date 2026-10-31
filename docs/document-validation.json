@@ -1,5 +1,41 @@
 {
-  "snapshotDate": "2026-10-26",
+  "currentRevision": {
+    "snapshotDate": "2026-10-31",
+    "specVersion": "1.5",
+    "implementationVersion": "2.5",
+    "specSha256": "0c880c09765ca4825aaa7ff66ecc899c8ac6c93868d99b7f88b3c37e8513afd8",
+    "specBytes": 225147,
+    "implementationSha256": "9111258db75419b4a7f3f6fb2bdf2f5aad21bec868bb6785e4e0aac5e0215426",
+    "implementationBytes": 443503,
+    "uniqueRequirementCount": 379,
+    "requirementOwnerRows": 379,
+    "acceptanceScenarioCount": 86,
+    "scenarioOwnerRows": 86,
+    "taskCount": 45,
+    "checks": [
+      {
+        "check": "paired versions and inventory",
+        "result": "PASS",
+        "evidence": "Root handoffs identify spec v1.5 / implementation v2.5; static extraction found 379 unique SA IDs, 379 individual owner rows, 86 AT definitions, 86 scenario-owner rows, and 45 task headings."
+      },
+      {
+        "check": "source hash and byte-length extraction",
+        "result": "PASS",
+        "evidence": "Recomputed from root source bytes on 2026-10-31; values match this record and docs/DOCUMENT-INTEGRITY.md."
+      },
+      {
+        "check": "application, provider, and device verification for speech",
+        "result": "NOT_VERIFIED",
+        "evidence": "No TTS engine enabled; exact MMS-TTS checkpoint and usage/distribution rights require owner confirmation. No web/Android speech output journey was run."
+      },
+      {
+        "check": "Docker rebuild/restart and live Ellai journey",
+        "result": "NOT_VERIFIED",
+        "evidence": "Docker cleanup reclaimed 0 B; D: has 7,544,832 bytes free and the Docker engine call hangs. No rebuild/restart or live Ellai journey was run."
+      }
+    ]
+  },
+  "historicalSnapshotDate": "2026-10-26",
   "sourceRevisionBeforeMetadataCorrection": "ef8a8cd7d6a24897310bdf6490227082d675499a",
   "specVersion": "1.4",
   "implementationVersion": "2.4",
@@ -24,7 +60,7 @@
     "implementationBytes": 430273,
     "implementationSha256": "2d98fd6ec3d9c019b87a4a9a4981485727b02cf695c88dbd028c1c0c13f7f76f"
   },
-  "checks": [
+  "historicalChecks": [
     {
       "check": "paired source metadata",
       "evidence": "Operative paired-revision text, current handoffs, and current inventory counts align to spec v1.4 / implementation v2.4 and 365 requirements / 76 scenarios / seven additions. Historical source-basis references to v1.3/v2.3 are explicitly retained as historical.",

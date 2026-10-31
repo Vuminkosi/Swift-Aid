@@ -5,9 +5,13 @@
 @using SwiftAid.Mobile.Services.Welcome
 @using SwiftAid.Client.Navigation
 @using SwiftAid.UI.Components.Surfaces.Shell
+@using SwiftAid.UI.Ellai
+@using SwiftAid.UI.Ellai.Components
+@using SwiftAid.UI.Ellai.Guidance
 @inject IMobileAuthenticationSession AuthenticationSession
 @inject IMobileWelcomePreferenceStore WelcomePreferenceStore
 @inject NavigationManager Navigation
+@inject EllaiLauncher EllaiLauncher
 
 <SwiftAidThemeProvider />
 <MudPopoverProvider />
@@ -35,21 +39,20 @@
     </HeaderActions>
 
     <DesktopNavigation>
-        <NavLink href="/" Match="NavLinkMatch.All"><MudIcon Icon="@Icons.Material.Filled.Home" aria-hidden="true" /><span>Dashboard</span></NavLink>
+        <NavLink href="/dashboard"><MudIcon Icon="@Icons.Material.Filled.Home" aria-hidden="true" /><span>Dashboard</span></NavLink>
         <NavLink href="@CasesHref"><MudIcon Icon="@Icons.Material.Filled.FolderOpen" aria-hidden="true" /><span>Cases</span></NavLink>
-        <NavLink href="/education"><MudIcon Icon="@Icons.Material.Filled.MenuBook" aria-hidden="true" /><span>Education</span></NavLink>
         <NavLink href="/sessions"><MudIcon Icon="@Icons.Material.Filled.Event" aria-hidden="true" /><span>Community</span></NavLink>
         <NavLink href="/account"><MudIcon Icon="@Icons.Material.Filled.Settings" aria-hidden="true" /><span>Settings</span></NavLink>
     </DesktopNavigation>
 
     <MobileNavigation>
-        <NavLink href="/" Match="NavLinkMatch.All"><MudIcon Icon="@Icons.Material.Filled.Home" aria-hidden="true" /><span>Home</span></NavLink>
+        <NavLink href="/dashboard"><MudIcon Icon="@Icons.Material.Filled.Home" aria-hidden="true" /><span>Dashboard</span></NavLink>
         <NavLink href="@CasesHref"><MudIcon Icon="@Icons.Material.Filled.FolderOpen" aria-hidden="true" /><span>Cases</span></NavLink>
         <NavLink href="/report" class="mobile-report-link" aria-label="Report a concern">
             <MudIcon Icon="@Icons.Material.Filled.Add" aria-hidden="true" />
         </NavLink>
         <NavLink href="/sessions"><MudIcon Icon="@Icons.Material.Filled.Groups" aria-hidden="true" /><span>Community</span></NavLink>
-        <NavLink href="/more"><MudIcon Icon="@Icons.Material.Filled.MoreHoriz" aria-hidden="true" /><span>More</span></NavLink>
+        <NavLink href="/more"><MudIcon Icon="@Icons.Material.Filled.Settings" aria-hidden="true" /><span>Settings</span></NavLink>
     </MobileNavigation>
 
     <ChildContent>
@@ -68,7 +71,7 @@
                     <MobileNotificationCenter UnreadCountChanged="UnreadNotificationCountChanged" />
                 }
             </MudDrawer>
-            <MudMainContent>
+            <MudMainContent Class="mobile-page-viewport">
                 @if (IsPublicSafeRoute || (_authenticationResolved && _signedIn))
                 {
                     @Body
@@ -95,14 +98,29 @@
     </ChildContent>
 </SwiftAidApplicationShell>
 
+@if (ShouldShowEllai)
+{
+    <EllaiGuidanceHost />
+    <EllaiLauncherMenu PublicHelpOnly="true" OnModeSelected="RequestEllaiMode" />
+}
+
 @code {
     private bool _notificationsOpen;
     private int _unreadNotificationCount;
     private bool _signedIn;
     private bool _authenticationResolved;
+    private bool _authenticationRefreshInProgress;
     private bool _publicWelcomeCompleted;
-    private bool ShowAppChrome => !IsActivePublicReportWizard && !IsActiveWelcome &&
+    private bool ShowAppChrome => !IsActivePublicReportWizard && !IsActiveWelcome && !IsIdentityJourneyRoute &&
         (_signedIn || !IsAtLandingRoute || _publicWelcomeCompleted);
+    private bool ShouldShowEllai => !IsActiveWelcome && !IsIdentityJourneyRoute;
+    private bool IsIdentityJourneyRoute =>
+        CurrentPath.Equals("/sign-in", StringComparison.OrdinalIgnoreCase) ||
+        CurrentPath.Equals("/forgot-password", StringComparison.OrdinalIgnoreCase) ||
+        CurrentPath.Equals("/reset-password", StringComparison.OrdinalIgnoreCase) ||
+        CurrentPath.Equals("/register", StringComparison.OrdinalIgnoreCase) ||
+        CurrentPath.Equals("/verify-email", StringComparison.OrdinalIgnoreCase) ||
+        CurrentPath.Equals("/welcome-complete", StringComparison.OrdinalIgnoreCase);
     private bool IsActiveWelcome =>
         CurrentPath.Equals("/welcome", StringComparison.OrdinalIgnoreCase);
     private bool IsAtLandingRoute => string.Equals(CurrentPath, "/", StringComparison.OrdinalIgnoreCase);
@@ -141,16 +159,20 @@
     private bool IsPublicSafeRoute => CurrentPath.Equals("/", StringComparison.OrdinalIgnoreCase) ||
         CurrentPath.Equals("/welcome", StringComparison.OrdinalIgnoreCase) ||
         CurrentPath.Equals("/report", StringComparison.OrdinalIgnoreCase) ||
+        CurrentPath.Equals("/ellai/about", StringComparison.OrdinalIgnoreCase) ||
         CurrentPath.Equals("/education", StringComparison.OrdinalIgnoreCase) ||
         CurrentPath.Equals("/sessions", StringComparison.OrdinalIgnoreCase) ||
         CurrentPath.Equals("/account", StringComparison.OrdinalIgnoreCase) ||
         CurrentPath.Equals("/more", StringComparison.OrdinalIgnoreCase) ||
         CurrentPath.Equals("/not-found", StringComparison.OrdinalIgnoreCase) ||
         CurrentPath.Equals("/sign-in", StringComparison.OrdinalIgnoreCase) ||
+        CurrentPath.Equals("/forgot-password", StringComparison.OrdinalIgnoreCase) ||
+        CurrentPath.Equals("/reset-password", StringComparison.OrdinalIgnoreCase) ||
         CurrentPath.Equals("/register", StringComparison.OrdinalIgnoreCase) ||
         CurrentPath.Equals("/verify-email", StringComparison.OrdinalIgnoreCase) ||
         CurrentPath.Equals("/welcome-complete", StringComparison.OrdinalIgnoreCase);
     private string CasesHref => _signedIn ? "/my-cases" : "/report?view=tracking";
+    private void RequestEllaiMode(SwiftAid.Contracts.Ellai.EllaiMode mode) => EllaiLauncher.Request(mode);
     private string SignInHref
     {
         get
@@ -215,7 +237,7 @@
             await InvokeAsync(async () =>
             {
                 RefreshPublicWelcomeCompletion();
-                if (!IsPublicSafeRoute)
+                if (!IsPublicSafeRoute && !_authenticationResolved && !_authenticationRefreshInProgress)
                 {
                     var revision = Interlocked.Increment(ref _authenticationRevision);
                     if (BeginAuthenticationRefresh(revision))
@@ -287,6 +309,7 @@
         }
 
         _authenticationResolved = false;
+        _authenticationRefreshInProgress = true;
         _signedIn = false;
         return true;
     }
@@ -310,6 +333,7 @@
         {
             _signedIn = isSignedIn;
             _authenticationResolved = true;
+            _authenticationRefreshInProgress = false;
         }
     }
 

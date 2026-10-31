@@ -3,6 +3,21 @@ let facebookSdkPromise;
 let configuredFacebookSdk;
 
 export async function loadSignInOptions() {
+    const capabilityResponse = await fetch("/auth/capabilities", {
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { Accept: "application/json" }
+    });
+
+    if (!capabilityResponse.ok) {
+        throw new Error("Sign-in capabilities are unavailable.");
+    }
+
+    const capability = await capabilityResponse.json();
+    if (typeof capability?.passwordSignInAvailable !== "boolean") {
+        throw new Error("Sign-in capabilities are invalid.");
+    }
+
     const providerResponse = await fetch("/auth/providers", {
         credentials: "same-origin",
         cache: "no-store",
@@ -62,6 +77,7 @@ export async function loadSignInOptions() {
     if (!hasAvailableSignIn) {
         return {
             providers,
+            passwordSignInAvailable: capability.passwordSignInAvailable,
             facebookWebAvailable: false,
             requestToken: null,
             optionsError: null
@@ -95,6 +111,7 @@ export async function loadSignInOptions() {
 
     return {
         providers,
+        passwordSignInAvailable: capability.passwordSignInAvailable,
         facebookWebAvailable,
         requestToken: antiforgery.requestToken,
         optionsError: null
@@ -279,8 +296,8 @@ async function safeJson(response) {
 
 export function focusPrimaryOption() {
     const primaryOption = document.getElementById("facebook-sign-in-button") ??
-        document.querySelector(".sign-in-provider-option form button[type='submit']");
-    primaryOption?.focus();
+        document.querySelector(".sign-in-provider-option form button[type='submit']:not([disabled])");
+    (primaryOption ?? document.getElementById("continue-without-account"))?.focus();
 }
 
 function loadFacebookSdk(appId, graphApiVersion) {

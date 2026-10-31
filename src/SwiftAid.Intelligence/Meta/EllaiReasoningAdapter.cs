@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using SwiftAid.Application.Ellai;
 
 namespace SwiftAid.Intelligence.Meta;
 
@@ -19,7 +20,7 @@ public sealed record EllaiReasoningResult(string Text, string Model, string Fini
 public sealed class EllaiReasoningAdapter(HttpClient http, EllaiOptions options)
 {
     public async Task<EllaiReasoningResult> CompleteAsync(
-        IReadOnlyList<(string Role, string Content)> messages, int maxTokens, CancellationToken ct)
+        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(messages);
         if (!options.HasReasoningRoute)
@@ -35,7 +36,7 @@ public sealed class EllaiReasoningAdapter(HttpClient http, EllaiOptions options)
         var payload = new
         {
             model = options.ReasoningModel,
-            messages = messages.Select(m => new { role = m.Role, content = m.Content }).ToList(),
+            messages = messages.Select(MetaCompatibleChatMessage.ToPayload).ToList(),
             max_tokens = maxTokens
         };
 
@@ -60,7 +61,9 @@ public sealed class EllaiReasoningAdapter(HttpClient http, EllaiOptions options)
 
         if (status is < 200 or >= 300)
         {
-            throw new InvalidOperationException($"Ellai reasoning refused the request (HTTP {status}).");
+            var diagnostic = ReadSafeErrorMetadata(body);
+            throw new InvalidOperationException(
+                $"Ellai reasoning refused the request (HTTP {status}{diagnostic}).");
         }
 
         try
@@ -112,4 +115,49 @@ public sealed class EllaiReasoningAdapter(HttpClient http, EllaiOptions options)
 
     private static int GetInt(JsonElement element, string name) =>
         element.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var n) ? n : 0;
+
+    /// <summary>Includes only short provider error identifiers in internal
+    /// diagnostics. Provider messages may echo prompts or other request data,
+    /// so their content is deliberately never copied to exceptions or logs.</summary>
+    private static string ReadSafeErrorMetadata(string body)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            if (!document.RootElement.TryGetProperty("error", out var error)
+                || error.ValueKind != JsonValueKind.Object)
+            {
+                return string.Empty;
+            }
+
+            var fields = new[] { "code", "type", "param" }
+                .Select(name => (Name: name, Value: ReadSafeIdentifier(error, name)))
+                .Where(pair => pair.Value is not null)
+                .Select(pair => $"{pair.Name}={pair.Value}")
+                .ToArray();
+            return fields.Length == 0 ? string.Empty : $"; provider {string.Join(", ", fields)}";
+        }
+        catch (JsonException)
+        {
+            return string.Empty;
+        }
+    }
+
+    private static string? ReadSafeIdentifier(JsonElement error, string name)
+    {
+        if (!error.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        var identifier = value.GetString();
+        if (string.IsNullOrWhiteSpace(identifier) || identifier.Length > 64
+            || identifier.Any(character => !char.IsAsciiLetterOrDigit(character)
+                && character is not '_' and not '-' and not '.'))
+        {
+            return null;
+        }
+
+        return identifier;
+    }
 }

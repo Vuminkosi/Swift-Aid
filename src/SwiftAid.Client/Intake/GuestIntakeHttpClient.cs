@@ -14,14 +14,17 @@ public sealed class GuestIntakeHttpClient : IGuestIntakeTransport
     private const string IntakeCapabilityHeader = "X-SwiftAid-Intake-Capability";
     private const string IntakeSessionHeader = "X-SwiftAid-Intake-Session";
     private const int MaximumResponseBytes = 64 * 1024;
+    private static readonly TimeSpan CountryCatalogueRequestTimeout = TimeSpan.FromSeconds(5);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly HttpClient _httpClient;
 
-    public GuestIntakeHttpClient(HttpClient httpClient)
+    public GuestIntakeHttpClient(HttpClient httpClient, bool allowInsecureTransport = false)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         var baseAddress = _httpClient.BaseAddress;
-        if (baseAddress is null || !string.Equals(baseAddress.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) ||
+        if (baseAddress is null ||
+            (!string.Equals(baseAddress.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) &&
+                !(allowInsecureTransport && string.Equals(baseAddress.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal))) ||
             !string.IsNullOrEmpty(baseAddress.UserInfo) || !string.IsNullOrEmpty(baseAddress.Query) ||
             !string.IsNullOrEmpty(baseAddress.Fragment))
         {
@@ -102,24 +105,34 @@ public sealed class GuestIntakeHttpClient : IGuestIntakeTransport
 
     public async Task<PublicIntakeCountryCatalogue> GetCountriesAsync(CancellationToken cancellationToken)
     {
-        using var response = await _httpClient.GetAsync(
-            "public/v1/intake/metadata/countries",
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken).ConfigureAwait(false);
-        EnsureSuccess(response);
-        var catalogue = await ReadJsonAsync<PublicIntakeCountryCatalogue>(response, cancellationToken).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(catalogue.Version) || !IsSafePublicReference(catalogue.Reference) ||
-            catalogue.Countries is not { Count: > 0 } || catalogue.Countries.Count > 300 ||
-            catalogue.Countries.Any(country => country is null || country.Code is not { Length: 2 } ||
-                country.Code.Any(character => character is < 'A' or > 'Z') ||
-                string.IsNullOrWhiteSpace(country.Label) || country.Label.Length > 200) ||
-            catalogue.Countries.Select(country => country.Code).Distinct(StringComparer.Ordinal).Count() !=
-                catalogue.Countries.Count)
+        using var requestLifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        requestLifetime.CancelAfter(CountryCatalogueRequestTimeout);
+
+        try
+        {
+            using var response = await _httpClient.GetAsync(
+                "public/v1/intake/metadata/countries",
+                HttpCompletionOption.ResponseHeadersRead,
+                requestLifetime.Token).ConfigureAwait(false);
+            EnsureSuccess(response);
+            var catalogue = await ReadJsonAsync<PublicIntakeCountryCatalogue>(response, requestLifetime.Token).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(catalogue.Version) || !IsSafePublicReference(catalogue.Reference) ||
+                catalogue.Countries is not { Count: > 0 } || catalogue.Countries.Count > 300 ||
+                catalogue.Countries.Any(country => country is null || country.Code is not { Length: 2 } ||
+                    country.Code.Any(character => character is < 'A' or > 'Z') ||
+                    string.IsNullOrWhiteSpace(country.Label) || country.Label.Length > 200) ||
+                catalogue.Countries.Select(country => country.Code).Distinct(StringComparer.Ordinal).Count() !=
+                    catalogue.Countries.Count)
+            {
+                throw new GuestIntakeTransportException(isRetryable: true);
+            }
+
+            return catalogue;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             throw new GuestIntakeTransportException(isRetryable: true);
         }
-
-        return catalogue;
     }
 
     private static bool IsSafePublicReference(string? reference) =>

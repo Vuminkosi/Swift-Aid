@@ -1,5 +1,7 @@
 @implements IAsyncDisposable
 @inject IJSRuntime JSRuntime
+@inject IServiceProvider Services
+@using SwiftAid.UI.Components.Theme
 
 <MudThemeProvider Theme="_theme" IsDarkMode="_isDarkMode" />
 
@@ -8,6 +10,7 @@
     private IJSObjectReference? _themeModule;
     private DotNetObjectReference<SwiftAidThemeProvider>? _dotNetReference;
     private bool _isDarkMode;
+    private string _preference = "system";
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -23,6 +26,8 @@
                 "./_content/SwiftAid.UI/Components/SwiftAidThemeProvider.razor.js");
             _dotNetReference = DotNetObjectReference.Create(this);
             _isDarkMode = await _themeModule.InvokeAsync<bool>("watchSystemTheme", _dotNetReference);
+            _preference = await _themeModule.InvokeAsync<string>("getThemePreference");
+            await ApplyHostThemeAsync();
             await InvokeAsync(StateHasChanged);
         }
         catch (JSException)
@@ -36,11 +41,32 @@
     }
 
     [JSInvokable]
-    public Task SetSystemTheme(bool isDarkMode) => InvokeAsync(() =>
+    public Task SetThemeState(string preference, bool isDarkMode) => InvokeAsync(async () =>
     {
+        _preference = NormalizePreference(preference);
         _isDarkMode = isDarkMode;
+        await ApplyHostThemeAsync();
         StateHasChanged();
     });
+
+    private async Task ApplyHostThemeAsync()
+    {
+        if (Services.GetService(typeof(IThemeAppearanceSink)) is not IThemeAppearanceSink sink)
+        {
+            return;
+        }
+
+        try
+        {
+            await sink.ApplyAsync(_preference, _isDarkMode);
+        }
+        catch (Exception)
+        {
+            // Native chrome is supplementary; CSS and MudBlazor retain the selected theme.
+        }
+    }
+
+    private static string NormalizePreference(string? preference) => preference is "light" or "dark" ? preference : "system";
 
     public async ValueTask DisposeAsync()
     {

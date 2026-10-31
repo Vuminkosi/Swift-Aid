@@ -55,8 +55,12 @@ public sealed class EllaiPolicyTests
     {
         Assert.False(EllaiPolicyService.IsContributorEligible("synthetic-demo", "real-sensitive"));
         Assert.False(EllaiPolicyService.IsContributorEligible("synthetic-demo", "unknown-origin"));
-        Assert.True(EllaiPolicyService.IsContributorEligible("synthetic-demo", "synthetic"));
-        Assert.True(EllaiPolicyService.IsContributorEligible("consented-nonsensitive", "public"));
+        Assert.True(EllaiPolicyService.IsContributorEligible(
+            EllaiProcessingClassification.SyntheticDemo, EllaiProcessingClassification.SyntheticDemo));
+        Assert.True(EllaiPolicyService.IsContributorEligible(
+            EllaiProcessingClassification.ConsentedNonSensitive,
+            EllaiProcessingClassification.ConsentedNonSensitive));
+        Assert.False(EllaiPolicyService.IsContributorEligible("consented-nonsensitive", "public"));
     }
 
     [Fact]

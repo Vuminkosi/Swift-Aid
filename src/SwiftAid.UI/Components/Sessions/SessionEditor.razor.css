@@ -1,3 +1,17 @@
+.session-editor {
+    min-width: 0;
+    width: 100%;
+}
+
+.session-editor__fields {
+    box-sizing: border-box;
+    max-width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
 .session-editor__material-row {
     display: flex;
     gap: 8px;

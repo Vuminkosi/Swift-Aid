@@ -1,0 +1,194 @@
+.account-entry-surface {
+    display: grid;
+    width: min(100% - 2rem, 76rem);
+    min-height: min(50rem, calc(100svh - 2rem));
+    grid-template-columns: minmax(0, 1fr) minmax(22rem, 34rem);
+    grid-template-rows: auto auto;
+    align-items: stretch;
+    margin-inline: auto;
+    overflow: hidden;
+    border: 1px solid var(--sa-border);
+    border-radius: 1.5rem;
+    background: var(--sa-surface);
+}
+
+.account-entry-surface__header {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    min-height: 4.5rem;
+    padding-inline: clamp(1rem, 3vw, 2rem);
+    border-block-end: 1px solid var(--sa-border);
+}
+
+.account-entry-surface__back,
+.account-entry-surface__brand-lockup {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    color: var(--sa-text-primary);
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.account-entry-surface__back {
+    justify-self: start;
+    gap: 0.4rem;
+}
+
+.account-entry-surface__brand-lockup {
+    grid-column: 2;
+    justify-self: center;
+    gap: 0.55rem;
+    font-size: 1.2rem;
+    letter-spacing: -0.025em;
+}
+
+.account-entry-surface__brand-lockup img {
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.45rem;
+    object-fit: contain;
+}
+
+.account-entry-surface__header-balance {
+    grid-column: 3;
+}
+
+.account-entry-surface__brand {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0;
+    padding: clamp(2rem, 5vw, 4.5rem);
+    background: radial-gradient(circle at 88% 16%, color-mix(in srgb, var(--sa-action-primary) 24%, transparent), transparent 34%),
+        linear-gradient(150deg, var(--sa-surface-subtle), var(--sa-surface));
+}
+
+.account-entry-surface__emblem {
+    display: grid;
+    width: 7rem;
+    aspect-ratio: 1;
+    place-items: center;
+    margin-block-end: 1.6rem;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--sa-border) 70%, transparent);
+    border-radius: 1.6rem;
+    background: var(--sa-surface);
+    box-shadow: 0 1rem 2.5rem color-mix(in srgb, var(--sa-action-primary) 14%, transparent);
+}
+
+.account-entry-surface__emblem img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.account-entry-surface__eyebrow {
+    margin: 0 0 1rem;
+    color: var(--sa-action-primary);
+    font-size: 0.8rem;
+    font-weight: 750;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.account-entry-surface__brand h2 {
+    margin: 0;
+    font-size: clamp(2rem, 3.6vw, 3.5rem);
+    font-weight: 780;
+    letter-spacing: -0.055em;
+    line-height: 1.08;
+}
+
+.account-entry-surface__brand > p:not(.account-entry-surface__eyebrow) {
+    max-width: 28rem;
+    margin-block: 1.2rem 0;
+    color: var(--sa-text-secondary);
+    font-size: 1.08rem;
+    line-height: 1.6;
+}
+
+.account-entry-surface__brand > a {
+    margin-block-start: 2rem;
+    color: var(--sa-link);
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.account-entry-surface__content {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    padding: clamp(1rem, 3.5vw, 2.5rem);
+}
+
+.account-entry-surface__content ::deep > .mud-paper {
+    width: 100%;
+    padding: clamp(1.25rem, 3vw, 2rem) !important;
+    border: 0;
+    background: transparent;
+}
+
+.account-entry-surface__content ::deep .swiftaid-page-heading__title {
+    max-width: none;
+    font-size: clamp(1.8rem, 3vw, 2.25rem);
+    line-height: 1.12;
+}
+
+.account-entry-surface :is(a, button, input, [tabindex]):focus-visible {
+    outline: 3px solid var(--sa-focus);
+    outline-offset: 3px;
+}
+
+@media (max-width: 850px) {
+    .account-entry-surface {
+        width: min(100% - 1rem, 38rem);
+        min-height: calc(100svh - 1rem);
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr);
+        border-radius: 1.25rem;
+    }
+
+    .account-entry-surface__header {
+        min-height: 4rem;
+        padding-inline: 0.75rem;
+    }
+
+    .account-entry-surface__back {
+        gap: 0;
+    }
+
+    .account-entry-surface__back span {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+    }
+
+    .account-entry-surface__brand-lockup {
+        font-size: 1.05rem;
+    }
+
+    .account-entry-surface__brand-lockup img {
+        width: 1.75rem;
+        height: 1.75rem;
+    }
+
+    .account-entry-surface__brand {
+        display: none;
+    }
+
+    .account-entry-surface__content {
+        align-items: flex-start;
+        padding: 0.5rem;
+    }
+
+    .account-entry-surface__content ::deep .swiftaid-page-heading__title {
+        font-size: clamp(1.75rem, 6vw, 2rem);
+    }
+}

@@ -4,6 +4,8 @@
 <dict>
     <key>LSRequiresIPhoneOS</key>
     <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>SwiftAid uses the microphone only when you choose voice capture or Ellai voice transcription.</string>
     <key>UIDeviceFamily</key>
     <array>
         <integer>1</integer>

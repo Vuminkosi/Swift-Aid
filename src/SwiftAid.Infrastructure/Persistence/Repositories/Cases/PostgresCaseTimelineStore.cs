@@ -28,12 +28,22 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
                 item.CreatedAtUtc))
             .SingleOrDefaultAsync(ct);
 
-    public async Task<IReadOnlyList<CaseTimelineRow>> GetEventsAsync(Guid caseId, int limit, CancellationToken ct)
+    public async Task<IReadOnlyList<CaseTimelineRow>> GetEventsAsync(
+        Guid caseId,
+        int limit,
+        long? beforeAggregateVersion,
+        CancellationToken ct)
     {
-        var rows = await _dbContext.CaseEvents.AsNoTracking()
-            .Where(item => item.CaseId == caseId)
-            .OrderBy(item => item.AggregateVersion)
-            .ThenBy(item => item.RecordedAtUtc)
+        var events = _dbContext.CaseEvents.AsNoTracking()
+            .Where(item => item.CaseId == caseId);
+        if (beforeAggregateVersion is { } cursor)
+        {
+            events = events.Where(item => item.AggregateVersion < cursor);
+        }
+
+        var rows = await events
+            .OrderByDescending(item => item.AggregateVersion)
+            .ThenByDescending(item => item.RecordedAtUtc)
             .Take(limit)
             .Select(item => new CaseTimelineRow(
                 item.EventId,

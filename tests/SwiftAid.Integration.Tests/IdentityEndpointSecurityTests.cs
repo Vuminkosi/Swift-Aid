@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
@@ -27,6 +28,109 @@ namespace SwiftAid.Integration.Tests;
 /// </summary>
 public sealed class IdentityEndpointSecurityTests
 {
+    [Fact]
+    public async Task IdentityEndpoints_WhenIdentityIsDisabled_KeepOnlySafeDiscoveryRoutes()
+    {
+        var federationOptions = new FederationOptions();
+        var identityServerOptions = new IdentityServerOptions();
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddSingleton(federationOptions);
+
+        await using var application = builder.Build();
+        application.MapSwiftAidIdentityEndpoints(federationOptions, identityServerOptions);
+        await application.StartAsync();
+
+        using var client = application.GetTestClient();
+        using var providers = await client.GetAsync("/auth/providers");
+        using var capabilities = await client.GetAsync("/auth/capabilities");
+        using var antiforgery = await client.GetAsync("/auth/antiforgery");
+        using var facebookOptions = await client.GetAsync("/auth/facebook/web/options");
+        using var passwordPolicy = await client.GetAsync("/auth/password/policy");
+        using var passwordLogin = await client.PostAsync("/auth/password/login", content: null);
+        using var profile = await client.GetAsync("/auth/profile");
+        using var facebookExchange = await client.PostAsync("/auth/facebook/web/exchange", content: null);
+
+        Assert.Equal(HttpStatusCode.OK, providers.StatusCode);
+        Assert.Equal("[]", await providers.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.OK, capabilities.StatusCode);
+        Assert.Contains("\"passwordSignInAvailable\":false", await capabilities.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("\"nativeSignInAvailable\":false", await capabilities.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(HttpStatusCode.NotFound, antiforgery.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, facebookOptions.StatusCode);
+        Assert.Contains("\"available\":false", await facebookOptions.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, passwordPolicy.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, passwordLogin.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, profile.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, facebookExchange.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, true)]
+    public async Task IdentityCapabilities_ReportPasswordAndNativeSignInAvailability(
+        bool federationEnabled,
+        bool identityServerEnabled,
+        bool nativeSignInAvailable)
+    {
+        await using var host = await IdentityEndpointTestHost.StartAsync(
+            callbackVerified: false,
+            federationEnabled: federationEnabled,
+            identityServerEnabled: identityServerEnabled);
+
+        using var capabilities = await host.Client.GetAsync("/auth/capabilities");
+
+        Assert.Equal(HttpStatusCode.OK, capabilities.StatusCode);
+        var content = await capabilities.Content.ReadAsStringAsync();
+        Assert.Contains("\"passwordSignInAvailable\":true", content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains($"\"nativeSignInAvailable\":{nativeSignInAvailable.ToString().ToLowerInvariant()}", content, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Antiforgery_WhenOnlyIdentityServerIsEnabled_ReturnsRequestToken()
+    {
+        await using var host = await IdentityEndpointTestHost.StartAsync(
+            callbackVerified: false,
+            federationEnabled: false,
+            identityServerEnabled: true);
+
+        using var response = await host.Client.GetAsync("/auth/antiforgery");
+        var content = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("requestToken", content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("\"headerName\":\"X-CSRF-TOKEN\"", content, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("name-too-long")]
+    public async Task PasswordRegistration_RequiresValidDisplayNameBeforeCallingRegistrar(string? displayName)
+    {
+        await using var host = await IdentityEndpointTestHost.StartAsync(
+            callbackVerified: false,
+            federationEnabled: false,
+            identityServerEnabled: true);
+        var requestToken = await host.GetAntiforgeryAsync();
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/auth/password/register")
+        {
+            Content = JsonContent.Create(new
+            {
+                displayName = displayName == "name-too-long" ? new string('n', 129) : displayName,
+                email = "new-user@example.test",
+                password = "NotARealPassword9!"
+            })
+        };
+        host.AddAntiforgery(request, requestToken);
+
+        using var response = await host.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, host.PasswordRegistrar.RegisterCalls);
+    }
+
     [Fact]
     public async Task ProviderChallenge_WithoutAntiforgeryToken_IsRejectedBeforeProviderChallenge()
     {
@@ -443,12 +547,16 @@ internal sealed class IdentityEndpointTestHost : IAsyncDisposable
 
     public RejectingExternalIdentityMappingStore MappingStore { get; }
 
+    public ProbePasswordIdentityRegistrar PasswordRegistrar =>
+        _application.Services.GetRequiredService<ProbePasswordIdentityRegistrar>();
+
     public ProbeIdentityAuthenticationState AuthenticationState { get; }
 
     public static async Task<IdentityEndpointTestHost> StartAsync(
         bool callbackVerified,
         string? connectionString = null,
         ProbeIdentityAuthenticationState? authenticationState = null,
+        bool federationEnabled = true,
         bool identityServerEnabled = false)
     {
         var builder = WebApplication.CreateBuilder();
@@ -477,15 +585,19 @@ internal sealed class IdentityEndpointTestHost : IAsyncDisposable
             .AddSignInManager();
         var federationOptions = new FederationOptions
         {
-            Enabled = true,
+            Enabled = federationEnabled,
             Google = new SocialProviderOptions
             {
-                Enabled = true,
+                Enabled = federationEnabled,
                 CallbackVerified = callbackVerified
             }
         };
         builder.Services.AddSingleton(federationOptions);
         builder.Services.AddSingleton<RejectingExternalIdentityMappingStore>();
+        builder.Services.AddSingleton<ProbePasswordIdentityRegistrar>();
+        builder.Services.AddSingleton<IPasswordIdentityRegistrar>(services =>
+            services.GetRequiredService<ProbePasswordIdentityRegistrar>());
+        builder.Services.AddSingleton<IUserProfileService, ProbeUserProfileService>();
         builder.Services.AddSingleton<IExternalIdentityMappingStore>(services =>
             services.GetRequiredService<RejectingExternalIdentityMappingStore>());
         builder.Services.AddSingleton<IExternalIdentityResolver>(services => new ExternalIdentityResolver(
@@ -620,6 +732,33 @@ internal sealed class ProbeAuthenticationHandler(
         Response.StatusCode = StatusCodes.Status418ImATeapot;
         return Task.CompletedTask;
     }
+}
+
+internal sealed class ProbePasswordIdentityRegistrar : IPasswordIdentityRegistrar
+{
+    public int RegisterCalls { get; private set; }
+
+    public Task<PasswordRegistrationResult> RegisterAsync(
+        string email,
+        string password,
+        string displayName,
+        CancellationToken cancellationToken)
+    {
+        RegisterCalls++;
+        return Task.FromResult(new PasswordRegistrationResult(PasswordRegistrationStatus.Unavailable));
+    }
+}
+
+internal sealed class ProbeUserProfileService : IUserProfileService
+{
+    public Task<UserProfileData?> GetAsync(string userId, CancellationToken cancellationToken) =>
+        Task.FromResult<UserProfileData?>(null);
+
+    public Task<UserProfileSaveResult> SaveAsync(
+        string userId,
+        UserProfileData profile,
+        CancellationToken cancellationToken) =>
+        Task.FromResult(new UserProfileSaveResult(UserProfileSaveStatus.Unavailable));
 }
 
 internal sealed class ProbeAuthenticationCounter

@@ -1,3 +1,25 @@
+export async function loadPasswordPolicy() {
+    const response = await fetch("/auth/password/policy", {
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { Accept: "application/json" }
+    });
+    if (!response.ok) {
+        throw new Error("Password policy is unavailable.");
+    }
+
+    const policy = await response.json();
+    if (!Number.isInteger(policy?.minimumLength) ||
+        typeof policy.requireDigit !== "boolean" ||
+        typeof policy.requireLowercase !== "boolean" ||
+        typeof policy.requireUppercase !== "boolean" ||
+        typeof policy.requireSymbol !== "boolean") {
+        throw new Error("Password policy is invalid.");
+    }
+
+    return policy;
+}
+
 export async function confirmPasswordReset(userId, code, newPassword) {
     let requestToken;
     try {

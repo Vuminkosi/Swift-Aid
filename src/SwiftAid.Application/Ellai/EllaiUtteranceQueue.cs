@@ -18,7 +18,12 @@ public sealed record EllaiUtteranceWork(
     string CycleId,
     ActorContext Actor,
     bool ContributorEligible,
-    string ConsentVersion);
+    string ConsentVersion,
+    string ProcessingLabel = EllaiProcessingClassification.UnknownOrigin,
+    string DataClassification = EllaiProcessingClassification.UnknownOrigin,
+    IReadOnlySet<string>? AllowedTools = null,
+    string ConsentPurpose = EllaiToolBroker.ToolReadPurpose,
+    string ClientUtteranceId = "");
 
 /// <summary>Single-flight utterance handoff: at most one queued-or-running
 /// work item per session, latest utterance wins. A newer utterance submitted

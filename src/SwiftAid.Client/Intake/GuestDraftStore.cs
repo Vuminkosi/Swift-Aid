@@ -62,7 +62,12 @@ public sealed class GuestDraftStore(
                 UpdatedAtUtc = _timeProvider.GetUtcNow(),
                 Version = checked(previous.Version + 1)
             };
-            await persistence.SaveBatchAsync([superseded, replacement], cancellationToken).ConfigureAwait(false);
+            await persistence.SaveBatchVersionedAsync(
+                [
+                    new GuestSubmissionWrite(superseded, previous.Version),
+                    new GuestSubmissionWrite(replacement, null)
+                ],
+                cancellationToken).ConfigureAwait(false);
             return ToSummary(replacement);
         }
         finally
@@ -158,7 +163,12 @@ public sealed class GuestDraftStore(
 
             try
             {
-                await persistence.SaveBatchAsync([superseded, replacement], cancellationToken).ConfigureAwait(false);
+                await persistence.SaveBatchVersionedAsync(
+                    [
+                        new GuestSubmissionWrite(superseded, current.Version),
+                        new GuestSubmissionWrite(replacement, null)
+                    ],
+                    cancellationToken).ConfigureAwait(false);
                 revisionSaved = true;
             }
             catch
@@ -198,6 +208,14 @@ public sealed class GuestDraftStore(
                     "A new report draft is ready. Removal of the previous recording is pending.");
             }
             return Retake(GuestAudioRetakeStatus.Cancelled, "The recording change was cancelled.");
+        }
+        catch (GuestSubmissionPersistenceConflictException)
+        {
+            if (intentWritten && !revisionSaved && intent is not null)
+            {
+                await CancelIntentSafelyAsync(intent.IntentKey).ConfigureAwait(false);
+            }
+            return Retake(GuestAudioRetakeStatus.Conflict, "This report changed. Refresh it before trying again.");
         }
         catch (Exception)
         {
@@ -359,7 +377,7 @@ public sealed class GuestDraftStore(
                 UpdatedAtUtc = _timeProvider.GetUtcNow(),
                 Version = checked(current.Version + 1)
             };
-            await persistence.SaveAsync(queued, cancellationToken).ConfigureAwait(false);
+            await persistence.SaveVersionedAsync(queued, current.Version, cancellationToken).ConfigureAwait(false);
             return ToSummary(queued);
         }
         finally
@@ -410,7 +428,7 @@ public sealed class GuestDraftStore(
         CancellationToken cancellationToken)
     {
         var record = CreateRecord(submission, _timeProvider.GetUtcNow());
-        await persistence.SaveAsync(record, cancellationToken).ConfigureAwait(false);
+        await persistence.SaveVersionedAsync(record, null, cancellationToken).ConfigureAwait(false);
         return ToSummary(record);
     }
 

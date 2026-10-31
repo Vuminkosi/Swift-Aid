@@ -1,5 +1,7 @@
 using SwiftAid.Application.Ellai;
 using SwiftAid.Contracts.Ellai;
+using System.Security.Claims;
+using SwiftAid.Application.Authorization;
 
 namespace SwiftAid.Application.Tests.Ellai;
 
@@ -11,6 +13,8 @@ namespace SwiftAid.Application.Tests.Ellai;
 [Trait("Task", "ELL-T17")]
 public sealed class EllaiFlagshipWalkthroughTests
 {
+    private static readonly ClaimsPrincipal Principal = new(new ClaimsIdentity(
+        [new Claim(ClaimTypes.NameIdentifier, "test-actor"), new Claim(ActorContext.AccessEpochClaimType, "1")], "test"));
     [Fact]
     public async Task SyntheticContinuityWalkthroughCompletesWithoutWrites()
     {
@@ -36,14 +40,14 @@ public sealed class EllaiFlagshipWalkthroughTests
         // 1. Start + utterance.
         var session = await sessions.StartAsync(
             new StartSessionRequest(EllaiMode.HelpMeWork, "flag-1", "cases", null, "text", "text"),
-            CancellationToken.None);
+            Principal, CancellationToken.None);
         var afterUtterance = await sessions.SubmitUtteranceAsync(
             new SubmitUtteranceRequest("u-1", session.SessionId, session.SessionVersion,
                 "What is overdue?", null, "typed", 1),
-            CancellationToken.None);
+            ActorContext.FromValidatedPrincipal(Principal), CancellationToken.None);
         Assert.NotNull(afterUtterance);
         consent.Grant(session.SessionId, EllaiConsentDimension.ReasoningText,
-            EllaiToolBroker.ToolReadPurpose, "synthetic", TimeSpan.FromHours(1));
+            EllaiToolBroker.ToolReadPurpose, EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
 
         // 2. Policy authorizes a synthetic read.
         var auth = policy.Authorize(
@@ -55,7 +59,7 @@ public sealed class EllaiFlagshipWalkthroughTests
 
         // 3. Bounded cycle: observe, then answer with evidence.
         var context = new EllaiToolContext(session.SessionId, session.ScopeDisplay,
-            "cases", "synthetic-case-001", 4, true);
+            "cases", "synthetic-case-001", 4, true, "consent/1", EllaiProcessingClassification.SyntheticDemo);
         var outcome = await runner.RunAsync(
             context,
             iteration => Task.FromResult(iteration == 1

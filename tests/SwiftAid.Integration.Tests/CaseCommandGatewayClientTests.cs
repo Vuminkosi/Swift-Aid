@@ -141,7 +141,8 @@ public sealed class CaseCommandGatewayClientTests
             ActorContext actor,
             Guid requestedCaseId,
             int? limit,
-            CancellationToken ct)
+            CancellationToken ct,
+            long? beforeAggregateVersion = null)
         {
             ct.ThrowIfCancellationRequested();
             Calls++;

@@ -11,12 +11,65 @@ using Microsoft.JSInterop.Infrastructure;
 using MudBlazor.Services;
 using SwiftAid.Client.Presentation;
 using SwiftAid.Gateway.Presentation;
+using SwiftAid.Infrastructure.Configuration;
 using SwiftAid.Infrastructure.Identity;
 
 namespace SwiftAid.Ui.Tests;
 
 public sealed class GatewayAccountPageTests
 {
+    [Fact]
+    public async Task SignOutNavigatesToPublicHomeAfterConfirmation()
+    {
+        var navigation = new TestNavigationManager();
+        var client = new GatewayAccountPresentationClient(
+            new SignedInAuthStateProvider(),
+            TestUsers.Manager(),
+            new StubUserProfileService(new UserProfileData("Amara Dlamini", null, null, null, null)),
+            Options.Create(new FederationOptions()),
+            navigation,
+            new ConfirmedSignOutJsRuntime());
+
+        var result = await client.SignOutAsync();
+
+        Assert.Equal(UiCapabilityResultCode.Success, result.Code);
+        Assert.Equal("http://localhost/", navigation.Uri);
+    }
+
+    [Fact]
+    public async Task AccountStateLoadsCurrentUserNameWhenIdentityClaimsOmitProfileDetails()
+    {
+        var client = new GatewayAccountPresentationClient(
+            new SignedInAuthStateProvider(),
+            TestUsers.Manager(),
+            new StubUserProfileService(new UserProfileData("Amara Dlamini", null, null, null, null)),
+            Options.Create(new FederationOptions()),
+            new TestNavigationManager(),
+            NoOpJsRuntime.Instance);
+
+        var result = await client.GetStateAsync();
+
+        Assert.True(result.Value?.IsSignedIn);
+        Assert.Equal("Amara Dlamini", result.Value?.DisplayName);
+    }
+
+    [Fact]
+    public async Task AccountStateFallsBackToCurrentIdentityEmailWhenProfileNameIsMissing()
+    {
+        var client = new GatewayAccountPresentationClient(
+            new SignedInAuthStateProvider(),
+            TestUsers.Manager(),
+            new StubUserProfileService(new UserProfileData(null, null, null, null, null)),
+            Options.Create(new FederationOptions()),
+            new TestNavigationManager(),
+            NoOpJsRuntime.Instance);
+
+        var result = await client.GetStateAsync();
+
+        Assert.True(result.Value?.IsSignedIn);
+        Assert.Equal("staff@example.org", result.Value?.DisplayName);
+    }
+
     [Fact]
     public async Task ChangeEmailPageRecoversFromClientFailure()
     {
@@ -149,6 +202,36 @@ public sealed class GatewayAccountPageTests
         }
     }
 
+    private sealed class ConfirmedSignOutJsRuntime : IJSRuntime
+    {
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
+            InvokeAsync<TValue>(identifier, CancellationToken.None, args);
+
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args)
+        {
+            if (identifier != "import" || typeof(TValue) != typeof(IJSObjectReference))
+                throw new InvalidOperationException("Unexpected JavaScript call in sign-out test.");
+
+            return ValueTask.FromResult((TValue)(object)new ConfirmedSignOutModule());
+        }
+    }
+
+    private sealed class ConfirmedSignOutModule : IJSObjectReference
+    {
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
+            InvokeAsync<TValue>(identifier, CancellationToken.None, args);
+
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args)
+        {
+            if (identifier != "signOut" || typeof(TValue) != typeof(bool))
+                throw new InvalidOperationException("Unexpected module call in sign-out test.");
+
+            return ValueTask.FromResult((TValue)(object)true);
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
     private sealed class NoOpErrorBoundaryLogger : IErrorBoundaryLogger
     {
         public static readonly NoOpErrorBoundaryLogger Instance = new();
@@ -223,7 +306,10 @@ public sealed class GatewayAccountPageTests
     {
         public override Task<AuthenticationState> GetAuthenticationStateAsync() =>
             Task.FromResult(new AuthenticationState(new ClaimsPrincipal(
-                new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "actor-1")], "probe"))));
+                new ClaimsIdentity(
+                [
+                    new Claim(ClaimTypes.NameIdentifier, "actor-1")
+                ], "probe"))));
     }
 
     private static class TestUsers
@@ -244,7 +330,12 @@ public sealed class GatewayAccountPageTests
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<UserManager<SwiftAidUser>>.Instance)
         {
             public override Task<SwiftAidUser?> GetUserAsync(ClaimsPrincipal principal) =>
-                Task.FromResult<SwiftAidUser?>(new SwiftAidUser { Id = "actor-1" });
+                Task.FromResult<SwiftAidUser?>(new SwiftAidUser
+                {
+                    Id = "actor-1",
+                    UserName = "staff@example.org",
+                    Email = "staff@example.org"
+                });
         }
 
         private sealed class StubUserStore : IUserStore<SwiftAidUser>
@@ -283,6 +374,18 @@ public sealed class GatewayAccountPageTests
             public Task<SwiftAidUser?> FindByNameAsync(string normalizedUserName, CancellationToken cancellationToken) =>
                 Task.FromResult<SwiftAidUser?>(null);
         }
+    }
+
+    private sealed class StubUserProfileService(UserProfileData? profile) : IUserProfileService
+    {
+        public Task<UserProfileData?> GetAsync(string userId, CancellationToken cancellationToken) =>
+            Task.FromResult(profile);
+
+        public Task<UserProfileSaveResult> SaveAsync(
+            string userId,
+            UserProfileData profile,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 
     private sealed class NeverCalledMembershipService : IOrganizationMembershipService

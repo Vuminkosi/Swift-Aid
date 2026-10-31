@@ -1,23 +1,27 @@
 namespace SwiftAid.Client.Authentication;
 
-/// <summary>Validated HTTPS origin and base path for a native authenticated HTTP client.</summary>
+/// <summary>Validated Gateway origin and base path for a native authenticated HTTP client.</summary>
 public sealed class NativeSessionHttpOptions
 {
-    public NativeSessionHttpOptions(Uri gatewayBaseAddress)
+    private readonly bool _allowInsecureTransport;
+
+    public NativeSessionHttpOptions(Uri gatewayBaseAddress, bool allowInsecureTransport = false)
     {
         ArgumentNullException.ThrowIfNull(gatewayBaseAddress);
 
         if (!gatewayBaseAddress.IsAbsoluteUri ||
-            gatewayBaseAddress.Scheme != Uri.UriSchemeHttps ||
+            (gatewayBaseAddress.Scheme != Uri.UriSchemeHttps &&
+                !(allowInsecureTransport && gatewayBaseAddress.Scheme == Uri.UriSchemeHttp)) ||
             gatewayBaseAddress.UserInfo.Length != 0 ||
             gatewayBaseAddress.Query.Length != 0 ||
             gatewayBaseAddress.Fragment.Length != 0)
         {
             throw new ArgumentException(
-                "The notification gateway address must be an absolute HTTPS URL without credentials, query, or fragment.",
+                "The notification gateway address must be an absolute HTTPS URL without credentials, query, or fragment. HTTP requires an explicit development-only override.",
                 nameof(gatewayBaseAddress));
         }
 
+        _allowInsecureTransport = allowInsecureTransport;
         GatewayBaseAddress = EnsureTrailingSlash(gatewayBaseAddress);
     }
 
@@ -26,7 +30,8 @@ public sealed class NativeSessionHttpOptions
     public bool IsWithinConfiguredGateway(Uri destination)
     {
         if (!destination.IsAbsoluteUri ||
-            destination.Scheme != Uri.UriSchemeHttps ||
+            destination.Scheme != GatewayBaseAddress.Scheme ||
+            (destination.Scheme != Uri.UriSchemeHttps && !_allowInsecureTransport) ||
             destination.UserInfo.Length != 0 ||
             !string.Equals(destination.IdnHost, GatewayBaseAddress.IdnHost, StringComparison.OrdinalIgnoreCase) ||
             destination.Port != GatewayBaseAddress.Port)

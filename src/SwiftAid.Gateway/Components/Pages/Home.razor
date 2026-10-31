@@ -1,60 +1,15 @@
 @page "/"
+@layout SwiftAid.Gateway.Components.Layout.PublicWebsiteLayout
+@using Microsoft.AspNetCore.Components.Authorization
+@using SwiftAid.UI.Components.Surfaces.Public
 
 <PageTitle>SwiftAid | Community support</PageTitle>
 
-<section class="welcome-panel" aria-labelledby="welcome-heading">
-    <div class="welcome-copy">
-        <SwiftAidPageHeading Eyebrow="Community health support"
-                             Title="A concern deserves a clear next step."
-                             Description="When reporting is available, you can start a human or animal concern without an account."
-                             HeadingId="welcome-heading">
-            <Actions>
-                <MudStack Row="true" Spacing="2" Class="welcome-actions">
-                    <MudButton Href="/report" Variant="Variant.Filled" Color="Color.Primary"
-                               EndIcon="@Icons.Material.Filled.ArrowForward">
-                        Report a concern
-                    </MudButton>
-                    <MudButton Href="/education" Variant="Variant.Text" Color="Color.Primary">
-                        Explore education
-                    </MudButton>
-                    <MudButton Href="/sign-in" Variant="Variant.Text" Color="Color.Primary">
-                        Sign in
-                    </MudButton>
-                </MudStack>
-            </Actions>
-        </SwiftAidPageHeading>
-    </div>
-    <div class="welcome-mark" aria-hidden="true">
-        <MudIcon Icon="@Icons.Material.Filled.VolunteerActivism" Size="Size.Large" />
-        <span>Care, with follow-through</span>
-    </div>
-</section>
-
-<section class="information-grid" aria-label="How SwiftAid works">
-    <MudPaper Class="information-card" Elevation="0">
-        <MudIcon Icon="@Icons.Material.Filled.Lock" Color="Color.Primary" Size="Size.Medium" />
-        <MudText Typo="Typo.h6" HtmlTag="h2">Private by default</MudText>
-        <SwiftAidBodyText>
-            Your report is private. A receipt shows its review status without exposing staff case details.
-        </SwiftAidBodyText>
-    </MudPaper>
-    <MudPaper Class="information-card" Elevation="0">
-        <MudIcon Icon="@Icons.Material.Filled.Pets" Color="Color.Primary" Size="Size.Medium" />
-        <MudText Typo="Typo.h6" HtmlTag="h2">People and animals</MudText>
-        <SwiftAidBodyText>
-            Record a concern for a person, an individual animal, or a herd or flock.
-        </SwiftAidBodyText>
-    </MudPaper>
-    <MudPaper Class="information-card" Elevation="0">
-        <MudIcon Icon="@Icons.Material.Filled.FactCheck" Color="Color.Primary" Size="Size.Medium" />
-        <MudText Typo="Typo.h6" HtmlTag="h2">Clear review states</MudText>
-        <SwiftAidBodyText>
-            Submission means received for review. It does not mean verified, assigned, or treated.
-        </SwiftAidBodyText>
-    </MudPaper>
-</section>
-
-<div class="service-boundary">
-    <MudText Typo="Typo.body2">Community information only.</MudText>
-    <SwiftAidServiceBoundaryNotice />
-</div>
+<AuthorizeView>
+    <Authorized>
+        <WebLandingSurface IsSignedIn="true" />
+    </Authorized>
+    <NotAuthorized>
+        <WebLandingSurface />
+    </NotAuthorized>
+</AuthorizeView>

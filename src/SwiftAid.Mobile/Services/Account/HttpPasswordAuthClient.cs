@@ -59,6 +59,7 @@ public sealed class HttpPasswordAuthClient(CookieSessionHttpClient session)
     }
 
     public async Task<PasswordAuthOutcome> RegisterAsync(
+        string displayName,
         string email,
         string password,
         CancellationToken cancellationToken = default)
@@ -67,7 +68,7 @@ public sealed class HttpPasswordAuthClient(CookieSessionHttpClient session)
         {
             var token = await _session.GetAntiforgeryTokenAsync(cancellationToken).ConfigureAwait(false);
             using var response = await _session.PostJsonAsync(
-                "/auth/password/register", new { email, password }, token, cancellationToken).ConfigureAwait(false);
+                "/auth/password/register", new { displayName, email, password }, token, cancellationToken).ConfigureAwait(false);
             return response.StatusCode switch
             {
                 HttpStatusCode.OK => Succeeded(await ReadEmailAsync(response, cancellationToken).ConfigureAwait(false)),
@@ -103,7 +104,7 @@ public sealed class HttpPasswordAuthClient(CookieSessionHttpClient session)
             using var response = await _session.PostJsonAsync(
                 "/auth/password/login", new { email, password, rememberMe }, token, cancellationToken)
                 .ConfigureAwait(false);
-            return response.StatusCode switch
+            var outcome = response.StatusCode switch
             {
                 HttpStatusCode.OK => Succeeded(await ReadEmailAsync(response, cancellationToken).ConfigureAwait(false)),
                 HttpStatusCode.Unauthorized => new PasswordAuthOutcome(
@@ -118,6 +119,35 @@ public sealed class HttpPasswordAuthClient(CookieSessionHttpClient session)
                         ?? "The sign-in request is invalid."),
                 _ => Unavailable("Sign-in is temporarily unavailable.")
             };
+
+            if (outcome.Status == PasswordAuthStatus.Succeeded)
+            {
+                if (rememberMe)
+                {
+                    try
+                    {
+                        var remembered = await _session.PersistAuthenticationCookieAsync(cancellationToken)
+                            .ConfigureAwait(false);
+                        if (!remembered)
+                        {
+                            await LogoutAsync(CancellationToken.None).ConfigureAwait(false);
+                            return Unavailable("This device could not securely save your sign-in session. Please try again.");
+                        }
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        await LogoutAsync(CancellationToken.None).ConfigureAwait(false);
+                        throw;
+                    }
+                    catch (Exception)
+                    {
+                        await LogoutAsync(CancellationToken.None).ConfigureAwait(false);
+                        return Unavailable("This device could not securely save your sign-in session. Please try again.");
+                    }
+                }
+            }
+
+            return outcome;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -151,7 +181,7 @@ public sealed class HttpPasswordAuthClient(CookieSessionHttpClient session)
         }
         finally
         {
-            _session.ClearCookies();
+            await _session.ClearCookiesAsync(CancellationToken.None).ConfigureAwait(false);
         }
 
         return new PasswordAuthOutcome(PasswordAuthStatus.Succeeded);
@@ -175,6 +205,52 @@ public sealed class HttpPasswordAuthClient(CookieSessionHttpClient session)
                 _ => new PasswordAuthOutcome(
                     PasswordAuthStatus.InvalidRequest,
                     Message: "Enter a valid email address.")
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            return TransportFailure(exception, cancellationToken, "Password reset is temporarily unavailable.");
+        }
+    }
+
+    public async Task<PasswordAuthOutcome> ConfirmPasswordResetAsync(
+        string userId,
+        string code,
+        string newPassword,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(userId) || userId.Length > 128 ||
+            string.IsNullOrWhiteSpace(code) || code.Length > 4096 ||
+            string.IsNullOrEmpty(newPassword) || newPassword.Length > 256)
+        {
+            return new PasswordAuthOutcome(
+                PasswordAuthStatus.InvalidRequest,
+                Message: "The reset link is invalid or has expired.");
+        }
+
+        try
+        {
+            var token = await _session.GetAntiforgeryTokenAsync(cancellationToken).ConfigureAwait(false);
+            using var response = await _session.PostJsonAsync(
+                "/auth/password/reset/confirm",
+                new { userId, code, newPassword },
+                token,
+                cancellationToken).ConfigureAwait(false);
+            return response.StatusCode switch
+            {
+                HttpStatusCode.NoContent => new PasswordAuthOutcome(
+                    PasswordAuthStatus.Succeeded,
+                    Message: "Your password has been reset. Sign in with your new password."),
+                HttpStatusCode.ServiceUnavailable => Unavailable("Password reset is temporarily unavailable."),
+                HttpStatusCode.BadRequest => new PasswordAuthOutcome(
+                    PasswordAuthStatus.InvalidRequest,
+                    Message: await ReadMessageAsync(response, cancellationToken).ConfigureAwait(false)
+                        ?? "The reset link is invalid or the new password does not meet the requirements."),
+                _ => Unavailable("Password reset is temporarily unavailable.")
             };
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

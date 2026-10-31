@@ -1,20 +1,89 @@
 @page "/monitoring"
 @using SwiftAid.Contracts.Cases
-@using SwiftAid.UI.Components.Cases
+@using SwiftAid.UI.Components.Surfaces.Operations
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject IMonitoringQueueClient MonitoringClient
 
 <PageTitle>Monitoring | SwiftAid</PageTitle>
-
-<MudContainer MaxWidth="MaxWidth.Large" Class="monitoring-page">
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="workspace-page">
     <SwiftAidPageHeading Eyebrow="Officer workspace"
                          Title="Monitoring"
-                         Description="Open follow-ups and unacknowledged escalations on cases you may read. Overdue work is highlighted; open a case for its immutable history."
+                         Description="Follow-ups and unacknowledged escalations, sorted by due time. Overdue work is highlighted. Open a case to review its activity."
                          HeadingId="monitoring-heading" />
-
-    <MudText Typo="Typo.h6" Class="mt-4">Assigned to me</MudText>
-    <MonitoringQueue Client="MonitoringClient" Scope="MonitoringQueueScope.Assigned" />
-
-    <MudText Typo="Typo.h6" Class="mt-6">All open work</MudText>
-    <MonitoringQueue Client="MonitoringClient" Scope="MonitoringQueueScope.Open" />
+    <MudGrid Spacing="3" Class="mt-2 monitoring-page__queues">
+        <MudItem xs="12" lg="6" Class="monitoring-page__queue-item">
+            <OperationsMonitoringQueue Title="Assigned to me"
+                                        Description="Follow-ups and escalations assigned to you."
+                                        State="_assignedState"
+                                        Items="_assignedItems"
+                                        OnRetry="LoadAssignedAsync" />
+        </MudItem>
+        <MudItem xs="12" lg="6" Class="monitoring-page__queue-item">
+            <OperationsMonitoringQueue Title="All open work"
+                                        Description="Open work you have permission to view."
+                                        State="_openState"
+                                        Items="_openItems"
+                                        OnRetry="LoadOpenAsync" />
+        </MudItem>
+    </MudGrid>
 </MudContainer>
+
+@code {
+    private IReadOnlyList<MonitoringQueueItem> _assignedItems = Array.Empty<MonitoringQueueItem>();
+    private IReadOnlyList<MonitoringQueueItem> _openItems = Array.Empty<MonitoringQueueItem>();
+    private OperationsSurfaceState _assignedState = OperationsSurfaceState.Loading;
+    private OperationsSurfaceState _openState = OperationsSurfaceState.Loading;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await InvokeAsync(StateHasChanged);
+        await Task.WhenAll(
+            LoadAndRenderAsync(LoadAssignedAsync),
+            LoadAndRenderAsync(LoadOpenAsync));
+    }
+
+    private async Task LoadAndRenderAsync(Func<Task> load)
+    {
+        await load();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task LoadAssignedAsync()
+    {
+        _assignedState = OperationsSurfaceState.Loading;
+        try
+        {
+            var result = await MonitoringClient.GetAssignedAsync(500);
+            _assignedItems = result.Items;
+            _assignedState = MapAccess(result.Access);
+        }
+        catch (Exception)
+        {
+            _assignedItems = Array.Empty<MonitoringQueueItem>();
+            _assignedState = OperationsSurfaceState.Error;
+        }
+    }
+
+    private async Task LoadOpenAsync()
+    {
+        _openState = OperationsSurfaceState.Loading;
+        try
+        {
+            var result = await MonitoringClient.GetOpenAsync(500);
+            _openItems = result.Items;
+            _openState = MapAccess(result.Access);
+        }
+        catch (Exception)
+        {
+            _openItems = Array.Empty<MonitoringQueueItem>();
+            _openState = OperationsSurfaceState.Error;
+        }
+    }
+
+    private static OperationsSurfaceState MapAccess(CaseQueueAccess access) => access switch
+    {
+        CaseQueueAccess.Allowed => OperationsSurfaceState.Populated,
+        CaseQueueAccess.Denied => OperationsSurfaceState.Denied,
+        _ => OperationsSurfaceState.Unavailable
+    };
+}

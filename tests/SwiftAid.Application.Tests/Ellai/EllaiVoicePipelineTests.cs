@@ -53,7 +53,7 @@ public sealed class EllaiVoicePipelineTests
     [Fact]
     public void InterruptionDropsQueuedNarration()
     {
-        var queue = new LocalNarrationQueue();
+        var queue = new EllaiNarrationQueue();
         var epoch = queue.SpeechEpoch;
 
         Assert.True(queue.TryEnqueue(new NarrationSentence("s1", "First.", "sess", "t1", epoch, "v1")));

@@ -1,8 +1,11 @@
 using MudBlazor.Services;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using OpenIddict.Validation.AspNetCore;
 using SwiftAid.Application.Intake;
@@ -21,6 +24,7 @@ using SwiftAid.Contracts.Sessions;
 using SwiftAid.Infrastructure.Configuration;
 using SwiftAid.Infrastructure.Identity;
 using SwiftAid.Infrastructure.Persistence.Ellai;
+using SwiftAid.Infrastructure.Persistence.Protection;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -29,6 +33,30 @@ builder.Services.AddRazorComponents()
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddMudServices();
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("ellai-guest-write", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            }));
+    options.AddPolicy("ellai-guest-read", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 120,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            }));
+});
 
 builder.Services.AddScoped<IPublicIntakeProcessingPolicyClient, GatewayPublicIntakeProcessingPolicyClient>();
 builder.Services.AddScoped<IEducationClient, StaticEducationClient>();
@@ -53,6 +81,10 @@ builder.Services.AddControllers();
 GatewayAuthenticationRegistration.Configure(builder.Services, builder.Configuration);
 
 builder.Services.AddSwiftAidInfrastructure(builder.Configuration, builder.Environment);
+GatewayAuthenticationRegistration.ConfigurePersistentCookieDataProtection(builder.Services);
+builder.Services.AddScoped<SwiftAid.Application.Authorization.IScopeService,
+    SwiftAid.Application.Authorization.ScopeService>();
+builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiSessionScopeResolver>();
 builder.Services.AddScoped<WebGuestIntakeService>();
 builder.Services.AddScoped<IPublicIntakeSubmissionClient, WebPublicIntakeSubmissionClient>();
 builder.Services.AddScoped<IPublicIntakeMetadataClient, WebPublicIntakeMetadataClient>();
@@ -67,6 +99,7 @@ Bit.Bonboarding.BitBonboarding.AddBitBonboardingServices(builder.Services, _ => 
 Bit.Bonboarding.BitBonboarding.AddBitBonboardingInMemoryStore(builder.Services);
 builder.Services.AddEllaiPersistence();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiSessionService>();
+builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiUtteranceSubmissionService>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiPolicyService>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiToolBroker>();
 builder.Services.AddScoped(_ => new SwiftAid.Application.Ellai.EllaiTechnicalDocs(
@@ -85,15 +118,20 @@ builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiApprovedActionService
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiApprovalService>();
 builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiApprovalDialogCoordinator>();
 builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiSessionEventJournal>();
+builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiSessionResponseStore>();
 builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiActivityStatusCoordinator>();
 builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiUtteranceQueue>();
 builder.Services.AddHostedService<SwiftAid.Gateway.Ellai.EllaiUtteranceWorker>();
 builder.Services.AddSingleton<SwiftAid.Application.Ellai.IEllaiUiObservationStore, SwiftAid.Application.Ellai.InMemoryEllaiUiObservationStore>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiScenarioDirector>();
 builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiConsentService>();
+builder.Services.AddScoped<SwiftAid.Gateway.Ellai.EllaiVoiceTranscriptionService>();
 builder.Services.AddScoped<SwiftAid.UI.Ellai.EllaiLauncher>();
 builder.Services.AddScoped<SwiftAid.UI.Ellai.EllaiEventPoller>();
 builder.Services.AddScoped<SwiftAid.Contracts.Ellai.IEllaiReviewClient, SwiftAid.Gateway.Ellai.EllaiReviewGatewayClient>();
+builder.Services.AddScoped<SwiftAid.Gateway.Ellai.EllaiGuestSessionIdentity>();
+builder.Services.AddHttpClient<SwiftAid.Gateway.Ellai.IEllaiSpeechSynthesisClient,
+    SwiftAid.Gateway.Ellai.EllaiSpeechSynthesisClient>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiTopicService>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiTrainingVerifier>();
 {
@@ -156,15 +194,20 @@ if (!app.Environment.IsDevelopment())
 {
     app.UseHsts();
 }
-app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+app.UseWhen(
+    context => !context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase)
+        && !context.Request.Path.StartsWithSegments("/auth", StringComparison.OrdinalIgnoreCase),
+    branch => branch.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true));
 
 app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 app.UseAntiforgery();
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
+    .AddAdditionalAssemblies(typeof(SwiftAid.UI.Ellai.Pages.EllaiSettingsAbout).Assembly)
     .AddInteractiveServerRenderMode();
 
 app.MapControllers();
@@ -182,6 +225,7 @@ app.MapCaseCommandEndpoints();
 app.MapCommunitySessionEndpoints();
 app.MapPublicSessionEndpoints();
 app.MapEllaiEndpoints();
+app.MapEllaiGuestEndpoints();
 
 app.MapSwiftAidIdentityEndpoints(
     app.Services.GetRequiredService<FederationOptions>(),
@@ -194,15 +238,62 @@ app.Run();
 
 public static class GatewayAuthenticationRegistration
 {
+    public static void ConfigurePersistentCookieDataProtection(IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        if (!services.Any(descriptor =>
+                descriptor.ServiceType == typeof(ProtectedPayloadDataProtectionProvider)))
+        {
+            return;
+        }
+
+        ConfigureCookieProvider(services, IdentityConstants.ApplicationScheme);
+        ConfigureCookieProvider(services, IdentityConstants.ExternalScheme);
+        ConfigureCookieProvider(services, EllaiGuestEndpoints.AuthenticationScheme);
+    }
+
+    private static void ConfigureCookieProvider(IServiceCollection services, string scheme)
+    {
+        services.AddOptions<CookieAuthenticationOptions>(scheme)
+            .Configure<ProtectedPayloadDataProtectionProvider>(
+                (options, provider) => options.DataProtectionProvider = provider);
+    }
+
     public static bool Configure(IServiceCollection services, IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
-        var identityEnabled = configuration.GetValue<bool>("Identity:Enabled") ||
-            configuration.GetValue<bool>("Federation:Enabled");
+        var identityServerEnabled = configuration.GetValue<bool>("Identity:Enabled");
+        var federationEnabled = configuration.GetValue<bool>("Federation:Enabled");
+        var identityEnabled = identityServerEnabled || federationEnabled;
 
         var authentication = services.AddAuthentication();
+        services.Configure<CookieAuthenticationOptions>(IdentityConstants.ApplicationScheme, options =>
+        {
+            options.Events.OnRedirectToLogin = context =>
+            {
+                if (context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase))
+                {
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    return Task.CompletedTask;
+                }
+
+                context.Response.Redirect(context.RedirectUri);
+                return Task.CompletedTask;
+            };
+            options.Events.OnRedirectToAccessDenied = context =>
+            {
+                if (context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase))
+                {
+                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    return Task.CompletedTask;
+                }
+
+                context.Response.Redirect(context.RedirectUri);
+                return Task.CompletedTask;
+            };
+        });
         if (!identityEnabled)
         {
             authentication = services.AddAuthentication(options =>
@@ -215,15 +306,45 @@ public static class GatewayAuthenticationRegistration
                 _ => { });
         }
 
+        authentication.AddCookie(EllaiGuestEndpoints.AuthenticationScheme, options =>
+        {
+            options.Cookie.Name = ".SwiftAid.Ellai.Guest";
+            options.Cookie.HttpOnly = true;
+            options.Cookie.SameSite = SameSiteMode.Strict;
+            options.Cookie.SecurePolicy = string.Equals(
+                configuration["ASPNETCORE_ENVIRONMENT"], "Development", StringComparison.OrdinalIgnoreCase)
+                ? CookieSecurePolicy.SameAsRequest
+                : CookieSecurePolicy.Always;
+            options.ExpireTimeSpan = TimeSpan.FromHours(2);
+            options.SlidingExpiration = false;
+            options.Events.OnRedirectToLogin = context =>
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                return Task.CompletedTask;
+            };
+            options.Events.OnRedirectToAccessDenied = context =>
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return Task.CompletedTask;
+            };
+        });
+
         services.AddAuthorization(options =>
         {
             options.AddPolicy("SwiftAidStaffApi", policy =>
             {
-                if (identityEnabled)
+                if (identityServerEnabled)
                 {
                     policy.AddAuthenticationSchemes(
                         IdentityConstants.ApplicationScheme,
                         OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
+                }
+                else if (federationEnabled)
+                {
+                    // Federated browser sign-in produces the application
+                    // cookie. OpenIddict validation is registered only when
+                    // the local Identity server is enabled.
+                    policy.AddAuthenticationSchemes(IdentityConstants.ApplicationScheme);
                 }
                 else
                 {

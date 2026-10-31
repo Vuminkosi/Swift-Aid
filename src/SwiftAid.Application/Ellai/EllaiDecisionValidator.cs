@@ -36,22 +36,47 @@ public static class EllaiDecisionValidator
             errors.Add("SpokenText exceeds 120 words.");
         }
 
-        if (decision.UiIntents.Count > MaxUiIntents)
+        if (decision.UiIntents is null)
+        {
+            errors.Add("UiIntents must be an array.");
+        }
+        else if (decision.UiIntents.Count > MaxUiIntents)
         {
             errors.Add("At most 3 UI intents per decision.");
         }
 
-        if (decision.Questions.Count > MaxQuestions)
+        if (decision.Questions is null)
         {
-            errors.Add("At most 3 clarifying questions per decision.");
+            errors.Add("Questions must be an array.");
+        }
+        else
+        {
+            if (decision.Questions.Count > MaxQuestions)
+            {
+                errors.Add("At most 3 clarifying questions per decision.");
+            }
+
+            if (decision.Questions.Any(question => question is null))
+            {
+                errors.Add("Questions entries must be objects.");
+            }
         }
 
-        if (decision.PlanProposal is not null && decision.PlanProposal.Actions.Count > MaxPlanActions)
+        if (decision.PlanProposal is not null && decision.PlanProposal.Actions is null)
+        {
+            errors.Add("Plan actions must be an array.");
+        }
+        else if (decision.PlanProposal is not null && decision.PlanProposal.Actions.Count > MaxPlanActions)
         {
             errors.Add("At most 3 administrative actions per plan.");
         }
 
-        if (decision.Kind == DecisionKind.NeedInput && decision.Questions.Count == 0)
+        if (decision.TopicRefs is null)
+        {
+            errors.Add("TopicRefs must be an array.");
+        }
+
+        if (decision.Kind == DecisionKind.NeedInput && decision.Questions is { Count: 0 })
         {
             errors.Add("NeedInput requires 1..3 questions.");
         }
@@ -61,13 +86,26 @@ public static class EllaiDecisionValidator
             errors.Add("ProposePlan requires a plan proposal.");
         }
 
-        foreach (var claim in decision.Claims)
+        if (decision.Claims is null)
         {
-            if (claim.Kind is not ClaimKind.Unknown
-                && claim.Kind is not ClaimKind.Proposed
-                && claim.Evidence.Count == 0)
+            errors.Add("Claims must be an array.");
+        }
+        else
+        {
+            foreach (var claim in decision.Claims)
             {
-                errors.Add($"Claim {claim.ClaimId} of kind {claim.Kind} requires evidence references.");
+                if (claim is null)
+                {
+                    errors.Add("Claims entries must be objects.");
+                    continue;
+                }
+
+                if (claim.Kind is not ClaimKind.Unknown
+                    && claim.Kind is not ClaimKind.Proposed
+                    && (claim.Evidence is null || claim.Evidence.Count == 0))
+                {
+                    errors.Add($"Claim {claim.ClaimId} of kind {claim.Kind} requires evidence references.");
+                }
             }
         }
 

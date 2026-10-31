@@ -1,3 +1,4 @@
+using System.Text;
 using SwiftAid.Contracts.Ellai;
 
 namespace SwiftAid.Application.Ellai;
@@ -5,7 +6,11 @@ namespace SwiftAid.Application.Ellai;
 /// <summary>One chat message in a reasoning thread. Roles are provider
 /// primitives (system/user/assistant/tool); content is prompt text, never
 /// credentials or record payloads beyond the tool-result summaries.</summary>
-public sealed record EllaiChatMessage(string Role, string Content);
+public sealed record EllaiChatMessage(
+    string Role,
+    string Content,
+    IReadOnlyList<EllaiToolRequest>? ToolCalls = null,
+    string? ToolCallId = null);
 
 /// <summary>Text completion for one reasoning turn with provider-reported
 /// token usage for the ledger. The loop parses <see cref="Text"/> through
@@ -73,7 +78,8 @@ public sealed class EllaiReasoningLoop(
         CancellationToken ct,
         Func<int, CancellationToken, Task<bool>>? reauthorizeAsync = null,
         EllaiActivityStatusCoordinator? activity = null,
-        EllaiSessionEventJournal? journal = null)
+        EllaiSessionEventJournal? journal = null,
+        Func<CancellationToken, Task<bool>>? isExecutionCurrentAsync = null)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(request.Context);
@@ -96,7 +102,7 @@ public sealed class EllaiReasoningLoop(
                 : $", {Math.Max(0, _ledger.RemainingFor(request.Context.SessionId))} session tokens left");
         var system = _prompts.Build(request.Role, request.CapabilitySummary, limits) +
             "\n## Turn protocol\n" + TurnProtocol +
-            "\n## Tool catalogue\n" + EllaiToolBroker.DescribeCatalogue();
+            "\n## Tool catalogue\n" + EllaiToolBroker.DescribeCatalogue(request.Context.AllowedTools);
         var thread = new List<EllaiChatMessage> { new("user", request.Utterance) };
 
         async Task<EllaiModelTurn> TurnAsync(int iteration)
@@ -117,19 +123,28 @@ public sealed class EllaiReasoningLoop(
             }
             thread.Add(new EllaiChatMessage("assistant", completion.Text));
             var parsed = EllaiModelTurnParser.Parse(completion.Text);
-            if (parsed.Turn is not null)
+            var decisionErrors = parsed.Turn?.FinalDecision is { } decision
+                ? EllaiDecisionValidator.Validate(decision)
+                : Array.Empty<string>();
+            if (parsed.Turn is not null && decisionErrors.Count == 0)
             {
+                if (parsed.Turn.ToolRequests.Count > 0)
+                {
+                    thread[^1] = thread[^1] with { ToolCalls = parsed.Turn.ToolRequests };
+                }
+
                 return parsed.Turn;
             }
 
             thread.Add(new EllaiChatMessage("user",
-                $"Turn rejected ({parsed.Error}) Reply with exactly one valid JSON turn."));
+                $"Turn rejected ({parsed.Error ?? string.Join("; ", decisionErrors)}). Reply with exactly one valid JSON turn matching the active schema."));
             return new EllaiModelTurn(Array.Empty<EllaiToolRequest>(), null);
         }
 
         Task<EllaiReauthorization> GateAsync(int iteration, CancellationToken gateCt)
         {
-            return ReauthorizeAsync(request, reauthorizeAsync, iteration, gateCt);
+            return ReauthorizeAsync(request, reauthorizeAsync, iteration,
+                EstimateReservation(system, thread, request.MaxTokensPerTurn), gateCt);
         }
 
         void ObserveTool(EllaiToolRequest toolRequest, EllaiToolResult result)
@@ -144,29 +159,67 @@ public sealed class EllaiReasoningLoop(
 
             thread.Add(new EllaiChatMessage("tool",
                 $"call {toolRequest.CallId ?? toolRequest.ToolName}: " +
-                $"{toolRequest.ToolName} [{result.ReasonCode}] {summary}"));
+                $"{toolRequest.ToolName} [{result.ReasonCode}] {summary}",
+                ToolCallId: toolRequest.CallId ?? toolRequest.ToolName));
         }
 
         return await _runner.RunAsync(
             request.Context, TurnAsync, EllaiDecisionValidator.Validate, ct, GateAsync,
-            activity, request.CycleId, request.ControllerEpoch, journal, ObserveTool).ConfigureAwait(false);
+            activity, request.CycleId, request.ControllerEpoch, journal, ObserveTool,
+            isExecutionCurrentAsync).ConfigureAwait(false);
     }
 
     private async Task<EllaiReauthorization> ReauthorizeAsync(
         EllaiLoopRequest request,
         Func<int, CancellationToken, Task<bool>>? reauthorizeAsync,
-        int iteration, CancellationToken ct)
+        int iteration, int estimatedTokens, CancellationToken ct)
     {
         if (reauthorizeAsync is not null && !await reauthorizeAsync(iteration, ct).ConfigureAwait(false))
         {
             return new EllaiReauthorization(false, "denied");
         }
 
-        if (_ledger is not null && !_ledger.TryReserve(request.Context.SessionId, request.MaxTokensPerTurn))
+        if (_ledger is not null && !_ledger.TryReserve(request.Context.SessionId, estimatedTokens))
         {
             return new EllaiReauthorization(false, "budget");
         }
 
         return new EllaiReauthorization(true, string.Empty);
+    }
+
+    private static int EstimateReservation(
+        string systemPrompt,
+        IReadOnlyList<EllaiChatMessage> thread,
+        int maxCompletionTokens)
+    {
+        // Provider usage showed prompts near 9k tokens while this lane only
+        // reserved the 1k completion allowance. Reserve a conservative
+        // character-to-token estimate for the full current thread before
+        // every dispatch, including tool-call metadata and the next output.
+        long utf8Bytes = Encoding.UTF8.GetByteCount(systemPrompt) + 32;
+        foreach (var message in thread)
+        {
+            utf8Bytes += Encoding.UTF8.GetByteCount(message.Role) +
+                Encoding.UTF8.GetByteCount(message.Content) + 16;
+            if (message.ToolCallId is not null)
+            {
+                utf8Bytes += Encoding.UTF8.GetByteCount(message.ToolCallId);
+            }
+
+            if (message.ToolCalls is not null)
+            {
+                foreach (var toolCall in message.ToolCalls)
+                {
+                    utf8Bytes += Encoding.UTF8.GetByteCount(toolCall.ToolName) +
+                        Encoding.UTF8.GetByteCount(toolCall.CallId ?? string.Empty) +
+                        toolCall.Arguments.Sum(argument =>
+                            Encoding.UTF8.GetByteCount(argument.Key) +
+                            Encoding.UTF8.GetByteCount(argument.Value));
+                }
+            }
+        }
+
+        var promptEstimate = (utf8Bytes + 1) / 2;
+        return (int)Math.Min(int.MaxValue, promptEstimate + maxCompletionTokens);
     }
 }

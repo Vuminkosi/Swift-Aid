@@ -1,4 +1,4 @@
-:root {
+:root[data-theme="agentic"] {
     color-scheme: light;
     /* Agentic Interface System semantic tokens (single source of truth). --sa-* names stay as compatibility aliases. */
     --ais-bg-canvas: #FFFFFF;
@@ -130,7 +130,7 @@
     --mud-elevation-25: none !important;
 }
 
-:root[data-theme="dark"] {
+:root[data-theme="agentic"][data-color-mode="dark"] {
     color-scheme: dark;
     --ais-bg-canvas: #101612;
     --ais-bg-surface: #151E18;
@@ -191,6 +191,10 @@ button:focus-visible,
 [tabindex]:focus-visible {
     outline: 2px solid var(--sa-focus);
     outline-offset: 2px;
+}
+
+h1[tabindex="-1"]:focus-visible {
+    outline: none;
 }
 
 .swiftaid-section-card {

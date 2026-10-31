@@ -12,24 +12,39 @@
 }
 
 .case-timeline__toolbar {
-    display: flex;
-    justify-content: flex-end;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: end;
+    gap: 0.75rem;
     min-width: 0;
 }
 
 .case-timeline ::deep .case-timeline__filter {
-    width: min(100%, 12rem);
+    width: 100%;
 }
+
+.case-timeline ::deep .case-timeline__date-filter { width: 100%; }
 
 .case-timeline ::deep .case-timeline__filter .mud-input-control {
     margin: 0;
 }
+
+.case-timeline ::deep .case-timeline__date-filter .mud-input-control { margin: 0; }
 
 .case-timeline__filtered-empty {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
     gap: 0.5rem;
+    padding-block: 0.75rem;
+}
+
+.case-timeline__older {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
     padding-block: 0.75rem;
 }
 
@@ -154,6 +169,8 @@
 }
 
 @media (max-width: 599px) {
+    .case-timeline__toolbar { grid-template-columns: minmax(0, 1fr); }
+
     .case-timeline__entry-heading {
         flex-direction: column;
         gap: 0.125rem;
@@ -179,4 +196,9 @@
     .case-timeline ::deep .case-timeline__event-drawer-content {
         padding-inline: 1rem;
     }
+}
+
+@media (min-width: 600px) and (max-width: 899px) {
+    .case-timeline__toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .case-timeline ::deep .case-timeline__filter { grid-column: 1 / -1; }
 }

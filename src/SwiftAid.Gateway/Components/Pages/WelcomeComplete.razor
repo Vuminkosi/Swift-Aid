@@ -1,5 +1,6 @@
 @page "/welcome-complete"
 @using SwiftAid.Client.Presentation
+@using SwiftAid.Client.Navigation
 @using SwiftAid.Gateway.Presentation
 @using SwiftAid.Infrastructure.Identity
 @using SwiftAid.UI.Components.Surfaces.Account
@@ -9,9 +10,13 @@
 
 <PageTitle>Welcome to SwiftAid | SwiftAid</PageTitle>
 
-<WelcomeCompleteSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" />
+<WelcomeCompleteSurface Snapshot="_snapshot" ReturnUrl="SafeReturnUrl" OnRefresh="RefreshAsync" />
 
 @code {
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    private string? RequestedReturnUrl { get; set; }
+    private string SafeReturnUrl => LocalReturnUrlPolicy.Resolve(RequestedReturnUrl, "/");
+
     private WelcomeCompleteSnapshot _snapshot = WelcomeCompleteSnapshot.Loading;
 
     private IUserProfileClient ProfileClient =>

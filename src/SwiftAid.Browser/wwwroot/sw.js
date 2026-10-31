@@ -12,7 +12,8 @@ const PRELOAD_PATHS = [
     "/js/guest-registration.js",
     "/js/guest-storage.js",
     "/_content/SwiftAid.UI/assets/swiftaid-icon.png",
-    "/_content/SwiftAid.UI/js/swiftaid-shell.js"
+    "/_content/SwiftAid.UI/js/swiftaid-shell.js",
+    "/_content/SwiftAid.UI/js/swiftaid-skip-link-fallback.js"
 ];
 
 self.addEventListener("install", event => {
@@ -76,6 +77,7 @@ function isAllowedStaticPath(path) {
         path === "/_content/SwiftAid.UI/css/swiftaid-theme.css" ||
         path === "/_content/SwiftAid.UI/assets/swiftaid-icon.png" ||
         path === "/_content/SwiftAid.UI/js/swiftaid-shell.js" ||
+        path === "/_content/SwiftAid.UI/js/swiftaid-skip-link-fallback.js" ||
         path === "/SwiftAid.Gateway.styles.css" ||
         path === "/app.css" ||
         path === "/favicon.png" ||

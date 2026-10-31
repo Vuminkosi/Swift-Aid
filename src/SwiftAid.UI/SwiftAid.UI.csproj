@@ -10,6 +10,7 @@
   <ItemGroup>
     <PackageReference Include="Bit.Bonboarding" />
     <ProjectReference Include="..\SwiftAid.Contracts\SwiftAid.Contracts.csproj" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.Authorization" />
     <PackageReference Include="Microsoft.AspNetCore.Components.Web" />
     <PackageReference Include="MudBlazor" />
     <PackageReference Include="Blazor.Lottie.Player" />

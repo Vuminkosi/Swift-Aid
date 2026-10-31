@@ -2,7 +2,7 @@
 
 ## Source of truth
 
-- Implement product behavior from `spec.md` v1.4 and task contracts from `implementation.md` v2.4.
+- Implement product behavior from `spec.md` v1.5 and task contracts from `implementation.md` v2.5.
 - Treat the supplied documents as requirements, not evidence that a capability has been implemented or validated.
 - Preserve task IDs, `SA-…` requirements, `AT-…` scenarios, offline behavior, privacy boundaries, and capability gates.
 - MudBlazor is the primary Blazor UI library. Use Syncfusion only for justified complex controls after compatibility and license evidence; keep a usable MudBlazor path while that gate is unresolved.

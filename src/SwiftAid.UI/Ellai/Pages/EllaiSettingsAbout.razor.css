@@ -1,4 +1,129 @@
+.ellai-settings {
+    padding-block: clamp(1.5rem, 4vw, 3.5rem) 4rem;
+}
+
+.ellai-settings__hero {
+    position: relative;
+    overflow: hidden;
+    margin-block-end: 1.5rem;
+    padding: clamp(1.5rem, 5vw, 3rem);
+    border: 1px solid var(--sa-border);
+    border-radius: 1.5rem;
+    background:
+        radial-gradient(ellipse at 92% 5%, color-mix(in srgb, var(--sa-action-primary) 22%, transparent), transparent 44%),
+        linear-gradient(135deg, var(--sa-surface), var(--sa-surface-subtle));
+}
+
+.ellai-settings__hero::after {
+    position: absolute;
+    inset-inline-end: -2.5rem;
+    inset-block-end: -4rem;
+    width: 12rem;
+    height: 12rem;
+    border: 1px solid color-mix(in srgb, var(--sa-action-primary) 35%, transparent);
+    border-radius: 50%;
+    content: "";
+    pointer-events: none;
+}
+
+.ellai-settings__eyebrow {
+    color: var(--sa-action-primary);
+    font-weight: 700;
+    letter-spacing: 0.12em;
+}
+
+.ellai-settings__title {
+    margin-block: 0.35rem 0.75rem;
+    font-weight: 750;
+    letter-spacing: -0.035em;
+}
+
+.ellai-settings__intro {
+    max-width: 44rem;
+    color: var(--sa-text-secondary);
+    line-height: 1.7;
+}
+
+.ellai-settings__tabs {
+    overflow: hidden;
+    border: 1px solid var(--sa-border);
+    border-radius: 1rem;
+    background: var(--sa-surface);
+}
+
+.ellai-settings__content,
+.ellai-settings__history {
+    display: grid;
+    gap: 1rem;
+    padding: clamp(1rem, 3vw, 1.75rem);
+}
+
+.ellai-settings__card {
+    display: grid;
+    gap: 0.5rem;
+    padding: 1.25rem;
+    border-radius: 0.875rem;
+    background: var(--sa-surface-subtle);
+}
+
+.ellai-settings__card h2 {
+    margin: 0;
+    font-weight: 650;
+}
+
+.ellai-settings__card p {
+    max-width: 54rem;
+    margin: 0;
+    color: var(--sa-text-secondary);
+    line-height: 1.65;
+}
+
+.ellai-settings__boundary {
+    line-height: 1.6;
+}
+
+.ellai-settings__session {
+    display: grid;
+    gap: 0.5rem;
+    padding: 1rem 1.25rem;
+    border-radius: 0.875rem;
+}
+
+.ellai-settings__session-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.35rem 1rem;
+}
+
+.ellai-settings__session-heading h2 {
+    margin: 0;
+}
+
+.ellai-settings__session-status {
+    color: var(--sa-text-secondary);
+}
+
 .ellai-history__cost {
-    font-size: 0.68rem;
-    opacity: 0.75;
+    display: none;
+}
+
+@media (max-width: 600px) {
+    .ellai-settings {
+        padding-inline: 1rem;
+    }
+
+    .ellai-settings__hero {
+        border-radius: 1.125rem;
+    }
+
+    .ellai-settings__hero::after {
+        inset-inline-end: -6rem;
+    }
+
+    .ellai-settings__session-heading {
+        align-items: flex-start;
+        flex-direction: column;
+    }
 }

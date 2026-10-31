@@ -7,8 +7,8 @@ namespace SwiftAid.UI.Theme;
 /// Shared light and dark palettes for the Gateway and Mobile hosts.
 /// Mapped to the Agentic Interface System (AIS) semantic tokens in
 /// wwwroot/css/swiftaid-theme.css: green-led primary action, neutral
-/// surfaces, dark text. Brand blues/greens stay for logo, illustration,
-/// and secondary accents only.
+/// surfaces and neutral secondary text/icons. Brand blues/greens stay for
+/// the logo, illustrations and explicit status/data accents.
 /// </summary>
 public static class SwiftAidBrandTheme
 {
@@ -31,11 +31,11 @@ public static class SwiftAidBrandTheme
             // #F5F7F5 navigation, #212121 body text.
             Primary = "#00804A",
             PrimaryContrastText = "#FFFFFF",
-            Secondary = BrandNavy,
+            Secondary = SwiftAidDesignTokens.TextSecondaryLight,
             SecondaryContrastText = "#FFFFFF",
             Tertiary = BrandGreen,
             TertiaryContrastText = "#062D29",
-            Info = "#1D4ED8",
+            Info = SwiftAidDesignTokens.TextSecondaryLight,
             InfoContrastText = "#FFFFFF",
             Success = "#006B3F",
             SuccessContrastText = "#FFFFFF",
@@ -53,7 +53,7 @@ public static class SwiftAidBrandTheme
             AppbarBackground = "#FFFFFF",
             AppbarText = "#212121",
             TextPrimary = "#212121",
-            TextSecondary = "#535752",
+            TextSecondary = SwiftAidDesignTokens.TextSecondaryLight,
             TextDisabled = "#798177",
             ActionDefault = "#535752"
         },
@@ -62,11 +62,11 @@ public static class SwiftAidBrandTheme
             // AIS dark: same structure and density as light.
             Primary = "#53D98D",
             PrimaryContrastText = "#06180D",
-            Secondary = BrandBlue,
+            Secondary = SwiftAidDesignTokens.TextSecondaryDark,
             SecondaryContrastText = "#FFFFFF",
             Tertiary = BrandGreen,
             TertiaryContrastText = "#062D29",
-            Info = "#8AB4FF",
+            Info = SwiftAidDesignTokens.TextSecondaryDark,
             InfoContrastText = "#06180D",
             Success = "#53D98D",
             SuccessContrastText = "#06180D",
@@ -84,7 +84,7 @@ public static class SwiftAidBrandTheme
             AppbarBackground = "#151E18",
             AppbarText = "#EDF2EE",
             TextPrimary = "#EDF2EE",
-            TextSecondary = "#B3BDB4",
+            TextSecondary = SwiftAidDesignTokens.TextSecondaryDark,
             TextDisabled = "#77867B",
             ActionDefault = "#B3BDB4"
         },

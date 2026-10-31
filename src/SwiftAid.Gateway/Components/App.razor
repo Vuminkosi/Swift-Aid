@@ -17,12 +17,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
+    <script src="_content/SwiftAid.UI/js/theme-preference-bootstrap.js"></script>
     @if (!IsGuestEntry)
     {
         <ResourcePreloader />
     }
     <link rel="stylesheet" href="_content/MudBlazor/MudBlazor.min.css" />
     <link rel="stylesheet" href="@Assets["_content/SwiftAid.UI/css/swiftaid-theme.css"]" />
+    <link rel="stylesheet" href="@Assets["_content/SwiftAid.UI/SwiftAid.UI.bundle.scp.css"]" />
     <link rel="stylesheet" href="@Assets["app.css"]" />
     <link rel="stylesheet" href="@Assets["SwiftAid.Gateway.styles.css"]" />
     @if (!IsGuestEntry)
@@ -37,6 +39,7 @@
 </head>
 
 <body>
+    <script src="_content/SwiftAid.UI/js/swiftaid-skip-link-fallback.js"></script>
     @if (IsGuestEntry)
     {
         <div id="guest-root"
@@ -67,6 +70,39 @@
             }
         </script>
     }
+    <aside id="cookie-preference" class="cookie-preference" aria-labelledby="cookie-preference-title" hidden>
+        <div class="cookie-preference__copy">
+            <h2 id="cookie-preference-title">Cookie preferences</h2>
+            <p>SwiftAid uses essential cookies for sign-in, session security and request protection. This preference is saved on this device. See our <a href="/privacy">Privacy notice</a>.</p>
+        </div>
+        <button id="cookie-preference-accept" class="cookie-preference__button" type="button">
+            Continue with essential cookies
+        </button>
+    </aside>
+    <script>
+        (() => {
+            const storageKey = "swiftaid.cookie-preference.v1";
+            const banner = document.getElementById("cookie-preference");
+            const button = document.getElementById("cookie-preference-accept");
+            if (!banner || !button) return;
+
+            try {
+                if (window.localStorage.getItem(storageKey) === "essential-only") return;
+            } catch {
+                // Keep the notice usable when local browser storage is unavailable.
+            }
+
+            banner.hidden = false;
+            button.addEventListener("click", () => {
+                try {
+                    window.localStorage.setItem(storageKey, "essential-only");
+                } catch {
+                    // The preference applies for this page even when it cannot be persisted.
+                }
+                banner.hidden = true;
+            });
+        })();
+    </script>
 </body>
 
 </html>
@@ -78,9 +114,16 @@
     {
         get
         {
-            var path = HttpContextAccessor.HttpContext?.Request.Path.Value?.TrimEnd('/');
-            return path is not null &&
-                (path.Length == 0 || string.Equals(path, "/report", StringComparison.OrdinalIgnoreCase));
+            var httpContext = HttpContextAccessor.HttpContext;
+            var path = httpContext?.Request.Path.Value?.TrimEnd('/');
+            if (string.Equals(path, "/report", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var isAnonymous = httpContext?.User.Identity?.IsAuthenticated != true;
+            return isAnonymous && path is not null &&
+                (path.Length == 0 || string.Equals(path, "/sessions", StringComparison.OrdinalIgnoreCase));
         }
     }
 

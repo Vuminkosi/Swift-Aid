@@ -36,12 +36,26 @@ public static class IdentityEndpoints
         ArgumentNullException.ThrowIfNull(federationOptions);
         ArgumentNullException.ThrowIfNull(identityServerOptions);
         var group = endpoints.MapGroup("/auth");
+        var identityEnabled = federationOptions.Enabled || identityServerOptions.Enabled;
         group.MapGet("/providers", GetProviders);
+        group.MapGet("/capabilities", () => Results.Ok(new IdentityCapabilities(
+            PasswordSignInAvailable: identityEnabled,
+            NativeSignInAvailable: identityServerOptions.Enabled)));
         group.MapGet("/facebook/web/options", GetFacebookWebLoginOptions);
-        group.MapPost("/facebook/web/exchange", ExchangeFacebookWebLogin);
-        if (federationOptions.Enabled)
+        if (identityEnabled)
         {
             group.MapGet("/antiforgery", GetAntiforgeryToken);
+        }
+        if (identityEnabled)
+        {
+            group.MapPost("/facebook/web/exchange", ExchangeFacebookWebLogin);
+        }
+        else
+        {
+            group.MapPost("/facebook/web/exchange", FacebookWebLoginUnavailable);
+        }
+        if (federationOptions.Enabled)
+        {
             group.MapPost("/{providerId}/challenge", ChallengeProvider);
             group.MapGet("/external/callback", CompleteExternalLogin);
             group.MapPost("/reauthenticate/{providerId}", ReauthenticateProvider);
@@ -53,32 +67,41 @@ public static class IdentityEndpoints
             group.MapPost("/logout", SignOutSwiftAid);
         }
 
-        group.MapGet("/password/policy", GetPasswordPolicy);
-        group.MapPost("/password/register", RegisterPasswordUser);
-        group.MapPost("/password/login", LoginPasswordUser);
-        group.MapPost("/password/change", ChangePasswordUser);
-        group.MapPost("/password/reset/request", RequestPasswordReset);
-        group.MapPost("/password/reset/confirm", ConfirmPasswordReset);
-        group.MapGet("/email/status", GetEmailVerificationStatus);
-        group.MapPost("/email/otp/request", RequestEmailOtp);
-        group.MapPost("/email/otp/confirm", ConfirmEmailOtp);
-        group.MapPost("/email/change/request", RequestEmailChange);
-        group.MapPost("/email/change/confirm", ConfirmEmailChange);
+        if (identityEnabled)
+        {
+            group.MapGet("/password/policy", GetPasswordPolicy);
+            group.MapPost("/password/register", RegisterPasswordUser);
+            group.MapPost("/password/login", LoginPasswordUser);
+            group.MapPost("/password/change", ChangePasswordUser);
+            group.MapPost("/password/reset/request", RequestPasswordReset);
+            group.MapPost("/password/reset/confirm", ConfirmPasswordReset);
+            group.MapGet("/email/status", GetEmailVerificationStatus);
+            group.MapPost("/email/otp/request", RequestEmailOtp);
+            group.MapPost("/email/otp/confirm", ConfirmEmailOtp);
+            group.MapPost("/email/change/request", RequestEmailChange);
+            group.MapPost("/email/change/confirm", ConfirmEmailChange);
 
-        group.MapGet("/profile", GetUserProfile);
-        group.MapPut("/profile/avatar", SaveProfileAvatar);
-        group.MapGet("/profile/avatar", GetProfileAvatar);
-        group.MapDelete("/profile/avatar", DeleteProfileAvatar);
-        group.MapPut("/profile", SaveUserProfile);
-        group.MapGet("/notifications/preferences", GetNotificationPreferences);
-        group.MapPut("/notifications/preferences", SaveNotificationPreferences);
-        group.MapGet("/organizations/mine", GetMyMemberships);
-        group.MapGet("/organizations/directory", SearchOrganizations);
-        group.MapGet("/organizations/requests/mine", GetMyMembershipRequests);
-        group.MapPost("/organizations/requests", SubmitMembershipRequest);
-        group.MapPost("/organizations/invitations/redeem", RedeemOrganizationInvitation);
-        group.MapPost("/organizations/invitations", IssueOrganizationInvitation);
-        group.MapPost("/organizations", CreateOrganization);
+            group.MapGet("/profile", GetUserProfile);
+            group.MapPut("/profile/avatar", SaveProfileAvatar);
+            group.MapGet("/profile/avatar", GetProfileAvatar);
+            group.MapDelete("/profile/avatar", DeleteProfileAvatar);
+            group.MapPut("/profile", SaveUserProfile);
+            group.MapGet("/notifications/preferences", GetNotificationPreferences);
+            group.MapPut("/notifications/preferences", SaveNotificationPreferences);
+            group.MapGet("/organizations/mine", GetMyMemberships);
+            group.MapGet("/organizations/directory", SearchOrganizations);
+            group.MapGet("/organizations/requests/mine", GetMyMembershipRequests);
+            group.MapPost("/organizations/requests", SubmitMembershipRequest);
+            group.MapPost("/organizations/invitations/redeem", RedeemOrganizationInvitation);
+            group.MapPost("/organizations/invitations", IssueOrganizationInvitation);
+            group.MapPost("/organizations", CreateOrganization);
+        }
+        else
+        {
+            group.MapGet("/password/policy", () => Results.Problem(
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                title: "Sign-in is temporarily unavailable."));
+        }
 
         if (identityServerOptions.Enabled)
         {
@@ -122,6 +145,12 @@ public static class IdentityEndpoints
                 options.Facebook.ClientId,
                 options.FacebookWebLogin.GraphApiVersion)
             : new FacebookWebLoginOptionsResponse(false));
+    }
+
+    private static IResult FacebookWebLoginUnavailable(HttpContext context)
+    {
+        SetNoStore(context);
+        return FacebookWebError(context, StatusCodes.Status503ServiceUnavailable, "web_login_disabled");
     }
 
     private static async Task<IResult> ExchangeFacebookWebLogin(
@@ -840,6 +869,7 @@ public static class IdentityEndpoints
         HttpContext context,
         IAntiforgery antiforgery,
         [FromServices] IPasswordIdentityRegistrar registrar,
+        [FromServices] IUserProfileService profiles,
         UserManager<SwiftAidUser> userManager,
         SignInManager<SwiftAidUser> signInManager,
         CancellationToken cancellationToken)
@@ -869,16 +899,18 @@ public static class IdentityEndpoints
         }
 
         var email = bodyRead.Request.Email?.Trim() ?? string.Empty;
+        var displayName = bodyRead.Request.DisplayName?.Trim() ?? string.Empty;
         var password = bodyRead.Request.Password ?? string.Empty;
         bodyRead.Request.Password = string.Empty;
-        if (!IsValidPasswordEmail(email) || string.IsNullOrEmpty(password) || password.Length > 256)
+        if (string.IsNullOrWhiteSpace(displayName) || displayName.Length > 128 ||
+            !IsValidPasswordEmail(email) || string.IsNullOrEmpty(password) || password.Length > 256)
         {
-            return PasswordError(context, StatusCodes.Status400BadRequest, "Enter a valid email address and password.");
+            return PasswordError(context, StatusCodes.Status400BadRequest, "Enter a full name, valid email address and password.");
         }
 
         try
         {
-            var registration = await registrar.RegisterAsync(email, password, cancellationToken)
+            var registration = await registrar.RegisterAsync(email, password, displayName, cancellationToken)
                 .ConfigureAwait(false);
             if (registration.Status == PasswordRegistrationStatus.DuplicateEmail)
             {
@@ -904,6 +936,12 @@ public static class IdentityEndpoints
 
             var user = await userManager.FindByIdAsync(registration.ActorId).ConfigureAwait(false);
             if (user is null)
+            {
+                return PasswordError(context, StatusCodes.Status503ServiceUnavailable, "Registration is temporarily unavailable.");
+            }
+
+            var profile = await profiles.GetAsync(user.Id, cancellationToken).ConfigureAwait(false);
+            if (profile is null || string.IsNullOrWhiteSpace(profile.DisplayName))
             {
                 return PasswordError(context, StatusCodes.Status503ServiceUnavailable, "Registration is temporarily unavailable.");
             }
@@ -2968,6 +3006,10 @@ private static async Task<IResult> GetNotificationPreferences(
         bool Available,
         string? AppId = null,
         string? GraphApiVersion = null);
+
+    private sealed record IdentityCapabilities(
+        bool PasswordSignInAvailable,
+        bool NativeSignInAvailable);
 
     private sealed record FacebookWebLoginExchangeResponse(string RedirectUrl);
 

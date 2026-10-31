@@ -2,9 +2,11 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Routing;
@@ -13,12 +15,13 @@ using Microsoft.Extensions.DependencyInjection;
 using OpenIddict.Validation.AspNetCore;
 using SwiftAid.Contracts.Sessions;
 using SwiftAid.Gateway.Endpoints;
+using SwiftAid.Gateway.Sessions;
 
 namespace SwiftAid.Integration.Tests;
 
 /// <summary>
-/// P10.1 community-session endpoints: auth, limit validation, 409/422 mapping, and
-/// public 404s for non-published sessions. Fake-service style; no live database.
+/// Community-session endpoints: fail-closed officer authorization and public
+/// session behavior. Fake-service style; no live database.
 /// </summary>
 public sealed class CommunitySessionEndpointTests
 {
@@ -26,7 +29,7 @@ public sealed class CommunitySessionEndpointTests
     private static readonly Guid KnownSessionId = Guid.Parse("d0c00001-2222-4a44-9aa9-123456789abc");
 
     [Fact]
-    public void OfficerRoutes_RequireStaffAuthentication()
+    public void OfficerRoutesRequireAuthenticationAndScopedCapabilityMetadata()
     {
         var builder = WebApplication.CreateBuilder();
         builder.Services.AddAuthorization();
@@ -48,6 +51,7 @@ public sealed class CommunitySessionEndpointTests
         {
             var authorization = Assert.Single(route.Metadata.GetOrderedMetadata<IAuthorizeData>());
             Assert.Equal(expectedSchemes, authorization.AuthenticationSchemes);
+            Assert.NotNull(route.Metadata.GetMetadata<CommunitySessionScopedAuthorizationRequiredMetadata>());
         }
     }
 
@@ -94,28 +98,19 @@ public sealed class CommunitySessionEndpointTests
 
         using var response = await host.Client.SendAsync(request);
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.Equal(0, host.Service.ExecuteCalls);
     }
 
     [Fact]
-    public async Task CreateDraft_IsAccepted()
+    public async Task CreateDraft_IsDeniedWithoutScopedStaffCapability()
     {
         await using var host = await TestSessionHost.StartAsync();
         using var request = CreateJsonRequest(HttpMethod.Post, "/api/v1/sessions", ValidCreateRequest());
 
         using var response = await host.SendBearerAsync(request);
-        var body = await response.Content.ReadAsStringAsync();
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = JsonSerializer.Deserialize<SessionCommandResult>(body, JsonOptions);
-        Assert.NotNull(result);
-        Assert.NotEqual(Guid.Empty, result!.SessionId);
-        Assert.Equal("actor-1", host.Service.LastActorId);
-        var command = Assert.IsType<CreateSessionDraftCommand>(host.Service.LastCommand);
-        Assert.Equal(0, command.ExpectedVersion);
-        Assert.Equal("Dry-season holding hygiene", command.Title);
-        Assert.Equal("planned for review", command.Reason);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(0, host.Service.ExecuteCalls);
     }
 
     [Fact]
@@ -127,7 +122,7 @@ public sealed class CommunitySessionEndpointTests
 
         using var response = await host.SendBearerAsync(message);
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.Equal(0, host.Service.ExecuteCalls);
     }
 
@@ -140,29 +135,23 @@ public sealed class CommunitySessionEndpointTests
 
         using var response = await host.SendBearerAsync(message);
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.Equal(0, host.Service.ExecuteCalls);
     }
 
     [Fact]
-    public async Task Update_IsAccepted()
+    public async Task Update_IsDeniedWithoutScopedStaffCapability()
     {
         await using var host = await TestSessionHost.StartAsync();
         using var message = CreateJsonRequest(HttpMethod.Put, $"/api/v1/sessions/{KnownSessionId:D}", ValidUpdateRequest());
 
         using var response = await host.SendBearerAsync(message);
-        var body = await response.Content.ReadAsStringAsync();
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = JsonSerializer.Deserialize<SessionCommandResult>(body, JsonOptions);
-        Assert.NotNull(result);
-        Assert.Equal(KnownSessionId, result!.SessionId);
-        var command = Assert.IsType<UpdateSessionCommand>(host.Service.LastCommand);
-        Assert.Equal(3, command.ExpectedVersion);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(0, host.Service.ExecuteCalls);
     }
 
     [Fact]
-    public async Task Review_WithStaleVersion_MapsToConflict()
+    public async Task Review_IsDeniedWithoutScopedStaffCapability()
     {
         await using var host = await TestSessionHost.StartAsync();
         host.Service.OnExecute = (_, _) =>
@@ -174,11 +163,12 @@ public sealed class CommunitySessionEndpointTests
 
         using var response = await host.SendBearerAsync(message);
 
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(0, host.Service.ExecuteCalls);
     }
 
     [Fact]
-    public async Task Schedule_InThePast_MapsToUnprocessable()
+    public async Task Schedule_IsDeniedWithoutScopedStaffCapability()
     {
         await using var host = await TestSessionHost.StartAsync();
         host.Service.OnExecute = (_, _) =>
@@ -190,7 +180,8 @@ public sealed class CommunitySessionEndpointTests
 
         using var response = await host.SendBearerAsync(message);
 
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(0, host.Service.ExecuteCalls);
     }
 
     [Fact]
@@ -204,12 +195,12 @@ public sealed class CommunitySessionEndpointTests
 
         using var response = await host.SendBearerAsync(message);
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.Equal(0, host.Service.ExecuteCalls);
     }
 
     [Fact]
-    public async Task Cancel_IsAccepted()
+    public async Task Cancel_IsDeniedWithoutScopedStaffCapability()
     {
         await using var host = await TestSessionHost.StartAsync();
         using var message = CreateJsonRequest(
@@ -219,13 +210,12 @@ public sealed class CommunitySessionEndpointTests
 
         using var response = await host.SendBearerAsync(message);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var command = Assert.IsType<CancelSessionCommand>(host.Service.LastCommand);
-        Assert.Equal("venue flooded", command.CancellationReason);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(0, host.Service.ExecuteCalls);
     }
 
     [Fact]
-    public async Task Complete_IsAccepted()
+    public async Task Complete_IsDeniedWithoutScopedStaffCapability()
     {
         await using var host = await TestSessionHost.StartAsync();
         using var message = CreateJsonRequest(
@@ -235,8 +225,31 @@ public sealed class CommunitySessionEndpointTests
 
         using var response = await host.SendBearerAsync(message);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.IsType<CompleteSessionCommand>(host.Service.LastCommand);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(0, host.Service.ExecuteCalls);
+    }
+
+    [Fact]
+    public async Task InProcessClient_DeniesStaffReadAndMutationWithoutCallingService()
+    {
+        var service = new FakeCommunitySessionService();
+        using var services = new ServiceCollection()
+            .AddSingleton<ICommunitySessionService>(service)
+            .BuildServiceProvider();
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, "actor-1"),
+                new Claim("swiftaid_access_epoch", "1")], "test"));
+        var client = new SessionGatewayClient(
+            new CommunityFixedAuthenticationStateProvider(principal), services);
+
+        var staffView = await client.GetStaffAsync(KnownSessionId);
+        var outcome = await client.ExecuteAsync(new CancelSessionCommand(
+            KnownSessionId, 1, "venue flooded", "venue closed", DateTimeOffset.UtcNow));
+
+        Assert.Null(staffView);
+        Assert.False(outcome.Succeeded);
+        Assert.Equal(0, service.StaffReadCalls);
+        Assert.Equal(0, service.ExecuteCalls);
     }
 
     [Fact]
@@ -454,6 +467,39 @@ public sealed class CommunitySessionEndpointTests
             ((Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult)result).StatusCode);
     }
 
+    [Fact]
+    public void MapCreateRequest_BlankTitle_IsRejectedBeforeCommandCreation()
+    {
+        var request = ValidCreateRequest() with { Title = " " };
+
+        var exception = Assert.Throws<ArgumentException>(
+            () => CommunitySessionEndpoints.MapCreateRequest(request));
+
+        Assert.Equal("Title", exception.ParamName);
+    }
+
+    [Fact]
+    public void MapUpdateRequest_ZeroExpectedVersion_IsRejectedBeforeCommandCreation()
+    {
+        var request = ValidUpdateRequest() with { ExpectedVersion = 0 };
+
+        var exception = Assert.Throws<ArgumentException>(
+            () => CommunitySessionEndpoints.MapUpdateRequest(KnownSessionId, request));
+
+        Assert.Equal("expectedVersion", exception.ParamName);
+    }
+
+    [Fact]
+    public void MapCancelRequest_BlankCancellationReason_IsRejectedBeforeCommandCreation()
+    {
+        var request = new CancelSessionApiRequest(2, " ", "venue closed");
+
+        var exception = Assert.Throws<ArgumentException>(
+            () => CommunitySessionEndpoints.MapCancelRequest(KnownSessionId, request));
+
+        Assert.Equal("CancellationReason", exception.ParamName);
+    }
+
     private static CreateSessionApiRequest ValidCreateRequest() => new(
         "Dry-season holding hygiene",
         "Practical steps for clean holding areas.",
@@ -538,6 +584,7 @@ public sealed class CommunitySessionEndpointTests
     {
         public int ExecuteCalls { get; private set; }
         public int ListCalls { get; private set; }
+        public int StaffReadCalls { get; private set; }
         public int? LastLimit { get; private set; }
         public SessionCommand? LastCommand { get; private set; }
         public string? LastActorId { get; private set; }
@@ -560,8 +607,11 @@ public sealed class CommunitySessionEndpointTests
                 command.SessionId, command.ExpectedVersion + 1, "Draft"));
         }
 
-        public Task<CommunitySessionView?> GetStaffAsync(Guid sessionId, string actorId, CancellationToken ct) =>
-            Task.FromResult<CommunitySessionView?>(null);
+        public Task<CommunitySessionView?> GetStaffAsync(Guid sessionId, string actorId, CancellationToken ct)
+        {
+            StaffReadCalls++;
+            return Task.FromResult<CommunitySessionView?>(null);
+        }
 
         public Task<IReadOnlyList<PublicSessionView>> ListPublicAsync(int? limit, CancellationToken ct)
         {
@@ -647,4 +697,11 @@ public sealed class CommunitySessionEndpointTests
             await _application.DisposeAsync();
         }
     }
+}
+
+internal sealed class CommunityFixedAuthenticationStateProvider(ClaimsPrincipal principal)
+    : AuthenticationStateProvider
+{
+    public override Task<AuthenticationState> GetAuthenticationStateAsync() =>
+        Task.FromResult(new AuthenticationState(principal));
 }

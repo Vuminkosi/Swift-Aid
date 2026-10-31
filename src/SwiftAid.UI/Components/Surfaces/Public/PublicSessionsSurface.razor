@@ -1,0 +1,1052 @@
+@using SwiftAid.Contracts.Sessions
+@using SwiftAid.UI.Components
+@using SwiftAid.UI.Components.Sessions
+@using SwiftAid.UI.Components.Theme
+@inject NavigationManager Navigation
+
+<MudContainer Fixed="true" Class="public-resource-surface">
+    <MudHidden Breakpoint="Breakpoint.SmAndDown">
+        <SwiftAidPageHeading Eyebrow="Public community" Title="Community sessions" Description="Browse published sessions. Calendar downloads, copied invitations and shared text never mark attendance or send automatically." HeadingId="public-sessions-heading" />
+    </MudHidden>
+
+    <MudHidden Breakpoint="Breakpoint.MdAndUp">
+        <header class="public-sessions-mobile-header">
+            <MudText Typo="Typo.h6" HtmlTag="h1" id="public-sessions-mobile-heading">Community Sessions</MudText>
+            @if (CanCreateSession)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" DropShadow="false"
+                           OnClick="() => ManageSessionAsync(null)" StartIcon="@Icons.Material.Filled.Event">
+                    Schedule Session
+                </MudButton>
+            }
+        </header>
+
+        <div class="public-sessions-mobile-tabs" role="group" aria-label="Filter sessions by date">
+            <button type="button" aria-pressed="@(_periodFilter == SessionPeriodFilter.Upcoming)"
+                    class="@( _periodFilter == SessionPeriodFilter.Upcoming ? "public-sessions-mobile-tabs__tab is-active" : "public-sessions-mobile-tabs__tab")"
+                    @onclick="() => PeriodChangedAsync(SessionPeriodFilter.Upcoming)">
+                Upcoming
+            </button>
+            <button type="button" aria-pressed="@(_periodFilter == SessionPeriodFilter.Past)"
+                    class="@(_periodFilter == SessionPeriodFilter.Past ? "public-sessions-mobile-tabs__tab is-active" : "public-sessions-mobile-tabs__tab")"
+                    @onclick="() => PeriodChangedAsync(SessionPeriodFilter.Past)">
+                Past
+            </button>
+        </div>
+    </MudHidden>
+
+    @if (ManagementNotice is { } managementNotice)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+            @managementNotice
+            <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="RefreshManagementCapabilitiesAsync"
+                       Disabled="@_managementRefreshBusy" StartIcon="@Icons.Material.Filled.Refresh">
+                @(_managementRefreshBusy ? "Refreshing…" : "Refresh session actions")
+            </MudButton>
+        </MudAlert>
+    }
+
+    @if (CanCreateSession)
+    {
+        <MudHidden Breakpoint="Breakpoint.SmAndDown">
+            <div class="public-sessions-management">
+                <MudText Typo="Typo.body2" Color="Color.Secondary">Plan or update a community session.</MudText>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="() => ManageSessionAsync(null)" StartIcon="@Icons.Material.Filled.Event">
+                    Schedule a session
+                </MudButton>
+            </div>
+        </MudHidden>
+    }
+
+    @if (!Loading && ErrorMessage is null && Sessions.Count > 0)
+    {
+        <MudHidden Breakpoint="Breakpoint.SmAndDown">
+            <section class="public-sessions-filters" aria-label="Filter community sessions">
+                <MudTextField T="string" Label="Search sessions" Value="@_searchText"
+                              ValueChanged="SearchChangedAsync" Variant="Variant.Outlined"
+                              Immediate="true" DebounceInterval="250" Clearable="true"
+                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                              aria-describedby="sessions-search-help" />
+                <span id="sessions-search-help" class="public-sessions-hint">Search session title, summary, presenter, topic, language, or region.</span>
+
+            <details class="public-sessions-filters__advanced">
+                <summary>More filters <span class="public-sessions-filters__count">@FilteredSessions.Count of @Sessions.Count sessions</span></summary>
+                <div class="public-sessions-filters__controls">
+            <div class="public-sessions-filters__row">
+                <MudSelect T="SessionPeriodFilter" Label="When" Value="@_periodFilter" ValueChanged="PeriodChangedAsync"
+                           Variant="Variant.Outlined" Dense="true">
+                    <MudSelectItem T="SessionPeriodFilter" Value="@SessionPeriodFilter.Upcoming">Upcoming</MudSelectItem>
+                    <MudSelectItem T="SessionPeriodFilter" Value="@SessionPeriodFilter.Past">Past</MudSelectItem>
+                    <MudSelectItem T="SessionPeriodFilter" Value="@SessionPeriodFilter.CustomDates">Choose dates</MudSelectItem>
+                    <MudSelectItem T="SessionPeriodFilter" Value="@SessionPeriodFilter.All">All dates</MudSelectItem>
+                </MudSelect>
+                <MudSelect T="string" Label="Category" Value="@_categoryFilter" ValueChanged="CategoryChangedAsync"
+                           Variant="Variant.Outlined" Dense="true" Clearable="true">
+                    @foreach (var category in Categories)
+                    {
+                        <MudSelectItem T="string" Value="@category">@category</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudSelect T="string" Label="Language" Value="@_languageFilter" ValueChanged="LanguageChangedAsync"
+                           Variant="Variant.Outlined" Dense="true" Clearable="true">
+                    @foreach (var language in Languages)
+                    {
+                        <MudSelectItem T="string" Value="@language">@language</MudSelectItem>
+                    }
+                </MudSelect>
+            </div>
+
+            @if (_periodFilter == SessionPeriodFilter.CustomDates)
+            {
+                <div class="public-sessions-filters__row public-sessions-filters__dates">
+                    <MudDatePicker Date="@_dateFrom" DateChanged="DateFromChangedAsync" Label="From date" Variant="Variant.Outlined" />
+                    <MudDatePicker Date="@_dateTo" DateChanged="DateToChangedAsync" Label="To date" Variant="Variant.Outlined" />
+                </div>
+            }
+
+            <div class="public-sessions-filters__summary">
+                @if (HasActiveFilters)
+                {
+                    <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="ClearFiltersAsync" StartIcon="@Icons.Material.Filled.FilterAltOff">Clear filters</MudButton>
+                }
+            </div>
+                </div>
+            </details>
+            </section>
+        </MudHidden>
+    }
+
+    <div class="@WorkspaceClass">
+    @if (!Loading && ErrorMessage is null && Sessions.Count > 0 && FilteredSessions.Count == 0)
+    {
+        <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="No matching sessions" Description="Try changing the date, category, language, or search filters." />
+    }
+    else
+    {
+        <PublicSessionList Sessions="FilteredSessions"
+                           Loading="Loading"
+                           ErrorMessage="@ErrorMessage"
+                           OnRetry="OnRetry"
+                           LoadInvitationTextAsync="LoadInvitationTextAsync"
+                           ShareTextAsync="ShareTextAsync" />
+    }
+
+    @if (!Loading && ErrorMessage is null && (SelectedSession is not null || HasStaffEditor))
+    {
+        <MudTabs Class="public-session-tabs" Rounded="true" KeepPanelsAlive="true"
+                 @bind-ActivePanelIndex="_activeTabIndex">
+        @if (SelectedSession is { } selected)
+        {
+        <MudTabPanel Text="Details">
+        <MudPaper Class="public-session-details" Elevation="0" Outlined="true" aria-labelledby="public-session-details-title">
+            <div class="public-session-details__heading">
+                <div>
+                    <MudText id="public-session-details-title" Typo="Typo.subtitle1" HtmlTag="h2">Session details</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">@selected.Title</MudText>
+                </div>
+                <MudSelect T="Guid" Label="Selected session" Value="@_selectedSessionId" ValueChanged="SessionSelectedAsync"
+                           Variant="Variant.Outlined" Dense="true">
+                    @foreach (var session in FilteredSessions)
+                    {
+                        <MudSelectItem T="Guid" Value="@session.SessionId">@session.Title</MudSelectItem>
+                    }
+                </MudSelect>
+                @if (CanOpenSelectedSession)
+                {
+                    <MudButton Variant="Variant.Text" Color="Color.Primary"
+                               OnClick="() => ManageSessionAsync(selected.SessionId)" StartIcon="@Icons.Material.Filled.Event">
+                        @(CanEditSelectedSession ? "Edit selected session" : "Open session actions")
+                    </MudButton>
+                }
+            </div>
+
+            <dl class="public-session-details__facts">
+                <div><dt>Time</dt><dd>@FormatDetailsWhen(selected)</dd></div>
+                <div><dt>Audience</dt><dd>@selected.AudienceDescription</dd></div>
+                <div><dt>Sector</dt><dd>@selected.Sector</dd></div>
+                <div><dt>Area</dt><dd>@($"{selected.RegionId}, {selected.CountryCode}")</dd></div>
+                <div><dt>Language</dt><dd>@selected.Language</dd></div>
+                <div><dt>Presenter</dt><dd>@selected.Presenter</dd></div>
+                <div><dt>Duration</dt><dd>@($"{selected.DurationMinutes} minutes")</dd></div>
+                @if (selected.Capacity is { } capacity)
+                {
+                    <div><dt>Session capacity</dt><dd>@capacity</dd></div>
+                }
+            </dl>
+
+            <div class="public-session-details__materials">
+                <MudText Typo="Typo.subtitle2" HtmlTag="h3">Linked materials</MudText>
+                @if (selected.Materials.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">No materials are linked to this session.</MudText>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">
+                        @selected.Materials.Count material reference(s) are linked. Their titles and content are not available in this session view.
+                    </MudText>
+                    <ul>
+                        @for (var index = 0; index < selected.Materials.Count; index++)
+                        {
+                            <li>Material version @selected.Materials[index].SourceVersion</li>
+                        }
+                    </ul>
+                }
+            </div>
+        </MudPaper>
+        </MudTabPanel>
+
+        <MudTabPanel Text="Reminders">
+        @if (!string.Equals(selected.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
+        {
+        <MudPaper Class="public-session-subscription" Elevation="0" Outlined="true" aria-labelledby="public-session-subscription-title">
+            <MudText id="public-session-subscription-title" Typo="Typo.subtitle1" HtmlTag="h2">Session reminders</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Choose whether to receive reminders about @selected.Title.</MudText>
+
+            @if (_subscriptionLoading)
+            {
+                <div role="status" aria-live="polite" class="public-session-subscription__state">
+                    <MudProgressCircular Indeterminate="true" Size="Size.Small" aria-label="Loading reminder choices" />
+                    <MudText Typo="Typo.body2">Loading reminder choices…</MudText>
+                </div>
+            }
+            else if (_subscriptionState is null || _subscriptionState.SessionId != selected.SessionId ||
+                     _subscriptionState.Status == SessionSubscriptionStatus.Unavailable)
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+                    @(_subscriptionState?.Message ?? "Reminder choices are not available right now.")
+                    @if (LoadSubscriptionStateAsync is not null)
+                    {
+                        <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="ReloadSubscriptionAsync" StartIcon="@Icons.Material.Filled.Refresh">Try again</MudButton>
+                    }
+                </MudAlert>
+            }
+            else if (_subscriptionState.Status == SessionSubscriptionStatus.RequiresAuthentication)
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+                    Sign in to manage reminders for this session.
+                    @if (OnRequestSignIn.HasDelegate)
+                    {
+                        <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="RequestSignInAsync" StartIcon="@Icons.Material.Filled.Login">Sign in</MudButton>
+                    }
+                </MudAlert>
+            }
+            else if (_subscriptionState.Status == SessionSubscriptionStatus.Active)
+            {
+                <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" role="status">
+                    Reminders are enabled for this session.
+                    @if (!string.IsNullOrWhiteSpace(_subscriptionState.Message))
+                    {
+                        <span>@_subscriptionState.Message</span>
+                    }
+                </MudAlert>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@IsSubscriptionBusy"
+                           OnClick="UnsubscribeAsync" aria-label="Turn off reminders for this session" StartIcon="@Icons.Material.Filled.NotificationsOff">
+                    @(IsSubscriptionBusy ? "Saving…" : "Turn off reminders")
+                </MudButton>
+            }
+            else if (_subscriptionState.Options is { } options && options.IsCurrent && options.Channels.Count > 0 &&
+                     !string.IsNullOrWhiteSpace(options.ConsentReference) && !string.IsNullOrWhiteSpace(options.ConsentText))
+            {
+                <MudText Typo="Typo.body2" Class="public-session-subscription__consent">@options.ConsentText</MudText>
+                <MudSelect T="SessionReminderChannel?" Label="Reminder method" Value="@_selectedReminderChannel"
+                           ValueChanged="ReminderChannelChangedAsync" Variant="Variant.Outlined" Dense="true">
+                    @foreach (var channel in options.Channels.Distinct())
+                    {
+                        <MudSelectItem T="SessionReminderChannel?" Value="@channel">@ReminderChannelLabel(channel)</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudCheckBox T="bool" @bind-Value="_reminderConsentAccepted" Color="Color.Primary">
+                    I agree to receive reminders using the method I selected.
+                </MudCheckBox>
+                @if (!string.IsNullOrWhiteSpace(_subscriptionState.Message))
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" role="status" aria-live="polite">@_subscriptionState.Message</MudText>
+                }
+                <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@(!CanSubscribe(options) || IsSubscriptionBusy)"
+                           OnClick="SubscribeAsync" aria-label="Turn on reminders for this session" StartIcon="@Icons.Material.Filled.NotificationsActive">
+                    @(IsSubscriptionBusy ? "Saving…" : "Turn on reminders")
+                </MudButton>
+            }
+            else
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+                    @(_subscriptionState.Options is { IsCurrent: false }
+                        ? "These reminder choices have changed. Refresh before continuing."
+                        : "Reminder choices are not available right now.")
+                    @if (LoadSubscriptionStateAsync is not null)
+                    {
+                        <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="ReloadSubscriptionAsync" StartIcon="@Icons.Material.Filled.Refresh">Refresh choices</MudButton>
+                    }
+                </MudAlert>
+            }
+
+            @if (_subscriptionState?.IsError == true && !string.IsNullOrWhiteSpace(_subscriptionState.Message))
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" role="alert">@_subscriptionState.Message</MudAlert>
+            }
+        </MudPaper>
+        }
+        else
+        {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+                Reminders are not available for cancelled sessions.
+            </MudAlert>
+        }
+        </MudTabPanel>
+        }
+        @if (HasStaffEditor)
+        {
+            <MudTabPanel Text="Schedule / edit">
+                @if (CurrentEditorCapabilities is { } editorCapabilities && StaffSessionEditorContent is not null)
+                {
+                    @StaffSessionEditorContent(editorCapabilities)
+                }
+                else
+                {
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+                        The session editor is not available right now.
+                    </MudAlert>
+                }
+            </MudTabPanel>
+        }
+        </MudTabs>
+    }
+    </div>
+</MudContainer>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<PublicSessionView> Sessions { get; set; } = Array.Empty<PublicSessionView>();
+    [Parameter] public bool Loading { get; set; }
+    [Parameter] public string? ErrorMessage { get; set; }
+    [Parameter] public EventCallback OnRetry { get; set; }
+    [Parameter] public Func<Guid, Task<string?>>? LoadInvitationTextAsync { get; set; }
+    [Parameter] public Func<string, Task>? ShareTextAsync { get; set; }
+    [Parameter] public Func<Guid, Task<SessionSubscriptionPanelState?>>? LoadSubscriptionStateAsync { get; set; }
+    [Parameter] public Func<SessionSubscriptionAction, Task<SessionSubscriptionPanelState?>>? ExecuteSubscriptionActionAsync { get; set; }
+    [Parameter] public EventCallback<Guid> OnRequestSignIn { get; set; }
+    [Parameter] public Guid? InitialSessionId { get; set; }
+    [Parameter] public Func<Guid?, long?, Task<SessionManagementPresentation>>? LoadManagementCapabilitiesAsync { get; set; }
+    [Parameter] public EventCallback<Guid?> OnManageSession { get; set; }
+    [Parameter] public RenderFragment<SessionManagementPresentation>? StaffSessionEditorContent { get; set; }
+    [Parameter] public SessionManagementPresentation? StaffEditorCapabilities { get; set; }
+
+    private Guid _selectedSessionId;
+    private string _searchText = string.Empty;
+    private string? _categoryFilter;
+    private string? _languageFilter;
+    private SessionPeriodFilter _periodFilter = SessionPeriodFilter.Upcoming;
+    private DateTime? _dateFrom;
+    private DateTime? _dateTo;
+    private Guid? _subscriptionSessionId;
+    private SessionSubscriptionPanelState? _subscriptionState;
+    private SessionReminderChannel? _selectedReminderChannel;
+    private bool _reminderConsentAccepted;
+    private bool _subscriptionLoading;
+    private bool _initialSelectionApplied;
+    private long _subscriptionRequestGeneration;
+    private Guid? _subscriptionBusySessionId;
+    private long _subscriptionBusyGeneration;
+    private int _activeTabIndex;
+    private SessionManagementPresentation? _createCapabilities;
+    private SessionManagementPresentation? _selectedCapabilities;
+    private SessionManagementPresentation? _editorCapabilities;
+    private bool _editorRequested;
+    private bool _createCapabilitiesLoaded;
+    private bool _selectedCapabilitiesLoaded;
+    private Guid? _capabilitySessionId;
+    private long? _capabilityVersion;
+    private long _managementRequestGeneration;
+
+    private string WorkspaceClass => IsEditorTabActive
+        ? "public-sessions-workspace public-sessions-workspace--editor-active"
+        : "public-sessions-workspace";
+
+    private bool IsEditorTabActive => _editorRequested && HasStaffEditor &&
+        _activeTabIndex == (SelectedSession is null ? 0 : 2);
+
+    private bool HasStaffEditorBindings => LoadManagementCapabilitiesAsync is not null &&
+        OnManageSession.HasDelegate && StaffSessionEditorContent is not null;
+
+    private bool CanCreateSession => HasStaffEditorBindings && _createCapabilitiesLoaded &&
+        _createCapabilities?.Matches(null, null, null) == true && _createCapabilities!.CanCreate;
+
+    private bool CanEditSelectedSession => SelectedCapabilitiesMatchSelectedSession &&
+        _selectedCapabilities!.CanEdit;
+
+    private bool CanOpenSelectedSession => HasStaffEditorBindings && SelectedCapabilitiesMatchSelectedSession &&
+        (_selectedCapabilities!.CanEdit || _selectedCapabilities!.CanReview || _selectedCapabilities!.CanSchedule ||
+         _selectedCapabilities!.CanCancel || _selectedCapabilities!.CanComplete);
+
+    private SessionManagementPresentation? CurrentEditorCapabilities => _editorCapabilities ?? StaffEditorCapabilities;
+
+    private bool HasStaffEditor => HasStaffEditorBindings && _editorRequested &&
+        CurrentEditorCapabilities is { } editorCapabilities && CanOpenForSnapshot(editorCapabilities);
+
+    private bool SelectedCapabilitiesMatchSelectedSession => HasStaffEditorBindings && _selectedCapabilitiesLoaded &&
+        SelectedSession is { } selected && _selectedCapabilities?.Matches(selected.SessionId, selected.Version, selected.Status) == true;
+
+    private bool _managementRefreshBusy;
+
+    private string? ManagementNotice
+    {
+        get
+        {
+            if (!HasStaffEditorBindings)
+            {
+                return null;
+            }
+
+            if (SelectedSession is { } selected && _selectedCapabilitiesLoaded)
+            {
+                if (_selectedCapabilities is not { IsAvailable: true })
+                {
+                    return _selectedCapabilities?.Message ?? "Session actions are not available right now.";
+                }
+
+                if (_selectedCapabilities.Matches(selected.SessionId, selected.Version, selected.Status) is false)
+                {
+                    return "This session changed. Refresh its actions before continuing.";
+                }
+            }
+            else if (_createCapabilitiesLoaded && _createCapabilities is not { IsAvailable: true })
+            {
+                return _createCapabilities?.Message ?? "Scheduling a session is not available right now.";
+            }
+
+            return null;
+        }
+    }
+
+    private bool IsSubscriptionBusy => _subscriptionBusySessionId == _selectedSessionId;
+
+    private IReadOnlyList<string> Categories => Sessions
+        .SelectMany(session => new[] { session.Sector }.Concat(session.TopicTags))
+        .Where(value => !string.IsNullOrWhiteSpace(value))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .Order(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+
+    private IReadOnlyList<string> Languages => Sessions
+        .Select(session => session.Language)
+        .Where(value => !string.IsNullOrWhiteSpace(value))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .Order(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+
+    private IReadOnlyList<PublicSessionView> FilteredSessions
+    {
+        get
+        {
+            var now = DateTimeOffset.UtcNow;
+            var search = _searchText.Trim();
+            return Sessions
+                .Where(session => MatchesPeriod(session, now))
+                .Where(MatchesCategory)
+                .Where(session => string.IsNullOrWhiteSpace(_languageFilter) ||
+                    string.Equals(session.Language, _languageFilter, StringComparison.OrdinalIgnoreCase))
+                .Where(session => MatchesSearch(session, search))
+                .ToArray();
+        }
+    }
+
+    private PublicSessionView? SelectedSession =>
+        FilteredSessions.FirstOrDefault(session => session.SessionId == _selectedSessionId)
+        ?? FilteredSessions.FirstOrDefault();
+
+    private bool HasActiveFilters => !string.IsNullOrWhiteSpace(_searchText) ||
+        !string.IsNullOrWhiteSpace(_categoryFilter) ||
+        !string.IsNullOrWhiteSpace(_languageFilter) ||
+        _periodFilter != SessionPeriodFilter.Upcoming ||
+        _dateFrom.HasValue || _dateTo.HasValue;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (StaffEditorCapabilities is not null && StaffEditorCapabilities != _editorCapabilities)
+        {
+            _editorCapabilities = StaffEditorCapabilities;
+        }
+
+        EnsureSelectedSession();
+        await EnsureSubscriptionForSelectionAsync();
+    }
+
+    private async Task SessionSelectedAsync(Guid sessionId)
+    {
+        _selectedSessionId = sessionId;
+        await LoadSubscriptionForSelectedAsync(force: true);
+        await EnsureManagementCapabilitiesAsync();
+    }
+
+    private async Task ManageSessionAsync(Guid? sessionId)
+    {
+        if (!HasStaffEditorBindings)
+        {
+            return;
+        }
+
+        var capabilities = sessionId is null ? _createCapabilities : _selectedCapabilities;
+        var allowed = sessionId is null
+            ? CanCreateSession
+            : SelectedSession is { } selected && selected.SessionId == sessionId && CanOpenSelectedSession;
+        if (!allowed || capabilities is null || !CanOpenForSnapshot(capabilities))
+        {
+            return;
+        }
+
+        _editorCapabilities = capabilities;
+        _editorRequested = true;
+        await OnManageSession.InvokeAsync(sessionId);
+        _activeTabIndex = SelectedSession is null ? 0 : 2;
+    }
+
+    private async Task SearchChangedAsync(string? value)
+    {
+        _searchText = value ?? string.Empty;
+        EnsureSelectedSession();
+        await EnsureSubscriptionForSelectionAsync();
+    }
+
+    private async Task CategoryChangedAsync(string? value)
+    {
+        _categoryFilter = value;
+        EnsureSelectedSession();
+        await EnsureSubscriptionForSelectionAsync();
+    }
+
+    private async Task LanguageChangedAsync(string? value)
+    {
+        _languageFilter = value;
+        EnsureSelectedSession();
+        await EnsureSubscriptionForSelectionAsync();
+    }
+
+    private async Task PeriodChangedAsync(SessionPeriodFilter value)
+    {
+        _periodFilter = value;
+        EnsureSelectedSession();
+        await EnsureSubscriptionForSelectionAsync();
+    }
+
+    private async Task DateFromChangedAsync(DateTime? value)
+    {
+        _dateFrom = value?.Date;
+        EnsureSelectedSession();
+        await EnsureSubscriptionForSelectionAsync();
+    }
+
+    private async Task DateToChangedAsync(DateTime? value)
+    {
+        _dateTo = value?.Date;
+        EnsureSelectedSession();
+        await EnsureSubscriptionForSelectionAsync();
+    }
+
+    private async Task ClearFiltersAsync()
+    {
+        _searchText = string.Empty;
+        _categoryFilter = null;
+        _languageFilter = null;
+        _periodFilter = SessionPeriodFilter.Upcoming;
+        _dateFrom = null;
+        _dateTo = null;
+        EnsureSelectedSession();
+        await EnsureSubscriptionForSelectionAsync();
+    }
+
+    private bool MatchesPeriod(PublicSessionView session, DateTimeOffset now)
+    {
+        if (_periodFilter == SessionPeriodFilter.Upcoming && session.StartUtc < now)
+        {
+            return false;
+        }
+
+        if (_periodFilter == SessionPeriodFilter.Past && session.StartUtc >= now)
+        {
+            return false;
+        }
+
+        if (_periodFilter == SessionPeriodFilter.CustomDates)
+        {
+            var sessionDate = SessionLocalDate(session);
+            if (_dateFrom is { } from && sessionDate < from.Date)
+            {
+                return false;
+            }
+
+            if (_dateTo is { } to && sessionDate > to.Date)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool MatchesCategory(PublicSessionView session) =>
+        string.IsNullOrWhiteSpace(_categoryFilter) ||
+        string.Equals(session.Sector, _categoryFilter, StringComparison.OrdinalIgnoreCase) ||
+        session.TopicTags.Any(tag => string.Equals(tag, _categoryFilter, StringComparison.OrdinalIgnoreCase));
+
+    private static bool MatchesSearch(PublicSessionView session, string search)
+    {
+        if (search.Length == 0)
+        {
+            return true;
+        }
+
+        return session.Title.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+            session.Summary.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+            session.Presenter.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+            session.Language.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+            session.RegionId.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+            session.CountryCode.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+            session.TopicTags.Any(tag => tag.Contains(search, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static DateTime SessionLocalDate(PublicSessionView session)
+    {
+        try
+        {
+            var timeZone = TimeZoneInfo.FindSystemTimeZoneById(session.TimeZoneId);
+            return TimeZoneInfo.ConvertTime(session.StartUtc, timeZone).Date;
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            return session.StartUtc.UtcDateTime.Date;
+        }
+        catch (InvalidTimeZoneException)
+        {
+            return session.StartUtc.UtcDateTime.Date;
+        }
+        catch (ArgumentException)
+        {
+            return session.StartUtc.UtcDateTime.Date;
+        }
+    }
+
+    private static string FormatDetailsWhen(PublicSessionView session)
+    {
+        try
+        {
+            var timeZone = TimeZoneInfo.FindSystemTimeZoneById(session.TimeZoneId);
+            var local = TimeZoneInfo.ConvertTime(session.StartUtc, timeZone);
+            return $"{local:dddd, d MMM yyyy · HH:mm} ({session.TimeZoneId})";
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            return $"{session.StartUtc:dddd, d MMM yyyy · HH:mm} UTC";
+        }
+        catch (InvalidTimeZoneException)
+        {
+            return $"{session.StartUtc:dddd, d MMM yyyy · HH:mm} UTC";
+        }
+        catch (ArgumentException)
+        {
+            return $"{session.StartUtc:dddd, d MMM yyyy · HH:mm} UTC";
+        }
+    }
+
+    private void EnsureSelectedSession()
+    {
+        var visible = FilteredSessions;
+        if (!_initialSelectionApplied && InitialSessionId is { } initialSessionId)
+        {
+            var requested = Sessions.FirstOrDefault(session => session.SessionId == initialSessionId);
+            if (requested is not null)
+            {
+                if (!visible.Any(session => session.SessionId == initialSessionId))
+                {
+                    _periodFilter = SessionPeriodFilter.All;
+                    visible = FilteredSessions;
+                }
+
+                _selectedSessionId = requested.SessionId;
+                _initialSelectionApplied = true;
+                return;
+            }
+
+            if (Sessions.Count > 0)
+            {
+                _initialSelectionApplied = true;
+            }
+        }
+
+        if (visible.Any(session => session.SessionId == _selectedSessionId))
+        {
+            return;
+        }
+
+        _selectedSessionId = visible.FirstOrDefault()?.SessionId ?? Guid.Empty;
+    }
+
+    private async Task EnsureSubscriptionForSelectionAsync()
+    {
+        if (_subscriptionSessionId != _selectedSessionId)
+        {
+            await LoadSubscriptionForSelectedAsync(force: true);
+        }
+
+        await EnsureManagementCapabilitiesAsync();
+    }
+
+    private async Task EnsureManagementCapabilitiesAsync(bool force = false)
+    {
+        if (LoadManagementCapabilitiesAsync is null)
+        {
+            _createCapabilities = null;
+            _selectedCapabilities = null;
+            _editorCapabilities = null;
+            _createCapabilitiesLoaded = false;
+            _selectedCapabilitiesLoaded = false;
+            _capabilitySessionId = null;
+            _capabilityVersion = null;
+            return;
+        }
+
+        if (force || !_createCapabilitiesLoaded)
+        {
+            _createCapabilities = null;
+            _createCapabilitiesLoaded = false;
+            _createCapabilities = await LoadManagementCapabilitiesSafelyAsync(null, null);
+            _createCapabilitiesLoaded = true;
+        }
+
+        var selected = SelectedSession;
+        if (selected is null)
+        {
+            _managementRequestGeneration++;
+            _selectedCapabilities = null;
+            _selectedCapabilitiesLoaded = false;
+            _capabilitySessionId = null;
+            _capabilityVersion = null;
+            return;
+        }
+
+        if (!force && _selectedCapabilitiesLoaded &&
+            _capabilitySessionId == selected.SessionId && _capabilityVersion == selected.Version)
+        {
+            return;
+        }
+
+        var generation = ++_managementRequestGeneration;
+        var requestedSessionId = selected.SessionId;
+        var requestedVersion = selected.Version;
+        _capabilitySessionId = requestedSessionId;
+        _capabilityVersion = requestedVersion;
+        _selectedCapabilitiesLoaded = false;
+        _selectedCapabilities = null;
+        var capabilities = await LoadManagementCapabilitiesSafelyAsync(requestedSessionId, requestedVersion);
+        if (generation != _managementRequestGeneration || SelectedSession is not { } current ||
+            current.SessionId != requestedSessionId || current.Version != requestedVersion)
+        {
+            return;
+        }
+
+        _selectedCapabilities = capabilities;
+        _selectedCapabilitiesLoaded = true;
+        if (_editorCapabilities?.SessionId == requestedSessionId)
+        {
+            _editorCapabilities = capabilities;
+        }
+    }
+
+    private async Task<SessionManagementPresentation> LoadManagementCapabilitiesSafelyAsync(
+        Guid? sessionId,
+        long? expectedVersion)
+    {
+        try
+        {
+            return await LoadManagementCapabilitiesAsync!(sessionId, expectedVersion);
+        }
+        catch (Exception)
+        {
+            return SessionManagementPresentation.Unavailable("Session actions are not available right now.");
+        }
+    }
+
+    private async Task RefreshManagementCapabilitiesAsync()
+    {
+        if (_managementRefreshBusy)
+        {
+            return;
+        }
+
+        _managementRefreshBusy = true;
+        try
+        {
+            await EnsureManagementCapabilitiesAsync(force: true);
+        }
+        finally
+        {
+            _managementRefreshBusy = false;
+        }
+    }
+
+    private static bool CanOpenForSnapshot(SessionManagementPresentation capabilities) =>
+        capabilities.Matches(capabilities.SessionId, capabilities.Version, capabilities.Status) &&
+        (capabilities.SessionId is null
+            ? capabilities.CanCreate
+            : capabilities.CanEdit || capabilities.CanReview || capabilities.CanSchedule ||
+              capabilities.CanCancel || capabilities.CanComplete);
+
+    private async Task LoadSubscriptionForSelectedAsync(bool force)
+    {
+        var sessionId = _selectedSessionId;
+        if (!force && _subscriptionSessionId == sessionId)
+        {
+            return;
+        }
+
+        _subscriptionSessionId = sessionId;
+        _subscriptionState = null;
+        _selectedReminderChannel = null;
+        _reminderConsentAccepted = false;
+        var requestGeneration = ++_subscriptionRequestGeneration;
+        if (sessionId == Guid.Empty || LoadSubscriptionStateAsync is null)
+        {
+            _subscriptionLoading = false;
+            return;
+        }
+
+        _subscriptionLoading = true;
+        try
+        {
+            var state = await LoadSubscriptionStateAsync(sessionId);
+            if (!IsCurrentSubscriptionRequest(requestGeneration, sessionId))
+            {
+                return;
+            }
+
+            _subscriptionState = state;
+            if (_subscriptionState?.Options is { IsCurrent: true, Channels.Count: > 0 } options)
+            {
+                _selectedReminderChannel = options.Channels.Distinct().FirstOrDefault();
+            }
+        }
+        catch (Exception)
+        {
+            if (!IsCurrentSubscriptionRequest(requestGeneration, sessionId))
+            {
+                return;
+            }
+
+            _subscriptionState = new SessionSubscriptionPanelState(
+                sessionId,
+                SessionSubscriptionStatus.Unavailable,
+                0,
+                null,
+                "Reminder choices are temporarily unavailable. Try again later.",
+                IsError: true);
+        }
+        finally
+        {
+            if (IsCurrentSubscriptionRequest(requestGeneration, sessionId))
+            {
+                _subscriptionLoading = false;
+            }
+        }
+    }
+
+    private Task ReloadSubscriptionAsync() => IsSubscriptionBusy
+        ? Task.CompletedTask
+        : LoadSubscriptionForSelectedAsync(force: true);
+
+    private bool IsCurrentSubscriptionRequest(long generation, Guid sessionId) =>
+        generation == _subscriptionRequestGeneration &&
+        sessionId == _selectedSessionId &&
+        _subscriptionSessionId == sessionId;
+
+    private bool CanSubscribe(SessionSubscriptionOptions options) =>
+        options.SessionId == _selectedSessionId &&
+        options.IsCurrent &&
+        _selectedReminderChannel is { } channel && options.Channels.Contains(channel) &&
+        _reminderConsentAccepted &&
+        ExecuteSubscriptionActionAsync is not null;
+
+    private Task ReminderChannelChangedAsync(SessionReminderChannel? channel)
+    {
+        _selectedReminderChannel = channel;
+        _reminderConsentAccepted = false;
+        return Task.CompletedTask;
+    }
+
+    private async Task SubscribeAsync()
+    {
+        if (_subscriptionState is not { Options: { } options } currentState ||
+            !CanSubscribe(options) || ExecuteSubscriptionActionAsync is null || IsSubscriptionBusy)
+        {
+            return;
+        }
+
+        var sessionId = _selectedSessionId;
+        var actionGeneration = ++_subscriptionRequestGeneration;
+        _subscriptionBusySessionId = sessionId;
+        _subscriptionBusyGeneration = actionGeneration;
+        try
+        {
+            var state = await ExecuteSubscriptionActionAsync(new SessionSubscriptionAction(
+                sessionId,
+                SessionSubscriptionActionKind.Subscribe,
+                options.Version,
+                options.ConsentReference,
+                _selectedReminderChannel));
+            if (!IsCurrentSubscriptionRequest(actionGeneration, sessionId))
+            {
+                return;
+            }
+
+            _subscriptionState = state;
+            if (_subscriptionState is null)
+            {
+                await LoadSubscriptionForSelectedAsync(force: true);
+            }
+        }
+        catch (Exception)
+        {
+            if (!IsCurrentSubscriptionRequest(actionGeneration, sessionId))
+            {
+                return;
+            }
+
+            _subscriptionState = currentState with
+            {
+                IsError = true,
+                Message = "The reminder choice could not be updated. Try again."
+            };
+        }
+        finally
+        {
+            if (_subscriptionBusyGeneration == actionGeneration)
+            {
+                _subscriptionBusySessionId = null;
+                _subscriptionBusyGeneration = 0;
+            }
+        }
+    }
+
+    private async Task UnsubscribeAsync()
+    {
+        if (_subscriptionState is not { } currentState || ExecuteSubscriptionActionAsync is null || IsSubscriptionBusy)
+        {
+            return;
+        }
+
+        var sessionId = _selectedSessionId;
+        var actionGeneration = ++_subscriptionRequestGeneration;
+        _subscriptionBusySessionId = sessionId;
+        _subscriptionBusyGeneration = actionGeneration;
+        try
+        {
+            var state = await ExecuteSubscriptionActionAsync(new SessionSubscriptionAction(
+                sessionId,
+                SessionSubscriptionActionKind.Unsubscribe,
+                currentState.Version,
+                null,
+                null));
+            if (IsCurrentSubscriptionRequest(actionGeneration, sessionId))
+            {
+                _subscriptionState = state;
+            }
+        }
+        catch (Exception)
+        {
+            if (IsCurrentSubscriptionRequest(actionGeneration, sessionId))
+            {
+                _subscriptionState = currentState with
+                {
+                    IsError = true,
+                    Message = "The reminder choice could not be updated. Try again."
+                };
+            }
+        }
+        finally
+        {
+            if (_subscriptionBusyGeneration == actionGeneration)
+            {
+                _subscriptionBusySessionId = null;
+                _subscriptionBusyGeneration = 0;
+            }
+        }
+    }
+
+    private async Task RequestSignInAsync()
+    {
+        var sessionId = _selectedSessionId;
+        var currentUri = Navigation.Uri;
+
+        try
+        {
+            await OnRequestSignIn.InvokeAsync(sessionId);
+        }
+        finally
+        {
+            // Gateway sign-in navigates away and restores the selected session
+            // from the return URL. In-place sign-in (such as Mobile) must
+            // reload the authoritative panel state before the user continues.
+            if (sessionId == _selectedSessionId
+                && string.Equals(currentUri, Navigation.Uri, StringComparison.Ordinal))
+            {
+                await LoadSubscriptionForSelectedAsync(force: true);
+            }
+        }
+    }
+
+    private static string ReminderChannelLabel(SessionReminderChannel channel) => channel switch
+    {
+        SessionReminderChannel.Email => "Email",
+        SessionReminderChannel.MobilePush => "Mobile notification",
+        _ => "Other"
+    };
+
+    public enum SessionSubscriptionStatus
+    {
+        Unavailable,
+        RequiresAuthentication,
+        Unsubscribed,
+        Active
+    }
+
+    public enum SessionReminderChannel
+    {
+        Email,
+        MobilePush
+    }
+
+    public enum SessionSubscriptionActionKind
+    {
+        Subscribe,
+        Unsubscribe
+    }
+
+    public sealed record SessionSubscriptionOptions(
+        Guid SessionId,
+        string ConsentReference,
+        long Version,
+        string ConsentText,
+        IReadOnlyList<SessionReminderChannel> Channels,
+        bool IsCurrent);
+
+    public sealed record SessionSubscriptionPanelState(
+        Guid SessionId,
+        SessionSubscriptionStatus Status,
+        long Version,
+        SessionSubscriptionOptions? Options,
+        string? Message,
+        bool IsError = false);
+
+    public sealed record SessionSubscriptionAction(
+        Guid SessionId,
+        SessionSubscriptionActionKind Kind,
+        long ExpectedVersion,
+        string? ConsentReference,
+        SessionReminderChannel? Channel);
+
+    private enum SessionPeriodFilter
+    {
+        Upcoming,
+        Past,
+        CustomDates,
+        All
+    }
+}

@@ -25,7 +25,8 @@ public sealed class CaseTimelineGatewayClient(
     public async Task<CaseTimelineResult> GetAsync(
         Guid caseId,
         int? limit,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        long? beforeAggregateVersion = null)
     {
         var actor = await GetActorAsync().ConfigureAwait(false);
         if (actor is null || caseId == Guid.Empty)
@@ -41,7 +42,7 @@ public sealed class CaseTimelineGatewayClient(
 
         try
         {
-            return await timeline.GetAsync(actor, caseId, limit, cancellationToken).ConfigureAwait(false);
+            return await timeline.GetAsync(actor, caseId, limit, cancellationToken, beforeAggregateVersion).ConfigureAwait(false);
         }
         catch (Exception)
         {

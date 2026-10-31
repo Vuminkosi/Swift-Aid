@@ -6,7 +6,7 @@ namespace SwiftAid.UI.Ellai;
 /// can never leave the visible viewport.</summary>
 public sealed record EllaiComposerPosition(double X, double Y)
 {
-    public static EllaiComposerPosition Default => new(24, 24);
+    public static EllaiComposerPosition Default => new(0, 0);
 
     public const double MoveStep = 24;
 

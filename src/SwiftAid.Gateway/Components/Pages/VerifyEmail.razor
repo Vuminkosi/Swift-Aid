@@ -5,7 +5,7 @@
 
 <PageTitle>Verify account | SwiftAid</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.Small">
+<AccountEntrySurface>
     <MudPaper Class="pa-4" Elevation="0">
         <SwiftAidPageHeading Eyebrow="Your SwiftAid account"
                              Title="Verify your account"
@@ -44,7 +44,7 @@
         </MudButton>
         <p role="status" aria-live="polite">@_liveMessage</p>
     </MudPaper>
-</MudContainer>
+</AccountEntrySurface>
 
 @code {
     private IJSObjectReference? _module;

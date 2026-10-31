@@ -50,20 +50,70 @@ public sealed class EllaiSurfaceLogicTests
     public async Task EmptyComposerShowsLiveVoiceControlInsteadOfSend()
     {
         var markup = await RenderComposerAsync(inputText: string.Empty, canUseMicrophone: true,
-            onStartVoice: EventCallback.Factory.Create(new object(), () => Task.CompletedTask));
+            onStartRealtimeVoice: EventCallback.Factory.Create(new object(), () => Task.CompletedTask),
+            isLiveSpeaking: false);
 
-        Assert.Contains("aria-label=\"Start live voice\"", markup, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Start realtime voice dialog\"", markup, StringComparison.Ordinal);
         Assert.DoesNotContain("aria-label=\"Send to Ellai\"", markup, StringComparison.Ordinal);
     }
 
     [Fact]
     public async Task EmptyComposerKeepsUnavailableVoiceControlVisibleAndDisabled()
     {
-        var markup = await RenderComposerAsync(inputText: string.Empty, canUseMicrophone: false);
+        var markup = await RenderComposerAsync(inputText: string.Empty, canUseMicrophone: false,
+            isLiveSpeaking: false);
 
-        Assert.Contains("aria-label=\"Live voice unavailable\"", markup, StringComparison.Ordinal);
-        Assert.Matches("""(?s)<button(?=[^>]*aria-label="Live voice unavailable")(?=[^>]*disabled)[^>]*>""", markup);
+        Assert.Contains("aria-label=\"Realtime voice dialog unavailable\"", markup, StringComparison.Ordinal);
+        Assert.Matches("""(?s)<button(?=[^>]*aria-label="Realtime voice dialog unavailable")(?=[^>]*disabled)[^>]*>""", markup);
         Assert.DoesNotContain("aria-label=\"Send to Ellai\"", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ComposerGroupsVoiceControlsSettingsEndSessionAndClose()
+    {
+        var callback = EventCallback.Factory.Create(new object(), () => Task.CompletedTask);
+        var markup = await RenderComposerAsync(
+            inputText: string.Empty,
+            canUseMicrophone: true,
+            onStartVoice: callback,
+            onStartRealtimeVoice: callback,
+            onOpenSettings: callback,
+            isLiveSpeaking: false);
+
+        var fieldActionsStart = markup.IndexOf("ellai-composer__field-actions", StringComparison.Ordinal);
+        var microphoneIndex = markup.IndexOf("Record audio for transcription", fieldActionsStart, StringComparison.Ordinal);
+        var liveVoiceIndex = markup.IndexOf("Start realtime voice dialog", fieldActionsStart, StringComparison.Ordinal);
+        Assert.True(microphoneIndex > fieldActionsStart);
+        Assert.True(liveVoiceIndex > microphoneIndex);
+
+        var headerActionsStart = markup.IndexOf("ellai-composer__header-actions", StringComparison.Ordinal);
+        var headerActionsEnd = markup.IndexOf("ellai-composer__input-row", headerActionsStart, StringComparison.Ordinal);
+        var headerActions = markup[headerActionsStart..headerActionsEnd];
+        Assert.Contains("Ellai About and settings", headerActions, StringComparison.Ordinal);
+        Assert.Contains("End Ellai session", headerActions, StringComparison.Ordinal);
+        Assert.Contains("Close Ellai composer", headerActions, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ClosingComposerHidesItButKeepsActiveSessionAndDoesNotCancelIt()
+    {
+        var client = new FakeReviewClient();
+        var session = CreateSession(version: 1);
+        using var host = await CreateHost(client, session, string.Empty);
+        SetField(host, "ShowComposer", true);
+
+        await InvokeAsync(host, "CloseComposerAsync");
+
+        Assert.False(GetField<bool>(host, "ShowComposer"));
+        Assert.Same(session, GetField<EllaiSessionView?>(host, "_sessionView"));
+        Assert.Empty(client.Cancellations);
+        Assert.Contains("still active", GetField<string?>(host, "StatusText"), StringComparison.Ordinal);
+
+        await InvokeAsync(host, "SelectModeAsync", EllaiMode.Ask);
+
+        Assert.True(GetField<bool>(host, "ShowComposer"));
+        Assert.Same(session, GetField<EllaiSessionView?>(host, "_sessionView"));
+        Assert.Equal(0, client.SessionStartCalls);
     }
 
     [Fact]
@@ -506,7 +556,10 @@ public sealed class EllaiSurfaceLogicTests
     private static async Task<string> RenderComposerAsync(
         string? inputText = "test question",
         bool canUseMicrophone = true,
-        EventCallback onStartVoice = default)
+        EventCallback onStartVoice = default,
+        EventCallback onStartRealtimeVoice = default,
+        EventCallback onOpenSettings = default,
+        bool isLiveSpeaking = true)
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -527,8 +580,10 @@ public sealed class EllaiSurfaceLogicTests
                     [nameof(EllaiCompactComposer.StatusText)] = "Messaging is unavailable.",
                     [nameof(EllaiCompactComposer.CanSend)] = false,
                     [nameof(EllaiCompactComposer.CanUseMicrophone)] = canUseMicrophone,
-                    [nameof(EllaiCompactComposer.IsLiveSpeaking)] = true,
+                    [nameof(EllaiCompactComposer.IsLiveSpeaking)] = isLiveSpeaking,
                     [nameof(EllaiCompactComposer.OnStartVoice)] = onStartVoice,
+                    [nameof(EllaiCompactComposer.OnStartRealtimeVoice)] = onStartRealtimeVoice,
+                    [nameof(EllaiCompactComposer.OnOpenSettings)] = onOpenSettings,
                 }));
 
             return component.ToHtmlString();
@@ -686,6 +741,30 @@ public sealed class EllaiSurfaceLogicTests
 
     private sealed class NoOpJsRuntime : IJSRuntime
     {
+        private static readonly IJSObjectReference Module = new NoOpJsModule();
+
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
+            InvokeCore<TValue>(identifier);
+
+        public ValueTask<TValue> InvokeAsync<TValue>(
+            string identifier,
+            CancellationToken cancellationToken,
+            object?[]? args) =>
+            InvokeCore<TValue>(identifier);
+
+        private static ValueTask<TValue> InvokeCore<TValue>(string identifier)
+        {
+            if (identifier == "import" && typeof(TValue) == typeof(IJSObjectReference))
+            {
+                return ValueTask.FromResult((TValue)Module);
+            }
+
+            return ValueTask.FromResult(default(TValue)!);
+        }
+    }
+
+    private sealed class NoOpJsModule : IJSObjectReference
+    {
         public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
             ValueTask.FromResult(default(TValue)!);
 
@@ -694,6 +773,8 @@ public sealed class EllaiSurfaceLogicTests
             CancellationToken cancellationToken,
             object?[]? args) =>
             ValueTask.FromResult(default(TValue)!);
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     private sealed class TestNavigationManager : NavigationManager
@@ -761,6 +842,8 @@ public sealed class EllaiSurfaceLogicTests
 
         public List<(string SessionId, long ExpectedSessionVersion)> Cancellations { get; } = [];
 
+        public int SessionStartCalls { get; private set; }
+
         public Queue<EllaiSessionCancelResult> CancelResults { get; init; } = new();
 
         public Func<EllaiMode, CancellationToken, Task<EllaiSessionStartResult>>? StartHandler { get; init; }
@@ -783,9 +866,12 @@ public sealed class EllaiSurfaceLogicTests
 
         public Exception? RejectionException { get; init; }
 
-        public Task<EllaiSessionStartResult> StartSessionAsync(EllaiMode mode, CancellationToken cancellationToken) =>
-            StartHandler?.Invoke(mode, cancellationToken)
+        public Task<EllaiSessionStartResult> StartSessionAsync(EllaiMode mode, CancellationToken cancellationToken)
+        {
+            SessionStartCalls++;
+            return StartHandler?.Invoke(mode, cancellationToken)
                 ?? Task.FromResult(new EllaiSessionStartResult(EllaiClientOperationStatus.OutcomeUnknown));
+        }
 
         public Task<EllaiUtteranceSubmitResult> SubmitUtteranceAsync(
             SubmitUtteranceRequest request,

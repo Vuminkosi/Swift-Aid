@@ -1,5 +1,7 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
+using SwiftAid.Application.Ellai;
 using SwiftAid.Intelligence.Meta;
 
 namespace SwiftAid.Application.Tests.Ellai;
@@ -12,6 +14,7 @@ public sealed class EllaiReasoningBackendTests
     {
         private readonly string _body;
         private readonly HttpStatusCode _status;
+        public string? RequestBody { get; private set; }
 
         public StubHandler(string body, HttpStatusCode status = HttpStatusCode.OK)
         {
@@ -19,11 +22,14 @@ public sealed class EllaiReasoningBackendTests
             _status = status;
         }
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
-            Task.FromResult(new HttpResponseMessage(_status)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            RequestBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(ct);
+            return new HttpResponseMessage(_status)
             {
                 Content = new StringContent(_body, Encoding.UTF8, "application/json"),
-            });
+            };
+        }
     }
 
     private static EllaiOptions Bind(IReadOnlyDictionary<string, string?> values) =>
@@ -87,12 +93,76 @@ public sealed class EllaiReasoningBackendTests
         using var http = new HttpClient(new StubHandler(json));
         var provider = new OllamaEllaiReasoningProvider(http, options);
 
-        var result = await provider.CompleteAsync(new[] { ("user", "Reply with the single word: ok") }, 64, CancellationToken.None);
+        var result = await provider.CompleteAsync([new EllaiChatMessage("user", "Reply with the single word: ok")], 64, CancellationToken.None);
 
         Assert.Equal("ollama", provider.Backend);
         Assert.Equal("llama3.2:3b", result.Model);
         Assert.Contains("ok", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(12, result.Usage.TotalTokens);
+    }
+
+    [Fact]
+    public async Task MetaProviderSerializesCorrelatedToolCallsAndResults()
+    {
+        const string response = """{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}""";
+        var options = Bind(new Dictionary<string, string?>
+        {
+            ["Ellai__Enabled"] = "true",
+            ["Ellai__ApiKey"] = "test-key",
+            ["Ellai__ApiUrl"] = "https://api.meta.ai/v1",
+            ["Ellai__ReasoningModel"] = "muse-spark-1.3-contributor",
+        });
+        var handler = new StubHandler(response);
+        using var http = new HttpClient(handler);
+        var adapter = new EllaiReasoningAdapter(http, options);
+        EllaiChatMessage[] messages =
+        [
+            new("system", "policy"),
+            new("assistant", "tool request", [new EllaiToolRequest(
+                EllaiToolNames.Now, new Dictionary<string, string>(), "call-1")]),
+            new("tool", "tool result", ToolCallId: "call-1"),
+        ];
+
+        await adapter.CompleteAsync(messages, 64, CancellationToken.None);
+
+        using var payload = JsonDocument.Parse(handler.RequestBody!);
+        var wireMessages = payload.RootElement.GetProperty("messages");
+        var assistant = wireMessages[1];
+        Assert.Equal("assistant", assistant.GetProperty("role").GetString());
+        Assert.Equal(JsonValueKind.Null, assistant.GetProperty("content").ValueKind);
+        var call = Assert.Single(assistant.GetProperty("tool_calls").EnumerateArray().ToArray());
+        Assert.Equal("call-1", call.GetProperty("id").GetString());
+        Assert.Equal("function", call.GetProperty("type").GetString());
+        Assert.Equal(EllaiToolNames.Now, call.GetProperty("function").GetProperty("name").GetString());
+        Assert.Equal("{}", call.GetProperty("function").GetProperty("arguments").GetString());
+        Assert.Equal("tool", wireMessages[2].GetProperty("role").GetString());
+        Assert.Equal("call-1", wireMessages[2].GetProperty("tool_call_id").GetString());
+        Assert.Equal("tool result", wireMessages[2].GetProperty("content").GetString());
+    }
+
+    [Fact]
+    public async Task MetaRefusalReportsOnlySafeProviderErrorIdentifiers()
+    {
+        const string body = """{"error":{"message":"private prompt and secret value","type":"invalid_request_error","param":"messages","code":"bad_messages"}}""";
+        var options = Bind(new Dictionary<string, string?>
+        {
+            ["Ellai__Enabled"] = "true",
+            ["Ellai__ApiKey"] = "test-key",
+            ["Ellai__ApiUrl"] = "https://api.meta.ai/v1",
+            ["Ellai__ReasoningModel"] = "muse-spark-1.3-contributor",
+        });
+        using var http = new HttpClient(new StubHandler(body, HttpStatusCode.BadRequest));
+        var adapter = new EllaiReasoningAdapter(http, options);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            adapter.CompleteAsync([new EllaiChatMessage("user", "synthetic request")], 64, CancellationToken.None));
+
+        Assert.Contains("HTTP 400", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("code=bad_messages", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("type=invalid_request_error", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("param=messages", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("private prompt", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret value", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -103,7 +173,7 @@ public sealed class EllaiReasoningBackendTests
         var provider = new OllamaEllaiReasoningProvider(http, options);
 
         await Assert.ThrowsAsync<MetaConfigurationException>(() =>
-            provider.CompleteAsync(new[] { ("user", "hi") }, 64, CancellationToken.None));
+            provider.CompleteAsync([new EllaiChatMessage("user", "hi")], 64, CancellationToken.None));
     }
 
     [Fact]
@@ -118,7 +188,7 @@ public sealed class EllaiReasoningBackendTests
         var provider = new ServerlessEllaiReasoningProvider(http, options);
 
         await Assert.ThrowsAsync<MetaConfigurationException>(() =>
-            provider.CompleteAsync(new[] { ("user", "hi") }, 64, CancellationToken.None));
+            provider.CompleteAsync([new EllaiChatMessage("user", "hi")], 64, CancellationToken.None));
     }
 
     [Fact]

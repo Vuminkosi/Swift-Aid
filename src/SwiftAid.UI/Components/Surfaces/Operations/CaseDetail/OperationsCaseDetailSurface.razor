@@ -3,6 +3,8 @@
 @using SwiftAid.UI.Components.Surfaces.Operations
 @using SwiftAid.UI.Components.Surfaces.Operations.WorkManagement
 @using Microsoft.AspNetCore.Components.Forms
+@inject NavigationManager Navigation
+@implements IDisposable
 
 <section class="case-detail" aria-labelledby="case-detail-title">
     <header class="case-detail__header">
@@ -26,7 +28,7 @@
         </nav>
     </header>
 
-    <MudTabs @ref="_tabs" Rounded="false" ApplyEffectsToContainer="false" Class="case-detail__tabs">
+    <MudTabs @ref="_tabs" @bind-ActivePanelIndex="_activePanelIndex" @bind-ActivePanelIndex:after="SyncActiveTabToUriAsync" Rounded="false" ApplyEffectsToContainer="false" Class="case-detail__tabs">
         <MudTabPanel Text="Overview" Icon="@Icons.Material.Outlined.FolderOpen">
             @if (OverviewData is { State: CaseDetailPanelState.Populated, Summary: { } overview })
             {
@@ -253,6 +255,7 @@
     [Parameter] public EventCallback OnWorkRetry { get; set; }
 
     private MudTabs? _tabs;
+    private int _activePanelIndex;
     private MudButton? _correctionTrigger;
     private MudTextField<string>? _correctionNarrativeField;
     private ElementReference _correctionReviewFocusTarget;
@@ -268,6 +271,14 @@
     private IReadOnlyCollection<string> _selectedEvidence = Array.Empty<string>();
     private IReadOnlyCollection<string> _observationEvidence = Array.Empty<string>();
     private Guid _boundCaseId;
+
+    private static readonly string[] TabKeys = ["overview", "history", "follow-ups", "assistance", "discussion", "attachments", "observations"];
+
+    protected override void OnInitialized()
+    {
+        _activePanelIndex = ReadActivePanelIndex();
+        Navigation.LocationChanged += OnLocationChanged;
+    }
 
     private IReadOnlyList<OperationsWorkManagementSurface.OperationsWorkItem> FollowUpItems => WorkItems.Where(item => item.Kind == OperationsWorkManagementSurface.OperationsWorkKind.FollowUp).ToArray();
     private IReadOnlyList<OperationsWorkManagementSurface.OperationsWorkItem> AssistanceItems => WorkItems.Where(item => item.Kind == OperationsWorkManagementSurface.OperationsWorkKind.Assistance).ToArray();
@@ -287,6 +298,66 @@
             _correctionAccessChanged = false;
         }
         _caseVersion = Math.Max(_caseVersion, Math.Max(DiscussionData?.AggregateVersion ?? 0, EvidenceData?.AggregateVersion ?? 0));
+    }
+
+    private Task SyncActiveTabToUriAsync()
+    {
+        var tab = TabKeys.ElementAtOrDefault(_activePanelIndex);
+        if (tab is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        var uri = Navigation.GetUriWithQueryParameter("tab", tab);
+        if (!string.Equals(uri, Navigation.Uri, StringComparison.Ordinal))
+        {
+            Navigation.NavigateTo(uri);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args)
+    {
+        var panelIndex = ReadActivePanelIndex(args.Location);
+        if (panelIndex == _activePanelIndex)
+        {
+            return;
+        }
+
+        _ = InvokeAsync(async () =>
+        {
+            _activePanelIndex = panelIndex;
+            if (_tabs is not null)
+            {
+                await _tabs.ActivatePanelAsync(panelIndex, ignoreDisabledState: false);
+            }
+
+            StateHasChanged();
+        });
+    }
+
+    private int ReadActivePanelIndex(string? uri = null)
+    {
+        var absoluteUri = Navigation.ToAbsoluteUri(uri ?? Navigation.Uri);
+        foreach (var pair in absoluteUri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separator = pair.IndexOf('=');
+            var key = Uri.UnescapeDataString((separator < 0 ? pair : pair[..separator]).Replace('+', ' '));
+            if (!string.Equals(key, "tab", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var requestedTab = separator < 0 ? string.Empty : Uri.UnescapeDataString(pair[(separator + 1)..].Replace('+', ' '));
+            var index = Array.FindIndex(TabKeys, tab => string.Equals(tab, requestedTab, StringComparison.OrdinalIgnoreCase));
+            if (index >= 0)
+            {
+                return index;
+            }
+        }
+
+        return 0;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -600,4 +671,6 @@
         CaseDetailOperationStatus.Unavailable => $"This {item} action isn't available here.",
         _ => $"This {item} couldn't be completed. Check the details and connection, then try again."
     };
+
+    public void Dispose() => Navigation.LocationChanged -= OnLocationChanged;
 }

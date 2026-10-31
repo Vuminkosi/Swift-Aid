@@ -10,7 +10,7 @@
     else if (_signedIn || _signOutPending)
     {
         <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="SignOutAsync"
-                   Disabled="_working" aria-label="Sign out of SwiftAid">
+                   Disabled="_working" aria-label="Sign out of SwiftAid" StartIcon="@Icons.Material.Filled.Logout">
             @if (_working)
             {
                 <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="me-2" aria-label="Signing out" />
@@ -20,8 +20,8 @@
     }
     else
     {
-        <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="SignInAsync"
-                   Disabled="_working" aria-label="Sign in to SwiftAid">
+        <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="SignInAsync"
+                   Disabled="_working" aria-label="Sign in to SwiftAid" StartIcon="@Icons.Material.Filled.Login">
             @if (_working)
             {
                 <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="me-2" aria-label="Opening sign-in" />

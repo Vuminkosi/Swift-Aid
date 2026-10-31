@@ -45,7 +45,7 @@ def test_synthesis_returns_pinned_pcm_contract(monkeypatch):
         )
 
     assert response.status_code == 200
-    assert response.headers["content-type"].startswith("audio/L16")
+    assert response.headers["content-type"].startswith("application/vnd.swiftaid.pcm")
     assert response.headers["x-swiftaid-sample-rate"] == "16000"
     assert response.headers["x-swiftaid-channels"] == "1"
     assert response.headers["x-swiftaid-sample-format"] == "s16le"

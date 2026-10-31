@@ -1,0 +1,31 @@
+/* Floating composer: a phone-size chat panel pinned above the launcher
+   avatar. The bubble tail (see EllaiCompactComposer) points down at the
+   MudFabMenu activator. The attached branch stays inline in the guidance
+   flow and is intentionally not positioned here. */
+.ellai-host__floating {
+    position: fixed;
+    z-index: 14;
+    inset-block-end: calc(20vh + 4rem);
+    inset-inline-end: max(1rem, env(safe-area-inset-right));
+    inline-size: min(23.5rem, calc(100vw - 2rem));
+    max-block-size: min(38rem, calc(100dvh - 20vh - 6rem));
+    display: flex;
+    flex-direction: column;
+}
+
+.ellai-host__floating ::deep .ellai-composer {
+    position: fixed;
+    inset-block-end: calc(20vh + 4rem);
+    inset-inline-end: max(1rem, env(safe-area-inset-right));
+    inline-size: min(23.5rem, calc(100vw - 2rem));
+    max-block-size: inherit;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.ellai-host__floating ::deep .ellai-status {
+    flex: 1 1 auto;
+    min-block-size: 0;
+    overflow-y: auto;
+}

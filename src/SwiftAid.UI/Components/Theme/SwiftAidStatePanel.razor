@@ -1,8 +1,10 @@
 @using SwiftAid.UI.Components.Theme
 
+<div class="swiftaid-state-panel__announcer" aria-live="polite" aria-atomic="true">@_announcementText</div>
+
 @if (State != SwiftAidViewState.Populated)
 {
-    <MudPaper Class="@PanelClass" Elevation="0" role="@(State == SwiftAidViewState.Loading ? "status" : "region")" aria-labelledby="@HeadingId" aria-live="@(State == SwiftAidViewState.Loading ? "polite" : null)">
+    <MudPaper Class="@PanelClass" Elevation="0" role="@(State == SwiftAidViewState.Loading ? "status" : "region")" aria-labelledby="@HeadingId" aria-live="@(State is SwiftAidViewState.Loading or SwiftAidViewState.Error or SwiftAidViewState.Offline or SwiftAidViewState.Denied ? "polite" : null)">
         <div class="swiftaid-status-panel__content">
             @if (State == SwiftAidViewState.Loading)
             {
@@ -26,7 +28,7 @@
                         @Actions
                         @if (OnRetry.HasDelegate)
                         {
-                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="OnRetry" aria-label="Retry loading this section">
+                            <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="OnRetry" aria-label="Try loading this section again" StartIcon="@Icons.Material.Filled.Refresh">
                                 Try again
                             </MudButton>
                         }
@@ -42,6 +44,8 @@ else
 }
 
 @code {
+    private string _announcementText = string.Empty;
+
     [Parameter]
     public SwiftAidViewState State { get; set; }
 
@@ -72,6 +76,18 @@ else
 
     private string HeadingId { get; } = $"swiftaid-state-{Guid.NewGuid():N}";
 
+    protected override void OnParametersSet()
+    {
+        var nextAnnouncement = State is SwiftAidViewState.Empty or SwiftAidViewState.Information
+            ? string.IsNullOrWhiteSpace(Description) ? Heading : $"{Heading}. {Description}"
+            : string.Empty;
+
+        if (!string.Equals(_announcementText, nextAnnouncement, StringComparison.Ordinal))
+        {
+            _announcementText = nextAnnouncement;
+        }
+    }
+
     private string Heading => !string.IsNullOrWhiteSpace(Title)
         ? Title
         : State switch
@@ -79,15 +95,15 @@ else
             SwiftAidViewState.Loading => "Loading",
             SwiftAidViewState.Empty => "Nothing to show yet",
             SwiftAidViewState.Offline => "You are offline",
-            SwiftAidViewState.Error => "This information is unavailable",
-            SwiftAidViewState.Denied => "Access is unavailable",
+            SwiftAidViewState.Error => "We couldn't load this information",
+            SwiftAidViewState.Denied => "You can't view this right now",
             SwiftAidViewState.Information => "Information",
             _ => string.Empty
         };
 
     private string Icon => State switch
     {
-        SwiftAidViewState.Empty => Icons.Material.Outlined.Inbox,
+        SwiftAidViewState.Empty => Icons.Material.Filled.Inbox,
         SwiftAidViewState.Offline => Icons.Material.Outlined.CloudOff,
         SwiftAidViewState.Error => Icons.Material.Outlined.ErrorOutline,
         SwiftAidViewState.Denied => Icons.Material.Outlined.Lock,

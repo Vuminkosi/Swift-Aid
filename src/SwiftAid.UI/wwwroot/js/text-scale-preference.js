@@ -55,5 +55,6 @@ export function setTextScale(preference) {
         // Keep the in-memory choice working even when storage is unavailable.
     }
     apply(next);
+    window.dispatchEvent(new Event("swiftaid-local-preferences-changed"));
     return next;
 }

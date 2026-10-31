@@ -65,7 +65,6 @@
 
     private async Task SignOutAsync()
     {
-        await SignOutPasswordCookieAsync();
         var result = await AccountClient.SignOutAsync();
         await RefreshShellAsync();
         var workspaceResult = await WorkspaceClient.GetStateAsync();
@@ -92,25 +91,6 @@
                 StatusMessage = result.Message ?? "Workspace view changed. Your access is unchanged.",
                 StatusIsError = false
             };
-        }
-    }
-
-    private async Task SignOutPasswordCookieAsync()
-    {
-        // Native sign-out below does not know the password cookie jar; clear it
-        // here so a password session does not survive sign-out.
-        try
-        {
-            var options = (NativeSessionHttpOptions?)ServiceProvider.GetService(typeof(NativeSessionHttpOptions));
-            var jar = CookieSessionHttpClient.Shared(options?.GatewayBaseAddress?.ToString());
-            if (jar.HasAuthenticationCookie)
-            {
-                await new HttpPasswordAuthClient(jar).LogoutAsync();
-            }
-        }
-        catch (Exception)
-        {
-            // Fall through: the shell refresh below re-reads the jar state.
         }
     }
 

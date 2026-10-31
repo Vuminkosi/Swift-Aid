@@ -32,6 +32,16 @@
         else
         {
             <div class="case-timeline__toolbar">
+                <MudDatePicker Label="Recorded from (local date)"
+                               @bind-Date="_fromLocalDate"
+                               DateFormat="MMM d, yyyy"
+                               Clearable="true"
+                               Class="case-timeline__date-filter" />
+                <MudDatePicker Label="Recorded through (local date)"
+                               @bind-Date="_throughLocalDate"
+                               DateFormat="MMM d, yyyy"
+                               Clearable="true"
+                               Class="case-timeline__date-filter" />
                 <MudSelect T="string"
                            Label="Filter history"
                            Value="_selectedEventType"
@@ -47,15 +57,23 @@
                 </MudSelect>
             </div>
 
-            @if (FilteredEntries.Count == 0)
+            @if (DateFilterError is { } dateFilterError)
+            {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Text" role="alert">
+                    @dateFilterError
+                    <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="ClearFilters">Clear filters</MudButton>
+                </MudAlert>
+            }
+            else if (FilteredEntries.Count == 0)
             {
                 <div class="case-timeline__filtered-empty" role="status">
-                    <MudText Typo="Typo.body2">No history entries match this filter.</MudText>
-                    <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="ClearEventFilter">Show all events</MudButton>
+                    <MudText Typo="Typo.body2">No loaded history entries match these filters.</MudText>
+                    <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="ClearFilters">Clear filters</MudButton>
                 </div>
             }
             else
             {
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Dates use your local time and filter the history entries currently loaded.</MudText>
                 <MudTimeline TimelinePosition="TimelinePosition.Start" Class="case-timeline__list">
                     @foreach (var entry in FilteredEntries)
                     {
@@ -77,6 +95,20 @@
                         </MudTimelineItem>
                     }
                 </MudTimeline>
+            }
+
+            @if (_hasOlderEntries || _loadingOlder || _olderError is not null)
+            {
+                <section class="case-timeline__older" aria-label="Older case history">
+                    @if (_olderError is { } olderError)
+                    {
+                        <MudAlert Severity="Severity.Warning" Variant="Variant.Text" role="alert">@olderError</MudAlert>
+                    }
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="_loadingOlder"
+                               OnClick="LoadOlderAsync" aria-label="Load older case history">
+                        @(_loadingOlder ? "Loading older history…" : _olderError is null ? "Load older history" : "Retry loading older history")
+                    </MudButton>
+                </section>
             }
 
             <MudText Typo="Typo.caption" Color="Color.Secondary" Class="case-timeline__notice">
@@ -163,11 +195,18 @@
     [Parameter] public int? Limit { get; set; }
 
     private bool _loading = true;
+    private long _timelineRequestGeneration;
     private bool _unavailable;
     private string? _error;
     private CaseTimeline? _timeline;
     private Guid _loadedCaseId = Guid.Empty;
+    private bool _hasOlderEntries;
+    private bool _loadingOlder;
+    private long? _olderThanAggregateVersion;
+    private string? _olderError;
     private string _selectedEventType = AllEventsFilter;
+    private DateTime? _fromLocalDate;
+    private DateTime? _throughLocalDate;
     private CaseTimelineEntry? _selectedEntry;
     private bool _detailsOpen;
 
@@ -196,14 +235,13 @@
         }
     }
 
-    private IReadOnlyList<CaseTimelineEntry> FilteredEntries =>
-        _timeline?.Entries
-            .Where(entry => _selectedEventType == AllEventsFilter ||
-                (_selectedEventType == RelatedActivityFilter && entry.Kind == CaseTimelineEntryKind.Derived) ||
-                string.Equals(entry.EventType, _selectedEventType, StringComparison.Ordinal))
-            .OrderBy(entry => entry.RecordedAtUtc)
-            .ThenBy(entry => entry.AggregateVersion)
-            .ToArray() ?? Array.Empty<CaseTimelineEntry>();
+    private string? DateFilterError => _fromLocalDate is { } from && _throughLocalDate is { } through && from.Date > through.Date
+        ? "The start date must be on or before the end date."
+        : null;
+
+    private IReadOnlyList<CaseTimelineEntry> FilteredEntries => DateFilterError is null && _timeline is not null
+        ? CaseTimelineEntryFilter.Apply(_timeline.Entries, _selectedEventType, _fromLocalDate, _throughLocalDate)
+        : Array.Empty<CaseTimelineEntry>();
 
     protected override async Task OnParametersSetAsync()
     {
@@ -211,6 +249,8 @@
         {
             _loadedCaseId = CaseId;
             _selectedEventType = AllEventsFilter;
+            _fromLocalDate = null;
+            _throughLocalDate = null;
             _selectedEntry = null;
             _detailsOpen = false;
             await RefreshAsync();
@@ -220,23 +260,49 @@
     /// <summary>Reloads the timeline; called by hosting pages after a successful command.</summary>
     public async Task RefreshAsync()
     {
-        if (Client is null || CaseId == Guid.Empty)
+        var requestGeneration = ++_timelineRequestGeneration;
+        var caseId = CaseId;
+        var client = Client;
+
+        _loadingOlder = false;
+        _timeline = null;
+        _hasOlderEntries = false;
+        _olderThanAggregateVersion = null;
+        _olderError = null;
+
+        if (client is null || caseId == Guid.Empty)
         {
+            _loading = false;
+            _unavailable = false;
+            _error = null;
             return;
         }
 
         _loading = true;
         _unavailable = false;
         _error = null;
-        _timeline = null;
-
         try
         {
-            var result = await Client.GetAsync(CaseId, Limit);
+            var result = await client.GetAsync(caseId, PageSize);
+            if (requestGeneration != _timelineRequestGeneration || caseId != CaseId)
+            {
+                return;
+            }
+
             if (result.Access == CaseTimelineAccess.Found && result.Timeline is not null)
             {
+                if (result.Timeline.Header.CaseId != caseId || !HasValidPageMetadata(result.Timeline))
+                {
+                    _error = "The case history response was incomplete. Refresh the timeline and try again.";
+                    return;
+                }
+
                 _timeline = result.Timeline;
+                _hasOlderEntries = result.Timeline.HasOlderEntries;
+                _olderThanAggregateVersion = result.Timeline.OlderThanAggregateVersion;
                 _selectedEventType = AllEventsFilter;
+                _fromLocalDate = null;
+                _throughLocalDate = null;
             }
             else
             {
@@ -245,12 +311,104 @@
         }
         catch (Exception)
         {
-            _error = "The case history could not be loaded. Check your connection and try again.";
+            if (requestGeneration == _timelineRequestGeneration && caseId == CaseId)
+            {
+                _error = "The case history could not be loaded. Check your connection and try again.";
+            }
         }
         finally
         {
-            _loading = false;
+            if (requestGeneration == _timelineRequestGeneration)
+            {
+                _loading = false;
+            }
         }
+    }
+
+    private int PageSize => Math.Clamp(Limit ?? 50, 1, 500);
+
+    private async Task LoadOlderAsync()
+    {
+        if (_loadingOlder || !_hasOlderEntries || _olderThanAggregateVersion is not { } cursor ||
+            Client is not { } client || _timeline is not { } currentTimeline || currentTimeline.Header.CaseId != CaseId)
+        {
+            return;
+        }
+
+        var requestGeneration = _timelineRequestGeneration;
+        var caseId = CaseId;
+        _loadingOlder = true;
+        _olderError = null;
+        try
+        {
+            var result = await client.GetAsync(caseId, PageSize, beforeAggregateVersion: cursor);
+            if (requestGeneration != _timelineRequestGeneration || caseId != CaseId)
+            {
+                return;
+            }
+
+            if (result.Access != CaseTimelineAccess.Found || result.Timeline is not { } olderPage || olderPage.Header.CaseId != caseId)
+            {
+                _timeline = null;
+                _unavailable = true;
+                _hasOlderEntries = false;
+                _olderThanAggregateVersion = null;
+                return;
+            }
+
+            if (!HasValidPageMetadata(olderPage) ||
+                (olderPage.OlderThanAggregateVersion is { } nextCursor && nextCursor >= cursor) ||
+                olderPage.Entries.Any(entry => entry.Kind == CaseTimelineEntryKind.Authoritative && entry.AggregateVersion >= cursor) ||
+                olderPage.Entries.Any(entry => currentTimeline.Entries.Any(current => current.EventId == entry.EventId)))
+            {
+                _olderError = "Older history could not be continued safely. Refresh the timeline and try again.";
+                return;
+            }
+
+            var mergedEntries = olderPage.Entries
+                .Concat(currentTimeline.Entries)
+                .OrderBy(entry => entry.RecordedAtUtc)
+                .ThenBy(entry => entry.AggregateVersion)
+                .ToArray();
+            _timeline = olderPage with { Entries = mergedEntries };
+            _hasOlderEntries = olderPage.HasOlderEntries;
+            _olderThanAggregateVersion = olderPage.OlderThanAggregateVersion;
+        }
+        catch (Exception)
+        {
+            if (requestGeneration == _timelineRequestGeneration && caseId == CaseId)
+            {
+                _olderError = "Older case history could not be loaded. Check your connection and try again.";
+            }
+        }
+        finally
+        {
+            if (requestGeneration == _timelineRequestGeneration)
+            {
+                _loadingOlder = false;
+            }
+        }
+    }
+
+    private static bool HasValidPageMetadata(CaseTimeline timeline)
+    {
+        if (timeline.HasOlderEntries != timeline.OlderThanAggregateVersion.HasValue)
+        {
+            return false;
+        }
+
+        if (!timeline.HasOlderEntries)
+        {
+            return true;
+        }
+
+        var authoritativeVersions = timeline.Entries
+            .Where(entry => entry.Kind == CaseTimelineEntryKind.Authoritative)
+            .Select(entry => entry.AggregateVersion)
+            .ToArray();
+        return timeline.OlderThanAggregateVersion is { } cursor && cursor > 0 &&
+            authoritativeVersions.Length > 0 &&
+            authoritativeVersions.Min() == cursor;
     }
 
     private Task SetEventFilterAsync(string? eventType)
@@ -259,7 +417,12 @@
         return Task.CompletedTask;
     }
 
-    private void ClearEventFilter() => _selectedEventType = AllEventsFilter;
+    private void ClearFilters()
+    {
+        _selectedEventType = AllEventsFilter;
+        _fromLocalDate = null;
+        _throughLocalDate = null;
+    }
 
     private void OpenDetails(CaseTimelineEntry entry)
     {

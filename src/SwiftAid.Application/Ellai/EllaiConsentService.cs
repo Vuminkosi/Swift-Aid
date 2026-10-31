@@ -31,6 +31,8 @@ public sealed record EllaiConsentGrant(
 /// sessions immediately. A microphone grant never implies reasoning dispatch.</summary>
 public sealed class EllaiConsentService
 {
+    public const string PublicProductHelpPurpose = SwiftAid.Contracts.Ellai.EllaiConsentPurposes.PublicProductHelp;
+
     private readonly object _gate = new();
     private readonly Dictionary<string, EllaiConsentGrant> _grants = new(StringComparer.Ordinal);
     private int _version;
@@ -127,13 +129,20 @@ public sealed class EllaiConsentService
         }
     }
 
-    public bool IsGranted(string sessionId, EllaiConsentDimension dimension, string purpose, DateTimeOffset now)
+    public bool IsGranted(
+        string sessionId,
+        EllaiConsentDimension dimension,
+        string purpose,
+        string dataClass,
+        DateTimeOffset now)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(dataClass);
         lock (_gate)
         {
             return _grants.Values.Any(g =>
                 g.SessionId == sessionId && g.Dimension == dimension
                 && string.Equals(g.Purpose, purpose, StringComparison.Ordinal)
+                && string.Equals(g.DataClass, dataClass, StringComparison.Ordinal)
                 && !g.Revoked && g.ExpiresAtUtc > now);
         }
     }

@@ -1,24 +1,73 @@
 @page "/more"
+@inject NavigationManager Navigation
 
-<PageTitle>More | SwiftAid</PageTitle>
+<PageTitle>Settings | SwiftAid</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.Small" Class="mobile-work-page">
-    <SwiftAidPageHeading Eyebrow="SwiftAid" Title="More" Description="Tasks, sessions, notifications, and account settings." HeadingId="more-heading" />
+<MudContainer Fixed="true" Class="mobile-work-page mobile-settings-page">
+    <div class="mobile-settings-page__heading">
+        <SwiftAidPageHeading Eyebrow="" Title="Settings" Description="Manage your account, privacy, synchronization, and app information." HeadingId="settings-heading" />
+    </div>
 
-    <nav class="mobile-destination-list" aria-label="More destinations">
-        <MudButton Href="/monitoring" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.EventNote">Follow-ups and tasks</MudButton>
-        <MudButton Href="/assistance" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.VolunteerActivism">Assistance requests</MudButton>
-        <MudButton Href="/follow-ups" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Schedule">Assigned follow-ups</MudButton>
-        <MudButton Href="/escalations" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.WarningAmber">Escalations</MudButton>
-        <MudButton Href="/surveillance" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Map">Surveillance</MudButton>
-        <MudButton Href="/education" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.School">Education</MudButton>
-        <MudButton Href="/sync" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.CloudSync">Synchronization</MudButton>
-        <MudButton Href="/account" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Settings">Settings</MudButton>
-    </nav>
-
-    <MudPaper Class="mobile-note-card" Elevation="0">
-        <MudText Typo="Typo.subtitle1" HtmlTag="h2">Notifications</MudText>
-        <MudText Typo="Typo.body2">Open the bell in the top bar to review notifications and device settings.</MudText>
-    </MudPaper>
+    <MudTabs ActivePanelIndex="_activeTab"
+             ActivePanelIndexChanged="NavigateToSettingsAsync"
+             Class="mobile-settings-tabs"
+             Elevation="0"
+             Rounded="false"
+             ApplyEffectsToContainer="false"
+             aria-label="Settings sections">
+        <MudTabPanel Text="Overview" Icon="@Icons.Material.Outlined.Dashboard">
+            <div class="mobile-settings-overview">
+                <p class="mobile-settings-overview__intro">Your SwiftAid settings, together in one place.</p>
+                <div class="mobile-settings-overview__cards">
+                    <MudPaper Class="mobile-settings-card" Elevation="0">
+                        <MudIcon Icon="@Icons.Material.Outlined.ManageAccounts" Color="Color.Primary" />
+                        <div><MudText Typo="Typo.subtitle1">Account and workspace</MudText><MudText Typo="Typo.body2">Manage your profile and workspace access.</MudText></div>
+                        <MudIconButton Href="/account" Icon="@Icons.Material.Outlined.ChevronRight" aria-label="Open account and workspace settings" />
+                    </MudPaper>
+                    <MudPaper Class="mobile-settings-card" Elevation="0">
+                        <MudIcon Icon="@Icons.Material.Outlined.CloudSync" Color="Color.Primary" />
+                        <div><MudText Typo="Typo.subtitle1">Synchronization</MudText><MudText Typo="Typo.body2">Check the status of saved and submitted reports.</MudText></div>
+                        <MudIconButton Href="/sync" Icon="@Icons.Material.Outlined.ChevronRight" aria-label="Open synchronization settings" />
+                    </MudPaper>
+                    <MudPaper Class="mobile-settings-card" Elevation="0">
+                        <MudIcon Icon="@Icons.Material.Outlined.Policy" Color="Color.Primary" />
+                        <div><MudText Typo="Typo.subtitle1">Privacy and data</MudText><MudText Typo="Typo.body2">Review how SwiftAid handles your information.</MudText></div>
+                        <MudIconButton Href="/privacy" Icon="@Icons.Material.Outlined.ChevronRight" aria-label="Open privacy and data settings" />
+                    </MudPaper>
+                    <MudPaper Class="mobile-settings-card" Elevation="0">
+                        <MudIcon Icon="@Icons.Material.Outlined.Info" Color="Color.Primary" />
+                        <div><MudText Typo="Typo.subtitle1">About SwiftAid</MudText><MudText Typo="Typo.body2">Learn about the service and how to get help.</MudText></div>
+                        <MudIconButton Href="/about" Icon="@Icons.Material.Outlined.ChevronRight" aria-label="About SwiftAid" />
+                    </MudPaper>
+                    <MudPaper Class="mobile-settings-card" Elevation="0">
+                        <MudIcon Icon="@Icons.Material.Outlined.RecordVoiceOver" Color="Color.Primary" />
+                        <div><MudText Typo="Typo.subtitle1">Ellai</MudText><MudText Typo="Typo.body2">Explore Ellai information and available settings.</MudText></div>
+                        <MudIconButton Href="/ellai/about" Icon="@Icons.Material.Outlined.ChevronRight" aria-label="Open Ellai information and settings" />
+                    </MudPaper>
+                </div>
+            </div>
+        </MudTabPanel>
+        <MudTabPanel Text="Account" Icon="@Icons.Material.Outlined.ManageAccounts" />
+        <MudTabPanel Text="Sync" Icon="@Icons.Material.Outlined.CloudSync" />
+        <MudTabPanel Text="Privacy" Icon="@Icons.Material.Outlined.Policy" />
+        <MudTabPanel Text="About" Icon="@Icons.Material.Outlined.Info" />
+        <MudTabPanel Text="Ellai" Icon="@Icons.Material.Outlined.RecordVoiceOver" />
+    </MudTabs>
 </MudContainer>
 
+@code {
+    private int _activeTab;
+
+    private static readonly string[] SettingsRoutes = [
+        "/more", "/account", "/sync", "/privacy", "/about", "/ellai/about"
+    ];
+
+    private Task NavigateToSettingsAsync(int tabIndex)
+    {
+        _activeTab = tabIndex;
+        if (tabIndex > 0 && tabIndex < SettingsRoutes.Length)
+            Navigation.NavigateTo(SettingsRoutes[tabIndex]);
+
+        return Task.CompletedTask;
+    }
+}

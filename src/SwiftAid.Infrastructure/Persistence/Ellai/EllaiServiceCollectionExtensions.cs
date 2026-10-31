@@ -12,6 +12,8 @@ public static class EllaiServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
         services.AddScoped<IEllaiSessionStore, PostgresEllaiSessionStore>();
+        services.AddScoped<IEllaiUtteranceOutboxStore>(provider =>
+            (IEllaiUtteranceOutboxStore)provider.GetRequiredService<IEllaiSessionStore>());
         services.AddScoped<IEllaiApprovalStore, PostgresEllaiApprovalStore>();
         services.AddScoped<IEllaiTopicStore, PostgresEllaiTopicStore>();
         services.AddScoped<IEllaiConsentStore, PostgresEllaiConsentStore>();

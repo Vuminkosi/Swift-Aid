@@ -74,8 +74,10 @@ public sealed record EllaiToolContext(
     int RemainingCalls,
     bool ContributorEligible,
     string ConsentVersion = "consent/1",
-    string DataClassification = "synthetic",
-    ActorContext? Actor = null);
+    string DataClassification = EllaiProcessingClassification.UnknownOrigin,
+    ActorContext? Actor = null,
+    IReadOnlySet<string>? AllowedTools = null,
+    string ConsentPurpose = EllaiToolBroker.ToolReadPurpose);
 
 /// <summary>Tool request with bounded arguments. <see cref="CallId"/> is the
 /// model-assigned call correlation id: it travels untouched through
@@ -150,7 +152,7 @@ public sealed class EllaiToolBroker
     /// <summary>Deterministic tool catalogue summary for the reasoning
     /// system prompt: canonical names with argument hints. The model still
     /// passes the same consent, budget and byte-bound pipeline per call.</summary>
-    public static string DescribeCatalogue() => string.Join("\n", new[]
+    private static readonly string[] ToolDescriptions =
     {
         $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, ref?) — permitted feature or live work queue.",
         $"{EllaiToolNames.Evidence}(ref, field?) — versioned source items with provenance.",
@@ -163,7 +165,19 @@ public sealed class EllaiToolBroker
         $"{EllaiToolNames.DocsGet}(section) — one approved section excerpt.",
         $"{EllaiToolNames.UiCatalogue}(goal?, limit?) — entitled control descriptors.",
         $"{EllaiToolNames.UiObserve}(controls, view, context?) — live mounted-control facts.",
-    });
+    };
+
+    public static string DescribeCatalogue(IReadOnlySet<string>? allowedTools = null) =>
+        string.Join("\n", ToolDescriptions.Where(description =>
+        {
+            if (allowedTools is null)
+            {
+                return true;
+            }
+
+            var separator = description.IndexOf('(');
+            return separator > 0 && allowedTools.Contains(description[..separator]);
+        }));
 
     private readonly EllaiPolicyService _policy;
     private readonly EllaiConsentService _consent;
@@ -174,6 +188,7 @@ public sealed class EllaiToolBroker
     private readonly EllaiUiRegistry? _uiRegistry;
     private readonly IEllaiUiDiscoveryService? _uiDiscovery;
     private readonly IEllaiUiObservationStore? _uiObservations;
+    private readonly EllaiProductFactCatalog _productFacts;
 
     /// <summary>Consent infrastructure is mandatory: a missing service fails
     /// closed instead of silently bypassing the ReasoningText grant check.
@@ -189,7 +204,8 @@ public sealed class EllaiToolBroker
         EllaiTechnicalDocs? docs = null, ICaseQueueQuery? queue = null,
         IEllaiApprovalStore? receipts = null, EllaiTopicService? topics = null,
         EllaiUiRegistry? uiRegistry = null, IEllaiUiDiscoveryService? uiDiscovery = null,
-        IEllaiUiObservationStore? uiObservations = null)
+        IEllaiUiObservationStore? uiObservations = null,
+        EllaiProductFactCatalog? productFacts = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _consent = consent ?? throw new ArgumentNullException(nameof(consent));
@@ -200,6 +216,7 @@ public sealed class EllaiToolBroker
         _uiRegistry = uiRegistry;
         _uiDiscovery = uiDiscovery;
         _uiObservations = uiObservations;
+        _productFacts = productFacts ?? new EllaiProductFactCatalog();
     }
 
     public async Task<EllaiToolResult> InvokeAsync(
@@ -212,6 +229,13 @@ public sealed class EllaiToolBroker
         if (!TryResolveCanonical(request.ToolName, out var canonical))
         {
             return Bound(Deny(request.ToolName, "Unregistered tool.", EllaiToolReasonCodes.UnregisteredTool));
+        }
+
+        if (context.AllowedTools is not null && !context.AllowedTools.Contains(canonical))
+        {
+            return Bound(Deny(request.ToolName,
+                "This tool is not available in the current session profile.",
+                EllaiToolReasonCodes.DeniedByPolicy));
         }
 
         if (context.RemainingCalls <= 0)
@@ -238,7 +262,8 @@ public sealed class EllaiToolBroker
         }
 
         if (!_consent.IsGranted(
-                context.SessionId, EllaiConsentDimension.ReasoningText, ToolReadPurpose, DateTimeOffset.UtcNow))
+                context.SessionId, EllaiConsentDimension.ReasoningText, context.ConsentPurpose,
+                context.DataClassification, DateTimeOffset.UtcNow))
         {
             return Bound(Deny(request.ToolName, "Reasoning-text consent grant is missing or expired.", EllaiToolReasonCodes.ConsentMissing));
         }
@@ -283,7 +308,7 @@ public sealed class EllaiToolBroker
         {
             EllaiToolNames.Evidence => Allow(request.ToolName, "Authorized versioned source items.", Math.Min(request.Arguments.Count, MaxItems), request.Arguments.Count > MaxItems),
             EllaiToolNames.Capabilities => Allow(request.ToolName, "Current capability descriptors.", 1, false),
-            EllaiToolNames.ProductFacts => Allow(request.ToolName, "Versioned nonmedical product facts.", 1, false),
+            EllaiToolNames.ProductFacts => ReadProductFacts(request),
             EllaiToolNames.Now => Allow(request.ToolName, DescribeNow(DateTimeOffset.UtcNow), 1, false),
             EllaiToolNames.DocsSearch => SearchDocs(request),
             EllaiToolNames.DocsGet => GetDocs(request),
@@ -698,6 +723,45 @@ public sealed class EllaiToolBroker
         var summary = $"{section.Title} [{section.SectionId}] " +
             $"(technical.md, status {section.Status}, rev {section.Revision}):\n{section.Body}";
         return Allow(request.ToolName, summary, 1, false);
+    }
+
+    private EllaiToolResult ReadProductFacts(EllaiToolRequest request)
+    {
+        if (request.Arguments.Keys.Any(key => !string.Equals(key, "topic", StringComparison.Ordinal)))
+        {
+            return Deny(request.ToolName,
+                "Only the optional topic argument is accepted.",
+                EllaiToolReasonCodes.InvalidArguments);
+        }
+
+        var topic = request.Arguments.TryGetValue("topic", out var requestedTopic)
+            ? requestedTopic
+            : null;
+        var facts = _productFacts.Find(topic);
+        if (facts.Count == 0)
+        {
+            return Deny(request.ToolName,
+                "No approved product fact matches that topic.",
+                EllaiToolReasonCodes.InvalidArguments);
+        }
+
+        var evidence = facts.Select(fact => new EvidenceRef(
+            "ProductFact",
+            fact.FactId,
+            fact.Revision,
+            fact.SourceId,
+            fact.FactId)).ToArray();
+        var summary = string.Join("\n", facts.Select(fact =>
+            $"[{fact.FactId}; source {fact.SourceId}; revision {fact.Revision}] {fact.Text}"));
+        return new EllaiToolResult(
+            request.ToolName,
+            Allowed: true,
+            DenialReason: null,
+            Evidence: evidence,
+            ResultSummary: summary,
+            ItemCount: facts.Count,
+            Truncated: false,
+            ReasonCode: EllaiToolReasonCodes.Ok);
     }
 
     internal static string DescribeNow(DateTimeOffset now) =>

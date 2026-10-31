@@ -48,6 +48,9 @@ function renderLoader() {
     image.className = "components-reconnect-loader-image";
     image.alt = "";
     image.setAttribute("aria-hidden", "true");
+    image.width = 150;
+    image.height = 150;
+    image.style.cssText = "display:block;box-sizing:border-box;width:150px;height:150px;min-width:150px;min-height:150px;max-width:150px;max-height:150px;object-fit:fill;object-position:center;flex:none;";
     image.src = !reducedMotionPreference || reducedMotionPreference.matches
         ? loader.dataset.stillSrc
         : loader.dataset.gifSrc;
@@ -56,23 +59,23 @@ function renderLoader() {
 
 function handleReconnectStateChanged(event) {
     if (event.detail.state === "show") {
-        setReconnectLoading(true, "Rejoining the server.");
+        setReconnectLoading(true, "Trying to reconnect.");
         reconnectModal.showModal();
     } else if (event.detail.state === "hide") {
         setReconnectLoading(false);
         reconnectModal.close();
     } else if (event.detail.state === "failed") {
-        setReconnectLoading(false, "Unable to rejoin. Please retry or reload the page.");
+        setReconnectLoading(false, "Still offline. Try again or refresh the page.");
         document.addEventListener("visibilitychange", retryWhenDocumentBecomesVisible);
     } else if (event.detail.state === "rejected") {
-        setReconnectLoading(false, "The session could not be resumed. Reloading the page.");
+        setReconnectLoading(false, "We could not continue. Refreshing the page.");
         location.reload();
     }
 }
 
 async function retry() {
     document.removeEventListener("visibilitychange", retryWhenDocumentBecomesVisible);
-    setReconnectLoading(true, "Retrying the connection.");
+    setReconnectLoading(true, "Trying to reconnect.");
 
     try {
         // Reconnect returns true on success, false when the server has no circuit, or throws when unreachable.
@@ -86,7 +89,7 @@ async function retry() {
             }
         }
     } catch {
-        setReconnectLoading(false, "The connection attempt failed. Please retry or reload the page.");
+        setReconnectLoading(false, "We could not reconnect. Try again or refresh the page.");
         document.addEventListener("visibilitychange", retryWhenDocumentBecomesVisible);
     } finally {
         if (loaderActive) {
@@ -96,7 +99,7 @@ async function retry() {
 }
 
 async function resume() {
-    setReconnectLoading(true, "Resuming the session.");
+    setReconnectLoading(true, "Continuing.");
 
     try {
         const successful = await Blazor.resumeCircuit();
@@ -105,7 +108,7 @@ async function resume() {
         }
     } catch {
         reconnectModal.classList.replace("components-reconnect-paused", "components-reconnect-resume-failed");
-        setReconnectLoading(false, "The session could not be resumed. Please retry or reload the page.");
+        setReconnectLoading(false, "We could not continue. Try again or refresh the page.");
     } finally {
         if (loaderActive) {
             setReconnectLoading(false);

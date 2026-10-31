@@ -9,7 +9,7 @@ else if (Snapshot.ViewState == WelcomeCompleteViewState.SignedOut)
     <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
         Sign in to view this page.
     </MudAlert>
-    <MudButton Href="/sign-in" Variant="Variant.Filled" Color="Color.Primary"
+    <MudButton Href="@SignInHref" Variant="Variant.Filled" Color="Color.Primary"
                StartIcon="@Icons.Material.Filled.Login" Class="auth-cta">
         Sign in
     </MudButton>
@@ -43,7 +43,7 @@ else
     </MudPaper>
     @if (Snapshot.HasActiveWorkspace)
     {
-        <MudButton Href="/" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+        <MudButton Href="@SafeReturnUrl" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
                    Class="auth-cta">
             Continue to your workspace
         </MudButton>
@@ -60,13 +60,13 @@ else
                    Class="auth-cta">
             View request status
         </MudButton>
-        <MudButton Href="/" Variant="Variant.Text" Color="Color.Primary" FullWidth="true" Class="auth-cta">
+        <MudButton Href="@SafeReturnUrl" Variant="Variant.Text" Color="Color.Primary" FullWidth="true" Class="auth-cta">
             Continue to SwiftAid
         </MudButton>
     }
     else
     {
-        <MudButton Href="/" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+        <MudButton Href="@SafeReturnUrl" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
                    Class="auth-cta">
             Continue to SwiftAid
         </MudButton>
@@ -81,6 +81,17 @@ else
 
 @code {
     [Parameter] public WelcomeCompleteSnapshot Snapshot { get; set; } = WelcomeCompleteSnapshot.Loading;
+    [Parameter] public string? ReturnUrl { get; set; }
 
     [Parameter] public EventCallback OnRefresh { get; set; }
+
+    private string SafeReturnUrl => IsLocalReturnUrl(ReturnUrl) ? ReturnUrl! : "/";
+    private string SignInHref => $"/sign-in?returnUrl={Uri.EscapeDataString(SafeReturnUrl)}";
+
+    private static bool IsLocalReturnUrl(string? value) =>
+        value is { Length: > 0 and <= 2048 } &&
+        value[0] == '/' &&
+        (value.Length == 1 || value[1] is not ('/' or '\\')) &&
+        !value.Contains('\\') &&
+        !value.Any(char.IsControl);
 }

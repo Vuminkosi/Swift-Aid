@@ -1,0 +1,52 @@
+.workspace-page {
+    padding-block: 1.25rem 2rem;
+}
+
+::deep .workspace-panel {
+    height: 100%;
+    padding: 1rem;
+    border: 1px solid var(--sa-border);
+    border-radius: var(--sa-radius-card, 0.75rem);
+    background: var(--sa-surface);
+}
+
+.panel-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-block-end: 0.75rem;
+}
+
+::deep .workspace-shortcut {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    min-height: 5rem;
+    padding: 1rem;
+    border: 1px solid var(--sa-border);
+    border-radius: var(--sa-radius-card, 0.75rem);
+    background: var(--sa-surface);
+}
+
+::deep .workspace-shortcut > a {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+}
+
+::deep .workspace-shortcut:has(> a:focus-visible) {
+    outline: 3px solid var(--sa-focus);
+    outline-offset: 2px;
+}
+
+@media (max-width: 600px) {
+    .workspace-page {
+        padding-inline: 0.25rem;
+    }
+
+    .panel-heading {
+        align-items: flex-start;
+    }
+}

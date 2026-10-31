@@ -1,0 +1,16 @@
+.capability-panel {
+    display: grid;
+    gap: 0.65rem;
+    max-width: 58rem;
+    padding: 1.25rem;
+    border: 1px solid var(--sa-border);
+    border-radius: var(--sa-radius-card, 0.75rem);
+    background: var(--sa-surface);
+}
+
+.capability-panel__topline {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}

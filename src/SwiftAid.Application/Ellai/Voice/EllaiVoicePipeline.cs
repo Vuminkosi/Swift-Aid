@@ -88,10 +88,11 @@ public sealed record NarrationSentence(
     long SpeechEpoch,
     string EvidenceVersion);
 
-/// <summary>Local narration queue (ELL-T12 groundwork). At most two validated
-/// sentences queued ahead; interruption bumps the speech epoch and drops all
-/// stale/queued text so late callbacks can never speak it.</summary>
-public sealed class LocalNarrationQueue
+/// <summary>Gateway-side narration coordination queue (ELL-T12 groundwork).
+/// This stores validated text only; it does not synthesize or play audio.
+/// At most two sentences queue ahead. Interruption bumps the speech epoch and
+/// drops stale text before any Gateway synthesis/streaming adapter can consume it.</summary>
+public sealed class EllaiNarrationQueue
 {
     private readonly object _gate = new();
     private readonly Queue<NarrationSentence> _queue = new();

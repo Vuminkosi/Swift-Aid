@@ -7,7 +7,7 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiLiveReceiptReadTests
 {
     private static readonly EllaiToolContext Context = new(
-        "session-1", "epoch-1", "cases", "case-1", 4, true);
+        "session-1", "epoch-1", "cases", "case-1", 4, true, "consent/1", EllaiProcessingClassification.SyntheticDemo);
 
     private static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(15);
 
@@ -15,7 +15,7 @@ public sealed class EllaiLiveReceiptReadTests
     {
         var consent = new EllaiConsentService();
         consent.Grant("session-1", EllaiConsentDimension.ReasoningText,
-            EllaiToolBroker.ToolReadPurpose, "synthetic", TimeSpan.FromHours(1));
+            EllaiToolBroker.ToolReadPurpose, EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
         return new EllaiToolBroker(new EllaiPolicyService(), consent, null, null, receipts);
     }
 

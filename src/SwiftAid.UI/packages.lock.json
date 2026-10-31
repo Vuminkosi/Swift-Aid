@@ -22,6 +22,16 @@
           "Microsoft.Extensions.Localization": "9.0.6"
         }
       },
+      "Microsoft.AspNetCore.Components.Authorization": {
+        "type": "Direct",
+        "requested": "[10.0.14, )",
+        "resolved": "10.0.14",
+        "contentHash": "u7lHiI9Z7y9nch44Kfc60VMhzAXO2pxmRzDWTHM9ts4J2Oe9u+zgLucyxY/cZlIW6OjP8/GMvwR8YdnfQbfHRQ==",
+        "dependencies": {
+          "Microsoft.AspNetCore.Authorization": "10.0.14",
+          "Microsoft.AspNetCore.Components": "10.0.14"
+        }
+      },
       "Microsoft.AspNetCore.Components.Web": {
         "type": "Direct",
         "requested": "[10.0.14, )",

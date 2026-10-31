@@ -12,20 +12,29 @@
 <MudDialogProvider />
 <MudSnackbarProvider />
 
+<div class="swiftaid-authorized-layout-root">
 <MudLayout>
     <MudAppBar Elevation="1" Color="Color.Transparent" Dense="true" Class="swiftaid-authorized-appbar">
-        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
-                       OnClick="@(_ => DrawerToggle())" aria-label="Toggle navigation"
+        <MudIconButton Icon="@(_drawerOpen ? Icons.Material.Filled.MenuOpen : Icons.Material.Filled.Menu)"
+                       Color="Color.Inherit"
+                       Size="Size.Medium"
+                       Edge="Edge.Start"
+                       Variant="Variant.Text"
+                       Class="swiftaid-authorized-navigation-toggle"
+                       OnClick="DrawerToggle"
+                       aria-label="@(_drawerOpen ? "Close navigation" : "Open navigation")"
+                       title="@(_drawerOpen ? "Close navigation" : "Open navigation")"
                        aria-expanded="@(_drawerOpen ? "true" : "false")"
                        aria-controls="swiftaid-authorized-navigation" />
-        <MudText Typo="Typo.h6" Class="ml-3">SwiftAid</MudText>
+        <img class="swiftaid-authorized-brand-mark" src="_content/SwiftAid.UI/assets/swiftaid-icon.png" alt="" />
+        <MudText Typo="Typo.h6" Class="ml-2">SwiftAid</MudText>
         <MudSpacer />
         @HeaderActions
         <MudIconButton Href="/account" Icon="@Icons.Material.Filled.AccountCircle" Color="Color.Inherit"
                        aria-label="Account and settings" />
     </MudAppBar>
-    <MudDrawer @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="0"
-               Variant="@DrawerVariant.Responsive" Class="swiftaid-authorized-drawer"
+    <MudDrawer @bind-Open="_drawerOpen" Breakpoint="Breakpoint.Md" ClipMode="DrawerClipMode.Always"
+               Elevation="0" Variant="DrawerVariant.Responsive" Class="swiftaid-authorized-drawer"
                id="swiftaid-authorized-navigation">
         <div class="swiftaid-authorized-navigation">
             <SwiftAidNavMenu />
@@ -37,8 +46,10 @@
         </MudContainer>
     </MudMainContent>
 </MudLayout>
+</div>
 
 <EllaiGuidanceHost />
+<EllaiLauncherMenu OnModeSelected="RequestEllaiMode" />
 
 @code {
     private readonly Guid _viewportObserverId = Guid.NewGuid();
@@ -63,9 +74,9 @@
     {
         var isMobileViewport = args.Breakpoint is Breakpoint.Xs or Breakpoint.Sm;
 
-        // Initialize from the actual viewport, then change the drawer only
-        // when crossing the Md boundary. Resizes within either range leave
-        // the user's current open/closed choice alone.
+        // Initialize from the actual viewport, then update only when crossing
+        // the desktop/mobile boundary so a user's toggle choice is preserved
+        // while resizing within the same layout range.
         if (_isMobileViewport is null || _isMobileViewport != isMobileViewport)
         {
             _drawerOpen = !isMobileViewport;
@@ -73,6 +84,11 @@
             StateHasChanged();
         }
     });
+
+    [Inject]
+    private EllaiLauncher EllaiLauncher { get; set; } = default!;
+
+    private void RequestEllaiMode(SwiftAid.Contracts.Ellai.EllaiMode mode) => EllaiLauncher.Request(mode);
 
     private void DrawerToggle()
     {

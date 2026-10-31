@@ -37,6 +37,36 @@ public sealed class AccountSurfaceSignOutTests
         Assert.DoesNotContain("Sign out", markup, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task GuestSnapshot_OffersSignInRegistrationAndGuestReportRoutes()
+    {
+        var markup = await RenderAsync(
+            new AccountPresentationSnapshot(
+                AccountViewState.Available,
+                IsSignedIn: false,
+                DisplayName: null,
+                Providers: Array.Empty<AccountProviderView>(),
+                Workspaces: Array.Empty<AccountWorkspaceView>(),
+                WorkspacesAvailable: true,
+                SelectedWorkspaceId: null,
+                SelectedWorkspaceName: null),
+            withSignOutHandler: false,
+            signInHref: "/sign-in?returnUrl=%2Fdashboard",
+            registerHref: "/register",
+            guestReportHref: "/report");
+
+        Assert.Contains("Choose how to continue", markup, StringComparison.Ordinal);
+        Assert.Contains("Sign in", markup, StringComparison.Ordinal);
+        Assert.Contains("Create account", markup, StringComparison.Ordinal);
+        Assert.Contains("Continue to a guest report", markup, StringComparison.Ordinal);
+        Assert.Contains("/sign-in?returnUrl=%2Fdashboard", markup, StringComparison.Ordinal);
+        Assert.Contains("href=\"/register\"", markup, StringComparison.Ordinal);
+        Assert.Contains("href=\"/report\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Sign-in required", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Sign-in methods", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Unavailable", markup, StringComparison.Ordinal);
+    }
+
     private static AccountPresentationSnapshot SignedInSnapshot() => new(
         AccountViewState.Available,
         IsSignedIn: true,
@@ -50,7 +80,12 @@ public sealed class AccountSurfaceSignOutTests
         SelectedWorkspaceId: null,
         SelectedWorkspaceName: null);
 
-    private static async Task<string> RenderAsync(AccountPresentationSnapshot snapshot, bool withSignOutHandler)
+    private static async Task<string> RenderAsync(
+        AccountPresentationSnapshot snapshot,
+        bool withSignOutHandler,
+        string? signInHref = null,
+        string? registerHref = null,
+        string? guestReportHref = null)
     {
         await using var services = CreateServices();
         await using var renderer = CreateRenderer(services);
@@ -59,7 +94,10 @@ public sealed class AccountSurfaceSignOutTests
             var parameters = new Dictionary<string, object?>
             {
                 [nameof(AccountSurface.Snapshot)] = snapshot,
-                [nameof(AccountSurface.OnRefresh)] = EventCallback.Factory.Create(new object(), static () => { })
+                [nameof(AccountSurface.OnRefresh)] = EventCallback.Factory.Create(new object(), static () => { }),
+                [nameof(AccountSurface.SignInHref)] = signInHref,
+                [nameof(AccountSurface.RegisterHref)] = registerHref,
+                [nameof(AccountSurface.GuestReportHref)] = guestReportHref
             };
             if (withSignOutHandler)
             {

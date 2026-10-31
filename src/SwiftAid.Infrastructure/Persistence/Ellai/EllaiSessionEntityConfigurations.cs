@@ -20,6 +20,7 @@ public sealed class EllaiSessionEntityConfiguration : IEntityTypeConfiguration<E
         builder.HasKey(entity => entity.SessionId).HasName("pk_ellai_sessions");
         builder.HasIndex(entity => entity.Status).HasDatabaseName("ix_ellai_sessions_status");
         builder.Property(entity => entity.SessionId).HasColumnName("session_id").HasColumnType("text");
+        builder.Property(entity => entity.OwnerActorId).HasColumnName("owner_actor_id").HasColumnType("text");
         builder.Property(entity => entity.Version).HasColumnName("version").IsConcurrencyToken();
         builder.Property(entity => entity.Mode).HasColumnName("mode").HasColumnType("text");
         builder.Property(entity => entity.Status).HasColumnName("status").HasColumnType("text");
@@ -37,6 +38,8 @@ public sealed class EllaiSessionEntityConfiguration : IEntityTypeConfiguration<E
 
 public sealed class EllaiUtteranceEntityConfiguration : IEntityTypeConfiguration<EllaiUtteranceEntity>
 {
+    public const int MaximumWorkPayloadBytes = 16 * 1024;
+
     public void Configure(EntityTypeBuilder<EllaiUtteranceEntity> builder)
     {
         builder.ToTable("ellai_utterances", table =>
@@ -44,6 +47,12 @@ public sealed class EllaiUtteranceEntityConfiguration : IEntityTypeConfiguration
             table.HasCheckConstraint(
                 "ck_ellai_utterances_ids_nonempty",
                 "length(btrim(session_id)) > 0 AND length(btrim(client_utterance_id)) > 0");
+            table.HasCheckConstraint(
+                "ck_ellai_utterances_attempt_count",
+                "attempt_count >= 0");
+            table.HasCheckConstraint(
+                "ck_ellai_utterances_payload_size",
+                $"work_payload_json IS NULL OR octet_length(work_payload_json::text) <= {MaximumWorkPayloadBytes}");
         });
 
         builder.HasKey(entity => new { entity.SessionId, entity.ClientUtteranceId })
@@ -56,6 +65,12 @@ public sealed class EllaiUtteranceEntityConfiguration : IEntityTypeConfiguration
         builder.Property(entity => entity.SessionId).HasColumnName("session_id").HasColumnType("text");
         builder.Property(entity => entity.ClientUtteranceId).HasColumnName("client_utterance_id").HasColumnType("text");
         builder.Property(entity => entity.AcceptedAtUtc).HasColumnName("accepted_at_utc").HasColumnType("timestamp with time zone");
+        builder.Property(entity => entity.WorkPayloadJson).HasColumnName("work_payload_json").HasColumnType("jsonb");
+        builder.Property(entity => entity.LeaseExpiresAtUtc).HasColumnName("lease_expires_at_utc").HasColumnType("timestamp with time zone");
+        builder.Property(entity => entity.AttemptCount).HasColumnName("attempt_count").HasDefaultValue(0);
+        builder.Property(entity => entity.CompletedAtUtc).HasColumnName("completed_at_utc").HasColumnType("timestamp with time zone");
+        builder.HasIndex(entity => new { entity.CompletedAtUtc, entity.LeaseExpiresAtUtc, entity.AcceptedAtUtc })
+            .HasDatabaseName("ix_ellai_utterances_outbox_claim");
     }
 }
 

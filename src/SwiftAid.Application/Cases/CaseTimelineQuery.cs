@@ -17,12 +17,16 @@ public sealed record CaseTimelineRow(
     DateTimeOffset RecordedAtUtc,
     int SchemaVersion);
 
-/// <summary>Persistence port for the authorized timeline read. Rows arrive oldest-first.</summary>
+/// <summary>Persistence port for the authorized timeline read. Cursor pages arrive newest-first.</summary>
 public interface ICaseTimelineStore
 {
     Task<CaseTimelineHeader?> GetHeaderAsync(Guid caseId, CancellationToken ct);
 
-    Task<IReadOnlyList<CaseTimelineRow>> GetEventsAsync(Guid caseId, int limit, CancellationToken ct);
+    Task<IReadOnlyList<CaseTimelineRow>> GetEventsAsync(
+        Guid caseId,
+        int limit,
+        long? beforeAggregateVersion,
+        CancellationToken ct);
 
     /// <summary>Guest intake receipt that promoted into this case, if any.</summary>
     Task<Guid?> GetPromotingReceiptAsync(Guid caseId, CancellationToken ct);
@@ -34,7 +38,8 @@ public interface ICaseTimelineQuery
         ActorContext actor,
         Guid caseId,
         int? limit,
-        CancellationToken ct);
+        CancellationToken ct,
+        long? beforeAggregateVersion = null);
 }
 
 /// <summary>
@@ -60,13 +65,20 @@ public sealed class CaseTimelineQuery(
         ActorContext actor,
         Guid caseId,
         int? limit,
-        CancellationToken ct)
+        CancellationToken ct,
+        long? beforeAggregateVersion = null)
     {
         ArgumentNullException.ThrowIfNull(actor);
         var take = limit ?? DefaultLimit;
         if (take < 1 || take > MaxLimit)
         {
             throw new ArgumentOutOfRangeException(nameof(limit), "The timeline limit must be between 1 and 500.");
+        }
+
+        if (beforeAggregateVersion is <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(beforeAggregateVersion), "The timeline cursor must be a positive aggregate version.");
         }
 
         if (caseId == Guid.Empty)
@@ -99,15 +111,17 @@ public sealed class CaseTimelineQuery(
                 return new CaseTimelineResult(CaseTimelineAccess.NotFoundOrNotAuthorized, null);
             }
 
-            var rows = await _store.GetEventsAsync(caseId, take, ct).ConfigureAwait(false);
-            var entries = rows
+            var rows = await _store.GetEventsAsync(caseId, take + 1, beforeAggregateVersion, ct).ConfigureAwait(false);
+            var hasOlderEntries = rows.Count > take;
+            var pageRows = rows
+                .Take(take)
                 .OrderBy(row => row.AggregateVersion)
                 .ThenBy(row => row.RecordedAtUtc)
-                .Select(MapAuthoritative)
-                .ToList();
+                .ToArray();
+            var entries = pageRows.Select(MapAuthoritative).ToList();
 
             var receiptId = await _store.GetPromotingReceiptAsync(caseId, ct).ConfigureAwait(false);
-            if (receiptId.HasValue)
+            if (receiptId.HasValue && !hasOlderEntries)
             {
                 entries.Insert(0, new CaseTimelineEntry(
                     Guid.Empty,
@@ -124,9 +138,12 @@ public sealed class CaseTimelineQuery(
             }
 
             await lease.CommitAsync(ct).ConfigureAwait(false);
+            long? olderCursor = hasOlderEntries && pageRows.Length > 0
+                ? pageRows[0].AggregateVersion
+                : null;
             return new CaseTimelineResult(
                 CaseTimelineAccess.Found,
-                new CaseTimeline(header, entries));
+                new CaseTimeline(header, entries, hasOlderEntries, olderCursor));
         }
     }
 

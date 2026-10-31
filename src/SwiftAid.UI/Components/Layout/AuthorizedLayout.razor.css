@@ -3,8 +3,40 @@
     border-block-end: 1px solid var(--sa-border);
 }
 
+.swiftaid-authorized-brand-mark {
+    width: 2rem;
+    height: 2rem;
+    margin-inline-start: 0.5rem;
+    border-radius: 0.45rem;
+    object-fit: contain;
+}
+
 .swiftaid-authorized-drawer {
     background: var(--ais-bg-sidebar);
+}
+
+.swiftaid-authorized-navigation-toggle {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--sa-text-primary);
+    cursor: pointer;
+}
+
+.swiftaid-authorized-navigation-toggle:hover {
+    background: var(--sa-status-info-soft);
+}
+
+.swiftaid-authorized-navigation-toggle:focus-visible {
+    outline: 3px solid var(--sa-focus);
+    outline-offset: 2px;
 }
 
 .swiftaid-authorized-navigation ::deep .mud-nav-link {

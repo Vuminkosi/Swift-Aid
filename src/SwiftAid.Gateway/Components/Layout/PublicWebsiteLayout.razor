@@ -1,0 +1,32 @@
+@inherits LayoutComponentBase
+@using Microsoft.AspNetCore.Components.Authorization
+@using SwiftAid.UI.Components.Theme
+@using SwiftAid.UI.Components.Surfaces.Public
+@using SwiftAid.UI.Ellai
+@using SwiftAid.UI.Ellai.Components
+@using SwiftAid.UI.Ellai.Guidance
+@inject EllaiLauncher EllaiLauncher
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<PublicWebsiteShell>
+    <ChildContent>@Body</ChildContent>
+</PublicWebsiteShell>
+
+<AuthorizeView>
+    <Authorized>
+        <EllaiGuidanceHost />
+        <EllaiLauncherMenu OnModeSelected="RequestEllaiMode" />
+    </Authorized>
+    <NotAuthorized>
+        <EllaiGuidanceHost />
+        <EllaiLauncherMenu PublicHelpOnly="true" OnModeSelected="RequestEllaiMode" />
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    private void RequestEllaiMode(SwiftAid.Contracts.Ellai.EllaiMode mode) => EllaiLauncher.Request(mode);
+}

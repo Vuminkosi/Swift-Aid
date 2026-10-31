@@ -15,6 +15,36 @@ namespace SwiftAid.Ui.Tests;
 public sealed class CaseCorrectionWorkflowTests
 {
     [Theory]
+    [InlineData("http://localhost/case/123?tab=history", 1)]
+    [InlineData("http://localhost/case/123?tab=attachments", 5)]
+    [InlineData("http://localhost/case/123?tab=unknown", 0)]
+    public async Task CaseDetail_RestoresTabFromRoute(string uri, int expectedIndex)
+    {
+        var services = CreateServices(uri);
+        await using var renderer = new TestRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        using var rendered = await renderer.RenderAsync(CaseDetailPanelState.Unavailable, CaseDetailCorrectionKind.LegacyV1, false);
+
+        Assert.Equal(expectedIndex, renderer.GetActivePanelIndex(rendered.Instance));
+    }
+
+    [Fact]
+    public async Task CaseDetail_TabSelectionUpdatesShareableUri_AndBrowserBackRestoresTab()
+    {
+        var services = CreateServices("http://localhost/case/123");
+        var navigation = services.GetRequiredService<TestNavigationManager>();
+        await using var renderer = new TestRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        using var rendered = await renderer.RenderAsync(CaseDetailPanelState.Unavailable, CaseDetailCorrectionKind.LegacyV1, false);
+
+        await renderer.ActivateTabAsync(rendered.Instance, 5);
+        Assert.Contains("tab=attachments", navigation.Uri, StringComparison.Ordinal);
+
+        navigation.NavigateTo("http://localhost/case/123?tab=history");
+        await renderer.Dispatcher.InvokeAsync(() => Task.CompletedTask);
+
+        Assert.Equal(1, renderer.GetActivePanelIndex(rendered.Instance));
+    }
+
+    [Theory]
     [InlineData(CaseDetailPanelState.Denied, CaseDetailCorrectionKind.LegacyV1, false, 0)]
     [InlineData(CaseDetailPanelState.Populated, CaseDetailCorrectionKind.HumanV2, false, 0)]
     [InlineData(CaseDetailPanelState.Populated, CaseDetailCorrectionKind.LegacyV1, false, 0)]
@@ -294,13 +324,32 @@ public sealed class CaseCorrectionWorkflowTests
         }
     }
 
-    private static ServiceProvider CreateServices()
+    private static ServiceProvider CreateServices(string uri = "http://localhost/case/123")
     {
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddMudServices();
         services.AddSingleton<IJSRuntime, RecordingJsRuntime>();
+        services.AddSingleton(new TestNavigationManager(uri));
+        services.AddSingleton<NavigationManager>(serviceProvider => serviceProvider.GetRequiredService<TestNavigationManager>());
         return services.BuildServiceProvider();
+    }
+
+    private sealed class TestNavigationManager : NavigationManager
+    {
+        public TestNavigationManager(string uri) => Initialize("http://localhost/", uri);
+
+        protected override void NavigateToCore(string uri, bool forceLoad)
+        {
+            Uri = ToAbsoluteUri(uri).ToString();
+            NotifyLocationChanged(false);
+        }
+
+        protected override void NavigateToCore(string uri, NavigationOptions options)
+        {
+            Uri = ToAbsoluteUri(uri).ToString();
+            NotifyLocationChanged(false);
+        }
     }
 
     private static Dictionary<string, object?> CreateParameters(Guid caseId, CaseDetailCorrectionView correction,
@@ -315,7 +364,7 @@ public sealed class CaseCorrectionWorkflowTests
     private sealed class CountingTimelineClient : ICaseTimelineClient
     {
         public int GetCalls { get; private set; }
-        public Task<CaseTimelineResult> GetAsync(Guid caseId, int? limit, CancellationToken cancellationToken = default)
+        public Task<CaseTimelineResult> GetAsync(Guid caseId, int? limit, CancellationToken cancellationToken = default, long? beforeAggregateVersion = null)
         {
             GetCalls++;
             return Task.FromResult(new CaseTimelineResult(CaseTimelineAccess.NotFoundOrNotAuthorized, null));
@@ -323,8 +372,12 @@ public sealed class CaseCorrectionWorkflowTests
     }
 
     private sealed record ComponentParameters(int ComponentId, Type ComponentType, Dictionary<string, object?> Parameters);
-    private sealed class TestRenderer(IServiceProvider services, ILoggerFactory loggerFactory) : Renderer(services, loggerFactory)
+    private sealed class TestRenderer : Renderer
     {
+        private readonly IServiceProvider _services;
+
+        public TestRenderer(IServiceProvider services, ILoggerFactory loggerFactory) : base(services, loggerFactory) => _services = services;
+
         public override Dispatcher Dispatcher { get; } = Dispatcher.CreateDefault();
 
         public async Task<RenderedComponent> RenderAsync(CaseDetailPanelState state, CaseDetailCorrectionKind kind,
@@ -341,6 +394,9 @@ public sealed class CaseCorrectionWorkflowTests
         public async Task<RenderedComponent> RenderAsync(Dictionary<string, object?> parameters)
         {
             var component = new OperationsCaseDetailSurface();
+            typeof(OperationsCaseDetailSurface)
+                .GetProperty("Navigation", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)
+                ?.SetValue(component, _services.GetRequiredService<NavigationManager>());
             var id = -1;
             await Dispatcher.InvokeAsync(async () =>
             {
@@ -361,6 +417,16 @@ public sealed class CaseCorrectionWorkflowTests
             Assert.NotNull(tabs);
             await tabs!.ActivatePanelAsync(tabIndex, ignoreDisabledState: false);
         });
+
+        public int GetActivePanelIndex(object surface)
+        {
+            var tabs = (MudTabs?)typeof(OperationsCaseDetailSurface)
+                .GetField("_tabs", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                ?.GetValue(surface);
+            return (int?)typeof(MudTabs)
+                .GetProperty("ActivePanelIndex", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public)
+                ?.GetValue(tabs) ?? -1;
+        }
 
         public List<ComponentParameters> FindComponents(int componentId, Type type)
         {

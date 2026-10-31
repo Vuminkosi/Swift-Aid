@@ -16,7 +16,8 @@ public sealed class CaseTimelineHttpClient(HttpClient httpClient) : ICaseTimelin
     public async Task<CaseTimelineResult> GetAsync(
         Guid caseId,
         int? limit,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        long? beforeAggregateVersion = null)
     {
         if (httpClient.BaseAddress is null || caseId == Guid.Empty)
         {
@@ -24,10 +25,16 @@ public sealed class CaseTimelineHttpClient(HttpClient httpClient) : ICaseTimelin
         }
 
         var path = $"api/v1/cases/{caseId:D}/timeline";
+        var queryParameters = new List<string>(2);
         if (limit.HasValue)
         {
-            path += $"?limit={limit.Value}";
+            queryParameters.Add($"limit={limit.Value}");
         }
+        if (beforeAggregateVersion.HasValue)
+        {
+            queryParameters.Add($"beforeAggregateVersion={beforeAggregateVersion.Value}");
+        }
+        if (queryParameters.Count > 0) path += "?" + string.Join("&", queryParameters);
 
         using var response = await httpClient.GetAsync(path, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)

@@ -8,13 +8,13 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiReadToolTests
 {
     private static readonly EllaiToolContext Context = new(
-        "session-1", "epoch-1", "cases", "case-1", 4, true);
+        "session-1", "epoch-1", "cases", "case-1", 4, true, "consent/1", EllaiProcessingClassification.SyntheticDemo);
 
     private static EllaiToolBroker GrantedBroker()
     {
         var consent = new EllaiConsentService();
         consent.Grant("session-1", EllaiConsentDimension.ReasoningText,
-            EllaiToolBroker.ToolReadPurpose, "synthetic", TimeSpan.FromHours(1));
+            EllaiToolBroker.ToolReadPurpose, EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
         return new EllaiToolBroker(new EllaiPolicyService(), consent);
     }
 
@@ -47,12 +47,12 @@ public sealed class EllaiReadToolTests
     public async Task RegisteredReadsReturnBoundedResults()
     {
         var docsPath = Path.Combine(Path.GetTempPath(), $"technical-{Guid.NewGuid():N}.md");
-        File.WriteAllText(docsPath, "## 1. Sample\n\n**Status: Implemented.** Sample section.\n");
+        File.WriteAllText(docsPath, "# Reference\n\n**Status: Approved.**\n\n## 1. Sample\n\n**Status: Implemented.** Sample section.\n");
         try
         {
             var consent = new EllaiConsentService();
             consent.Grant("session-1", EllaiConsentDimension.ReasoningText,
-                EllaiToolBroker.ToolReadPurpose, "synthetic", TimeSpan.FromHours(1));
+                EllaiToolBroker.ToolReadPurpose, EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
             var topics = new EllaiTopicService();
             await topics.TrackAsync("session-1", "Sample topic", new[] { "sample" }, null, null);
             var registry = new EllaiUiRegistry();
@@ -115,5 +115,42 @@ public sealed class EllaiReadToolTests
             CancellationToken.None);
 
         Assert.False(result.Allowed);
+    }
+
+    [Fact]
+    public async Task ProductFacts_ReturnVersionedGroundingAndDenyUnknownTopics()
+    {
+        var broker = GrantedBroker();
+
+        var receipt = await broker.InvokeAsync(
+            Context,
+            new EllaiToolRequest(EllaiToolNames.ProductFacts,
+                new Dictionary<string, string> { ["topic"] = "guest receipt" }),
+            CancellationToken.None);
+        var unknown = await broker.InvokeAsync(
+            Context,
+            new EllaiToolRequest(EllaiToolNames.ProductFacts,
+                new Dictionary<string, string> { ["topic"] = "unpublished capability" }),
+            CancellationToken.None);
+        var unsupportedArgument = await broker.InvokeAsync(
+            Context,
+            new EllaiToolRequest(EllaiToolNames.ProductFacts,
+                new Dictionary<string, string> { ["path"] = "spec.md" }),
+            CancellationToken.None);
+
+        Assert.True(receipt.Allowed);
+        Assert.Contains("An intake receipt confirms that a concern was received", receipt.ResultSummary);
+        Assert.NotEmpty(receipt.Evidence);
+        Assert.All(receipt.Evidence, item =>
+        {
+            Assert.Equal("ProductFact", item.SourceKind);
+            Assert.Equal(EllaiProductFactCatalog.Revision, item.Version);
+            Assert.False(string.IsNullOrWhiteSpace(item.FieldPath));
+        });
+        Assert.True(EllaiToolBroker.MeasureEnvelopeBytes(receipt) <= EllaiToolBroker.MaxResultBytes);
+        Assert.False(unknown.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.InvalidArguments, unknown.ReasonCode);
+        Assert.False(unsupportedArgument.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.InvalidArguments, unsupportedArgument.ReasonCode);
     }
 }

@@ -26,6 +26,27 @@ public sealed class MobileGatewayAddressTests
     }
 
     [Fact]
+    public void Resolve_AllowsHttpOnlyWhenDevelopmentGatewayIsExplicitlyEnabled()
+    {
+        var resolved = MobileGatewayAddress.Resolve(
+            "http://10.0.2.2:8080",
+            "SwiftAid:GatewayBaseAddress",
+            rewriteLoopbackForAndroidEmulator: false,
+            allowHttpForDevelopmentGateway: true);
+
+        Assert.Equal("http://10.0.2.2:8080/", resolved?.ToString());
+    }
+
+    [Fact]
+    public void Resolve_RejectsHttpWhenDevelopmentGatewayIsNotEnabled()
+    {
+        Assert.Throws<InvalidOperationException>(() => MobileGatewayAddress.Resolve(
+            "http://10.0.2.2:8080",
+            "SwiftAid:GatewayBaseAddress",
+            rewriteLoopbackForAndroidEmulator: false));
+    }
+
+    [Fact]
     public void Resolve_RejectsBlankSettingName()
     {
         Assert.Throws<ArgumentException>(() =>

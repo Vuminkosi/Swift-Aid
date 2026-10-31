@@ -11,7 +11,7 @@ public sealed class EllaiConsentHydrationTests
     {
         var grant = new EllaiConsentGrant(
             $"grant-{Guid.NewGuid():N}", session, EllaiConsentDimension.ReasoningText,
-            purpose, "synthetic", 3, DateTimeOffset.UtcNow.AddHours(1), revoked);
+            purpose, EllaiProcessingClassification.SyntheticDemo, 3, DateTimeOffset.UtcNow.AddHours(1), revoked);
         store.RecordAsync(grant, CancellationToken.None).GetAwaiter().GetResult();
         return grant;
     }
@@ -26,13 +26,13 @@ public sealed class EllaiConsentHydrationTests
         var service = new EllaiConsentService();
         Assert.False(service.IsGranted(
             "session-1", EllaiConsentDimension.ReasoningText,
-            EllaiToolBroker.ToolReadPurpose, DateTimeOffset.UtcNow));
+            EllaiToolBroker.ToolReadPurpose, EllaiProcessingClassification.SyntheticDemo, DateTimeOffset.UtcNow));
 
         await service.HydrateAsync("session-1", store, CancellationToken.None);
 
         Assert.True(service.IsGranted(
             "session-1", EllaiConsentDimension.ReasoningText,
-            EllaiToolBroker.ToolReadPurpose, DateTimeOffset.UtcNow));
+            EllaiToolBroker.ToolReadPurpose, EllaiProcessingClassification.SyntheticDemo, DateTimeOffset.UtcNow));
         Assert.Equal("consent/3", service.VersionLabel("session-1"));
     }
 
@@ -45,14 +45,14 @@ public sealed class EllaiConsentHydrationTests
         await service.HydrateAsync("session-1", store, CancellationToken.None);
         Assert.True(service.IsGranted(
             "session-1", EllaiConsentDimension.ReasoningText,
-            EllaiToolBroker.ToolReadPurpose, DateTimeOffset.UtcNow));
+            EllaiToolBroker.ToolReadPurpose, EllaiProcessingClassification.SyntheticDemo, DateTimeOffset.UtcNow));
 
         Assert.True(await store.SetRevokedAsync("session-1", grant.GrantId, CancellationToken.None));
         await service.HydrateAsync("session-1", store, CancellationToken.None);
 
         Assert.False(service.IsGranted(
             "session-1", EllaiConsentDimension.ReasoningText,
-            EllaiToolBroker.ToolReadPurpose, DateTimeOffset.UtcNow));
+            EllaiToolBroker.ToolReadPurpose, EllaiProcessingClassification.SyntheticDemo, DateTimeOffset.UtcNow));
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public sealed class EllaiConsentHydrationTests
         var store = new InMemoryEllaiConsentStore();
         var service = new EllaiConsentService();
         service.Grant("session-1", EllaiConsentDimension.ReasoningText,
-            EllaiToolBroker.ToolReadPurpose, "synthetic", TimeSpan.FromHours(1));
+            EllaiToolBroker.ToolReadPurpose, EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
         service.RevokeSession("session-1");
 
         await service.HydrateAsync("session-1", store, CancellationToken.None);
@@ -69,7 +69,7 @@ public sealed class EllaiConsentHydrationTests
         Assert.Equal(1, service.LatestVersion("session-1"));
         Assert.False(service.IsGranted(
             "session-1", EllaiConsentDimension.ReasoningText,
-            EllaiToolBroker.ToolReadPurpose, DateTimeOffset.UtcNow));
+            EllaiToolBroker.ToolReadPurpose, EllaiProcessingClassification.SyntheticDemo, DateTimeOffset.UtcNow));
     }
 
     [Fact]
@@ -81,7 +81,7 @@ public sealed class EllaiConsentHydrationTests
         await service.HydrateAsync("session-1", store, CancellationToken.None);
 
         var next = service.Grant("session-1", EllaiConsentDimension.ReasoningText,
-            EllaiToolBroker.ToolReadPurpose, "synthetic", TimeSpan.FromHours(1));
+            EllaiToolBroker.ToolReadPurpose, EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
 
         Assert.True(next.Version > 3);
     }

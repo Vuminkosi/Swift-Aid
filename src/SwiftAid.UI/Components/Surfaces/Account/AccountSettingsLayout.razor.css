@@ -10,3 +10,26 @@
         overscroll-behavior: contain;
     }
 }
+
+.account-settings-layout__mobile-tabs {
+    min-width: 0;
+    margin-block-end: 1rem;
+    border: 1px solid var(--sa-border);
+    border-radius: 1rem;
+    background: var(--sa-surface);
+}
+
+.account-settings-layout__mobile-tabs ::deep .mud-tabs-tabbar {
+    overflow-x: auto;
+    scrollbar-width: none;
+    border-bottom: 1px solid var(--sa-border);
+}
+
+.account-settings-layout__mobile-tabs ::deep .mud-tabs-tabbar::-webkit-scrollbar {
+    display: none;
+}
+
+.account-settings-layout__mobile-tabs ::deep .mud-tab {
+    min-width: max-content;
+    padding-inline: .75rem;
+}

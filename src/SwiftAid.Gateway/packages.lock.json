@@ -507,6 +507,7 @@
           "Microsoft.AspNetCore.Components.WebAssembly": "[10.0.14, )",
           "Microsoft.NET.Sdk.WebAssembly.Pack": "[10.0.14, )",
           "MudBlazor": "[9.11.0, )",
+          "SwiftAid.Client": "[1.0.0, )",
           "SwiftAid.Contracts": "[1.0.0, )",
           "SwiftAid.GuestIntake": "[1.0.0, )",
           "SwiftAid.UI": "[1.0.0, )"

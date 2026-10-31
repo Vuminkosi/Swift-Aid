@@ -14,10 +14,11 @@ public sealed class SwiftAidOfflineDbContext : OfflineDbContext
 
     public SwiftAidOfflineDbContext(
         DbContextOptions<SwiftAidOfflineDbContext> options,
-        Uri? gatewayBaseAddress)
+        Uri? gatewayBaseAddress,
+        bool allowInsecureTransport = false)
         : base(options)
     {
-        _gatewayBaseAddress = ValidateGatewayBaseAddress(gatewayBaseAddress);
+        _gatewayBaseAddress = ValidateGatewayBaseAddress(gatewayBaseAddress, allowInsecureTransport);
     }
 
     public DbSet<OfflineSpikeRecord> SpikeRows => Set<OfflineSpikeRecord>();
@@ -51,18 +52,20 @@ public sealed class SwiftAidOfflineDbContext : OfflineDbContext
         });
     }
 
-    internal static Uri? ValidateGatewayBaseAddress(Uri? endpoint)
+    internal static Uri? ValidateGatewayBaseAddress(Uri? endpoint, bool allowInsecureTransport = false)
     {
         if (endpoint is null)
         {
             return null;
         }
 
-        if (!endpoint.IsAbsoluteUri || endpoint.Scheme != Uri.UriSchemeHttps ||
+        if (!endpoint.IsAbsoluteUri ||
+            (endpoint.Scheme != Uri.UriSchemeHttps &&
+                !(allowInsecureTransport && endpoint.Scheme == Uri.UriSchemeHttp)) ||
             !string.IsNullOrEmpty(endpoint.UserInfo) || !string.IsNullOrEmpty(endpoint.Query) ||
             !string.IsNullOrEmpty(endpoint.Fragment))
         {
-            throw new ArgumentException("The Datasync Gateway base address must be an absolute HTTPS origin or path without credentials, query, or fragment.", nameof(endpoint));
+            throw new ArgumentException("The Datasync Gateway base address must be an absolute HTTPS origin or path without credentials, query, or fragment. HTTP requires an explicit development-only override.", nameof(endpoint));
         }
 
         // Datasync entity endpoints are relative to the configured gateway base. A base
@@ -95,8 +98,12 @@ public sealed class SwiftAidOfflineDbContextFactory : IDbContextFactory<SwiftAid
 {
     private readonly string _databasePath;
     private readonly Uri? _gatewayBaseAddress;
+    private readonly bool _allowInsecureTransport;
 
-    public SwiftAidOfflineDbContextFactory(string appPrivateDirectory, Uri? gatewayBaseAddress)
+    public SwiftAidOfflineDbContextFactory(
+        string appPrivateDirectory,
+        Uri? gatewayBaseAddress,
+        bool allowInsecureTransport = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(appPrivateDirectory);
         if (!Path.IsPathFullyQualified(appPrivateDirectory))
@@ -105,7 +112,8 @@ public sealed class SwiftAidOfflineDbContextFactory : IDbContextFactory<SwiftAid
         }
 
         _databasePath = Path.Combine(appPrivateDirectory, "swiftaid-datasync-spike.db");
-        _gatewayBaseAddress = SwiftAidOfflineDbContext.ValidateGatewayBaseAddress(gatewayBaseAddress);
+        _allowInsecureTransport = allowInsecureTransport;
+        _gatewayBaseAddress = SwiftAidOfflineDbContext.ValidateGatewayBaseAddress(gatewayBaseAddress, allowInsecureTransport);
     }
 
     public bool HasRemoteEndpoint => _gatewayBaseAddress is not null;
@@ -124,7 +132,7 @@ public sealed class SwiftAidOfflineDbContextFactory : IDbContextFactory<SwiftAid
             .UseSqlite(connectionString)
             .Options;
 
-        return new SwiftAidOfflineDbContext(options, _gatewayBaseAddress);
+        return new SwiftAidOfflineDbContext(options, _gatewayBaseAddress, _allowInsecureTransport);
     }
 
     public Task<SwiftAidOfflineDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default)

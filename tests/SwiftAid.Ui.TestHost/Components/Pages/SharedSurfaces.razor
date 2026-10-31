@@ -1,0 +1,233 @@
+@page "/shared-surfaces"
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.Contracts.Geography
+@using SwiftAid.Contracts.Intake
+@using SwiftAid.Contracts.Sessions
+@using SwiftAid.UI.Components.Public
+@using SwiftAid.UI.Components.Surfaces.Public
+@using SwiftAid.UI.Components.Surfaces.Shell
+@using SwiftAid.UI.Components.Theme
+
+<PageTitle>Shared SwiftAid surfaces fixture</PageTitle>
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<SwiftAidApplicationShell BrandName="SwiftAid"
+                          HomeHref="/shared-surfaces"
+                          PageLabel="Shared surfaces fixture"
+                          MainContentId="shared-surfaces-main"
+                          DesktopNavigation="@DesktopLinks"
+                          MobileNavigation="@MobileLinks"
+                          HeaderActions="@HeaderActions">
+    <ChildContent>
+        <div class="shared-surfaces-fixture">
+            <header class="shared-surfaces-fixture__heading">
+                <h1>Shared surfaces verification</h1>
+                <p>Local test fixture only. Report edits stay in memory; no service, storage, receipt, or account is connected.</p>
+            </header>
+
+            <section id="shared-home" aria-label="Public home surface" data-testid="public-home-surface">
+                <PublicHomeSurface IsSignedIn="false" CaseQueueClient="_unusedSignedInQueueClient" />
+            </section>
+
+            <section id="shared-report" aria-label="Public report surface" data-testid="public-report-surface">
+                <PublicReportSurface Draft="_reportDraft"
+                                     Countries="_countries"
+                                     CountryCatalogueVersion="fixture-country-catalogue-v1"
+                                     CountryCatalogueIsCurrent="true"
+                                     ProcessingPolicyReference="testhost-synthetic-only"
+                                     ProcessingPolicyVersion="fixture-v1"
+                                     PrivacyNoticeIsCurrent="false"
+                                     DraftSavingAvailable="false"
+                                     SubmitAvailable="false" />
+                <p data-testid="report-capability-state" role="status" aria-live="polite">
+                    Report submission and draft saving are unavailable in this read-only synthetic fixture.
+                </p>
+            </section>
+
+            <section id="shared-sessions" aria-label="Public sessions surface" data-testid="public-sessions-surface">
+                <PublicSessionsSurface Sessions="_demoSessions"
+                                       InitialSessionId="@SyntheticSessionId" />
+            </section>
+
+            <section id="shared-education" aria-label="Synthetic process education surface" data-testid="synthetic-education-surface">
+                <p>TestHost-only, synthetic process and privacy materials. Search changes this in-memory fixture list; no health guidance or offline save is provided.</p>
+                <EducationSurface Materials="@VisibleEducationResources"
+                                  Query="_educationQuery"
+                                  IsAvailable="true"
+                                  TotalCount="@VisibleEducationResources.Count"
+                                  OnQueryChanged="ChangeEducationQueryAsync" />
+                <p data-testid="education-fixture-state" role="status" aria-live="polite">@_educationFixtureStatus</p>
+            </section>
+
+            <section id="shared-state-transitions" class="shared-surfaces-fixture__states" aria-label="State transition controls">
+                <h2>Loading to empty or information</h2>
+                <div class="shared-surfaces-fixture__controls">
+                    <button type="button" data-testid="loading-to-empty" @onclick="ShowEmptyState">Show empty state</button>
+                    <button type="button" data-testid="loading-to-information" @onclick="ShowInformationState">Show information state</button>
+                    <button type="button" data-testid="reset-loading-state" @onclick="ResetLoadingState">Reset to loading</button>
+                </div>
+                <div data-testid="loading-transition-panel">
+                    <SwiftAidStatePanel State="_loadingState"
+                                        Title="Synthetic reports loading"
+                                        Description="Waiting for this fixture state transition.">
+                        <ChildContent>
+                            <p data-testid="loading-transition-populated">The fixture data is ready.</p>
+                        </ChildContent>
+                    </SwiftAidStatePanel>
+                </div>
+
+                <h2>Populated to empty</h2>
+                <button type="button" data-testid="populated-to-empty" @onclick="ShowEmptyQueue">Show empty state</button>
+                <div data-testid="populated-transition-panel">
+                    <SwiftAidStatePanel State="_populatedState"
+                                        Title="Synthetic queue is empty"
+                                        Description="No live queue was queried.">
+                        <ChildContent>
+                            <p data-testid="populated-transition-content">Synthetic fixture queue has one visible example.</p>
+                        </ChildContent>
+                    </SwiftAidStatePanel>
+                </div>
+            </section>
+
+            <section id="shared-draft-probe" aria-label="Shared report draft probe" data-testid="shared-draft-probe">
+                <h2>Shared report draft, in memory</h2>
+                <p>The desktop form and mobile stepper receive the same draft object. This probe displays its current narrative without saving it.</p>
+                <button type="button" data-testid="capture-shared-draft" @onclick="CaptureDraft">Read current draft</button>
+                <output data-testid="shared-draft-value" aria-live="polite">@_observedDraftNarrative</output>
+            </section>
+        </div>
+    </ChildContent>
+</SwiftAidApplicationShell>
+
+@code {
+    // Signed-out PublicHomeSurface never requests the privileged case queue; null is deliberate here.
+    private ICaseQueueClient _unusedSignedInQueueClient = null!;
+    private readonly PublicReportDraft _reportDraft = new()
+    {
+        SubjectScope = IntakeSubjectScope.Human,
+        Narrative = "Synthetic fixture narrative. No person or animal is represented.",
+        ReportReviewConfirmed = true,
+        CountryCode = "ZW",
+        CountryConfirmed = true,
+        LocationUnknown = false
+    };
+    private readonly IReadOnlyList<PublicCountryOption> _countries =
+    [
+        new("ZW", "Zimbabwe"),
+        new("SZ", "Eswatini")
+    ];
+    private static readonly Guid SyntheticSessionId = Guid.Parse("f7663b33-aee7-47a8-9b9d-5b1d3ab8fc01");
+    private readonly IReadOnlyList<PublicSessionView> _demoSessions =
+    [
+        new(
+            Guid.Parse("f7663b33-aee7-47a8-9b9d-5b1d3ab8fc01"),
+            1,
+            "Synthetic community session",
+            "A fixture-only listing for testing the public sessions surface.",
+            "Community members",
+            ["fixture"],
+            "ZW",
+            "fixture-region",
+            "community",
+            "Demo presenter",
+            "English",
+            DateTimeOffset.UtcNow.AddDays(7),
+            "Africa/Harare",
+            45,
+            null,
+            [],
+            SessionChannelType.None,
+            null,
+            "Published",
+            null,
+            1)
+    ];
+    private SwiftAidViewState _loadingState = SwiftAidViewState.Loading;
+    private SwiftAidViewState _populatedState = SwiftAidViewState.Populated;
+    private string _observedDraftNarrative = "No draft read yet.";
+    private EducationBrowseRequest _educationQuery = new();
+    private string _educationFixtureStatus = "Search filters a static synthetic list in page memory. Materials are not approved for public use.";
+    private IReadOnlyList<EducationMaterialPresentation> _educationResources =
+    [
+        new(
+            "fixture-privacy-process",
+            "Privacy notice review process",
+            "A fixed, nonclinical checklist for reviewing privacy notice versions.",
+            "Privacy process",
+            "English",
+            "Synthetic TestHost fixture",
+            "fixture-v1",
+            IsApproved: false,
+            IsAvailableOffline: false,
+            OfflineState: EducationOfflinePresentationState.Unavailable,
+            ReviewStatus: "Not reviewed; synthetic fixture",
+            ReuseRights: "Not applicable to synthetic fixture"),
+        new(
+            "fixture-evidence-process",
+            "Evidence handling process",
+            "A fixed, nonclinical checklist for labeling unknown evidence accurately.",
+            "Evidence process",
+            "English",
+            "Synthetic TestHost fixture",
+            "fixture-v1",
+            IsApproved: false,
+            IsAvailableOffline: false,
+            OfflineState: EducationOfflinePresentationState.Unavailable,
+            ReviewStatus: "Not reviewed; synthetic fixture",
+            ReuseRights: "Not applicable to synthetic fixture")
+    ];
+
+    private RenderFragment DesktopLinks => @<div class="shared-surfaces-fixture__desktop-links">
+        <a href="#shared-home">Home</a>
+        <a href="#shared-report">Report</a>
+        <a href="#shared-sessions">Sessions</a>
+        <a href="#shared-education">Education</a>
+        <a href="#shared-state-transitions">State transitions</a>
+        <a href="#shared-draft-probe">Draft probe</a>
+        <a href="#populated-transition-content">Queue example</a>
+    </div>;
+
+    private RenderFragment MobileLinks => @<text>
+        <a href="#shared-home">Home</a>
+        <a href="#shared-report">Report</a>
+        <a href="#shared-sessions">Sessions</a>
+        <a href="#shared-education">Education</a>
+        <a href="#shared-state-transitions">States</a>
+        <a href="#shared-draft-probe">Draft</a>
+    </text>;
+
+    private IReadOnlyList<EducationMaterialPresentation> VisibleEducationResources => _educationResources
+        .Where(material => string.IsNullOrWhiteSpace(_educationQuery.Search) ||
+            material.Title.Contains(_educationQuery.Search, StringComparison.OrdinalIgnoreCase) ||
+            material.Summary.Contains(_educationQuery.Search, StringComparison.OrdinalIgnoreCase))
+        .Where(material => string.IsNullOrWhiteSpace(_educationQuery.Category) ||
+            string.Equals(material.Category, _educationQuery.Category, StringComparison.OrdinalIgnoreCase))
+        .Where(material => !_educationQuery.OfflineOnly || material.IsAvailableOffline)
+        .ToArray();
+
+    private RenderFragment HeaderActions => @<span data-testid="shared-shell-status">Synthetic test fixture</span>;
+
+    private void ShowEmptyState() => _loadingState = SwiftAidViewState.Empty;
+
+    private void ShowInformationState() => _loadingState = SwiftAidViewState.Information;
+
+    private void ResetLoadingState() => _loadingState = SwiftAidViewState.Loading;
+
+    private void ShowEmptyQueue() => _populatedState = SwiftAidViewState.Empty;
+
+    private void CaptureDraft()
+    {
+        _observedDraftNarrative = _reportDraft.Narrative ?? "Unknown";
+    }
+
+    private Task ChangeEducationQueryAsync(EducationBrowseRequest request)
+    {
+        _educationQuery = request;
+        _educationFixtureStatus = "Search filters a static synthetic list in page memory. Materials are not approved for public use.";
+        return Task.CompletedTask;
+    }
+}

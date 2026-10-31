@@ -7,10 +7,6 @@
     {
         <MudText Typo="Typo.body2" Color="Color.Secondary">
             Status: @(Status ?? "unknown") · version @ExpectedVersion
-            @if (!string.IsNullOrWhiteSpace(CreatedByActorId))
-            {
-                <span> · planned by @CreatedByActorId</span>
-            }
         </MudText>
     }
 
@@ -19,6 +15,8 @@
         <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" role="alert" Class="mt-2">@ServerError</MudAlert>
     }
 
+    <fieldset class="session-editor__fields" disabled="@(!CanEditFields || Busy)">
+        <legend>Session details</legend>
     <MudGrid Class="mt-2">
         <MudItem xs="12" md="6">
             <MudTextField T="string" Label="Title" @bind-Value="_title" Required="true"
@@ -109,41 +107,49 @@
             <MudText Typo="Typo.caption" Color="Color.Secondary">
                 At least one human-authored, source-linked material is required. New or unreviewed content cannot be published.
             </MudText>
-            @foreach (var row in _materials)
+            @for (var materialIndex = 0; materialIndex < _materials.Count; materialIndex++)
             {
+                var row = _materials[materialIndex];
+                var removeMaterialLabel = $"Remove material {materialIndex + 1}";
                 <div class="session-editor__material-row" @key="row.Key">
                     <MudTextField T="string" Label="Material" @bind-Value="row.MaterialId" />
                     <MudTextField T="string" Label="Source version" @bind-Value="row.SourceVersion" />
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error"
-                                   OnClick="() => RemoveMaterial(row)" aria-label="Remove material" Disabled="Busy" />
+                                   OnClick="() => RemoveMaterial(row)" aria-label="@removeMaterialLabel" Disabled="@(!CanEditFields || Busy)" />
                 </div>
             }
             @if (!string.IsNullOrEmpty(FieldError("Materials")))
             {
                 <MudText Typo="Typo.caption" Color="Color.Error">@FieldError("Materials")</MudText>
             }
-            <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
-                       OnClick="AddMaterial" Disabled="Busy">Add material</MudButton>
-        </MudItem>
-        <MudItem xs="12">
-            <MudTextField T="string" Label="Reason for this change" @bind-Value="_reason" Required="true"
-                         HelperText="Recorded with the change for review."
-                         Error='@HasError("Reason")' ErrorText='@FieldError("Reason")' />
+            <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="AddMaterial" Disabled="@(!CanEditFields || Busy)">Add material</MudButton>
         </MudItem>
     </MudGrid>
+    </fieldset>
+
+    @if (CanProvideReason)
+    {
+        <MudTextField T="string" Label="Reason for this change" @bind-Value="_reason" Required="true"
+                     HelperText="Recorded with the change for review."
+                     Error='@HasError("Reason")' ErrorText='@FieldError("Reason")' />
+    }
 
     <div class="session-editor__actions">
         @if (IsNew)
         {
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SubmitCreateAsync" Disabled="Busy">Save draft</MudButton>
+            @if (CanCreate)
+            {
+                <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="SubmitCreateAsync" Disabled="Busy" StartIcon="@Icons.Material.Filled.Save">Save draft</MudButton>
+            }
         }
         else
         {
             @if (CanUpdate)
             {
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SubmitUpdateAsync" Disabled="Busy">Save changes</MudButton>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="SubmitUpdateAsync" Disabled="Busy" StartIcon="@Icons.Material.Filled.Save">Save changes</MudButton>
             }
-            @if (IsDraft)
+            @if (CanReview && IsDraft)
             {
                 @if (IsSelfReview)
                 {
@@ -155,28 +161,28 @@
                         <MudText Typo="Typo.caption" Color="Color.Error">@FieldError("SelfReview")</MudText>
                     }
                 }
-                <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="SubmitReviewAsync" Disabled="Busy">Record review</MudButton>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="SubmitReviewAsync" Disabled="Busy" StartIcon="@Icons.Material.Filled.RateReview">Record review</MudButton>
             }
-            @if (IsReviewed)
+            @if (CanSchedule)
             {
-                <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="SubmitScheduleAsync" Disabled="Busy">Publish schedule</MudButton>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="SubmitScheduleAsync" Disabled="Busy" StartIcon="@Icons.Material.Filled.Publish">Publish schedule</MudButton>
             }
-            @if (IsScheduled)
+            @if (CanComplete)
             {
-                <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="SubmitCompleteAsync" Disabled="Busy">Mark complete</MudButton>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="SubmitCompleteAsync" Disabled="Busy" StartIcon="@Icons.Material.Filled.TaskAlt">Mark complete</MudButton>
             }
             @if (CanCancel)
             {
                 @if (!_confirmingCancel)
                 {
-                    <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="() => _confirmingCancel = true" Disabled="Busy">Cancel session…</MudButton>
+                    <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="() => _confirmingCancel = true" Disabled="Busy" StartIcon="@Icons.Material.Filled.Cancel">Cancel session…</MudButton>
                 }
                 else
                 {
                     <MudTextField T="string" Label="Cancellation reason" @bind-Value="_cancellationReason" Required="true"
                                  Error='@HasError("CancellationReason")' ErrorText='@FieldError("CancellationReason")' />
-                    <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="SubmitCancelAsync" Disabled="Busy">Yes, cancel this session</MudButton>
-                    <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="() => _confirmingCancel = false" Disabled="Busy">Keep session</MudButton>
+                    <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="SubmitCancelAsync" Disabled="Busy" StartIcon="@Icons.Material.Filled.Cancel">Yes, cancel this session</MudButton>
+                    <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="() => _confirmingCancel = false" Disabled="Busy" StartIcon="@Icons.Material.Filled.ArrowBack">Keep session</MudButton>
                 }
             }
         }
@@ -195,6 +201,8 @@
     [Parameter] public string? CurrentActorId { get; set; }
 
     [Parameter] public CommunitySessionView? InitialSession { get; set; }
+
+    [Parameter] public SessionManagementPresentation? ManagementCapabilities { get; set; }
 
     [Parameter] public bool Busy { get; set; }
 
@@ -239,10 +247,16 @@
 
     private bool IsNew => SessionId is null;
     private bool IsDraft => string.Equals(Status, "Draft", StringComparison.OrdinalIgnoreCase);
-    private bool IsReviewed => string.Equals(Status, "Reviewed", StringComparison.OrdinalIgnoreCase);
-    private bool IsScheduled => string.Equals(Status, "Scheduled", StringComparison.OrdinalIgnoreCase);
-    private bool CanUpdate => IsDraft || IsReviewed || IsScheduled;
-    private bool CanCancel => IsReviewed || IsScheduled;
+    private bool HasCurrentCapabilities => ManagementCapabilities is { } capabilities &&
+        capabilities.Matches(SessionId, IsNew ? null : ExpectedVersion, Status);
+    private bool CanCreate => IsNew && HasCurrentCapabilities && ManagementCapabilities!.CanCreate;
+    private bool CanUpdate => !IsNew && HasCurrentCapabilities && ManagementCapabilities!.CanEdit;
+    private bool CanReview => !IsNew && HasCurrentCapabilities && ManagementCapabilities!.CanReview;
+    private bool CanSchedule => !IsNew && HasCurrentCapabilities && ManagementCapabilities!.CanSchedule;
+    private bool CanCancel => !IsNew && HasCurrentCapabilities && ManagementCapabilities!.CanCancel;
+    private bool CanComplete => !IsNew && HasCurrentCapabilities && ManagementCapabilities!.CanComplete;
+    private bool CanEditFields => IsNew ? CanCreate : CanUpdate;
+    private bool CanProvideReason => CanCreate || CanUpdate || CanReview || CanSchedule || CanCancel || CanComplete;
     private bool IsSelfReview =>
         CurrentActorId is not null &&
         string.Equals(CurrentActorId, CreatedByActorId, StringComparison.Ordinal);
@@ -312,7 +326,7 @@
 
     private async Task SubmitCreateAsync()
     {
-        if (!ValidateForm(requireReason: true, forSchedule: false))
+        if (!CanCreate || !ValidateForm(requireReason: true, forSchedule: false))
         {
             return;
         }
@@ -322,7 +336,7 @@
 
     private async Task SubmitUpdateAsync()
     {
-        if (!ValidateForm(requireReason: true, forSchedule: false))
+        if (!CanUpdate || !ValidateForm(requireReason: true, forSchedule: false))
         {
             return;
         }
@@ -333,7 +347,7 @@
 
     private async Task SubmitReviewAsync()
     {
-        if (!ValidateForm(requireReason: true, forSchedule: false))
+        if (!CanReview || !IsDraft || !ValidateForm(requireReason: true, forSchedule: false))
         {
             return;
         }
@@ -349,7 +363,7 @@
 
     private async Task SubmitScheduleAsync()
     {
-        if (!ValidateForm(requireReason: true, forSchedule: true))
+        if (!CanSchedule || !ValidateForm(requireReason: true, forSchedule: true))
         {
             return;
         }
@@ -359,7 +373,7 @@
 
     private async Task SubmitCancelAsync()
     {
-        if (!ValidateForm(requireReason: true, forSchedule: false))
+        if (!CanCancel || !ValidateForm(requireReason: true, forSchedule: false))
         {
             return;
         }
@@ -375,7 +389,7 @@
 
     private async Task SubmitCompleteAsync()
     {
-        if (!ValidateForm(requireReason: true, forSchedule: false))
+        if (!CanComplete || !ValidateForm(requireReason: true, forSchedule: false))
         {
             return;
         }

@@ -5,7 +5,10 @@ using System.Text.Json;
 namespace SwiftAid.Intelligence.Meta;
 
 /// <summary>Realtime session result: provider session id plus finalized transcripts.</summary>
-public sealed record RealtimeAsrResult(string SessionId, IReadOnlyList<string> FinalTranscripts);
+public sealed record RealtimeAsrResult(string SessionId, IReadOnlyList<MetaAsrRealtimeTranscript> Turns)
+{
+    public IReadOnlyList<string> FinalTranscripts => Turns.Select(turn => turn.Text).ToArray();
+}
 
 /// <summary>Live Meta realtime transcription adapter (ELL-T11). Protocol per
 /// the official voice reference: connect, send the handshake as the first
@@ -55,8 +58,8 @@ public sealed class MetaAsrRealtimeAdapter(EllaiOptions options)
         await SendTextAsync(socket, handshake, linked.Token);
         var sessionId = await ReadHandshakeAckAsync(socket, linked.Token);
 
-        var finals = new List<string>();
-        var receiver = ReceiveUntilCloseAsync(socket, finals, linked.Token);
+        var transcripts = new MetaAsrRealtimeTranscriptCollector();
+        var receiver = ReceiveUntilCloseAsync(socket, transcripts, linked.Token);
 
         var buffer = new byte[7680];
         int read;
@@ -68,7 +71,7 @@ public sealed class MetaAsrRealtimeAdapter(EllaiOptions options)
 
         await SendTextAsync(socket, """{"type":"endStream"}""", linked.Token);
         await receiver;
-        return new RealtimeAsrResult(sessionId, finals);
+        return new RealtimeAsrResult(sessionId, transcripts.Turns);
     }
 
     private static Task SendTextAsync(ClientWebSocket socket, string text, CancellationToken ct)
@@ -102,14 +105,14 @@ public sealed class MetaAsrRealtimeAdapter(EllaiOptions options)
     }
 
     private static async Task ReceiveUntilCloseAsync(
-        ClientWebSocket socket, List<string> finals, CancellationToken ct)
+        ClientWebSocket socket, MetaAsrRealtimeTranscriptCollector transcripts, CancellationToken ct)
     {
         while (socket.State == WebSocketState.Open)
         {
             string? text = null;
             try
             {
-                text = await ReceiveTextAsync(socket, CancellationToken.None);
+                text = await ReceiveTextAsync(socket, ct);
             }
             catch (WebSocketException)
             {
@@ -134,20 +137,12 @@ public sealed class MetaAsrRealtimeAdapter(EllaiOptions options)
                     throw new InvalidOperationException($"Ellai realtime ASR error: {message}");
                 }
 
-                if (root.TryGetProperty("type", out var kind)
-                    && kind.ValueKind == JsonValueKind.String
-                    && kind.GetString() == "transcript"
-                    && root.TryGetProperty("final", out var fin)
-                    && fin.ValueKind == JsonValueKind.True
-                    && root.TryGetProperty("transcript", out var tr)
-                    && tr.ValueKind == JsonValueKind.String)
-                {
-                    finals.Add(tr.GetString() ?? string.Empty);
-                }
             }
             catch (JsonException)
             {
             }
+
+            transcripts.TryAppend(text);
 
             ct.ThrowIfCancellationRequested();
         }

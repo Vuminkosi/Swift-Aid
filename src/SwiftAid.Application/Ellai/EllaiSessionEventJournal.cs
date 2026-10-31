@@ -53,6 +53,28 @@ public sealed class EllaiSessionEventJournal
         }
     }
 
+    /// <summary>Appends one lifecycle hint at most once while its journal row
+    /// is retained. Concurrent HTTP/in-process cancellation retries resolve
+    /// to the same safe event instead of duplicating it.</summary>
+    public EllaiSessionEvent AppendOnce(
+        string sessionId, string kind, string? @ref, string detail, DateTimeOffset now)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(kind);
+        lock (_gate)
+        {
+            if (_bySession.TryGetValue(sessionId, out var events))
+            {
+                var existing = events.FirstOrDefault(item =>
+                    string.Equals(item.Kind, kind, StringComparison.Ordinal)
+                    && string.Equals(item.Ref, @ref, StringComparison.Ordinal));
+                if (existing is not null) return existing;
+            }
+
+            return Append(sessionId, kind, @ref, detail, now);
+        }
+    }
+
     /// <summary>Events after the cursor with the new cursor. Unknown sessions
     /// read as empty: the journal never reveals whether a session exists.</summary>
     public EllaiSessionEventPage ReadSince(string sessionId, long cursor, int take = 50)

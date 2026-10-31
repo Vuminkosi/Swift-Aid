@@ -19,6 +19,10 @@ RUN apt-get update \
     && apt-get install --yes --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
+RUN mkdir -p /var/swiftaid/keys \
+    && chown app:app /var/swiftaid/keys \
+    && chmod 700 /var/swiftaid/keys
+
 COPY --from=build /app/publish ./
 
 ENV ASPNETCORE_HTTP_PORTS=8080 \

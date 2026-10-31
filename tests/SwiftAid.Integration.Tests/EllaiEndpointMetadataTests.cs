@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using SwiftAid.Application.Ellai;
 using SwiftAid.Gateway.Endpoints;
+using SwiftAid.Gateway.Ellai;
 
 namespace SwiftAid.Integration.Tests;
 
@@ -13,12 +14,19 @@ public sealed class EllaiEndpointMetadataTests
     {
         var builder = WebApplication.CreateBuilder();
         builder.Services.AddScoped<EllaiSessionService>();
+        builder.Services.AddScoped<EllaiSessionScopeResolver>();
         builder.Services.AddScoped<EllaiUtteranceSubmissionService>();
         builder.Services.AddScoped<EllaiApprovalService>();
         builder.Services.AddScoped<EllaiApprovedActionService>();
         builder.Services.AddSingleton<EllaiApprovalDialogCoordinator>();
         builder.Services.AddSingleton<EllaiSessionEventJournal>();
         builder.Services.AddSingleton<EllaiConsentService>();
+        builder.Services.AddScoped<EllaiVoiceTranscriptionService>();
+        builder.Services.AddSingleton<SwiftAid.Intelligence.Meta.EllaiOptions>();
+        builder.Services.AddSingleton<EllaiSessionResponseStore>();
+        builder.Services.AddHttpClient<EllaiSpeechSynthesisClient>();
+        builder.Services.AddTransient<IEllaiSpeechSynthesisClient>(services =>
+            services.GetRequiredService<EllaiSpeechSynthesisClient>());
         builder.Services.AddSingleton<IEllaiSessionStore, InMemoryEllaiSessionStore>();
         builder.Services.AddSingleton<IEllaiApprovalStore, EllaiReceiptStore>();
         builder.Services.AddSingleton<IEllaiUiObservationStore, InMemoryEllaiUiObservationStore>();
@@ -43,4 +51,5 @@ public sealed class EllaiEndpointMetadataTests
         Assert.All(receiptRoutes, endpoint =>
             Assert.NotNull(endpoint.Metadata.GetMetadata<EllaiScopedAuthorizationRequiredMetadata>()));
     }
+
 }

@@ -140,7 +140,7 @@ public sealed class CommandBackedWorkManagementClientTests
         private readonly CaseTimeline _timeline = timeline ??
             new CaseTimeline(Header(), []);
 
-        public Task<CaseTimelineResult> GetAsync(Guid caseId, int? limit, CancellationToken cancellationToken = default) =>
+        public Task<CaseTimelineResult> GetAsync(Guid caseId, int? limit, CancellationToken cancellationToken = default, long? beforeAggregateVersion = null) =>
             Task.FromResult(new CaseTimelineResult(access, access == CaseTimelineAccess.Found ? _timeline : null));
     }
 

@@ -8,6 +8,14 @@
     white-space: nowrap;
 }
 
+.swiftaid-public-header ::deep .swiftaid-public-brand-mark {
+    width: 1.75rem;
+    height: 1.75rem;
+    margin-inline-end: 0.5rem;
+    border-radius: 0.4rem;
+    object-fit: contain;
+}
+
 .swiftaid-public-header {
     position: relative;
     display: flex;
@@ -84,10 +92,23 @@
     }
 }
 
+.swiftaid-public-layout-root {
+    min-height: 100vh;
+}
+
 .swiftaid-public-main {
     background: var(--sa-canvas);
 }
 
+.swiftaid-public-layout-root ::deep .swiftaid-public-main--identity {
+    min-height: 100svh;
+    padding: 0 !important;
+}
+
 .swiftaid-public-body {
     padding-block: 1.5rem 3rem;
+}
+
+.swiftaid-public-layout-root ::deep .swiftaid-public-body--identity {
+    padding-block: 0.5rem;
 }
