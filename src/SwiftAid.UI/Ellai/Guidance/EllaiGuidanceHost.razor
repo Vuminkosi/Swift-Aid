@@ -758,6 +758,16 @@
                             return;
                         }
 
+                        if (_isPlayingResponse
+                            && string.Equals(status.State, "UserSpeaking", StringComparison.Ordinal))
+                        {
+                            // Native mobile playback cannot receive the browser's local
+                            // acoustic barge-in callback. Stop it as soon as the Gateway
+                            // confirms speech for this live turn.
+                            StopResponseAudio();
+                            changed = true;
+                        }
+
                         if (GetVoiceTurnStatusText(status.State) is { } text
                             && !string.Equals(StatusText, text, StringComparison.Ordinal))
                         {

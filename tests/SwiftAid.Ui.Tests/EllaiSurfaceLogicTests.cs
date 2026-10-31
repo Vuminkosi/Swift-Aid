@@ -102,6 +102,36 @@ public sealed class EllaiSurfaceLogicTests
     }
 
     [Fact]
+    public async Task ConfirmedGatewaySpeechStopsNativeResponsePlayback()
+    {
+        var client = new FakeReviewClient
+        {
+            VoiceTurnStatusHandler = (_, _) => Task.FromResult<EllaiVoiceTurnStatusDto?>(
+                new("UserSpeaking", 1, 320, 0, null)),
+        };
+        using var host = await CreateHost(client, CreateSession(version: 1), string.Empty);
+        SetField(host, "_isRecordingAudio", true);
+        SetField(host, "_captureMode", EllaiVoiceCaptureMode.Live);
+        SetField(host, "_isPlayingResponse", true);
+        SetField(host, "_activeResponseSequence", 7L);
+        SetField(host, "_activeResponsePlaybackId", "playback-current");
+
+        await InvokeAsync(host, "StartVoiceTurnStatusPollingAsync", "session-1");
+
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (GetField<bool>(host, "_isPlayingResponse") && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(10);
+        }
+
+        await InvokeAsync(host, "StopVoiceTurnStatusPollingAsync");
+
+        Assert.True(client.VoiceTurnStatusReads > 0);
+        Assert.False(GetField<bool>(host, "_isPlayingResponse"));
+        Assert.Equal("I’m listening to your message.", GetField<string?>(host, "StatusText"));
+    }
+
+    [Fact]
     public async Task InterruptedLiveStreamRetriesPcmOnceAndSubmitsTranscriptOnce()
     {
         var client = new FakeReviewClient(
@@ -1160,6 +1190,18 @@ public sealed class EllaiSurfaceLogicTests
             Task<EllaiVoiceTranscriptionResult?>>? VoiceTranscriptionHandler { get; init; }
 
         public Func<string, Stream, Task<EllaiVoiceTranscriptionResult?>>? LiveTranscriptionHandler { get; init; }
+
+        public Func<string, CancellationToken, Task<EllaiVoiceTurnStatusDto?>>? VoiceTurnStatusHandler { get; init; }
+
+        public int VoiceTurnStatusReads { get; private set; }
+
+        public Task<EllaiVoiceTurnStatusDto?> GetVoiceTurnStatusAsync(
+            string sessionId, CancellationToken cancellationToken)
+        {
+            VoiceTurnStatusReads++;
+            return VoiceTurnStatusHandler?.Invoke(sessionId, cancellationToken)
+                ?? Task.FromResult<EllaiVoiceTurnStatusDto?>(null);
+        }
 
         public int ProductHelpConsentGrants { get; private set; }
 
