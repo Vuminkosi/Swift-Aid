@@ -29,6 +29,7 @@
         <div class="ellai-host__attached">
             <EllaiCompactComposer Placement="EllaiSurfacePlacement.Attached"
                                   StatusText="@StatusText" Phase="@Phase"
+                                  ResponseText="@_latestResponseText"
                                   LivePartialTranscript="@_livePartialVoiceTranscript"
                                   InputText="@InputText" InputTextChanged="OnInputChanged"
                                   Position="@Position" PositionChanged="OnPositionChanged"
@@ -48,6 +49,7 @@
         <div class="ellai-host__floating">
             <EllaiCompactComposer Placement="EllaiSurfacePlacement.Floating"
                                   StatusText="@StatusText" Phase="@Phase"
+                                  ResponseText="@_latestResponseText"
                                   LivePartialTranscript="@_livePartialVoiceTranscript"
                                   InputText="@InputText" InputTextChanged="OnInputChanged"
                                   Position="@Position" PositionChanged="OnPositionChanged"
@@ -91,6 +93,9 @@
     private GuidanceSnapshot? _guidance;
     private string? _stopCommandId;
     private long _latestResponseSequence;
+    private long _lastReceivedResponseSequence;
+    private string? _responseSessionId;
+    private string? _latestResponseText;
     private long _activeResponseSequence;
     private string? _activeResponsePlaybackId;
     private bool _isPlayingResponse;
@@ -1520,10 +1525,30 @@
                 return;
             }
 
-            StatusText = response.Text;
+            if (!string.Equals(_responseSessionId, response.SessionId, StringComparison.Ordinal))
+            {
+                _responseSessionId = response.SessionId;
+                _lastReceivedResponseSequence = 0;
+                _latestResponseSequence = 0;
+                _latestResponseText = null;
+            }
+
+            if (response.Sequence <= _lastReceivedResponseSequence)
+            {
+                return;
+            }
+
+            _lastReceivedResponseSequence = response.Sequence;
+            _latestResponseText = response.Text;
+            StatusText = "Ellai responded.";
             _latestResponseSequence = response.Sequence;
             Phase = EllaiStatusPhases.Ready;
             StateHasChanged();
+
+            if (_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Live && CanPlayResponse)
+            {
+                _ = PlayResponseAudioAsync();
+            }
         });
     }
 
@@ -1539,6 +1564,16 @@
             StopResponseAudio();
             StatusText = "Speech playback stopped.";
             await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        await PlayResponseAudioAsync();
+    }
+
+    private async Task PlayResponseAudioAsync()
+    {
+        if (_sessionView is null || _latestResponseSequence < 1 || _isPlayingResponse)
+        {
             return;
         }
 

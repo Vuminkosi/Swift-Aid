@@ -70,6 +70,14 @@
     line-height: 1.35;
 }
 
+.ellai-composer__response {
+    margin-block: 0.5rem;
+    max-block-size: 12rem;
+    overflow: auto;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
 .ellai-composer__handle {
     touch-action: none;
     cursor: grab;

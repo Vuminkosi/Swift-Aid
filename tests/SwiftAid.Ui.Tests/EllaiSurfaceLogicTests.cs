@@ -780,9 +780,12 @@ public sealed class EllaiSurfaceLogicTests
     }
 
     [Fact]
-    public async Task CurrentModelResponseUpdatesOnlyItsMatchingCompactSessionStatus()
+    public async Task LiveVoiceResponseIsShownAndAutomaticallyPlayedOnce()
     {
+        NoOpJsModule.Invocations.Clear();
         using var host = await CreateHost(new FakeReviewClient(), CreateSession(version: 1), string.Empty);
+        SetField(host, "_isRecordingAudio", true);
+        SetField(host, "_captureMode", EllaiVoiceCaptureMode.Live);
 
         await InvokeAsync(host, "OnResponseReceived",
             new EllaiSessionResponseDto(1, "other-session", "Foreign response.", DateTimeOffset.UtcNow));
@@ -791,9 +794,29 @@ public sealed class EllaiSurfaceLogicTests
         const string currentResponse = "Here is the current result.";
         await InvokeAsync(host, "OnResponseReceived",
             new EllaiSessionResponseDto(1, "session-1", currentResponse, DateTimeOffset.UtcNow));
+        await host.Dispatcher.InvokeAsync(async () => await Task.Yield());
 
-        Assert.Equal(currentResponse, GetField<string?>(host, "StatusText"));
+        Assert.Equal(currentResponse, GetField<string?>(host, "_latestResponseText"));
         Assert.Equal(EllaiStatusPhases.Ready, GetField<string?>(host, "Phase"));
+        Assert.Contains("playResponse", NoOpJsModule.Invocations);
+
+        await InvokeAsync(host, "OnResponseReceived",
+            new EllaiSessionResponseDto(1, "session-1", "Duplicate response.", DateTimeOffset.UtcNow));
+        await host.Dispatcher.InvokeAsync(async () => await Task.Yield());
+
+        Assert.Equal(currentResponse, GetField<string?>(host, "_latestResponseText"));
+        Assert.Equal(1, NoOpJsModule.Invocations.Count(invocation => invocation == "playResponse"));
+    }
+
+    [Fact]
+    public async Task CompactComposerDisplaysResponseTextWhileSpeechPlays()
+    {
+        const string responseText = "Your assigned cases are listed here.";
+
+        var html = await RenderComposerAsync(inputText: null, responseText: responseText);
+
+        Assert.Contains(responseText, html, StringComparison.Ordinal);
+        Assert.Contains("aria-live=\"polite\"", html, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1082,6 +1105,7 @@ public sealed class EllaiSurfaceLogicTests
 
     private static async Task<string> RenderComposerAsync(
         string? inputText = "test question",
+        string? responseText = null,
         string? livePartialTranscript = null,
         bool canUseMicrophone = true,
         bool? canUseRealtimeMicrophone = null,
@@ -1107,6 +1131,7 @@ public sealed class EllaiSurfaceLogicTests
                 {
                     [nameof(EllaiCompactComposer.InputText)] = inputText,
                     [nameof(EllaiCompactComposer.LivePartialTranscript)] = livePartialTranscript,
+                    [nameof(EllaiCompactComposer.ResponseText)] = responseText,
                     [nameof(EllaiCompactComposer.StatusText)] = "Messaging is unavailable.",
                     [nameof(EllaiCompactComposer.CanSend)] = false,
                     [nameof(EllaiCompactComposer.CanUseMicrophone)] = canUseMicrophone,
@@ -1303,14 +1328,22 @@ public sealed class EllaiSurfaceLogicTests
 
     private sealed class NoOpJsModule : IJSObjectReference
     {
+        public static List<string> Invocations { get; } = [];
+
         public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
-            ValueTask.FromResult(default(TValue)!);
+            RecordAndReturn<TValue>(identifier);
 
         public ValueTask<TValue> InvokeAsync<TValue>(
             string identifier,
             CancellationToken cancellationToken,
             object?[]? args) =>
-            ValueTask.FromResult(default(TValue)!);
+            RecordAndReturn<TValue>(identifier);
+
+        private static ValueTask<TValue> RecordAndReturn<TValue>(string identifier)
+        {
+            Invocations.Add(identifier);
+            return ValueTask.FromResult(default(TValue)!);
+        }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
