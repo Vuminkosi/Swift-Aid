@@ -382,6 +382,7 @@ public static class EllaiGuestEndpoints
         EllaiSessionResponseStore responses,
         IEllaiSpeechSynthesisClient speech,
         EllaiResponseSpeechCoordinator speechCoordinator,
+        EllaiVoiceTurnCoordinator turnCoordinator,
         Guid? playbackId = null)
     {
         if (sequence < 1 || playbackId == Guid.Empty)
@@ -406,6 +407,10 @@ public static class EllaiGuestEndpoints
         var playback = playbackId is Guid id
             ? speechCoordinator.Begin(sessionId, sequence, id, http.RequestAborted)
             : null;
+        if (playbackId is Guid activePlaybackId)
+        {
+            turnCoordinator.SetAssistantPlayback(sessionId, sequence, activePlaybackId, isPlaying: true);
+        }
         var synthesisCancellation = playback?.Token ?? http.RequestAborted;
         HttpResponseMessage upstream;
         try
@@ -416,16 +421,28 @@ public static class EllaiGuestEndpoints
         catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested)
         {
             playback?.Dispose();
+            if (playbackId is Guid stoppedPlaybackId)
+            {
+                turnCoordinator.SetAssistantPlayback(sessionId, sequence, stoppedPlaybackId, isPlaying: false);
+            }
             return Results.Empty;
         }
         catch (OperationCanceledException) when (playback?.Token.IsCancellationRequested == true)
         {
             playback?.Dispose();
+            if (playbackId is Guid stoppedPlaybackId)
+            {
+                turnCoordinator.SetAssistantPlayback(sessionId, sequence, stoppedPlaybackId, isPlaying: false);
+            }
             return Results.Empty;
         }
         catch (HttpRequestException)
         {
             playback?.Dispose();
+            if (playbackId is Guid stoppedPlaybackId)
+            {
+                turnCoordinator.SetAssistantPlayback(sessionId, sequence, stoppedPlaybackId, isPlaying: false);
+            }
             return Results.Problem(
                 statusCode: StatusCodes.Status503ServiceUnavailable,
                 title: "Ellai speech is temporarily unavailable.");
@@ -433,6 +450,10 @@ public static class EllaiGuestEndpoints
         catch (InvalidOperationException)
         {
             playback?.Dispose();
+            if (playbackId is Guid stoppedPlaybackId)
+            {
+                turnCoordinator.SetAssistantPlayback(sessionId, sequence, stoppedPlaybackId, isPlaying: false);
+            }
             return Results.Problem(
                 statusCode: StatusCodes.Status503ServiceUnavailable,
                 title: "Ellai speech is temporarily unavailable.");
@@ -440,6 +461,10 @@ public static class EllaiGuestEndpoints
         catch
         {
             playback?.Dispose();
+            if (playbackId is Guid stoppedPlaybackId)
+            {
+                turnCoordinator.SetAssistantPlayback(sessionId, sequence, stoppedPlaybackId, isPlaying: false);
+            }
             throw;
         }
 
@@ -448,6 +473,10 @@ public static class EllaiGuestEndpoints
         {
             upstream.Dispose();
             playback?.Dispose();
+            if (playbackId is Guid stoppedPlaybackId)
+            {
+                turnCoordinator.SetAssistantPlayback(sessionId, sequence, stoppedPlaybackId, isPlaying: false);
+            }
             return Results.Problem(
                 statusCode: StatusCodes.Status503ServiceUnavailable,
                 title: "Ellai speech is temporarily unavailable.");
@@ -474,16 +503,25 @@ public static class EllaiGuestEndpoints
         {
             upstream.Dispose();
             playback?.Dispose();
+            if (playbackId is Guid stoppedPlaybackId)
+            {
+                turnCoordinator.SetAssistantPlayback(sessionId, sequence, stoppedPlaybackId, isPlaying: false);
+            }
             return Results.Empty;
         }
         catch
         {
             upstream.Dispose();
             playback?.Dispose();
+            if (playbackId is Guid stoppedPlaybackId)
+            {
+                turnCoordinator.SetAssistantPlayback(sessionId, sequence, stoppedPlaybackId, isPlaying: false);
+            }
             throw;
         }
 
-        return new EllaiResponseAudioStreamResult(audioStream, upstream, playback);
+        return new EllaiResponseAudioStreamResult(
+            audioStream, upstream, playback, turnCoordinator, sessionId, sequence, playbackId);
     }
 
     public static IResult InterruptResponseAudioAsync(
@@ -491,7 +529,8 @@ public static class EllaiGuestEndpoints
         long sequence,
         Guid playbackId,
         EllaiSessionResponseStore responses,
-        EllaiResponseSpeechCoordinator speechCoordinator)
+        EllaiResponseSpeechCoordinator speechCoordinator,
+        EllaiVoiceTurnCoordinator turnCoordinator)
     {
         if (sequence < 1 || playbackId == Guid.Empty)
         {
@@ -507,6 +546,7 @@ public static class EllaiGuestEndpoints
         }
 
         speechCoordinator.Interrupt(sessionId, sequence, playbackId);
+        turnCoordinator.InterruptPlayback(sessionId, sequence, playbackId);
         return Results.NoContent();
     }
 
@@ -629,25 +669,39 @@ public static class EllaiGuestEndpoints
 internal sealed class EllaiResponseAudioStreamResult(
     Stream audioStream,
     HttpResponseMessage upstream,
-    EllaiResponseSpeechCoordinator.PlaybackLease? playback) : IResult
+    EllaiResponseSpeechCoordinator.PlaybackLease? playback,
+    EllaiVoiceTurnCoordinator turnCoordinator,
+    string sessionId,
+    long sequence,
+    Guid? playbackId) : IResult
 {
     public async Task ExecuteAsync(HttpContext httpContext)
     {
         httpContext.Response.ContentType = "application/vnd.swiftaid.pcm";
-        using (playback)
-        using (upstream)
-        using (audioStream)
-        using (var cancellation = playback is null
-            ? CancellationTokenSource.CreateLinkedTokenSource(httpContext.RequestAborted)
-            : CancellationTokenSource.CreateLinkedTokenSource(httpContext.RequestAborted, playback.Token))
+        try
         {
-            try
+            using (playback)
+            using (upstream)
+            using (audioStream)
+            using (var cancellation = playback is null
+                ? CancellationTokenSource.CreateLinkedTokenSource(httpContext.RequestAborted)
+                : CancellationTokenSource.CreateLinkedTokenSource(httpContext.RequestAborted, playback.Token))
             {
-                await audioStream.CopyToAsync(httpContext.Response.Body, cancellation.Token).ConfigureAwait(false);
+                try
+                {
+                    await audioStream.CopyToAsync(httpContext.Response.Body, cancellation.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+                {
+                    // An explicit playback stop or disconnected client ends only this response stream.
+                }
             }
-            catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        }
+        finally
+        {
+            if (playbackId is Guid id)
             {
-                // An explicit playback stop or disconnected client ends only this response stream.
+                turnCoordinator.SetAssistantPlayback(sessionId, sequence, id, isPlaying: false);
             }
         }
     }

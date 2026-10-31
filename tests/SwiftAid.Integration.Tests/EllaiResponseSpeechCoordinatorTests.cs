@@ -63,20 +63,24 @@ public sealed class EllaiResponseSpeechCoordinatorTests
         var speechStream = new BlockingReadStream();
         var speech = new BlockingSpeechSynthesisClient(speechStream);
         var coordinator = new EllaiResponseSpeechCoordinator();
+        var turnCoordinator = new EllaiVoiceTurnCoordinator();
         var output = new MemoryStream();
         var http = new DefaultHttpContext();
         http.Response.Body = output;
 
         var result = await EllaiGuestEndpoints.StreamResponseAudioAsync(
-            sessionId, sequence, http, responses, speech, coordinator, playbackId);
+            sessionId, sequence, http, responses, speech, coordinator, turnCoordinator, playbackId);
         var execution = result.ExecuteAsync(http);
         await speechStream.ReadStarted.WaitAsync(TimeSpan.FromSeconds(2));
 
-        Assert.True(coordinator.Interrupt(sessionId, sequence, playbackId));
+        var interruption = EllaiGuestEndpoints.InterruptResponseAudioAsync(
+            sessionId, sequence, playbackId, responses, coordinator, turnCoordinator);
         await execution.WaitAsync(TimeSpan.FromSeconds(2));
 
+        Assert.Equal(StatusCodes.Status204NoContent, Assert.IsAssignableFrom<IStatusCodeHttpResult>(interruption).StatusCode);
         Assert.True(speech.SynthesisToken.IsCancellationRequested);
         Assert.Equal(0, output.Length);
+        Assert.Equal(EllaiVoiceTurnState.Interrupted, turnCoordinator.GetSnapshot(sessionId).State);
     }
 
     private sealed class BlockingSpeechSynthesisClient(BlockingReadStream stream) : IEllaiSpeechSynthesisClient

@@ -72,6 +72,8 @@ public sealed class EllaiVoiceTranscriptionServiceTests
         };
         var handler = new StubAsrHandler();
         var providerServices = new ServiceCollection();
+        var turnCoordinator = new EllaiVoiceTurnCoordinator();
+        providerServices.AddSingleton(turnCoordinator);
         providerServices.AddSingleton(new MetaAsrRealtimeAdapter(options));
         providerServices.AddSingleton(new MetaAsrUploadAdapter(new HttpClient(handler), options));
         using var provider = providerServices.BuildServiceProvider();
@@ -86,6 +88,8 @@ public sealed class EllaiVoiceTranscriptionServiceTests
 
         Assert.Equal("recognized fallback words", result?.Transcript);
         Assert.True(handler.ReceivedWaveAudio);
+        Assert.Equal(EllaiVoiceTurnState.Processing,
+            turnCoordinator.GetSnapshot("session-fallback").State);
     }
 
     [Fact]
@@ -101,6 +105,8 @@ public sealed class EllaiVoiceTranscriptionServiceTests
             AsrMode = "DIARIZATION",
         };
         var providerServices = new ServiceCollection();
+        var turnCoordinator = new EllaiVoiceTurnCoordinator();
+        providerServices.AddSingleton(turnCoordinator);
         providerServices.AddSingleton(new MetaAsrRealtimeAdapter(options));
         providerServices.AddSingleton<IVoiceActivityDetector>(_ => new SileroOnnxVoiceActivityDetector());
         providerServices.AddTransient<SileroVoiceActivityAudioStream>();
@@ -127,11 +133,55 @@ public sealed class EllaiVoiceTranscriptionServiceTests
 
             Assert.Equal("streamed words", result?.Transcript);
             Assert.Equal(expectedPcm, server.ReceivedPcm);
+            Assert.Equal(EllaiVoiceTurnState.Processing,
+                turnCoordinator.GetSnapshot("session-stream").State);
         }
         finally
         {
             audio.Complete();
         }
+    }
+
+    [Fact]
+    public async Task LiveTranscriptionVadConfirmsBargeInAndCancelsOnlyTheActiveResponsePlayback()
+    {
+        await using var server = await AudioForwardingWebSocketServer.CreateAsync();
+        var options = new EllaiOptions
+        {
+            Enabled = true,
+            ApiKey = "test-key",
+            AsrModel = "muse-voice-transcribe-1.0",
+            AsrWebSocketUrl = server.WebSocketUrl,
+            AsrMode = "DIARIZATION",
+        };
+        const string sessionId = "session-barge-in";
+        const long responseSequence = 6;
+        var playbackId = Guid.NewGuid();
+        var turns = new EllaiVoiceTurnCoordinator();
+        var playbackCoordinator = new EllaiResponseSpeechCoordinator();
+        using var playback = playbackCoordinator.Begin(
+            sessionId, responseSequence, playbackId, CancellationToken.None);
+        turns.SetAssistantPlayback(sessionId, responseSequence, playbackId, isPlaying: true);
+
+        var providerServices = new ServiceCollection();
+        providerServices.AddSingleton(turns);
+        providerServices.AddSingleton(playbackCoordinator);
+        providerServices.AddSingleton(new MetaAsrRealtimeAdapter(options));
+        providerServices.AddSingleton<IVoiceActivityDetector, ContinuousSpeechDetector>();
+        providerServices.AddTransient<SileroVoiceActivityAudioStream>();
+        using var provider = providerServices.BuildServiceProvider();
+        var consent = new EllaiConsentService();
+        var consentStore = new InMemoryEllaiConsentStore();
+        var service = new EllaiVoiceTranscriptionService(consent, consentStore, options, provider);
+        await service.GrantVoiceConsentAsync(sessionId, CancellationToken.None);
+        await using var audio = new MemoryStream(new byte[24_000 * sizeof(short)]);
+
+        var result = await service.TranscribeAsync(
+            sessionId, EllaiVoiceCaptureMode.Live, audio, audio.Length, CancellationToken.None);
+
+        Assert.Equal("streamed words", result?.Transcript);
+        Assert.True(playback.Token.IsCancellationRequested);
+        Assert.Equal(EllaiVoiceTurnState.Processing, turns.GetSnapshot(sessionId).State);
     }
 
     private static EllaiVoiceTranscriptionService CreateService(
@@ -158,6 +208,23 @@ public sealed class EllaiVoiceTranscriptionServiceTests
                     "{\"sessionId\":\"asr-session\",\"transcript\":\"recognized fallback words\",\"audioDurationMs\":100,\"turns\":[]}",
                     Encoding.UTF8, "application/json"),
             };
+        }
+    }
+
+    private sealed class ContinuousSpeechDetector : IVoiceActivityDetector
+    {
+        public IVoiceActivityDetectionSession CreateSession() => new Session();
+
+        private sealed class Session : IVoiceActivityDetectionSession
+        {
+            private long _sequence;
+
+            public ValueTask<VoiceActivityResult> AnalyzeAsync(
+                VoiceActivityFrame frame, CancellationToken cancellationToken = default) =>
+                ValueTask.FromResult(new VoiceActivityResult(_sequence++, 0.95f, true, false));
+
+            public void Reset() => _sequence = 0;
+            public void Dispose() { }
         }
     }
 

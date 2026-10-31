@@ -126,6 +126,7 @@ builder.Services.AddHostedService<SwiftAid.Gateway.Ellai.EllaiUtteranceWorker>()
 builder.Services.AddSingleton<SwiftAid.Application.Ellai.IEllaiUiObservationStore, SwiftAid.Application.Ellai.InMemoryEllaiUiObservationStore>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiScenarioDirector>();
 builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiConsentService>();
+builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiVoiceTurnCoordinator>();
 builder.Services.AddScoped<SwiftAid.Gateway.Ellai.EllaiVoiceTranscriptionService>();
 builder.Services.AddSingleton<SwiftAid.Application.Ellai.IVoiceActivityDetector,
     SwiftAid.Gateway.Ellai.SileroOnnxVoiceActivityDetector>();

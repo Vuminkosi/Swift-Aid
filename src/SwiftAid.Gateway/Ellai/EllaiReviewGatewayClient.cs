@@ -401,8 +401,11 @@ public sealed class EllaiReviewGatewayClient(
             return false;
         }
 
-        return _serviceProvider.GetService<EllaiResponseSpeechCoordinator>()
+        var interrupted = _serviceProvider.GetService<EllaiResponseSpeechCoordinator>()
             ?.Interrupt(sessionId, sequence, parsedPlaybackId) == true;
+        _serviceProvider.GetService<EllaiVoiceTurnCoordinator>()
+            ?.InterruptPlayback(sessionId, sequence, parsedPlaybackId);
+        return interrupted;
     }
 
     public async Task<EllaiReviewDto?> GetActiveReviewAsync(string sessionId, CancellationToken cancellationToken)

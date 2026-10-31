@@ -69,7 +69,10 @@ public sealed class EllaiVoiceTranscriptionService(
 
         if (mode == EllaiVoiceCaptureMode.Live)
         {
-            return await TranscribeLiveStreamAsync(audio, cancellationToken).ConfigureAwait(false);
+            using var turn = services.GetService<EllaiVoiceTurnCoordinator>()
+                ?.BeginStream(sessionId, cancellationToken);
+            return await TranscribeLiveStreamAsync(
+                audio, turn, turn?.CancellationToken ?? cancellationToken).ConfigureAwait(false);
         }
 
         using var bounded = new MemoryStream();
@@ -123,6 +126,7 @@ public sealed class EllaiVoiceTranscriptionService(
 
     private async Task<EllaiVoiceTranscriptionResult?> TranscribeLiveStreamAsync(
         Stream audio,
+        EllaiVoiceTurnCoordinator.VoiceStreamLease? turn,
         CancellationToken cancellationToken)
     {
         using var capturedPcm = new MemoryStream();
@@ -145,7 +149,7 @@ public sealed class EllaiVoiceTranscriptionService(
                         SingleWriter = true,
                         AllowSynchronousContinuations = false,
                     });
-                    vadWorker = ProcessVadChunksAsync(vadChunks.Reader, vadStream, cancellationToken);
+                    vadWorker = ProcessVadChunksAsync(vadChunks.Reader, vadStream, turn, cancellationToken);
                 }
 
                 try
@@ -157,8 +161,25 @@ public sealed class EllaiVoiceTranscriptionService(
                             ? null
                             : (chunk, ct) => vadChunks.Writer.WriteAsync(chunk.ToArray(), ct))
                         .ConfigureAwait(false);
-                    transcript = string.Join(" ", result.FinalTranscripts
-                        .Where(text => !string.IsNullOrWhiteSpace(text)));
+                    var finalizedTurns = new List<string>();
+                    for (var index = 0; index < result.Turns.Count; index++)
+                    {
+                        var finalTurn = result.Turns[index];
+                        if (string.IsNullOrWhiteSpace(finalTurn.Text))
+                        {
+                            continue;
+                        }
+
+                        var providerTurnId = finalTurn.TurnId?.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                            ?? $"{result.SessionId}:{index}";
+                        var accepted = turn?.AcceptFinalTranscript(providerTurnId, finalTurn.Text);
+                        if (turn is null || accepted is not null)
+                        {
+                            finalizedTurns.Add(accepted?.Text ?? finalTurn.Text.Trim());
+                        }
+                    }
+
+                    transcript = string.Join(" ", finalizedTurns);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -214,7 +235,13 @@ public sealed class EllaiVoiceTranscriptionService(
                         var result = await uploadAdapter.TranscribeAsync(
                             waveStream, "ellai-live-fallback.wav", "audio/wav", cancellationToken)
                             .ConfigureAwait(false);
-                        transcript = result.Transcript;
+                        var fallbackTranscript = result.Transcript.Trim();
+                        var acceptedFallback = turn?.AcceptFinalTranscript(
+                            $"{result.SessionId}:upload-fallback", fallbackTranscript);
+                        if (turn is null || acceptedFallback is not null)
+                        {
+                            transcript = acceptedFallback?.Text ?? fallbackTranscript;
+                        }
                     }
                 }
                 finally
@@ -249,9 +276,11 @@ public sealed class EllaiVoiceTranscriptionService(
     private async Task ProcessVadChunksAsync(
         ChannelReader<byte[]> chunks,
         SileroVoiceActivityAudioStream vadStream,
+        EllaiVoiceTurnCoordinator.VoiceStreamLease? turn,
         CancellationToken cancellationToken)
     {
         var vadEnabled = true;
+        var turnCoordinator = turn is null ? null : services.GetService<EllaiVoiceTurnCoordinator>();
         try
         {
             await foreach (var chunk in chunks.ReadAllAsync(cancellationToken).ConfigureAwait(false))
@@ -260,8 +289,22 @@ public sealed class EllaiVoiceTranscriptionService(
                 {
                     if (vadEnabled)
                     {
-                        _ = await vadStream.AppendPcm16Async(chunk, 24_000, cancellationToken)
+                        var activities = await vadStream.AppendPcm16Async(chunk, 24_000, cancellationToken)
                             .ConfigureAwait(false);
+                        if (turn is not null && turnCoordinator is not null)
+                        {
+                            var playbackCoordinator = services.GetService<EllaiResponseSpeechCoordinator>();
+                            foreach (var activity in activities)
+                            {
+                                var bargeIn = turnCoordinator.ObserveAcousticFrame(
+                                    turn, activity, TimeSpan.FromMilliseconds(32));
+                                if (bargeIn is not null)
+                                {
+                                    playbackCoordinator?.Interrupt(
+                                        bargeIn.SessionId, bargeIn.ResponseSequence, bargeIn.PlaybackId);
+                                }
+                            }
+                        }
                     }
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
