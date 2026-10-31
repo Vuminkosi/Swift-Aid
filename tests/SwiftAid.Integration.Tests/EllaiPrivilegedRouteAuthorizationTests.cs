@@ -271,7 +271,9 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
                 using var stateResponse = await client.SendAsync(stateRequest);
                 Assert.Equal(System.Net.HttpStatusCode.OK, stateResponse.StatusCode);
                 var stateJson = await stateResponse.Content.ReadAsStringAsync();
-                Assert.DoesNotContain("transcript", stateJson, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("no-store", stateResponse.Headers.CacheControl?.ToString(),
+                    StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("private guest words", stateJson, StringComparison.Ordinal);
                 var voiceState = await stateResponse.Content.ReadFromJsonAsync<EllaiVoiceTurnStatusDto>();
                 Assert.Equal("Idle", voiceState?.State);
             }
@@ -359,21 +361,23 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
     }
 
     [Fact]
-    public async Task AuthenticatedVoiceTurnStateIsSessionOwnerScopedAndTranscriptFree()
+    public async Task AuthenticatedVoiceTurnStatusIsSessionOwnerScopedAndNoStore()
     {
         await using var app = await StartApplicationAsync();
         var coordinator = app.Services.GetRequiredService<EllaiVoiceTurnCoordinator>();
         using var stream = coordinator.BeginStream("session-1", CancellationToken.None);
+        Assert.True(stream.ObservePartialTranscript("turn-1", "private transcript"));
         using var client = app.GetTestClient();
 
         using var response = await client.GetAsync("/api/v1/ellai/sessions/session-1/voice/state");
 
         Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
         var payload = await response.Content.ReadAsStringAsync();
-        Assert.DoesNotContain("transcript", payload, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("no-store", response.Headers.CacheControl?.ToString(), StringComparison.OrdinalIgnoreCase);
         var status = await response.Content.ReadFromJsonAsync<EllaiVoiceTurnStatusDto>();
         Assert.Equal("Listening", status?.State);
         Assert.Equal(stream.Epoch, status?.Epoch);
+        Assert.Equal("private transcript", status?.PartialTranscript);
 
         await using var otherOwnerApp = await StartApplicationAsync(sessionOwnerId: "different-owner");
         using var otherOwnerClient = otherOwnerApp.GetTestClient();

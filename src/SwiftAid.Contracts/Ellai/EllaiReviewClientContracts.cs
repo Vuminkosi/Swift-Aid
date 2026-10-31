@@ -20,7 +20,8 @@ public sealed record EllaiVoiceTurnStatusDto(
     string State,
     long Epoch,
     int ConfirmedSpeechMilliseconds,
-    int SilenceMilliseconds);
+    int SilenceMilliseconds,
+    string? PartialTranscript);
 
 /// <summary>Session UI event as delivered by the review event transport.</summary>
 public sealed record EllaiSessionEventDto(

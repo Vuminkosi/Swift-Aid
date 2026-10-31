@@ -171,6 +171,25 @@ public sealed class EllaiVoiceTurnCoordinatorTests
     }
 
     [Fact]
+    public void PartialTranscriptIsDisplayOnlyBoundedAndFencedByTurnAndEpoch()
+    {
+        var coordinator = new EllaiVoiceTurnCoordinator();
+        using var first = coordinator.BeginStream("session-partial", CancellationToken.None);
+
+        Assert.True(first.ObservePartialTranscript("turn-1", "  transient words  "));
+        Assert.Equal("transient words", coordinator.GetSnapshot("session-partial").PartialTranscript);
+        Assert.False(first.ObservePartialTranscript("turn-2", new string('x', 8_001)));
+
+        using var current = coordinator.BeginStream("session-partial", CancellationToken.None);
+
+        Assert.Null(coordinator.GetSnapshot("session-partial").PartialTranscript);
+        Assert.False(first.ObservePartialTranscript("turn-1", "late partial"));
+        Assert.True(current.ObservePartialTranscript("turn-2", "current partial"));
+        Assert.NotNull(current.AcceptFinalTranscript("turn-2", "current final"));
+        Assert.Null(coordinator.GetSnapshot("session-partial").PartialTranscript);
+    }
+
+    [Fact]
     public void DuplicateFinalsAndOtherSessionsAreIsolated()
     {
         var coordinator = new EllaiVoiceTurnCoordinator();

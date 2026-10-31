@@ -29,6 +29,7 @@
         <div class="ellai-host__attached">
             <EllaiCompactComposer Placement="EllaiSurfacePlacement.Attached"
                                   StatusText="@StatusText" Phase="@Phase"
+                                  LivePartialTranscript="@_livePartialVoiceTranscript"
                                   InputText="@InputText" InputTextChanged="OnInputChanged"
                                   Position="@Position" PositionChanged="OnPositionChanged"
                                   CanSend="@CanSubmitText" CanCancel="@(!_startOutcomeUnknown)" CanUseMicrophone="@_microphoneCaptureAvailable"
@@ -46,6 +47,7 @@
         <div class="ellai-host__floating">
             <EllaiCompactComposer Placement="EllaiSurfacePlacement.Floating"
                                   StatusText="@StatusText" Phase="@Phase"
+                                  LivePartialTranscript="@_livePartialVoiceTranscript"
                                   InputText="@InputText" InputTextChanged="OnInputChanged"
                                   Position="@Position" PositionChanged="OnPositionChanged"
                                   CanSend="@CanSubmitText" CanCancel="@(!_startOutcomeUnknown)" CanUseMicrophone="@_microphoneCaptureAvailable"
@@ -101,6 +103,7 @@
     private CancellationTokenSource? _liveVoiceCts;
     private CancellationTokenSource? _voiceTurnStatusCts;
     private Task? _voiceTurnStatusTask;
+    private string? _livePartialVoiceTranscript;
     private long _capturedVoiceBytes;
     private EllaiVoiceCaptureMode? _captureMode;
     private bool _microphoneCaptureAvailable;
@@ -387,11 +390,24 @@
                             return;
                         }
 
+                        var changed = false;
+                        if (!string.Equals(_livePartialVoiceTranscript, status.PartialTranscript,
+                                StringComparison.Ordinal))
+                        {
+                            _livePartialVoiceTranscript = status.PartialTranscript;
+                            changed = true;
+                        }
+
                         if (GetVoiceTurnStatusText(status.State) is { } text
                             && !string.Equals(StatusText, text, StringComparison.Ordinal))
                         {
                             StatusText = text;
                             Phase = EllaiStatusPhases.Active;
+                            changed = true;
+                        }
+
+                        if (changed)
+                        {
                             StateHasChanged();
                         }
                     }).ConfigureAwait(false);
@@ -735,6 +751,7 @@
 
     private void DiscardCapturedAudio()
     {
+        _livePartialVoiceTranscript = null;
         if (_capturedPcm is not null)
         {
             if (_capturedPcm.TryGetBuffer(out var buffer))

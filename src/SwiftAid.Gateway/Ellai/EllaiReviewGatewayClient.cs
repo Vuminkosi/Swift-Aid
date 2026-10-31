@@ -307,7 +307,8 @@ public sealed class EllaiReviewGatewayClient(
 
         var snapshot = coordinator.GetSnapshot(sessionId);
         return new EllaiVoiceTurnStatusDto(snapshot.State.ToString(), snapshot.Epoch,
-            ToMilliseconds(snapshot.ConfirmedSpeech), ToMilliseconds(snapshot.Silence));
+            ToMilliseconds(snapshot.ConfirmedSpeech), ToMilliseconds(snapshot.Silence),
+            snapshot.PartialTranscript);
     }
 
     private static int ToMilliseconds(TimeSpan duration) =>

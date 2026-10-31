@@ -47,6 +47,20 @@ public sealed class EllaiSurfaceLogicTests
     }
 
     [Fact]
+    public async Task LivePartialTranscriptIsDisplayedSeparatelyFromTheEditableDraft()
+    {
+        var markup = await RenderComposerAsync(
+            inputText: "existing draft",
+            livePartialTranscript: "transient recognized words");
+
+        Assert.Contains("class=\"ellai-composer__partial-transcript\" aria-live=\"off\"", markup,
+            StringComparison.Ordinal);
+        Assert.Contains("Heard so far:", markup, StringComparison.Ordinal);
+        Assert.Contains("transient recognized words", markup, StringComparison.Ordinal);
+        Assert.Contains("existing draft", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task EmptyComposerShowsLiveVoiceControlInsteadOfSend()
     {
         var markup = await RenderComposerAsync(inputText: string.Empty, canUseMicrophone: true,
@@ -555,6 +569,7 @@ public sealed class EllaiSurfaceLogicTests
 
     private static async Task<string> RenderComposerAsync(
         string? inputText = "test question",
+        string? livePartialTranscript = null,
         bool canUseMicrophone = true,
         EventCallback onStartVoice = default,
         EventCallback onStartRealtimeVoice = default,
@@ -577,6 +592,7 @@ public sealed class EllaiSurfaceLogicTests
                 ParameterView.FromDictionary(new Dictionary<string, object?>
                 {
                     [nameof(EllaiCompactComposer.InputText)] = inputText,
+                    [nameof(EllaiCompactComposer.LivePartialTranscript)] = livePartialTranscript,
                     [nameof(EllaiCompactComposer.StatusText)] = "Messaging is unavailable.",
                     [nameof(EllaiCompactComposer.CanSend)] = false,
                     [nameof(EllaiCompactComposer.CanUseMicrophone)] = canUseMicrophone,

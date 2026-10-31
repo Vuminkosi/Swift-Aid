@@ -36,7 +36,8 @@ public sealed record EllaiVoiceTurnSnapshot(
     long? ActiveResponseSequence,
     Guid? ActivePlaybackId,
     TimeSpan ConfirmedSpeech,
-    TimeSpan Silence);
+    TimeSpan Silence,
+    string? PartialTranscript);
 
 public sealed record EllaiAcceptedFinalTranscript(
     string ProviderTurnId,
@@ -86,6 +87,8 @@ public sealed class EllaiVoiceTurnCoordinator
             state.LastTouchedUtc = _timeProvider.GetUtcNow();
             state.StreamStartedTimestamp = _timeProvider.GetTimestamp();
             state.FinalProviderTurnIds.Clear();
+            state.PartialProviderTurnId = null;
+            state.PartialTranscript = null;
             state.LastVadSequence = -1;
             state.SpeechCandidate = TimeSpan.Zero;
             state.ConfirmedSpeech = TimeSpan.Zero;
@@ -241,9 +244,47 @@ public sealed class EllaiVoiceTurnCoordinator
 
             state.State = EllaiVoiceTurnState.Processing;
             state.LastTouchedUtc = _timeProvider.GetUtcNow();
+            if (string.Equals(state.PartialProviderTurnId, providerTurnId, StringComparison.Ordinal)
+                || string.Equals(state.PartialProviderTurnId, "unscoped", StringComparison.Ordinal))
+            {
+                state.PartialProviderTurnId = null;
+                state.PartialTranscript = null;
+            }
             EllaiVoiceTurnMetrics.FinalTranscriptAccepted(
                 _timeProvider.GetElapsedTime(state.StreamStartedTimestamp));
             return new EllaiAcceptedFinalTranscript(providerTurnId, normalized, lease.Epoch);
+        }
+    }
+
+    public bool ObservePartialTranscript(
+        VoiceStreamLease lease, string providerTurnId, string text)
+    {
+        ArgumentNullException.ThrowIfNull(lease);
+        if (string.IsNullOrWhiteSpace(providerTurnId) || providerTurnId.Length > 128
+            || string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        var normalized = text.Trim();
+        if (normalized.Length > 8_000)
+        {
+            return false;
+        }
+
+        lock (_gate)
+        {
+            var state = lease.Session;
+            if (!IsCurrent(lease) || lease.CancellationToken.IsCancellationRequested
+                || state.FinalProviderTurnIds.Contains(providerTurnId))
+            {
+                return false;
+            }
+
+            state.PartialProviderTurnId = providerTurnId;
+            state.PartialTranscript = normalized;
+            state.LastTouchedUtc = _timeProvider.GetUtcNow();
+            return true;
         }
     }
 
@@ -259,6 +300,8 @@ public sealed class EllaiVoiceTurnCoordinator
 
             lease.Session.State = EllaiVoiceTurnState.Recovering;
             lease.Session.LastTouchedUtc = _timeProvider.GetUtcNow();
+            lease.Session.PartialProviderTurnId = null;
+            lease.Session.PartialTranscript = null;
             EllaiVoiceTurnMetrics.TurnRecovered();
             return true;
         }
@@ -271,7 +314,7 @@ public sealed class EllaiVoiceTurnCoordinator
             return _sessions.TryGetValue(sessionId, out var state)
                 ? Snapshot(state)
                 : new EllaiVoiceTurnSnapshot(sessionId, 0, EllaiVoiceTurnState.Idle,
-                    null, null, TimeSpan.Zero, TimeSpan.Zero);
+                    null, null, TimeSpan.Zero, TimeSpan.Zero, null);
         }
     }
 
@@ -315,7 +358,7 @@ public sealed class EllaiVoiceTurnCoordinator
     private static EllaiVoiceTurnSnapshot Snapshot(SessionState state) =>
         new(state.SessionId, state.Epoch, state.State,
             state.ActiveResponseSequence, state.ActivePlaybackId,
-            state.ConfirmedSpeech, state.Silence);
+            state.ConfirmedSpeech, state.Silence, state.PartialTranscript);
 
     private static void MarkInterrupted(SessionState state)
     {
@@ -417,6 +460,8 @@ public sealed class EllaiVoiceTurnCoordinator
             if (ReferenceEquals(lease.Session.ActiveStream, lease))
             {
                 lease.Session.ActiveStream = null;
+                lease.Session.PartialProviderTurnId = null;
+                lease.Session.PartialTranscript = null;
             }
 
             lease.DisposeCancellation();
@@ -439,6 +484,8 @@ public sealed class EllaiVoiceTurnCoordinator
         public TimeSpan BargeInSpeech { get; set; }
         public DateTimeOffset LastTouchedUtc { get; set; } = createdAtUtc;
         public long StreamStartedTimestamp { get; set; }
+        public string? PartialProviderTurnId { get; set; }
+        public string? PartialTranscript { get; set; }
     }
 
     public sealed class VoiceStreamLease : IDisposable
@@ -466,6 +513,9 @@ public sealed class EllaiVoiceTurnCoordinator
 
         public EllaiAcceptedFinalTranscript? AcceptFinalTranscript(string providerTurnId, string text) =>
             _owner.AcceptFinalTranscript(this, providerTurnId, text);
+
+        public bool ObservePartialTranscript(string providerTurnId, string text) =>
+            _owner.ObservePartialTranscript(this, providerTurnId, text);
 
         public bool MarkRecovering() => _owner.MarkRecovering(this);
 

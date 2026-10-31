@@ -69,6 +69,12 @@
             </span>
         </div>
     </div>
+    @if (!string.IsNullOrWhiteSpace(LivePartialTranscript))
+    {
+        <p class="ellai-composer__partial-transcript" aria-live="off">
+            <span>Heard so far:</span> @LivePartialTranscript
+        </p>
+    }
     <EllaiStatusLine StatusText="@StatusText" Phase="@Phase" Placement="@Placement" />
     @if (CanPlayResponse)
     {
@@ -96,6 +102,9 @@
 
     [Parameter]
     public string? StatusText { get; set; }
+
+    [Parameter]
+    public string? LivePartialTranscript { get; set; }
 
     [Parameter]
     public string? Phase { get; set; }

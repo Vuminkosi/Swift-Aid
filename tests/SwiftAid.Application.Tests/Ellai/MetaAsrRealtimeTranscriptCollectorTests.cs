@@ -16,6 +16,26 @@ public sealed class MetaAsrRealtimeTranscriptCollectorTests
     }
 
     [Fact]
+    public void PartialTranscriptCanBeReadForDisplayWithoutEnteringFinalCollection()
+    {
+        var collector = new MetaAsrRealtimeTranscriptCollector();
+
+        Assert.True(collector.TryReadPartial(
+            """{"type":"transcript","transcript":"  currently speaking  ","final":false,"turnId":4}""",
+            out var partial));
+
+        Assert.Equal(4, partial?.TurnId);
+        Assert.Equal("currently speaking", partial?.Text);
+        Assert.Empty(collector.Turns);
+        Assert.False(collector.TryReadPartial(
+            """{"type":"transcript","transcript":"final words","final":true,"turnId":4}""",
+            out _));
+        Assert.False(collector.TryReadPartial(
+            """{"type":"transcript","transcript":"too long","final":false,"turnId":0}""",
+            out _));
+    }
+
+    [Fact]
     public void EndpointingUsesSpeechCompleteTurnIdAndSuppressesDuplicateTurn()
     {
         var collector = new MetaAsrRealtimeTranscriptCollector();

@@ -159,7 +159,14 @@ public sealed class EllaiVoiceTranscriptionService(
                         cancellationToken,
                         vadChunks is null
                             ? null
-                            : (chunk, ct) => vadChunks.Writer.WriteAsync(chunk.ToArray(), ct))
+                            : (chunk, ct) => vadChunks.Writer.WriteAsync(chunk.ToArray(), ct),
+                        (partial, _) =>
+                        {
+                            var providerTurnId = partial.TurnId?.ToString(
+                                System.Globalization.CultureInfo.InvariantCulture) ?? "unscoped";
+                            turn?.ObservePartialTranscript(providerTurnId, partial.Text);
+                            return ValueTask.CompletedTask;
+                        })
                         .ConfigureAwait(false);
                     var finalizedTurns = new List<string>();
                     for (var index = 0; index < result.Turns.Count; index++)

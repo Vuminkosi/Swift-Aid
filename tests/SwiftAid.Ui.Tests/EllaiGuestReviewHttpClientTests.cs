@@ -158,6 +158,7 @@ public sealed class EllaiGuestReviewHttpClientTests
         Assert.NotNull(status);
         Assert.Equal("UserSpeaking", status.State);
         Assert.Equal(5, status.Epoch);
+        Assert.Equal("temporary words", status.PartialTranscript);
         Assert.Null(handler.CsrfToken);
     }
 
@@ -328,7 +329,7 @@ public sealed class EllaiGuestReviewHttpClientTests
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
-                    "{\"state\":\"UserSpeaking\",\"epoch\":5,\"confirmedSpeechMilliseconds\":320,\"silenceMilliseconds\":0}",
+                    "{\"state\":\"UserSpeaking\",\"epoch\":5,\"confirmedSpeechMilliseconds\":320,\"silenceMilliseconds\":0,\"partialTranscript\":\"temporary words\"}",
                     Encoding.UTF8, "application/json"),
             });
         }

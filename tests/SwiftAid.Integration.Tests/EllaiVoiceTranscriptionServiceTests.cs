@@ -172,6 +172,61 @@ public sealed class EllaiVoiceTranscriptionServiceTests
     }
 
     [Fact]
+    public async Task LiveProviderPartialIsVisibleDuringCaptureButFinalRemainsAuthoritative()
+    {
+        await using var server = await AudioForwardingWebSocketServer.CreateAsync(
+            sendFinalTranscript: true, sendPartialTranscript: true);
+        var options = new EllaiOptions
+        {
+            Enabled = true,
+            ApiKey = "test-key",
+            AsrModel = "muse-voice-transcribe-1.0",
+            AsrWebSocketUrl = server.WebSocketUrl,
+            AsrMode = "DIARIZATION",
+        };
+        var turns = new EllaiVoiceTurnCoordinator();
+        var providerServices = new ServiceCollection();
+        providerServices.AddSingleton(turns);
+        providerServices.AddSingleton(new MetaAsrRealtimeAdapter(options));
+        using var provider = providerServices.BuildServiceProvider();
+        var service = new EllaiVoiceTranscriptionService(
+            new EllaiConsentService(), new InMemoryEllaiConsentStore(), options, provider);
+        await service.GrantVoiceConsentAsync("session-partial", CancellationToken.None);
+        await using var audio = new ProgressivePcmStream();
+        var transcription = service.TranscribeAsync(
+            "session-partial", EllaiVoiceCaptureMode.Live, audio, contentLength: null,
+            cancellationToken: CancellationToken.None);
+
+        try
+        {
+            await audio.WriteAsync(new byte[24_000 * sizeof(short)]);
+            await server.FirstAudioReceived.WaitAsync(TimeSpan.FromSeconds(10));
+            await WaitForPartialTranscriptAsync(turns, "session-partial", TimeSpan.FromSeconds(5));
+            Assert.Equal("currently speaking", turns.GetSnapshot("session-partial").PartialTranscript);
+
+            audio.Complete();
+            var result = await transcription.WaitAsync(TimeSpan.FromSeconds(15));
+
+            Assert.Equal("streamed words", result?.Transcript);
+            Assert.Null(turns.GetSnapshot("session-partial").PartialTranscript);
+        }
+        finally
+        {
+            audio.Complete();
+        }
+    }
+
+    private static async Task WaitForPartialTranscriptAsync(
+        EllaiVoiceTurnCoordinator turns, string sessionId, TimeSpan timeout)
+    {
+        using var cancellation = new CancellationTokenSource(timeout);
+        while (turns.GetSnapshot(sessionId).PartialTranscript is null)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(20), cancellation.Token);
+        }
+    }
+
+    [Fact]
     public async Task LiveTranscriptionVadConfirmsBargeInAndCancelsOnlyTheActiveResponsePlayback()
     {
         await using var server = await AudioForwardingWebSocketServer.CreateAsync();
@@ -319,6 +374,7 @@ public sealed class EllaiVoiceTranscriptionServiceTests
     private sealed class AudioForwardingWebSocketServer : IAsyncDisposable
     {
         private readonly bool _sendFinalTranscript;
+        private readonly bool _sendPartialTranscript;
         private WebApplication _application = null!;
         private readonly TaskCompletionSource _firstAudioReceived = new(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -327,12 +383,16 @@ public sealed class EllaiVoiceTranscriptionServiceTests
         public Task FirstAudioReceived => _firstAudioReceived.Task;
         public byte[] ReceivedPcm { get; private set; } = [];
 
-        private AudioForwardingWebSocketServer(bool sendFinalTranscript) =>
-            _sendFinalTranscript = sendFinalTranscript;
-
-        public static async Task<AudioForwardingWebSocketServer> CreateAsync(bool sendFinalTranscript = true)
+        private AudioForwardingWebSocketServer(bool sendFinalTranscript, bool sendPartialTranscript)
         {
-            var result = new AudioForwardingWebSocketServer(sendFinalTranscript);
+            _sendFinalTranscript = sendFinalTranscript;
+            _sendPartialTranscript = sendPartialTranscript;
+        }
+
+        public static async Task<AudioForwardingWebSocketServer> CreateAsync(
+            bool sendFinalTranscript = true, bool sendPartialTranscript = false)
+        {
+            var result = new AudioForwardingWebSocketServer(sendFinalTranscript, sendPartialTranscript);
             var builder = WebApplication.CreateBuilder();
             builder.Logging.ClearProviders();
             builder.WebHost.ConfigureKestrel(server => server.Listen(IPAddress.Loopback, 0));
@@ -368,6 +428,7 @@ public sealed class EllaiVoiceTranscriptionServiceTests
 
             using var pcm = new MemoryStream();
             var buffer = new byte[4096];
+            var partialSent = false;
             while (socket.State == WebSocketState.Open)
             {
                 var received = await socket.ReceiveAsync(buffer, CancellationToken.None).ConfigureAwait(false);
@@ -379,6 +440,13 @@ public sealed class EllaiVoiceTranscriptionServiceTests
                 {
                     pcm.Write(buffer, 0, received.Count);
                     _firstAudioReceived.TrySetResult();
+                    if (_sendPartialTranscript && !partialSent)
+                    {
+                        partialSent = true;
+                        await SendTextAsync(socket,
+                            "{\"type\":\"transcript\",\"final\":false,\"turnId\":1,\"transcript\":\" currently speaking \"}")
+                            .ConfigureAwait(false);
+                    }
                     continue;
                 }
                 if (Encoding.UTF8.GetString(buffer, 0, received.Count).Contains("endStream", StringComparison.Ordinal))

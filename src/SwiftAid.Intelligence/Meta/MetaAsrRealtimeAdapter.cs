@@ -15,7 +15,8 @@ public sealed record RealtimeAsrResult(string SessionId, IReadOnlyList<MetaAsrRe
 /// JSON text frame within 10 s (credential travels in the handshake — the
 /// Authorization header is ignored), stream raw PCM as binary frames, send
 /// {"type":"endStream"} and keep reading until close 1000. Partial frames
-/// never execute; only final transcripts are returned. Key never logged.</summary>
+/// are forwarded to an optional display-only callback; only provider-final
+/// transcripts are returned. Key never logged.</summary>
 public sealed class MetaAsrRealtimeAdapter(EllaiOptions options)
 {
     public const int HandshakeTimeoutSeconds = 10;
@@ -39,7 +40,8 @@ public sealed class MetaAsrRealtimeAdapter(EllaiOptions options)
     public async Task<RealtimeAsrResult> TranscribePcmAsync(
         Stream pcm24kMono16Bit,
         CancellationToken ct,
-        Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask>? onAudioChunk = null)
+        Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask>? onAudioChunk = null,
+        Func<MetaAsrRealtimePartialTranscript, CancellationToken, ValueTask>? onPartialTranscript = null)
     {
         ArgumentNullException.ThrowIfNull(pcm24kMono16Bit);
         var handshake = BuildHandshake();
@@ -64,7 +66,7 @@ public sealed class MetaAsrRealtimeAdapter(EllaiOptions options)
         var sessionId = await ReadHandshakeAckAsync(socket, handshakeLinked.Token);
 
         var transcripts = new MetaAsrRealtimeTranscriptCollector();
-        var receiver = ReceiveUntilCloseAsync(socket, transcripts, linked.Token);
+        var receiver = ReceiveUntilCloseAsync(socket, transcripts, onPartialTranscript, linked.Token);
 
         var buffer = new byte[7680];
         int read;
@@ -115,7 +117,10 @@ public sealed class MetaAsrRealtimeAdapter(EllaiOptions options)
     }
 
     private static async Task ReceiveUntilCloseAsync(
-        ClientWebSocket socket, MetaAsrRealtimeTranscriptCollector transcripts, CancellationToken ct)
+        ClientWebSocket socket,
+        MetaAsrRealtimeTranscriptCollector transcripts,
+        Func<MetaAsrRealtimePartialTranscript, CancellationToken, ValueTask>? onPartialTranscript,
+        CancellationToken ct)
     {
         while (socket.State == WebSocketState.Open)
         {
@@ -152,7 +157,27 @@ public sealed class MetaAsrRealtimeAdapter(EllaiOptions options)
             {
             }
 
-            transcripts.TryAppend(text);
+            if (onPartialTranscript is not null
+                && transcripts.TryReadPartial(text, out var partial)
+                && partial is not null)
+            {
+                try
+                {
+                    await onPartialTranscript(partial, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch
+                {
+                    // Display-only partials must not interrupt provider audio or final transcription.
+                }
+            }
+            else
+            {
+                transcripts.TryAppend(text);
+            }
 
             ct.ThrowIfCancellationRequested();
         }

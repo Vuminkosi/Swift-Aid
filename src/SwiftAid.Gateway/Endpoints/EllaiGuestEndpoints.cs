@@ -22,14 +22,16 @@ public static class EllaiGuestEndpoints
     private static readonly TimeSpan GuestSessionLifetime = TimeSpan.FromHours(2);
 
     public static IResult ReadVoiceTurnState(
-        string sessionId, EllaiVoiceTurnCoordinator coordinator)
+        HttpContext http, string sessionId, EllaiVoiceTurnCoordinator coordinator)
     {
         var snapshot = coordinator.GetSnapshot(sessionId);
+        http.Response.Headers.CacheControl = "no-store, private";
         return Results.Ok(new EllaiVoiceTurnStatusDto(
             snapshot.State.ToString(),
             snapshot.Epoch,
             ToMilliseconds(snapshot.ConfirmedSpeech),
-            ToMilliseconds(snapshot.Silence)));
+            ToMilliseconds(snapshot.Silence),
+            snapshot.PartialTranscript));
     }
 
     private static int ToMilliseconds(TimeSpan duration) =>
