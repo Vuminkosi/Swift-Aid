@@ -239,6 +239,8 @@ These are personas and capabilities, not assertions of professional licensure. A
 
 **SA-ACL-06 — P0.** Staff roles MUST be provisioned through controlled administration. Selecting “Health Officer” in a UI MUST NOT grant privileges. The authentication screen MUST not replicate any illustrative self-assigned-role interaction.
 
+**Approved creator provisioning (2026-11-01).** Creating an organization atomically grants its creator standard-sensitivity case import/read/search/count access in that organization's initial workspace, for Zimbabwe and Eswatini and both human and animal health. Grants permit case visibility within that organization/workspace; they do not confer other organizations' access, elevated sensitivity, approval, export, or case-management actions. Ordinary membership and invitations do not grant this creator authority. Existing creators may be backfilled only with matching creation evidence, active resources and membership, and no existing grants to override. Membership and grant revocation remain authoritative.
+
 **SA-ACL-07 — P0.** Cross-sector signals MUST start with minimized evidence. Access to a linked underlying case requires an independent appropriate grant.
 
 **SA-ACL-08 — P0.** Regional or national switches MUST offer only authorized workspaces. Zimbabwe and Eswatini MUST NOT automatically share identifiable records.

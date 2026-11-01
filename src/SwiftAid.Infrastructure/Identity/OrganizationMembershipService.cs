@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using SwiftAid.Application.Authorization;
+using SwiftAid.Contracts.Commands;
 using SwiftAid.Infrastructure.Persistence;
 
 namespace SwiftAid.Infrastructure.Identity;
@@ -113,9 +115,10 @@ public sealed class OrganizationMembershipService(
                 OrganizationId = organization,
                 Status = PersistentResourceStatus.Active
             });
+            var membershipId = Guid.NewGuid();
             _dbContext.OrganizationMemberships.Add(new OrganizationMembershipEntity
             {
-                MembershipId = Guid.NewGuid(),
+                MembershipId = membershipId,
                 ActorId = actorId,
                 OrganizationId = organization,
                 Status = PersistentMembershipStatus.Active,
@@ -124,6 +127,35 @@ public sealed class OrganizationMembershipService(
                 GrantedByActorId = actorId,
                 Version = 1
             });
+            // SaveChanges commits creator grants with the organization, workspace and membership.
+            // Joining an existing organization does not use this provisioning path.
+            foreach (var country in new[] { "ZW", "SZ" })
+            foreach (var sector in new[] { Sector.HumanHealth, Sector.AnimalHealth })
+            {
+                var grantId = $"creator-{membershipId:N}-{country}-{sector}";
+                _dbContext.AccessGrantGroups.Add(new AccessGrantGroupEntity
+                {
+                    GrantGroupId = grantId,
+                    MembershipId = membershipId,
+                    ActorId = actorId,
+                    OrganizationId = organization,
+                    WorkspaceId = organization + "-general",
+                    CountryCode = country,
+                    Sector = sector,
+                    SensitivityCode = "standard",
+                    CanAccessJurisdictionalCases = true,
+                    Status = PersistentGrantStatus.Active,
+                    ValidFromUtc = now,
+                    ExpiresAtUtc = DateTimeOffset.MaxValue,
+                    GrantedByActorId = actorId,
+                    ChangeReason = "OrganizationCreator",
+                    Version = 1
+                });
+                foreach (var operation in new[] { CaseOperation.ReadCase, CaseOperation.Search, CaseOperation.Count })
+                {
+                    _dbContext.AccessGrantOperations.Add(new AccessGrantOperationEntity { GrantGroupId = grantId, Operation = operation });
+                }
+            }
             var epoch = await _dbContext.ActorAccessStates
                 .AsNoTracking()
                 .Where(state => state.ActorId == actorId)
@@ -137,6 +169,7 @@ public sealed class OrganizationMembershipService(
                 Operation = "Organization.Created",
                 DecisionCode = "Allowed",
                 AccessEpoch = epoch ?? 0,
+                ReasonCode = "OrganizationCreator:standard:ZW,SZ:HumanHealth,AnimalHealth:ReadCase,Search,Count",
                 RecordedAtUtc = now
             });
             await _dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);

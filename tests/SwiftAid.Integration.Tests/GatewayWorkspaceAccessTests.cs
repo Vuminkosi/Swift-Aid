@@ -43,7 +43,22 @@ public sealed class GatewayWorkspaceAccessTests
         var destinations = await imports.GetDestinationsAsync(default);
         Assert.Contains(destinations, d => d.OrganizationId == first && d.WorkspaceId == first + "-general");
         Assert.Contains(destinations, d => d.OrganizationId == second && d.WorkspaceId == second + "-general");
-        Assert.False(await fixture.Db.AccessGrantGroups.AnyAsync(g => g.OrganizationId == first || g.OrganizationId == second));
+        var grants = await fixture.Db.AccessGrantGroups.Where(g => g.OrganizationId == first).ToArrayAsync();
+        Assert.Equal(4, grants.Length);
+        Assert.All(grants, g =>
+        {
+            Assert.Equal("officer-1", g.ActorId);
+            Assert.Equal(first + "-general", g.WorkspaceId);
+            Assert.Equal("standard", g.SensitivityCode);
+            Assert.True(g.CanAccessJurisdictionalCases);
+        });
+        Assert.Equal(new[] { "SZ", "ZW" }, grants.Select(g => g.CountryCode).Distinct().Order().ToArray());
+        var available = await fixture.Store.GetWorkspacesAsync(CaseImportPostgresTests.Actor, default);
+        Assert.Equal(2, available.Count(w => w.OrganizationId == first));
+        var context = CaseImportPostgresTests.Context with { WorkspaceId = first + "-general", OrganizationId = first };
+        var imported = await fixture.Service.ProcessAsync(CaseImportPostgresTests.Actor, Guid.NewGuid(), context, 1, true,
+            new StringReader(CaseImportPostgresTests.Csv(Guid.NewGuid())), default);
+        Assert.NotNull(Assert.Single(imported.Rows).CaseId);
         var selected = await client.SelectWorkspaceAsync(second + "-general");
         Assert.Equal(second + "-general", selected.Value!.SelectedWorkspaceId);
         Assert.Equal(selected.Value.SelectedWorkspaceId, (await client.GetStateAsync()).Value!.SelectedWorkspaceId);
@@ -55,11 +70,46 @@ public sealed class GatewayWorkspaceAccessTests
         state = await client.GetStateAsync();
         Assert.DoesNotContain(state.Value!.Workspaces, w => w.Id == second + "-general");
         Assert.DoesNotContain(await imports.GetDestinationsAsync(default), d => d.OrganizationId == second);
+        Assert.DoesNotContain(await fixture.Store.GetWorkspacesAsync(CaseImportPostgresTests.Actor, default), w => w.OrganizationId == second);
         Assert.Equal(UiCapabilityResultCode.Denied, (await client.SelectWorkspaceAsync(second + "-general")).Code);
         auth.Epoch = 999999;
         Assert.Equal(UiCapabilityResultCode.Denied, (await client.GetStateAsync()).Code);
         auth.SignedIn = false;
         Assert.Equal(UiCapabilityResultCode.Denied, (await client.GetStateAsync()).Code);
+    }
+
+    [IntakePostgresFact]
+    public async Task Creator_backfill_is_idempotent_and_preserves_restrictions_and_unproven_members()
+    {
+        await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
+        var service = new OrganizationMembershipService(fixture.Db, TimeProvider.System);
+        var names = Enumerable.Range(0, 4).Select(_ => "creator-test-" + Guid.NewGuid().ToString("N")).ToArray();
+        foreach (var name in names)
+            Assert.Equal(OrganizationCreateStatus.Created, (await service.CreateAsync("officer-1", name, default)).Status);
+
+        // Reproduce pre-upgrade state for a creator, a revoked member, and an unproven member.
+        var cleared = names.Take(3).ToArray();
+        var ids = await fixture.Db.AccessGrantGroups.Where(g => cleared.Contains(g.OrganizationId)).Select(g => g.GrantGroupId).ToArrayAsync();
+        await fixture.Db.AccessGrantOperations.Where(o => ids.Contains(o.GrantGroupId)).ExecuteDeleteAsync();
+        await fixture.Db.AccessGrantGroups.Where(g => ids.Contains(g.GrantGroupId)).ExecuteDeleteAsync();
+        await fixture.Db.OrganizationMemberships.Where(m => m.OrganizationId == names[1])
+            .ExecuteUpdateAsync(s => s.SetProperty(m => m.Status, PersistentMembershipStatus.Revoked));
+        var unprovenTime = (await fixture.Db.Organizations.SingleAsync(o => o.OrganizationId == names[2])).CreatedAtUtc;
+        await fixture.Db.SecurityAuditEntries.Where(a => a.Operation == "Organization.Created" && a.RecordedAtUtc == unprovenTime).ExecuteDeleteAsync();
+        await fixture.Db.AccessGrantGroups.Where(g => g.OrganizationId == names[3])
+            .ExecuteUpdateAsync(s => s.SetProperty(g => g.Status, PersistentGrantStatus.Revoked));
+        fixture.Db.ChangeTracker.Clear();
+        var migration = new SwiftAid.Infrastructure.Persistence.Migrations.OrganizationCreatorAccess();
+        for (var run = 0; run < 2; run++)
+            foreach (var sql in migration.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.SqlOperation>())
+                await fixture.Db.Database.ExecuteSqlRawAsync(sql.Sql);
+        Assert.Equal(4, await fixture.Db.AccessGrantGroups.CountAsync(g => g.OrganizationId == names[0]));
+        Assert.False(await fixture.Db.AccessGrantGroups.AnyAsync(g => g.OrganizationId == names[1] || g.OrganizationId == names[2]));
+        Assert.All(await fixture.Db.AccessGrantGroups.Where(g => g.OrganizationId == names[3]).ToArrayAsync(),
+            g => Assert.Equal(PersistentGrantStatus.Revoked, g.Status));
+        var backfilledIds = await fixture.Db.AccessGrantGroups.Where(g => g.OrganizationId == names[0]).Select(g => g.GrantGroupId).ToArrayAsync();
+        Assert.Equal(12, await fixture.Db.AccessGrantOperations.CountAsync(o => backfilledIds.Contains(o.GrantGroupId)));
+        Assert.Equal(4, await fixture.Db.SecurityAuditEntries.CountAsync(a => a.Operation == "Organization.CreatorAccessBackfilled" && backfilledIds.Contains(a.ReasonCode!)));
     }
 
     private sealed class Authentication : AuthenticationStateProvider

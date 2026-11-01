@@ -238,6 +238,18 @@ public sealed class OrganizationMembershipServiceTests : IAsyncDisposable
                 updated_at_utc TEXT NOT NULL
             );
             PRAGMA foreign_keys = ON;
+            CREATE TABLE access_grant_groups (
+                grant_group_id TEXT PRIMARY KEY, membership_id TEXT NOT NULL REFERENCES organization_memberships(membership_id),
+                actor_id TEXT NOT NULL, organization_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+                country_code TEXT NOT NULL, sector TEXT NOT NULL, sensitivity_code TEXT NOT NULL,
+                can_access_jurisdictional_cases INTEGER NOT NULL, status TEXT NOT NULL,
+                valid_from_utc TEXT NOT NULL, expires_at_utc TEXT NOT NULL, granted_by_actor_id TEXT NOT NULL,
+                revoked_by_actor_id TEXT, change_reason TEXT, version INTEGER NOT NULL, lock_token SMALLINT NOT NULL DEFAULT 0
+            );
+            CREATE TABLE access_grant_group_operations (
+                grant_group_id TEXT NOT NULL REFERENCES access_grant_groups(grant_group_id), operation TEXT NOT NULL,
+                lock_token SMALLINT NOT NULL DEFAULT 0, PRIMARY KEY(grant_group_id, operation)
+            );
             """);
     }
 
