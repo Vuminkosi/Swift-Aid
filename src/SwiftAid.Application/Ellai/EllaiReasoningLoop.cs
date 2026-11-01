@@ -96,7 +96,9 @@ public sealed class EllaiReasoningLoop(
         EllaiActivityStatusCoordinator? activity = null,
         EllaiSessionEventJournal? journal = null,
         Func<CancellationToken, Task<bool>>? isExecutionCurrentAsync = null,
-        Func<string, CancellationToken, ValueTask>? onTextDelta = null)
+        Func<string, CancellationToken, ValueTask>? onTextDelta = null,
+        Action<EllaiActivityEvent>? onActivity = null,
+        Func<EllaiToolContext, EllaiToolRequest, CancellationToken, Task<EllaiToolResult>>? invokeToolAsync = null)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(request.Context);
@@ -207,7 +209,7 @@ public sealed class EllaiReasoningLoop(
         return await _runner.RunAsync(
             request.Context, TurnAsync, EllaiDecisionValidator.Validate, ct, GateAsync,
             activity, request.CycleId, request.ControllerEpoch, journal, ObserveTool,
-            isExecutionCurrentAsync).ConfigureAwait(false);
+            isExecutionCurrentAsync, onActivity, invokeToolAsync).ConfigureAwait(false);
     }
 
     private async Task<EllaiReauthorization> ReauthorizeAsync(

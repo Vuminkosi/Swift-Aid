@@ -88,6 +88,8 @@
             return "Connecting…";
         }
 
+        if (!string.IsNullOrWhiteSpace(_toolActivityText)) return _toolActivityText;
+
         if (_submittingUtterance || _thinkingUtteranceId is not null)
         {
             return "Thinking…";
@@ -170,10 +172,14 @@
     private string? _greetedLiveSessionId;
     private bool _readResponsesAloud;
     private bool _responseAudioQueueRunning;
+    private readonly HashSet<long> _progressAudioSequences = [];
+    private string? _toolActivityText;
+    private string? _silencedProgressTurnId;
+    private Task<bool> _responseStopTask = Task.FromResult(true);
     private int _localBargeInPending;
 
     private bool CanPlayResponse => _sessionView is not null
-        && _latestResponseSequence > 0
+        && (_latestResponseSequence > 0 || _progressAudioSequences.Count > 0)
         && (!ReviewClient.UsesGatewayPcmAudioDownload
             || Services.GetService<IEllaiPcmAudioPlayer>()?.IsAvailable == true);
 
@@ -1738,10 +1744,13 @@
         if (utteranceId is null) return;
         _settledUtteranceId = utteranceId;
         if (_thinkingUtteranceId == utteranceId) _thinkingUtteranceId = null;
+        _toolActivityText = null;
+        PreemptProgressAudio();
     }
 
     private void ShowLatestUserMessage(string utteranceId, string? text)
     {
+        if (_latestUserUtteranceId != utteranceId) _toolActivityText = null;
         if (_latestUserUtteranceId != utteranceId && _responseTextUtteranceId != utteranceId)
         {
             StopResponseAudio();
@@ -1797,7 +1806,7 @@
         {
             if (_sessionView is null
                 || !string.Equals(response.SessionId, _sessionView.SessionId, StringComparison.Ordinal)
-                || (string.IsNullOrWhiteSpace(response.Text) && !response.IsFinal))
+                || (string.IsNullOrWhiteSpace(response.Text) && !response.IsFinal && response.Progress is null))
             {
                 return;
             }
@@ -1821,6 +1830,31 @@
             _lastReceivedResponseSequence = response.Sequence;
             if (_latestUserUtteranceId is not null && response.ClientUtteranceId is not null
                 && response.ClientUtteranceId != _latestUserUtteranceId) return;
+            if (response.Progress is { } progress)
+            {
+                if (progress.State == "Interrupted") _silencedProgressTurnId = response.ClientUtteranceId;
+                if (progress.State is "Completed" or "Failed" or "Cancelled" or "Interrupted" or "Retrying")
+                {
+                    _toolActivityText = null;
+                    PreemptProgressAudio();
+                }
+                else if (_settledUtteranceId != response.ClientUtteranceId
+                    && _silencedProgressTurnId != response.ClientUtteranceId)
+                {
+                    _toolActivityText = progress.Operation;
+                    if (progress.Speak && _readResponsesAloud && progress.ExpiresAtUtc > DateTimeOffset.UtcNow)
+                    {
+                        _progressAudioSequences.Add(response.Sequence);
+                        _pendingResponseAudioSequences.Enqueue(response.Sequence);
+                        Interlocked.Exchange(ref _stopResponsePlaybackRequested, 0);
+                        if (!_responseAudioQueueRunning) _ = PlayQueuedResponseAudioAsync();
+                    }
+                }
+                StateHasChanged();
+                return;
+            }
+            _toolActivityText = null;
+            PreemptProgressAudio();
             if (response.IsFinal || response.IsReconciliation)
                 SettleThinking(response.ClientUtteranceId);
             if (response.IsReconciliation)
@@ -1944,7 +1978,17 @@
                     _pendingResponseAudioSequences.Clear();
                     return;
                 }
+                // Await local stop acknowledgement before a replacement starts.
+                if (!await _responseStopTask)
+                {
+                    _pendingResponseAudioSequences.Clear();
+                    _progressAudioSequences.Clear();
+                    return;
+                }
+                if (Interlocked.CompareExchange(ref _stopResponsePlaybackRequested, 0, 0) != 0
+                    || !_readResponsesAloud) break;
                 await PlayResponseAudioSequenceAsync(sequence);
+                _progressAudioSequences.Remove(sequence);
             }
         }
         finally { _responseAudioQueueRunning = false; }
@@ -2522,12 +2566,20 @@
 
     private void StopResponseAudio(string? interruptionTurnId = null, long streamEpoch = 0)
     {
+        if (interruptionTurnId is not null)
+        {
+            _silencedProgressTurnId = _latestUserUtteranceId;
+            _toolActivityText = null;
+        }
         var sessionId = _sessionView?.SessionId;
         var sequence = _activeResponseSequence;
         var playbackId = _activeResponsePlaybackId;
         _audioPlaybackCts?.Cancel();
         Interlocked.Exchange(ref _stopResponsePlaybackRequested, 1);
         _pendingResponseAudioSequences.Clear();
+        _progressAudioSequences.Clear();
+        var previousStop = _responseStopTask;
+        var localStops = new List<Task>();
         if (sessionId is not null && sequence > 0 && playbackId is not null)
         {
             _ = ReviewClient.InterruptResponseAudioAsync(
@@ -2545,22 +2597,40 @@
             var player = Services.GetService<IEllaiPcmAudioPlayer>();
             if (player is not null)
             {
-                _ = player.StopAsync();
+                localStops.Add(player.StopAsync());
             }
         }
 
         if (_speechModule is not null && !string.IsNullOrWhiteSpace(sessionId))
         {
-            _ = _speechModule.InvokeVoidAsync("stopResponse", sessionId);
+            localStops.Add(_speechModule.InvokeVoidAsync("stopResponse", sessionId).AsTask());
         }
+        _responseStopTask = ObserveLocalStopsAsync(previousStop, localStops);
 
         _isPlayingResponse = false;
         _activeResponseSequence = 0;
         _activeResponsePlaybackId = null;
     }
 
+    private void PreemptProgressAudio()
+    {
+        if (_progressAudioSequences.Count == 0) return;
+        StopResponseAudio();
+        // A final answer may now continue on the same serialized playback queue.
+        Interlocked.Exchange(ref _stopResponsePlaybackRequested, 0);
+    }
+
+    private static async Task<bool> ObserveLocalStopsAsync(Task<bool> previousStop, IEnumerable<Task> stops)
+    {
+        await previousStop;
+        try { await Task.WhenAll(stops); return true; }
+        catch (Exception) { return false; } // Keep the visible answer; never overlap uncertain playback.
+    }
+
     private void CancelPriorSession()
     {
+        _toolActivityText = null;
+        _silencedProgressTurnId = null;
         _lastDurableTurn = null;
         _latestResponseText = null;
         _responseTextUtteranceId = null;
@@ -2644,7 +2714,15 @@
     {
         try
         {
-            await InvokeAsync(() => OpenReviewAsync(requestId)).ConfigureAwait(false);
+            await InvokeAsync(async () =>
+            {
+                PreemptProgressAudio();
+                _toolActivityText = "Waiting for your approval";
+                StateHasChanged();
+                await OpenReviewAsync(requestId);
+                _toolActivityText = null;
+                StateHasChanged();
+            }).ConfigureAwait(false);
         }
         catch
         {

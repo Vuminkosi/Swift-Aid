@@ -386,6 +386,8 @@ public sealed class EllaiVoiceTranscriptionService(
                                 {
                                     playbackCoordinator?.Interrupt(
                                         bargeIn.SessionId, bargeIn.ResponseSequence, bargeIn.PlaybackId);
+                                    services.GetService<EllaiSessionResponseStore>()?.InterruptProgress(
+                                        bargeIn.SessionId, bargeIn.ResponseSequence);
                                 }
                             }
                         }

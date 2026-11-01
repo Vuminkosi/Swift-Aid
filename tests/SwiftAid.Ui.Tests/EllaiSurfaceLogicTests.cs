@@ -21,6 +21,36 @@ namespace SwiftAid.Ui.Tests;
 [Trait("Task", "ELL-T13")]
 public sealed class EllaiSurfaceLogicTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FinalAnswerPreemptsAcknowledgementAndWaitsForLocalStopWithoutOverlap(bool stopFails)
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(version: 1), string.Empty);
+        var speech = new BlockingNarrationJsModule();
+        SetField(host, "_speechModule", speech);
+        SetField(host, "_readResponsesAloud", true);
+        var ack = new EllaiSessionResponseDto(1, "session-1", "One moment.", DateTimeOffset.UtcNow, "u", IsFinal: false,
+            Progress: new("u:initial", "Acknowledgement", "Checking the records", true, 1, DateTimeOffset.UtcNow.AddSeconds(8)));
+        await InvokeAsync(host, "OnResponseReceived", ack);
+        await InvokeAsync(host, "OnResponseReceived", ack);
+        Assert.Equal(1, speech.Starts);
+        Assert.Null(GetField<string?>(host, "_latestResponseText"));
+        Assert.Equal("Checking the records", GetField<string?>(host, "_toolActivityText"));
+        await InvokeAsync(host, "OnResponseReceived",
+            new EllaiSessionResponseDto(2, "session-1", "Here is the answer.", DateTimeOffset.UtcNow, "u"));
+        Assert.Equal(1, speech.Starts);
+        Assert.True(speech.StopRequested);
+        if (stopFails) speech.StopCompleted.TrySetException(new InvalidOperationException("Synthetic stop failure"));
+        else speech.StopCompleted.TrySetResult();
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(2);
+        while (GetField<bool>(host, "_responseAudioQueueRunning") && DateTimeOffset.UtcNow < deadline) await Task.Delay(10);
+        Assert.Equal(stopFails ? 1 : 2, speech.Starts);
+        Assert.Equal(1, speech.MaximumConcurrent);
+        Assert.Equal("Here is the answer.", GetField<string?>(host, "_latestResponseText"));
+        Assert.Null(GetField<string?>(host, "_toolActivityText"));
+    }
+
     [Fact]
     public async Task FreshConversationClearsPriorTimelineAndAcceptsItsFirstTurn()
     {
@@ -1641,6 +1671,36 @@ public sealed class EllaiSurfaceLogicTests
             CancellationToken cancellationToken,
             object?[]? args) => InvokeAsync<TValue>(identifier, args);
 
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class BlockingNarrationJsModule : IJSObjectReference
+    {
+        private readonly TaskCompletionSource _ackStopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource StopCompleted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int Starts { get; private set; }
+        public int MaximumConcurrent { get; private set; }
+        public bool StopRequested { get; private set; }
+        private int _active;
+        public async ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args)
+        {
+            if (identifier == "playResponse")
+            {
+                Starts++;
+                MaximumConcurrent = Math.Max(MaximumConcurrent, ++_active);
+                if (Starts == 1) await _ackStopped.Task;
+                _active--;
+            }
+            if (identifier == "stopResponse")
+            {
+                StopRequested = true;
+                _ackStopped.TrySetResult();
+                await StopCompleted.Task;
+            }
+            return default!;
+        }
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args) =>
+            InvokeAsync<TValue>(identifier, args);
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 

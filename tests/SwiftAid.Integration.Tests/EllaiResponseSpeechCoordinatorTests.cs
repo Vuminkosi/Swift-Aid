@@ -10,6 +10,22 @@ namespace SwiftAid.Integration.Tests;
 public sealed class EllaiResponseSpeechCoordinatorTests
 {
     [Fact]
+    public async Task FastFinalResponsePreventsObsoleteAcknowledgementSynthesis()
+    {
+        var responses = new EllaiSessionResponseStore();
+        var progress = new EllaiToolProgressPublisher(responses, "fast", "turn", 1, 1);
+        progress.Observe(new("fast", 1, 1, EllaiActivityKind.ToolStarted, "cycle", "read",
+            DateTimeOffset.UtcNow, EllaiToolNames.Now));
+        var ack = Assert.Single(responses.ReadSince("fast", 0).Responses);
+        responses.Reconcile("fast", "turn", EllaiUtteranceResolution.Completed("It is ready.", 1));
+        var speech = new SentenceSpeechSynthesisClient();
+        var result = await EllaiGuestEndpoints.StreamResponseAudioAsync("fast", ack.Sequence,
+            new DefaultHttpContext(), responses, speech, new(), new(), Guid.NewGuid());
+        Assert.Equal(404, Assert.IsAssignableFrom<IStatusCodeHttpResult>(result).StatusCode);
+        Assert.Empty(speech.Texts);
+    }
+
+    [Fact]
     public async Task Interrupt_CancelsOnlyTheMatchingPlayback()
     {
         var coordinator = new EllaiResponseSpeechCoordinator();

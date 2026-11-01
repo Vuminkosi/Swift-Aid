@@ -89,6 +89,9 @@ public sealed class EllaiUtteranceWorker(
             return;
         }
 
+        var progress = new EllaiToolProgressPublisher(
+            scopedServices.GetRequiredService<EllaiSessionResponseStore>(), work.SessionId,
+            item.ClientUtteranceId, work.ControllerEpoch, item.AttemptCount);
         try
         {
             var sessions = scopedServices.GetRequiredService<IEllaiSessionStore>();
@@ -107,7 +110,7 @@ public sealed class EllaiUtteranceWorker(
             }
 
             var started = System.Diagnostics.Stopwatch.StartNew();
-            var outcome = await RunWorkAsync(work, scopedServices, stoppingToken).ConfigureAwait(false);
+            var outcome = await RunWorkAsync(work, scopedServices, stoppingToken, progress).ConfigureAwait(false);
             if (!outcome.Completed)
             {
                 _logger.LogWarning("Ellai turn {SessionId}/{UtteranceId} stopped with {FailureCode}.",
@@ -128,6 +131,7 @@ public sealed class EllaiUtteranceWorker(
                 // from PostgreSQL even when this process exits before this publication.
                 scopedServices.GetService<EllaiSessionResponseStore>()?.Reconcile(
                     work.SessionId, item.ClientUtteranceId, committed);
+                progress.Finish(committed.Outcome);
             }
             _logger.LogInformation(
                 "Ellai turn {SessionId}/{UtteranceId} attempt {Attempt} outcome {Outcome}; processing {ProcessingMs}ms, commit {CommitMs}ms.",
@@ -141,6 +145,7 @@ public sealed class EllaiUtteranceWorker(
             {
                 await outbox.FailAsync(item.SessionId, item.ClientUtteranceId, item.AttemptCount,
                     DateTimeOffset.UtcNow, terminal: false, CancellationToken.None).ConfigureAwait(false);
+                progress.Finish("RetryableFailure");
             }
             catch (Exception ex)
             {
@@ -164,13 +169,14 @@ public sealed class EllaiUtteranceWorker(
                 item.SessionId, item.AttemptCount);
             await outbox.FailAsync(item.SessionId, item.ClientUtteranceId, item.AttemptCount,
                 DateTimeOffset.UtcNow.Add(retryDelay), terminal, CancellationToken.None).ConfigureAwait(false);
+            progress.Finish(terminal ? "TerminalFailure" : "RetryableFailure");
         }
     }
 
     private static async Task<EllaiUtteranceOutcome> RunWorkAsync(
         EllaiUtteranceWork work,
         IServiceProvider scopedServices,
-        CancellationToken stoppingToken)
+        CancellationToken stoppingToken, EllaiToolProgressPublisher progress)
     {
         var consent = scopedServices.GetRequiredService<EllaiConsentService>();
         var consentStore = scopedServices.GetService<IEllaiConsentStore>();
@@ -194,7 +200,21 @@ public sealed class EllaiUtteranceWorker(
             scopedServices.GetRequiredService<IEllaiSessionStore>(),
             consentStore,
             CreateTextDeltaPublisher(work, scopedServices.GetRequiredService<EllaiSessionResponseStore>()),
-            scopedServices.GetRequiredService<IEllaiUtteranceOutboxStore>());
+            scopedServices.GetRequiredService<IEllaiUtteranceOutboxStore>(), progress.Observe,
+            scopedServices.GetService<EllaiToolBroker>() is null ? null : async (context, request, ct) =>
+            {
+                // Independent reads must not share the worker's EF DbContext.
+                await using var toolScope = scopedServices.CreateAsyncScope();
+                var toolServices = toolScope.ServiceProvider;
+                var current = await toolServices.GetRequiredService<IEllaiSessionStore>()
+                    .GetAsync(work.SessionId, ct).ConfigureAwait(false);
+                if (current is null || current.Status != "Active" || current.InteractionEpoch != work.ControllerEpoch
+                    || current.OwnerActorId != work.Actor.ActorId || current.ScopeEpoch != work.ScopeEpoch)
+                    return new EllaiToolResult(request.ToolName, false, "This request is no longer current.", [],
+                        string.Empty, 0, false, EllaiToolReasonCodes.DeniedByPolicy);
+                return await toolServices.GetRequiredService<EllaiToolBroker>()
+                    .InvokeAsync(context, request, ct).ConfigureAwait(false);
+            });
         return await EllaiUtteranceRunner.RunOneAsync(
             work, dependencies, MaxTokensPerTurn, stoppingToken).ConfigureAwait(false);
     }

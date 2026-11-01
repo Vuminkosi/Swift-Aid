@@ -434,7 +434,8 @@ public static class EllaiGuestEndpoints
 
         var page = responses.ReadSince(sessionId, sequence - 1, take: 1);
         var response = page.Responses.FirstOrDefault(item => item.Sequence == sequence);
-        if (response is null)
+        if (response is null || string.IsNullOrWhiteSpace(response.Text)
+            || (response.Progress is not null && !responses.CanSpeakProgress(response)))
         {
             return Results.NotFound();
         }

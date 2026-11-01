@@ -16,7 +16,8 @@ public enum EllaiActivityKind
     VerificationStarted,
     CycleCompleted,
     CycleBlocked,
-    SessionCancelled
+    SessionCancelled,
+    ToolPending
 }
 
 /// <summary>One correlated activity event. Detail is a safe context key
@@ -29,7 +30,8 @@ public sealed record EllaiActivityEvent(
     EllaiActivityKind Kind,
     string CycleId,
     string Detail,
-    DateTimeOffset AtUtc);
+    DateTimeOffset AtUtc,
+    string? ToolName = null);
 
 /// <summary>Projected composer status: deterministic template text, never a
 /// claim about tool success. Rendered beneath the single compact composer.</summary>
@@ -81,7 +83,8 @@ public sealed class EllaiActivityStatusCoordinator
             }
 
             if (activity.ControllerEpoch < projection.ControllerEpoch
-                || activity.Sequence <= projection.LastSequence)
+                || (activity.ControllerEpoch == projection.ControllerEpoch
+                    && activity.Sequence <= projection.LastSequence))
             {
                 return null;
             }

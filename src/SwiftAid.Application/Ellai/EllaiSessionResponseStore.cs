@@ -17,6 +17,29 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null)
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private readonly Dictionary<string, SessionResponses> _sessions = new(StringComparer.Ordinal);
 
+    public EllaiSessionResponseDto? PublishProgress(
+        string sessionId, string utteranceId, string text, EllaiInteractionProgressDto progress)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(utteranceId);
+        lock (_gate)
+        {
+            PruneExpired();
+            if (!_sessions.TryGetValue(sessionId, out var session))
+            {
+                session = new SessionResponses(_timeProvider.GetUtcNow());
+                _sessions.Add(sessionId, session);
+            }
+            if (session.Items.Any(item => item.Progress?.EventId == progress.EventId)) return null;
+            var response = new EllaiSessionResponseDto(++session.Sequence, sessionId, text,
+                _timeProvider.GetUtcNow(), utteranceId, IsFinal: false, Progress: progress);
+            session.Items.AddLast(response);
+            session.LastUpdatedAtUtc = response.CreatedAtUtc;
+            while (session.Items.Count > MaximumResponsesPerSession) session.Items.RemoveFirst();
+            return response;
+        }
+    }
+
     public EllaiSessionResponseDto? Publish(string sessionId, string clientUtteranceId, string text)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -56,6 +79,35 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null)
             }
 
             return response;
+        }
+    }
+
+    public bool CanSpeakProgress(EllaiSessionResponseDto response)
+    {
+        lock (_gate)
+        {
+            return response.Progress is { Speak: true } progress
+                && progress.ExpiresAtUtc > _timeProvider.GetUtcNow()
+                && _sessions.TryGetValue(response.SessionId, out var session)
+                && !session.Items.Any(item => item.ClientUtteranceId == response.ClientUtteranceId
+                    && item.Progress?.State == "Interrupted")
+                && !session.Items.Any(item => item.Sequence > response.Sequence
+                    && (item.ClientUtteranceId != response.ClientUtteranceId
+                        || item.Progress is null
+                        || item.Progress.State is "Completed" or "Failed" or "Cancelled" or "Interrupted" or "Retrying"));
+        }
+    }
+
+    public void InterruptProgress(string sessionId, long responseSequence)
+    {
+        lock (_gate)
+        {
+            if (!_sessions.TryGetValue(sessionId, out var session)) return;
+            var response = session.Items.FirstOrDefault(item => item.Sequence == responseSequence);
+            if (response?.ClientUtteranceId is not { } turnId) return;
+            PublishProgress(sessionId, turnId, string.Empty,
+                new($"{turnId}:interrupted", "Interrupted", "Response interrupted", false,
+                    response.Progress?.ControllerEpoch ?? 0, _timeProvider.GetUtcNow().AddSeconds(30)));
         }
     }
 
@@ -111,7 +163,7 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null)
         {
             PruneExpired();
             return _sessions.TryGetValue(sessionId, out var session)
-                && session.Items.Any(item => string.Equals(
+                && session.Items.Any(item => item.Progress is null && string.Equals(
                     item.ClientUtteranceId, clientUtteranceId, StringComparison.Ordinal));
         }
     }
@@ -173,7 +225,7 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null)
         }
     }
 
-    public EllaiSessionResponsePageDto ReadSince(string sessionId, long cursor, int take = 16)
+    public EllaiSessionResponsePageDto ReadSince(string sessionId, long cursor, int take = 16, bool includeProgress = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         take = Math.Clamp(take, 1, MaximumResponsesPerSession);
@@ -186,6 +238,7 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null)
             }
 
             var responses = session.Items.Where(item => item.Sequence > Math.Max(0, cursor))
+                .Where(item => includeProgress || item.Progress is null)
                 .Take(take).ToArray();
             return new EllaiSessionResponsePageDto(
                 responses,

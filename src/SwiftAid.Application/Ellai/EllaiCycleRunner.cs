@@ -52,7 +52,9 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
         long controllerEpoch = 1,
         EllaiSessionEventJournal? journal = null,
         Action<EllaiToolRequest, EllaiToolResult>? onToolResult = null,
-        Func<CancellationToken, Task<bool>>? isExecutionCurrentAsync = null)
+        Func<CancellationToken, Task<bool>>? isExecutionCurrentAsync = null,
+        Action<EllaiActivityEvent>? onActivity = null,
+        Func<EllaiToolContext, EllaiToolRequest, CancellationToken, Task<EllaiToolResult>>? invokeToolAsync = null)
     {
         ArgumentNullException.ThrowIfNull(modelTurn);
         ArgumentNullException.ThrowIfNull(validate);
@@ -67,27 +69,53 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
             var toolCallsUsed = 0;
             var repairUsed = false;
             var repairsAttempted = 0;
-            var remaining = context;
             long sequence = 0;
-            var now = DateTimeOffset.UtcNow;
+            var traceGate = new object();
             var accepted = false;
             var lastTurnUnreviewed = false;
 
-            void Trace(EllaiActivityKind kind, string detail = "")
+            void Trace(EllaiActivityKind kind, string detail = "", string? toolName = null)
             {
-                if (activity is null)
+                lock (traceGate)
                 {
-                    return;
-                }
+                    var runtimeEvent = new EllaiActivityEvent(context.SessionId, controllerEpoch,
+                        Interlocked.Increment(ref sequence), kind, cycleId, detail, DateTimeOffset.UtcNow, toolName);
+                    onActivity?.Invoke(runtimeEvent);
+                    if (activity is null)
+                    {
+                        return;
+                    }
 
-                var status = activity.Publish(new EllaiActivityEvent(
-                    context.SessionId, controllerEpoch, ++sequence, kind, cycleId, detail, now));
-                if (status is not null)
-                {
-                    journal?.Append(
-                        context.SessionId, "activity", status.Phase, status.Text,
-                        DateTimeOffset.UtcNow);
+                    var status = activity.Publish(runtimeEvent);
+                    if (status is not null)
+                    {
+                        journal?.Append(
+                            context.SessionId, "activity", status.Phase, status.Text,
+                            DateTimeOffset.UtcNow);
+                    }
                 }
+            }
+
+            async Task<EllaiToolResult> InvokeObservedAsync(EllaiToolRequest request, int remainingCalls)
+            {
+                Trace(EllaiActivityKind.ToolStarted, ActivityDetail(request.ToolName), request.ToolName);
+                using var timing = EllaiPipelineMetrics.Measure("tool_execution");
+                var toolContext = context with { RemainingCalls = remainingCalls };
+                var invocation = invokeToolAsync is null ? broker.InvokeAsync(toolContext, request, ct)
+                    : invokeToolAsync(toolContext, request, ct);
+                using var progressDelay = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                try
+                {
+                    for (var update = 0; update < 2 && !invocation.IsCompleted; update++)
+                    {
+                        var delay = Task.Delay(TimeSpan.FromSeconds(update == 0 ? 8 : 20), progressDelay.Token);
+                        if (await Task.WhenAny(invocation, delay).ConfigureAwait(false) == invocation
+                            || invocation.IsCompleted || ct.IsCancellationRequested) break;
+                        Trace(EllaiActivityKind.ToolPending, ActivityDetail(request.ToolName), request.ToolName);
+                    }
+                    return await invocation.ConfigureAwait(false);
+                }
+                finally { await progressDelay.CancelAsync().ConfigureAwait(false); }
             }
 
             EllaiCycleOutcome Stop(string reason, int iteration, string blockedDetail, string? failureCode = null)
@@ -133,7 +161,9 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
                 }
 
                 var needsArgumentRepair = false;
-                foreach (var toolRequest in turn.ToolRequests)
+                // Parallel reads require independent persistence scopes supplied by
+                // the Gateway. The ordinary scoped broker remains serial.
+                foreach (var batch in turn.ToolRequests.Chunk(invokeToolAsync is null ? 1 : 4))
                 {
                     if (isExecutionCurrentAsync is not null
                         && !await isExecutionCurrentAsync(ct).ConfigureAwait(false))
@@ -142,35 +172,35 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
                             iteration, "denied");
                     }
 
-                    if (toolCallsUsed >= MaxToolCalls)
+                    if (toolCallsUsed + batch.Length > MaxToolCalls)
                     {
                         return Stop("Model-visible tool budget exhausted.", iteration, "budget");
                     }
 
-                    Trace(EllaiActivityKind.ToolStarted, ActivityDetail(toolRequest.ToolName));
-                    remaining = remaining with { RemainingCalls = MaxToolCalls - toolCallsUsed };
-                    EllaiToolResult result;
-                    using (EllaiPipelineMetrics.Measure("tool_execution"))
+                    var results = await Task.WhenAll(batch.Select((request, index) =>
+                        InvokeObservedAsync(request, MaxToolCalls - toolCallsUsed - index))).ConfigureAwait(false);
+                    toolCallsUsed += batch.Length;
+                    for (var index = 0; index < batch.Length; index++)
                     {
-                        result = await broker.InvokeAsync(remaining, toolRequest, ct);
-                    }
-                    toolCallsUsed++;
-                    onToolResult?.Invoke(toolRequest, result);
-                    if (!result.Allowed)
-                    {
-                        if (result.ReasonCode == EllaiToolReasonCodes.InvalidArguments)
+                        var toolRequest = batch[index];
+                        var result = results[index];
+                        onToolResult?.Invoke(toolRequest, result);
+                        if (!result.Allowed)
                         {
-                            // The rejected call did not execute. Its error observation is already
-                            // in the model thread; allow correction within the existing call/turn limits.
-                            // Never accept a decision packaged with the rejected call.
-                            needsArgumentRepair = true;
-                            continue;
+                            if (result.ReasonCode == EllaiToolReasonCodes.InvalidArguments)
+                            {
+                                // The rejected call did not execute. Its error observation is already
+                                // in the model thread; allow correction within the existing call/turn limits.
+                                // Never accept a decision packaged with the rejected call.
+                                needsArgumentRepair = true;
+                                continue;
+                            }
+                            return Stop($"Tool {toolRequest.ToolName} denied: {result.DenialReason}",
+                                iteration, BlockedDetail(result.ReasonCode), result.ReasonCode);
                         }
-                        return Stop($"Tool {toolRequest.ToolName} denied: {result.DenialReason}",
-                            iteration, BlockedDetail(result.ReasonCode), result.ReasonCode);
-                    }
 
-                    Trace(EllaiActivityKind.ToolObservationAccepted);
+                        Trace(EllaiActivityKind.ToolObservationAccepted);
+                    }
                 }
 
                 if (needsArgumentRepair)

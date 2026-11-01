@@ -31,14 +31,14 @@ public static class EllaiConversationFeed
         HttpContext http, string sessionId, long? cursor, string? streamId,
         [Microsoft.AspNetCore.Mvc.FromServices] IEllaiUtteranceOutboxStore outbox,
         [Microsoft.AspNetCore.Mvc.FromServices] EllaiSessionResponseStore responses,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool includeProgress = false)
     {
         using var timing = EllaiPipelineMetrics.Measure("feed_read");
         var actor = ActorContext.FromValidatedPrincipal(http.User);
         var conversation = await outbox.ReadConversationAsync(sessionId, actor.ActorId, cancellationToken)
             .ConfigureAwait(false);
         var position = streamId is not null && streamId != responses.StreamId ? 0 : Math.Max(0, cursor ?? 0);
-        var page = responses.ReadSince(sessionId, position);
+        var page = responses.ReadSince(sessionId, position, includeProgress: includeProgress);
         foreach (var response in page.Responses)
         {
             EllaiPipelineMetrics.Record("publication_to_feed", (DateTimeOffset.UtcNow - response.CreatedAtUtc).TotalMilliseconds);

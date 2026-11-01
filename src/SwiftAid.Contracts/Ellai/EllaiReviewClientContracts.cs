@@ -68,7 +68,13 @@ public sealed record EllaiSessionResponseDto(
     string? ClientUtteranceId = null,
     bool IsFinal = true,
     bool IsReconciliation = false,
-    string? Outcome = null);
+    string? Outcome = null,
+    EllaiInteractionProgressDto? Progress = null);
+
+/// <summary>Ephemeral runtime narration; never an assistant answer or approval receipt.</summary>
+public sealed record EllaiInteractionProgressDto(
+    string EventId, string State, string Operation, bool Speak,
+    long ControllerEpoch, DateTimeOffset ExpiresAtUtc, string Language = "en");
 
 public sealed record EllaiSessionResponsePageDto(
     IReadOnlyList<EllaiSessionResponseDto> Responses,

@@ -8,6 +8,39 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiCycleRunnerTests
 {
     [Fact]
+    public async Task IsolatedParallelToolBatchStartsTogetherAndAcknowledgesOnlyOnce()
+    {
+        var broker = GrantedBroker();
+        var runner = new EllaiCycleRunner(broker);
+        var responses = new EllaiSessionResponseStore();
+        var progress = new EllaiToolProgressPublisher(responses, Context.SessionId, "parallel", 1, 1);
+        var allStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = 0;
+        var run = runner.RunAsync(Context, iteration => Task.FromResult(iteration == 1
+            ? new EllaiModelTurn(Enumerable.Range(1, 4).Select(index => new EllaiToolRequest(
+                EllaiToolNames.Now, new Dictionary<string, string>(), index.ToString())).ToArray(), null)
+            : new EllaiModelTurn([], ValidDecision())), EllaiDecisionValidator.Validate, CancellationToken.None,
+            onActivity: progress.Observe, invokeToolAsync: async (context, request, ct) =>
+            {
+                if (Interlocked.Increment(ref started) == 4) allStarted.TrySetResult();
+                await release.Task.WaitAsync(ct);
+                return await broker.InvokeAsync(context, request, ct);
+            });
+        try
+        {
+            await allStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.False(run.IsCompleted);
+            Assert.Single(responses.ReadSince(Context.SessionId, 0).Responses,
+                row => row.Progress?.State == "Acknowledgement");
+        }
+        finally { release.TrySetResult(); }
+        var outcome = await run;
+        Assert.True(outcome.Completed);
+        Assert.Equal(4, outcome.ToolCallsUsed);
+    }
+
+    [Fact]
     public async Task InvalidToolArgumentsReturnToModelForBoundedRepair()
     {
         var observations = new List<EllaiToolResult>();

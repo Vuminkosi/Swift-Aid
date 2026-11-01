@@ -9,6 +9,28 @@ namespace SwiftAid.Ui.Tests;
 [Trait("Task", "ELL-T08")]
 public sealed class EllaiEventPollerTests
 {
+    [Theory]
+    [InlineData(false, "Processing", true)]
+    [InlineData(true, "Processing", false)]
+    [InlineData(false, "Completed", false)]
+    public async Task ProgressReconnectAndRefreshNeverReplayObsoleteSpeech(bool refresh, string outcome, bool expectedSpeech)
+    {
+        var reviews = new FakeReviews();
+        var poller = new EllaiEventPoller(reviews);
+        poller.TrackSession("s-1");
+        var created = refresh ? DateTimeOffset.UtcNow.AddMinutes(-1) : DateTimeOffset.UtcNow;
+        reviews.ResponsePage = new([new(1, "s-1", "One moment.", created, "u", IsFinal: false,
+            Progress: new("u:initial", "Acknowledgement", "Checking records", true, 1, DateTimeOffset.UtcNow.AddSeconds(8)))],
+            1, "process", [new("u", 1, "Question", outcome == "Completed" ? "Answer" : null, outcome, 1, null)]);
+        var received = new List<EllaiSessionResponseDto>();
+        poller.ResponseReceived += received.Add;
+        await poller.PollOnceAsync(0, CancellationToken.None);
+        await poller.PollOnceAsync(0, CancellationToken.None);
+        if (outcome == "Completed") Assert.Empty(received);
+        else Assert.Equal(expectedSpeech, Assert.Single(received).Progress!.Speak);
+        Assert.Equal(1, poller.ResponseCursor);
+    }
+
     [Fact]
     public async Task GatewayRestartResetsTransientCursor()
     {

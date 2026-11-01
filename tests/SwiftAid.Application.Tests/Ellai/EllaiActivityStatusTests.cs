@@ -76,6 +76,15 @@ public sealed class EllaiActivityStatusTests
     }
 
     [Fact]
+    public void NextTurnStartsItsOwnSequenceWithoutLosingProgress()
+    {
+        var coordinator = new EllaiActivityStatusCoordinator();
+        coordinator.Publish(Event("s-1", 1, 20, EllaiActivityKind.CycleCompleted));
+        Assert.NotNull(coordinator.Publish(Event("s-1", 2, 1, EllaiActivityKind.ToolStarted, "read", "cycle-2")));
+        Assert.Null(coordinator.Publish(Event("s-1", 1, 21, EllaiActivityKind.ToolObservationAccepted)));
+    }
+
+    [Fact]
     public void CancelFencesLateCallbacks()
     {
         var coordinator = new EllaiActivityStatusCoordinator();

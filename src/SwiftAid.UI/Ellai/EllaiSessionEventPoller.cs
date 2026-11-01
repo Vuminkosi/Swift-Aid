@@ -441,7 +441,7 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
         try
         {
             using var response = await _http.GetAsync(
-                $"{SessionRoute(sessionId)}/responses?cursor={Math.Max(0, cursor)}&streamId={Uri.EscapeDataString(_responseStreamId ?? string.Empty)}",
+                $"{SessionRoute(sessionId)}/responses?cursor={Math.Max(0, cursor)}&streamId={Uri.EscapeDataString(_responseStreamId ?? string.Empty)}&includeProgress=true",
                 cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
@@ -994,6 +994,7 @@ public sealed class EllaiEventPoller(IEllaiReviewClient reviews)
     public event Action<IReadOnlyList<EllaiConversationTurnDto>>? ConversationUpdated;
     public event Action? ResponseStreamReset;
     private string? _streamId;
+    private DateTimeOffset _trackedAtUtc;
 
     public string? SessionId { get; private set; }
 
@@ -1010,6 +1011,7 @@ public sealed class EllaiEventPoller(IEllaiReviewClient reviews)
             Cursor = 0;
             ResponseCursor = 0;
             _streamId = null;
+            _trackedAtUtc = DateTimeOffset.UtcNow;
             _seenReviews.Clear();
         }
     }
@@ -1091,7 +1093,20 @@ public sealed class EllaiEventPoller(IEllaiReviewClient reviews)
                 continue;
             }
 
-            ResponseReceived?.Invoke(response);
+            if (response.Progress is { } progress)
+            {
+                var latest = responses.Conversation?.LastOrDefault();
+                var isActiveTurn = latest is { Outcome: "Queued" or "Processing" or "RetryableFailure" }
+                    && latest.ClientUtteranceId == response.ClientUtteranceId;
+                if (isActiveTurn || progress.State is "Completed" or "Failed" or "Cancelled" or "Interrupted" or "Retrying")
+                {
+                    // Replayed/expired hints may update activity, but never replay speech.
+                    var speak = progress.Speak && response.CreatedAtUtc >= _trackedAtUtc
+                        && progress.ExpiresAtUtc > DateTimeOffset.UtcNow && isActiveTurn;
+                    ResponseReceived?.Invoke(response with { Progress = progress with { Speak = speak } });
+                }
+            }
+            else ResponseReceived?.Invoke(response);
             ResponseCursor = response.Sequence;
         }
     }

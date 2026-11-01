@@ -18,7 +18,9 @@ public sealed record EllaiUtteranceServices(
     IEllaiSessionStore? Sessions = null,
     IEllaiConsentStore? ConsentStore = null,
     Func<string, CancellationToken, ValueTask>? OnTextDelta = null,
-    IEllaiUtteranceOutboxStore? Outbox = null);
+    IEllaiUtteranceOutboxStore? Outbox = null,
+    Action<EllaiActivityEvent>? OnActivity = null,
+    Func<EllaiToolContext, EllaiToolRequest, CancellationToken, Task<EllaiToolResult>>? InvokeToolAsync = null);
 
 /// <summary>Background execution of one accepted utterance with ledger,
 /// activity and journal wiring. Ordinary typed messages need no separate
@@ -126,7 +128,9 @@ public static class EllaiUtteranceRunner
                     {
                         await services.OnTextDelta(text, deltaCt).ConfigureAwait(false);
                     }
-                })
+                },
+            onActivity: services.OnActivity,
+            invokeToolAsync: services.InvokeToolAsync)
             .ConfigureAwait(false);
         return new EllaiUtteranceOutcome(
             true,
