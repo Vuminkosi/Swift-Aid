@@ -2,6 +2,24 @@
 
 2026-11-01. Synthetic, disposable local Docker fixtures on Windows; .NET 10.0.14, PostgreSQL/PostGIS 17, NATS 2.15.1. No patient data.
 
+## Final consolidated checks and delivery boundary
+
+PASS: 91 integration tests, 2 opt-in skips, at `62608eb` with the disposable PostgreSQL, restricted import runtime and NATS fixture variables configured:
+
+```powershell
+dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-build --no-restore --filter 'FullyQualifiedName~CaseImport|FullyQualifiedName~SharedWorkspace|FullyQualifiedName~EllaiImport|FullyQualifiedName~CaseRegistration|FullyQualifiedName~ManagedCaseRegistration|FullyQualifiedName~IngestionOutbox|FullyQualifiedName~JetStreamAcknowledgement|FullyQualifiedName~OrganizationMembership|FullyQualifiedName~OrganizationInvitation|FullyQualifiedName~DemoDataTests|FullyQualifiedName~CaseAuthorityLockHelperSource' --logger 'console;verbosity=minimal'
+```
+
+The two skips are browser and supplied-file load opt-ins, executed separately with the results below. Process-loss tests also have their own explicit opt-in and separate result. This combined check does not establish a running downstream intelligence pipeline.
+
+PASS: `dotnet ef migrations has-pending-model-changes --project src/SwiftAid.Infrastructure --startup-project src/SwiftAid.Infrastructure --no-build` reported no pending model changes. EF tooling 10.0.12 reported its version difference from runtime 10.0.14; no schema check failure occurred.
+
+PASS: `$env:GATEWAY_IMAGE='swiftaid/gateway:ingestion-20261101'` followed by `docker compose -f infra/compose.yml build gateway`. Image built at 06:50 UTC, ID `sha256:365d8913514854ea7b73674b47f04a15a6b92c728ac7bc9251b1b26e889e4e78`. Build source was `118e9ee`; the following `62608eb` change only affected tests/documentation. Build emitted trimming and browser SQLite native-reference warnings with native WASM/AOT disabled. Browser offline SQLite behavior is not verified by this build.
+
+NOT VERIFIED: running this published image, shared Gateway recreation/migration, Android/iOS rebuilds, physical devices and live model providers. The isolated browser fixture below exercises actual component/service/database paths with synthetic authentication and policy; it does not substitute for deployment acceptance. The image and local ignored browser/measurement evidence are retained as delivery artifacts.
+
+Overall result: **PARTIAL**. Maximum measured durable import is 15,000 reports. Completed downstream processing throughput, detection accuracy, million-record capacity and end-to-end surveillance readiness remain unproven. See the [delivery matrix](gateway-implementation-plan.md#delivery-status-at-the-end-of-the-bounded-implementation-slices).
+
 ## Verified dispatch slice
 
 | Check | Result | Observed scope |

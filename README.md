@@ -53,6 +53,16 @@ Offline access to downloaded, source-linked materials is part of the design. Thi
 
 Latest Ellai evidence includes tool-response journeys of roughly **35–70 seconds** and a voice run that did not complete all five replies. These are outstanding issues, not accepted service levels. See [Ellai implementation and validation](docs/ellai-voice-processing-progress.md).
 
+## Import cases from Workspace
+
+Authorized staff can open **Workspace → Imports**, select an organization, workspace and country, and upload the supported CSV. Multiple organizations can participate in one workspace; membership, grants and case visibility remain organization-scoped. A workspace link alone grants no access.
+
+Imports use bounded batches and the normal case-registration rules. The page shows durable row counts and rejection details. Pause after a batch, refresh and resume with the unchanged original file; stable command IDs prevent duplicate cases when an accepted row is retried. Import completion means the file was processed and may include rejected rows. It does not mean surveillance analysis is complete.
+
+See the [CSV format and examples](docs/architecture/gateway-import-format.md), [migration and runtime-grant runbook](docs/architecture/gateway-operational-runbook.md), and [measured verification report](docs/architecture/gateway-performance-report.md). The supplied 15,000 synthetic reports passed durable HTTP/PostgreSQL ingestion and replay checks; larger-scale processing and downstream intelligence remain outstanding.
+
+Ellai can help describe the import schema, validate observation formatting and inspect the current staff member's authorized import progress. These tools preserve the normal submission and approval boundaries.
+
 ## Meta models and their roles
 
 | Model / route | Use in SwiftAid | Boundary |

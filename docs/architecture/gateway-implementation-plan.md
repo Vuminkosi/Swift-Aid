@@ -22,6 +22,25 @@
 
 Progress and exact delivered/unimplemented boundaries will be updated as slices complete.
 
+## Delivery status at the end of the bounded implementation slices
+
+**PARTIAL against `designs/data/pipeline-requirements.md`.** The ingestion foundation is implemented and tested; the complete surveillance processing pipeline is not delivered. Accepted import rows are durable case registrations, not completed intelligence results.
+
+| Requirement area | Delivered boundary | Remaining work |
+|---|---|---|
+| Audit and canonical design | Source audit, processing architecture, event contracts, runbook and measured performance report | Revisit findings as downstream workers become executable |
+| Canonical ingestion | CSV adapter uses existing registration, validation, authorization, receipts and transactional case/outbox writes | JSONL, laboratory/backfill update adapters and broader media ingestion |
+| Workspace imports | Streaming bounded batches, encrypted source ledger, per-row outcomes, pause/resume, original-command replay, owner-authorized history; shared-workspace organization selection | Autonomous background resume, complete file identity, broader native-client validation and workload-isolation benchmarks |
+| Outbox and broker | Fenced leases, bounded retry/exhaustion, ordered case revisions, duplicate PubAck correction, opt-in bounded ingestion stream and operator recovery procedure | Durable processing consumers, result-before-ACK, consumer idempotency, automated retention and operator reprocessing UI |
+| Processing and surveillance | Existing abstractions preserved; no fabricated processing completion | Durable stage scheduler, quality/classification, detection, correlation, assessments and human verification integration |
+| Ellai | Schema/observation/location assistance plus authorized destination, import-list and import-status tools | Provider-driven capture acceptance and signal-triggered durable investigation orchestration |
+| Observability | Bounded import stage/outcome metrics and durable inspectable failures | Exporter/backend setup, full distributed tracing, downstream metrics, dashboards and alerts |
+| Resilience and scale | Real PostgreSQL/NATS process-loss recovery, source/authority isolation, restricted-role checks, browser resume and 15,000-row durable HTTP ingestion | Consumer/MinIO fault matrix, concurrent interactive load, 100k/million/multi-million full processing, HA and hardware/provider validation |
+
+The next implementation dependency is a durable processing result/checkpoint boundary with authorization, revision fencing and consumer idempotency, followed by a bounded JetStream consumer that acknowledges only committed outcomes. Intelligence stages depend on that boundary. Enabling dispatch alone does not establish completed processing.
+
+Local commits on `master`: audit `36c2874`; dispatch `b85afa4`; CSV/Ellai preparation `af21afa`; import backend `dc953d7`; Workspace UI `f690055`; supplied-file measurement `f54151e`; shared workspaces `154697f`; restricted import role `7687d4d`; upload/dependency corrections `792be6d`; Ellai monitoring `0f9ec62`; metrics `cbf45a2`; process-loss tests `118e9ee`; membership fixture regression `62608eb`. No commits were pushed. Deployment requires the reviewed migrations and runtime grants in the runbook. The shared Gateway/database were not replaced or migrated by this delivery.
+
 Owner-directed scope addition: imports belong in Workspace, and multiple organizations may participate in one workspace. Preserve a single organization per case and current membership/grant boundaries. Implement explicit participation links, backwards-compatible optional organization selection for registration/imports, migration backfill, revocation locking and actor-owned organization-filtered history. Verify cross-organization denial, replay conflicts and the real browser selection workflow; do not infer new self-service organization-administration permissions.
 
 Slice 1 implemented and verified: additive leased dispatch for both original outboxes, duplicate-PubAck correction for existing publishers, bounded opt-in stream provisioning and operations documentation. Focused final check: 28 passed, zero skipped, plus real ACL bootstrap and Compose validation. Consumer completion and intelligence stages remain separate outstanding work.
