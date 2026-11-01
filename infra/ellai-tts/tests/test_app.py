@@ -66,3 +66,29 @@ def test_synthesis_rejects_unconfigured_voice(monkeypatch):
         )
 
     assert response.status_code == 422
+
+
+def test_native_voice_metadata_and_language_mismatch(monkeypatch):
+    from pathlib import Path
+    from voice_pool import VoiceProfile
+    with client(monkeypatch) as test_client:
+        profile = VoiceProfile("shona-v1", "sna", "facebook/mms-tts-sna", "a" * 40, "b" * 64, Path("/models/sna"))
+        pool = tts_app.app.state.pool
+        pool.profiles[profile.voice_id] = profile
+        pool.loader = lambda _: tts_app.LoadedVoice(FakeModel(), FakeTokenizer(), 22050)
+        payload = {"text": "Synthetic test", "requestId": "native-1", "voiceId": profile.voice_id, "language": "sna"}
+        response = test_client.post("/v1/synthesize", headers={"Authorization": "Bearer test-only-key"}, json=payload)
+        assert response.status_code == 200
+        assert response.headers["x-swiftaid-model-id"] == profile.model_id
+        assert response.headers["x-swiftaid-language"] == "sna"
+        assert response.headers["x-swiftaid-sample-rate"] == "22050"
+        payload["language"] = "eng"
+        assert test_client.post("/v1/synthesize", headers={"Authorization": "Bearer test-only-key"}, json=payload).status_code == 422
+
+
+def test_busy_worker_applies_backpressure(monkeypatch):
+    with client(monkeypatch) as test_client, tts_app.app.state.pool.use(tts_app.VOICE_ID):
+        response = test_client.post("/v1/synthesize", headers={"Authorization": "Bearer test-only-key"},
+                                    json={"text": "Synthetic test", "requestId": "busy-1"})
+        assert response.status_code == 429
+        assert response.headers["retry-after"] == "1"

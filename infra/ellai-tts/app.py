@@ -14,6 +14,7 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from transformers import VitsModel, VitsTokenizer
+from voice_pool import VoiceProfile, VoicePool, VoiceBusy, read_profiles
 
 
 EXPECTED_MODEL_ID = "facebook/mms-tts-eng"
@@ -37,9 +38,10 @@ class SynthesisRequest(BaseModel):
     text: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
     voice_id: str = Field(default=VOICE_ID, min_length=1, max_length=80, alias="voiceId")
     request_id: str = Field(min_length=1, max_length=120, alias="requestId")
+    language: str = Field(default="eng", min_length=3, max_length=3)
 
 
-def load_voice(model_dir: Path) -> LoadedVoice:
+def load_voice(model_dir: Path, expected_sha256: str = EXPECTED_MODEL_SHA256) -> LoadedVoice:
     import hashlib
 
     model_file = model_dir / "model.safetensors"
@@ -50,7 +52,7 @@ def load_voice(model_dir: Path) -> LoadedVoice:
     with model_file.open("rb") as model_stream:
         for chunk in iter(lambda: model_stream.read(1024 * 1024), b""):
             digest.update(chunk)
-    if digest.hexdigest() != EXPECTED_MODEL_SHA256:
+    if digest.hexdigest() != expected_sha256:
         raise RuntimeError("The mounted MMS-TTS model file does not match the pinned SHA-256.")
 
     model = VitsModel.from_pretrained(
@@ -63,18 +65,17 @@ def load_voice(model_dir: Path) -> LoadedVoice:
     return LoadedVoice(model, tokenizer, sample_rate)
 
 
-def _get_voice() -> LoadedVoice:
-    voice = getattr(app.state, "voice", None)
-    if voice is None:
-        raise HTTPException(status_code=503, detail="Speech synthesis is unavailable.")
-    return voice
-
-
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> Iterator[None]:
     model_path = Path(os.environ.get("ELLAI_TTS_MODEL_PATH", "/models/mms-tts-eng"))
+    english = VoiceProfile(VOICE_ID, "eng", EXPECTED_MODEL_ID, EXPECTED_REVISION, EXPECTED_MODEL_SHA256, model_path)
+    profiles = read_profiles(os.environ.get("ELLAI_TTS_NATIVE_PROFILES", "[]"), english)
+    application.state.pool = VoicePool(profiles,
+        lambda profile: load_voice(profile.directory) if profile.language == "eng" else load_voice(profile.directory, profile.sha256),
+        int(os.environ.get("ELLAI_TTS_MAX_RESIDENT_MODELS", "2")))
     try:
-        application.state.voice = load_voice(model_path)
+        with application.state.pool.use(VOICE_ID):
+            application.state.voice = True
     except (OSError, RuntimeError, ValueError):
         application.state.voice = None
     yield
@@ -111,15 +112,22 @@ def synthesize(
     ):
         raise HTTPException(status_code=401, detail="Unauthorized.")
 
-    if request.voice_id != VOICE_ID:
+    pool = app.state.pool
+    profile = pool.profiles.get(request.voice_id)
+    if profile is None or profile.language != request.language:
         raise HTTPException(status_code=422, detail="The requested voice profile is unavailable.")
     if _MARKUP.search(request.text) or not request.text.strip():
         raise HTTPException(status_code=422, detail="The speech text is invalid.")
 
-    voice = _get_voice()
-    inputs = voice.tokenizer(text=request.text, return_tensors="pt")
-    with torch.inference_mode():
-        waveform = voice.model(**inputs).waveform[0].detach().cpu().numpy()
+    try:
+        with pool.use(request.voice_id) as (profile, voice):
+            inputs = voice.tokenizer(text=request.text, return_tensors="pt")
+            with torch.inference_mode():
+                waveform = voice.model(**inputs).waveform[0].detach().cpu().numpy()
+    except VoiceBusy:
+        raise HTTPException(status_code=429, detail="Speech synthesis is busy.", headers={"Retry-After": "1"})
+    except (OSError, RuntimeError, ValueError):
+        raise HTTPException(status_code=503, detail="The requested speech checkpoint is unavailable.")
     waveform = np.asarray(waveform, dtype=np.float32)
     if waveform.ndim != 1 or waveform.size == 0 or waveform.size > MAX_SAMPLE_COUNT:
         raise HTTPException(status_code=422, detail="The synthesized audio exceeds its limit.")
@@ -128,12 +136,13 @@ def synthesize(
         _frames(pcm),
         media_type="application/vnd.swiftaid.pcm",
         headers={
-            "X-SwiftAid-Voice-Id": VOICE_ID,
+            "X-SwiftAid-Voice-Id": profile.voice_id,
             "X-SwiftAid-Sample-Rate": str(voice.sample_rate),
             "X-SwiftAid-Channels": "1",
             "X-SwiftAid-Sample-Format": "s16le",
-            "X-SwiftAid-Model-Id": EXPECTED_MODEL_ID,
-            "X-SwiftAid-Model-Revision": EXPECTED_REVISION,
+            "X-SwiftAid-Model-Id": profile.model_id,
+            "X-SwiftAid-Model-Revision": profile.revision,
+            "X-SwiftAid-Language": profile.language,
             "X-SwiftAid-Request-Id": request.request_id,
             "Cache-Control": "no-store",
             "X-Content-Type-Options": "nosniff",
