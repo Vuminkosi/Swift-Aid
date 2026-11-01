@@ -155,6 +155,8 @@ builder.Services.AddScoped<SwiftAid.Contracts.Ellai.IEllaiReviewClient, SwiftAid
 builder.Services.AddScoped<SwiftAid.Gateway.Ellai.EllaiGuestSessionIdentity>();
 builder.Services.AddHttpClient<SwiftAid.Gateway.Ellai.IEllaiSpeechSynthesisClient,
     SwiftAid.Gateway.Ellai.EllaiSpeechSynthesisClient>();
+builder.Services.AddHttpClient<SwiftAid.Application.Ellai.IEllaiLanguageClient,
+    SwiftAid.Gateway.Ellai.EllaiLanguageClient>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiTopicService>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiTrainingVerifier>();
 {
