@@ -247,6 +247,21 @@ against an authenticated CDP page, and `SWIFTAID_RUN_LIVE_PROVIDER=1 node
 tests/SwiftAid.Ui.Tests/ellai-text.gateway.browser.cjs` (add
 `SWIFTAID_TEST_OUTPUT_LANGUAGE=sna` for translated output).
 
+Authenticated Chromium also verified Enter admission/clearing, a real Muse reply
+identifying Ellai About as the active page, and real MMS PCM playback starting in
+Web Audio (guest route 401 followed by owner-authorized staff route 200). The
+guest live-voice test with a synthetic 4.144-second WAV followed by 18 seconds of
+silence completed five durable turns in 106,528ms: one microphone capture, live
+track at completion, ten successful response-audio requests, zero page errors,
+and effective AEC/NS/AGC enabled at 48kHz. No client utterance resubmissions were
+observed. This is real Gateway/provider integration with a fake microphone,
+not hardware echo rejection, natural barge-in or Android/iOS validation.
+
+Outstanding tour integration is broader than a missing prompt: the worker does
+not deliver validated UI intents to a connected model-planner/Bonboarding flow;
+native and guest guidance controls still return unavailable. The read-only
+investigation confirmed these gaps; the changes above do not close them.
+
 **Status: Partial implementation. Report journey descriptors are registered at
 Gateway startup; complete model-generated guidance is not verified.**
 `EllaiUiRegistry` holds versioned semantic descriptors. `EllaiGuidancePlanValidator`,
