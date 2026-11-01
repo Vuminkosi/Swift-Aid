@@ -21,6 +21,9 @@ def main() -> None:
         from swiftaid_workers.classification.settings import ClassificationSettings
         job_id = str(UUID(args.classification_backfill)) if args.classification_backfill else None
         settings = ClassificationSettings()  # type: ignore[call-arg]
+        if settings.health_file:
+            from pathlib import Path
+            Path(settings.health_file).unlink(missing_ok=True)
         classifier = BartClassifier(settings.device)
         classifier.load()
         if job_id:

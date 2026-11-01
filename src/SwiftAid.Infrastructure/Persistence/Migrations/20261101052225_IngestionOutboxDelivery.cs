@@ -97,7 +97,7 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
 
             // Legacy leases have no owner token and cannot fence a completion. Keep every row pending.
             // Deploy with dispatch paused; the new publisher will acquire a fresh token.
-            migrationBuilder.Sql("UPDATE domain_outbox SET lease_until_utc = NULL WHERE lease_id IS NULL AND lease_until_utc IS NOT NULL");
+            migrationBuilder.Sql("UPDATE domain_outbox SET lease_until_utc = NULL WHERE lease_id IS NULL AND lease_until_utc IS NOT NULL;");
 
             migrationBuilder.AddCheckConstraint(
                 name: "ck_domain_outbox_fence",

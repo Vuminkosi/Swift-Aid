@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 from contextlib import suppress
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -125,6 +126,10 @@ async def run_consumer(settings: Any, classifier: Any) -> None:
 
         try:
             async with asyncio.TaskGroup() as group:
+                if getattr(settings, "health_file", None):
+                    from swiftaid_workers.classification.health import monitor
+                    group.create_task(monitor(connection, client, Path(settings.health_file)))
+                logger.warning("Classification consumer connected; model loaded; durable=%s", settings.durable)
                 for _ in range(settings.concurrency):
                     group.create_task(lane())
         finally:

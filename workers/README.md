@@ -52,6 +52,35 @@ These mirror the `workers` job in `.github/workflows/verify.yml`.
 
 ## Persistent classification consumer (opt-in)
 
+### Local Docker Compose deployment
+
+The `classification` profile in `infra/compose.yml` includes the CPU worker, durable-consumer bootstrap and ingestion-stream bootstrap. The image installs the locked classification extra (CPU Torch on Linux), reserves up to 4 CPUs/6 GiB, and caches the pinned BART model in `classification-model-data`. Model weights require approximately 1.6 GB in addition to the image. Initial loading can take several minutes.
+
+Before starting, back up the database and apply the reviewed migrations through `20261101081631_ClassificationOutboxOrderingIndex`. The application does not automatically migrate a shared database. Preserve existing streams; bootstrap refuses incompatible stream or consumer settings. Reload the updated `infra/nats.conf` on an already-running broker (`docker kill --signal HUP swiftaid-nats-1`).
+
+Configure explicit existing organization IDs, from the repository root:
+
+```powershell
+./infra/scripts/configure-classification.ps1 -OrganizationIds 'your-organization-id'
+```
+
+This creates ignored `.classification-worker.env` and `.classification-gateway.env` files. The worker receives the private machine token; Gateway receives its SHA-256 and the organization allowlist. Existing tokens are reused. Never commit these files. For a remote deployment supply managed secrets and HTTPS instead of this local configuration.
+
+After migrations and configuration, set `SWIFTAID_INGESTION_DISPATCH_ENABLED=true` and `COMPOSE_PROFILES=classification` in the ignored `infra/.env`, then run:
+
+```powershell
+docker compose -f infra/compose.yml build gateway classification-worker
+docker compose -f infra/compose.yml up -d gateway classification-worker
+docker compose -f infra/compose.yml ps gateway classification-worker
+docker compose -f infra/compose.yml logs --tail 50 classification-worker
+```
+
+The worker shares Gateway's network namespace and sends its credential only over `127.0.0.1`; the existing explicit loopback HTTP exception is unchanged. Restart/recreate the worker whenever Gateway is recreated. NATS uses the existing worker identity, which can bind/pull/ack but cannot create the durable. Only the bootstrap service has provisioning credentials. PostgreSQL remains accessible through Gateway, never directly from the worker.
+
+Worker health requires the model to have loaded, the consumer to have bound, a recent NATS flush, and authenticated Gateway `/api/internal/classification/ready` with a successful classification-table query. A stale dependency check expires after 60 seconds. Health does not prove inference accuracy, supported-language coverage or throughput. Unknown/non-English language still abstains.
+
+To pause processing, stop `classification-worker` and set `SWIFTAID_INGESTION_DISPATCH_ENABLED=false` before recreating Gateway. Retain the database, stream and model volumes; queued work is not deleted. Schema rollback requires a separately reviewed recovery plan.
+
 Install `uv sync --project workers --locked --extra classification`. This adds pinned Torch 2.10.0 and Transformers 4.57.6; ordinary contract tests do not need inference dependencies. The model is `facebook/bart-large-mnli` at revision `d7645e127eaf1aefc7862fd59a17a5aa8558b8ce`, approximately 1.6 GB of safetensors. CPU is the default; `CLASSIFICATION_DEVICE=cuda` requires a compatible CUDA Torch installation and validation on that GPU. Model loading is serialized before consumption. Neither profile has a throughput guarantee.
 
 After the Gateway classification migrations, explicit organization-scoped worker configuration and ingestion stream provisioning, provision the durable using the bootstrap NATS identity:

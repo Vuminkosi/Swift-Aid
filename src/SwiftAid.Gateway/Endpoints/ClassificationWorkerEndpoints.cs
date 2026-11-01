@@ -1,6 +1,9 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Options;
+using Microsoft.EntityFrameworkCore;
+using SwiftAid.Infrastructure.Persistence;
+using SwiftAid.Infrastructure.Persistence.Classification;
 using SwiftAid.Application.Classification;
 using SwiftAid.Infrastructure.Classification;
 
@@ -37,6 +40,12 @@ public static class ClassificationWorkerEndpoints
             catch (UnauthorizedAccessException) { return Results.StatusCode(403); }
             catch (ArgumentException) { return Results.BadRequest(new { code = "invalid-classification-contract" }); }
             catch (InvalidDataException) { return Results.BadRequest(new { code = "invalid-source-journal" }); }
+        });
+        group.MapGet("/ready", async (SwiftAidDbContext db, CancellationToken ct) =>
+        {
+            // Authenticated readiness checks the persistence boundary without exposing case data.
+            await db.Set<ClassificationResultEntity>().AnyAsync(ct);
+            return Results.Ok(new { status = "ready" });
         });
         group.MapPost("/claim", async (ClassificationClaimRequest request, ClassificationRegistry registry, ClassificationBackfillStore backfill, CancellationToken ct) =>
         {

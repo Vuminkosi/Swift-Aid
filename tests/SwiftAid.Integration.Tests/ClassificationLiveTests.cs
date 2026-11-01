@@ -60,6 +60,15 @@ public sealed class ClassificationLiveTests(ITestOutputHelper output)
         await using var app = builder.Build(); app.UseClassificationRequestLimit(); app.MapClassificationWorkerEndpoints(); await app.StartAsync();
         var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
         using var client = new HttpClient();
+        Assert.Equal(System.Net.HttpStatusCode.Unauthorized,
+            (await client.GetAsync(address + "/api/internal/classification/ready")).StatusCode);
+        using (var readiness = new HttpRequestMessage(HttpMethod.Get, address + "/api/internal/classification/ready"))
+        {
+            readiness.Headers.Authorization = new("Bearer", token);
+            using var ready = await client.SendAsync(readiness);
+            Assert.Equal(System.Net.HttpStatusCode.OK, ready.StatusCode);
+            Assert.Contains("ready", await ready.Content.ReadAsStringAsync());
+        }
         Assert.Equal(System.Net.HttpStatusCode.Unauthorized, (await client.PostAsync(address + "/api/internal/classification/claim",
             new StringContent(JsonSerializer.Serialize(new { notice }, new JsonSerializerOptions(JsonSerializerDefaults.Web)), Encoding.UTF8, "application/json"))).StatusCode);
         var root = new DirectoryInfo(AppContext.BaseDirectory);

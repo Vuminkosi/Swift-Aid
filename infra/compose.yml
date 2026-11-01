@@ -10,6 +10,8 @@ services:
     env_file:
       - path: ${SWIFTAID_NATS_OPTIONS_FILE:-../.nats-overrides.env}
         required: false
+      - path: ${SWIFTAID_CLASSIFICATION_GATEWAY_FILE:-../.classification-gateway.env}
+        required: false
     environment:
       # ASP.NET Core
       # Local Compose stack: Development unlocks the TransportSecurity plaintext-dev
@@ -303,7 +305,7 @@ services:
     restart: "no"
   nats-ingestion-bootstrap:
     image: natsio/nats-box:0.19.7@sha256:ffce8bd103383f179f8c7f11cf645726acf5d17280706c530c3b342dbe16334c
-    profiles: ["ingestion"]
+    profiles: ["ingestion", "classification"]
     entrypoint: ["/bin/sh", "/opt/swiftaid/bootstrap-ingestion-stream.sh"]
     volumes:
       - ./scripts/bootstrap-ingestion-stream.sh:/opt/swiftaid/bootstrap-ingestion-stream.sh:ro
@@ -317,6 +319,65 @@ services:
     networks:
       - application
     restart: "no"
+
+  classification-bootstrap:
+    profiles: ["classification"]
+    image: swiftaid/classification-worker:local
+    build:
+      context: ../workers
+      args:
+        CLASSIFICATION: "true"
+    entrypoint: ["/app/.venv/bin/python", "-m", "swiftaid_workers.classification.provision"]
+    environment:
+      NATS_URL: "nats://nats:4222"
+      NATS_USER: "${NATS_BOOTSTRAP_USER:?Set NATS_BOOTSTRAP_USER in .env}"
+      NATS_PASSWORD: "${NATS_BOOTSTRAP_PASSWORD:?Set NATS_BOOTSTRAP_PASSWORD in .env}"
+    depends_on:
+      nats-ingestion-bootstrap:
+        condition: service_completed_successfully
+    networks: [application]
+    restart: "no"
+
+  classification-worker:
+    profiles: ["classification"]
+    image: swiftaid/classification-worker:local
+    build:
+      context: ../workers
+      args:
+        CLASSIFICATION: "true"
+    command: ["--classification"]
+    env_file:
+      - path: ${SWIFTAID_CLASSIFICATION_WORKER_FILE:-../.classification-worker.env}
+        required: false
+    environment:
+      CLASSIFICATION_NATS_URL: "nats://nats:4222"
+      CLASSIFICATION_NATS_USER: "${NATS_WORKER_USER:?Set NATS_WORKER_USER in .env}"
+      CLASSIFICATION_NATS_PASSWORD: "${NATS_WORKER_PASSWORD:?Set NATS_WORKER_PASSWORD in .env}"
+      # Share Gateway's network namespace: credentials remain on loopback, not bridge HTTP.
+      CLASSIFICATION_GATEWAY_URL: "http://127.0.0.1:8080"
+      CLASSIFICATION_ALLOW_LOOPBACK_HTTP: "true"
+      CLASSIFICATION_DEVICE: cpu
+      CLASSIFICATION_HEALTH_FILE: /tmp/classification-ready
+      HF_HOME: /models
+      HF_HUB_DISABLE_TELEMETRY: "1"
+    network_mode: "service:gateway"
+    volumes:
+      - classification-model-data:/models
+    depends_on:
+      gateway:
+        condition: service_healthy
+        restart: true
+      classification-bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-m", "swiftaid_workers.classification.health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10m
+      retries: 4
+    mem_limit: 6g
+    cpus: 4
+    restart: unless-stopped
 
   minio:
     image: swiftaid/minio:RELEASE.2025-10-15T17-29-55Z-source
@@ -436,6 +497,7 @@ volumes:
   nats-data:
   minio-data:
   ellai-tts-model-data:
+  classification-model-data:
 
 secrets:
   fcm-service-account:

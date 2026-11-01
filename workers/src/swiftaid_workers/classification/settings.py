@@ -13,6 +13,7 @@ class ClassificationSettings(BaseSettings):
     concurrency: int = Field(default=2, ge=1, le=8)
     device: str = "cpu"
     allow_loopback_http: bool = False
+    health_file: str | None = None
     backfill_interval_seconds: float = Field(default=1, ge=0.1, le=60)
 
     @model_validator(mode="after")

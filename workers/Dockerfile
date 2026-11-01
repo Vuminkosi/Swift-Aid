@@ -8,13 +8,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_LINK_MODE=copy
 
 WORKDIR /app
+ARG CLASSIFICATION=false
 COPY --from=uv /uv /uvx /bin/
 COPY pyproject.toml uv.lock ./
 COPY src ./src
 
 RUN addgroup --system swiftaid \
     && adduser --system --ingroup swiftaid swiftaid \
-    && uv sync --frozen --no-dev --no-cache \
+    && if [ "$CLASSIFICATION" = "true" ]; then uv sync --frozen --no-dev --no-cache --extra classification; else uv sync --frozen --no-dev --no-cache; fi \
+    && mkdir -p /models \
+    && chown swiftaid:swiftaid /models \
     && chown -R swiftaid:swiftaid /app
 
 USER swiftaid

@@ -4,6 +4,19 @@ Baseline: `a64bd6f`, 2026-11-01. Implements the owner-authorized continuation in
 
 ## Audit and contract
 
+### Compose deployment verification (2026-11-01)
+
+The `classification` Compose profile now supplies the persistent Python consumer and its one-shot provisioning dependency. See [deployment and rollback instructions](../../workers/README.md#local-docker-compose-deployment). Gateway retains PostgreSQL ownership; the worker uses a scoped machine credential over shared-namespace loopback and the existing NATS worker permissions. CPU Torch is locked separately from GPU runtimes. The readiness lease is cleared before model loading and refreshed only after broker and authenticated Gateway persistence checks succeed.
+
+- PASS: Gateway and CPU worker container builds; Compose configuration validation.
+- PASS: Python suite, 59 passed / 3 opt-in tests skipped; Ruff checks.
+- PASS: real pinned BART, Gateway HTTP, disposable PostgreSQL and JetStream integration test, including unauthenticated readiness rejection, authenticated readiness, result commit, redelivery without duplicate inference, poison quarantine and resumable backfill (1 test, 23 seconds).
+- PASS: offline CPU-container synthetic inference with cached weights: model load 3.40 seconds; two-label inference 220.80 ms. This is a small smoke sample, not a throughput benchmark or clinical validation.
+- PASS: shared NATS stream and durable bootstrap after reloading the existing broker ACL; no retained stream data was deleted.
+- NOT VERIFIED: shared-database classification processing. Its required migrations await explicit approval after automatic review rejected the shared schema/data mutation. No shared database migration or live classification activation has occurred in this deployment step.
+
+The migration SQL generator exposed a missing statement terminator in the existing ingestion lease repair. The source migration now terminates that statement so generated deployment scripts remain executable; its data semantics are unchanged.
+
 - Python `jobs/consumer.py` validates envelopes only; the entry point refuses execution. Existing job persistence contracts are not registered as a working repository. They prohibit the legacy Surveillance job type. A classification-specific registry is required; this does not enable that legacy job or change official clinical classification.
 - Managed case reports have immutable protected v1/v2 journal events. The Gateway journal reader and payload protection store are reusable. Broker messages contain IDs only, never authorized input or tenant authority.
 - Domain outbox rows require case-event foreign keys. Derived intelligence must not masquerade as a case command/event. Classification lifecycle records therefore need an additive outbox lane using the existing dispatch/lease pattern and broker, with no sensitive payload.
