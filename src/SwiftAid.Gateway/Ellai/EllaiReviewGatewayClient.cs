@@ -266,7 +266,7 @@ public sealed class EllaiReviewGatewayClient(
             using var stream = new MemoryStream(audio, writable: false);
             return await voice.TranscribeAsync(
                     sessionId, mode, stream, audio.LongLength, cancellationToken,
-                    voiceCaptureId, voiceCaptureOffsetSamples)
+                    voiceCaptureId, voiceCaptureOffsetSamples, submissionPrincipal: principal)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -305,7 +305,7 @@ public sealed class EllaiReviewGatewayClient(
             return await voice.TranscribeAsync(
                 sessionId, EllaiVoiceCaptureMode.Live, audio, contentLength: null,
                 cancellationToken: cancellationToken, voiceCaptureId: voiceCaptureId,
-                voiceCaptureOffsetSamples: voiceCaptureOffsetSamples)
+                voiceCaptureOffsetSamples: voiceCaptureOffsetSamples, submissionPrincipal: principal)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -338,6 +338,7 @@ public sealed class EllaiReviewGatewayClient(
             ToMilliseconds(snapshot.ConfirmedSpeech), ToMilliseconds(snapshot.Silence),
             snapshot.PartialTranscript,
             coordinator.GetCompletedTurns(sessionId, afterSequence)
+                .TakeWhile(turn => !turn.ServerSubmission || turn.Admission is not null)
                 .Select(turn => new EllaiCompletedVoiceTurnDto(
                     turn.Sequence,
                     turn.ProviderTurnId,
@@ -347,7 +348,9 @@ public sealed class EllaiReviewGatewayClient(
                     turn.StreamEpoch,
                     AudioStartSample: turn.AudioStartSample,
                     AudioEndSample: turn.AudioEndSample,
-                    VoiceCaptureId: turn.VoiceCaptureId))
+                    VoiceCaptureId: turn.VoiceCaptureId,
+                    ServerSubmission: turn.ServerSubmission,
+                    Admission: turn.Admission))
                 .ToArray(),
             snapshot.SessionId);
     }

@@ -32,6 +32,7 @@ public static class EllaiGuestEndpoints
             ToMilliseconds(snapshot.Silence),
             snapshot.PartialTranscript,
             coordinator.GetCompletedTurns(sessionId, afterSequence)
+                .TakeWhile(turn => !turn.ServerSubmission || turn.Admission is not null)
                 .Select(turn => new EllaiCompletedVoiceTurnDto(
                     turn.Sequence,
                     turn.ProviderTurnId,
@@ -41,7 +42,9 @@ public static class EllaiGuestEndpoints
                     turn.StreamEpoch,
                     AudioStartSample: turn.AudioStartSample,
                     AudioEndSample: turn.AudioEndSample,
-                    VoiceCaptureId: turn.VoiceCaptureId))
+                    VoiceCaptureId: turn.VoiceCaptureId,
+                    ServerSubmission: turn.ServerSubmission,
+                    Admission: turn.Admission))
                 .ToArray(),
             snapshot.SessionId));
     }
@@ -364,7 +367,9 @@ public static class EllaiGuestEndpoints
             sessionId, captureMode, request.Body, request.ContentLength, cancellationToken,
             request.Query["voiceCaptureId"].FirstOrDefault(),
             long.TryParse(request.Query["voiceCaptureOffsetSamples"].FirstOrDefault(), out var offsetSamples)
-                ? offsetSamples : 0).ConfigureAwait(false);
+                ? offsetSamples : 0,
+            submissionPrincipal: request.Query["serverSubmission"] == "true" ? http.User : null)
+            .ConfigureAwait(false);
         return result is not null
             ? Results.Json(result)
             : Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,

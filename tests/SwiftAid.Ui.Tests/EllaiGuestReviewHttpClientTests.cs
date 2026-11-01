@@ -10,8 +10,8 @@ namespace SwiftAid.Ui.Tests;
 public sealed class EllaiGuestReviewHttpClientTests
 {
     [Theory]
-    [InlineData("http://localhost:8080/", "ws://localhost:8080/api/v1/ellai/guest/sessions/guest-session/voice/live-stream?voiceCaptureId=capture-1")]
-    [InlineData("https://example.test/app/", "wss://example.test/app/api/v1/ellai/guest/sessions/guest-session/voice/live-stream?voiceCaptureId=capture-1")]
+    [InlineData("http://localhost:8080/", "ws://localhost:8080/api/v1/ellai/guest/sessions/guest-session/voice/live-stream?voiceCaptureId=capture-1&serverSubmission=true")]
+    [InlineData("https://example.test/app/", "wss://example.test/app/api/v1/ellai/guest/sessions/guest-session/voice/live-stream?voiceCaptureId=capture-1&serverSubmission=true")]
     public void LiveVoiceWebSocketUsesSameOriginAndSecureScheme(
         string baseAddress, string expected)
     {
@@ -156,7 +156,7 @@ public sealed class EllaiGuestReviewHttpClientTests
             "guest-session", [1, 2, 3, 4], EllaiVoiceCaptureMode.Recorded, CancellationToken.None);
 
         Assert.Equal("heard words", transcript?.Transcript);
-        Assert.Equal("/api/v1/ellai/guest/sessions/guest-session/voice/recorded", handler.PostPath);
+        Assert.Equal("/api/v1/ellai/guest/sessions/guest-session/voice/recorded?serverSubmission=true", handler.PostPath);
         Assert.Equal("audio/wav", handler.ContentType);
         Assert.Equal(new byte[] { 1, 2, 3, 4 }, handler.AudioBytes);
         Assert.Equal("csrf-test", handler.CsrfToken);
@@ -173,7 +173,7 @@ public sealed class EllaiGuestReviewHttpClientTests
             "guest-session", [1, 2, 3, 4], EllaiVoiceCaptureMode.Live, CancellationToken.None);
 
         Assert.Equal("heard words", transcript?.Transcript);
-        Assert.Equal("/api/v1/ellai/guest/sessions/guest-session/voice/live", handler.PostPath);
+        Assert.Equal("/api/v1/ellai/guest/sessions/guest-session/voice/live?serverSubmission=true", handler.PostPath);
         Assert.Equal("application/octet-stream", handler.ContentType);
         Assert.Equal(new byte[] { 1, 2, 3, 4 }, handler.AudioBytes);
         Assert.Equal("csrf-test", handler.CsrfToken);
@@ -192,7 +192,7 @@ public sealed class EllaiGuestReviewHttpClientTests
 
         Assert.Equal("streamed words", result?.Transcript);
         Assert.Equal(
-            "/api/v1/ellai/guest/sessions/guest-session/voice/live?voiceCaptureId=voice-capture-1&voiceCaptureOffsetSamples=4800",
+            "/api/v1/ellai/guest/sessions/guest-session/voice/live?serverSubmission=true&voiceCaptureId=voice-capture-1&voiceCaptureOffsetSamples=4800",
             handler.Path);
         Assert.Equal("application/octet-stream", handler.ContentType);
         Assert.Null(handler.ContentLength);
@@ -373,7 +373,7 @@ public sealed class EllaiGuestReviewHttpClientTests
                 };
             }
 
-            PostPath = request.RequestUri?.AbsolutePath;
+            PostPath = request.RequestUri?.PathAndQuery;
             ContentType = request.Content?.Headers.ContentType?.MediaType;
             CsrfToken = request.Headers.TryGetValues("X-CSRF-TOKEN", out var values) ? values.Single() : null;
             AudioBytes = request.Content is null

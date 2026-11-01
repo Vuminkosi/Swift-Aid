@@ -1,3 +1,5 @@
+using SwiftAid.Contracts.Ellai;
+
 namespace SwiftAid.Application.Ellai;
 
 public enum EllaiVoiceTurnState
@@ -55,7 +57,9 @@ public sealed record EllaiCompletedVoiceTurn(
     long StreamEpoch,
     long AudioStartSample = -1,
     long AudioEndSample = -1,
-    string VoiceCaptureId = "");
+    string VoiceCaptureId = "",
+    bool ServerSubmission = false,
+    EllaiUtteranceSubmitResult? Admission = null);
 
 public sealed record EllaiBargeInDecision(
     string SessionId,
@@ -85,7 +89,8 @@ public sealed class EllaiVoiceTurnCoordinator
     }
 
     public VoiceStreamLease BeginStream(
-        string sessionId, CancellationToken cancellationToken, string? voiceCaptureId = null)
+        string sessionId, CancellationToken cancellationToken, string? voiceCaptureId = null,
+        bool serverSubmission = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         lock (_gate)
@@ -128,7 +133,7 @@ public sealed class EllaiVoiceTurnCoordinator
                 : EllaiVoiceTurnState.Listening;
             var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             var lease = new VoiceStreamLease(
-                this, state, state.Epoch, effectiveCaptureId, linkedCancellation);
+                this, state, state.Epoch, effectiveCaptureId, linkedCancellation, serverSubmission);
             state.ActiveStream = lease;
             return lease;
         }
@@ -423,8 +428,20 @@ public sealed class EllaiVoiceTurnCoordinator
         lock (_gate)
         {
             return _sessions.TryGetValue(sessionId, out var state)
-                ? state.CompletedTurns.Where(turn => turn.Sequence > afterSequence).ToArray()
+                ? state.CompletedTurns.Where(turn => turn.Sequence > afterSequence)
+                    .Select(turn => turn with { Admission = state.Submissions.GetValueOrDefault(turn.TurnId) }).ToArray()
                 : [];
+        }
+    }
+
+    public void RecordSubmission(string sessionId, Guid turnId, EllaiUtteranceSubmitResult result)
+    {
+        lock (_gate)
+        {
+            if (_sessions.TryGetValue(sessionId, out var state)
+                && state.CompletedTurns.Any(turn => turn.TurnId == turnId && turn.ServerSubmission)
+                && state.Submissions.GetValueOrDefault(turnId)?.Status != EllaiClientOperationStatus.Accepted)
+                state.Submissions[turnId] = result;
         }
     }
 
@@ -639,7 +656,7 @@ public sealed class EllaiVoiceTurnCoordinator
 
             while (state.CompletedTurns.Count >= MaximumRetainedCompletedTurnsPerSession)
             {
-                state.CompletedTurns.Dequeue();
+                state.Submissions.Remove(state.CompletedTurns.Dequeue().TurnId);
             }
 
             var turnId = state.ConfirmedInterruptionTurnId ?? Guid.NewGuid();
@@ -658,7 +675,8 @@ public sealed class EllaiVoiceTurnCoordinator
                 transcript.Epoch,
                 hasAudioSpan ? state.LastSpeechStartSample : -1,
                 hasAudioSpan ? state.LastSpeechEndSample : -1,
-                state.ActiveStream?.VoiceCaptureId ?? string.Empty));
+                state.ActiveStream?.VoiceCaptureId ?? string.Empty,
+                state.ActiveStream?.ServerSubmission == true));
             state.PendingInterruptionTurnId = null;
             state.ConfirmedInterruptionTurnId = null;
             state.State = EllaiVoiceTurnState.TurnCompleted;
@@ -694,6 +712,7 @@ public sealed class EllaiVoiceTurnCoordinator
         public HashSet<string> FinalProviderTurnIds { get; } = new(StringComparer.Ordinal);
         public Queue<EllaiAcceptedFinalTranscript> PendingFinalTranscripts { get; } = new();
         public Queue<EllaiCompletedVoiceTurn> CompletedTurns { get; } = new();
+        public Dictionary<Guid, EllaiUtteranceSubmitResult> Submissions { get; } = new();
         public Dictionary<(string CaptureId, long Start, long End), long> CompletedAudioSpans { get; } = [];
         public Queue<(string CaptureId, long Start, long End)> CompletedAudioSpanOrder { get; } = new();
         public long NextCompletionSequence { get; set; }
@@ -732,13 +751,15 @@ public sealed class EllaiVoiceTurnCoordinator
             SessionState session,
             long epoch,
             string voiceCaptureId,
-            CancellationTokenSource cancellation)
+            CancellationTokenSource cancellation,
+            bool serverSubmission)
         {
             _owner = owner;
             Session = session;
             Epoch = epoch;
             VoiceCaptureId = voiceCaptureId;
             _cancellation = cancellation;
+            ServerSubmission = serverSubmission;
         }
 
         internal SessionState Session { get; }
@@ -746,6 +767,7 @@ public sealed class EllaiVoiceTurnCoordinator
         public string VoiceCaptureId { get; }
         public CancellationToken CancellationToken => _cancellation.Token;
         public string SessionId => Session.SessionId;
+        public bool ServerSubmission { get; }
 
         public EllaiAcceptedFinalTranscript? AcceptFinalTranscript(string providerTurnId, string text) =>
             _owner.AcceptFinalTranscript(this, providerTurnId, text);

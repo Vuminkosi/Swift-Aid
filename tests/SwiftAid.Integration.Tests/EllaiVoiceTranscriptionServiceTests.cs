@@ -1,4 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
+using System.Security.Claims;
+using SwiftAid.Application.Authorization;
 using System.Net;
 using System.Net.WebSockets;
 using System.Text;
@@ -18,6 +20,107 @@ namespace SwiftAid.Integration.Tests;
 
 public sealed class EllaiVoiceTranscriptionServiceTests
 {
+    [Theory]
+    [InlineData("voice-owner", EllaiClientOperationStatus.Accepted)]
+    [InlineData("other-owner", EllaiClientOperationStatus.Unauthorized)]
+    public async Task RecordedVoiceIsAdmittedBeforeReturningAndRetriesKeepOneDurableTurn(
+        string actorId, EllaiClientOperationStatus expectedStatus)
+    {
+        const string sessionId = "recorded-admission";
+        var options = new EllaiOptions { Enabled = true, ApiKey = "synthetic",
+            AsrModel = "muse-voice-transcribe-1.0", AsrTranscriptionUrl = "https://transcription.test/v1/transcribe" };
+        var principal = new ClaimsPrincipal(new ClaimsIdentity([
+            new Claim(ClaimTypes.NameIdentifier, actorId), new Claim(ActorContext.AccessEpochClaimType, "1")], "test"));
+        var store = new InMemoryEllaiSessionStore();
+        await store.CreateAsync(new(sessionId, EllaiMode.Ask, "Active", 1, 1, 1, 1, 0, 12,
+            "voice-owner", "ellai-help-identity-epoch-1", null, null, DateTimeOffset.UtcNow), CancellationToken.None);
+        var consent = new EllaiConsentService();
+        using var http = new HttpClient(new StubAsrHandler());
+        using var provider = new ServiceCollection().AddSingleton(consent)
+            .AddSingleton<IEllaiSessionStore>(store).AddScoped<EllaiUtteranceSubmissionService>()
+            .AddSingleton(new MetaAsrUploadAdapter(http, options)).BuildServiceProvider();
+        var service = new EllaiVoiceTranscriptionService(consent, new InMemoryEllaiConsentStore(), options, provider);
+        await service.GrantVoiceConsentAsync(sessionId, CancellationToken.None);
+        // The provider fixture only checks the container signature; no real audio leaves this test.
+        var wave = new byte[44];
+        "RIFF"u8.CopyTo(wave);
+        "WAVE"u8.CopyTo(wave.AsSpan(8));
+        string? acceptedId = null;
+        for (var retry = 0; retry < 2; retry++)
+        {
+            using var audio = new MemoryStream(wave);
+            var result = await service.TranscribeAsync(sessionId, EllaiVoiceCaptureMode.Recorded,
+                audio, audio.Length, CancellationToken.None, "same-capture", submissionPrincipal: principal);
+            Assert.NotNull(result);
+            Assert.True(result.ServerSubmission);
+            Assert.Equal(expectedStatus, result.Admission?.Status);
+            if (acceptedId is not null) Assert.Equal(acceptedId, result.ClientUtteranceId);
+            acceptedId = result.ClientUtteranceId;
+            var conversation = await store.ReadConversationAsync(sessionId, "voice-owner", CancellationToken.None);
+            if (expectedStatus == EllaiClientOperationStatus.Accepted)
+            {
+                Assert.Equal(acceptedId, Assert.Single(conversation).ClientUtteranceId);
+                Assert.Equal("Queued", conversation[0].Outcome);
+            }
+            else Assert.Empty(conversation);
+        }
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(48_000)]
+    public async Task ConfirmedVoiceTurnIsAdmittedWithoutClientPollingOrMicrophoneEof(int finalAfterPcmBytes)
+    {
+        await using var server = await AudioForwardingWebSocketServer.CreateAsync(finalAfterPcmBytes: finalAfterPcmBytes);
+        var options = new EllaiOptions
+        {
+            Enabled = true, ApiKey = "synthetic-key", AsrModel = "muse-voice-transcribe-1.0",
+            AsrWebSocketUrl = server.WebSocketUrl, AsrMode = "DIARIZATION",
+        };
+        const string sessionId = "gateway-submission";
+        var principal = new ClaimsPrincipal(new ClaimsIdentity([
+            new Claim(ClaimTypes.NameIdentifier, "voice-owner"),
+            new Claim(ActorContext.AccessEpochClaimType, "1")], "test"));
+        var store = new InMemoryEllaiSessionStore();
+        await store.CreateAsync(new(sessionId, EllaiMode.Ask, "Active", 1, 1, 1, 1, 0, 12,
+            "voice-owner", "ellai-help-identity-epoch-1", null, null, DateTimeOffset.UtcNow), CancellationToken.None);
+        var turns = new EllaiVoiceTurnCoordinator();
+        var consent = new EllaiConsentService();
+        using var provider = new ServiceCollection().AddSingleton(turns).AddSingleton(consent)
+            .AddSingleton<IEllaiSessionStore>(store).AddScoped<EllaiUtteranceSubmissionService>()
+            .AddSingleton(new MetaAsrRealtimeAdapter(options))
+            .AddSingleton<IVoiceActivityDetector, SpeechThenSilenceDetector>()
+            .AddTransient<SileroVoiceActivityAudioStream>().BuildServiceProvider();
+        var service = new EllaiVoiceTranscriptionService(consent, new InMemoryEllaiConsentStore(), options, provider);
+        await service.GrantVoiceConsentAsync(sessionId, CancellationToken.None);
+        await using var audio = new ProgressivePcmStream();
+        using var lifetime = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        var transcription = service.TranscribeAsync(sessionId, EllaiVoiceCaptureMode.Live, audio, null,
+            lifetime.Token, "capture-direct", submissionPrincipal: principal);
+        try
+        {
+            await audio.WriteAsync(new byte[48_000]);
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(3);
+            IReadOnlyList<EllaiConversationTurn> conversation = [];
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                conversation = await store.ReadConversationAsync(sessionId, "voice-owner", CancellationToken.None);
+                if (conversation.Count > 0) break;
+                await Task.Delay(20);
+            }
+            Assert.False(transcription.IsCompleted);
+            var accepted = Assert.Single(conversation);
+            Assert.Equal("streamed words", accepted.UserText);
+            Assert.Equal("Queued", accepted.Outcome);
+            Assert.Equal(Assert.Single(turns.GetCompletedTurns(sessionId)).TurnId.ToString("N"), accepted.ClientUtteranceId);
+        }
+        finally
+        {
+            audio.Complete();
+            await transcription;
+        }
+    }
+
     [Fact]
     public async Task ProviderReceiverFailureDoesNotWaitForMicrophoneEof()
     {
@@ -520,6 +623,7 @@ public sealed class EllaiVoiceTranscriptionServiceTests
         private readonly bool _sendFinalTranscript;
         private readonly bool _sendPartialTranscript;
         private readonly bool _failAfterHandshake;
+        private readonly int _finalAfterPcmBytes;
         private WebApplication _application = null!;
         private readonly TaskCompletionSource _firstAudioReceived = new(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -528,17 +632,19 @@ public sealed class EllaiVoiceTranscriptionServiceTests
         public Task FirstAudioReceived => _firstAudioReceived.Task;
         public byte[] ReceivedPcm { get; private set; } = [];
 
-        private AudioForwardingWebSocketServer(bool sendFinalTranscript, bool sendPartialTranscript, bool failAfterHandshake)
+        private AudioForwardingWebSocketServer(bool sendFinalTranscript, bool sendPartialTranscript, bool failAfterHandshake, int finalAfterPcmBytes)
         {
             _sendFinalTranscript = sendFinalTranscript;
             _sendPartialTranscript = sendPartialTranscript;
             _failAfterHandshake = failAfterHandshake;
+            _finalAfterPcmBytes = finalAfterPcmBytes;
         }
 
         public static async Task<AudioForwardingWebSocketServer> CreateAsync(
-            bool sendFinalTranscript = true, bool sendPartialTranscript = false, bool failAfterHandshake = false)
+            bool sendFinalTranscript = true, bool sendPartialTranscript = false, bool failAfterHandshake = false,
+            int finalAfterPcmBytes = 0)
         {
-            var result = new AudioForwardingWebSocketServer(sendFinalTranscript, sendPartialTranscript, failAfterHandshake);
+            var result = new AudioForwardingWebSocketServer(sendFinalTranscript, sendPartialTranscript, failAfterHandshake, finalAfterPcmBytes);
             var builder = WebApplication.CreateBuilder();
             builder.Logging.ClearProviders();
             builder.WebHost.ConfigureKestrel(server => server.Listen(IPAddress.Loopback, 0));
@@ -580,6 +686,7 @@ public sealed class EllaiVoiceTranscriptionServiceTests
             using var pcm = new MemoryStream();
             var buffer = new byte[4096];
             var partialSent = false;
+            var finalSent = false;
             while (socket.State == WebSocketState.Open)
             {
                 var received = await socket.ReceiveAsync(buffer, CancellationToken.None).ConfigureAwait(false);
@@ -591,6 +698,13 @@ public sealed class EllaiVoiceTranscriptionServiceTests
                 {
                     pcm.Write(buffer, 0, received.Count);
                     _firstAudioReceived.TrySetResult();
+                    if (_sendFinalTranscript && !finalSent && _finalAfterPcmBytes > 0 && pcm.Length >= _finalAfterPcmBytes)
+                    {
+                        finalSent = true;
+                        await SendTextAsync(socket,
+                            "{\"type\":\"transcript\",\"final\":true,\"turnId\":1,\"transcript\":\"streamed words\"}")
+                            .ConfigureAwait(false);
+                    }
                     if (_sendPartialTranscript && !partialSent)
                     {
                         partialSent = true;
@@ -607,7 +721,7 @@ public sealed class EllaiVoiceTranscriptionServiceTests
             }
 
             ReceivedPcm = pcm.ToArray();
-            if (_sendFinalTranscript)
+            if (_sendFinalTranscript && !finalSent)
             {
                 await SendTextAsync(socket,
                     "{\"type\":\"transcript\",\"final\":true,\"turnId\":1,\"transcript\":\"streamed words\"}")

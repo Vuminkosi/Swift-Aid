@@ -12,7 +12,9 @@ public enum EllaiVoiceCaptureMode
     Live,
 }
 
-public sealed record EllaiVoiceTranscriptionResult(string Transcript);
+public sealed record EllaiVoiceTranscriptionResult(
+    string Transcript, string? ClientUtteranceId = null,
+    EllaiUtteranceSubmitResult? Admission = null, bool ServerSubmission = false);
 
 /// <summary>Transient state for the active voice stream, scoped to the owning
 /// Ellai session. Completed transcripts are returned only to that session owner.</summary>
@@ -37,7 +39,9 @@ public sealed record EllaiCompletedVoiceTurnDto(
     string Kind = "TurnCompleted",
     long AudioStartSample = -1,
     long AudioEndSample = -1,
-    string? VoiceCaptureId = null);
+    string? VoiceCaptureId = null,
+    bool ServerSubmission = false,
+    EllaiUtteranceSubmitResult? Admission = null);
 
 /// <summary>Session UI event as delivered by the review event transport.</summary>
 public sealed record EllaiSessionEventDto(

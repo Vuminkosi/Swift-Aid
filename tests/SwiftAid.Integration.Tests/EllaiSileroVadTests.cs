@@ -9,6 +9,11 @@ using Xunit.Abstractions;
 
 namespace SwiftAid.Integration.Tests;
 
+// This listener observes process-wide counters, including other voice fixtures.
+[CollectionDefinition("Ellai voice metrics", DisableParallelization = true)]
+public sealed class EllaiVoiceMetricsCollection;
+
+[Collection("Ellai voice metrics")]
 public sealed class EllaiSileroVadTests
 {
     private readonly ITestOutputHelper _output;

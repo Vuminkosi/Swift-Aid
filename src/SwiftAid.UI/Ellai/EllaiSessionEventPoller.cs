@@ -38,7 +38,7 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
         ArgumentNullException.ThrowIfNull(baseUri);
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(voiceCaptureId);
-        var route = $"{SessionRoute(sessionId)}/voice/live-stream?voiceCaptureId={Uri.EscapeDataString(voiceCaptureId)}";
+        var route = $"{SessionRoute(sessionId)}/voice/live-stream?voiceCaptureId={Uri.EscapeDataString(voiceCaptureId)}&serverSubmission=true";
         if (voiceCaptureOffsetSamples > 0)
         {
             route += $"&voiceCaptureOffsetSamples={voiceCaptureOffsetSamples}";
@@ -245,9 +245,8 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
             return null;
         }
 
-        var route = $"{SessionRoute(sessionId)}/voice/{mode.ToString().ToLowerInvariant()}";
-        if (mode == EllaiVoiceCaptureMode.Live
-            && (!string.IsNullOrWhiteSpace(voiceCaptureId) || voiceCaptureOffsetSamples > 0))
+        var route = $"{SessionRoute(sessionId)}/voice/{mode.ToString().ToLowerInvariant()}?serverSubmission=true";
+        if (!string.IsNullOrWhiteSpace(voiceCaptureId) || voiceCaptureOffsetSamples > 0)
         {
             var query = new List<string>();
             if (!string.IsNullOrWhiteSpace(voiceCaptureId))
@@ -258,7 +257,7 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
             {
                 query.Add($"voiceCaptureOffsetSamples={voiceCaptureOffsetSamples}");
             }
-            route += $"?{string.Join('&', query)}";
+            route += $"&{string.Join('&', query)}";
         }
         var contentType = mode == EllaiVoiceCaptureMode.Recorded ? "audio/wav" : "application/octet-stream";
         try
@@ -292,7 +291,7 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
         var content = new StreamContent(audio, 8_192);
         content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
         var route = $"{SessionRoute(sessionId)}/voice/live";
-        var query = new List<string>();
+        var query = new List<string> { "serverSubmission=true" };
         if (!string.IsNullOrWhiteSpace(voiceCaptureId))
         {
             query.Add($"voiceCaptureId={Uri.EscapeDataString(voiceCaptureId)}");
@@ -1081,6 +1080,9 @@ public sealed class EllaiEventPoller(IEllaiReviewClient reviews)
             }
             _streamId = responses.StreamId;
         }
+        // Establish the durable user-turn identity before its response chunks.
+        // Voice admission no longer waits for the separate voice-status poll.
+        if (responses.Conversation is not null) ConversationUpdated?.Invoke(responses.Conversation);
         foreach (var response in responses.Responses)
         {
             if (response.Sequence <= ResponseCursor
@@ -1092,6 +1094,5 @@ public sealed class EllaiEventPoller(IEllaiReviewClient reviews)
             ResponseReceived?.Invoke(response);
             ResponseCursor = response.Sequence;
         }
-        if (responses.Conversation is not null) ConversationUpdated?.Invoke(responses.Conversation);
     }
 }

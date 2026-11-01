@@ -18,9 +18,21 @@ async function main() {
     let sessionId;
     let firstCompletedAt;
     let responseAudioRequests = 0;
+    let blockedVoicePolls = 0;
     const expectedTurns = Number(process.env.SWIFTAID_EXPECTED_VOICE_TURNS ?? 5);
     assert.ok(Number.isInteger(expectedTurns) && expectedTurns > 0);
     page.on("pageerror", error => errors.push(error.message));
+    page.on("request", request => {
+        if (new URL(request.url()).pathname.endsWith("/utterances") && request.method() === "POST") submitted++;
+    });
+    // Voice status is a UI notification, never a prerequisite for admission.
+    // Hold it unavailable for the whole conversation to prove that separation.
+    if (process.env.SWIFTAID_BLOCK_VOICE_STATUS === "1") {
+        await page.route("**/voice/state*", async route => {
+            blockedVoicePolls++;
+            await route.fulfill({ status: 503, body: "" });
+        });
+    }
     page.on("websocket", socket => {
         if (socket.url().includes("/voice/live-stream")) socket.on("framesent", () => frames++);
     });
@@ -35,7 +47,6 @@ async function main() {
             conversation = (await response.json()).conversation ?? [];
             if (!firstCompletedAt && conversation.some(turn => turn.outcome === "Completed")) firstCompletedAt = Date.now();
         }
-        if (url.pathname.endsWith("/utterances") && response.request().method() === "POST") submitted++;
         } catch { /* A closed page may discard response bodies; outcome assertions still apply. */ }
     });
     await page.addInitScript(() => {
@@ -65,7 +76,7 @@ async function main() {
             }))),
         }));
         const report = {
-            sessionId, elapsedMs: Date.now() - started, frames, submitted,
+            sessionId, elapsedMs: Date.now() - started, frames, submitted, blockedVoicePolls,
             firstCompletedMs: firstCompletedAt ? firstCompletedAt - started : null,
             responseAudioRequests,
             voiceState: lastVoice?.state, voiceEpoch: lastVoice?.epoch,
@@ -80,6 +91,7 @@ async function main() {
         };
         console.log(JSON.stringify(report));
         assert.equal(report.captureStarts, 1);
+        assert.equal(submitted, 0, "Confirmed voice turns must enter the outbox without client resubmission.");
         assert.ok(report.trackStates.every(state => state === "live"));
         assert.equal(report.completedTurns, expectedTurns);
         if (process.env.SWIFTAID_EXPECTED_FIRST_WORDS) {

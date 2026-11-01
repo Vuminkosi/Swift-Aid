@@ -381,9 +381,7 @@
             _capturedVoiceBytes = 0;
         }
         _captureMode = mode;
-        _liveVoiceCaptureId = mode == EllaiVoiceCaptureMode.Live
-            ? Guid.NewGuid().ToString("N")
-            : null;
+        _liveVoiceCaptureId = Guid.NewGuid().ToString("N");
         _captureEchoCancellationEnabled = false;
         if (mode == EllaiVoiceCaptureMode.Live)
         {
@@ -1089,8 +1087,15 @@
                 continue;
             }
 
+            // A pending server admission must not advance the replay cursor.
+            if (completedTurn.ServerSubmission && completedTurn.Admission is null) break;
             _lastCompletedVoiceTurnSequence = completedTurn.Sequence;
             var transcript = completedTurn.Transcript.Trim();
+            if (completedTurn.ServerSubmission)
+            {
+                ReconcileVoiceAdmission(completedTurn.TurnId, transcript, completedTurn.Admission);
+                continue;
+            }
             InputText = transcript;
             if (Guid.TryParseExact(completedTurn.TurnId, "N", out var turnId)
                 || Guid.TryParse(completedTurn.TurnId, out turnId))
@@ -1104,6 +1109,39 @@
             StateHasChanged();
             await OnSend();
         }
+    }
+
+    private void ReconcileVoiceAdmission(string? utteranceId, string transcript, EllaiUtteranceSubmitResult? result)
+    {
+        if (_sessionView is null || string.IsNullOrWhiteSpace(utteranceId)) return;
+        if (result?.Session is { } updated
+            && string.Equals(updated.SessionId, _sessionView.SessionId, StringComparison.Ordinal))
+        {
+            if (updated.SessionVersion < _sessionView.SessionVersion && _lastDurableTurn is not null
+                && _lastDurableTurn.ClientUtteranceId != utteranceId) return;
+            if (updated.SessionVersion >= _sessionView.SessionVersion) _sessionView = updated;
+        }
+        if (result?.Status == EllaiClientOperationStatus.Accepted)
+        {
+            ShowLatestUserMessage(utteranceId, transcript);
+            if (_settledUtteranceId != utteranceId) _thinkingUtteranceId = utteranceId;
+            StatusText = "Ready";
+            Phase = EllaiStatusPhases.Active;
+        }
+        else
+        {
+            // Keep the stable identity on retry, including an ambiguous commit result.
+            // Never overwrite a typed draft while reconciling a voice failure.
+            if (string.IsNullOrWhiteSpace(InputText))
+            {
+                InputText = transcript;
+                _pendingUtteranceId = utteranceId;
+                _pendingUtteranceText = transcript;
+            }
+            StatusText = "Couldn't send your voice message. Try again.";
+            Phase = EllaiStatusPhases.NeedsInput;
+        }
+        StateHasChanged();
     }
 
     private async Task StopVoiceTurnStatusPollingAsync()
@@ -1508,7 +1546,7 @@
                 try
                 {
                     result = await ReviewClient.TranscribeVoiceAsync(
-                        session.SessionId, payload, mode.Value, CancellationToken.None).ConfigureAwait(false);
+                        session.SessionId, payload, mode.Value, CancellationToken.None, _liveVoiceCaptureId).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -1538,6 +1576,11 @@
             }
 
             var transcript = result.Transcript.Trim();
+            if (result.ServerSubmission)
+            {
+                await InvokeAsync(() => ReconcileVoiceAdmission(result.ClientUtteranceId, transcript, result.Admission));
+                return;
+            }
             var canAutoSubmitVoiceTurn = string.IsNullOrWhiteSpace(InputText);
             InputText = string.IsNullOrWhiteSpace(InputText)
                 ? transcript
@@ -1717,12 +1760,14 @@
             var latest = conversation.LastOrDefault();
             if (latest is null || latest == _lastDurableTurn) return;
             if (_lastDurableTurn is not null && latest.Sequence < _lastDurableTurn.Sequence) return;
-            if (_thinkingUtteranceId is not null && latest.ClientUtteranceId != _thinkingUtteranceId) return;
+            if (_thinkingUtteranceId is not null && latest.ClientUtteranceId != _thinkingUtteranceId
+                && !conversation.Any(turn => turn.ClientUtteranceId == _thinkingUtteranceId
+                    && turn.Sequence < latest.Sequence)) return;
             _lastDurableTurn = latest;
             ShowLatestUserMessage(latest.ClientUtteranceId, latest.UserText);
             if (latest.Outcome is "Queued" or "Processing" or "RetryableFailure")
             {
-                if (_thinkingUtteranceId is null && latest.ClientUtteranceId != _settledUtteranceId)
+                if (latest.ClientUtteranceId != _settledUtteranceId)
                     _thinkingUtteranceId = latest.ClientUtteranceId;
                 StateHasChanged();
             }

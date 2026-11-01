@@ -46,7 +46,9 @@ public static class EllaiVoiceWebSocketEndpoint
                 contentLength: null,
                 cancellationToken,
                 captureId,
-                Math.Max(0, offset)).ConfigureAwait(false);
+                Math.Max(0, offset),
+                submissionPrincipal: http.Request.Query["serverSubmission"] == "true" ? principal : null)
+                .ConfigureAwait(false);
 
             if (socket.State == WebSocketState.Open)
             {

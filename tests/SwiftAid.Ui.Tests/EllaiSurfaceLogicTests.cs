@@ -425,6 +425,71 @@ public sealed class EllaiSurfaceLogicTests
     }
 
     [Fact]
+    public async Task ServerAdmittedVoiceTurnUpdatesComposerWithoutResubmittingOrStoppingCapture()
+    {
+        var client = new FakeReviewClient();
+        using var host = await CreateHost(client, CreateSession(version: 3), "unfinished typed draft");
+        SetField(host, "_captureMode", EllaiVoiceCaptureMode.Live);
+        SetField(host, "_isRecordingAudio", true);
+        var turnId = Guid.NewGuid().ToString("N");
+        var status = new EllaiVoiceTurnStatusDto("TurnCompleted", 1, 900, 400, null,
+            [new(1, "muse-1", "Show my assigned cases", "session-1", turnId, 1,
+                ServerSubmission: true, Admission: new(EllaiClientOperationStatus.Accepted, CreateSession(version: 2)))]);
+
+        await InvokeAsync(host, "SubmitConfirmedGatewayVoiceTurnsAsync", status, "session-1", false);
+        await InvokeAsync(host, "SubmitConfirmedGatewayVoiceTurnsAsync", status, "session-1", false);
+
+        Assert.Empty(client.Submissions);
+        Assert.True(GetField<bool>(host, "_isRecordingAudio"));
+        Assert.Equal("Show my assigned cases", GetField<string?>(host, "_latestUserText"));
+        Assert.Equal("unfinished typed draft", GetField<string?>(host, "InputText"));
+        Assert.Equal(turnId, GetField<string?>(host, "_thinkingUtteranceId"));
+        Assert.Equal(3, GetField<EllaiSessionView>(host, "_sessionView").SessionVersion);
+    }
+
+    [Fact]
+    public async Task VoiceNotificationAfterDurableAnswerDoesNotRestartThinkingOrClearAnswer()
+    {
+        var client = new FakeReviewClient();
+        using var host = await CreateHost(client, CreateSession(version: 2), string.Empty);
+        SetField(host, "_captureMode", EllaiVoiceCaptureMode.Live);
+        SetField(host, "_isRecordingAudio", true);
+        var turnId = Guid.NewGuid().ToString("N");
+        await InvokeAsync(host, "OnConversationUpdated", (object)new EllaiConversationTurnDto[]
+        {
+            new(turnId, 1, "Hello", "Hello back", "Completed", 1, DateTimeOffset.UtcNow),
+        });
+        await InvokeAsync(host, "SubmitConfirmedGatewayVoiceTurnsAsync",
+            new EllaiVoiceTurnStatusDto("TurnCompleted", 1, 900, 400, null,
+                [new(1, "muse-1", "Hello", "session-1", turnId, 1, ServerSubmission: true,
+                    Admission: new(EllaiClientOperationStatus.Accepted, CreateSession(version: 2)))]),
+            "session-1", false);
+
+        Assert.Empty(client.Submissions);
+        Assert.Null(GetField<string?>(host, "_thinkingUtteranceId"));
+        Assert.Equal("Hello back", GetField<string?>(host, "_latestResponseText"));
+    }
+
+    [Fact]
+    public async Task UnavailableVoiceAdmissionRetainsStableIdentityForManualRetry()
+    {
+        var client = new FakeReviewClient(new EllaiUtteranceSubmitResult(EllaiClientOperationStatus.Accepted, CreateSession(version: 2)));
+        using var host = await CreateHost(client, CreateSession(version: 1), string.Empty);
+        SetField(host, "_captureMode", EllaiVoiceCaptureMode.Live);
+        SetField(host, "_isRecordingAudio", true);
+        var turnId = Guid.NewGuid().ToString("N");
+        await InvokeAsync(host, "SubmitConfirmedGatewayVoiceTurnsAsync",
+            new EllaiVoiceTurnStatusDto("TurnCompleted", 1, 900, 400, null,
+                [new(1, "muse-1", "Hello", "session-1", turnId, 1, ServerSubmission: true,
+                    Admission: new(EllaiClientOperationStatus.Unavailable, null))]), "session-1", false);
+        Assert.Empty(client.Submissions);
+        Assert.Equal("Hello", GetField<string?>(host, "InputText"));
+        Assert.Null(GetField<string?>(host, "_thinkingUtteranceId"));
+        await InvokeAsync(host, "OnSend");
+        Assert.Equal(turnId, Assert.Single(client.Submissions).ClientUtteranceId);
+    }
+
+    [Fact]
     public async Task EndpointCandidateWithoutCompletedTurnDoesNotSubmitOrStopCapture()
     {
         var client = new FakeReviewClient
