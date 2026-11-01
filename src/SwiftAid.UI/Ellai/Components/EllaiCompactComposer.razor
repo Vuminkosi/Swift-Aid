@@ -87,15 +87,17 @@
         </p>
     }
     <EllaiStatusLine StatusText="@StatusText" Phase="@Phase" Placement="@Placement" />
-    @if (CanPlayResponse)
+    @if (CanPlayResponse || IsListeningEnabled)
     {
         <div class="ellai-composer__speech-action">
-            <MudIconButton Icon="@(IsPlayingResponse ? Icons.Material.Filled.StopCircle : Icons.Material.Filled.VolumeUp)"
-                           Color="Color.Primary" Size="Size.Small"
+            <MudIconButton Icon="@(IsListeningEnabled ? Icons.Material.Filled.VolumeUp : Icons.Material.Filled.VolumeOff)"
+                           Color="@(IsListeningEnabled ? Color.Primary : Color.Default)" Size="Size.Small"
                            OnClick="OnToggleResponseAudio"
                            data-ellai-audio-unlock="true"
-                           aria-label="@(IsPlayingResponse ? "Stop Ellai speech" : "Play Ellai response")" />
-            <span>@(IsPlayingResponse ? "Speaking" : "Listen to Ellai")</span>
+                           aria-pressed="@(IsListeningEnabled ? "true" : "false")"
+                           aria-label="@(IsListeningEnabled ? "Turn off Ellai voice" : "Listen to Ellai")"
+                           title="@(IsListeningEnabled ? "Stop reading replies aloud" : "Read this and new replies aloud")" />
+            <span>@(IsListeningEnabled ? "Voice on" : "Listen to Ellai")</span>
         </div>
     }
 </div>
@@ -146,6 +148,9 @@
 
     [Parameter]
     public bool CanPlayResponse { get; set; }
+
+    [Parameter]
+    public bool IsListeningEnabled { get; set; }
 
     [Parameter]
     public bool IsPlayingResponse { get; set; }

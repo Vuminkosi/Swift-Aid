@@ -210,6 +210,8 @@ async function playPcm(sessionId, sequence, purpose, playbackId) {
         }
         await Promise.all(ended);
     } finally {
+        // A failed stream must not leave scheduled sound playing after its handle is lost.
+        stopRecord(record);
         if (activePlayback.get(sessionId) === record) {
             activePlayback.delete(sessionId);
         }

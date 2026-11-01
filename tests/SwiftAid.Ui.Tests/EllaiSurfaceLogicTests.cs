@@ -21,6 +21,39 @@ namespace SwiftAid.Ui.Tests;
 [Trait("Task", "ELL-T13")]
 public sealed class EllaiSurfaceLogicTests
 {
+    [Theory]
+    [InlineData(true, "true")]
+    [InlineData(false, "false")]
+    public async Task ListenToggleExposesItsAccessiblePressedState(bool enabled, string expected)
+    {
+        var html = await RenderComposerAsync(isListeningEnabled: enabled);
+        Assert.Contains($"aria-pressed=\"{expected}\"", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ListenToggleReadsNewTypedRepliesUntilDisabledWithoutReplayingFinalReconciliation()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(version: 1), string.Empty);
+        var speech = new RecordingJsModule();
+        SetField(host, "_speechModule", speech);
+        await InvokeAsync(host, "OnResponseReceived",
+            new EllaiSessionResponseDto(1, "session-1", "First answer.", DateTimeOffset.UtcNow, "first"));
+        Assert.DoesNotContain("playResponse", speech.Invocations);
+        await InvokeAsync(host, "ToggleResponseAudioAsync");
+        Assert.Single(speech.Invocations, call => call == "playResponse");
+        await InvokeAsync(host, "OnResponseReceived",
+            new EllaiSessionResponseDto(2, "session-1", "Next answer.", DateTimeOffset.UtcNow, "next", IsFinal: false));
+        Assert.Equal(2, speech.Invocations.Count(call => call == "playResponse"));
+        await InvokeAsync(host, "OnResponseReceived",
+            new EllaiSessionResponseDto(3, "session-1", "Next answer.", DateTimeOffset.UtcNow, "next",
+                IsReconciliation: true, Outcome: "Completed"));
+        Assert.Equal(2, speech.Invocations.Count(call => call == "playResponse"));
+        await InvokeAsync(host, "ToggleResponseAudioAsync");
+        await InvokeAsync(host, "OnResponseReceived",
+            new EllaiSessionResponseDto(4, "session-1", "Silent answer.", DateTimeOffset.UtcNow, "silent"));
+        Assert.Equal(2, speech.Invocations.Count(call => call == "playResponse"));
+    }
+
     [Fact]
     public async Task VoiceEntryWaitsForAnActiveSessionAndRecoversAfterStartup()
     {
@@ -159,6 +192,7 @@ public sealed class EllaiSurfaceLogicTests
             await InvokeAsync(host, "StartLiveCaptureAsync");
             Assert.True(module.Invocations.IndexOf("startCapture") < module.Invocations.IndexOf("playListeningGreeting"));
             Assert.True(GetField<bool>(host, "_isRecordingAudio"));
+            Assert.True(GetField<bool>(host, "_readResponsesAloud"));
             Assert.DoesNotContain("stopCapture", module.Invocations);
         }
         finally { streaming.TrySetResult(null); }
@@ -889,6 +923,7 @@ public sealed class EllaiSurfaceLogicTests
         NoOpJsModule.Invocations.Clear();
         using var host = await CreateHost(new FakeReviewClient(), CreateSession(version: 1), string.Empty);
         SetField(host, "_isRecordingAudio", true);
+        SetField(host, "_readResponsesAloud", true);
         SetField(host, "_captureMode", EllaiVoiceCaptureMode.Live);
 
         await InvokeAsync(host, "OnResponseReceived",
@@ -939,6 +974,7 @@ public sealed class EllaiSurfaceLogicTests
             new EllaiSessionResponseDto(4, "session-1", "", DateTimeOffset.UtcNow, "u-2", true, true, "TerminalFailure"));
         await host.Dispatcher.InvokeAsync(async () => await Task.Yield());
         Assert.DoesNotContain("Unsafe provisional", GetField<string?>(host, "_latestResponseText") ?? "");
+        Assert.False(GetProperty<bool>(host, "CanPlayResponse"));
     }
 
     [Fact]
@@ -1234,7 +1270,8 @@ public sealed class EllaiSurfaceLogicTests
         EventCallback onStartVoice = default,
         EventCallback onStartRealtimeVoice = default,
         EventCallback onOpenSettings = default,
-        bool isLiveSpeaking = true)
+        bool isLiveSpeaking = true,
+        bool isListeningEnabled = false)
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -1252,6 +1289,8 @@ public sealed class EllaiSurfaceLogicTests
                 ParameterView.FromDictionary(new Dictionary<string, object?>
                 {
                     [nameof(EllaiCompactComposer.InputText)] = inputText,
+                    [nameof(EllaiCompactComposer.CanPlayResponse)] = true,
+                    [nameof(EllaiCompactComposer.IsListeningEnabled)] = isListeningEnabled,
                     [nameof(EllaiCompactComposer.LivePartialTranscript)] = livePartialTranscript,
                     [nameof(EllaiCompactComposer.ResponseText)] = responseText,
                     [nameof(EllaiCompactComposer.StatusText)] = "Messaging is unavailable.",

@@ -37,7 +37,7 @@
                                   CanUseRealtimeMicrophone="@(CanStartVoiceCapture && (_microphoneCaptureAvailable || _nativeVoiceCapture?.IsAvailable == true))"
                                   IsLiveSpeaking="@(_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Live)"
                                   IsRecordingAudio="@(_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Recorded)"
-                                  CanPlayResponse="@CanPlayResponse" IsPlayingResponse="@_isPlayingResponse"
+                                  CanPlayResponse="@CanPlayResponse" IsPlayingResponse="@_isPlayingResponse" IsListeningEnabled="@_readResponsesAloud"
                                   OnToggleResponseAudio="ToggleResponseAudioAsync"
                                   OnSend="OnSend" OnCancel="OnCancel" OnClose="CloseComposerAsync" OnOpenSettings="OpenEllaiSettings"
                                   OnStartVoice="StartRecordedCaptureAsync"
@@ -57,7 +57,7 @@
                                   CanUseRealtimeMicrophone="@(CanStartVoiceCapture && (_microphoneCaptureAvailable || _nativeVoiceCapture?.IsAvailable == true))"
                                   IsLiveSpeaking="@(_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Live)"
                                   IsRecordingAudio="@(_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Recorded)"
-                                  CanPlayResponse="@CanPlayResponse" IsPlayingResponse="@_isPlayingResponse"
+                                  CanPlayResponse="@CanPlayResponse" IsPlayingResponse="@_isPlayingResponse" IsListeningEnabled="@_readResponsesAloud"
                                   OnToggleResponseAudio="ToggleResponseAudioAsync"
                                   OnSend="OnSend" OnCancel="OnCancel" OnClose="CloseComposerAsync" OnOpenSettings="OpenEllaiSettings"
                                   OnStartVoice="StartRecordedCaptureAsync"
@@ -166,6 +166,8 @@
     private bool _voiceTranscriptionInProgress;
     private bool _startingVoiceCapture;
     private string? _greetedLiveSessionId;
+    private bool _readResponsesAloud;
+    private bool _responseAudioQueueRunning;
     private int _localBargeInPending;
 
     private bool CanPlayResponse => _sessionView is not null
@@ -436,6 +438,7 @@
             }
 
             _isRecordingAudio = true;
+            if (mode == EllaiVoiceCaptureMode.Live) _readResponsesAloud = true;
             if (useNativeLiveCapture)
             {
                 try
@@ -1715,6 +1718,7 @@
             if (latest.Outcome != "Completed")
             {
                 StopResponseAudio();
+                _latestResponseSequence = 0;
                 _latestResponseAudioSequences.Clear();
                 _pendingResponseAudioSequences.Clear();
             }
@@ -1763,6 +1767,7 @@
                 if (response.Outcome != "Completed")
                 {
                     StopResponseAudio();
+                    _latestResponseSequence = 0;
                     _latestResponseAudioSequences.Clear();
                     _pendingResponseAudioSequences.Clear();
                 }
@@ -1771,7 +1776,7 @@
                     _latestResponseSequence = response.Sequence;
                     _latestResponseAudioSequences.Clear();
                     _latestResponseAudioSequences.Add(response.Sequence);
-                    if (_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Live && CanPlayResponse)
+                    if (_readResponsesAloud && CanPlayResponse)
                     {
                         _pendingResponseAudioSequences.Enqueue(response.Sequence);
                         if (!_isPlayingResponse) _ = PlayQueuedResponseAudioAsync();
@@ -1804,7 +1809,7 @@
             }
             Phase = response.IsFinal ? EllaiStatusPhases.Ready : EllaiStatusPhases.Active;
             if (!string.IsNullOrWhiteSpace(response.Text)
-                && _isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Live && CanPlayResponse)
+                && _readResponsesAloud && CanPlayResponse)
             {
                 _pendingResponseAudioSequences.Enqueue(response.Sequence);
                 if (!_isPlayingResponse)
@@ -1818,19 +1823,22 @@
 
     private async Task ToggleResponseAudioAsync()
     {
-        if (_sessionView is null || _latestResponseSequence < 1)
+        if (_sessionView is null)
         {
             return;
         }
 
-        if (_isPlayingResponse)
+        if (_readResponsesAloud)
         {
+            _readResponsesAloud = false;
             StopResponseAudio();
             StatusText = "Speech playback stopped.";
             await InvokeAsync(StateHasChanged);
             return;
         }
 
+        _readResponsesAloud = true;
+        await InvokeAsync(StateHasChanged);
         await PlayResponseAudioAsync();
     }
 
@@ -1848,27 +1856,31 @@
             : _latestResponseAudioSequences.ToArray();
         foreach (var sequence in sequences)
         {
-            if (Interlocked.CompareExchange(ref _stopResponsePlaybackRequested, 0, 0) != 0)
-            {
-                break;
-            }
-            await PlayResponseAudioSequenceAsync(sequence);
+            if (!_pendingResponseAudioSequences.Contains(sequence))
+                _pendingResponseAudioSequences.Enqueue(sequence);
         }
+        await PlayQueuedResponseAudioAsync();
     }
 
     private async Task PlayQueuedResponseAudioAsync()
     {
-        Interlocked.Exchange(ref _stopResponsePlaybackRequested, 0);
-        while (_pendingResponseAudioSequences.TryDequeue(out var sequence))
+        if (_responseAudioQueueRunning) return;
+        _responseAudioQueueRunning = true;
+        try
         {
-            if (Interlocked.CompareExchange(ref _stopResponsePlaybackRequested, 0, 0) != 0
-                || !_isRecordingAudio || _captureMode != EllaiVoiceCaptureMode.Live || !CanPlayResponse)
+            Interlocked.Exchange(ref _stopResponsePlaybackRequested, 0);
+            while (_pendingResponseAudioSequences.TryDequeue(out var sequence))
             {
-                _pendingResponseAudioSequences.Clear();
-                return;
+                if (Interlocked.CompareExchange(ref _stopResponsePlaybackRequested, 0, 0) != 0
+                    || !_readResponsesAloud || !CanPlayResponse)
+                {
+                    _pendingResponseAudioSequences.Clear();
+                    return;
+                }
+                await PlayResponseAudioSequenceAsync(sequence);
             }
-            await PlayResponseAudioSequenceAsync(sequence);
         }
+        finally { _responseAudioQueueRunning = false; }
     }
 
     private async Task PlayResponseAudioSequenceAsync(long sequence)
@@ -2474,7 +2486,6 @@
             _ = _speechModule.InvokeVoidAsync("stopResponse", sessionId);
         }
 
-        _latestResponseSequence = 0;
         _isPlayingResponse = false;
         _activeResponseSequence = 0;
         _activeResponsePlaybackId = null;
@@ -2482,6 +2493,7 @@
 
     private void CancelPriorSession()
     {
+        _readResponsesAloud = false;
         _thinkingUtteranceId = null;
         _settledUtteranceId = null;
         try
