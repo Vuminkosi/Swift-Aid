@@ -66,6 +66,14 @@ The original organization is retained for old-client requests that omit `organiz
 
 ## Isolated tests
 
+### Restricted import runtime
+
+For a **new, dedicated restricted case/import database login**, apply `case-authority-lock-helper.sql` with its existing NOLOGIN helper owner, then `case-command-runtime-grants.sql`, then `case-import-runtime-grants.sql`. Supply the existing `runtime_role` to each script; none creates credentials. The import extension grants the canonical registration inserts (including its notification/outbox transaction), the bounded workspace lock function and import ledger access. Immutable source/context columns cannot be updated, and the application cannot write organization links/memberships or mark outbox rows published. The migration/deployment identity remains separate.
+
+The base case-command profile intentionally rejects registration INSERT rights: do not reapply that narrower profile to an already extended import role. Reapply the import extension directly; it verifies its critical authority/source invariants and is idempotent. Review any subsequent privilege changes explicitly. This profile covers the registration/import workflow, not every Gateway identity, media, notification-delivery or ingestion-dispatch function; those services need their reviewed profiles rather than broad database-owner credentials.
+
+`CaseImportRuntimeTests` uses a separately authenticated non-owner database connection to the same disposable fixture. Set `SWIFTAID_TEST_IMPORT_RUNTIME_CONNECTION` in addition to the normal intake fixture variables. The test proves accepted registration, replay, one receipt/two events, and denied authority/source/outbox-state mutations. Its first run failed on the missing lock-function privilege; after the complete registration profile it passed. PostgreSQL failure diagnostics are confined to synthetic local fixtures.
+
 Set `SWIFTAID_RUN_INTAKE_POSTGRES_FIXTURES=1` and `SWIFTAID_TEST_INTAKE_POSTGRES_CONNECTION` to a disposable loopback database named `swiftaid_intake_test`. The tests delete outbox fixture rows. Set `SWIFTAID_TEST_INGESTION_NATS_URL=nats://127.0.0.1:44229` to a disposable broker for the crash/replay case. Never point these at shared data.
 
 ```powershell

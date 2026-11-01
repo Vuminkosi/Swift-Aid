@@ -169,7 +169,7 @@ WITH grant_contract(relation_name, update_columns, insert_columns) AS (
         ('protected_event_payloads', ARRAY[]::text[], ARRAY['payload_id', 'protected_bytes', 'protection_purpose_version', 'created_at_utc']::text[]),
         ('case_events', ARRAY[]::text[], ARRAY['event_id', 'case_id', 'aggregate_version', 'report_revision', 'command_id', 'actor_id', 'event_type', 'schema_version', 'occurred_at_utc', 'recorded_at_utc', 'payload_id']::text[]),
         ('command_receipts', ARRAY[]::text[], ARRAY['receipt_id', 'actor_id', 'command_id', 'case_id', 'command_type', 'schema_version', 'canonical_payload_hash', 'first_aggregate_version', 'last_aggregate_version', 'report_revision', 'accepted_at_utc']::text[]),
-        ('domain_outbox', ARRAY[]::text[], ARRAY['outbox_id', 'event_id', 'message_type', 'created_at_utc', 'available_at_utc', 'attempt_count', 'lease_until_utc', 'published_at_utc']::text[]),
+        ('domain_outbox', ARRAY[]::text[], ARRAY['outbox_id', 'event_id', 'message_type', 'created_at_utc', 'available_at_utc', 'attempt_count', 'lease_until_utc', 'published_at_utc', 'lease_id', 'exhausted_at_utc', 'last_failure_code']::text[]),
         ('security_audit_entries', ARRAY[]::text[], ARRAY['audit_id', 'actor_id', 'target_actor_id', 'resource_id', 'operation', 'decision_code', 'access_epoch', 'recorded_at_utc', 'reason_code']::text[])
 ), effective_relations AS (
     SELECT contract.relation_name,
@@ -328,7 +328,7 @@ GRANT INSERT (
 ) ON public.command_receipts TO :"runtime_role";
 GRANT INSERT (
     outbox_id, event_id, message_type, created_at_utc, available_at_utc,
-    attempt_count, lease_until_utc, published_at_utc
+    attempt_count, lease_until_utc, published_at_utc, lease_id, exhausted_at_utc, last_failure_code
 ) ON public.domain_outbox TO :"runtime_role";
 GRANT INSERT (
     audit_id, actor_id, target_actor_id, resource_id, operation,
@@ -354,7 +354,7 @@ WITH grant_contract(relation_name, update_columns, insert_columns) AS (
         ('protected_event_payloads', ARRAY[]::text[], ARRAY['payload_id', 'protected_bytes', 'protection_purpose_version', 'created_at_utc']::text[]),
         ('case_events', ARRAY[]::text[], ARRAY['event_id', 'case_id', 'aggregate_version', 'report_revision', 'command_id', 'actor_id', 'event_type', 'schema_version', 'occurred_at_utc', 'recorded_at_utc', 'payload_id']::text[]),
         ('command_receipts', ARRAY[]::text[], ARRAY['receipt_id', 'actor_id', 'command_id', 'case_id', 'command_type', 'schema_version', 'canonical_payload_hash', 'first_aggregate_version', 'last_aggregate_version', 'report_revision', 'accepted_at_utc']::text[]),
-        ('domain_outbox', ARRAY[]::text[], ARRAY['outbox_id', 'event_id', 'message_type', 'created_at_utc', 'available_at_utc', 'attempt_count', 'lease_until_utc', 'published_at_utc']::text[]),
+        ('domain_outbox', ARRAY[]::text[], ARRAY['outbox_id', 'event_id', 'message_type', 'created_at_utc', 'available_at_utc', 'attempt_count', 'lease_until_utc', 'published_at_utc', 'lease_id', 'exhausted_at_utc', 'last_failure_code']::text[]),
         ('security_audit_entries', ARRAY[]::text[], ARRAY['audit_id', 'actor_id', 'target_actor_id', 'resource_id', 'operation', 'decision_code', 'access_epoch', 'recorded_at_utc', 'reason_code']::text[])
 ), effective_relations AS (
     SELECT contract.relation_name,

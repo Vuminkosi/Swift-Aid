@@ -49,7 +49,7 @@ internal sealed class CaseAuthorityRuntimeProfile : IAsyncDisposable
         ["protected_event_payloads"] = ["payload_id", "protected_bytes", "protection_purpose_version", "created_at_utc"],
         ["case_events"] = ["event_id", "case_id", "aggregate_version", "report_revision", "command_id", "actor_id", "event_type", "schema_version", "occurred_at_utc", "recorded_at_utc", "payload_id"],
         ["command_receipts"] = ["receipt_id", "actor_id", "command_id", "case_id", "command_type", "schema_version", "canonical_payload_hash", "first_aggregate_version", "last_aggregate_version", "report_revision", "accepted_at_utc"],
-        ["domain_outbox"] = ["outbox_id", "event_id", "message_type", "created_at_utc", "available_at_utc", "attempt_count", "lease_until_utc", "published_at_utc"],
+        ["domain_outbox"] = ["outbox_id", "event_id", "message_type", "created_at_utc", "available_at_utc", "attempt_count", "lease_until_utc", "published_at_utc", "lease_id", "exhausted_at_utc", "last_failure_code"],
         ["security_audit_entries"] = ["audit_id", "actor_id", "target_actor_id", "resource_id", "operation", "decision_code", "access_epoch", "recorded_at_utc", "reason_code"]
     };
 
