@@ -25,6 +25,7 @@
         <div class="classification-panel__status" role="status" aria-live="polite">
             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@StatusColor(item)">@StatusLabel(item)</MudChip>
             @if (!item.CurrentConfiguration) { <MudText Typo="Typo.caption">Earlier analysis</MudText> }
+            @if (item.Translation is not null) { <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">Experimental · Reviewed translation</MudChip> }
             <MudText Typo="Typo.caption">Report revision @item.ReportRevision · @Language(item.SourceLanguage)</MudText>
         </div>
         @if (item.State == "Completed" && item.AbstentionReason is null)

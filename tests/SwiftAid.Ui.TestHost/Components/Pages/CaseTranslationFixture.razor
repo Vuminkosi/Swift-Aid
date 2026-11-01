@@ -1,0 +1,43 @@
+@page "/case-translation-fixture"
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.UI.Components.Surfaces.Operations.CaseDetail
+@using SwiftAid.UI.Components.Theme
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<main data-interactive="@(_interactive ? "true" : "false")" style="max-width:900px;margin:1rem auto;padding:1rem">
+    <h1>Translation synthetic fixture</h1>
+    @foreach (var mode in new[] { "review", "readonly", "denied", "failed", "slow", "conflict" })
+    { <button @onclick="() => Select(mode)">@mode</button> }
+    <CaseTranslationPanel CaseId="_case" Client="_client" />
+</main>
+@code {
+    private bool _interactive;
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { _interactive = true; StateHasChanged(); }
+    }
+    private Guid _case = Guid.NewGuid();
+    private readonly FixtureClient _client = new();
+    private void Select(string mode) { _client.Mode = mode; _client.ReviewStatus = "Unreviewed"; _case = Guid.NewGuid(); }
+    private sealed class FixtureClient : ICaseTranslationClient
+    {
+        public string Mode { get; set; } = "review";
+        public string ReviewStatus { get; set; } = "Unreviewed";
+        private readonly Guid _artifact = Guid.NewGuid();
+        public async Task<CaseTranslationSnapshot> GetAsync(Guid id, CancellationToken ct = default)
+        {
+            var mode = Mode;
+            if (mode == "slow") await Task.Delay(1200);
+            if (mode == "denied") return new(id, [], CaseClassificationAccess.Denied);
+            return new(id, [new(_artifact, mode == "failed" ? "Failed" : "Completed", "sna", "eng", "fixture-model", new string('a', 40),
+                ReviewStatus, ReviewStatus == "Unreviewed" ? 0 : 1, ["numeric-content-changed"], "3 synthetic reports.", null,
+                DateTimeOffset.UtcNow, "2 synthetic reports.", mode != "readonly")]);
+        }
+        public Task<string> ReviewAsync(Guid caseId, Guid artifactId, Guid decisionId, long expectedVersion, bool approve, CancellationToken ct = default)
+        {
+            if (Mode == "conflict") return Task.FromResult("Conflict");
+            ReviewStatus = approve ? "Approved" : "Rejected";
+            return Task.FromResult("Recorded");
+        }
+    }
+}

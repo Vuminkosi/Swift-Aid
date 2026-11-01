@@ -31,22 +31,27 @@ public sealed class PostgresCaseClassificationQuery(SwiftAidDbContext db, ICaseA
                                  orderby association.CreatedAtUtc descending
                                  select new { association, result, config }).Take(10).ToListAsync(ct);
             var sourceIds = records.Select(row => row.association.SourceEventId).ToArray();
+            var translationIds = records.Select(row => JsonSerializer.Deserialize<ClassificationProfile>(row.config.ProfileJson)!.Translation?.ArtifactId)
+                .Where(id => id.HasValue).Select(id => id!.Value).ToArray();
+            var translations = await db.Set<TranslationArtifactEntity>().AsNoTracking().Where(x => translationIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
             var quality = await db.Set<ReportQualityEntity>().AsNoTracking()
                 .Where(q => sourceIds.Contains(q.SourceEventId) && q.Version == ReportQualityRules.Version)
                 .ToDictionaryAsync(q => q.SourceEventId, q => q.AssessmentJson, ct);
             var evidence = records.Select(row =>
             {
                 var profile = JsonSerializer.Deserialize<ClassificationProfile>(row.config.ProfileJson)!;
+                var translationCurrent = profile.Translation is not { } translated ||
+                    translations.TryGetValue(translated.ArtifactId, out var artifact) && artifact.ReviewStatus == "Approved" && artifact.ReviewVersion == translated.ReviewVersion;
                 var completed = row.result.PredictionsJson is null ? null : JsonSerializer.Deserialize<ClassificationCompletion>(row.result.PredictionsJson,
                     new JsonSerializerOptions(JsonSerializerDefaults.Web));
                 return new CaseClassificationEvidence(row.result.Id, row.association.SourceEventId, row.association.ReportRevision,
-                    row.result.State, (options.Value.Profile with { SourceLanguage = profile.SourceLanguage }).Hash == row.config.Id,
+                    row.result.State, translationCurrent && (options.Value.Profile with { SourceLanguage = profile.SourceLanguage, Translation = profile.Translation }).Hash == row.config.Id,
                     row.association.Reused, profile.ModelId, profile.ModelRevision, profile.TaxonomyVersion, profile.SourceLanguage,
                     row.result.AbstentionReason, row.result.FailureCode, row.result.CreatedAtUtc,
                     completed?.Predictions.Select(p => new ClassifiedLabel(p.LabelId, profile.Labels.Single(l => l.Id == p.LabelId).Description,
                         p.Score, p.Score >= profile.SelectionThreshold)).ToArray() ?? [],
                     quality.TryGetValue(row.association.SourceEventId, out var assessment)
-                        ? JsonSerializer.Deserialize<ReportQualityAssessment>(assessment) : null);
+                        ? JsonSerializer.Deserialize<ReportQualityAssessment>(assessment) : null, profile.Translation);
             }).ToArray();
             await lease.CommitAsync(ct);
             return evidence;

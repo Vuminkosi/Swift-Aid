@@ -1316,6 +1316,222 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                     b.ToTable("quality_assessments", "swiftaid_classification");
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.TranslationArtifactEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("AvailableAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("CompletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CompletedLeaseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Configuration")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FailureCode")
+                        .HasColumnType("text");
+
+                    b.Property<string>("FindingsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<double>("InferenceMilliseconds")
+                        .HasColumnType("double precision");
+
+                    b.Property<Guid?>("LeaseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("LeaseUntilUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ModelRevision")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("OrganizationId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<byte[]>("ProtectedSource")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<byte[]>("ProtectedTranslation")
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("ResultHash")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ReviewStatus")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<long>("ReviewVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("SourceLanguage")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("WorkspaceId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id")
+                        .HasName("PK_translation_artifacts");
+
+                    b.HasIndex("Fingerprint")
+                        .IsUnique()
+                        .HasDatabaseName("IX_translation_fingerprint");
+
+                    b.HasIndex("State", "AvailableAtUtc")
+                        .HasDatabaseName("IX_translation_work");
+
+                    b.HasIndex("WorkspaceId", "OrganizationId");
+
+                    b.ToTable("artifacts", "swiftaid_translation", t =>
+                        {
+                            t.HasCheckConstraint("ck_translation_attempts", "\"Attempts\" BETWEEN 0 AND 5");
+
+                            t.HasCheckConstraint("ck_translation_lease", "(\"State\" = 'Leased') = (\"LeaseId\" IS NOT NULL AND \"LeaseUntilUtc\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_translation_review", "\"ReviewStatus\" IN ('Pending','Unreviewed','Approved','Rejected')");
+
+                            t.HasCheckConstraint("ck_translation_state", "\"State\" IN ('Pending','Leased','RetryScheduled','Completed','Failed','Cancelled')");
+                        });
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.TranslationAssociationEntity", b =>
+                {
+                    b.Property<Guid>("SourceEventId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ArtifactId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CaseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("ReportRevision")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("SourceEventId", "ArtifactId")
+                        .HasName("PK_translation_associations");
+
+                    b.HasIndex("ArtifactId");
+
+                    b.HasIndex("CaseId", "ReportRevision")
+                        .HasDatabaseName("IX_translation_source_revision");
+
+                    b.ToTable("associations", "swiftaid_translation");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.TranslationOutboxEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ArtifactId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("AvailableAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FailureCode")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("LeaseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("LeaseUntilUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("PublishedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("ReviewVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("SourceEventId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id")
+                        .HasName("PK_translation_outbox");
+
+                    b.HasIndex("AvailableAtUtc")
+                        .HasDatabaseName("IX_translation_outbox_available")
+                        .HasFilter("\"PublishedAtUtc\" IS NULL");
+
+                    b.HasIndex("SourceEventId");
+
+                    b.HasIndex("ArtifactId", "SourceEventId", "ReviewVersion")
+                        .IsUnique()
+                        .HasDatabaseName("IX_translation_replay_identity");
+
+                    b.ToTable("outbox", "swiftaid_translation");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.TranslationReviewEntity", b =>
+                {
+                    b.Property<Guid>("DecisionId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ActorId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("Approved")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("ArtifactId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("RecordedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("DecisionId")
+                        .HasName("PK_translation_reviews");
+
+                    b.HasIndex("ArtifactId", "Version")
+                        .IsUnique()
+                        .HasDatabaseName("IX_translation_review_version");
+
+                    b.ToTable("reviews", "swiftaid_translation");
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.CommandReceiptEntity", b =>
                 {
                     b.Property<Guid>("ReceiptId")
@@ -4536,6 +4752,67 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasForeignKey("SourceEventId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.TranslationArtifactEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.WorkspaceOrganizationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("WorkspaceId", "OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_translation_workspace");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.TranslationAssociationEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.Classification.TranslationArtifactEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ArtifactId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_translation_association_artifact");
+
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.ManagedCaseEntity", null)
+                        .WithMany()
+                        .HasForeignKey("CaseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_translation_association_case");
+
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.CaseEventEntity", null)
+                        .WithMany()
+                        .HasForeignKey("SourceEventId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_translation_association_event");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.TranslationOutboxEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.Classification.TranslationArtifactEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ArtifactId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_translation_outbox_artifact");
+
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.CaseEventEntity", null)
+                        .WithMany()
+                        .HasForeignKey("SourceEventId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_translation_outbox_event");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.TranslationReviewEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.Classification.TranslationArtifactEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ArtifactId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_translation_review_artifact");
                 });
 
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.CommandReceiptEntity", b =>

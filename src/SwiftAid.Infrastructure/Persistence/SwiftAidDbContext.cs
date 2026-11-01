@@ -107,6 +107,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         ConfigureEventsAndCommands(modelBuilder);
         ConfigureAudit(modelBuilder);
         Classification.ClassificationModel.Configure(modelBuilder);
+        Classification.TranslationModel.Configure(modelBuilder);
         Classification.ClassificationBackfillModel.Configure(modelBuilder);
         Classification.ReportQualityModel.Configure(modelBuilder);
         Surveillance.SurveillanceModel.Configure(modelBuilder);

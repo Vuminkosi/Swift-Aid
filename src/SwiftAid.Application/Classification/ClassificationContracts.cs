@@ -14,6 +14,9 @@ public sealed record ClassificationProfile(
     string HypothesisVersion, string HypothesisTemplate, string SourceLanguage,
     int MaximumTokens, double SelectionThreshold, IReadOnlyList<ClassificationLabel> Labels)
 {
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public TranslationProvenance? Translation { get; init; }
+
     [System.Text.Json.Serialization.JsonIgnore]
     public string Hash => ClassificationFingerprint.Hash(JsonSerializer.Serialize(this));
 

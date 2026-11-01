@@ -17,7 +17,8 @@ namespace SwiftAid.Infrastructure.Classification;
 /// <summary>Gateway-owned, fenced classification persistence. No inference occurs inside SQL transactions.</summary>
 public sealed class ClassificationRegistry(
     SwiftAidDbContext db, PostgresProtectedCaseEventPayloadStore payloads,
-    IOptions<ClassificationOptions> configured, TimeProvider clock, IDataProtectionProvider protection)
+    IOptions<ClassificationOptions> configured, TimeProvider clock, IDataProtectionProvider protection,
+    TranslationRegistry? translations = null)
 {
     private ClassificationOptions Options => configured.Value;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -41,18 +42,6 @@ public sealed class ClassificationRegistry(
             (e.EventType == "CaseReported" || e.EventType == "CaseReportCorrected")).OrderByDescending(e => e.AggregateVersion).FirstAsync(ct);
         var sourceLanguage = await ReadImportedLanguageAsync(source, header, ct);
         var profile = Options.Profile with { SourceLanguage = sourceLanguage ?? Options.Profile.SourceLanguage };
-        var config = profile.Hash;
-        var inbox = await db.Set<ClassificationInboxEntity>().FindAsync([notice.MessageId, config], ct);
-        if (inbox is not null && inbox.NoticeHash != noticeHash) throw new ArgumentException("Changed message identity.");
-        if (inbox?.State is "Completed" or "Failed" or "Superseded" &&
-            await db.Set<ReportQualityEntity>().AnyAsync(q => q.SourceEventId == source.EventId && q.Version == ReportQualityRules.Version, ct))
-        {
-            await transaction.CommitAsync(ct);
-            return new(header.ReportRevision == notice.ReportRevision ? inbox.State : "Superseded", FailureCode: inbox.FailureCode, ConfigurationHash: config);
-        }
-        inbox ??= new() { MessageId = notice.MessageId, ConfigurationId = config, NoticeHash = noticeHash, State = "Pending", UpdatedAtUtc = now };
-        if (db.Entry(inbox).State == EntityState.Detached) db.Add(inbox);
-
         // Read the immutable facts revision, even when this notice is an administrative event.
         var plaintext = await payloads.UnprotectForClassificationAsync(source, Options.Organizations, ct);
         string text;
@@ -70,6 +59,29 @@ public sealed class ClassificationRegistry(
             quality = ReportQualityRules.Assess(facts, source.RecordedAtUtc);
         }
         finally { CryptographicOperations.ZeroMemory(plaintext); }
+        if (translations is not null && profile.SourceLanguage != "en")
+        {
+            var artifact = await translations.EnsureAsync(header, source, text, profile.SourceLanguage, ct);
+            if (artifact is { State: "Completed", ReviewStatus: "Approved" })
+            {
+                text = translations.ReadTranslation(artifact);
+                profile = profile with { SourceLanguage = "en", Translation = new(artifact.Id, artifact.Fingerprint,
+                    artifact.SourceLanguage, artifact.ModelRevision, artifact.ReviewStatus, artifact.ReviewVersion) };
+            }
+        }
+        var config = profile.Hash;
+        var inbox = await db.Set<ClassificationInboxEntity>().FindAsync([notice.MessageId, config], ct);
+        if (inbox is not null && inbox.NoticeHash != noticeHash) throw new ArgumentException("Changed message identity.");
+        if (inbox?.State is "Completed" or "Failed" or "Superseded" &&
+            await db.Set<ReportQualityEntity>().AnyAsync(q => q.SourceEventId == source.EventId && q.Version == ReportQualityRules.Version, ct))
+        {
+            // A completed abstention may acquire new translation work; persist admission before ACK.
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+            return new(header.ReportRevision == notice.ReportRevision ? inbox.State : "Superseded", FailureCode: inbox.FailureCode, ConfigurationHash: config);
+        }
+        inbox ??= new() { MessageId = notice.MessageId, ConfigurationId = config, NoticeHash = noticeHash, State = "Pending", UpdatedAtUtc = now };
+        if (db.Entry(inbox).State == EntityState.Detached) db.Add(inbox);
         await db.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO swiftaid_classification.quality_assessments ("SourceEventId", "Version", "CaseId", "ReportRevision", "AssessmentJson", "CreatedAtUtc")
             VALUES ({source.EventId}, {ReportQualityRules.Version}, {source.CaseId}, {source.ReportRevision}, {JsonSerializer.Serialize(quality)}::jsonb, {now})
@@ -145,6 +157,17 @@ public sealed class ClassificationRegistry(
         if (!OwnsLease(result, request.LeaseId)) return "StaleLease";
         var configuration = await db.Set<ClassificationConfigurationEntity>().FindAsync([result.ConfigurationId], ct);
         var profile = JsonSerializer.Deserialize<ClassificationProfile>(configuration!.ProfileJson)!;
+        if (profile.Translation is { } translated)
+        {
+            var artifact = translations is null ? null : await translations.LockedAsync(translated.ArtifactId, ct);
+            if (artifact is null || translations?.Allows(artifact.OrganizationId) != true || artifact.ReviewStatus != "Approved" ||
+                artifact.ReviewVersion != translated.ReviewVersion || artifact.Fingerprint != translated.Fingerprint)
+            {
+                SetFailed(result, "translation-review-changed");
+                AddEvent(result.Id, "ClassificationFailed");
+                await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); return "Failed";
+            }
+        }
         ClassificationResultValidation.Validate(request, profile);
         result.State = "Completed"; result.CompletedAtUtc = clock.GetUtcNow(); result.PredictionsJson = JsonSerializer.Serialize(request, Json);
         result.AbstentionReason = request.AbstentionReason; result.InputTokens = request.InputTokens;

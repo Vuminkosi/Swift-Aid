@@ -24,7 +24,9 @@ public sealed class CaseClassificationGatewayClient(AuthenticationStateProvider 
                     i.SourceLanguage, i.AbstentionReason, i.CreatedAtUtc,
                     i.Labels.Select(l => new CaseClassificationPattern(l.Id, l.Description, l.SemanticScore, l.Selected)).ToArray(),
                     i.Quality is null ? null : new CaseQualityEvidence(i.Quality.Version,
-                        i.Quality.Findings.Select(f => new CaseQualityFinding(f.Code, f.Field, f.Explanation)).ToArray()))).ToArray());
+                        i.Quality.Findings.Select(f => new CaseQualityFinding(f.Code, f.Field, f.Explanation)).ToArray()),
+                    i.Translation is null ? null : new CaseTranslationProvenance(i.Translation.ArtifactId, i.Translation.Fingerprint,
+                        i.Translation.SourceLanguage, i.Translation.ModelRevision, i.Translation.ReviewStatus, i.Translation.ReviewVersion))).ToArray());
         }
         catch (UnauthorizedAccessException) { return new(caseId, [], CaseClassificationAccess.Denied); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }

@@ -65,6 +65,7 @@ builder.Services.AddScoped<IAnalyticsClient, AnalyticsGatewayClient>();
 builder.Services.AddScoped<IDashboardOverviewClient, DashboardOverviewGatewayClient>();
 builder.Services.AddScoped<ICaseDetailSummaryClient, CaseDetailSummaryGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseClassificationClient, CaseClassificationGatewayClient>();
+builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseTranslationClient, CaseTranslationGatewayClient>();
 builder.Services.AddScoped<ICaseCorrectionReadClient, CaseCorrectionReadGatewayClient>();
 
 
@@ -214,6 +215,11 @@ builder.Services.AddHostedService<NotificationDeliveryWorker>();
 builder.Services.AddHostedService<SwiftAid.Gateway.Ingestion.IngestionOutboxWorker>();
 builder.Services.Configure<SwiftAid.Infrastructure.Classification.ClassificationOptions>(builder.Configuration.GetSection("Classification"));
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.ClassificationRegistry>();
+builder.Services.Configure<SwiftAid.Infrastructure.Classification.TranslationOptions>(builder.Configuration.GetSection("ExperimentalMultilingualIntelligence"));
+builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.TranslationRegistry>();
+builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.CaseTranslationService>();
+builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.TranslationOutboxDispatcher>();
+builder.Services.AddHostedService<SwiftAid.Gateway.Ellai.EllaiTranslationWorker>();
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.ClassificationBackfillStore>();
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.ClassificationOutboxDispatcher>();
 builder.Services.AddScoped<SwiftAid.Application.Classification.ICaseClassificationQuery, SwiftAid.Infrastructure.Classification.PostgresCaseClassificationQuery>();
@@ -256,6 +262,7 @@ app.MapManagedCaseRegistrationEndpoints();
 app.MapCaseImportEndpoints();
 app.MapClassificationWorkerEndpoints();
 app.MapCaseClassificationEndpoints();
+app.MapCaseTranslationEndpoints();
 app.MapSurveillanceSignalEndpoints();
 app.MapCaseTimelineEndpoints();
 app.MapCaseDetailEndpoints();

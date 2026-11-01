@@ -6,7 +6,8 @@ public sealed record ClassifiedLabel(string Id, string Description, double Seman
 public sealed record CaseClassificationEvidence(Guid ResultId, Guid SourceEventId, long ReportRevision,
     string State, bool CurrentConfiguration, bool Reused, string ModelId, string ModelRevision,
     string TaxonomyVersion, string SourceLanguage, string? AbstentionReason, string? FailureCode,
-    DateTimeOffset CreatedAtUtc, IReadOnlyList<ClassifiedLabel> Labels, ReportQualityAssessment? Quality = null);
+    DateTimeOffset CreatedAtUtc, IReadOnlyList<ClassifiedLabel> Labels, ReportQualityAssessment? Quality = null,
+    TranslationProvenance? Translation = null);
 
 public interface ICaseClassificationQuery
 {
