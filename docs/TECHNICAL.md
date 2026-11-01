@@ -265,3 +265,9 @@ FullyQualifiedName~Ellai` (unit/contract, 192 passing, 3 skipped) and
 `SWIFTAID_RUN_SQLAUTH_FIXTURES=1` and the approved disposable loopback
 connection (127.0.0.1:32703); otherwise they skip. Provider, web and
 Android smoke checks are recorded separately and never mocked.
+
+### Model-backed guidance planning adapter
+
+`EllaiModelGuidancePlanner` calls the existing routed `IEllaiTurnCompletionClient` and returns a strictly parsed draft plus provider usage. It bounds context and response size, rejects unknown JSON members and numeric enum values, preserves the requested objective/mode, and rejects malformed steps. Twelve focused planner/decision-contract tests pass with synthetic completions; no real Muse inference was exercised by those tests.
+
+This adapter is not yet admitted from the durable utterance/session path or connected to Bonboarding activation. Its caller must enforce session authorization and cancellation fences, charge returned usage, validate registry scope and current observations, persist the accepted plan, and publish it for the renderer. It is not a completed dynamic-guidance feature. NLLB/ASR, durable translation registry and translation-derived classification remain outstanding.

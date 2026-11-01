@@ -115,6 +115,20 @@ public static class EllaiDecisionValidator
     public static IReadOnlyList<string> ValidateDraft(EllaiGuidancePlanDraft draft)
     {
         var errors = new List<string>();
+        if (draft is null || draft.Steps is null || draft.Questions is null)
+        {
+            return ["A guidance draft requires steps and questions arrays."];
+        }
+        if (!Enum.IsDefined(draft.Status) || !Enum.IsDefined(draft.Mode))
+        {
+            return ["The guidance status or mode is unsupported."];
+        }
+        if (draft.Steps.Any(step => step is null || string.IsNullOrWhiteSpace(step.StepKey)
+            || string.IsNullOrWhiteSpace(step.ControlId) || string.IsNullOrWhiteSpace(step.Explanation)
+            || !Enum.IsDefined(step.Behavior)))
+        {
+            return ["Guidance steps require valid identifiers, explanations and behaviors."];
+        }
         if (draft.SchemaVersion != EllaiGuidancePlanDraft.CurrentSchemaVersion)
         {
             errors.Add($"Unsupported plan schemaVersion {draft.SchemaVersion}; expected {EllaiGuidancePlanDraft.CurrentSchemaVersion}.");
