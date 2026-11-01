@@ -3,9 +3,9 @@
 
 <PageTitle>SwiftAid | AI-Powered Community Disease Surveillance</PageTitle>
 <HeadContent>
-    <meta name="description" content="SwiftAid is building offline-first community disease surveillance and early outbreak intelligence for underserved communities in Zimbabwe and Eswatini." />
+    <meta name="description" content="SwiftAid connects community health reporting, AI assistance and accountable case follow-through for frontline teams in Zimbabwe and Eswatini." />
     <meta property="og:title" content="SwiftAid | AI-Powered Community Disease Surveillance" />
-    <meta property="og:description" content="An earlier voice in public health surveillance. Community reporting, local-language access, and potential outbreak signals for human verification." />
+    <meta property="og:description" content="Give every community a voice. Report concerns, keep evidence connected and coordinate follow-through with SwiftAid." />
 </HeadContent>
 
 @code {
@@ -19,9 +19,9 @@
             <p class="web-landing__eyebrow">Community health, connected</p>
             <h1 id="web-landing-title">Healthier people.<br />Safer communities.<br /><span>Brighter tomorrows.</span></h1>
             <p class="web-landing__lead">
-                An earlier voice in public health surveillance. SwiftAid is building
-                offline-first reporting and early outbreak intelligence for underserved
-                communities, starting in Zimbabwe and Eswatini.
+                Community health intelligence, closer to home. Capture concerns,
+                keep evidence connected, and coordinate follow-through with AI assistance.
+                Built for frontline work in Zimbabwe and Eswatini, where every report matters.
             </p>
             <div class="web-landing__actions" aria-label="Get started">
                 <a class="web-landing__button web-landing__button--primary" href="/report">Report a concern</a>
@@ -47,10 +47,9 @@
             <h2 id="what-is-swiftaid-title">Every report can help tell a bigger story.</h2>
         </div>
         <p>
-            A concern in one village may be part of a wider pattern. Our vision is to connect
-            community reports with evidence that helps health teams investigate sooner.
-            Potential outbreak signals need verification by authorized health officials;
-            people stay in control of decisions and follow-through.
+            A concern in one village may be part of a wider pattern. SwiftAid keeps
+            observations, supporting evidence and follow-up connected, so authorized
+            health teams can review concerns in context and decide what happens next.
         </p>
     </section>
 
@@ -59,7 +58,7 @@
             <span class="web-landing__feature-icon" aria-hidden="true"><MudIcon Icon="@Icons.Material.Filled.AssignmentTurnedIn" /></span>
             <p class="web-landing__feature-label">For authorized teams</p>
             <h3>Manage cases</h3>
-            <p>Teams see and act on cases only when their account has the required access.</p>
+            <p>Keep assigned cases, follow-ups and supporting evidence in one place.</p>
             @if (IsSignedIn)
             {
                 <a href="/dashboard">Open your workspace <span aria-hidden="true">→</span></a>
@@ -102,7 +101,7 @@
         <div class="web-landing__models-heading">
             <p class="web-landing__eyebrow">Meta Models</p>
             <h2 id="meta-models-title">Speak. Understand. Follow through.</h2>
-            <p>Ellai, SwiftAid's assistant, brings Meta's language and speech models together to make information easier to share and use.</p>
+            <p>Ask Ellai in your own words, find the information you need, and hear the reply. Meta's language and speech models support each step.</p>
         </div>
         <div class="web-landing__model-list">
             <article>
@@ -118,11 +117,15 @@
                 <div><h3>MMS-TTS</h3><p>Gives Ellai a voice. Turn on Listen to Ellai to hear replies and brief updates while it checks information.</p></div>
             </article>
         </div>
+        <aside class="web-landing__voice-support" aria-labelledby="silero-title">
+            <h3 id="silero-title">Silero · Supporting natural voice turns</h3>
+            <p>Alongside Meta's speech models, Silero helps Ellai recognize speech and pauses, so spoken requests can be organized into conversational turns.</p>
+        </aside>
         <div class="web-landing__models-footer">
-            <p>English is our current voice starting point. We are working toward validated Shona and siSwati experiences. AI assistance needs a connection; saved reports and available offline materials support work between connections.</p>
+            <p>Speak with Ellai in English, or type when talking isn't convenient. Keep report drafts on your device and send them when you're connected.</p>
             <a class="web-landing__button web-landing__button--secondary" href="https://github.com/Vuminkosi/Swift-Aid">Explore SwiftAid on GitHub <span aria-hidden="true">&nbsp;↗</span></a>
         </div>
-        <p class="web-landing__model-notice">MMS voice by Meta AI · <a href="https://huggingface.co/facebook/mms-tts-eng">English model</a> · <a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a>. This prototype uses it noncommercially. No Meta endorsement is implied.</p>
+        <p class="web-landing__model-notice">MMS voice by Meta AI · <a href="https://huggingface.co/facebook/mms-tts-eng">English model</a> · <a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a> · Noncommercial use.</p>
     </section>
 
     <section class="web-landing__community" aria-labelledby="community-title">

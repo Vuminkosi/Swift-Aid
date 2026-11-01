@@ -265,6 +265,9 @@
 .web-landing__model-number { color: var(--sa-action-primary); font-weight: 750; font-size: 0.85rem; padding-block-start: 0.2rem; }
 .web-landing__model-list h3 { margin: 0; font-size: 1.15rem; }
 .web-landing__model-list p { margin-block: 0.7rem 0; }
+.web-landing__voice-support { margin-block: 0 2rem; padding-inline-start: 1.25rem; border-inline-start: 3px solid var(--sa-action-primary); }
+.web-landing__voice-support h3 { margin: 0; font-size: 1rem; }
+.web-landing__voice-support p { max-width: 55rem; margin-block: 0.5rem 0; color: var(--sa-text-secondary); line-height: 1.65; }
 .web-landing__models-footer { display: flex; align-items: center; justify-content: space-between; gap: 2rem; }
 .web-landing__models-footer p { max-width: 49rem; margin: 0; }
 .web-landing__models-footer a { flex-shrink: 0; }
