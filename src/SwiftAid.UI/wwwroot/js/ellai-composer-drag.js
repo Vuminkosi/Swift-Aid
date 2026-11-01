@@ -38,8 +38,24 @@ function loadInteract() {
 }
 
 export async function attach(root, dotnet) {
+    if (!root?.isConnected) return;
     detach(root);
-    const interact = await loadInteract();
+    // Blazor may remove the element before .NET disposal interop can resolve it.
+    // The browser owns cleanup, including an attachment still loading its script.
+    const binding = { interactable: null, resize: null, observer: null };
+    bindings.set(root, binding);
+    binding.observer = new MutationObserver(() => {
+        if (!root.isConnected) detach(root);
+    });
+    binding.observer.observe(document.documentElement, { childList: true, subtree: true });
+    let interact;
+    try { interact = await loadInteract(); }
+    catch (error) {
+        if (bindings.get(root) === binding) detach(root);
+        interactPromise = null;
+        throw error;
+    }
+    if (bindings.get(root) !== binding || !root.isConnected) return;
     let x = 0;
     let y = 0;
 
@@ -66,22 +82,25 @@ export async function attach(root, dotnet) {
                 ({ x, y } = applyPosition(root, x, y));
             },
             async end() {
+                if (bindings.get(root) !== binding || !root.isConnected) return;
                 root.classList.remove("ellai-composer--dragging");
-                await dotnet.invokeMethodAsync("OnInteractPositionChanged", x, y);
+                await dotnet.invokeMethodAsync("OnInteractPositionChanged", x, y).catch(() => {});
             },
         },
     });
 
     const resize = async () => {
+        if (bindings.get(root) !== binding || !root.isConnected) return;
         if (!root.style.left && !root.style.top) {
             return;
         }
         const rect = root.getBoundingClientRect();
         ({ x, y } = applyPosition(root, rect.left, rect.top));
-        await dotnet.invokeMethodAsync("OnInteractPositionChanged", x, y);
+        await dotnet.invokeMethodAsync("OnInteractPositionChanged", x, y).catch(() => {});
     };
     window.addEventListener("resize", resize, { passive: true });
-    bindings.set(root, { interactable, resize });
+    binding.interactable = interactable;
+    binding.resize = resize;
 }
 
 export function moveBy(root, deltaX, deltaY) {
@@ -90,11 +109,13 @@ export function moveBy(root, deltaX, deltaY) {
 }
 
 export function detach(root, resetPosition = false) {
+    if (!root) return;
     const binding = bindings.get(root);
     if (binding) {
-        binding.interactable.unset();
-        window.removeEventListener("resize", binding.resize);
         bindings.delete(root);
+        binding.observer?.disconnect();
+        binding.interactable?.unset();
+        if (binding.resize) window.removeEventListener("resize", binding.resize);
     }
     root.classList.remove("ellai-composer--dragging");
     if (resetPosition) {
