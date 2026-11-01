@@ -17,7 +17,7 @@ Test command and environment variables are in [the runbook](gateway-operational-
 
 ## Capacity and remaining verification
 
-NOT VERIFIED: 10,000/100,000/1,000,000/multi-million full ingestion and processing runs; sustained throughput, p95/p99 end-to-end latency, CPU/working-set limits, multi-node HA, actual process/network restart, full consumer result-before-ACK, statistical detection accuracy, physical devices and external providers. Stream capacity settings are limits, not measured throughput.
+Initial dispatch-slice limitations: full ingestion/processing load, sustained throughput, p95/p99 end-to-end latency, CPU/working-set limits, multi-node HA, actual process/network restart, full consumer result-before-ACK, statistical detection accuracy, physical devices and external providers were NOT VERIFIED at that point. Later supplied-file and restart results below supersede only their explicitly tested boundaries. Stream capacity settings are limits, not measured throughput.
 
 The largest concurrency assertion in the initial functional run is twelve independent intake notices claimed by two database connections without overlap. Test timing is not a throughput benchmark. Additional measured slices will be appended without replacing these limits with estimates.
 
@@ -69,6 +69,8 @@ PASS: complete Application suite: 605 passed, 3 existing live-provider skips. In
 PASS (subsequent check): `CaseImportRuntimeTests`, real non-owner PostgreSQL login using the reviewed import extension. Registers a case for a secondary organization, replays the same command without duplication and proves permission-denied responses for link/membership changes, protected source/context changes, row deletion and outbox publication updates. Before the correction this test failed with registration-unavailable; the database reported missing lock-function EXECUTE. The corrected profile includes only required canonical case/notification inserts and ledger rights. The command profile also includes new outbox metadata columns in its INSERT allowlist, preserving existing command persistence after the earlier outbox migration. Broader SQLAUTH fixtures remain skipped; this result does not relabel them as verified.
 
 ## Import fault and boundary regressions
+
+PASS: two explicit-opt-in `IngestionRestartTests` killed the labelled disposable PostgreSQL and NATS processes with SIGKILL and restarted their containers. A committed HTTP import survives PostgreSQL recovery, replays its first row and resumes the next through a recreated HTTP host, preserving exactly two receipts, four events and four outbox rows. A real JetStream PubAck survives broker process loss; republishing the same notice returns the same stored sequence. Tests finished in about 5 seconds. This is actual local database/broker process loss, not host power loss, replica failover, a separate Gateway OS-process restart, long network partition or downstream consumer completion.
 
 PASS: `CaseImportMetricsTests` observes real accepted/replayed imports with the .NET MeterListener, verifies all five stage histograms and exact committed outcome counters, and asserts each observation has only its bounded stage/status label. Two functional batch samples were 554.92 and 125.92 ms; stage sample ranges: admission 14.02–119.48 ms, validation 0.03–0.12 ms, canonical registration 72.13–286.80 ms, checkpoint 5.75–13.09 ms. This cold/warm functional sample is not a percentile, sustained performance result or external telemetry-export proof.
 

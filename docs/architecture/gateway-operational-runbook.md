@@ -64,6 +64,12 @@ Use `Suspended` or `Revoked` to disable participation while retaining historical
 
 The original organization is retained for old-client requests that omit `organizationId`. New imports explicitly select their organization. Adding secondary links is a forward migration: the downgrade guard refuses to remove a populated shared-workspace relationship.
 
+### Explicit process-loss fixture
+
+`IngestionRestartTests` requires `SWIFTAID_RUN_INGESTION_RESTART=1` **in addition** to the normal intake fixture opt-in. It refuses targets other than the named `swiftaid-ingestion-test-pg` (127.0.0.1:55439, database `swiftaid_intake_test`) and `swiftaid-ingestion-test-nats` (127.0.0.1:44229) containers, and requires their `swiftaid.task` label to begin `ingestion-`. It sends SIGKILL and starts those disposable containers again. Never label shared services to satisfy this guard. Run it serially with no other work using those fixtures. Provision migrations and the existing replay helper before running; the intake fixture applies pending migrations but does not install that separately reviewed helper.
+
+The test uses real HTTP import routes with synthetic identity/policy and real database/broker storage. It retains source IDs, receipts and outbox records across process loss and asserts duplicate PubAck sequence stability. It does not prove whole-host durability or replica failover.
+
 ## Isolated tests
 
 ### Import measurements
