@@ -195,6 +195,15 @@ Edit / Reject / Cancel); text or voice consent is never approval.
 
 ## 5. Dynamic UI Intelligence and surface
 
+Ellai About session history opens `EllaiConversationDialog` through the shared
+MudDialog provider. Desktop uses `MaxWidth.Medium`; Android/iOS and small browser
+viewports use full-screen. Pinned MIT-licensed `MudX.MudBlazor.Extension` 9.10.0
+provides encoded chat bubbles for durable user/assistant turns. The existing
+owner-authorized response query supplies history; transient progress is excluded.
+Loading, retry, empty history and terminal outcomes remain distinct. Component
+tests cover completed, failed and cancelled turns and HTML encoding. Native-device
+and deployed-browser validation of this dialog remains pending.
+
 **Status: Partial implementation. Report journey descriptors are registered at
 Gateway startup; complete model-generated guidance is not verified.**
 `EllaiUiRegistry` holds versioned semantic descriptors. `EllaiGuidancePlanValidator`,

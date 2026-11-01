@@ -1029,6 +1029,7 @@
           "Microsoft.AspNetCore.Components.Authorization": "[10.0.14, )",
           "Microsoft.AspNetCore.Components.Web": "[10.0.14, )",
           "MudBlazor": "[9.11.0, )",
+          "MudX.MudBlazor.Extension": "[9.10.0, )",
           "SwiftAid.Contracts": "[1.0.0, )",
           "WebRtcVad.NET": "[1.0.0, )"
         }
@@ -1256,6 +1257,15 @@
           "Microsoft.AspNetCore.Components": "10.0.1",
           "Microsoft.AspNetCore.Components.Web": "10.0.1",
           "Microsoft.Extensions.Localization": "10.0.1"
+        }
+      },
+      "MudX.MudBlazor.Extension": {
+        "type": "CentralTransitive",
+        "requested": "[9.10.0, )",
+        "resolved": "9.10.0",
+        "contentHash": "WZbL+f56ZAr4Tbos+k5+rI4s/OlGHBELZ7u4t2KkiqboW1m/fIFZnbJ6YrVilPKa2/WJWHld3OJ4vs/Yo3xecA==",
+        "dependencies": {
+          "MudBlazor": "9.10.0"
         }
       },
       "NATS.Net": {

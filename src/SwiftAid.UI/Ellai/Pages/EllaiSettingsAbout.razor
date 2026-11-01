@@ -3,6 +3,8 @@
 @page "/ellai/about"
 @implements IDisposable
 @inject IEllaiReviewClient ReviewClient
+@inject IDialogService Dialogs
+@inject IBrowserViewportService Viewport
 
 <MudContainer MaxWidth="MaxWidth.Medium" Class="ellai-settings">
     <section class="ellai-settings__hero" aria-labelledby="ellai-settings-title">
@@ -95,37 +97,6 @@
                             </div>
                             <MudText Typo="Typo.body2" Class="ellai-settings__session-status">@DisplayStatus(session.Status)</MudText>
                             <MudButton Variant="Variant.Text" OnClick="@(() => OpenConversationAsync(session.SessionId))">View conversation</MudButton>
-                            @if (_selectedSessionId == session.SessionId)
-                            {
-                                @if (_loadingConversation)
-                                {
-                                    <MudProgressLinear Indeterminate="true" aria-label="Loading conversation" />
-                                }
-                                else if (_conversation is null)
-                                {
-                                    <MudText Typo="Typo.caption" role="status">This conversation couldn't be loaded. Select View conversation to try again.</MudText>
-                                }
-                                else if (_conversation.Count == 0)
-                                {
-                                    <MudText Typo="Typo.caption">No saved messages in this conversation.</MudText>
-                                }
-                                else
-                                {
-                                    @if (_conversation.Count == 100)
-                                    {
-                                        <MudText Typo="Typo.caption">Showing the most recent 100 turns.</MudText>
-                                    }
-                                    @foreach (var turn in _conversation)
-                                    {
-                                        <div class="ellai-settings__turn" @key="turn.ClientUtteranceId">
-                                            <MudText Typo="Typo.caption"><strong>You</strong></MudText>
-                                            <MudText Typo="Typo.caption" Class="ellai-settings__message">@(turn.UserText ?? "Earlier message unavailable.")</MudText>
-                                            <MudText Typo="Typo.caption"><strong>Ellai</strong></MudText>
-                                            <MudText Typo="Typo.caption" Class="ellai-settings__message">@ReplyText(turn)</MudText>
-                                        </div>
-                                    }
-                                }
-                            }
                         </MudPaper>
                     }
                 }
@@ -141,20 +112,15 @@
 @code {
     private readonly CancellationTokenSource _lifetime = new();
     private readonly List<EllaiSessionHistoryItemDto> _sessions = [];
-    private IReadOnlyList<EllaiConversationTurnDto>? _conversation;
-    private string? _selectedSessionId;
     private int? _nextOffset;
     private bool _loading;
     private bool _loadFailed;
-    private bool _loadingConversation;
 
     protected override Task OnInitializedAsync() => RefreshAsync();
 
     private async Task RefreshAsync()
     {
         _sessions.Clear();
-        _selectedSessionId = null;
-        _conversation = null;
         _nextOffset = null;
         await LoadAsync(0);
     }
@@ -180,28 +146,20 @@
 
     private async Task OpenConversationAsync(string sessionId)
     {
-        _selectedSessionId = sessionId;
-        _conversation = null;
-        _loadingConversation = true;
-        try
+        var breakpoint = await Viewport.GetCurrentBreakpointAsync();
+        var parameters = new DialogParameters<EllaiConversationDialog>
         {
-            var page = await ReviewClient.PollResponsesAsync(sessionId, 0, _lifetime.Token);
-            if (_selectedSessionId == sessionId) _conversation = page?.Conversation;
-        }
-        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
-        catch (Exception) { /* A failed load stays distinct from an empty conversation. */ }
-        finally { if (_selectedSessionId == sessionId) _loadingConversation = false; }
+            { dialog => dialog.SessionId, sessionId },
+        };
+        await Dialogs.ShowAsync<EllaiConversationDialog>("Conversation", parameters, new DialogOptions
+        {
+            MaxWidth = MaxWidth.Medium,
+            FullWidth = true,
+            FullScreen = OperatingSystem.IsAndroid() || OperatingSystem.IsIOS() || breakpoint <= Breakpoint.Sm,
+            CloseButton = true,
+            CloseOnEscapeKey = true,
+        });
     }
-
-    private static string ReplyText(EllaiConversationTurnDto turn) => turn.Outcome switch
-    {
-        "Completed" => turn.AssistantText ?? "Earlier reply unavailable.",
-        "Queued" or "Processing" => "Thinking…",
-        "RetryableFailure" => "Reconnecting…",
-        "Cancelled" => "Request ended.",
-        "TerminalFailure" => "This request couldn't be completed.",
-        _ => "Earlier reply unavailable.",
-    };
 
     public void Dispose() { _lifetime.Cancel(); _lifetime.Dispose(); }
 

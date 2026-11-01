@@ -13,6 +13,7 @@
     <PackageReference Include="Microsoft.AspNetCore.Components.Authorization" />
     <PackageReference Include="Microsoft.AspNetCore.Components.Web" />
     <PackageReference Include="MudBlazor" />
+    <PackageReference Include="MudX.MudBlazor.Extension" />
     <PackageReference Include="Blazor.Lottie.Player" />
     <PackageReference Include="WebRtcVad.NET" />
   </ItemGroup>

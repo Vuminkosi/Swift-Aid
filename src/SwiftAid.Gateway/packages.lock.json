@@ -597,6 +597,7 @@
           "Bit.Bonboarding": "[10.7.0, )",
           "Blazor.Lottie.Player": "[1.0.6, )",
           "MudBlazor": "[9.11.0, )",
+          "MudX.MudBlazor.Extension": "[9.10.0, )",
           "SwiftAid.Contracts": "[1.0.0, )",
           "WebRtcVad.NET": "[1.0.0, )"
         }
@@ -734,6 +735,15 @@
           "CommunityToolkit.HighPerformance": "8.4.0",
           "System.IO.Hashing": "9.0.4",
           "System.Reactive": "6.0.1"
+        }
+      },
+      "MudX.MudBlazor.Extension": {
+        "type": "CentralTransitive",
+        "requested": "[9.10.0, )",
+        "resolved": "9.10.0",
+        "contentHash": "WZbL+f56ZAr4Tbos+k5+rI4s/OlGHBELZ7u4t2KkiqboW1m/fIFZnbJ6YrVilPKa2/WJWHld3OJ4vs/Yo3xecA==",
+        "dependencies": {
+          "MudBlazor": "9.10.0"
         }
       },
       "Npgsql.EntityFrameworkCore.PostgreSQL": {

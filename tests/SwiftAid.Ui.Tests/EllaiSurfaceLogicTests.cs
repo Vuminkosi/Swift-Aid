@@ -22,6 +22,38 @@ namespace SwiftAid.Ui.Tests;
 public sealed class EllaiSurfaceLogicTests
 {
     [Theory]
+    [InlineData("Completed", "Saved answer")]
+    [InlineData("TerminalFailure", "This request couldn't be completed.")]
+    [InlineData("Cancelled", "Request ended.")]
+    public async Task HistoryDialogRendersDurableTurnsAsEncodedChat(string outcome, string expected)
+    {
+        var client = new FakeReviewClient
+        {
+            SavedConversation = [new("saved", 1, "<script>user</script>", "Saved answer", outcome, 1, DateTimeOffset.UtcNow)],
+        };
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddMudServices();
+        services.AddSingleton<IJSRuntime>(new NoOpJsRuntime());
+        services.AddSingleton<IEllaiReviewClient>(client);
+        services.AddSingleton<NavigationManager>(new TestNavigationManager());
+        await using var provider = services.BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(provider, provider.GetRequiredService<ILoggerFactory>());
+        var root = await renderer.Dispatcher.InvokeAsync(async () =>
+            await renderer.RenderComponentAsync<MudBlazor.MudDialogProvider>());
+        await renderer.Dispatcher.InvokeAsync(async () =>
+            await provider.GetRequiredService<MudBlazor.IDialogService>().ShowAsync<EllaiConversationDialog>(
+                "Conversation", new MudBlazor.DialogParameters { ["SessionId"] = "saved-session" }));
+        var html = await renderer.Dispatcher.InvokeAsync(root.ToHtmlString);
+        Assert.Equal("saved-session", client.HistorySessionId);
+        Assert.Contains("&lt;script&gt;user&lt;/script&gt;", html);
+        Assert.DoesNotContain("<script>user</script>", html);
+        Assert.Contains(expected.Replace("'", "&#x27;"), html);
+        Assert.Contains("You", html);
+        Assert.Contains("Ellai", html);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task FinalAnswerPreemptsAcknowledgementAndWaitsForLocalStopWithoutOverlap(bool stopFails)
@@ -1761,6 +1793,14 @@ public sealed class EllaiSurfaceLogicTests
     private sealed class FakeReviewClient(params EllaiUtteranceSubmitResult[] submitResults)
         : IEllaiReviewClient
     {
+        public IReadOnlyList<EllaiConversationTurnDto>? SavedConversation { get; init; }
+        public string? HistorySessionId { get; private set; }
+        public Task<EllaiSessionResponsePageDto?> PollResponsesAsync(string sessionId, long cursor, CancellationToken cancellationToken)
+        {
+            HistorySessionId = sessionId;
+            return Task.FromResult<EllaiSessionResponsePageDto?>(SavedConversation is null ? null : new([], 0, Conversation: SavedConversation));
+        }
+
         private readonly Queue<EllaiUtteranceSubmitResult> _submitResults = new(submitResults);
 
         public List<SubmitUtteranceRequest> Submissions { get; } = [];

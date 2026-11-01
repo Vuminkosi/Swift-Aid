@@ -56,6 +56,15 @@
           "Microsoft.Extensions.Localization": "10.0.1"
         }
       },
+      "MudX.MudBlazor.Extension": {
+        "type": "Direct",
+        "requested": "[9.10.0, )",
+        "resolved": "9.10.0",
+        "contentHash": "WZbL+f56ZAr4Tbos+k5+rI4s/OlGHBELZ7u4t2KkiqboW1m/fIFZnbJ6YrVilPKa2/WJWHld3OJ4vs/Yo3xecA==",
+        "dependencies": {
+          "MudBlazor": "9.10.0"
+        }
+      },
       "WebRtcVad.NET": {
         "type": "Direct",
         "requested": "[1.0.0, )",
