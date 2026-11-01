@@ -44,11 +44,15 @@ public static class EllaiToolNames
     public const string IngestionSchema = "ellai_ingestion_schema";
     public const string ValidateObservations = "ellai_validate_observations";
     public const string Locations = "ellai_locations";
+    public const string ImportDestinations = "ellai_import_destinations";
+    public const string Imports = "ellai_imports";
+    public const string ImportStatus = "ellai_import_status";
 
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
     {
         State, Evidence, Topic, Capabilities, Receipts, ProductFacts, Now,
-        DocsSearch, DocsGet, UiCatalogue, UiObserve, IngestionSchema, ValidateObservations, Locations
+        DocsSearch, DocsGet, UiCatalogue, UiObserve, IngestionSchema, ValidateObservations, Locations,
+        ImportDestinations, Imports, ImportStatus
     };
 }
 
@@ -174,6 +178,9 @@ public sealed class EllaiToolBroker
         $"{EllaiToolNames.IngestionSchema}() — canonical case CSV fields, capture requirements and authority boundaries; no submission.",
         $"{EllaiToolNames.ValidateObservations}(observations_json) — validate a bounded JSON array of original reported strings; no inference or submission.",
         $"{EllaiToolNames.Locations}(q, country?, limit?) — search the public geographic registry; present matches for user selection, never guess a location.",
+        $"{EllaiToolNames.ImportDestinations}() — current authorized organization/workspace/country destinations for Workspace imports; staff only.",
+        $"{EllaiToolNames.Imports}(workspace_id, organization_id, country) — the current user's recent imports in one permitted destination; staff only.",
+        $"{EllaiToolNames.ImportStatus}(import_id) — the current user's durable import state and saved/rejected/retry counts; no case contents and no submission.",
     };
 
     public static string DescribeCatalogue(IReadOnlySet<string>? allowedTools = null) =>
@@ -199,6 +206,8 @@ public sealed class EllaiToolBroker
     private readonly IEllaiUiObservationStore? _uiObservations;
     private readonly EllaiProductFactCatalog _productFacts;
     private readonly IGeographicRegistry? _geography;
+    private readonly ICaseImportStore? _imports;
+    private readonly ICaseImportWorkspaceReader? _importWorkspaces;
 
     /// <summary>Consent infrastructure is mandatory for consent-scoped reads.
     /// Ordinary typed messages use their own explicit classification and do
@@ -215,7 +224,8 @@ public sealed class EllaiToolBroker
         IEllaiApprovalStore? receipts = null, EllaiTopicService? topics = null,
         EllaiUiRegistry? uiRegistry = null, IEllaiUiDiscoveryService? uiDiscovery = null,
         IEllaiUiObservationStore? uiObservations = null,
-        EllaiProductFactCatalog? productFacts = null, IGeographicRegistry? geography = null)
+        EllaiProductFactCatalog? productFacts = null, IGeographicRegistry? geography = null,
+        ICaseImportStore? imports = null, ICaseImportWorkspaceReader? importWorkspaces = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _consent = consent ?? throw new ArgumentNullException(nameof(consent));
@@ -228,6 +238,8 @@ public sealed class EllaiToolBroker
         _uiObservations = uiObservations;
         _productFacts = productFacts ?? new EllaiProductFactCatalog();
         _geography = geography;
+        _imports = imports;
+        _importWorkspaces = importWorkspaces;
     }
 
     public async Task<EllaiToolResult> InvokeAsync(
@@ -328,6 +340,9 @@ public sealed class EllaiToolBroker
         if (canonical == EllaiToolNames.Locations)
             return Bound(await ReadLocationsAsync(request, ct).ConfigureAwait(false));
 
+        if (canonical is EllaiToolNames.ImportDestinations or EllaiToolNames.Imports or EllaiToolNames.ImportStatus)
+            return Bound(await ReadImportsAsync(context, request, ct).ConfigureAwait(false));
+
         return Bound(canonical switch
         {
             EllaiToolNames.Evidence => Allow(request.ToolName, "Authorized versioned source items.", Math.Min(request.Arguments.Count, MaxItems), request.Arguments.Count > MaxItems),
@@ -352,11 +367,63 @@ public sealed class EllaiToolBroker
             observations = "observations_json is an array of up to 32 original strings, each at most 300 characters; never objects or inferred diagnoses.",
             capture = "Preserve source narrative, occurrence/capture timestamps and explicit unknowns. Dates with a time require an offset. Ask for missing facts without inventing them.",
             authority = "Public intake returns a private unverified receipt. Managed-case capture requires current staff authorization and explicit report review. A source case_id is not the destination case ID. Empty workspace/owner fields use the authorized import context and submitting officer.",
-            submission = "These tools only prepare or validate capture. Use the existing report form to submit; never claim a report was saved without its durable receipt.",
+            submission = "Use the existing report form for individual capture or Workspace > Imports for authorized case CSV imports. These tools prepare, validate or read progress; never claim a report was saved without its durable receipt.",
             provenance = "CaseCsvImportAdapter/v1"
         });
         return new(request.ToolName, true, null,
             [new EvidenceRef("ProductFact", "ingestion-schema", "1", "capture", "ingestion-schema/1")], summary, 1, false);
+    }
+
+    private async Task<EllaiToolResult> ReadImportsAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
+    {
+        if (context.Actor is null)
+            return Deny(request.ToolName, "Import records require current staff access.", EllaiToolReasonCodes.DeniedByPolicy);
+        if (_imports is null || _importWorkspaces is null)
+            return Deny(request.ToolName, "Import information is unavailable.", EllaiToolReasonCodes.Unavailable);
+        try
+        {
+            if (request.ToolName == EllaiToolNames.ImportDestinations)
+            {
+                if (request.Arguments.Count != 0)
+                    return Deny(request.ToolName, "This tool takes no arguments.", EllaiToolReasonCodes.InvalidArguments);
+                var destinations = await _importWorkspaces.GetWorkspacesAsync(context.Actor, ct).ConfigureAwait(false);
+                var items = destinations.Take(MaxItems).ToArray();
+                return new(request.ToolName, true, null, [],
+                    JsonSerializer.Serialize(new { destinations = items, importPage = "/workspace/imports", submitted = false }),
+                    items.Length, destinations.Count > items.Length);
+            }
+            if (request.ToolName == EllaiToolNames.Imports)
+            {
+                if (request.Arguments.Count != 3 ||
+                    !request.Arguments.TryGetValue("workspace_id", out var workspace) || string.IsNullOrWhiteSpace(workspace) ||
+                    !request.Arguments.TryGetValue("organization_id", out var organization) || string.IsNullOrWhiteSpace(organization) ||
+                    !request.Arguments.TryGetValue("country", out var country) || country.Length != 2 || country.Any(character => character is < 'A' or > 'Z'))
+                    return Deny(request.ToolName, "Supply the organization, workspace and country from a permitted import destination.", EllaiToolReasonCodes.InvalidArguments);
+                var history = await _importWorkspaces.GetRecentAsync(context.Actor, workspace, country, ct, organization).ConfigureAwait(false);
+                var items = history.Take(MaxItems).ToArray();
+                return new(request.ToolName, true, null,
+                    items.Select(item => new EvidenceRef("ImportJob", item.ImportId.ToString("D"), item.UpdatedAtUtc.ToString("O"), "status", item.ImportId.ToString("D"))).ToArray(),
+                    JsonSerializer.Serialize(new { imports = items, importPage = "/workspace/imports" }), items.Length, history.Count >= MaxItems);
+            }
+            if (request.Arguments.Count != 1 || !request.Arguments.TryGetValue("import_id", out var importText) ||
+                !Guid.TryParseExact(importText, "D", out var importId) || importId == Guid.Empty)
+                return Deny(request.ToolName, "Supply a complete import reference.", EllaiToolReasonCodes.InvalidArguments);
+            var summary = await _imports.GetAsync(context.Actor, importId, ct).ConfigureAwait(false);
+            if (summary is null)
+                return Deny(request.ToolName, "That import is not available to the current user.", EllaiToolReasonCodes.DeniedByPolicy);
+            return new(request.ToolName, true, null,
+                [new EvidenceRef("ImportJob", importId.ToString("D"), summary.UpdatedAtUtc.ToString("O"), "status", importId.ToString("D"))],
+                JsonSerializer.Serialize(new { import = summary, intelligenceStatus = "not-reported-by-import-ledger",
+                    interpretation = "Completed means the import file was processed. Check rejected and retry counts. It does not mean surveillance analysis finished." }), 1, false);
+        }
+        catch (CaseImportException exception) when (exception.Code == "not-authorized")
+        {
+            return Deny(request.ToolName, "That import scope is not available to the current user.", EllaiToolReasonCodes.DeniedByPolicy);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
+        {
+            return Deny(request.ToolName, "Import information is unavailable.", EllaiToolReasonCodes.Unavailable);
+        }
     }
 
     private static EllaiToolResult ValidateObservations(EllaiToolRequest request)

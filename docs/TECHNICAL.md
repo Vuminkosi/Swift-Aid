@@ -48,6 +48,9 @@ execute/approve/sql/shell.
 | `ellai_ingestion_schema` | Current case CSV/capture requirements and receipt/authority boundaries; does not submit data. |
 | `ellai_validate_observations` | Validates the existing string-array observation format with bounded input; returns format/count only, without clinical interpretation or submission. |
 | `ellai_locations` | Bounded public geographic registry search with versioned provenance; candidates require user selection. |
+| `ellai_import_destinations` | Current actor-authorized organization/workspace/country destinations, at most 20; directs staff to Workspace Imports without submitting anything. |
+| `ellai_imports` | At most 20 actor-owned recent imports for an explicit organization/workspace/country, with current membership and access checks. |
+| `ellai_import_status` | Durable actor-owned import counts, checkpoint and state; no original source content. Import completion does not establish intelligence-processing completion. |
 | `ellai_now` | Current server time (UTC, round-trip + unix ms); no domain data. |
 | `ellai_docs_search` | Search this approved reference by topic/section id. |
 | `ellai_docs_get` | Retrieve one approved section excerpt with provenance. |

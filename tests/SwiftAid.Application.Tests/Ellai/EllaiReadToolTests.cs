@@ -94,8 +94,9 @@ public sealed class EllaiReadToolTests
                 var result = await broker.InvokeAsync(
                     Context, new EllaiToolRequest(tool, args),
                     CancellationToken.None);
-                Assert.True(result.Allowed);
-                Assert.Equal(EllaiToolReasonCodes.Ok, result.ReasonCode);
+                var requiresStaffActor = tool is EllaiToolNames.ImportDestinations or EllaiToolNames.Imports or EllaiToolNames.ImportStatus;
+                Assert.Equal(!requiresStaffActor, result.Allowed);
+                Assert.Equal(requiresStaffActor ? EllaiToolReasonCodes.DeniedByPolicy : EllaiToolReasonCodes.Ok, result.ReasonCode);
                 Assert.True(result.ItemCount <= EllaiToolBroker.MaxItems);
                 Assert.True(EllaiToolBroker.MeasureEnvelopeBytes(result) <= EllaiToolBroker.MaxResultBytes);
             }

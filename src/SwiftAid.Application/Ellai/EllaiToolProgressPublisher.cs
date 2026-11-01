@@ -100,6 +100,8 @@ public sealed class EllaiToolProgressPublisher(
         EllaiToolNames.IngestionSchema => ("Checking report requirements", "Let me check what's needed."),
         EllaiToolNames.ValidateObservations => ("Checking the reported observations", "I'll check that format."),
         EllaiToolNames.Locations => ("Finding the reported location", "Let me find that place."),
+        EllaiToolNames.ImportDestinations => ("Checking your import workspaces", "Let me check where you can import."),
+        EllaiToolNames.Imports or EllaiToolNames.ImportStatus => ("Checking your imports", "I'll check your import progress."),
         _ => ("Checking that for you", turnId.Length % 2 == 0 ? "Hmm, let me check that." : "One moment."),
     };
 }
