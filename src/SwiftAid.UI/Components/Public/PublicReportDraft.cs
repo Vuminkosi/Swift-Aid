@@ -169,10 +169,10 @@ public sealed class PublicReportDraft : IValidatableObject
         var capturedAt = CapturedAt.HasValue
             ? new ReportedTime(
                 CapturedAt.Value.ToUniversalTime(),
-                DateOnly.FromDateTime(CapturedAt.Value.DateTime),
                 null,
                 null,
-                CapturedAt.Value.Offset.ToString(),
+                null,
+                FormatOffset(CapturedAt.Value.Offset),
                 SafeLocalZoneId(),
                 ReportedTimePrecision.Exact)
             : new ReportedTime(null, null, null, null, null, null, ReportedTimePrecision.Unknown);
@@ -269,10 +269,10 @@ public sealed class PublicReportDraft : IValidatableObject
             var instant = new DateTimeOffset(local, offset);
             occurrence = new ReportedTime(
                 instant.ToUniversalTime(),
-                DateOnly.FromDateTime(local),
                 null,
                 null,
-                offset.ToString(),
+                null,
+                FormatOffset(offset),
                 TimeNote,
                 ReportedTimePrecision.Exact);
             return true;
@@ -300,6 +300,13 @@ public sealed class PublicReportDraft : IValidatableObject
 
         var date = occurrence.LocalDate ?? occurrence.RangeStart;
         return (date?.ToDateTime(TimeOnly.MinValue), null, occurrence.OriginalOffset);
+    }
+
+    /// <summary>Formats an offset exactly as the intake contract requires (signed ±HH:mm).</summary>
+    private static string FormatOffset(TimeSpan offset)
+    {
+        var absolute = offset.Duration();
+        return string.Concat(offset < TimeSpan.Zero ? "-" : "+", absolute.ToString(@"hh\:mm"));
     }
 
     private static bool TryParseOffset(string? value, out TimeSpan offset)

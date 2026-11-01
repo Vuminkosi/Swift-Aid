@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using SwiftAid.Contracts.Intake;
 
 namespace SwiftAid.Client.Intake;
@@ -15,7 +16,16 @@ public sealed class GuestIntakeHttpClient : IGuestIntakeTransport
     private const string IntakeSessionHeader = "X-SwiftAid-Intake-Session";
     private const int MaximumResponseBytes = 64 * 1024;
     private static readonly TimeSpan CountryCatalogueRequestTimeout = TimeSpan.FromSeconds(5);
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
+
+    /// <summary>Matches the public intake wire format: camel-case members with
+    /// camel-case string enums, exactly as the service serializes receipts.</summary>
+    private static JsonSerializerOptions CreateJsonOptions()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
+        return options;
+    }
     private readonly HttpClient _httpClient;
 
     public GuestIntakeHttpClient(HttpClient httpClient, bool allowInsecureTransport = false)

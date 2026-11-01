@@ -54,6 +54,7 @@ builder.Services.AddScoped<IGuestSubmissionPersistence>(serviceProvider =>
     serviceProvider.GetRequiredService<BrowserGuestSubmissionPersistence>());
 builder.Services.AddScoped<IGuestSubmissionStore>(serviceProvider => new GuestDraftStore(
     serviceProvider.GetRequiredService<IGuestSubmissionPersistence>(),
+    transport: serviceProvider.GetRequiredService<IGuestIntakeTransport>(),
     cleanupJournal: serviceProvider.GetRequiredService<IGuestAudioCleanupJournal>(),
     audioStore: serviceProvider.GetRequiredService<IGuestAudioStore>()));
 builder.Services.AddScoped<IGuestAudioStore, BrowserGuestAudioStore>();

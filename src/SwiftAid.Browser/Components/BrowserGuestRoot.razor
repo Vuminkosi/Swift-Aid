@@ -170,7 +170,7 @@ else
         string.Equals(baseUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
     private bool CanSend => IsSecureIntakeTransportAvailable && _storageAvailable && _countryCatalogueIsCurrent && _privacyNoticeIsCurrent &&
         !string.IsNullOrWhiteSpace(_processingPolicyReference) && !string.IsNullOrWhiteSpace(_processingPolicyVersion) &&
-        !string.IsNullOrWhiteSpace(_processingPolicyNoticeText) && _processingPolicyIsLive;
+        _processingPolicyIsLive;
     private string SendUnavailableMessage => !IsSecureIntakeTransportAvailable
         ? "Sending requires a secure HTTPS connection. You can save this report on this device and send it when using SwiftAid over HTTPS."
         : !_storageAvailable
@@ -178,7 +178,7 @@ else
             : !_countryCatalogueIsCurrent || !_privacyNoticeIsCurrent ||
               string.IsNullOrWhiteSpace(_processingPolicyReference) ||
               string.IsNullOrWhiteSpace(_processingPolicyVersion) ||
-              string.IsNullOrWhiteSpace(_processingPolicyNoticeText) || !_processingPolicyIsLive
+              !_processingPolicyIsLive
                 ? "Sending is unavailable until current report information is available. You can save this report on this device."
                 : "Sending is temporarily unavailable. Your saved report remains on this device.";
     private IReadOnlyList<PublicReportHistorySurface.HistoryItem> HistoryItems => _history;
