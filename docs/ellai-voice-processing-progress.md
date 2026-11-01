@@ -206,3 +206,9 @@ Follow-up five-turn Chromium run **PASS for synthetic public conversation contin
 Latest automated totals: application Ellai 274 passed / 3 skipped; UI 286 passed; integration Ellai 55 passed / 16 skipped, with three PostgreSQL outcome fixtures additionally passed on a disposable instance; JavaScript capture 6 passed. Android Debug SDK Install passed with zero warnings/errors, preserving app data and refreshing deployment assemblies. iOS CoreCompile passed; packaging and hardware remain unverified.
 
 Natural barge-in/physical echo rejection, a controlled slow-network conversation, authorized case-list actions, permission revoke/restore, and physical Android/iOS remain **NOT VERIFIED**. Full paged history rendering also remains incomplete; the current feed restores a bounded durable snapshot and the latest answer. No production-readiness claim is made.
+
+### Composer thinking feedback (1 November 2026)
+
+The shared web/MAUI composer now shows animated `Thinking…` from submission through the matching terminal response, including restored queued/processing/retryable work. Reconnecting takes priority. Older outcomes cannot clear a newer request's indicator. Dots are hidden from assistive technology and stop animating with reduced motion.
+
+**PASS:** UI suite 290 tests; real Chromium request through recreated Gateway showed the animation, disabled it under reduced motion, kept it visible at 390 px width, cleared it on completion, and restored the response after refresh with zero page errors. First chunk 6,323 ms, completion 6,387 ms. Narrow-screen screenshot visually inspected. Android SDK Install passed with zero warnings/errors and the app was launched on emulator-5554. Emulator animation interaction and physical iOS remain **NOT VERIFIED**. The initial test compile failed on a missing nullable constructor argument; corrected before the passing runs.

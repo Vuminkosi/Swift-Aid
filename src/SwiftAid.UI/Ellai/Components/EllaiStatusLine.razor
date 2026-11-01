@@ -8,7 +8,16 @@
         <MudText Typo="Typo.caption" Color="Color.Primary">@phaseLabel</MudText>
     }
     <div class="ellai-status__text @(_expanded ? null : "ellai-status__text--clamped")">
-        @RenderRichText()
+        @if (StatusText == "Thinking…")
+        {
+            <span class="ellai-status__thinking">
+                Thinking<span aria-hidden="true"><span class="ellai-status__dot">.</span><span class="ellai-status__dot">.</span><span class="ellai-status__dot">.</span></span>
+            </span>
+        }
+        else
+        {
+            @RenderRichText()
+        }
     </div>
     @if (NeedsExpander)
     {

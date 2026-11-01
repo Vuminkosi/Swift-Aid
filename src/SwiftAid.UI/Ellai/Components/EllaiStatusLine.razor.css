@@ -3,6 +3,23 @@
     gap: 0.125rem;
 }
 
+.ellai-status__dot {
+    display: inline-block;
+    animation: ellai-thinking 1.4s ease-in-out infinite;
+}
+
+.ellai-status__dot:nth-child(2) { animation-delay: 0.2s; }
+.ellai-status__dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes ellai-thinking {
+    0%, 80%, 100% { opacity: 0.35; }
+    40% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ellai-status__dot { animation: none; }
+}
+
 .ellai-status__text--clamped {
     display: -webkit-box;
     -webkit-line-clamp: 3;

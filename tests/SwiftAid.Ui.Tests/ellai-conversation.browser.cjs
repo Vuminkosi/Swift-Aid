@@ -36,6 +36,20 @@ async function main() {
         const started = Date.now();
         await input.fill(process.env.SWIFTAID_TEXT_PROMPT ?? "Hi. Reply with one short friendly greeting.");
         await page.getByRole("button", { name: "Send to Ellai", exact: true }).click();
+        const thinking = page.locator(".ellai-status__thinking");
+        await thinking.waitFor({ state: "visible" });
+        const dot = thinking.locator(".ellai-status__dot").first();
+        assert.notEqual(await dot.evaluate(element => getComputedStyle(element).animationName), "none");
+        await page.emulateMedia({ reducedMotion: "reduce" });
+        assert.equal(await dot.evaluate(element => getComputedStyle(element).animationName), "none");
+        await page.emulateMedia({ reducedMotion: "no-preference" });
+        await page.setViewportSize({ width: 390, height: 844 });
+        const thinkingBox = await thinking.boundingBox();
+        assert.ok(thinkingBox && thinkingBox.x >= 0 && thinkingBox.x + thinkingBox.width <= 390);
+        if (process.env.SWIFTAID_THINKING_SCREENSHOT) {
+            await page.locator(".ellai-composer").screenshot({ path: process.env.SWIFTAID_THINKING_SCREENSHOT });
+        }
+        await page.setViewportSize({ width: 1280, height: 800 });
         const deadline = Date.now() + 120000;
         let turn;
         while (Date.now() < deadline) {
@@ -48,6 +62,7 @@ async function main() {
         assert.ok(turn.userText && turn.assistantText);
         await page.waitForFunction(text => document.querySelector(".ellai-composer__response")?.textContent?.trim() === text, turn.assistantText);
         const completedMs = Date.now() - started;
+        await thinking.waitFor({ state: "hidden" });
         const originalSession = sessionId;
         assert.ok(originalSession);
         latestPage = null;
@@ -58,7 +73,8 @@ async function main() {
         assert.deepEqual(errors, []);
         console.log(JSON.stringify({ result: "PASS", sessionId: originalSession,
             firstChunkMs: firstChunkAt ? firstChunkAt - started : null, completedMs,
-            outcome: turn.outcome, restoredAfterRefresh: true, pageErrors: errors.length }));
+            outcome: turn.outcome, restoredAfterRefresh: true, thinkingAnimation: true,
+            reducedMotion: true, mobileStatusVisible: true, pageErrors: errors.length }));
         // End only this synthetic test conversation through the regular user control.
         await page.getByRole("button", { name: "End Ellai session", exact: true }).click();
     } finally {

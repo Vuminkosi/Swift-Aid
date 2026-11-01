@@ -165,7 +165,7 @@ public sealed class EllaiSurfaceLogicTests
     }
 
     [Fact]
-    public async Task ComposerVoiceStatusUsesOnlyReadyConnectingOrReconnecting()
+    public async Task ComposerStatusPrioritizesConnectionRecoveryOverThinking()
     {
         using var host = await CreateHost(new FakeReviewClient(), CreateSession(version: 1), string.Empty);
         var testHost = Assert.IsType<TestComponentHost<EllaiGuidanceHost>>(host);
@@ -176,11 +176,51 @@ public sealed class EllaiSurfaceLogicTests
             () => (string?)statusMethod.Invoke(testHost.Component, null));
 
         Assert.Equal("Ready", await GetStatus());
+        SetField(host, "_thinkingUtteranceId", "pending-turn");
+        Assert.Equal("Thinking…", await GetStatus());
         SetField(host, "_startingSession", true);
         Assert.Equal("Connecting…", await GetStatus());
         SetField(host, "_startingSession", false);
         SetField(host, "_liveVoiceReconnectRequired", true);
         Assert.Equal("Reconnecting…", await GetStatus());
+    }
+
+    [Theory]
+    [InlineData("Completed")]
+    [InlineData("TerminalFailure")]
+    [InlineData("Cancelled")]
+    public async Task ThinkingTracksAcceptedTurnUntilItsDurableOutcome(string outcome)
+    {
+        var client = new FakeReviewClient(new EllaiUtteranceSubmitResult(
+            EllaiClientOperationStatus.Accepted, CreateSession(version: 2)));
+        using var host = await CreateHost(client, CreateSession(version: 1), "Synthetic question");
+        await InvokeAsync(host, "OnSend");
+        var id = Assert.Single(client.Submissions).ClientUtteranceId;
+        Assert.Equal(id, GetField<string?>(host, "_thinkingUtteranceId"));
+        await InvokeAsync(host, "OnConversationUpdated", (object)new EllaiConversationTurnDto[]
+        {
+            new("older-turn", 1, "Earlier question", "Earlier answer", "Completed", 1, DateTimeOffset.UtcNow),
+        });
+        Assert.Equal(id, GetField<string?>(host, "_thinkingUtteranceId"));
+        await InvokeAsync(host, "OnConversationUpdated", (object)new EllaiConversationTurnDto[]
+        {
+            new(id, 2, "Synthetic question", outcome == "Completed" ? "Answer" : null, outcome, 1, DateTimeOffset.UtcNow),
+        });
+        Assert.Null(GetField<string?>(host, "_thinkingUtteranceId"));
+    }
+
+    [Fact]
+    public async Task ThinkingRestoresPendingHistoryAndClearsWhenAdmissionFails()
+    {
+        var client = new FakeReviewClient(new EllaiUtteranceSubmitResult(EllaiClientOperationStatus.InvalidRequest, null));
+        using var host = await CreateHost(client, CreateSession(version: 1), "Synthetic question");
+        await InvokeAsync(host, "OnSend");
+        Assert.Null(GetField<string?>(host, "_thinkingUtteranceId"));
+        await InvokeAsync(host, "OnConversationUpdated", (object)new EllaiConversationTurnDto[]
+        {
+            new("restored-turn", 2, "Earlier question", null, "Processing", 1, null),
+        });
+        Assert.Equal("restored-turn", GetField<string?>(host, "_thinkingUtteranceId"));
     }
 
     [Fact]

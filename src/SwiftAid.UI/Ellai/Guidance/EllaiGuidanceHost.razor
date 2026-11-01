@@ -83,14 +83,14 @@
             return "Reconnecting…";
         }
 
-        if (_startingSession || _startingVoiceCapture || _submittingUtterance)
+        if (_startingSession || _startingVoiceCapture)
         {
             return "Connecting…";
         }
 
-        if (_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Live)
+        if (_submittingUtterance || _thinkingUtteranceId is not null)
         {
-            return "Ready";
+            return "Thinking…";
         }
 
         return "Ready";
@@ -99,6 +99,8 @@
     private string? _pendingUtteranceId;
     private string? _pendingUtteranceText;
     private bool _submittingUtterance;
+    private string? _thinkingUtteranceId;
+    private string? _settledUtteranceId;
     private CancellationTokenSource? _submissionCts;
     private TaskCompletionSource? _submissionSettled;
     private bool _startingSession;
@@ -1683,6 +1685,13 @@
         });
     }
 
+    private void SettleThinking(string? utteranceId)
+    {
+        if (utteranceId is null) return;
+        _settledUtteranceId = utteranceId;
+        if (_thinkingUtteranceId == utteranceId) _thinkingUtteranceId = null;
+    }
+
     private void OnConversationUpdated(IReadOnlyList<EllaiConversationTurnDto> conversation)
     {
         _ = InvokeAsync(() =>
@@ -1690,6 +1699,16 @@
             var latest = conversation.LastOrDefault();
             if (latest is null || latest == _lastDurableTurn) return;
             _lastDurableTurn = latest;
+            if (latest.Outcome is "Queued" or "Processing" or "RetryableFailure")
+            {
+                if (_thinkingUtteranceId is null && latest.ClientUtteranceId != _settledUtteranceId)
+                    _thinkingUtteranceId = latest.ClientUtteranceId;
+                StateHasChanged();
+            }
+            else
+            {
+                SettleThinking(latest.ClientUtteranceId);
+            }
             if (latest.Outcome is "Queued" or "Processing") return;
             _responseTextUtteranceId = latest.ClientUtteranceId;
             _latestResponseText = OutcomeText(latest.Outcome, latest.AssistantText);
@@ -1733,6 +1752,8 @@
             }
 
             _lastReceivedResponseSequence = response.Sequence;
+            if (response.IsFinal || response.IsReconciliation)
+                SettleThinking(response.ClientUtteranceId);
             if (response.IsReconciliation)
             {
                 var hadChunks = _responseTextUtteranceId == response.ClientUtteranceId
@@ -2131,6 +2152,8 @@
         var cancellationToken = _submissionCts.Token;
         _submissionSettled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _submittingUtterance = true;
+        _thinkingUtteranceId = request.ClientUtteranceId;
+        var accepted = false;
         StatusText = "Sending your message to Ellai…";
         Phase = EllaiStatusPhases.Active;
         try
@@ -2142,6 +2165,7 @@
                     when result.Session is { } updated
                         && string.Equals(updated.SessionId, session.SessionId, StringComparison.Ordinal):
                     _sessionView = updated;
+                    accepted = true;
                     _pendingUtteranceId = null;
                     _pendingUtteranceText = null;
                     if (string.Equals(InputText, text, StringComparison.Ordinal))
@@ -2237,6 +2261,8 @@
         finally
         {
             _submittingUtterance = false;
+            if (!accepted && _thinkingUtteranceId == request.ClientUtteranceId)
+                _thinkingUtteranceId = null;
             _submissionSettled?.TrySetResult();
         }
     }
@@ -2456,6 +2482,8 @@
 
     private void CancelPriorSession()
     {
+        _thinkingUtteranceId = null;
+        _settledUtteranceId = null;
         try
         {
             _cts?.Cancel();
