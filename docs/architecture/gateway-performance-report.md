@@ -60,6 +60,8 @@ Run with `SWIFTAID_RUN_IMPORT_LOAD=1`, `SWIFTAID_RUN_INTAKE_POSTGRES_FIXTURES=1`
 
 ## Shared-workspace verification
 
+Subsequent broader regression initially found seven failures in the hand-written SQLite membership fixture because it lacked `workspace_organizations`. The three SQLite fixture schemas that create workspaces (membership, invitation, demo data) now include the link table. PASS: all 23 tests across those three classes, including a new real service/query check that both organizations list the shared workspace while a revoked link disappears only from its organization's listing. This is SQLite fixture coverage, separate from the PostgreSQL isolation/migration evidence.
+
 PASS: four real PostgreSQL `SharedWorkspaceImportTests`: separate organizations create cases in the same workspace; case reads and import history remain isolated; an organization change cannot replay a command into another organization; a link alone grants no membership; link revocation waits for an active authority transaction and denies new work afterward. Migration applied successfully over the populated disposable database.
 
 PASS: expanded Chromium integration selects a secondary organization, imports a case into the same workspace and restores its result after refresh, in addition to the 250-row pause/resume and invalid-row scenario. The database asserts the actual selected organization on the saved case. Browser interaction 12,649 ms, no page errors. Same synthetic authentication/policy and real component/database boundaries as above; shared Gateway/native devices remain NOT VERIFIED.

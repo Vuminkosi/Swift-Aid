@@ -46,6 +46,33 @@ public sealed class OrganizationMembershipServiceTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Mine_lists_shared_workspace_for_each_membership_and_hides_revoked_link()
+    {
+        var now = _timeProvider.GetUtcNow();
+        _dbContext.OrganizationMemberships.Add(new OrganizationMembershipEntity
+        {
+            MembershipId = Guid.NewGuid(), ActorId = "actor-1", OrganizationId = "org-2",
+            Status = PersistentMembershipStatus.Active, ValidFromUtc = now, GrantedByActorId = "actor-1", Version = 1
+        });
+        var link = new WorkspaceOrganizationEntity
+        {
+            WorkspaceId = "ws-1", OrganizationId = "org-2", Status = PersistentResourceStatus.Active,
+            CreatedAtUtc = now, UpdatedAtUtc = now
+        };
+        _dbContext.WorkspaceOrganizations.Add(link);
+        await _dbContext.SaveChangesAsync();
+        var service = _provider.GetRequiredService<IOrganizationMembershipService>();
+        var memberships = await service.GetMineAsync("actor-1", default);
+        Assert.Equal(2, memberships.Count);
+        Assert.All(memberships, membership => Assert.Contains("ws-1", membership.WorkspaceIds));
+        link.Status = PersistentResourceStatus.Revoked;
+        await _dbContext.SaveChangesAsync();
+        memberships = await service.GetMineAsync("actor-1", default);
+        Assert.Contains("ws-1", memberships.Single(item => item.OrganizationId == "org-1").WorkspaceIds);
+        Assert.Empty(memberships.Single(item => item.OrganizationId == "org-2").WorkspaceIds);
+    }
+
+    [Fact]
     public async Task Directory_lists_only_active_organizations()
     {
         var service = _provider.GetRequiredService<IOrganizationMembershipService>();
@@ -160,6 +187,14 @@ public sealed class OrganizationMembershipServiceTests : IAsyncDisposable
                 organization_id TEXT NOT NULL REFERENCES organizations (organization_id),
                 status TEXT NOT NULL,
                 lock_token SMALLINT NOT NULL DEFAULT 0
+            );
+            CREATE TABLE workspace_organizations (
+                workspace_id TEXT NOT NULL REFERENCES workspaces (workspace_id),
+                organization_id TEXT NOT NULL REFERENCES organizations (organization_id),
+                status TEXT NOT NULL,
+                created_at_utc TEXT NOT NULL,
+                updated_at_utc TEXT NOT NULL,
+                PRIMARY KEY (workspace_id, organization_id)
             );
             CREATE TABLE organization_memberships (
                 membership_id TEXT NOT NULL PRIMARY KEY,

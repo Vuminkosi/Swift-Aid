@@ -162,6 +162,14 @@ public sealed class OrganizationInvitationServiceTests : IAsyncDisposable
                 status TEXT NOT NULL,
                 lock_token SMALLINT NOT NULL DEFAULT 0
             );
+            CREATE TABLE workspace_organizations (
+                workspace_id TEXT NOT NULL REFERENCES workspaces (workspace_id),
+                organization_id TEXT NOT NULL REFERENCES organizations (organization_id),
+                status TEXT NOT NULL,
+                created_at_utc TEXT NOT NULL,
+                updated_at_utc TEXT NOT NULL,
+                PRIMARY KEY (workspace_id, organization_id)
+            );
             CREATE TABLE organization_memberships (
                 membership_id TEXT NOT NULL PRIMARY KEY,
                 actor_id TEXT NOT NULL REFERENCES actors (actor_id),
