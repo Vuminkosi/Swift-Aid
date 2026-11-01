@@ -7,8 +7,6 @@
 @using SwiftAid.UI.Components.Surfaces.Operations.CaseDetail
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ICaseTimelineClient TimelineClient
-@inject ICaseDiscussionClient DiscussionClient
-@inject ICaseEvidenceClient EvidenceClient
 @inject IJSRuntime JS
 @inject IServiceProvider ServiceProvider
 
@@ -474,7 +472,14 @@
 
         try
         {
-            var result = await DiscussionClient.GetAsync(caseId, new CaseDiscussionQuery(new PageRequest(1, 50)));
+            var discussionClient = ServiceProvider.GetService<ICaseDiscussionClient>();
+            if (discussionClient is null)
+            {
+                _discussion = new CaseDetailDiscussionView(CaseDetailPanelState.Unavailable, Array.Empty<CaseDetailDiscussionMessage>());
+                return;
+            }
+
+            var result = await discussionClient.GetAsync(caseId, new CaseDiscussionQuery(new PageRequest(1, 50)));
             if (request != _discussionRequest || caseId != CaseId)
             {
                 return;
@@ -616,7 +621,14 @@
 
         try
         {
-            var result = await EvidenceClient.GetAsync(caseId, new CaseEvidenceQuery(new PageRequest(1, 50)));
+            var evidenceClient = ServiceProvider.GetService<ICaseEvidenceClient>();
+            if (evidenceClient is null)
+            {
+                _evidence = new CaseDetailEvidenceView(CaseDetailPanelState.Unavailable, Array.Empty<CaseDetailEvidenceItem>());
+                return;
+            }
+
+            var result = await evidenceClient.GetAsync(caseId, new CaseEvidenceQuery(new PageRequest(1, 50)));
             if (request != _evidenceRequest || caseId != CaseId)
             {
                 return;

@@ -62,7 +62,7 @@ services:
       Qdrant__ApiKey: "${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}"
 
       # NATS
-      Nats__Url: "nats://nats:${NATS_PORT:-4222}"
+      Nats__Url: "nats://nats:4222"
       Nats__Username: "${NATS_GATEWAY_USER:?Set NATS_GATEWAY_USER in .env}"
       Nats__Password: "${NATS_GATEWAY_PASSWORD:?Set NATS_GATEWAY_PASSWORD in .env}"
       Nats__Enabled: "true"
@@ -73,7 +73,7 @@ services:
       Nats__NotificationSubject: "${NATS_NOTIFICATION_SUBJECT:-swiftaid.notifications.inapp}"
 
       # MinIO
-      Minio__Endpoint: "http://minio:${MINIO_API_PORT:-9000}"
+      Minio__Endpoint: "http://minio:9000"
       Minio__Bucket: "${MINIO_BUCKET:?Set MINIO_BUCKET in .env}"
       Minio__MaxObjectSizeBytes: "${MINIO_MAX_OBJECT_SIZE_BYTES:-104857600}"
       Minio__AccessKey: "${MINIO_APP_ACCESS_KEY:-}"
@@ -82,7 +82,8 @@ services:
       Minio__Enabled: "${MINIO_ENABLED:-false}"
 
       # Redis
-      Redis__ConnectionString: "redis:${REDIS_PORT:-6379},password=${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env},abortConnect=false"
+      # Published host ports never change container-to-container addresses.
+      Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env},abortConnect=false"
       Redis__InstanceName: "${REDIS_INSTANCE_NAME:-swiftaid:}"
       Redis__MaximumTtlSeconds: "${REDIS_MAXIMUM_TTL_SECONDS:-3600}"
       Redis__Enabled: "true"

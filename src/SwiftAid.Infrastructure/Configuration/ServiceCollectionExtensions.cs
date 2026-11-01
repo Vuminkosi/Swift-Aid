@@ -652,6 +652,7 @@ public static class ServiceCollectionExtensions
         return new NatsOptions
         {
             Enabled = ReadBool(section, nameof(NatsOptions.Enabled)),
+            IngestionDispatchEnabled = ReadBool(section, nameof(NatsOptions.IngestionDispatchEnabled)),
             Url = ReadString(section, nameof(NatsOptions.Url)),
             Username = ReadString(section, nameof(NatsOptions.Username)),
             Password = ReadString(section, nameof(NatsOptions.Password)),

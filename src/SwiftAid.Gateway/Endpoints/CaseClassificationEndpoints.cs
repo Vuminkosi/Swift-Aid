@@ -1,6 +1,3 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Identity;
-using OpenIddict.Validation.AspNetCore;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Classification;
 
@@ -20,8 +17,7 @@ public static class CaseClassificationEndpoints
                 return result is null ? Results.NotFound() : Results.Ok(new { caseId, items = result, interpretation = "Reported semantic patterns; not a diagnosis or calibrated disease probability." });
             }
             catch (UnauthorizedAccessException) { return Results.NotFound(); }
-        }).RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = string.Join(",", IdentityConstants.ApplicationScheme,
-            OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme) });
+        }).RequireAuthorization("SwiftAidStaffApi");
         return endpoints;
     }
 }

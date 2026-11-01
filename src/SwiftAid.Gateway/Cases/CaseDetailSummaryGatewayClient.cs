@@ -43,7 +43,8 @@ public sealed class CaseDetailSummaryGatewayClient(
             return Denied();
         }
 
-        var summaryQuery = _serviceProvider.GetService<ICaseSummaryQuery>();
+        await using var scope = _serviceProvider.CreateAsyncScope();
+        var summaryQuery = scope.ServiceProvider.GetService<ICaseSummaryQuery>();
         if (summaryQuery is null)
         {
             return Unavailable("The case is temporarily unavailable.");

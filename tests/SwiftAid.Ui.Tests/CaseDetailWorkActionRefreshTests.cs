@@ -18,6 +18,21 @@ namespace SwiftAid.Ui.Tests;
 public sealed class CaseDetailWorkActionRefreshTests
 {
     [Fact]
+    public async Task MissingOptionalDiscussionAndEvidenceProvidersDoNotPreventCaseRendering()
+    {
+        var (services, renderer) = CreateRenderer(new FakeWorkManagementClient(failRefresh: false), false);
+        await using (services)
+        await using (renderer)
+        {
+            using var page = await renderer.RenderAsync<CaseDetail>(Guid.NewGuid());
+            Assert.Equal(CaseDetailPanelState.Unavailable, GetSurfaceParameter<CaseDetailDiscussionView>(
+                renderer, page.ComponentId, nameof(OperationsCaseDetailSurface.DiscussionData)).State);
+            Assert.Equal(CaseDetailPanelState.Unavailable, GetSurfaceParameter<CaseDetailEvidenceView>(
+                renderer, page.ComponentId, nameof(OperationsCaseDetailSurface.EvidenceData)).State);
+        }
+    }
+
+    [Fact]
     public async Task AcceptedAction_WhenRefreshFails_DoesNotClaimWorkWasRefreshed()
     {
         var caseId = Guid.NewGuid();
@@ -166,7 +181,7 @@ public sealed class CaseDetailWorkActionRefreshTests
         return (T)value!;
     }
 
-    private static (ServiceProvider Services, TestRenderer Renderer) CreateRenderer(FakeWorkManagementClient workClient)
+    private static (ServiceProvider Services, TestRenderer Renderer) CreateRenderer(FakeWorkManagementClient workClient, bool optionalProviders = true)
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -174,8 +189,11 @@ public sealed class CaseDetailWorkActionRefreshTests
         services.AddSingleton<NavigationManager, TestNavigationManager>();
         services.AddSingleton<IJSRuntime, NoOpJsRuntime>();
         services.AddSingleton<ICaseTimelineClient, EmptyCaseTimelineClient>();
-        services.AddSingleton<ICaseDiscussionClient, EmptyCaseDiscussionClient>();
-        services.AddSingleton<ICaseEvidenceClient, EmptyCaseEvidenceClient>();
+        if (optionalProviders)
+        {
+            services.AddSingleton<ICaseDiscussionClient, EmptyCaseDiscussionClient>();
+            services.AddSingleton<ICaseEvidenceClient, EmptyCaseEvidenceClient>();
+        }
         services.AddSingleton<IWorkManagementClient>(workClient);
 
         var serviceProvider = services.BuildServiceProvider();

@@ -32,7 +32,10 @@ public sealed class CaseQueueGatewayClient(
             return new CaseQueueResult(CaseQueueAccess.Denied, []);
         }
 
-        var queue = _serviceProvider.GetService<ICaseQueueQuery>();
+        // A Blazor circuit outlives a request and can overlap other panel reads.
+        // Each operation must own its query's DbContext and authority transaction.
+        await using var scope = _serviceProvider.CreateAsyncScope();
+        var queue = scope.ServiceProvider.GetService<ICaseQueueQuery>();
         if (queue is null)
         {
             return new CaseQueueResult(CaseQueueAccess.Unavailable, []);

@@ -16,6 +16,37 @@ namespace SwiftAid.Integration.Tests;
 public sealed class DisabledIdentityChallengeTests
 {
     [Fact]
+    public async Task ClassificationEndpointUsesConfiguredStaffPolicyWithoutLocalBearerHandler()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Identity:Enabled"] = "false",
+            ["Federation:Enabled"] = "true"
+        });
+        GatewayAuthenticationRegistration.Configure(builder.Services, builder.Configuration);
+        builder.Services.AddAuthentication().AddCookie(IdentityConstants.ApplicationScheme);
+        builder.Services.AddSingleton<SwiftAid.Application.Classification.ICaseClassificationQuery, UnusedClassificationQuery>();
+        await using var application = builder.Build();
+        application.UseAuthentication();
+        application.UseAuthorization();
+        SwiftAid.Gateway.Endpoints.CaseClassificationEndpoints.MapCaseClassificationEndpoints(application);
+        await application.StartAsync();
+
+        using var response = await application.GetTestClient().GetAsync($"/api/v1/cases/{Guid.NewGuid()}/classification");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Null(response.Headers.Location);
+    }
+
+    private sealed class UnusedClassificationQuery : SwiftAid.Application.Classification.ICaseClassificationQuery
+    {
+        public Task<IReadOnlyList<SwiftAid.Application.Classification.CaseClassificationEvidence>?> GetAsync(
+            SwiftAid.Application.Authorization.ActorContext actor, Guid caseId, CancellationToken ct) =>
+            throw new InvalidOperationException("An anonymous caller must not reach the query.");
+    }
+
+    [Fact]
     public async Task ProtectedPageRedirectsToSignInWithItsLocalReturnUrlWhenIdentityIsDisabled()
     {
         await using var application = await CreateApplicationAsync();

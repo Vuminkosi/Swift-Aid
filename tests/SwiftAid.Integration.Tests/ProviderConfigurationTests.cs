@@ -306,6 +306,7 @@ public sealed class ProviderConfigurationTests
         {
             ["ConnectionStrings:SwiftAid"] = "Host=localhost;Database=swiftaid;Username=app;Password=",
             ["Nats:EventStream"] = "SWIFTAID_EVENTS",
+            ["Nats:IngestionDispatchEnabled"] = "true",
             ["Nats:EventSubjectPrefix"] = "swiftaid.events.case",
             ["Nats:NotificationStream"] = "SWIFTAID_NOTIFICATIONS",
             ["Nats:NotificationSubject"] = "swiftaid.notifications.inapp"
@@ -321,6 +322,7 @@ public sealed class ProviderConfigurationTests
 
         Assert.Contains("Database=swiftaid", database.ConnectionString, StringComparison.Ordinal);
         Assert.Equal("SWIFTAID_EVENTS", nats.EventStream);
+        Assert.True(nats.IngestionDispatchEnabled);
         Assert.Equal("swiftaid.events.case", nats.EventSubjectPrefix);
         Assert.Empty(nats.Password);
     }
