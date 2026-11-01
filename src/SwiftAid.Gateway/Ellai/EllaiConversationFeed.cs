@@ -23,7 +23,8 @@ public static class EllaiConversationFeed
     {
         var rows = await sessions.ListOwnedAsync(actorId, offset, 21, cancellationToken).ConfigureAwait(false);
         return new(rows.Take(20).Select(session => new EllaiSessionHistoryItemDto(
-            session.SessionId, session.Mode.ToString(), session.Status, session.UpdatedAtUtc)).ToArray(),
+            session.SessionId, session.Mode.ToString(), session.Status, session.UpdatedAtUtc,
+            session.HistoryPreview, session.HistoryTurnCount)).ToArray(),
             rows.Count > 20 ? offset + 20 : null);
     }
 

@@ -95,7 +95,10 @@
 
         <MudTabPanel Text="Session history" aria-label="Previous Ellai sessions">
             <div class="ellai-settings__history">
-                <MudButton Variant="Variant.Text" OnClick="RefreshAsync" Disabled="@_loading">Refresh sessions</MudButton>
+                <header class="ellai-history__header">
+                    <div><h2>Your conversations</h2><p>Revisit a question or pick up the context of an earlier conversation.</p></div>
+                    <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Outlined.Refresh" OnClick="RefreshAsync" Disabled="@_loading">Refresh sessions</MudButton>
+                </header>
                 @if (_loading)
                 {
                     <MudProgressLinear Indeterminate="true" aria-label="Loading sessions" />
@@ -112,16 +115,24 @@
                 }
                 else
                 {
-                    @foreach (var session in _sessions)
+                    @foreach (var group in _sessions.OrderByDescending(item => item.UpdatedAtUtc).GroupBy(item => HistoryDateGroup(item.UpdatedAtUtc)))
                     {
-                        <MudPaper @key="session.SessionId" Outlined="true" Class="ellai-settings__session">
-                            <div class="ellai-settings__session-heading">
-                                <MudText Typo="Typo.subtitle1" HtmlTag="h2">@DisplayMode(session.Mode)</MudText>
-                                <MudText Typo="Typo.caption">@session.UpdatedAtUtc.ToLocalTime().ToString("dd MMM yyyy · HH:mm")</MudText>
+                        <h3 class="ellai-history__group">@group.Key</h3>
+                        @foreach (var session in group)
+                        {
+                        <article @key="session.SessionId" class="ellai-settings__session">
+                            <div class="ellai-history__icon" aria-hidden="true"><MudIcon Icon="@Icons.Material.Outlined.Forum" Size="Size.Small" /></div>
+                            <div class="ellai-history__body">
+                                <h4>@(string.IsNullOrWhiteSpace(session.Preview) ? DisplayMode(session.Mode) : session.Preview)</h4>
+                                <div class="ellai-history__metadata">
+                                    <time datetime="@session.UpdatedAtUtc.ToString("O")">@session.UpdatedAtUtc.ToLocalTime().ToString("dd MMM · HH:mm")</time>
+                                    @if (session.TurnCount is { } turns) { <span>@turns @(turns == 1 ? "message sent" : "messages sent")</span> }
+                                    <span class="ellai-history__status">@DisplayStatus(session.Status)</span>
+                                </div>
                             </div>
-                            <MudText Typo="Typo.body2" Class="ellai-settings__session-status">@DisplayStatus(session.Status)</MudText>
-                            <MudButton Variant="Variant.Text" OnClick="@(() => OpenConversationAsync(session.SessionId))">View conversation</MudButton>
-                        </MudPaper>
+                            <MudButton Class="ellai-history__open" Size="Size.Small" Color="Color.Primary" Variant="Variant.Text" EndIcon="@Icons.Material.Outlined.ArrowForward" OnClick="@(() => OpenConversationAsync(session.SessionId))">View conversation</MudButton>
+                        </article>
+                        }
                     }
                 }
                 @if (_nextOffset is not null)
@@ -236,6 +247,13 @@
         "HelpMeWork" => "Task assistance",
         _ => "Ellai session",
     };
+
+    private static string HistoryDateGroup(DateTimeOffset date)
+    {
+        var day = date.ToLocalTime().Date;
+        var today = DateTimeOffset.Now.Date;
+        return day == today ? "Today" : day == today.AddDays(-1) ? "Yesterday" : day.ToString("MMMM yyyy");
+    }
 
     private static string DisplayStatus(string status) => status switch
     {

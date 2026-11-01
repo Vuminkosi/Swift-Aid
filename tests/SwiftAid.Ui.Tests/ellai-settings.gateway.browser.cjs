@@ -36,7 +36,16 @@ async function main() {
         assert.match(await output.innerText(), /siSwati/);
         if (await closeComposer.isVisible()) await closeComposer.click();
         await page.getByRole('tab', { name: 'Session history' }).click();
-        await page.getByRole('button', { name: 'View conversation', exact: true }).first().click();
+        await page.getByRole('heading', { name: 'Your conversations', exact: true }).waitFor();
+        const session = page.locator('.ellai-settings__session').first();
+        await session.locator('.ellai-history__body h4').waitFor();
+        assert.ok((await session.locator('h4').innerText()).length > 0);
+        assert.ok((await session.locator('time').getAttribute('datetime')).length > 0);
+        const savedConversation = page.locator('.ellai-settings__session').filter({
+            has: page.locator('.ellai-history__metadata > span').filter({ hasText: /^[1-9]\d* messages? sent$/ })
+        }).first()
+            .getByRole('button', { name: 'View conversation', exact: true });
+        await savedConversation.click();
         const dialog = page.getByRole('dialog');
         await dialog.waitFor();
         assert.match(await dialog.getAttribute('class'), /mud-dialog-width-md/);
@@ -45,12 +54,13 @@ async function main() {
         await dialog.getByRole('button', { name: 'Close', exact: true }).last().click();
         await page.setViewportSize({ width: 390, height: 844 });
         await page.waitForTimeout(500);
-        await page.getByRole('button', { name: 'View conversation', exact: true }).first().click();
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+        await savedConversation.click();
         await dialog.waitFor();
         assert.match(await dialog.getAttribute('class'), /mud-dialog-fullscreen/);
         await dialog.getByRole('button', { name: 'Close', exact: true }).last().click();
         console.log(JSON.stringify({ languagesPersistAfterReload: true, desktopMediumChat: true, mobileViewportFullScreenChat: true,
-            nativeDeviceTested: false }));
+            compactHistory: true, nativeDeviceTested: false }));
     } finally {
         await page.evaluate(value => {
             if (value === null) localStorage.removeItem('swiftaid.ellai.languages.v1');

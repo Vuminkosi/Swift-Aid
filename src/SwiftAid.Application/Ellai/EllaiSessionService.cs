@@ -17,7 +17,12 @@ public sealed record EllaiSessionRecord(
     string ScopeEpoch,
     string? ActiveInvestigationId,
     string? PendingCheckpointId,
-    DateTimeOffset UpdatedAtUtc);
+    DateTimeOffset UpdatedAtUtc)
+{
+    /// <summary>Read-only history projection; not part of session mutation or reasoning state.</summary>
+    public string? HistoryPreview { get; init; }
+    public int? HistoryTurnCount { get; init; }
+}
 
 /// <summary>Accepted-turn checkpoint linkage.</summary>
 public sealed record EllaiCheckpoint(

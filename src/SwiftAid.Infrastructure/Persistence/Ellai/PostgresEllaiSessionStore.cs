@@ -22,8 +22,21 @@ public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext) : IEl
             .Where(session => session.OwnerActorId == ownerActorId)
             .OrderByDescending(session => session.UpdatedAtUtc).ThenBy(session => session.SessionId)
             .Skip(Math.Max(0, offset)).Take(Math.Clamp(take, 1, 101))
+            .Select(session => new
+            {
+                Session = session,
+                Preview = _dbContext.Set<EllaiUtteranceEntity>()
+                    .Where(turn => turn.SessionId == session.SessionId && turn.UserText != null && turn.UserText != "")
+                    .OrderBy(turn => turn.Sequence).ThenBy(turn => turn.ClientUtteranceId)
+                    .Select(turn => turn.UserText!.Substring(0, 160)).FirstOrDefault(),
+                TurnCount = _dbContext.Set<EllaiUtteranceEntity>().Count(turn => turn.SessionId == session.SessionId)
+            })
             .ToListAsync(ct).ConfigureAwait(false);
-        return rows.Select(ToRecord).ToArray();
+        return rows.Select(row => ToRecord(row.Session) with
+        {
+            HistoryPreview = row.Preview,
+            HistoryTurnCount = row.TurnCount
+        }).ToArray();
     }
 
     public async Task<EllaiSessionRecord?> GetAsync(string sessionId, CancellationToken ct)

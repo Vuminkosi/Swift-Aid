@@ -89,7 +89,8 @@ public sealed record EllaiConversationTurnDto(
     string Outcome, int AttemptCount, DateTimeOffset? CompletedAtUtc);
 
 public sealed record EllaiSessionHistoryItemDto(
-    string SessionId, string Mode, string Status, DateTimeOffset UpdatedAtUtc);
+    string SessionId, string Mode, string Status, DateTimeOffset UpdatedAtUtc,
+    string? Preview = null, int? TurnCount = null);
 
 public sealed record EllaiSessionHistoryPageDto(
     IReadOnlyList<EllaiSessionHistoryItemDto> Sessions, int? NextOffset);
