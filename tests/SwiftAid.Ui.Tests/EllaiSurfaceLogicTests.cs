@@ -180,7 +180,7 @@ public sealed class EllaiSurfaceLogicTests
         Assert.Contains("aria-label=\"Send to Ellai\"", markup, StringComparison.Ordinal);
         Assert.Contains("aria-label=\"Ellai voice and text controls\"", markup, StringComparison.Ordinal);
         Assert.Contains("Message Ellai", markup, StringComparison.Ordinal);
-        Assert.Contains(
+        Assert.DoesNotContain(
             "For privacy, avoid sharing names, contact details, or other details that could identify someone.",
             markup,
             StringComparison.Ordinal);
