@@ -171,16 +171,14 @@ Wait for PostgreSQL to become healthy. Use `config --quiet`; printing expanded c
 
 ### 3. Initialize the local database
 
-Gateway does not automatically migrate. Generate an idempotent script, inspect it, then apply it only to the intended development database:
+Compose automatically runs the one-shot `database-migrate` service from the same image as Gateway. It waits for PostgreSQL, applies pending EF migrations under a database lock, and exits. Gateway starts only after that service succeeds. Repeated deployments apply only pending migrations; migration failure blocks startup. No manual SQL apply step is needed.
 
 ```powershell
-New-Item -ItemType Directory -Force artifacts | Out-Null
-dotnet ef migrations script --idempotent --project src/SwiftAid.Infrastructure --output artifacts/local-migrations.sql
-# Review artifacts/local-migrations.sql before applying it.
-Get-Content artifacts/local-migrations.sql -Raw | docker compose --env-file infra/.env -f infra/compose.yml exec -T postgres sh -c 'exec psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+docker compose --env-file infra/.env -f infra/compose.yml up --build database-migrate
+docker compose --env-file infra/.env -f infra/compose.yml logs database-migrate
 ```
 
-The design-time factory uses a dummy connection for script generation and does not read `infra/.env`. The apply command uses the container's identity without copying its password into command text. Existing databases need backups and migration review. Production restricted-role provisioning is separate: review [`infra/postgres`](infra/postgres) and its lock-helper/runtime-grant preconditions instead of using a database-owner application account.
+The explicit command above is optional: normal `up -d --build` includes the migration dependency. Keep backups and migration review in the deployment process. `SWIFTAID_MIGRATION_CONNECTION` can supply a separate migration identity; by default local Compose uses its configured PostgreSQL owner. Production restricted-role provisioning is separate: review [`infra/postgres`](infra/postgres) and its lock-helper/runtime-grant preconditions instead of using a database-owner application account. Do not use `--no-deps` for normal deployments because it bypasses migration ordering.
 
 ### 4. Start the web app
 
@@ -197,7 +195,7 @@ Ellai needs hosted Meta or local Ollama below. Base Compose does not start optio
 After source changes, recreate affected services:
 
 ```powershell
-docker compose --env-file infra/.env -f infra/compose.yml up -d --no-deps --build gateway
+docker compose --env-file infra/.env -f infra/compose.yml up -d --build gateway
 ```
 
 Stop with `docker compose --env-file infra/.env -f infra/compose.yml stop`. Preserve named volumes: they contain records, identity keys and models. Volume deletion is not a routine restart.

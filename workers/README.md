@@ -56,7 +56,7 @@ These mirror the `workers` job in `.github/workflows/verify.yml`.
 
 The `classification` profile in `infra/compose.yml` includes the CPU worker, durable-consumer bootstrap and ingestion-stream bootstrap. The image installs the locked classification extra (CPU Torch on Linux), reserves up to 4 CPUs/6 GiB, and caches the pinned BART model in `classification-model-data`. Model weights require approximately 1.6 GB in addition to the image. Initial loading can take several minutes.
 
-Before starting, back up the database and apply the reviewed migrations through `20261101081631_ClassificationOutboxOrderingIndex`. The application does not automatically migrate a shared database. Preserve existing streams; bootstrap refuses incompatible stream or consumer settings. Reload the updated `infra/nats.conf` on an already-running broker (`docker kill --signal HUP swiftaid-nats-1`).
+Before upgrading an existing database, retain a backup. Compose's `database-migrate` dependency automatically applies all pending EF migrations before Gateway starts, including the classification schema. A failed migration blocks Gateway startup. Preserve existing streams; bootstrap refuses incompatible stream or consumer settings. Reload the updated `infra/nats.conf` on an already-running broker (`docker kill --signal HUP swiftaid-nats-1`).
 
 Configure explicit existing organization IDs, from the repository root:
 
@@ -66,7 +66,7 @@ Configure explicit existing organization IDs, from the repository root:
 
 This creates ignored `.classification-worker.env` and `.classification-gateway.env` files. The worker receives the private machine token; Gateway receives its SHA-256 and the organization allowlist. Existing tokens are reused. Never commit these files. For a remote deployment supply managed secrets and HTTPS instead of this local configuration.
 
-After migrations and configuration, set `SWIFTAID_INGESTION_DISPATCH_ENABLED=true` and `COMPOSE_PROFILES=classification` in the ignored `infra/.env`, then run:
+After configuration, set `SWIFTAID_INGESTION_DISPATCH_ENABLED=true` and add `classification` to `COMPOSE_PROFILES` in the ignored `infra/.env` (preserve other enabled profiles), then run:
 
 ```powershell
 docker compose -f infra/compose.yml build gateway classification-worker

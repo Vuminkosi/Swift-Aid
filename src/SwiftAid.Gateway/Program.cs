@@ -26,7 +26,27 @@ using SwiftAid.Infrastructure.Identity;
 using SwiftAid.Infrastructure.Persistence.Ellai;
 using SwiftAid.Infrastructure.Persistence.Protection;
 
-var builder = WebApplication.CreateBuilder(args);
+var migrateDatabase = args.Contains("--migrate-database", StringComparer.Ordinal);
+var builder = WebApplication.CreateBuilder(args.Where(arg => arg != "--migrate-database").ToArray());
+
+if (migrateDatabase)
+{
+    try
+    {
+        var applied = await SwiftAid.Gateway.DatabaseMigrationRunner.RunAsync(
+            builder.Configuration.GetConnectionString("SwiftAid")
+                ?? throw new InvalidOperationException("The migration connection is required."),
+            CancellationToken.None);
+        Console.WriteLine($"Database migrations completed. Applied: {applied}.");
+    }
+    catch (Exception exception)
+    {
+        // Database exceptions can contain private connection or record details.
+        Console.Error.WriteLine($"Database migration failed: {exception.GetType().Name}. Gateway startup is blocked.");
+        Environment.ExitCode = 1;
+    }
+    return;
+}
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();

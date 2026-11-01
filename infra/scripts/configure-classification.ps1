@@ -28,4 +28,4 @@ finally { $sha.Dispose() }
 $config = @('Classification__Enabled=true', "Classification__WorkerTokenSha256=$hash")
 for ($i = 0; $i -lt $OrganizationIds.Count; $i++) { $config += "Classification__Organizations__${i}=$($OrganizationIds[$i])" }
 [IO.File]::WriteAllText($gatewayFile, ($config -join "`n") + "`n", $utf8)
-Write-Output 'Prepared ignored local classification credentials. Apply migrations before enabling ingestion dispatch.'
+Write-Output 'Prepared ignored local classification credentials. Compose applies migrations before Gateway starts.'

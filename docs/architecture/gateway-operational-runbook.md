@@ -2,6 +2,12 @@
 
 ## Rollout
 
+Compose now runs `database-migrate` from the Gateway image before starting Gateway. The one-shot `--migrate-database` command starts no HTTP listeners or hosted workers, uses the canonical context and EF migration history, holds a PostgreSQL session advisory lock across discovery/application, and has a ten-minute cancellation deadline. Failure exits nonzero and blocks dependent service startup. Reruns are idempotent. Use normal `docker compose -f infra/compose.yml up -d --build`; `--no-deps` deliberately bypasses this deployment guarantee.
+
+Backups remain a release prerequisite for existing databases. The migrator uses `SWIFTAID_MIGRATION_CONNECTION` when supplied, otherwise the existing local owner connection. It does not create privileged runtime roles or bypass the separately provisioned authority helpers. Stop incompatible old application instances during a schema-changing rollout. Never automatically downgrade or restore a shared database on failure; inspect migration history and fix forward.
+
+Verification (2026-11-01): disposable PostgreSQL upgrade/concurrency/rerun/cancellation test PASS; container failure exit-code probe PASS; approved local deployment applied 13 migrations and subsequent Compose startup applied zero. Gateway and classification became healthy after dependency completion. The pre-upgrade backup is retained at the ignored `.codex/pre-classification-deploy.dump` path; archive listing was checked, restoration was NOT VERIFIED.
+
 1. Keep `SWIFTAID_INGESTION_DISPATCH_ENABLED=false` while deploying the additive `IngestionOutboxDelivery` migration using the existing database migration procedure. Pause any external publisher of these tables. The migration invalidates old ownerless leases and retains every row. Index replacement takes database locks; schedule accordingly for large tables.
 2. Recreate NATS with the updated `infra/nats.conf` ACL; preserve its data volume. The bootstrap identity can create/read only the named stream, not update or purge it. Gateway can publish only the two ingestion subjects and query stream information.
 3. Run `docker compose -f infra/compose.yml --profile ingestion run --rm nats-ingestion-bootstrap`. Existing configuration must match; mismatches fail without changes. Local storage is bounded and rejects new publication when full.

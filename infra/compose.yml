@@ -1,6 +1,22 @@
 name: swiftaid
 
 services:
+  database-migrate:
+    build:
+      context: ..
+      dockerfile: src/SwiftAid.Gateway/Dockerfile
+    image: ${GATEWAY_IMAGE:-vuminkosimatibe/swiftaid-gateway:latest}
+    command: ["--migrate-database"]
+    environment:
+      ConnectionStrings__SwiftAid: "${SWIFTAID_MIGRATION_CONNECTION:-Host=postgres;Port=5432;Database=${POSTGRES_DB:?Set POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    networks: [application]
+    restart: "no"
+
   gateway:
     build:
       context: ..
@@ -185,6 +201,8 @@ services:
         target: /etc/swiftaid/docs/TECHNICAL.md
         read_only: true
     depends_on:
+      database-migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       nats:

@@ -13,7 +13,10 @@ The `classification` Compose profile now supplies the persistent Python consumer
 - PASS: real pinned BART, Gateway HTTP, disposable PostgreSQL and JetStream integration test, including unauthenticated readiness rejection, authenticated readiness, result commit, redelivery without duplicate inference, poison quarantine and resumable backfill (1 test, 23 seconds).
 - PASS: offline CPU-container synthetic inference with cached weights: model load 3.40 seconds; two-label inference 220.80 ms. This is a small smoke sample, not a throughput benchmark or clinical validation.
 - PASS: shared NATS stream and durable bootstrap after reloading the existing broker ACL; no retained stream data was deleted.
-- NOT VERIFIED: shared-database classification processing. Its required migrations await explicit approval after automatic review rejected the shared schema/data mutation. No shared database migration or live classification activation has occurred in this deployment step.
+- PASS: approved shared-database deployment applied 13 pending migrations through `20261101090312_ImmutableSurveillanceEvidence`; automatic rerun applied zero. Gateway and classification containers are healthy. The running worker loaded BART, bound the durable consumer and received HTTP 200 from authenticated Gateway persistence readiness. Gateway also reached MMS-TTS model readiness.
+- NOT VERIFIED: a newly submitted case processed through the deployed shared stack. At activation the case outbox was empty and there were no classification results; the real inference/persistence test above used disposable fixtures, not user records.
+
+Migrations are now automatic: Compose runs `database-migrate` from the Gateway image before Gateway starts. A disposable PostgreSQL test passed for upgrade from the deployed baseline, concurrent runs, idempotent reruns and cancellation. A container probe against an unavailable loopback database returned exit code 1 as required. The pre-upgrade local database backup is retained privately at `.codex/pre-classification-deploy.dump`; neither it nor local worker credentials are tracked.
 
 The migration SQL generator exposed a missing statement terminator in the existing ingestion lease repair. The source migration now terminates that statement so generated deployment scripts remain executable; its data semantics are unchanged.
 
