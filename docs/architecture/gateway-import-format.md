@@ -58,6 +58,10 @@ The ledger protects original row values using the configured data-protection key
 
 States are Running, Paused, Completed and Failed. Row results distinguish Accepted, Replayed, Invalid, Denied, Conflict, RetryableFailure and Failed. Completed means the supplied file was processed; inspect rejected counts. Registration unavailability retries at the same checkpoint, bounded to five attempts. Interrupted/unavailable streams pause; earlier accepted rows remain committed. Resume with the same import ID, context, header order and unchanged source file. Completed imports cannot append rows. No automatic background reprocessing or source-file retention in MinIO is claimed; the caller resends remaining rows.
 
+Policy/country validation dependency exceptions now also produce durable RetryableFailure rows and exhaust after five attempts, with a sanitized stage-specific error. They do not leave a row indefinitely Processing. Explicitly reprocessing the original row after dependency recovery preserves the same command and can resolve the failure without duplication. Persistence/checkpoint outages remain recoverable through lease expiry and canonical receipts; a database outage cannot be falsely reported as a persisted terminal result.
+
+The 8 MiB HTTP batch limit is enforced while reading actual wire bytes, including requests without Content-Length. A body crossing the limit returns HTTP 413 with the durable partial result and paused checkpoint. Earlier committed cases remain saved. Reduce the next batch and resume at the returned checkpoint; do not assume a rejected oversized request rolled back its earlier rows. Workspace uploads already send smaller bounded batches.
+
 For operational automation, `scripts/import-cases.py` streams bounded batches, queries the checkpoint before resuming, refuses redirects and reads its bearer token only from `SWIFTAID_IMPORT_ACCESS_TOKEN`:
 
 ```powershell

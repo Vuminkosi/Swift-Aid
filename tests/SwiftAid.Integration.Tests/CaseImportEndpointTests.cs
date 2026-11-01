@@ -63,6 +63,39 @@ public sealed class CaseImportEndpointTests
     internal static HttpRequestMessage Request(Guid id, Guid command) => Host.Request(id, 1, true,
         CaseImportPostgresTests.Context, CaseImportPostgresTests.Csv(command));
 
+    [IntakePostgresFact]
+    public async Task Chunked_body_is_bounded_and_keeps_earlier_commits_recoverable()
+    {
+        await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
+        await using var host = await Host.StartAsync(fixture);
+        var id = Guid.NewGuid();
+        var command = Guid.NewGuid();
+        var valid = CaseImportPostgresTests.Csv(command);
+        var invalid = CaseImportPostgresTests.Csv(Guid.NewGuid()).Split('\n', 2)[1]
+            .Replace("Original supplied concern", new string('x', 15000));
+        var body = valid + string.Concat(Enumerable.Repeat(invalid, 600));
+        using var request = Request(id, command);
+        request.Content?.Dispose();
+        request.Content = new ChunkedCsvContent(Encoding.UTF8.GetBytes(body));
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue("text/csv");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "synthetic-import-token");
+        Assert.Null(request.Content.Headers.ContentLength);
+        using var response = await host.Client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        var result = JsonSerializer.Deserialize<CaseImportBatchResult>(await response.Content.ReadAsStringAsync(), Host.Json)!;
+        Assert.Equal("batch-byte-limit", result.ErrorCode);
+        Assert.Equal("Paused", result.Summary!.State);
+        Assert.Equal(1, result.Summary.Accepted);
+        Assert.InRange(result.Summary.NextRow, 2, 600);
+        Assert.Equal(1, await fixture.Db.CommandReceipts.CountAsync(row => row.CommandId == command));
+    }
+
+    private sealed class ChunkedCsvContent(byte[] bytes) : HttpContent
+    {
+        protected override bool TryComputeLength(out long length) { length = 0; return false; }
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => stream.WriteAsync(bytes).AsTask();
+    }
+
     internal sealed class Host(WebApplication app, HttpClient client) : IAsyncDisposable
     {
         public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);

@@ -58,26 +58,38 @@ public sealed class CaseCsvImportService(ICaseImportStore store, IManagedCaseReg
                 else
                 {
                     var record = parsed.Record!;
-                    if (!await validator.ValidateAsync(record.Submission, new IntakeLimits(), ct))
+                    var failureCode = "validation-unavailable";
+                    try
                     {
-                        outcome = new(rowNumber, record.CommandId, "Invalid", null, "current-policy-or-country");
+                        if (!await validator.ValidateAsync(record.Submission, new IntakeLimits(), ct))
+                        {
+                            outcome = new(rowNumber, record.CommandId, "Invalid", null, "current-policy-or-country");
+                        }
+                        else
+                        {
+                            failureCode = "registration-unavailable";
+                            var report = IntakePromotionMapper.ToCapturedReport(record.CommandId,
+                                $"csv:{record.CommandId:N}:{record.SourceReference}", record.Submission);
+                            var request = new RegisterManagedCaseRequest(record.CommandId, context.WorkspaceId, report, context.OrganizationId);
+                            var result = await registration.RegisterAsync(actor, request, ct);
+                            var status = result.Status == CaseRegistrationStatus.Unavailable
+                                ? attempts >= 5 ? "Failed" : "RetryableFailure"
+                                : result.Status.ToString();
+                            outcome = new(rowNumber, record.CommandId, status, result.CaseId,
+                                result.Status is CaseRegistrationStatus.Accepted or CaseRegistrationStatus.Replayed ? null :
+                                result.Status == CaseRegistrationStatus.Unavailable ? failureCode : "registration-" + status.ToLowerInvariant());
+                        }
                     }
-                    else
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (Exception exception) when (exception is not OutOfMemoryException)
                     {
-                        var report = IntakePromotionMapper.ToCapturedReport(record.CommandId,
-                            $"csv:{record.CommandId:N}:{record.SourceReference}", record.Submission);
-                        var request = new RegisterManagedCaseRequest(record.CommandId, context.WorkspaceId, report, context.OrganizationId);
-                        var result = await registration.RegisterAsync(actor, request, ct);
-                        var status = result.Status == CaseRegistrationStatus.Unavailable
-                            ? attempts >= 5 ? "Failed" : "RetryableFailure"
-                            : result.Status.ToString();
-                        outcome = new(rowNumber, record.CommandId, status, result.CaseId,
-                            result.Status is CaseRegistrationStatus.Accepted or CaseRegistrationStatus.Replayed ? null : "registration-" + status.ToLowerInvariant());
+                        // A dependency exception is an observable row outcome, not an indefinitely Processing row.
+                        outcome = new(rowNumber, record.CommandId, attempts >= 5 ? "Failed" : "RetryableFailure", null, failureCode);
                     }
                 }
                 await store.CompleteRowAsync(lease, outcome, ct);
                 outcomes.Add(outcome);
-                if (outcome.Status == "RetryableFailure") { error = "registration-unavailable"; break; }
+                if (outcome.Status == "RetryableFailure") { error = outcome.ErrorCode ?? "registration-unavailable"; break; }
                 if (outcome.Status == "Denied") { error = "registration-denied"; break; }
             }
             if (error is null && finalBatch) state = "Completed";

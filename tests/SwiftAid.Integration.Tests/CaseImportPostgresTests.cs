@@ -217,6 +217,66 @@ public sealed class CaseImportPostgresTests
         { IntakeSubmissionRules.Validate(submission, limits); return Task.FromResult(submission.Location.CountryCode == "ZW"); }
     }
 
+    [IntakePostgresFact]
+    public async Task Validation_dependency_failure_is_durable_bounded_and_recoverable()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var importId = Guid.NewGuid();
+        var command = Guid.NewGuid();
+        var service = fixture.CreateService(fixture.Db, validator: new UnavailableValidator());
+        for (var attempt = 1; attempt <= 5; attempt++)
+        {
+            var result = await service.ProcessAsync(Actor, importId, Context, 1, true, new StringReader(Csv(command)), default);
+            var row = Assert.Single(result.Rows);
+            Assert.Equal(attempt == 5 ? "Failed" : "RetryableFailure", row.Status);
+            Assert.Equal("validation-unavailable", row.ErrorCode);
+            Assert.Equal(attempt == 5 ? 2 : 1, result.Summary!.NextRow);
+            Assert.Equal(0, result.Summary.Unresolved);
+        }
+        Assert.False(await fixture.Db.CommandReceipts.AnyAsync(row => row.CommandId == command));
+        var ledger = await fixture.Db.Set<CaseImportRowEntity>().AsNoTracking().SingleAsync(row => row.ImportId == importId);
+        Assert.Equal(5, ledger.Attempts);
+        Assert.Equal("Failed", ledger.State);
+        // Explicit reprocessing after the dependency recovers retains the original command identity.
+        var recovered = await fixture.Service.ProcessAsync(Actor, importId, Context, 1, true, new StringReader(Csv(command)), default);
+        Assert.Equal("Accepted", Assert.Single(recovered.Rows).Status);
+        Assert.Equal(1, await fixture.Db.CommandReceipts.CountAsync(row => row.CommandId == command));
+    }
+
+    private sealed class UnavailableValidator : IIntakeSubmissionValidator
+    {
+        public Task<bool> ValidateAsync(IntakeSubmission submission, IntakeLimits limits, CancellationToken ct) =>
+            throw new HttpRequestException("Synthetic policy dependency outage.");
+    }
+
+    [IntakePostgresFact]
+    public async Task Registration_outages_have_a_stable_failure_code_and_five_attempt_limit()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        foreach (var throws in new[] { false, true })
+        {
+            var service = new CaseCsvImportService(fixture.Store, new UnavailableRegistration(throws), new FixtureValidator());
+            var importId = Guid.NewGuid();
+            var csv = Csv(Guid.NewGuid());
+            for (var attempt = 1; attempt <= 5; attempt++)
+            {
+                var result = await service.ProcessAsync(Actor, importId, Context, 1, true, new StringReader(csv), default);
+                var row = Assert.Single(result.Rows);
+                Assert.Equal(attempt == 5 ? "Failed" : "RetryableFailure", row.Status);
+                Assert.Equal("registration-unavailable", row.ErrorCode);
+                Assert.Equal(0, result.Summary!.Unresolved);
+                Assert.Equal(attempt == 5 ? 2 : 1, result.Summary.NextRow);
+            }
+        }
+    }
+
+    private sealed class UnavailableRegistration(bool throws) : IManagedCaseRegistrationProcessor
+    {
+        public ValueTask<CaseRegistrationResult> RegisterAsync(ActorContext actor, RegisterManagedCaseRequest request, CancellationToken ct) =>
+            throws ? throw new IOException("Synthetic registration outage.") :
+            ValueTask.FromResult(CaseRegistrationResult.WithoutCase(CaseRegistrationStatus.Unavailable, request.CommandId));
+    }
+
     private sealed class FailCheckpointOnce(ICaseImportStore inner) : ICaseImportStore
     {
         public Task<CaseImportLease> OpenAsync(ActorContext actor, Guid id, CaseImportContext context, long row, CancellationToken ct) => inner.OpenAsync(actor, id, context, row, ct);
