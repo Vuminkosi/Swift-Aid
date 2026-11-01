@@ -115,6 +115,8 @@ public sealed class EllaiUtteranceWorker(
             {
                 _logger.LogWarning("Ellai turn {SessionId}/{UtteranceId} stopped with {FailureCode}.",
                     work.SessionId, item.ClientUtteranceId, outcome.FailureCode ?? "AdmissionDenied");
+                if (outcome.FailureCode == "InvalidDecision")
+                    _logger.LogWarning("Ellai decision shape rejected: {Diagnostic}", outcome.StopReason);
             }
             var resolution = outcome.Completed && !string.IsNullOrWhiteSpace(outcome.DisplayText)
                 && EllaiResponsePublicationPolicy.CanPublish(work)

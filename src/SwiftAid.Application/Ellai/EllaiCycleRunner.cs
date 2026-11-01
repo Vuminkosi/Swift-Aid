@@ -17,7 +17,8 @@ public sealed record EllaiCycleOutcome(
 public sealed record EllaiModelTurn(
     IReadOnlyList<EllaiToolRequest> ToolRequests,
     EllaiDecision? FinalDecision,
-    bool RequiresRepair = false);
+    bool RequiresRepair = false,
+    string? RejectionDiagnostic = null);
 
 /// <summary>Per-iteration run gate. A refused gate stops the run with the
 /// given safe blocked detail: "budget" for exhausted token/dollar budgets,
@@ -143,7 +144,7 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
                 if (turn.RequiresRepair)
                 {
                     if (repairsAttempted >= MaxRepairAttempts)
-                        return Stop("The model did not produce a valid decision within the repair allowance.",
+                        return Stop(turn.RejectionDiagnostic ?? "The model did not produce a valid decision within the repair allowance.",
                             iteration, "invalid", "InvalidDecision");
                     repairsAttempted++;
                     repairUsed = true;

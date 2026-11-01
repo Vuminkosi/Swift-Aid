@@ -1,4 +1,8 @@
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Schema;
+using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using SwiftAid.Contracts.Ellai;
 
 namespace SwiftAid.Application.Ellai;
@@ -82,6 +86,14 @@ public sealed class EllaiReasoningLoop(
     /// cut and marked; re-invoke the read for the full bounded result.</summary>
     public const int ThreadObservationChars = 4000;
 
+    private static readonly JsonSerializerOptions ContractJson = new(JsonSerializerDefaults.Web)
+    {
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+        Converters = { new JsonStringEnumConverter(allowIntegerValues: false) }
+    };
+    private static readonly string DecisionSchema = JsonSchemaExporter
+        .GetJsonSchemaAsNode(ContractJson, typeof(EllaiDecision)).ToJsonString();
+
     private readonly EllaiCycleRunner _runner = runner ?? throw new ArgumentNullException(nameof(runner));
     private readonly EllaiPromptBuilder _prompts = prompts ?? throw new ArgumentNullException(nameof(prompts));
     private readonly IEllaiTurnCompletionClient _completions =
@@ -121,10 +133,14 @@ public sealed class EllaiReasoningLoop(
                 : $", {Math.Max(0, _ledger.RemainingFor(request.Context.SessionId))} session tokens left");
         var system = _prompts.Build(request.Role, request.CapabilitySummary, limits) +
             "\n## Turn protocol\n" + TurnProtocol +
+            "\n## Final decision JSON schema\n" + DecisionSchema +
+            "\nThe schema describes data shape, not permission. Claims must cite exact evidence objects returned by permitted tools. " +
+            "Do not invent evidence references, UI bindings or action authority. Use empty arrays/null for nonapplicable fields." +
             "\n## Tool catalogue\n" + EllaiToolBroker.DescribeCatalogue(request.Context.AllowedTools);
         var thread = new List<EllaiChatMessage>(request.Conversation ?? []);
         thread.Add(new("user", request.Utterance));
         var provisionalAnswerRejected = false;
+        var observedEvidence = new HashSet<EvidenceRef>();
 
         async Task<EllaiModelTurn> TurnAsync(int iteration)
         {
@@ -163,6 +179,9 @@ public sealed class EllaiReasoningLoop(
             var decisionErrors = parsed.Turn?.FinalDecision is { } decision
                 ? EllaiDecisionValidator.Validate(decision)
                 : Array.Empty<string>();
+            if (parsed.Turn?.FinalDecision?.Claims is { } claims && claims.Any(claim =>
+                    claim?.Evidence is { } evidence && evidence.Any(reference => reference is null || !observedEvidence.Contains(reference))))
+                decisionErrors = decisionErrors.Append("Claim evidence must exactly match a reference returned by a permitted tool in this turn.").ToArray();
             EllaiPipelineMetrics.Record("decision_validation", System.Diagnostics.Stopwatch.GetElapsedTime(validationStarted).TotalMilliseconds);
             if (parsed.Turn is not null && decisionErrors.Count == 0)
             {
@@ -188,7 +207,14 @@ public sealed class EllaiReasoningLoop(
             // The durable reconciliation replaces the rejected draft. Appending a repaired
             // draft here would duplicate or contradict text/audio already presented for this turn.
             provisionalAnswerRejected |= emittedText;
-            return new EllaiModelTurn(Array.Empty<EllaiToolRequest>(), null, RequiresRepair: true);
+            var rejected = parsed.Turn?.FinalDecision;
+            // Shape/count diagnostics only: never log provider prose, claim IDs or evidence payloads.
+            var diagnostic = rejected is null ? "InvalidModelTurn" :
+                $"InvalidDecision: schema={rejected.SchemaVersion}; displayLength={rejected.DisplayText?.Length ?? 0}; " +
+                $"claimsNull={rejected.Claims is null}; nullClaims={rejected.Claims?.Count(c => c is null) ?? 0}; " +
+                $"ungroundedClaims={rejected.Claims?.Count(c => c is not null && c.Kind is not (ClaimKind.Unknown or ClaimKind.Proposed) && (c.Evidence is null || c.Evidence.Count == 0)) ?? 0}; " +
+                $"questionsNull={rejected.Questions is null}; intentsNull={rejected.UiIntents is null}; topicsNull={rejected.TopicRefs is null}; errors={decisionErrors.Count}";
+            return new EllaiModelTurn(Array.Empty<EllaiToolRequest>(), null, RequiresRepair: true, RejectionDiagnostic: diagnostic);
         }
 
         Task<EllaiReauthorization> GateAsync(int iteration, CancellationToken gateCt)
@@ -199,6 +225,8 @@ public sealed class EllaiReasoningLoop(
 
         void ObserveTool(EllaiToolRequest toolRequest, EllaiToolResult result)
         {
+            if (result.Allowed)
+                foreach (var reference in result.Evidence.Take(20)) observedEvidence.Add(reference);
             var summary = result.Allowed
                 ? result.ResultSummary
                 : $"denied ({result.ReasonCode}): {result.DenialReason}";
@@ -209,7 +237,8 @@ public sealed class EllaiReasoningLoop(
 
             thread.Add(new EllaiChatMessage("tool",
                 $"call {toolRequest.CallId ?? toolRequest.ToolName}: " +
-                $"{toolRequest.ToolName} [{result.ReasonCode}] {summary}",
+                $"{toolRequest.ToolName} [{result.ReasonCode}] {summary}" +
+                "\nEvidence references: " + SerializeEvidence(result),
                 ToolCallId: toolRequest.CallId ?? toolRequest.ToolName));
         }
 
@@ -217,6 +246,21 @@ public sealed class EllaiReasoningLoop(
             request.Context, TurnAsync, EllaiDecisionValidator.Validate, ct, GateAsync,
             activity, request.CycleId, request.ControllerEpoch, journal, ObserveTool,
             isExecutionCurrentAsync, onActivity, invokeToolAsync).ConfigureAwait(false);
+    }
+
+    private static string SerializeEvidence(EllaiToolResult result)
+    {
+        if (!result.Allowed) return "[]";
+        var references = new List<string>();
+        var remaining = 8000;
+        foreach (var evidence in result.Evidence.Take(20))
+        {
+            var serialized = JsonSerializer.Serialize(evidence, ContractJson);
+            if (serialized.Length > remaining) break;
+            references.Add(serialized);
+            remaining -= serialized.Length + 1;
+        }
+        return "[" + string.Join(",", references) + "]";
     }
 
     private async Task<EllaiReauthorization> ReauthorizeAsync(

@@ -52,6 +52,36 @@ public sealed class EllaiReasoningLoopTests
          "topicRefs":[],"resumeSuggestion":null,"stopReason":null}}
         """;
 
+    [Fact]
+    public async Task ProviderReceivesNestedDecisionSchemaAndReturnedEvidenceReferences()
+    {
+        var completions = new ScriptedCompletions(
+            """{"tool_calls":[{"id":"facts","name":"ellai_productfacts","args":{}}]}""", DecisionTurn);
+        var result = await Loop(completions).RunAsync(Request(), CancellationToken.None);
+        Assert.True(result.Completed);
+        var system = completions.Threads[0][0].Content;
+        Assert.Contains("\"evidenceId\"", system);
+        Assert.Contains("\"sourceKind\"", system);
+        Assert.Contains("\"choiceIds\"", system);
+        var observed = Assert.Single(completions.Threads[1], m => m.Role == "tool");
+        Assert.Contains("\"evidenceId\"", observed.Content);
+        Assert.Contains("\"sourceKind\"", observed.Content);
+    }
+
+    [Fact]
+    public async Task FabricatedEvidenceCannotCompleteAnOtherwiseValidDecision()
+    {
+        var fabricated = DecisionTurn.Replace("\"claims\":[]", """
+            "claims":[{"claimId":"claim","text":"An invented fact","kind":"ProductFact",
+            "evidence":[{"sourceKind":"ProductFact","resourceId":"invented","version":"1","fieldPath":null,"evidenceId":"invented"}]}]
+            """);
+        var completions = new ScriptedCompletions(fabricated, DecisionTurn);
+        var outcome = await Loop(completions).RunAsync(Request(), CancellationToken.None);
+        Assert.True(outcome.Completed);
+        Assert.Equal(2, completions.Calls);
+        Assert.Empty(outcome.Decision!.Claims);
+    }
+
     [Theory]
     [InlineData("not-json")]
     [InlineData("{\"final_decision\":{\"schemaVersion\":999}}")]
