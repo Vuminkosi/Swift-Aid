@@ -1129,6 +1129,10 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                     b.HasIndex("AvailableAtUtc", "CreatedAtUtc")
                         .HasFilter("\"PublishedAtUtc\" IS NULL AND \"ExhaustedAtUtc\" IS NULL");
 
+                    b.HasIndex("ResultId", "CaseId", "ReportRevision", "EventType")
+                        .IsUnique()
+                        .HasFilter("\"EventType\" = 'ClassificationSuperseded'");
+
                     b.ToTable("outbox", "swiftaid_classification");
                 });
 

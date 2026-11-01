@@ -36,6 +36,7 @@ public sealed class ClassificationRegistry(
             throw new ArgumentException("Notice does not match a committed source event.");
         var header = await db.ManagedCases.AsNoTracking().SingleAsync(c => c.CaseId == notice.SourceId, ct);
         await RequireScopeAsync(header.WorkspaceId, header.OrganizationId, ct);
+        await SupersedeOldFactsAsync(header.CaseId, header.ReportRevision, ct);
         var source = await db.CaseEvents.AsNoTracking().Where(e => e.CaseId == header.CaseId && e.ReportRevision == notice.ReportRevision &&
             (e.EventType == "CaseReported" || e.EventType == "CaseReportCorrected")).OrderByDescending(e => e.AggregateVersion).FirstAsync(ct);
         var sourceLanguage = await ReadImportedLanguageAsync(source, header, ct);
@@ -45,7 +46,10 @@ public sealed class ClassificationRegistry(
         if (inbox is not null && inbox.NoticeHash != noticeHash) throw new ArgumentException("Changed message identity.");
         if (inbox?.State is "Completed" or "Failed" or "Superseded" &&
             await db.Set<ReportQualityEntity>().AnyAsync(q => q.SourceEventId == source.EventId && q.Version == ReportQualityRules.Version, ct))
+        {
+            await transaction.CommitAsync(ct);
             return new(header.ReportRevision == notice.ReportRevision ? inbox.State : "Superseded", FailureCode: inbox.FailureCode, ConfigurationHash: config);
+        }
         inbox ??= new() { MessageId = notice.MessageId, ConfigurationId = config, NoticeHash = noticeHash, State = "Pending", UpdatedAtUtc = now };
         if (db.Entry(inbox).State == EntityState.Detached) db.Add(inbox);
 
@@ -118,6 +122,8 @@ public sealed class ClassificationRegistry(
             response = new("Leased", new(result.Id, result.LeaseId.Value, config, fingerprint, result.LeaseUntilUtc.Value, text, profile));
         }
         await db.SaveChangesAsync(ct);
+        // A historical backfill can create an old association after the initial sweep.
+        await SupersedeOldFactsAsync(header.CaseId, header.ReportRevision, ct);
         await transaction.CommitAsync(ct);
         return response with { ConfigurationHash = config };
     }
@@ -214,6 +220,17 @@ public sealed class ClassificationRegistry(
 
     private Task<int> LockAsync(string key, CancellationToken ct) =>
         db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", ct);
+    private Task<int> SupersedeOldFactsAsync(Guid caseId, long currentRevision, CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        return db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO swiftaid_classification.outbox ("Id", "ResultId", "CaseId", "ReportRevision", "EventType", "CreatedAtUtc", "AvailableAtUtc", "Attempts")
+            SELECT gen_random_uuid(), a."ResultId", a."CaseId", a."ReportRevision", 'ClassificationSuperseded', {now}, {now}, 0
+            FROM swiftaid_classification.associations a
+            WHERE a."CaseId" = {caseId} AND a."ReportRevision" < {currentRevision}
+            ON CONFLICT ("ResultId", "CaseId", "ReportRevision", "EventType") WHERE "EventType" = 'ClassificationSuperseded' DO NOTHING
+            """, ct);
+    }
     private bool OwnsLease(ClassificationResultEntity r, Guid lease) =>
         r.State == "Leased" && r.LeaseId == lease && r.WorkerId == Options.WorkerId && r.LeaseUntilUtc > clock.GetUtcNow();
     private static void ClearLease(ClassificationResultEntity r) { r.LeaseId = null; r.LeaseUntilUtc = null; r.WorkerId = null; }

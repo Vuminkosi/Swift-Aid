@@ -20,6 +20,29 @@ namespace SwiftAid.Integration.Tests;
 [Collection(IntakePostgresCollection.Name)]
 public sealed class CaseImportPostgresTests
 {
+    [IntakePostgresFact]
+    public async Task Imported_case_projection_matches_initial_journal_and_legacy_zero_is_repaired()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var result = await fixture.Service.ProcessAsync(Actor, Guid.NewGuid(), Context, 1, true, new StringReader(Csv(Guid.NewGuid())), default);
+        var caseId = Assert.Single(result.Rows).CaseId!.Value;
+        var header = await fixture.Db.ManagedCases.AsNoTracking().SingleAsync(c => c.CaseId == caseId);
+        Assert.Equal(1, header.WorkflowVersion);
+        // Reproduce the legacy projection defect in this task-owned synthetic case only.
+        await fixture.Db.ManagedCases.Where(c => c.CaseId == caseId).ExecuteUpdateAsync(s => s.SetProperty(c => c.WorkflowVersion, 0));
+        var repair = new SwiftAid.Infrastructure.Persistence.Migrations.RepairInitialCaseWorkflowVersion();
+        foreach (var operation in repair.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.SqlOperation>())
+            await fixture.Db.Database.ExecuteSqlRawAsync(operation.Sql);
+        Assert.Equal(1, (await fixture.Db.ManagedCases.AsNoTracking().SingleAsync(c => c.CaseId == caseId)).WorkflowVersion);
+        var grant = await fixture.Db.AccessGrantGroups.FirstAsync(g => g.WorkspaceId == Context.WorkspaceId && g.ActorId == Actor.ActorId && g.Status == PersistentGrantStatus.Active);
+        fixture.Db.AccessGrantOperations.Add(new AccessGrantOperationEntity { GrantGroupId = grant.GrantGroupId, Operation = CaseOperation.ResolveCase });
+        await fixture.Db.SaveChangesAsync();
+        fixture.Db.ChangeTracker.Clear();
+        var command = new SwiftAid.Contracts.Commands.ResolveCaseCommand(Guid.NewGuid(), 2, "Synthetic workflow completion", null, DateTimeOffset.UtcNow);
+        var completed = await fixture.CommandProcessor().ProcessAsync(Actor, caseId, 1, command, default);
+        Assert.Equal(SwiftAid.Application.Cases.Commands.CaseCommandProcessingStatus.Accepted, completed.Status);
+    }
+
     internal static readonly CaseImportContext Context = new("workspace-1",
         new IntakeConfirmations(true, "ZW", "catalogue/fixture", true, true, "fixture-policy", "1", null, null, null));
     internal static readonly ActorContext Actor = CaseRegistrationBackendTests.CreateOfficer("officer-1");
@@ -179,6 +202,15 @@ public sealed class CaseImportPostgresTests
         public ProtectedPayloadDataProtectionProvider Protection { get; }
         internal SwiftAid.Infrastructure.Persistence.Protection.PostgresProtectedCaseEventPayloadStore ClassificationPayloadStore(SwiftAidDbContext db) =>
             new(db, new SwiftAid.Infrastructure.Persistence.Transactions.PostgresCaseCommandUnitOfWork(db), _keys.CreateOptions(), Protection);
+        internal SwiftAid.Application.Cases.Commands.CaseCommandProcessor CommandProcessor()
+        {
+            var unit = new SwiftAid.Infrastructure.Persistence.Transactions.PostgresCaseCommandUnitOfWork(Db);
+            var payloads = new PostgresProtectedCaseEventPayloadStore(Db, unit, _keys.CreateOptions(), Protection);
+            var policy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(Db, unit), new PostgresCaseAccessDescriptorStore(Db, unit));
+            var persistence = new SwiftAid.Infrastructure.Persistence.Processing.PostgresCaseCommandPersistence(Db, unit, payloads,
+                new SwiftAid.Application.Serialization.CaseEventSerializer());
+            return new(unit, policy, persistence);
+        }
         public PostgresCaseImportStore Store { get; }
         public CaseCsvImportService Service { get; }
 

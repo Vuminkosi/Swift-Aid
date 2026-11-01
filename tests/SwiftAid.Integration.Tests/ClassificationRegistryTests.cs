@@ -17,6 +17,28 @@ namespace SwiftAid.Integration.Tests;
 public sealed class ClassificationRegistryTests
 {
     [IntakePostgresFact]
+    public async Task Newer_projection_revision_emits_one_durable_supersession_without_replacing_predictions()
+    {
+        await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
+        var context = await fixture.CreateIsolatedWorkspaceAsync();
+        var notice = await ImportAsync(fixture, context);
+        var registry = Registry(fixture);
+        var original = (await registry.ClaimAsync(notice, default)).Lease!;
+        await registry.CompleteAsync(Completion(original), default);
+        // Consumer-boundary fixture: simulate an already committed newer projection.
+        // The existing legacy narrative-correction command intentionally rejects typed v2 imports.
+        await fixture.Db.ManagedCases.Where(c => c.CaseId == notice.SourceId)
+            .ExecuteUpdateAsync(s => s.SetProperty(c => c.ReportRevision, 2));
+        fixture.Db.ChangeTracker.Clear();
+        Assert.Equal("Superseded", (await registry.ClaimAsync(notice, default)).State);
+        Assert.Equal("Superseded", (await registry.ClaimAsync(notice, default)).State);
+        var events = await fixture.Db.Set<ClassificationEventEntity>().Where(e => e.CaseId == notice.SourceId && e.EventType == "ClassificationSuperseded").ToListAsync();
+        Assert.Equal(original.ResultId, Assert.Single(events).ResultId);
+        Assert.Equal(1, events[0].ReportRevision);
+        Assert.Equal("Completed", (await fixture.Db.Set<ClassificationResultEntity>().FindAsync(original.ResultId))!.State);
+    }
+
+    [IntakePostgresFact]
     public async Task Backfill_snapshots_revisions_resumes_after_restart_and_reconciles_without_reinference()
     {
         await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();

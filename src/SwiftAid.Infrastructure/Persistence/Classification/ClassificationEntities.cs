@@ -125,6 +125,10 @@ public static class ClassificationModel
             b.ToTable("outbox", "swiftaid_classification"); b.HasKey(x => x.Id);
             b.Property(x => x.Sequence).UseIdentityByDefaultColumn();
             b.HasIndex(x => x.Sequence).IsUnique();
+            // The filtered supersession key cannot support ordering queries over every lifecycle event.
+            b.HasIndex(x => x.ResultId);
+            b.HasIndex(x => new { x.ResultId, x.CaseId, x.ReportRevision, x.EventType }).IsUnique()
+                .HasFilter("\"EventType\" = 'ClassificationSuperseded'");
             b.HasIndex(x => new { x.AvailableAtUtc, x.CreatedAtUtc }).HasFilter("\"PublishedAtUtc\" IS NULL AND \"ExhaustedAtUtc\" IS NULL");
             b.HasOne<ClassificationResultEntity>().WithMany().HasForeignKey(x => x.ResultId).OnDelete(DeleteBehavior.Restrict);
         });

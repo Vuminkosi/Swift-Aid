@@ -309,7 +309,7 @@ public sealed class PostgresCaseRegistrationPersistence : ICaseRegistrationPersi
             AggregateVersion = 2,
             ReportRevision = 1,
             Workflow = CaseWorkflow.Reported,
-            WorkflowVersion = 0,
+            WorkflowVersion = reported.AggregateVersion,
             Classification = ClinicalClassification.Unclassified,
             ClassificationVersion = 0,
             Laboratory = LaboratoryState.NotRecorded,
