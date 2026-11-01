@@ -124,13 +124,16 @@ public sealed class EllaiReasoningLoop(
             "\n## Tool catalogue\n" + EllaiToolBroker.DescribeCatalogue(request.Context.AllowedTools);
         var thread = new List<EllaiChatMessage>(request.Conversation ?? []);
         thread.Add(new("user", request.Utterance));
+        var provisionalAnswerRejected = false;
 
         async Task<EllaiModelTurn> TurnAsync(int iteration)
         {
             var messages = new List<EllaiChatMessage> { new("system", system) };
             messages.AddRange(thread);
-            var textParser = onTextDelta is null ? null : new EllaiDecisionTextStreamParser();
-            var completion = onTextDelta is null
+            var streamCurrentAnswer = onTextDelta is not null && !provisionalAnswerRejected;
+            var emittedText = false;
+            var textParser = streamCurrentAnswer ? new EllaiDecisionTextStreamParser() : null;
+            var completion = !streamCurrentAnswer
                 ? await _completions.CompleteAsync(messages, request.MaxTokensPerTurn, ct).ConfigureAwait(false)
                 : await _completions.CompleteStreamingAsync(
                     messages,
@@ -139,7 +142,8 @@ public sealed class EllaiReasoningLoop(
                     {
                         foreach (var sentence in textParser!.Append(delta))
                         {
-                            await onTextDelta(sentence, callbackCt).ConfigureAwait(false);
+                            emittedText = true;
+                            await onTextDelta!(sentence, callbackCt).ConfigureAwait(false);
                         }
                     },
                     ct).ConfigureAwait(false);
@@ -181,7 +185,10 @@ public sealed class EllaiReasoningLoop(
 
             thread.Add(new EllaiChatMessage("user",
                 $"Turn rejected ({parsed.Error ?? string.Join("; ", decisionErrors)}). Reply with exactly one valid JSON turn matching the active schema."));
-            return new EllaiModelTurn(Array.Empty<EllaiToolRequest>(), null);
+            // The durable reconciliation replaces the rejected draft. Appending a repaired
+            // draft here would duplicate or contradict text/audio already presented for this turn.
+            provisionalAnswerRejected |= emittedText;
+            return new EllaiModelTurn(Array.Empty<EllaiToolRequest>(), null, RequiresRepair: true);
         }
 
         Task<EllaiReauthorization> GateAsync(int iteration, CancellationToken gateCt)

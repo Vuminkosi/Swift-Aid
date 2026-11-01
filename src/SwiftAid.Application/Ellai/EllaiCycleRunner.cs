@@ -16,7 +16,8 @@ public sealed record EllaiCycleOutcome(
 /// tool requests or a final decision draft.</summary>
 public sealed record EllaiModelTurn(
     IReadOnlyList<EllaiToolRequest> ToolRequests,
-    EllaiDecision? FinalDecision);
+    EllaiDecision? FinalDecision,
+    bool RequiresRepair = false);
 
 /// <summary>Per-iteration run gate. A refused gate stops the run with the
 /// given safe blocked detail: "budget" for exhausted token/dollar budgets,
@@ -139,6 +140,15 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
                 }
 
                 var turn = await modelTurn(iteration);
+                if (turn.RequiresRepair)
+                {
+                    if (repairsAttempted >= MaxRepairAttempts)
+                        return Stop("The model did not produce a valid decision within the repair allowance.",
+                            iteration, "invalid", "InvalidDecision");
+                    repairsAttempted++;
+                    repairUsed = true;
+                    continue;
+                }
                 lastTurnUnreviewed = turn.ToolRequests.Count > 0 && turn.FinalDecision is null;
 
                 // The accepted check-in fires on the first real tool request,

@@ -52,6 +52,31 @@ public sealed class EllaiReasoningLoopTests
          "topicRefs":[],"resumeSuggestion":null,"stopReason":null}}
         """;
 
+    [Theory]
+    [InlineData("not-json")]
+    [InlineData("{\"final_decision\":{\"schemaVersion\":999}}")]
+    public async Task RejectedDecisionsCannotBypassTheSharedRepairBudget(string rejected)
+    {
+        var completions = new ScriptedCompletions(rejected, rejected, rejected, DecisionTurn);
+        var outcome = await Loop(completions).RunAsync(Request(), CancellationToken.None);
+        Assert.False(outcome.Completed);
+        Assert.Equal(EllaiCycleRunner.MaxRepairAttempts + 1, completions.Calls);
+        Assert.Equal("InvalidDecision", outcome.FailureCode);
+        Assert.True(outcome.RepairUsed);
+    }
+
+    [Fact]
+    public async Task RepairDoesNotAppendAnotherProvisionalAnswerToTheSameTurn()
+    {
+        var completions = new ScriptedCompletions(DecisionTurn.Replace("\"claims\":[]", "\"claims\":[null]"), DecisionTurn);
+        var deltas = new List<string>();
+        var outcome = await Loop(completions).RunAsync(Request(), CancellationToken.None,
+            onTextDelta: (text, _) => { deltas.Add(text); return ValueTask.CompletedTask; });
+        Assert.True(outcome.Completed);
+        Assert.Equal("It is now.", string.Concat(deltas));
+        Assert.Equal("It is now.", outcome.Decision!.DisplayText);
+    }
+
     [Fact]
     public async Task ToolResultEntersLaterTurnWithCallId()
     {
