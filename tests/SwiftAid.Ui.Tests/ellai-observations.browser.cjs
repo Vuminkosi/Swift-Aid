@@ -17,6 +17,8 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
         assert(first.controlStates.every(c => c.state === 4));
         assert(!JSON.stringify(first).includes('sensitive'));
         assert.equal(first.contextStamp, (await collect()).contextStamp);
+        await page.evaluate(() => history.pushState({}, '', '/report'));
+        assert.notEqual(first.viewInstanceId, (await collect()).viewInstanceId);
         await page.locator('#report-submit').evaluate(e => e.disabled = true);
         const disabled = await collect();
         assert.equal(disabled.controlStates.find(c => c.controlId === 'report.submit').state, 3);

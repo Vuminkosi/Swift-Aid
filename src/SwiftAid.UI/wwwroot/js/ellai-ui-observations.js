@@ -12,11 +12,17 @@ const reportBindings = [
     ["report.receipt", "public-receipt-title"]
 ];
 
-const viewInstanceId = crypto.randomUUID();
+let viewInstanceId = crypto.randomUUID();
+let previousPath = location.pathname;
 let contextStamp = crypto.randomUUID();
 let previousState = null;
 
 export function collect() {
+    if (location.pathname !== previousPath) {
+        previousPath = location.pathname;
+        viewInstanceId = crypto.randomUUID();
+        contextStamp = crypto.randomUUID();
+    }
     const controlStates = [];
     for (const [controlId, id] of reportBindings) {
         const elements = document.querySelectorAll(`[id="${id}"]`);
@@ -39,6 +45,6 @@ export function collect() {
         previousState = stateKey;
         contextStamp = crypto.randomUUID();
     }
-    return { viewInstanceId, contextStamp, platform: "webview",
+    return { viewInstanceId, contextStamp, platform: "web",
         mountedControlIds: controlStates.map(c => c.controlId), controlStates };
 }
