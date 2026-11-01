@@ -78,7 +78,8 @@ public sealed class EllaiUtteranceSubmissionService(
             allowedTools,
             EllaiConsentService.PublicProductHelpPurpose,
             request.ClientUtteranceId,
-            request.Languages);
+            request.Languages,
+            EllaiPageContext.DisplayName(request.ActivePage) is null ? null : request.ActivePage);
         var payload = EllaiUtteranceWorkEnvelope.Serialize(work, request.ClientUtteranceId);
         var safeRequest = request with
         {

@@ -55,7 +55,8 @@ public sealed record EllaiLoopRequest(
     int MaxTokensPerTurn,
     string CycleId,
     long ControllerEpoch,
-    IReadOnlyList<EllaiChatMessage>? Conversation = null);
+    IReadOnlyList<EllaiChatMessage>? Conversation = null,
+    string? ActivePage = null);
 
 /// <summary>Multi-turn reasoning loop (Task 6): drives the bounded cycle
 /// runner with a routed text provider. Each model text turn parses to typed
@@ -132,6 +133,9 @@ public sealed class EllaiReasoningLoop(
                 ? string.Empty
                 : $", {Math.Max(0, _ledger.RemainingFor(request.Context.SessionId))} session tokens left");
         var system = _prompts.Build(request.Role, request.CapabilitySummary, limits) +
+            "\n## Current context\nServer time (UTC): " + DateTimeOffset.UtcNow.ToString("O") +
+            ". Client-reported page: " + (EllaiPageContext.DisplayName(request.ActivePage) ?? "Unknown") +
+            ". Page context is advisory; it grants no record access or tool authority. Do not infer a local time zone." +
             "\n## Turn protocol\n" + TurnProtocol +
             "\n## Final decision JSON schema\n" + DecisionSchema +
             "\nThe schema describes data shape, not permission. Claims must cite exact evidence objects returned by permitted tools. " +

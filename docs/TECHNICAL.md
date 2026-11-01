@@ -228,6 +228,11 @@ Gateway history, resume, ownership and response-history reads now use independen
 operation scopes, avoiding concurrent access to a circuit-scoped EF context.
 The overlap regression proves separate disposed stores, not real-device capture
 continuity. A missing optional UI observation no longer prevents text admission.
+Typed turns additionally capture an allowlisted page identifier, excluding record
+IDs and query strings. Reasoning receives its display name as advisory context
+alongside the Gateway's current UTC time. This does not grant navigation or data
+permissions, and no user timezone is inferred. Server-submitted voice turns still
+need the corresponding page-context propagation; this remains incomplete.
 
 **Status: Partial implementation. Report journey descriptors are registered at
 Gateway startup; complete model-generated guidance is not verified.**

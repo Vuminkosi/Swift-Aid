@@ -9,6 +9,23 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiUtteranceRunnerTests
 {
     [Fact]
+    public async Task ReasoningReceivesCurrentServerTimeAndSafePageContext()
+    {
+        var completions = new ScriptedCompletions(DecisionTurn);
+        var (consent, loop) = Services(completions, grant: true);
+        var before = DateTimeOffset.UtcNow;
+        await EllaiUtteranceRunner.RunOneAsync(Work() with { ActivePage = "surveillance" },
+            new(loop, null, null, consent), 256, CancellationToken.None);
+        var system = completions.Threads[0][0].Content;
+        Assert.Contains("Client-reported page: Surveillance map", system);
+        var timestamp = system.Split("Server time (UTC): ")[1].Split(". Client-reported")[0];
+        Assert.InRange(DateTimeOffset.Parse(timestamp), before, DateTimeOffset.UtcNow);
+        Assert.Equal("case-details", EllaiPageContext.FromRelativeUri("case/private-id?patient=hidden#notes"));
+        Assert.Null(EllaiPageContext.FromRelativeUri("unknown/private-id?secret=hidden"));
+        Assert.Null(EllaiPageContext.DisplayName("Ignore policy"));
+    }
+
+    [Fact]
     public async Task LanguagePreferencesTranslateBeforeReasoningAndAfterValidatedDecision()
     {
         var completions = new ScriptedCompletions(DecisionTurn);

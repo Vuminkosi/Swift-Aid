@@ -2278,7 +2278,8 @@
             text,
             TranscriptRef: null,
             InputSource: "typed",
-            ClientEpoch: session.SessionVersion);
+            ClientEpoch: session.SessionVersion,
+            ActivePage: EllaiPageContext.FromRelativeUri(Navigation.ToBaseRelativePath(Navigation.Uri)));
 
         _submissionCts?.Dispose();
         _submissionCts = CancellationTokenSource.CreateLinkedTokenSource(_cts?.Token ?? CancellationToken.None);
