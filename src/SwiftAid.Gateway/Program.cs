@@ -64,6 +64,7 @@ builder.Services.AddScoped<ISubscriptionClient, UnavailableSubscriptionClient>()
 builder.Services.AddScoped<IAnalyticsClient, AnalyticsGatewayClient>();
 builder.Services.AddScoped<IDashboardOverviewClient, DashboardOverviewGatewayClient>();
 builder.Services.AddScoped<ICaseDetailSummaryClient, CaseDetailSummaryGatewayClient>();
+builder.Services.AddScoped<ICaseReportDetailsClient, CaseReportDetailsGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseClassificationClient, CaseClassificationGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Contracts.Cases.ICaseTranslationClient, CaseTranslationGatewayClient>();
 builder.Services.AddScoped<ICaseCorrectionReadClient, CaseCorrectionReadGatewayClient>();
@@ -75,6 +76,7 @@ builder.Services.AddScoped<IAccountPresentationClient, GatewayAccountPresentatio
 builder.Services.AddScoped<IWorkspaceAccessClient, GatewayWorkspaceAccessClient>();
 builder.Services.AddScoped<IStaffSessionEditorClient, GatewayStaffSessionEditorClient>();
 builder.Services.AddScoped<IMapAggregateClient, MapAggregateGatewayClient>();
+builder.Services.AddScoped<ISurveillanceMapDetailsClient, SurveillanceMapDetailsGatewayClient>();
 builder.Services.AddScoped<ICaseWorkspaceClient, CaseWorkspaceGatewayClient>();
 builder.Services.AddScoped<SwiftAid.Gateway.Ingestion.IWorkspaceImportClient, SwiftAid.Gateway.Ingestion.WorkspaceImportClient>();
 builder.Services.AddScoped<IWorkManagementClient, CommandBackedWorkManagementClient>();

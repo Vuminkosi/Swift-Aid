@@ -20,7 +20,8 @@ namespace SwiftAid.Gateway.Cases;
 public sealed class DashboardOverviewGatewayClient(
     AuthenticationStateProvider authenticationStateProvider,
     IServiceProvider serviceProvider,
-    IIntakePublicMetadataProvider metadataProvider) : IDashboardOverviewClient
+    IIntakePublicMetadataProvider metadataProvider,
+    ICaseReportDetailsClient? reportClient = null) : IDashboardOverviewClient
 {
     private const string Capability = "dashboard-overview";
     private const int CategorySuppressionThreshold = 5;
@@ -52,7 +53,8 @@ public sealed class DashboardOverviewGatewayClient(
             return Denied();
         }
 
-        var aggregateQuery = _serviceProvider.GetService<IDashboardAggregateQuery>();
+        await using var scope = _serviceProvider.CreateAsyncScope();
+        var aggregateQuery = scope.ServiceProvider.GetService<IDashboardAggregateQuery>();
         if (aggregateQuery is null)
         {
             return Unavailable("The dashboard is not available right now.");
@@ -132,6 +134,20 @@ public sealed class DashboardOverviewGatewayClient(
             .Take(RecentCaseLimit)
             .Select(row => ToRecentCase(row, labels))
             .ToList();
+        if (reportClient is not null)
+        {
+            for (var index = 0; index < recent.Count; index++)
+            {
+                var response = await reportClient.GetAsync(Guid.Parse(recent[index].CaseId), cancellationToken);
+                if (response.Succeeded && response.Value is { } report)
+                    recent[index] = recent[index] with
+                    {
+                        RegionLabel = report.Location is { } place ? CaseReportDisplay.LocationLabel(place) : recent[index].RegionLabel,
+                        LocationHref = report.Location is { } target ? CaseReportDisplay.MapHref(target) : null,
+                        ObservationPreview = CaseReportDisplay.ObservationPreview(report)
+                    };
+            }
+        }
         var asOfUtc = result.AsOfUtc;
 
         return new DashboardOverview(

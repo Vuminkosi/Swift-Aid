@@ -365,10 +365,14 @@
     white-space: nowrap;
 }
 .operations-dashboard__case-table td {
-    padding: 0.55rem;
+    padding: 0.4rem 0.55rem;
     border-bottom: 1px solid var(--sa-border-subtle, var(--sa-border));
     vertical-align: middle;
 }
+.operations-dashboard__table-caption { text-align: left; color: var(--sa-text-secondary); font-size: .7rem; padding: 0 0 .6rem; }
+.operations-dashboard__case-table tbody tr:hover { background: var(--mud-palette-action-default-hover); }
+.operations-dashboard__case-table ::deep .mud-link { font-size: .78rem; }
+.operations-dashboard__sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .operations-dashboard__case-table tr:last-child td { border-bottom: 0; }
 .operations-dashboard__case-reference,
 .operations-dashboard__case-sector,
@@ -535,4 +539,18 @@
     .operations-dashboard *,
     .operations-dashboard *::before,
     .operations-dashboard *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
+}
+
+@media (min-width: 960px) {
+    .operations-dashboard__case-table-wrap {
+        max-height: max(12rem, calc(100dvh - 27rem));
+        overflow: auto;
+        overscroll-behavior: contain;
+    }
+    .operations-dashboard__case-table thead th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: var(--sa-surface);
+    }
 }

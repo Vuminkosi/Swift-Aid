@@ -16,6 +16,77 @@ namespace SwiftAid.Ui.Tests;
 public sealed class DashboardAggregateClientTests
 {
     [Fact]
+    public async Task DashboardAndMapConcurrentReadsUseSeparateDisposableScopes()
+    {
+        var gate = new AggregateReadGate();
+        await using var services = new ServiceCollection()
+            .AddSingleton(gate)
+            .AddScoped<IsolatedAggregateQuery>()
+            .AddScoped<IDashboardAggregateQuery>(sp => sp.GetRequiredService<IsolatedAggregateQuery>())
+            .AddScoped<IMapAggregateQuery>(sp => sp.GetRequiredService<IsolatedAggregateQuery>())
+            .BuildServiceProvider();
+        await using var circuit = services.CreateAsyncScope();
+        var dashboard = new DashboardOverviewGatewayClient(new SignedInAuthStateProvider(),
+            circuit.ServiceProvider, new ThrowingMetadataProvider());
+        var map = new MapAggregateGatewayClient(new SignedInAuthStateProvider(), circuit.ServiceProvider);
+        var overview = dashboard.GetAsync(new DashboardOverviewQuery());
+        var areas = map.GetAsync(new MapAggregateQuery(new PageRequest(1, 25)));
+        try
+        {
+            await gate.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            gate.Release.TrySetResult();
+        }
+        await Task.WhenAll(overview, areas);
+        Assert.Equal(UiCapabilityResultCode.Success, (await overview).Code);
+        Assert.Equal(UiCapabilityResultCode.Success, (await areas).Code);
+        Assert.Equal(2, gate.Instances.Count);
+        Assert.Equal(2, gate.Disposed.Count);
+    }
+
+    private sealed class AggregateReadGate
+    {
+        public HashSet<Guid> Instances { get; } = [];
+        public HashSet<Guid> Disposed { get; } = [];
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int Calls;
+    }
+
+    private sealed class IsolatedAggregateQuery(AggregateReadGate gate)
+        : IDashboardAggregateQuery, IMapAggregateQuery, IAsyncDisposable
+    {
+        private readonly Guid _id = Guid.NewGuid();
+        private async Task ReadAsync(CancellationToken ct)
+        {
+            lock (gate)
+            {
+                gate.Instances.Add(_id);
+                if (++gate.Calls == 2) gate.Started.TrySetResult();
+            }
+            await gate.Release.Task.WaitAsync(ct);
+        }
+        public async Task<DashboardAggregateResult> GetAsync(ActorContext actor, TimeSpan window, CancellationToken ct)
+        {
+            await ReadAsync(ct);
+            return new(DashboardAggregateAccess.Allowed, [], DateTimeOffset.UtcNow, false);
+        }
+        public async Task<SwiftAid.Contracts.Surveillance.SurveillanceAggregateResult> GetAsync(
+            ActorContext actor, string? regionCode, TimeSpan window, CancellationToken ct)
+        {
+            await ReadAsync(ct);
+            return new(SwiftAid.Contracts.Surveillance.SurveillanceAggregateAccess.Allowed, [], DateTimeOffset.UtcNow, false);
+        }
+        public ValueTask DisposeAsync()
+        {
+            lock (gate) gate.Disposed.Add(_id);
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    [Fact]
     public async Task DashboardClient_RejectsInvalidQueryBeforeResolvingServices()
     {
         var client = new DashboardOverviewGatewayClient(

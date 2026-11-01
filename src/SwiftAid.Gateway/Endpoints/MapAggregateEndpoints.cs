@@ -1,10 +1,7 @@
 using System.Text.Json;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
-using OpenIddict.Validation.AspNetCore;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases;
 using SwiftAid.Contracts.Surveillance;
@@ -24,13 +21,8 @@ public static class MapAggregateEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
-        var schemes = string.Join(
-            ",",
-            IdentityConstants.ApplicationScheme,
-            OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
-
         endpoints.MapGet("/api/v1/surveillance/area-aggregates", GetAggregatesAsync)
-            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .RequireAuthorization("SwiftAidStaffApi")
             .WithName("GetSurveillanceAreaAggregates")
             .Produces<SurveillanceAggregateResult>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)

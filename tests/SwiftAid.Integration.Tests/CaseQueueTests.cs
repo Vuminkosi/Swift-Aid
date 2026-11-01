@@ -36,6 +36,24 @@ public sealed class CaseQueueTests
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     [IntakePostgresFact]
+    public async Task MapCandidateCountryAndWorkspaceFiltersApplyBeforeLimit()
+    {
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var target = await IntakeDecisionStoreTests.SeedManagedCaseAsync(db, "org-sz-1");
+        var newerOtherCountry = await IntakeDecisionStoreTests.SeedManagedCaseAsync(db);
+        var now = DateTimeOffset.UtcNow;
+        await SeedEventAsync(db, target, 1, "CaseReported", now.AddDays(2));
+        await SeedEventAsync(db, newerOtherCountry, 1, "CaseReported", now.AddDays(3));
+
+        var rows = await new PostgresCaseQueueStore(db).GetAsync("officer-1", "workspace-sz-1", "SZ",
+            now.AddMinutes(-1), 1, CancellationToken.None);
+
+        Assert.Equal(target, Assert.Single(rows).CaseId);
+        Assert.Empty(await new PostgresCaseQueueStore(db).GetAsync("officer-1", "workspace-1", "SZ",
+            now.AddMinutes(-1), 1, CancellationToken.None));
+    }
+
+    [IntakePostgresFact]
     public async Task OwnedCases_ListedNewestFirst()
     {
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();

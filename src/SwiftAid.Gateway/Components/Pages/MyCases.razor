@@ -197,7 +197,7 @@
         row.RegionLabel,
         row.AssigneeLabel,
         row.ReportedCategoryLabel,
-        row.UpdatedAtUtc);
+        row.UpdatedAtUtc, row.LocationHref, row.ObservationPreview);
 
     private static OperationsCaseQueue.FilterOptionsView ToViewOptions(CaseWorkspaceFilterOptions options) => new(
         options.Sectors.Select(ToViewOption).ToArray(),

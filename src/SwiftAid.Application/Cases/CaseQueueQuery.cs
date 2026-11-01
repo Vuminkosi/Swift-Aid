@@ -13,13 +13,24 @@ public sealed record CaseQueueCandidate(
     string AccountableOwnerActorId,
     long AggregateVersion,
     DateTimeOffset UpdatedAtUtc,
-    DateTimeOffset LastRecordedAtUtc);
+    DateTimeOffset LastRecordedAtUtc,
+    string? Sector = null,
+    string? Classification = null,
+    string? WorkspaceId = null,
+    DateTimeOffset? CreatedAtUtc = null);
 
 /// <summary>Persistence port for the "my cases" queue. Rows arrive newest-first.</summary>
 public interface ICaseQueueStore
 {
     Task<IReadOnlyList<CaseQueueCandidate>> GetOwnedCasesAsync(
         string ownerActorId, int take, CancellationToken ct);
+}
+
+/// <summary>Bounded map candidates; callers must authorize each report before using its evidence.</summary>
+public interface ICaseMapCandidateStore
+{
+    Task<IReadOnlyList<CaseQueueCandidate>> GetAsync(string ownerActorId, string workspaceId,
+        string countryCode, DateTimeOffset sinceUtc, int take, CancellationToken ct);
 }
 
 public interface ICaseQueueQuery
@@ -106,7 +117,9 @@ public sealed class CaseQueueQuery(
                     candidate.CountryCode,
                     candidate.AccountableOwnerActorId,
                     candidate.AggregateVersion,
-                    candidate.UpdatedAtUtc));
+                    candidate.UpdatedAtUtc,
+                    candidate.Sector,
+                    candidate.Classification, candidate.WorkspaceId, candidate.CreatedAtUtc));
             }
         }
 

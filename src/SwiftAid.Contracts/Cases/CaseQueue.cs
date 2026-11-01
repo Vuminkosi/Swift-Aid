@@ -11,7 +11,11 @@ public sealed record CaseQueueItem(
     string CountryCode,
     string AccountableOwnerActorId,
     long AggregateVersion,
-    DateTimeOffset UpdatedAtUtc);
+    DateTimeOffset UpdatedAtUtc,
+    string? Sector = null,
+    string? Classification = null,
+    string? WorkspaceId = null,
+    DateTimeOffset? CreatedAtUtc = null);
 
 /// <summary>Queue read outcome distinguishing denial/unavailability from an empty queue.</summary>
 public enum CaseQueueAccess

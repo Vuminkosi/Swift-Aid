@@ -1,5 +1,6 @@
 @using System.Globalization
 @using SwiftAid.UI.Components.Theme
+@using SwiftAid.Contracts.Surveillance
 
 <section class="operations-map @(CompactPreview ? "operations-map--compact" : string.Empty)"
          aria-labelledby="@(CompactPreview ? null : "operations-map-title")"
@@ -24,12 +25,13 @@
         <div class="operations-map__filters" role="group" aria-label="Map filters">@FilterContent</div>
     }
 
-    @if (State != OperationsSurfaceState.Populated)
+    @if (State is not (OperationsSurfaceState.Populated or OperationsSurfaceState.Empty))
     {
         <SwiftAidStatePanel State="State.ToSwiftAidViewState()" Title="@StateTitle" Description="@StateDescription" OnRetry="OnRetry" />
     }
     else if (Areas.Count == 0)
     {
+        <OperationsStreetMap Country="@(FocusCountry ?? "SZ")" Points="@(Details?.Points ?? [])" Focus="Focus" />
         <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="No area totals" Description="No area totals are available for these filters." />
     }
     else
@@ -41,15 +43,9 @@
                 <div>
                     @if (!CompactPreview)
                     {
-                        <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="aggregate-map-heading">Country totals</MudText>
+                        <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="aggregate-map-heading">Map of reported cases</MudText>
                     }
-                    <MudText Typo="Typo.caption" Color="Color.Secondary">Country outlines show country totals. Region totals appear in the table only.</MudText>
-                </div>
-                <div class="operations-map__tools" role="group" aria-label="Map display controls">
-                    <MudIconButton Icon="@Icons.Material.Filled.Remove" OnClick="ZoomOut" aria-label="Zoom out" Disabled="@(_zoom <= MinimumZoom)" />
-                    <MudText Typo="Typo.caption" Class="operations-map__zoom-label">@ZoomDescription</MudText>
-                    <MudIconButton Icon="@Icons.Material.Filled.Add" OnClick="ZoomIn" aria-label="Zoom in" Disabled="@(_zoom >= MaximumZoom)" />
-                    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.CenterFocusStrong" Size="Size.Small" OnClick="ResetView">Reset view</MudButton>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Report markers group cases at public place references. Small groups are withheld.</MudText>
                 </div>
             </div>
 
@@ -64,18 +60,8 @@
             }
             else
             {
-                <div class="operations-map__viewport"
-                     role="region"
-                     aria-label="Interactive country map. Drag to pan, use zoom controls, or select a highlighted country."
-                     @onpointerdown="StartPan" @onpointermove="UpdatePan" @onpointerup="EndPan" @onpointerleave="EndPan">
-                    <div class="operations-map__canvas" style="@CanvasStyle">
-                        <OperationsCountryBasemap Areas="Areas"
-                                                  ShowHuman="_showHuman"
-                                                  ShowAnimal="_showAnimal"
-                                                  SelectedCountryCode="_selectedArea?.AreaCode"
-                                                  OnCountrySelected="SelectCountry" />
-                    </div>
-                </div>
+                <OperationsStreetMap Country="@(FocusCountry ?? "SZ")" Points="@(Details?.Points ?? [])"
+                                     ShowHuman="_showHuman" ShowAnimal="_showAnimal" Focus="Focus" />
             }
 
             @if (SelectedArea is not null)
@@ -105,6 +91,31 @@
                 </div>
             }
         </section>
+
+        @if (!CompactPreview)
+        {
+            <section class="operations-map__signals" aria-labelledby="map-signals-heading">
+                <h2 id="map-signals-heading">Recent signals</h2>
+                @if (DetailsLoading) { <MudProgressLinear Indeterminate="true" aria-label="Loading mapped reports and signals" /> }
+                else if (Details is null) { <p>Signal details could not be loaded.</p> }
+                else if (Details.Signals.Count == 0) { <p>No signals to review for this view.</p> }
+                @if (Details is not null)
+                {
+                    <div class="operations-map__signal-list">
+                        @foreach (var signal in Details.Signals)
+                        {
+                            <article class="operations-map__signal">
+                                <MudLink Href="@signal.CaseHref">@signal.Label</MudLink>
+                                <small>@signal.Area · @signal.Reports reports · @signal.FromUtc.ToString("dd MMM")–@signal.ToUtc.ToString("dd MMM")</small>
+                                <span>@signal.State · Requires human review</span>
+                            </article>
+                        }
+                    </div>
+                    @if (Details.Truncated) { <small>Mapped report groups cover the latest 500 cases available to you.</small> }
+                    @if (Details.UnmappedReports > 0) { <small>Some reports are not mapped because their location is unavailable or their group is too small.</small> }
+                }
+            </section>
+        }
 
         <section class="operations-map__data" aria-labelledby="area-totals-table-title">
             <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="area-totals-table-title">Area totals</MudText>
@@ -202,17 +213,8 @@
         string? SuppressionReason,
         DateTimeOffset AsOfUtc);
 
-    private const double MinimumZoom = 0.75;
-    private const double MaximumZoom = 1.75;
-    private const double ZoomStep = 0.15;
     private bool _showHuman = true;
     private bool _showAnimal = true;
-    private bool _isPanning;
-    private double _zoom = 1;
-    private double _panX;
-    private double _panY;
-    private double _dragOffsetX;
-    private double _dragOffsetY;
     private AreaAggregateView? _selectedArea;
 
     [Parameter] public string Eyebrow { get; set; } = "Operations";
@@ -225,16 +227,25 @@
     [Parameter] public string ContractVersion { get; set; } = "Unknown";
     [Parameter] public string PeriodLabel { get; set; } = "the selected period";
     [Parameter] public string? StatusMessage { get; set; }
+    public sealed record MapFocus(double Latitude, double Longitude, string Label);
+    [Parameter] public SurveillanceMapDetails? Details { get; set; }
+    [Parameter] public bool DetailsLoading { get; set; }
+    [Parameter] public MapFocus? Focus { get; set; }
+    [Parameter] public string? FocusCountry { get; set; }
+    private string? _appliedFocusCountry;
     [Parameter] public bool CompactPreview { get; set; }
     [Parameter] public RenderFragment? FilterContent { get; set; }
     [Parameter] public EventCallback OnRetry { get; set; }
 
     private AreaAggregateView? SelectedArea => Areas.FirstOrDefault(area => area.Precision == AggregatePrecision.Country && string.Equals(area.AreaCode, _selectedArea?.AreaCode, StringComparison.OrdinalIgnoreCase));
-    private string ZoomDescription => $"{_zoom * 100:0}%";
-    private string CanvasStyle => FormattableString.Invariant($"transform: translate({_panX:0.#}px, {_panY:0.#}px) scale({_zoom:0.00});");
 
     protected override void OnParametersSet()
     {
+        if (FocusCountry != _appliedFocusCountry || (_selectedArea is null && FocusCountry is not null))
+        {
+            SelectCountry(FocusCountry ?? "");
+            _appliedFocusCountry = FocusCountry;
+        }
         if (_selectedArea is not null && Areas.All(area => area.AreaCode != _selectedArea.AreaCode))
         {
             _selectedArea = null;
@@ -286,37 +297,6 @@
     }
 
     private static string DisplayAreaLabel(string label) => label;
-
-    private void ZoomIn() => _zoom = Math.Min(MaximumZoom, _zoom + ZoomStep);
-    private void ZoomOut() => _zoom = Math.Max(MinimumZoom, _zoom - ZoomStep);
-
-    private void ResetView()
-    {
-        _zoom = 1;
-        _panX = 0;
-        _panY = 0;
-        _selectedArea = null;
-    }
-
-    private void StartPan(PointerEventArgs args)
-    {
-        _isPanning = true;
-        _dragOffsetX = args.ClientX - _panX;
-        _dragOffsetY = args.ClientY - _panY;
-    }
-
-    private void UpdatePan(PointerEventArgs args)
-    {
-        if (!_isPanning)
-        {
-            return;
-        }
-
-        _panX = Math.Clamp(args.ClientX - _dragOffsetX, -220, 220);
-        _panY = Math.Clamp(args.ClientY - _dragOffsetY, -140, 140);
-    }
-
-    private void EndPan() => _isPanning = false;
 
     private static string PrecisionLabel(AggregatePrecision precision) => precision switch
     {

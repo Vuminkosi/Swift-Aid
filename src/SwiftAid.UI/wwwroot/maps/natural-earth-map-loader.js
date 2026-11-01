@@ -6,5 +6,11 @@ export async function loadCountryGeometry() {
         throw new Error("The local country geometry could not be loaded.");
     }
 
-    return await response.text();
+    // Stream the asset instead of returning a large string through a single
+    // Blazor Server message. Keep the same path for browser and native clients.
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength > 256 * 1024) {
+        throw new Error("The country geometry exceeds the supported size.");
+    }
+    return bytes;
 }

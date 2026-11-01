@@ -175,6 +175,13 @@
     line-height: 1.45;
 }
 
+.operations-case-queue__table ::deep .mud-table-cell { padding: .45rem .65rem; font-size: .76rem; line-height: 1.35; }
+.operations-case-queue__table ::deep th.mud-table-cell { font-size: .68rem; color: var(--sa-text-secondary); font-weight: 650; }
+.operations-case-queue__table ::deep .mud-chip { margin: 0; height: 1.5rem; font-size: .68rem; }
+.operations-case-queue__table ::deep .operations-case-queue__case-link { font-size: .78rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.operations-case-queue__secondary { display: block; margin-top: .15rem; font-size: .68rem; color: var(--sa-text-secondary); }
+.operations-case-queue__sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
 .operations-case-queue__reference {
     display: flex;
     align-items: center;
@@ -248,5 +255,16 @@
 
     .operations-case-queue__row-status ::deep .mud-chip {
         max-width: 5.75rem;
+    }
+}
+
+.operations-case-queue__observations { display: block; max-width: 24rem; font-size: .75rem; line-height: 1.5; overflow-wrap: anywhere; }
+.operations-case-queue__mobile-observations { grid-column: 2 / -1; grid-row: 2; margin: 0; font-size: .72rem; line-height: 1.5; color: var(--sa-text-secondary); }
+
+@media (min-width: 960px) {
+    .operations-case-queue__table ::deep .mud-table-container {
+        max-height: max(12rem, calc(100dvh - 22rem));
+        overflow: auto;
+        overscroll-behavior: contain;
     }
 }

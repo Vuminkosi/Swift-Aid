@@ -27,7 +27,9 @@ public sealed class MapAggregateEndpointTests
     {
         var builder = WebApplication.CreateBuilder();
         builder.Services.AddSingleton<IMapAggregateQuery>(new StubAggregateQuery());
-        builder.Services.AddAuthorization();
+        builder.Services.AddAuthorization(options => options.AddPolicy("SwiftAidStaffApi", policy =>
+            policy.AddAuthenticationSchemes(IdentityConstants.ApplicationScheme,
+                OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme).RequireAuthenticatedUser()));
         using var app = builder.Build();
         app.MapMapAggregateEndpoints();
 
@@ -38,9 +40,7 @@ public sealed class MapAggregateEndpointTests
             candidate => candidate.RoutePattern.RawText == "/api/v1/surveillance/area-aggregates");
 
         var authorization = Assert.Single(route.Metadata.GetOrderedMetadata<IAuthorizeData>());
-        Assert.Equal(
-            string.Join(",", IdentityConstants.ApplicationScheme, OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme),
-            authorization.AuthenticationSchemes);
+        Assert.Equal("SwiftAidStaffApi", authorization.Policy);
     }
 
     [Fact]
@@ -131,7 +131,9 @@ public sealed class MapAggregateEndpointTests
                 IdentityConstants.ApplicationScheme, _ => { })
             .AddScheme<AuthenticationSchemeOptions, TestAuthenticationHandler>(
                 OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme, _ => { });
-        builder.Services.AddAuthorization();
+        builder.Services.AddAuthorization(options => options.AddPolicy("SwiftAidStaffApi", policy =>
+            policy.AddAuthenticationSchemes(IdentityConstants.ApplicationScheme,
+                OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme).RequireAuthenticatedUser()));
         // No IMapAggregateQuery: the case command pipeline is disabled here.
         using var app = builder.Build();
         app.UseAuthentication();
@@ -201,7 +203,9 @@ public sealed class MapAggregateEndpointTests
                     IdentityConstants.ApplicationScheme, _ => { })
                 .AddScheme<AuthenticationSchemeOptions, TestAuthenticationHandler>(
                     OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme, _ => { });
-            builder.Services.AddAuthorization();
+            builder.Services.AddAuthorization(options => options.AddPolicy("SwiftAidStaffApi", policy =>
+            policy.AddAuthenticationSchemes(IdentityConstants.ApplicationScheme,
+                OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme).RequireAuthenticatedUser()));
 
             var service = new StubAggregateQuery(access);
             builder.Services.AddSingleton<IMapAggregateQuery>(service);

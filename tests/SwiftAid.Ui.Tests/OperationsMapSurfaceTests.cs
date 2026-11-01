@@ -45,6 +45,7 @@ public sealed class OperationsMapSurfaceTests
             Array.Empty<OperationsMapSurface.AreaAggregateView>());
 
         Assert.Contains("No area totals", markup, StringComparison.Ordinal);
+        Assert.Contains("Interactive surveillance map", markup, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -67,8 +68,10 @@ public sealed class OperationsMapSurfaceTests
         var markup = await RenderAsync(OperationsSurfaceState.Populated, areas, updatedAtUtc: true);
 
         Assert.Contains("Area totals", markup, StringComparison.Ordinal);
-        Assert.Contains("Country totals", markup, StringComparison.Ordinal);
-        Assert.Contains("Area totals remain available in the table.", markup, StringComparison.Ordinal);
+        Assert.Contains("Map of reported cases", markup, StringComparison.Ordinal);
+        Assert.Contains("Interactive surveillance map", markup, StringComparison.Ordinal);
+        Assert.Contains("Reset view", markup, StringComparison.Ordinal);
+        Assert.Contains("Recent signals", markup, StringComparison.Ordinal);
         Assert.Contains("Updated", markup, StringComparison.Ordinal);
         Assert.Contains("the last 30 days", markup, StringComparison.Ordinal);
     }

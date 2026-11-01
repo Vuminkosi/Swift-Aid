@@ -1,6 +1,8 @@
 @using System.Text.Json
+@using Microsoft.Extensions.Logging
 @using SwiftAid.UI.Components.Theme
 @inject IJSRuntime JavaScript
+@inject Microsoft.Extensions.Logging.ILogger<OperationsCountryBasemap> Logger
 @implements IAsyncDisposable
 
 <div class="operations-country-map">
@@ -28,7 +30,7 @@
     else
     {
         <svg class="operations-country-map__svg"
-             viewBox="0 0 960 480"
+             viewBox="@ViewBox"
              role="group"
              aria-labelledby="@MapTitleId @MapDescriptionId"
              preserveAspectRatio="xMidYMid meet">
@@ -54,7 +56,6 @@
                    tabindex="@(hasAggregate ? "0" : null)"
                    aria-label="@(hasAggregate ? CountryAccessibleLabel(country.Name, aggregate!) : null)"
                    aria-pressed="@(hasAggregate ? string.Equals(country.Code, SelectedCountryCode, StringComparison.Ordinal) : null)"
-                   @onpointerdown:stopPropagation="true"
                    @onclick="() => SelectCountryAsync(country.Code)"
                    @onkeydown="args => SelectCountryOnKeyDownAsync(args, country.Code)">
                     @foreach (var path in country.Paths)
@@ -65,6 +66,13 @@
                             <title>@country.Name</title>
                         </path>
                     }
+                </g>
+            }
+            @if (Focus is { } point)
+            {
+                <g role="img" aria-label="@($"Public place reference: {point.Label}")">
+                    <circle cx="@MapX(point.Longitude)" cy="@MapY(point.Latitude)" r="0.8" fill="var(--mud-palette-primary)" stroke="var(--mud-palette-background)" stroke-width="0.25" />
+                    <title>@point.Label ? public place reference, not a case location</title>
                 </g>
             }
         </svg>
@@ -104,6 +112,27 @@
     private string? _loadError;
 
     [Parameter, EditorRequired] public IReadOnlyList<OperationsMapSurface.AreaAggregateView> Areas { get; set; } = Array.Empty<OperationsMapSurface.AreaAggregateView>();
+    [Parameter] public string? FocusCountry { get; set; }
+    [Parameter] public OperationsMapSurface.MapFocus? Focus { get; set; }
+    private static string MapX(double longitude) => ((longitude + 180) * 960 / 360).ToString(System.Globalization.CultureInfo.InvariantCulture);
+    private static string MapY(double latitude) => ((90 - latitude) * 480 / 180).ToString(System.Globalization.CultureInfo.InvariantCulture);
+    private string ViewBox
+    {
+        get
+        {
+            var country = _countries.FirstOrDefault(item => item.Code == FocusCountry);
+            if (country is null) return "0 0 960 480";
+            var points = country.Paths.SelectMany(path =>
+                System.Text.RegularExpressions.Regex.Matches(path, @"-?\d+(?:\.\d+)?")
+                    .Select(match => double.Parse(match.Value, System.Globalization.CultureInfo.InvariantCulture))).ToArray();
+            var xs = points.Where((_, index) => index % 2 == 0).ToArray();
+            var ys = points.Where((_, index) => index % 2 == 1).ToArray();
+            if (xs.Length == 0 || ys.Length == 0) return "0 0 960 480";
+            var width = Math.Max(.5, Math.Max(xs.Max() - xs.Min(), (ys.Max() - ys.Min()) * 2) * 1.25);
+            width = Math.Min(960, width);
+            return FormattableString.Invariant($"{Math.Clamp((xs.Min() + xs.Max() - width) / 2, 0, 960 - width)} {Math.Clamp((ys.Min() + ys.Max() - width / 2) / 2, 0, 480 - width / 2)} {width} {width / 2}");
+        }
+    }
     [Parameter] public bool ShowHuman { get; set; } = true;
     [Parameter] public bool ShowAnimal { get; set; } = true;
     [Parameter] public string? SelectedCountryCode { get; set; }
@@ -136,12 +165,16 @@
         {
             using var timeout = new CancellationTokenSource(GeometryLoadTimeout);
             _module ??= await JavaScript.InvokeAsync<IJSObjectReference>("import", timeout.Token, GeometryModulePath);
-            var json = await _module.InvokeAsync<string>("loadCountryGeometry", timeout.Token);
+            await using var reference = await _module.InvokeAsync<IJSStreamReference>("loadCountryGeometry", timeout.Token);
+            await using var stream = await reference.OpenReadStreamAsync(256 * 1024, timeout.Token);
+            using var reader = new StreamReader(stream);
+            var json = await reader.ReadToEndAsync(timeout.Token);
             _countries = ParseGeometry(json);
             _geometryLoaded = true;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            Logger.LogWarning(exception, "Country geometry could not be loaded from the bundled map asset.");
             _geometryLoaded = false;
             _loadError = "Country outlines could not be loaded. Area totals remain available in the table.";
             _countries = Array.Empty<CountryFeature>();

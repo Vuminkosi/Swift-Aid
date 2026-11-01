@@ -15,6 +15,36 @@ public sealed class CaseCorrectionReadQueryTests
     private static readonly DateTimeOffset Now = new(2026, 10, 30, 12, 0, 0, TimeSpan.Zero);
 
     [Fact]
+    public async Task ReportReadRequiresReadGrantBeforeDecryptingEvidence()
+    {
+        var persistence = new StubPersistence(TypedAggregate());
+        var query = new CaseReportReadQuery(new StubPolicy(false, false), new StubUnitOfWork(), persistence);
+        Assert.Null(await query.GetAsync(Actor(), CaseId, CancellationToken.None));
+        Assert.Equal(0, persistence.ReplayCalls);
+    }
+
+    [Fact]
+    public async Task ReportReadShowsTypedEvidenceWithoutGrantingCorrection()
+    {
+        var policy = new StubPolicy(true, false);
+        var query = new CaseReportReadQuery(policy, new StubUnitOfWork(), new StubPersistence(TypedAggregate()));
+        var result = await query.GetAsync(Actor(), CaseId, CancellationToken.None);
+        Assert.NotNull(result);
+        Assert.Equal("synthetic typed narrative", result.Narrative);
+        Assert.Equal("reported symptom, not a diagnosis", Assert.Single(result.Observations));
+        Assert.Equal("ZA", result.Location?.CountryCode);
+        Assert.Equal([CaseOperation.ReadCase], policy.Operations);
+        Assert.Empty(policy.CombinedOperations);
+    }
+
+    [Fact]
+    public async Task ReportReadDoesNotTurnStorageFailureIntoEmptyObservations()
+    {
+        var query = new CaseReportReadQuery(new StubPolicy(true, false), new StubUnitOfWork(), new StubPersistence(null, true));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => query.GetAsync(Actor(), CaseId, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task LegacyReport_WithBothGrants_ReturnsVersionAndNarrative()
     {
         var policy = new StubPolicy(true, true);
@@ -174,7 +204,7 @@ public sealed class CaseCorrectionReadQueryTests
         var report = HumanReport.Create(Guid.Parse("40000000-0000-0000-0000-000000000002"), context,
             ReportedFact<string>.Unknown(provenance), ReportedFact<int>.Unknown(provenance),
             ReportedFact<string>.Known("reported concern", provenance),
-            new ReportEvidence(new ReportedText("synthetic typed narrative", provenance), [], null));
+            new ReportEvidence(new ReportedText("synthetic typed narrative", provenance), [new ReportedText("reported symptom, not a diagnosis", provenance)], null));
         var reportData = new CaseReportEventData.HumanV2(report,
             new ReportConfirmations(true, "ZA", "catalogue-test", true, true, "policy-test", "v1", null, null, null));
         var commandId = Guid.NewGuid();

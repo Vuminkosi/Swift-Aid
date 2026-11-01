@@ -9,12 +9,19 @@ namespace SwiftAid.Infrastructure.Persistence.Repositories.Cases;
 /// recently recorded journal event. Cases without journal rows fall back to the
 /// projection timestamp. No sealed payloads are read.
 /// </summary>
-public sealed class PostgresCaseQueueStore(SwiftAidDbContext dbContext) : ICaseQueueStore
+public sealed class PostgresCaseQueueStore(SwiftAidDbContext dbContext) : ICaseQueueStore, ICaseMapCandidateStore
 {
     private readonly SwiftAidDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
 
-    public async Task<IReadOnlyList<CaseQueueCandidate>> GetOwnedCasesAsync(
-        string ownerActorId, int take, CancellationToken ct)
+    public Task<IReadOnlyList<CaseQueueCandidate>> GetOwnedCasesAsync(string ownerActorId, int take, CancellationToken ct) =>
+        ReadAsync(ownerActorId, take, null, null, null, ct);
+
+    public Task<IReadOnlyList<CaseQueueCandidate>> GetAsync(string ownerActorId, string workspaceId,
+        string countryCode, DateTimeOffset sinceUtc, int take, CancellationToken ct) =>
+        ReadAsync(ownerActorId, take, workspaceId, countryCode, sinceUtc, ct);
+
+    private async Task<IReadOnlyList<CaseQueueCandidate>> ReadAsync(
+        string ownerActorId, int take, string? workspaceId, string? countryCode, DateTimeOffset? sinceUtc, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(ownerActorId);
         if (take < 1)
@@ -24,10 +31,17 @@ public sealed class PostgresCaseQueueStore(SwiftAidDbContext dbContext) : ICaseQ
 
         var rows = await _dbContext.ManagedCases.AsNoTracking()
             .Where(item => item.AccountableOwnerActorId == ownerActorId)
+            .Where(item => workspaceId == null || item.WorkspaceId == workspaceId)
+            .Where(item => countryCode == null || item.CountryCode == countryCode)
+            .Where(item => sinceUtc == null || item.CreatedAtUtc >= sinceUtc)
             .Select(item => new
             {
                 item.CaseId,
                 Workflow = item.Workflow.ToString(),
+                item.Sector,
+                item.Classification,
+                item.WorkspaceId,
+                item.CreatedAtUtc,
                 item.CountryCode,
                 item.AccountableOwnerActorId,
                 item.AggregateVersion,
@@ -49,7 +63,9 @@ public sealed class PostgresCaseQueueStore(SwiftAidDbContext dbContext) : ICaseQ
                 item.AccountableOwnerActorId,
                 item.AggregateVersion,
                 item.UpdatedAtUtc,
-                item.LastRecordedAtUtc ?? item.UpdatedAtUtc))
+                item.LastRecordedAtUtc ?? item.UpdatedAtUtc,
+                item.Sector.ToString(),
+                item.Classification.ToString(), item.WorkspaceId, item.CreatedAtUtc))
             .ToArray();
     }
 }

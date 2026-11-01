@@ -100,11 +100,12 @@
                 {
                     <div class="operations-dashboard__case-table-wrap">
                         <table class="operations-dashboard__case-table">
-                            <thead><tr><th>Case</th><th>Condition</th><th>Location</th><th>Status</th><th>Reported</th></tr></thead>
+                            <caption class="operations-dashboard__table-caption">Most recently reported cases you can access</caption>
+                            <thead><tr><th scope="col">Case / type</th><th scope="col">Observations / classification</th><th scope="col">Location</th><th scope="col">Status</th><th scope="col">Reported</th><th scope="col"><span class="operations-dashboard__sr-only">Open case</span></th></tr></thead>
                             <tbody>
                                 @foreach (var item in Overview.RecentCases.OrderByDescending(item => item.ReportedAtUtc).Take(6))
                                 {
-                                    <tr>
+                                    <tr @key="item.CaseId">
                                         <td data-label="Case">
                                             @if (DashboardCaseView.GetCaseHref(item.CaseId) is { } caseHref)
                                             {
@@ -121,10 +122,10 @@
                                             <span class="operations-dashboard__case-sector">@SectorLabel(item.SubjectSector)</span>
                                         </td>
                                         <td data-label="Condition">
-                                            <span class="operations-dashboard__condition-name">@item.ReportedConditionLabel</span>
+                                            <span class="operations-dashboard__condition-name">@(item.ObservationPreview ?? item.ReportedConditionLabel)</span>
                                             <span class="operations-dashboard__condition-kind">@item.ClassificationLabel</span>
                                         </td>
-                                        <td data-label="Location">@item.RegionLabel</td>
+                                        <td data-label="Location">@if (item.LocationHref is not null) { <MudLink Href="@item.LocationHref">@item.RegionLabel</MudLink> } else { @item.RegionLabel }</td>
                                         <td data-label="Status">
                                             <span class="operations-dashboard__status @WorkflowClass(item.WorkflowState)">@WorkflowLabel(item.WorkflowState)</span>
                                             @if (item.AdministrativePriority == DashboardPriorityView.High)
@@ -132,7 +133,13 @@
                                             <span class="operations-dashboard__priority" title="Administrative priority">High priority</span>
                                             }
                                         </td>
-                                        <td data-label="Reported">@RelativeTime(item.ReportedAtUtc)</td>
+                                        <td data-label="Reported"><time datetime="@item.ReportedAtUtc.ToString("O")" title="@item.ReportedAtUtc.ToLocalTime().ToString("f")">@RelativeTime(item.ReportedAtUtc)</time><span class="operations-dashboard__condition-kind">@item.ReportedAtUtc.ToLocalTime().ToString("dd MMM yyyy")</span></td>
+                                        <td data-label="Open">
+                                            @if (DashboardCaseView.GetCaseHref(item.CaseId) is { } detailHref)
+                                            {
+                                                <MudIconButton Href="@detailHref" Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" aria-label="@($"View {item.DisplayReference}")" />
+                                            }
+                                        </td>
                                     </tr>
                                 }
                             </tbody>
@@ -288,7 +295,7 @@
                 </div>
                 <OperationsMapSurface Eyebrow="Authorized area totals" Title="Map of recent reports" HeadingTag="h3"
                                       Description="Privacy-protected counts by area."
-                                      State="MapState" Areas="MapAreas" UpdatedAtUtc="UpdatedAtUtc"
+                                      State="MapState" Areas="MapAreas" Details="MapDetails" FocusCountry="@(string.IsNullOrEmpty(RegionCode) ? "SZ" : RegionCode)" UpdatedAtUtc="UpdatedAtUtc"
                                       ContractVersion="1" PeriodLabel="@PeriodLabel" CompactPreview="true"
                                       OnRetry="OnRetryAll" />
             </section>
@@ -355,6 +362,7 @@
 
     [Parameter] public DashboardOverviewView? Overview { get; set; }
     [Parameter] public OperationsSurfaceState OverviewState { get; set; } = OperationsSurfaceState.Loading;
+    [Parameter] public SwiftAid.Contracts.Surveillance.SurveillanceMapDetails? MapDetails { get; set; }
     [Parameter] public OperationsSurfaceState MapState { get; set; } = OperationsSurfaceState.Unavailable;
     [Parameter] public IReadOnlyList<OperationsMapSurface.AreaAggregateView> MapAreas { get; set; } = Array.Empty<OperationsMapSurface.AreaAggregateView>();
     [Parameter] public IReadOnlyList<OperationsMapSurface.AreaAggregateView> RegionOptions { get; set; } = Array.Empty<OperationsMapSurface.AreaAggregateView>();

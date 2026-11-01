@@ -39,6 +39,28 @@ public sealed class DisabledIdentityChallengeTests
         Assert.Null(response.Headers.Location);
     }
 
+    [Fact]
+    public async Task MapEndpointUsesConfiguredStaffPolicyWithoutLocalBearerHandler()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Identity:Enabled"] = "false",
+            ["Federation:Enabled"] = "true"
+        });
+        GatewayAuthenticationRegistration.Configure(builder.Services, builder.Configuration);
+        builder.Services.AddAuthentication().AddCookie(IdentityConstants.ApplicationScheme);
+        await using var application = builder.Build();
+        application.UseAuthentication();
+        application.UseAuthorization();
+        SwiftAid.Gateway.Endpoints.MapAggregateEndpoints.MapMapAggregateEndpoints(application);
+        await application.StartAsync();
+        using var response = await application.GetTestClient().GetAsync("/api/v1/surveillance/area-aggregates");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Null(response.Headers.Location);
+    }
+
     private sealed class UnusedClassificationQuery : SwiftAid.Application.Classification.ICaseClassificationQuery
     {
         public Task<IReadOnlyList<SwiftAid.Application.Classification.CaseClassificationEvidence>?> GetAsync(

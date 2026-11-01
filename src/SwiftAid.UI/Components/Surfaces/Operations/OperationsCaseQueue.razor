@@ -150,18 +150,22 @@
     else
     {
         <MudHidden Breakpoint="Breakpoint.MdAndDown">
-            <MudTable Items="Items" Hover="true" Dense="true" RowsPerPage="Query.PageSize" aria-label="Authorized cases">
+            <MudTable Items="Items" Hover="true" Dense="true" FixedHeader="true" RowsPerPage="Query.PageSize" Class="operations-case-queue__table" aria-label="Authorized cases">
                 <HeaderContent>
-                    <MudTh>Case</MudTh><MudTh>Type</MudTh><MudTh>Status</MudTh><MudTh>Country and region</MudTh><MudTh>Reported category</MudTh><MudTh>Assigned to</MudTh><MudTh>Updated</MudTh>
+                    <MudTh>Case / type</MudTh><MudTh>Observations</MudTh><MudTh>Status</MudTh><MudTh>Location</MudTh><MudTh>Classification</MudTh><MudTh>Assigned to</MudTh><MudTh>Updated</MudTh><MudTh><span class="operations-case-queue__sr-only">Open case</span></MudTh>
                 </HeaderContent>
                 <RowTemplate>
-                    <MudTd DataLabel="Case">@CaseReference(context)</MudTd>
-                    <MudTd DataLabel="Type">@SectorLabel(context.Sector)</MudTd>
+                    <MudTd DataLabel="Case">
+                        <MudLink Href="@($"/case/{context.CaseId:D}")" Class="operations-case-queue__case-link" aria-label="@($"Open {CaseReferenceLabel(context)}")">@CaseReferenceLabel(context)</MudLink>
+                        <span class="operations-case-queue__secondary">@SectorLabel(context.Sector)</span>
+                    </MudTd>
+                    <MudTd DataLabel="Observations"><span class="operations-case-queue__observations">@(context.ObservationPreview ?? "Observations unavailable")</span></MudTd>
                     <MudTd DataLabel="Status"><MudChip T="string" Size="Size.Small" Color="@WorkflowColor(context.Workflow)">@StatusLabel(context.Workflow)</MudChip></MudTd>
-                    <MudTd DataLabel="Country and region">@LocationLabel(context)</MudTd>
-                    <MudTd DataLabel="Reported category">@(context.ReportedCategoryLabel ?? "Not recorded")</MudTd>
+                    <MudTd DataLabel="Country and region">@if (context.LocationHref is not null) { <MudLink Href="@context.LocationHref">@context.RegionLabel</MudLink> } else { @LocationLabel(context) }</MudTd>
+                    <MudTd DataLabel="Classification">@(context.ReportedCategoryLabel ?? "Not recorded")</MudTd>
                     <MudTd DataLabel="Assigned to">@(context.AssigneeLabel ?? "Not recorded")</MudTd>
-                    <MudTd DataLabel="Updated">@context.UpdatedAtUtc.ToLocalTime().ToString("g")</MudTd>
+                    <MudTd DataLabel="Updated"><time datetime="@context.UpdatedAtUtc.ToString("O")" title="@context.UpdatedAtUtc.ToLocalTime().ToString("f")">@RelativeTime(context.UpdatedAtUtc)</time><span class="operations-case-queue__secondary">@context.UpdatedAtUtc.ToLocalTime().ToString("dd MMM yyyy")</span></MudTd>
+                    <MudTd><MudIconButton Href="@($"/case/{context.CaseId:D}")" Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" aria-label="@($"View {CaseReferenceLabel(context)}")" /></MudTd>
                 </RowTemplate>
             </MudTable>
         </MudHidden>
@@ -185,9 +189,10 @@
                             </MudText>
                             <div class="operations-case-queue__row-location">
                                 <MudIcon Icon="@Icons.Material.Filled.Place" aria-hidden="true" />
-                                <MudText Typo="Typo.caption">@LocationLabel(item)</MudText>
+                                @if (item.LocationHref is not null) { <MudLink Href="@item.LocationHref">@item.RegionLabel</MudLink> } else { <MudText Typo="Typo.caption">@LocationLabel(item)</MudText> }
                             </div>
                         </div>
+                        <p class="operations-case-queue__mobile-observations">@(item.ObservationPreview ?? "Observations unavailable")</p>
                         <div class="operations-case-queue__row-status">
                             <MudChip T="string" Size="Size.Small" Color="@WorkflowColor(item.Workflow)">@StatusLabel(item.Workflow)</MudChip>
                             <MudText Typo="Typo.caption" Color="Color.Secondary" title="@item.UpdatedAtUtc.ToLocalTime().ToString("g")">
@@ -260,7 +265,9 @@
         string? RegionLabel,
         string? AssigneeLabel,
         string? ReportedCategoryLabel,
-        DateTimeOffset UpdatedAtUtc);
+        DateTimeOffset UpdatedAtUtc,
+        string? LocationHref = null,
+        string? ObservationPreview = null);
 
     private string? _copyStatus;
     private bool _copySucceeded;

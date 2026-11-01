@@ -153,7 +153,9 @@ public sealed record DashboardRecentCase(
     string RegionLabel,
     DashboardWorkflowState WorkflowState,
     DashboardAdministrativePriority AdministrativePriority,
-    DateTimeOffset ReportedAtUtc)
+    DateTimeOffset ReportedAtUtc,
+    string? LocationHref = null,
+    string? ObservationPreview = null)
 {
     public bool IsValid => !string.IsNullOrWhiteSpace(CaseId) && CaseId.Length <= 128 &&
         !string.IsNullOrWhiteSpace(DisplayReference) && DisplayReference.Length <= 64 &&

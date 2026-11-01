@@ -55,7 +55,9 @@ public sealed record CaseWorkspaceRow(
     string? ReportedCategoryLabel,
     DateTimeOffset UpdatedAtUtc,
     long AggregateVersion,
-    IReadOnlyList<CaseWorkspaceAction> AvailableActions);
+    IReadOnlyList<CaseWorkspaceAction> AvailableActions,
+    string? LocationHref = null,
+    string? ObservationPreview = null);
 
 public enum CaseWorkspaceAction
 {

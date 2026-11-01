@@ -15,7 +15,7 @@
                 <MudText id="case-detail-title" Typo="Typo.h5" HtmlTag="h1">Case #@summary.PublicReference</MudText>
                 <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">@WorkflowDisplayLabel(summary.Workflow)</MudChip>
             </div>
-            <MudText Typo="Typo.body2" Color="Color.Secondary">@summary.ClassificationLabel · @summary.LocationLabel</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@summary.ClassificationLabel · @(LocationLabelOverride ?? summary.LocationLabel)</MudText>
         }
         else
         {
@@ -30,6 +30,7 @@
 
     <MudTabs @ref="_tabs" @bind-ActivePanelIndex="_activePanelIndex" @bind-ActivePanelIndex:after="SyncActiveTabToUriAsync" Rounded="false" ApplyEffectsToContainer="false" Class="case-detail__tabs">
         <MudTabPanel Text="Overview" Icon="@Icons.Material.Outlined.FolderOpen">
+            @ReportContent
             @if (OverviewData is { State: CaseDetailPanelState.Populated, Summary: { } overview })
             {
                 <section class="case-detail__section" aria-labelledby="summary-heading">
@@ -39,7 +40,10 @@
                         <div><dt>Type</dt><dd>@SubjectTypeLabel(overview.SubjectType)</dd></div>
                         <div><dt>Classification</dt><dd>@overview.ClassificationLabel</dd></div>
                         <div><dt>Priority</dt><dd>@overview.PriorityLabel</dd></div>
-                        <div><dt>Location</dt><dd>@overview.LocationLabel, @overview.CountryLabel</dd></div>
+                        <div><dt>Location</dt><dd>
+                            @if (LocationHref is not null) { <MudLink Href="@LocationHref">@(LocationLabelOverride ?? overview.LocationLabel)</MudLink> }
+                            else { @(overview.LocationLabel == overview.CountryLabel ? overview.CountryLabel : $"{overview.LocationLabel}, {overview.CountryLabel}") }
+                        </dd></div>
                         <div><dt>Owner</dt><dd>@SafeLabel(overview.OwnerDisplayLabel)</dd></div>
                         <div><dt>Reported</dt><dd>@overview.OpenedAtUtc.ToLocalTime().ToString("g")</dd></div>
                         <div><dt>Updated</dt><dd>@overview.UpdatedAtUtc.ToLocalTime().ToString("g")</dd></div>
@@ -203,6 +207,7 @@
         </MudTabPanel>
         <MudTabPanel Text="Observations" Icon="@Icons.Material.Outlined.Visibility">
             <section class="case-detail__section" aria-label="Case observations">
+                @ReportContent
                 <div class="case-detail__section-heading"><MudText Typo="Typo.subtitle1" HtmlTag="h2">Recorded observations</MudText><MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.Add" Color="Color.Primary" OnClick="OpenObservation">Add observation</MudButton></div>
                 @if (ObservationsData is { State: CaseDetailPanelState.Populated } observations)
                 {
@@ -232,6 +237,9 @@
 @code {
     [Parameter, EditorRequired] public Guid CaseId { get; set; }
     [Parameter] public ICaseTimelineClient? TimelineClient { get; set; }
+    [Parameter] public string? LocationLabelOverride { get; set; }
+    [Parameter] public string? LocationHref { get; set; }
+    [Parameter] public RenderFragment? ReportContent { get; set; }
     [Parameter] public CaseDetailOverviewView? OverviewData { get; set; }
     [Parameter] public EventCallback OnRefreshOverview { get; set; }
     [Parameter] public CaseDetailCorrectionView? CorrectionData { get; set; }

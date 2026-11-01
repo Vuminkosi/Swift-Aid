@@ -42,7 +42,8 @@ public sealed class MapAggregateGatewayClient(
             return Denied();
         }
 
-        var aggregateQuery = _serviceProvider.GetService<IMapAggregateQuery>();
+        await using var scope = _serviceProvider.CreateAsyncScope();
+        var aggregateQuery = scope.ServiceProvider.GetService<IMapAggregateQuery>();
         if (aggregateQuery is null)
         {
             return Unavailable("Map totals are not available right now.");

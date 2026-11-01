@@ -9,7 +9,8 @@ namespace SwiftAid.Gateway.Cases;
 /// <summary>Builds a presentation-only workspace from the authorized mine queue and public country labels.</summary>
 public sealed class CaseWorkspaceGatewayClient(
     ICaseQueueClient caseQueueClient,
-    IPublicIntakeMetadataClient publicMetadataClient) : ICaseWorkspaceClient
+    IPublicIntakeMetadataClient publicMetadataClient,
+    ICaseReportDetailsClient? reportClient = null) : ICaseWorkspaceClient
 {
     private const int MaximumRows = 100;
     private const string Capability = "case-workspace";
@@ -59,6 +60,20 @@ public sealed class CaseWorkspaceGatewayClient(
             .Take(query.Page.PageSize)
             .Select(pair => pair.Row)
             .ToArray();
+        if (reportClient is not null)
+        {
+            for (var index = 0; index < pageItems.Length; index++)
+            {
+                var result = await reportClient.GetAsync(pageItems[index].CaseId, cancellationToken);
+                if (result.Succeeded && result.Value is { } report)
+                    pageItems[index] = pageItems[index] with
+                    {
+                        RegionLabel = report.Location is { } place ? CaseReportDisplay.LocationLabel(place) : pageItems[index].RegionLabel,
+                        LocationHref = report.Location is { } target ? CaseReportDisplay.MapHref(target) : null,
+                        ObservationPreview = CaseReportDisplay.ObservationPreview(report)
+                    };
+            }
+        }
         var page = new Page<CaseWorkspaceRow>(
             pageItems,
             query.Page.PageNumber,
@@ -119,13 +134,18 @@ public sealed class CaseWorkspaceGatewayClient(
 
     private static CaseWorkspaceRow ToRow(CaseQueueItem item, IReadOnlyDictionary<string, string> countryLabels) => new(
         item.CaseId,
-        PublicReference: null,
+        PublicReference: "Case " + item.CaseId.ToString("N")[..8],
         item.Workflow,
         countryLabels.GetValueOrDefault(item.CountryCode) ?? "Country not listed",
-        CaseWorkspaceSector.Unknown,
+        item.Sector switch
+        {
+            "HumanHealth" => CaseWorkspaceSector.Human,
+            "AnimalHealth" => CaseWorkspaceSector.Animal,
+            _ => CaseWorkspaceSector.Unknown
+        },
         RegionLabel: null,
         AssigneeLabel: "Assigned to you",
-        ReportedCategoryLabel: null,
+        ReportedCategoryLabel: item.Classification,
         item.UpdatedAtUtc,
         item.AggregateVersion,
         [CaseWorkspaceAction.Open]);

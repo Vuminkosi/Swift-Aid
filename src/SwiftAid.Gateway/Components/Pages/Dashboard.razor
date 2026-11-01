@@ -4,12 +4,13 @@
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject IDashboardOverviewClient DashboardClient
 @inject IMapAggregateClient MapAggregateClient
+@inject ISurveillanceMapDetailsClient MapDetailsClient
 
 <PageTitle>Dashboard | SwiftAid</PageTitle>
 <OperationsDashboard Overview="_overview"
                      OverviewState="_overviewState"
                      MapState="_mapState"
-                     MapAreas="_mapAreas"
+                     MapAreas="_mapAreas" MapDetails="_mapDetails"
                      RegionOptions="_regionOptions"
                      Period="_period"
                      Sector="_sector"
@@ -31,7 +32,7 @@
     private static readonly TimeSpan DashboardRequestTimeout = TimeSpan.FromSeconds(15);
     private DashboardPeriodView _period = DashboardPeriodView.Days30;
     private DashboardSectorView _sector = DashboardSectorView.Human;
-    private string? _regionCode;
+    private string? _regionCode = "SZ";
     private DashboardOverviewView? _overview;
     private IReadOnlyList<OperationsMapSurface.AreaAggregateView> _mapAreas = Array.Empty<OperationsMapSurface.AreaAggregateView>();
     private IReadOnlyList<OperationsMapSurface.AreaAggregateView> _regionOptions = Array.Empty<OperationsMapSurface.AreaAggregateView>();
@@ -40,6 +41,8 @@
     private DateTimeOffset? _updatedAtUtc;
     private long _overviewRequestGeneration;
     private long _mapRequestGeneration;
+    private long _detailsRequestGeneration;
+    private SwiftAid.Contracts.Surveillance.SurveillanceMapDetails? _mapDetails;
 
     private string PeriodDescription => _period == DashboardPeriodView.Days90 ? "Last 90 days" : "Last 30 days";
 
@@ -82,12 +85,21 @@
 
     private async Task LoadAsync()
     {
+        var generation = ++_detailsRequestGeneration;
+        var country = _regionCode ?? "SZ";
+        var period = _period == DashboardPeriodView.Days90 ? MapAggregatePeriod.Days90 : MapAggregatePeriod.Days30;
+        _mapDetails = null;
         _overviewState = OperationsSurfaceState.Loading;
         _mapState = OperationsSurfaceState.Loading;
         _overview = null;
         _updatedAtUtc = null;
         await InvokeAsync(StateHasChanged);
         await Task.WhenAll(LoadOverviewAsync(), LoadMapAsync());
+        if (generation != _detailsRequestGeneration) return;
+        var details = await MapDetailsClient.GetAsync(country, period);
+        if (generation != _detailsRequestGeneration) return;
+        _mapDetails = details.Succeeded ? details.Value : null;
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task LoadOverviewAsync()
@@ -143,7 +155,7 @@
         {
             using var timeout = new CancellationTokenSource(DashboardRequestTimeout);
             var result = await MapAggregateClient.GetAsync(
-                new MapAggregateQuery(new PageRequest(1, 100), _regionCode, period), timeout.Token);
+                new MapAggregateQuery(new PageRequest(1, 100), null, period), timeout.Token);
             if (generation != Volatile.Read(ref _mapRequestGeneration))
                 return;
 
@@ -159,14 +171,12 @@
                 return;
             }
 
-            _mapAreas = page.Areas.Items.Select(area => ToMapView(area, _sector)).ToArray();
+            _mapAreas = page.Areas.Items.Where(area => string.IsNullOrWhiteSpace(_regionCode) || area.AreaCode == _regionCode)
+                .Select(area => ToMapView(area, _sector)).ToArray();
             _mapState = _mapAreas.Count > 0 ? OperationsSurfaceState.Populated : OperationsSurfaceState.Empty;
-            if (string.IsNullOrWhiteSpace(_regionCode))
-            {
                 _regionOptions = page.Areas.Items.Select(area => ToMapView(area, DashboardSectorView.OneHealth))
                     .OrderBy(area => area.AreaLabel, StringComparer.CurrentCultureIgnoreCase)
                     .ToArray();
-            }
 
             _updatedAtUtc = _updatedAtUtc is null || page.AsOfUtc > _updatedAtUtc ? page.AsOfUtc : _updatedAtUtc;
         }
@@ -256,7 +266,7 @@
             item.RegionLabel,
             (DashboardWorkflowViewState)item.WorkflowState,
             (DashboardPriorityView)item.AdministrativePriority,
-            item.ReportedAtUtc)).ToArray(),
+            item.ReportedAtUtc, item.LocationHref, item.ObservationPreview)).ToArray(),
         overview.RecentOperationalAlerts.Select(item => new DashboardAlertView(
             (DashboardAlertViewKind)item.Kind,
             ToView(item.Sector),

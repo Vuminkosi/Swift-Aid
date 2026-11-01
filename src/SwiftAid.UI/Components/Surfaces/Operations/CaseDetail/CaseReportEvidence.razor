@@ -1,0 +1,38 @@
+@using SwiftAid.Contracts.Cases
+
+<section class="case-report-evidence" aria-label="Original report and observations">
+    <h2>Reported observations</h2>
+    @if (Report is not null)
+    {
+        @if (!string.IsNullOrWhiteSpace(Report.Narrative))
+        {
+            <h3>Report narrative</h3>
+            <p class="case-report-evidence__text">@Report.Narrative</p>
+        }
+        @if (Report.Observations.Count == 0)
+        {
+            <p>No separate observations were recorded.</p>
+        }
+        else
+        {
+            <ul>
+                @foreach (var observation in Report.Observations)
+                {
+                    <li class="case-report-evidence__text">@observation</li>
+                }
+            </ul>
+        }
+        <small>Recorded evidence · report revision @Report.ReportRevision</small>
+    }
+    else
+    {
+        <p role="status">@(Loading ? "Loading reported observations…" : "Reported observations could not be loaded.")</p>
+        @if (!Loading) { <MudButton OnClick="OnRetry" Size="Size.Small">Try again</MudButton> }
+    }
+</section>
+
+@code {
+    [Parameter] public CaseReportDetails? Report { get; set; }
+    [Parameter] public bool Loading { get; set; }
+    [Parameter] public EventCallback OnRetry { get; set; }
+}
