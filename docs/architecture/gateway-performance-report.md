@@ -4,6 +4,8 @@
 
 ## Final consolidated checks and delivery boundary
 
+Subsequent classification work is measured in [the classification implementation report](gateway-classification-implementation.md#executed-validation-local-windows--synthetic-fixtures). Its single-report real BART/replay test does not change the 15,000-row ingestion measurement into a classification benchmark.
+
 PASS: 91 integration tests, 2 opt-in skips, at `62608eb` with the disposable PostgreSQL, restricted import runtime and NATS fixture variables configured:
 
 ```powershell

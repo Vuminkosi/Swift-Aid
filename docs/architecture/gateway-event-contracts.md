@@ -35,3 +35,9 @@ Delivery states are derived from existing rows:
 Published means broker storage only. It does not mean extraction, classification, investigation or human verification completed. Consumers still require a durable inbox/result transaction, explicit ACK after commit, current source-version checks and replay reconciliation beyond the two-minute broker deduplication window. These consumer requirements are not satisfied merely by this notice contract.
 
 Failure codes are closed and contain no exception messages: `publish-timeout`, `jetstream-unavailable`, `invalid-notice`, `publish-failed`, `unexpected-stream`, `lease-expired`.
+
+## Classification lifecycle v1
+
+Subject `swiftaid.ingestion.v1.classification`, same bounded `SWIFTAID_INGESTION` stream. Fields: `schemaVersion`, stable `messageId`, monotonically increasing outbox `sequence`, `resultId`, nullable `caseId`/`reportRevision`, `eventType`, `recordedAtUtc`. No source text, scores, tenant authority or credentials are published. The first slice emits `ClassificationRequested`, `ClassificationCompleted`, `ClassificationFailed` and `ClassificationReused`; explicit supersession events remain follow-up work. Result reads must join the current report revision and selected configuration, never treat every historical association as current.
+
+The classification durable filters only `swiftaid.ingestion.v1.case`; it cannot consume its own lifecycle events. Gateway persists inbox/results/associations/lifecycle records transactionally. Actual model attempts are bounded in PostgreSQL; broker redelivery is unlimited to avoid abandoning work during control-plane outages before a terminal outcome can be stored. Invalid notices require committed quarantine metadata before ACK. See [classification details](gateway-classification-implementation.md).

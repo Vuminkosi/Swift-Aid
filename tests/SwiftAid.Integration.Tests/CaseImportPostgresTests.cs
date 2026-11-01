@@ -177,6 +177,8 @@ public sealed class CaseImportPostgresTests
         private readonly CaseRegistrationBackendTests.SyntheticRegistrationKeyRing _keys;
         public SwiftAidDbContext Db { get; }
         public ProtectedPayloadDataProtectionProvider Protection { get; }
+        internal SwiftAid.Infrastructure.Persistence.Protection.PostgresProtectedCaseEventPayloadStore ClassificationPayloadStore(SwiftAidDbContext db) =>
+            new(db, new SwiftAid.Infrastructure.Persistence.Transactions.PostgresCaseCommandUnitOfWork(db), _keys.CreateOptions(), Protection);
         public PostgresCaseImportStore Store { get; }
         public CaseCsvImportService Service { get; }
 

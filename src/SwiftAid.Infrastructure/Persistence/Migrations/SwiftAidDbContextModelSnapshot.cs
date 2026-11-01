@@ -917,6 +917,269 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.ClassificationAssociationEntity", b =>
+                {
+                    b.Property<Guid>("CaseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("ReportRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("ConfigurationId")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ResultId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Reused")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("SourceEventId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("CaseId", "ReportRevision", "ConfigurationId");
+
+                    b.HasIndex("ResultId");
+
+                    b.HasIndex("SourceEventId");
+
+                    b.ToTable("associations", "swiftaid_classification");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.ClassificationConfigurationEntity", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ProfileJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("configurations", "swiftaid_classification");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.ClassificationEventEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("AvailableAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CaseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("ExhaustedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FailureCode")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("LeaseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("LeaseUntilUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("PublishedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("ReportRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("ResultId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("Sequence")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Sequence"));
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ResultId");
+
+                    b.HasIndex("Sequence")
+                        .IsUnique();
+
+                    b.HasIndex("AvailableAtUtc", "CreatedAtUtc")
+                        .HasFilter("\"PublishedAtUtc\" IS NULL AND \"ExhaustedAtUtc\" IS NULL");
+
+                    b.ToTable("outbox", "swiftaid_classification");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.ClassificationInboxEntity", b =>
+                {
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ConfigurationId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("FailureCode")
+                        .HasColumnType("text");
+
+                    b.Property<string>("NoticeHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid?>("ResultId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("MessageId", "ConfigurationId");
+
+                    b.HasIndex("ResultId");
+
+                    b.ToTable("inbox", "swiftaid_classification");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.ClassificationQuarantineEntity", b =>
+                {
+                    b.Property<string>("WorkerId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<decimal>("StreamSequence")
+                        .HasColumnType("numeric(20,0)");
+
+                    b.Property<string>("PayloadSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("RecordedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("WorkerId", "StreamSequence");
+
+                    b.ToTable("quarantine", "swiftaid_classification");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.ClassificationResultEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AbstentionReason")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("AttemptStartedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("AvailableAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("CompletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ConfigurationId")
+                        .IsRequired()
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FailureCode")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<double>("InferenceMilliseconds")
+                        .HasColumnType("double precision");
+
+                    b.Property<int>("InputTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("LeaseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("LeaseUntilUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("OrganizationId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("PredictionsJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("WorkerId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("WorkspaceId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConfigurationId");
+
+                    b.HasIndex("Fingerprint")
+                        .IsUnique();
+
+                    b.HasIndex("State", "AvailableAtUtc");
+
+                    b.HasIndex("WorkspaceId", "OrganizationId");
+
+                    b.ToTable("results", "swiftaid_classification", t =>
+                        {
+                            t.HasCheckConstraint("ck_classification_attempts", "\"Attempts\" BETWEEN 0 AND 8");
+
+                            t.HasCheckConstraint("ck_classification_lease", "(\"State\" = 'Leased') = (\"LeaseId\" IS NOT NULL AND \"LeaseUntilUtc\" IS NOT NULL AND \"WorkerId\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_classification_state", "\"State\" IN ('Pending','Leased','RetryScheduled','Completed','Failed')");
+                        });
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.CommandReceiptEntity", b =>
                 {
                     b.Property<Guid>("ReceiptId")
@@ -3774,6 +4037,59 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasForeignKey("RevokedByActorId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_case_shares_revoker");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.ClassificationAssociationEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.ManagedCaseEntity", null)
+                        .WithMany()
+                        .HasForeignKey("CaseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.Classification.ClassificationResultEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ResultId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.CaseEventEntity", null)
+                        .WithMany()
+                        .HasForeignKey("SourceEventId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.ClassificationEventEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.Classification.ClassificationResultEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ResultId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.ClassificationInboxEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.Classification.ClassificationResultEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ResultId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.ClassificationResultEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.Classification.ClassificationConfigurationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ConfigurationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.WorkspaceOrganizationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("WorkspaceId", "OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.CommandReceiptEntity", b =>

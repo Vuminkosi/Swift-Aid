@@ -155,6 +155,32 @@ public sealed class PostgresProtectedCaseEventPayloadStore : IProtectedCaseEvent
         ReadOnlyMemory<byte> protectedBytes,
         CancellationToken cancellationToken)
     {
+        _ = PostgresLeaseGuard.RequireCurrent(_dbContext, _leaseAccessor, caseId);
+        return await UnprotectCoreAsync(caseId, payloadId, eventType, schemaVersion,
+            protectionPurposeVersion, protectedBytes, cancellationToken).ConfigureAwait(false);
+    }
+
+    // A machine principal never impersonates a case owner. This separate internal read path
+    // requires a transaction and locks the explicitly configured organizational authority.
+    internal async ValueTask<byte[]> UnprotectForClassificationAsync(
+        CaseEventEntity source, IReadOnlyCollection<string> organizations, CancellationToken cancellationToken)
+    {
+        if (_dbContext.Database.CurrentTransaction is null) throw new UnauthorizedAccessException();
+        var header = await _dbContext.ManagedCases.AsNoTracking()
+            .SingleAsync(c => c.CaseId == source.CaseId, cancellationToken).ConfigureAwait(false);
+        if (!organizations.Contains(header.OrganizationId, StringComparer.Ordinal) ||
+            !await _dbContext.Database.SqlQuery<bool>($"SELECT swiftaid_internal.lock_workspace_organization({header.WorkspaceId}, {header.OrganizationId}) AS \"Value\"")
+                .SingleAsync(cancellationToken).ConfigureAwait(false)) throw new UnauthorizedAccessException();
+        var payload = await _dbContext.ProtectedEventPayloads.AsNoTracking()
+            .SingleAsync(p => p.PayloadId == source.PayloadId, cancellationToken).ConfigureAwait(false);
+        return await UnprotectCoreAsync(source.CaseId, source.PayloadId, source.EventType, source.SchemaVersion,
+            payload.ProtectionPurposeVersion, payload.ProtectedBytes, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async ValueTask<byte[]> UnprotectCoreAsync(
+        Guid caseId, Guid payloadId, string eventType, int schemaVersion, string protectionPurposeVersion,
+        ReadOnlyMemory<byte> protectedBytes, CancellationToken cancellationToken)
+    {
         cancellationToken.ThrowIfCancellationRequested();
         EnsureEnabled();
         ValidateMetadata(caseId, payloadId, eventType, schemaVersion);
@@ -164,7 +190,6 @@ public sealed class PostgresProtectedCaseEventPayloadStore : IProtectedCaseEvent
             throw new NotSupportedException("The protected payload purpose version is not supported.");
         }
 
-        _ = PostgresLeaseGuard.RequireCurrent(_dbContext, _leaseAccessor, caseId);
         if (protectedBytes.IsEmpty)
         {
             throw new ProtectedCaseEventPayloadException();

@@ -23,6 +23,13 @@ public sealed class IngestionOutboxWorker(
                         .DispatchOneAsync(kind, stoppingToken);
                 }
 
+                await using (var scope = scopes.CreateAsyncScope())
+                {
+                    if (scope.ServiceProvider.GetRequiredService<IOptions<SwiftAid.Infrastructure.Classification.ClassificationOptions>>().Value.Enabled)
+                        dispatched |= await scope.ServiceProvider.GetRequiredService<SwiftAid.Infrastructure.Classification.ClassificationOutboxDispatcher>()
+                            .DispatchOneAsync(stoppingToken);
+                }
+
                 if (!dispatched) await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

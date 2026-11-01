@@ -1,5 +1,7 @@
 # Gateway processing architecture
 
+The subsequent [persistent classification vertical slice](gateway-classification-implementation.md) adds an opt-in durable Python consumer, scoped Gateway lease/result routes, PostgreSQL registry and classification lifecycle outbox lane. Its real-model integration test is recorded separately from the original dispatch evidence below. Downstream quality, detection, correlation and investigation remain outstanding.
+
 ## Implemented delivery boundary
 
 Public intake and managed cases retain their existing transaction, authorization, encryption, receipt and event paths. The additive `IngestionOutboxDelivery` migration extends their existing outbox rows with delivery fencing and failure state. `PostgresIngestionOutbox` claims due work with `FOR UPDATE SKIP LOCKED`; it never decrypts report payloads.
@@ -16,7 +18,7 @@ Unpublished earlier case aggregate versions prevent claiming later versions. Exh
 - Notification delivery remains independent. Its publisher, the existing event publisher and the job publisher now also accept valid duplicate PubAck responses.
 - `CaseRegistrationProcessor` and `IntakeService` remain the only application ingestion routes for their respective authority scopes. Public intake does not become a staff case automatically.
 - Original media stays in private MinIO storage; source facts remain protected in PostgreSQL. No source narrative, precise location, transcript, receipt proof or actor identity is added to ingestion notices.
-- Python job contracts remain available, but the baseline contains no functioning durable processing consumer. No unvalidated intelligence stage is enabled by delivery publication.
+- Python job contracts remain available. The original baseline had no functioning durable consumer; the explicit classification consumer now binds a provisioned ingestion durable. Other legacy job types remain unchanged. Delivery publication alone does not enable downstream surveillance.
 
 ## Instrumentation and limits
 

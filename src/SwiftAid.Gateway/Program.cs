@@ -184,8 +184,12 @@ builder.Services.AddScoped<INotificationChangeSignal>(serviceProvider =>
 });
 builder.Services.AddHostedService<NotificationDeliveryWorker>();
 builder.Services.AddHostedService<SwiftAid.Gateway.Ingestion.IngestionOutboxWorker>();
+builder.Services.Configure<SwiftAid.Infrastructure.Classification.ClassificationOptions>(builder.Configuration.GetSection("Classification"));
+builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.ClassificationRegistry>();
+builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.ClassificationOutboxDispatcher>();
 
 var app = builder.Build();
+app.UseClassificationRequestLimit();
 
 app.UseExceptionHandler("/Error", createScopeForErrors: true);
 if (!app.Environment.IsDevelopment())
@@ -215,6 +219,7 @@ app.MapIntakeDecisionEndpoints();
 app.MapIntakeCoordinationEndpoints();
 app.MapManagedCaseRegistrationEndpoints();
 app.MapCaseImportEndpoints();
+app.MapClassificationWorkerEndpoints();
 app.MapCaseTimelineEndpoints();
 app.MapCaseDetailEndpoints();
 app.MapCaseQueueEndpoints();
