@@ -38,6 +38,14 @@
         </ChildContent>
     </PublicWebsiteShell>
 }
+else if (_isEllaiAbout)
+{
+    <PublicWebsiteShell>
+        <ChildContent>
+            <SwiftAid.UI.Ellai.Pages.EllaiSettingsAbout />
+        </ChildContent>
+    </PublicWebsiteShell>
+}
 else if (_isSessions)
 {
     <PublicWebsiteShell>
@@ -145,6 +153,7 @@ else
     private bool _feedbackIsError;
     private bool _isHome;
     private bool _isSessions;
+    private bool _isEllaiAbout;
     private bool _isReport;
     private bool _isTracking;
     private Guid? _activeDraftId;
@@ -177,6 +186,7 @@ else
     protected override async Task OnInitializedAsync()
     {
         UpdateRoute();
+        if (_isEllaiAbout) return;
         if (_isSessions)
         {
             await LoadPublicSessionsAsync();
@@ -476,10 +486,11 @@ else
         var query = Uri.UnescapeDataString(uri.Query);
         _isHome = path.Length == 0;
         _isSessions = string.Equals(path, "/sessions", StringComparison.OrdinalIgnoreCase);
+        _isEllaiAbout = string.Equals(path, "/ellai/about", StringComparison.OrdinalIgnoreCase);
         _isTracking = string.Equals(path, "/report", StringComparison.OrdinalIgnoreCase) &&
             query.Contains("view=tracking", StringComparison.OrdinalIgnoreCase);
         _isReport = string.Equals(path, "/report", StringComparison.OrdinalIgnoreCase) && !_isTracking;
-        return _isHome || _isSessions || _isReport || _isTracking;
+        return _isHome || _isSessions || _isEllaiAbout || _isReport || _isTracking;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)

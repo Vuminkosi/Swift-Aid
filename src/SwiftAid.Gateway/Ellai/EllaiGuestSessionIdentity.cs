@@ -15,6 +15,7 @@ public sealed class EllaiGuestSessionIdentity
 
     public ClaimsPrincipal CreatePrincipal()
     {
+        if (TryGetHistoryPrincipal(out var existing)) return existing;
         var actorId = "ellai-guest-" + Guid.NewGuid().ToString("N");
         return new ClaimsPrincipal(new ClaimsIdentity(
         [
@@ -66,6 +67,21 @@ public sealed class EllaiGuestSessionIdentity
 
     public bool IsGuestPrincipal(ClaimsPrincipal principal) =>
         string.Equals(principal.FindFirstValue("swiftaid_ellai_guest"), "true", StringComparison.Ordinal);
+
+    public bool TryGetHistoryPrincipal(out ClaimsPrincipal principal)
+    {
+        lock (_gate)
+        {
+            if (_principal is not null && _expiresAtUtc > DateTimeOffset.UtcNow)
+            {
+                principal = _principal;
+                return true;
+            }
+            ClearCore();
+        }
+        principal = new ClaimsPrincipal(new ClaimsIdentity());
+        return false;
+    }
 
     public void Clear(string sessionId)
     {

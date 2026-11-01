@@ -20,6 +20,21 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
 
     public bool UsesGatewayPcmAudioDownload => true;
 
+    public async Task<EllaiSessionHistoryPageDto?> ListSessionHistoryAsync(int offset, CancellationToken cancellationToken)
+    {
+        if (_authenticated is null || _guest is null) return null;
+        try
+        {
+            var signedIn = await _authentication.IsSignedInAsync(cancellationToken).ConfigureAwait(false);
+            var page = await (signedIn ? _authenticated : _guest).ListSessionHistoryAsync(offset, cancellationToken).ConfigureAwait(false);
+            if (!signedIn && page is not null)
+                foreach (var session in page.Sessions) _guestSessions.TryAdd(session.SessionId, 0);
+            return page;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception) { return null; }
+    }
+
     public MobileEllaiReviewClient(
         HttpClient? authenticatedHttp,
         HttpClient? guestHttp,

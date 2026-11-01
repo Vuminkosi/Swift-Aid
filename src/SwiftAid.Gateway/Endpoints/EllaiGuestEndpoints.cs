@@ -115,6 +115,18 @@ public static class EllaiGuestEndpoints
         group.MapGet("/antiforgery", GetAntiforgeryToken)
             .WithName("GetEllaiGuestAntiforgeryToken")
             .Produces<EllaiGuestAntiforgeryToken>(StatusCodes.Status200OK);
+        group.MapGet("/sessions", async (HttpContext http, [FromServices] IEllaiSessionStore sessions,
+            CancellationToken cancellationToken, int offset = 0) =>
+        {
+            var authentication = await http.AuthenticateAsync(AuthenticationScheme).ConfigureAwait(false);
+            if (!authentication.Succeeded || authentication.Principal?.FindFirstValue(GuestClaim) != "true")
+            {
+                http.Response.Headers.CacheControl = "no-store, private";
+                return Results.Json(new EllaiSessionHistoryPageDto([], null));
+            }
+            http.User = authentication.Principal;
+            return await EllaiConversationFeed.ListSessionsAsync(http, sessions, cancellationToken, offset).ConfigureAwait(false);
+        });
         group.MapPost("/sessions", StartSessionAsync)
             .WithMetadata(new RequestSizeLimitAttribute(8 * 1024))
             .WithName("StartEllaiGuestSession")
@@ -233,7 +245,12 @@ public static class EllaiGuestEndpoints
             new Claim(ActorContext.AccessEpochClaimType, "0"),
             new Claim(GuestClaim, "true"),
         ], AuthenticationScheme);
-        var principal = new ClaimsPrincipal(identity);
+        var authentication = await http.AuthenticateAsync(AuthenticationScheme).ConfigureAwait(false);
+        var principal = authentication.Succeeded
+            && authentication.Principal?.FindFirstValue(GuestClaim) == "true"
+            && authentication.Principal.FindFirstValue(ClaimTypes.NameIdentifier)?.StartsWith(GuestActorPrefix, StringComparison.Ordinal) == true
+                ? authentication.Principal
+                : new ClaimsPrincipal(identity);
         var now = DateTimeOffset.UtcNow;
         var guestScope = new ScopeManifest(
             Array.Empty<ScopeGrantManifest>(), 0, now.AddMinutes(10));
@@ -705,7 +722,7 @@ public static class EllaiGuestEndpoints
             http.RequestServices.GetService<EllaiApprovalDialogCoordinator>(),
             http.RequestServices.GetService<EllaiSessionEventJournal>(),
             http.RequestServices.GetService<EllaiSessionResponseStore>());
-        await http.SignOutAsync(AuthenticationScheme).ConfigureAwait(false);
+        // Ending one conversation does not end the guest identity that owns its history.
         return Results.Ok(await sessions.GetOwnedViewAsync(sessionId, http.User, cancellationToken)
             .ConfigureAwait(false));
     }

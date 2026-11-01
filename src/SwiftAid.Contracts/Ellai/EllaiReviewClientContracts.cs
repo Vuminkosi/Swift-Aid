@@ -77,6 +77,12 @@ public sealed record EllaiConversationTurnDto(
     string ClientUtteranceId, long Sequence, string? UserText, string? AssistantText,
     string Outcome, int AttemptCount, DateTimeOffset? CompletedAtUtc);
 
+public sealed record EllaiSessionHistoryItemDto(
+    string SessionId, string Mode, string Status, DateTimeOffset UpdatedAtUtc);
+
+public sealed record EllaiSessionHistoryPageDto(
+    IReadOnlyList<EllaiSessionHistoryItemDto> Sessions, int? NextOffset);
+
 /// <summary>Bounded little-endian, mono PCM response streamed from the Gateway.</summary>
 public sealed record EllaiResponseAudio(byte[] Pcm, int SampleRate, string VoiceId, long Sequence);
 
@@ -187,6 +193,9 @@ public interface IEllaiReviewClient
 
     Task<EllaiSessionStartResult> ResumeSessionAsync(string sessionId, CancellationToken cancellationToken) =>
         Task.FromResult(new EllaiSessionStartResult(EllaiClientOperationStatus.Unavailable));
+
+    Task<EllaiSessionHistoryPageDto?> ListSessionHistoryAsync(int offset, CancellationToken cancellationToken) =>
+        Task.FromResult<EllaiSessionHistoryPageDto?>(null);
 
     /// <summary>Submits one finalized user utterance through the authenticated
     /// session contract. Null means the request was unavailable, invalid, or

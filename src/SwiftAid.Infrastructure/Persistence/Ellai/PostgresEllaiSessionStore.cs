@@ -15,6 +15,17 @@ public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext) : IEl
 {
     private readonly SwiftAidDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
 
+    public async Task<IReadOnlyList<EllaiSessionRecord>> ListOwnedAsync(string ownerActorId, int offset, int take, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerActorId);
+        var rows = await _dbContext.Set<EllaiSessionEntity>().AsNoTracking()
+            .Where(session => session.OwnerActorId == ownerActorId)
+            .OrderByDescending(session => session.UpdatedAtUtc).ThenBy(session => session.SessionId)
+            .Skip(Math.Max(0, offset)).Take(Math.Clamp(take, 1, 101))
+            .ToListAsync(ct).ConfigureAwait(false);
+        return rows.Select(ToRecord).ToArray();
+    }
+
     public async Task<EllaiSessionRecord?> GetAsync(string sessionId, CancellationToken ct)
     {
         var entity = await _dbContext.Set<EllaiSessionEntity>().AsNoTracking()

@@ -29,7 +29,7 @@
         <div class="ellai-host__attached">
             <EllaiCompactComposer Placement="EllaiSurfacePlacement.Attached"
                                   StatusText="@GetComposerStatusText()" Phase="null"
-                                  ResponseText="@_latestResponseText"
+                                  ResponseText="@_latestResponseText" SentMessage="@_latestUserText"
                                   LivePartialTranscript="@_livePartialVoiceTranscript"
                                   InputText="@InputText" InputTextChanged="OnInputChanged"
                                   Position="@Position" PositionChanged="OnPositionChanged"
@@ -49,7 +49,7 @@
         <div class="ellai-host__floating">
             <EllaiCompactComposer Placement="EllaiSurfacePlacement.Floating"
                                   StatusText="@GetComposerStatusText()" Phase="null"
-                                  ResponseText="@_latestResponseText"
+                                  ResponseText="@_latestResponseText" SentMessage="@_latestUserText"
                                   LivePartialTranscript="@_livePartialVoiceTranscript"
                                   InputText="@InputText" InputTextChanged="OnInputChanged"
                                   Position="@Position" PositionChanged="OnPositionChanged"
@@ -119,6 +119,8 @@
     private string? _responseSessionId;
     private string? _responseTextUtteranceId;
     private string? _latestResponseText;
+    private string? _latestUserText;
+    private string? _latestUserUtteranceId;
     private EllaiConversationTurnDto? _lastDurableTurn;
     private Microsoft.JSInterop.IJSObjectReference? _sessionContinuity;
     private readonly List<long> _latestResponseAudioSequences = [];
@@ -1695,13 +1697,29 @@
         if (_thinkingUtteranceId == utteranceId) _thinkingUtteranceId = null;
     }
 
+    private void ShowLatestUserMessage(string utteranceId, string? text)
+    {
+        if (_latestUserUtteranceId != utteranceId && _responseTextUtteranceId != utteranceId)
+        {
+            StopResponseAudio();
+            _latestResponseText = null;
+            _latestResponseSequence = 0;
+            _latestResponseAudioSequences.Clear();
+        }
+        _latestUserUtteranceId = utteranceId;
+        _latestUserText = text;
+    }
+
     private void OnConversationUpdated(IReadOnlyList<EllaiConversationTurnDto> conversation)
     {
         _ = InvokeAsync(() =>
         {
             var latest = conversation.LastOrDefault();
             if (latest is null || latest == _lastDurableTurn) return;
+            if (_lastDurableTurn is not null && latest.Sequence < _lastDurableTurn.Sequence) return;
+            if (_thinkingUtteranceId is not null && latest.ClientUtteranceId != _thinkingUtteranceId) return;
             _lastDurableTurn = latest;
+            ShowLatestUserMessage(latest.ClientUtteranceId, latest.UserText);
             if (latest.Outcome is "Queued" or "Processing" or "RetryableFailure")
             {
                 if (_thinkingUtteranceId is null && latest.ClientUtteranceId != _settledUtteranceId)
@@ -1756,6 +1774,8 @@
             }
 
             _lastReceivedResponseSequence = response.Sequence;
+            if (_latestUserUtteranceId is not null && response.ClientUtteranceId is not null
+                && response.ClientUtteranceId != _latestUserUtteranceId) return;
             if (response.IsFinal || response.IsReconciliation)
                 SettleThinking(response.ClientUtteranceId);
             if (response.IsReconciliation)
@@ -1790,14 +1810,16 @@
             var startsNewResponse = !string.IsNullOrWhiteSpace(response.Text)
                 && (response.ClientUtteranceId is null
                     || !string.Equals(_responseTextUtteranceId, response.ClientUtteranceId, StringComparison.Ordinal));
+            var hasDurableAnswer = _lastDurableTurn?.ClientUtteranceId == response.ClientUtteranceId
+                && _lastDurableTurn?.Outcome == "Completed";
             if (startsNewResponse)
             {
                 _responseTextUtteranceId = response.ClientUtteranceId;
-                _latestResponseText = response.Text;
+                if (!hasDurableAnswer) _latestResponseText = response.Text;
                 _latestResponseAudioSequences.Clear();
                 _pendingResponseAudioSequences.Clear();
             }
-            else if (!string.IsNullOrWhiteSpace(response.Text))
+            else if (!hasDurableAnswer && !string.IsNullOrWhiteSpace(response.Text))
             {
                 _latestResponseText = string.Concat(_latestResponseText, " ", response.Text);
             }
@@ -2178,6 +2200,7 @@
                         && string.Equals(updated.SessionId, session.SessionId, StringComparison.Ordinal):
                     _sessionView = updated;
                     accepted = true;
+                    ShowLatestUserMessage(request.ClientUtteranceId, text);
                     _pendingUtteranceId = null;
                     _pendingUtteranceText = null;
                     if (string.Equals(InputText, text, StringComparison.Ordinal))
@@ -2493,6 +2516,15 @@
 
     private void CancelPriorSession()
     {
+        _lastDurableTurn = null;
+        _latestResponseText = null;
+        _responseTextUtteranceId = null;
+        _responseSessionId = null;
+        _lastReceivedResponseSequence = 0;
+        _latestResponseSequence = 0;
+        _latestResponseAudioSequences.Clear();
+        _latestUserText = null;
+        _latestUserUtteranceId = null;
         _readResponsesAloud = false;
         _thinkingUtteranceId = null;
         _settledUtteranceId = null;

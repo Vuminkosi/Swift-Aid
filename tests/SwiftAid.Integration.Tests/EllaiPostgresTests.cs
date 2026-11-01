@@ -35,6 +35,31 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
     public Task InitializeAsync() => Task.CompletedTask;
 
     [EllaiPostgresFact]
+    public async Task SessionHistorySurvivesNewContextAndPagesOnlyOwnedRows()
+    {
+        var owner = $"history-owner-{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+        await using (var db = CreateDbContext())
+        {
+            var store = new PostgresEllaiSessionStore(db);
+            for (var i = 0; i < 4; i++)
+            {
+                var id = $"history-{Guid.NewGuid():N}";
+                _sessionIds.Add(id);
+                await store.CreateAsync(new(id, EllaiMode.Ask, "Cancelled", 1, 1, 1, 1, 0, 12,
+                    i == 3 ? "another-history-owner" : owner, "scope-test", null, null, now.AddMinutes(i)), CancellationToken.None);
+            }
+        }
+        await using var restarted = CreateDbContext();
+        var restored = new PostgresEllaiSessionStore(restarted);
+        var first = await restored.ListOwnedAsync(owner, 0, 2, CancellationToken.None);
+        var second = await restored.ListOwnedAsync(owner, 2, 2, CancellationToken.None);
+        Assert.Equal(new[] { _sessionIds[2], _sessionIds[1] }, first.Select(item => item.SessionId));
+        Assert.Equal(_sessionIds[0], Assert.Single(second).SessionId);
+        Assert.Empty(await restored.ListOwnedAsync("unknown-history-owner", 0, 20, CancellationToken.None));
+    }
+
+    [EllaiPostgresFact]
     public async Task DurableConversationSurvivesRestartAndRejectsStaleAcknowledgement()
     {
         var id = $"pg-conversation-{Guid.NewGuid():N}";

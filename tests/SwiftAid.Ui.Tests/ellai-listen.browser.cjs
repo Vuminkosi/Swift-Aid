@@ -82,11 +82,52 @@ async function main() {
             .getAttribute("aria-pressed"), "false");
         assert.ok(audio.length >= 2 && audio.every(item => item.status === 200));
         assert.equal(new Set(audio.map(item => item.path)).size, audio.length, "No reconciled answer replay.");
+        await page.waitForFunction(() => document.querySelector(".ellai-composer__sent-message")?.textContent?.trim()
+            === "Hello again. Reply with one short greeting.");
+        assert.equal(await page.locator(".ellai-composer__response").count(), 1);
+        assert.ok(await page.locator(".ellai-composer__response").evaluate(element =>
+            parseFloat(getComputedStyle(element).fontSize)) <= 12);
+        await page.setViewportSize({ width: 390, height: 844 });
+        const status = await page.locator(".ellai-composer__status-row .ellai-status").boundingBox();
+        const voice = await page.locator(".ellai-composer__speech-action").boundingBox();
+        assert.ok(status && voice && voice.x > status.x && Math.abs((voice.y + voice.height / 2) - (status.y + status.height / 2)) < 5);
+        if (process.env.SWIFTAID_COMPOSER_SCREENSHOT)
+            await page.locator(".ellai-composer").screenshot({ path: process.env.SWIFTAID_COMPOSER_SCREENSHOT });
+        assert.deepEqual(errors, []);
+        await page.getByRole("button", { name: "End Ellai session", exact: true }).click();
+        const nextSession = page.waitForResponse(response => response.request().method() === "POST"
+            && new URL(response.url()).pathname.endsWith("/guest/sessions") && response.ok());
+        await page.locator(".ellai-launcher-menu__button").click();
+        await page.getByRole("menuitem", { name: "Ask", exact: true }).click();
+        const secondSessionId = (await (await nextSession).json()).sessionId;
+        assert.notEqual(secondSessionId, sessionId);
+        await page.goto(`${process.env.SWIFTAID_GATEWAY_URL ?? "http://localhost:8080"}/ellai/about`);
+        await page.getByRole("tab", { name: "Session history", exact: true }).click();
+        await page.waitForFunction(() => document.querySelectorAll(".ellai-settings__session").length === 2);
+        await page.getByRole("button", { name: "View conversation", exact: true }).last().click();
+        await page.waitForFunction(() => document.querySelectorAll(".ellai-settings__turn").length === 3);
+        await page.reload();
+        await page.getByRole("tab", { name: "Session history", exact: true }).click();
+        await page.waitForFunction(() => document.querySelectorAll(".ellai-settings__session").length === 2);
+        const historyRoute = "**/api/v1/ellai/guest/sessions?offset=*";
+        await page.route(historyRoute, route => route.fulfill({ status: 503, body: "" }));
+        await page.getByRole("button", { name: "Refresh sessions", exact: true }).click();
+        await page.getByText("Your sessions couldn't be loaded. Please try Refresh sessions.", { exact: true }).waitFor();
+        await page.unroute(historyRoute);
+        await page.getByRole("button", { name: "Refresh sessions", exact: true }).click();
+        await page.waitForFunction(() => document.querySelectorAll(".ellai-settings__session").length === 2);
+        const stranger = await browser.newContext();
+        const otherHistory = await stranger.request.get(`${process.env.SWIFTAID_GATEWAY_URL ?? "http://localhost:8080"}/api/v1/ellai/guest/sessions`);
+        assert.deepEqual((await otherHistory.json()).sessions, []);
+        const privateReply = await stranger.request.get(`${process.env.SWIFTAID_GATEWAY_URL ?? "http://localhost:8080"}/api/v1/ellai/guest/sessions/${sessionId}/responses`);
+        assert.equal(privateReply.status(), 401);
+        await stranger.close();
         assert.deepEqual(errors, []);
         console.log(JSON.stringify({ result: "PASS", sessionId, completionMs: [firstMs, secondMs, thirdMs],
             audioRequests: audio.length, playbackSources: spokenSources, automaticNextReply: true,
-            disabledNextReply: true, pageErrors: errors.length }));
-        await page.getByRole("button", { name: "End Ellai session", exact: true }).click();
+            disabledNextReply: true, captionReply: true, statusAndListenSameRow: true,
+            restoredSessions: 2, historyTurns: 3, historyFailureRecovery: true, otherGuestDenied: true,
+            pageErrors: errors.length }));
     } finally {
         await browser.close();
     }

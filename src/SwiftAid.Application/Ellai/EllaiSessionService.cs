@@ -31,6 +31,8 @@ public sealed record EllaiCheckpoint(
 
 public interface IEllaiSessionStore
 {
+    Task<IReadOnlyList<EllaiSessionRecord>> ListOwnedAsync(string ownerActorId, int offset, int take, CancellationToken ct);
+
     Task<EllaiSessionRecord?> GetAsync(string sessionId, CancellationToken ct);
 
     Task<EllaiSessionRecord> CreateAsync(EllaiSessionRecord record, CancellationToken ct);
@@ -93,6 +95,18 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
     private readonly Dictionary<string, EllaiSessionRecord> _sessions = new(StringComparer.Ordinal);
     private readonly Dictionary<(string SessionId, string ClientUtteranceId), InMemoryOutboxEntry> _utterances = new();
     private readonly List<EllaiCheckpoint> _checkpoints = new();
+
+    public Task<IReadOnlyList<EllaiSessionRecord>> ListOwnedAsync(string ownerActorId, int offset, int take, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerActorId);
+        lock (_gate)
+        {
+            return Task.FromResult<IReadOnlyList<EllaiSessionRecord>>(_sessions.Values
+                .Where(session => session.OwnerActorId == ownerActorId)
+                .OrderByDescending(session => session.UpdatedAtUtc).ThenBy(session => session.SessionId, StringComparer.Ordinal)
+                .Skip(Math.Max(0, offset)).Take(Math.Clamp(take, 1, 101)).ToArray());
+        }
+    }
 
     public Task<EllaiSessionRecord?> GetAsync(string sessionId, CancellationToken ct)
     {

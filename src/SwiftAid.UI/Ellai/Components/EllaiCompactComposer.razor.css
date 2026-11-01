@@ -70,12 +70,35 @@
     line-height: 1.35;
 }
 
-.ellai-composer__response {
+.ellai-composer ::deep .ellai-composer__response {
     margin-block: 0.5rem;
     max-block-size: 12rem;
     overflow: auto;
     overflow-wrap: anywhere;
     white-space: pre-wrap;
+}
+
+.ellai-composer ::deep .ellai-composer__sent-message {
+    margin-block: 0.5rem 0.25rem;
+    padding-inline-start: 0.5rem;
+    border-inline-start: 2px solid var(--sa-border);
+    max-block-size: 4.5rem;
+    overflow: auto;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+    color: var(--mud-palette-text-secondary);
+}
+
+.ellai-composer__status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.ellai-composer__status-row .ellai-composer__speech-action {
+    margin-inline-start: auto;
+    flex-shrink: 0;
 }
 
 .ellai-composer__handle {

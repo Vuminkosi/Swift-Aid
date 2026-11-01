@@ -74,9 +74,15 @@
     <MudText Typo="Typo.caption" Color="Color.Secondary" Class="ellai-composer__privacy-note">
         For privacy, avoid sharing names, contact details, or other details that could identify someone.
     </MudText>
+    @if (!string.IsNullOrWhiteSpace(SentMessage))
+    {
+        <MudText Typo="Typo.caption" Class="ellai-composer__sent-message" aria-label="Your latest message">
+            @SentMessage
+        </MudText>
+    }
     @if (!string.IsNullOrWhiteSpace(ResponseText))
     {
-        <MudText Typo="Typo.body2" Class="ellai-composer__response" aria-live="polite">
+        <MudText Typo="Typo.caption" Class="ellai-composer__response" aria-live="polite">
             @ResponseText
         </MudText>
     }
@@ -86,6 +92,7 @@
             @LivePartialTranscript
         </p>
     }
+    <div class="ellai-composer__status-row">
     <EllaiStatusLine StatusText="@StatusText" Phase="@Phase" Placement="@Placement" />
     @if (CanPlayResponse || IsListeningEnabled)
     {
@@ -100,6 +107,7 @@
             <span>@(IsListeningEnabled ? "Voice on" : "Listen to Ellai")</span>
         </div>
     }
+    </div>
 </div>
 
 @code {
@@ -151,6 +159,9 @@
 
     [Parameter]
     public bool IsListeningEnabled { get; set; }
+
+    [Parameter]
+    public string? SentMessage { get; set; }
 
     [Parameter]
     public bool IsPlayingResponse { get; set; }

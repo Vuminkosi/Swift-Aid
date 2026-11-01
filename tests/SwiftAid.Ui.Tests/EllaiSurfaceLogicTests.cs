@@ -21,6 +21,52 @@ namespace SwiftAid.Ui.Tests;
 [Trait("Task", "ELL-T13")]
 public sealed class EllaiSurfaceLogicTests
 {
+    [Fact]
+    public async Task FreshConversationClearsPriorTimelineAndAcceptsItsFirstTurn()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(version: 1), string.Empty);
+        await InvokeAsync(host, "OnConversationUpdated", (object)new EllaiConversationTurnDto[]
+        {
+            new("old", 4, "Old question", "Old answer", "Completed", 1, DateTimeOffset.UtcNow),
+        });
+        await InvokeAsync(host, "CancelPriorSession");
+        Assert.Null(GetField<string?>(host, "_latestResponseText"));
+        await InvokeAsync(host, "OnConversationUpdated", (object)new EllaiConversationTurnDto[]
+        {
+            new("fresh", 1, "Fresh question", "Fresh answer", "Completed", 1, DateTimeOffset.UtcNow),
+        });
+        Assert.Equal("Fresh answer", GetField<string?>(host, "_latestResponseText"));
+    }
+
+    [Fact]
+    public async Task DurableAnswerIsNotAppendedAgainWhenItsLateChunksArrive()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(version: 1), string.Empty);
+        await InvokeAsync(host, "OnResponseReceived",
+            new EllaiSessionResponseDto(1, "session-1", "Earlier answer", DateTimeOffset.UtcNow, "old-turn"));
+        await InvokeAsync(host, "OnConversationUpdated", (object)new EllaiConversationTurnDto[]
+        {
+            new("new-turn", 2, "Latest question", "Latest complete answer", "Completed", 1, DateTimeOffset.UtcNow),
+        });
+        await InvokeAsync(host, "OnResponseReceived",
+            new EllaiSessionResponseDto(2, "session-1", "Latest complete answer", DateTimeOffset.UtcNow, "new-turn", false));
+        Assert.Equal("Latest complete answer", GetField<string?>(host, "_latestResponseText"));
+        Assert.Equal("Latest question", GetField<string?>(host, "_latestUserText"));
+        await InvokeAsync(host, "OnResponseReceived",
+            new EllaiSessionResponseDto(3, "session-1", "Delayed older answer", DateTimeOffset.UtcNow, "old-turn"));
+        Assert.Equal("Latest complete answer", GetField<string?>(host, "_latestResponseText"));
+    }
+
+    [Fact]
+    public async Task ComposerShowsLatestSentMessageAndCaptionSizedReplyBesideOneStatusRow()
+    {
+        var html = await RenderComposerAsync(responseText: "Latest reply", sentMessage: "Latest sent question");
+        Assert.Contains("Latest sent question", html, StringComparison.Ordinal);
+        Assert.Contains("Your latest message", html, StringComparison.Ordinal);
+        Assert.Contains("ellai-composer__status-row", html, StringComparison.Ordinal);
+        Assert.Matches("mud-typography-caption[^>]*ellai-composer__response", html);
+    }
+
     [Theory]
     [InlineData(true, "true")]
     [InlineData(false, "false")]
@@ -230,6 +276,7 @@ public sealed class EllaiSurfaceLogicTests
         using var host = await CreateHost(client, CreateSession(version: 1), "Synthetic question");
         await InvokeAsync(host, "OnSend");
         var id = Assert.Single(client.Submissions).ClientUtteranceId;
+        Assert.Equal("Synthetic question", GetField<string?>(host, "_latestUserText"));
         Assert.Equal(id, GetField<string?>(host, "_thinkingUtteranceId"));
         await InvokeAsync(host, "OnConversationUpdated", (object)new EllaiConversationTurnDto[]
         {
@@ -1271,7 +1318,8 @@ public sealed class EllaiSurfaceLogicTests
         EventCallback onStartRealtimeVoice = default,
         EventCallback onOpenSettings = default,
         bool isLiveSpeaking = true,
-        bool isListeningEnabled = false)
+        bool isListeningEnabled = false,
+        string? sentMessage = null)
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -1291,6 +1339,7 @@ public sealed class EllaiSurfaceLogicTests
                     [nameof(EllaiCompactComposer.InputText)] = inputText,
                     [nameof(EllaiCompactComposer.CanPlayResponse)] = true,
                     [nameof(EllaiCompactComposer.IsListeningEnabled)] = isListeningEnabled,
+                    [nameof(EllaiCompactComposer.SentMessage)] = sentMessage,
                     [nameof(EllaiCompactComposer.LivePartialTranscript)] = livePartialTranscript,
                     [nameof(EllaiCompactComposer.ResponseText)] = responseText,
                     [nameof(EllaiCompactComposer.StatusText)] = "Messaging is unavailable.",

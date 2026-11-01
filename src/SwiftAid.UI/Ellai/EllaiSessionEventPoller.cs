@@ -18,6 +18,20 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
     private string? _guestAntiforgeryToken;
     private string? _responseStreamId;
 
+    public async Task<EllaiSessionHistoryPageDto?> ListSessionHistoryAsync(int offset, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var route = _useGuestRoutes ? "api/v1/ellai/guest/sessions" : "api/v1/ellai/sessions";
+            using var response = await _http.GetAsync($"{route}?offset={Math.Max(0, offset)}", cancellationToken).ConfigureAwait(false);
+            return response.IsSuccessStatusCode
+                ? await response.Content.ReadFromJsonAsync<EllaiSessionHistoryPageDto>(Json, cancellationToken).ConfigureAwait(false)
+                : null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception) { return null; }
+    }
+
     public Uri CreateLiveVoiceWebSocketUri(Uri baseUri, string sessionId, string voiceCaptureId,
         long voiceCaptureOffsetSamples = 0)
     {

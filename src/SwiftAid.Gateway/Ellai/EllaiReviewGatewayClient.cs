@@ -24,6 +24,18 @@ public sealed class EllaiReviewGatewayClient(
     private readonly EllaiGuestSessionIdentity _guestSessionIdentity =
         guestSessionIdentity ?? new EllaiGuestSessionIdentity();
 
+    public async Task<EllaiSessionHistoryPageDto?> ListSessionHistoryAsync(int offset, CancellationToken cancellationToken)
+    {
+        var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+        var principal = state.User;
+        if (principal.Identity?.IsAuthenticated != true
+            && !_guestSessionIdentity.TryGetHistoryPrincipal(out principal)) return new([], null);
+        var actor = ActorContext.FromValidatedPrincipal(principal);
+        return await EllaiConversationFeed.ListOwnedSessionsAsync(
+            _serviceProvider.GetRequiredService<IEllaiSessionStore>(), actor.ActorId, Math.Max(0, offset), cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     public async Task<EllaiSessionStartResult> ResumeSessionAsync(string sessionId, CancellationToken cancellationToken)
     {
         var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
@@ -363,7 +375,6 @@ public sealed class EllaiReviewGatewayClient(
                 sessionId, expectedSessionVersion, principal, cancellationToken).ConfigureAwait(false);
             if (cancelled)
             {
-                _guestSessionIdentity.Clear(sessionId);
                 var now = DateTimeOffset.UtcNow;
                 EllaiSessionCancellationEffects.Apply(
                     sessionId,
@@ -736,7 +747,8 @@ public sealed class EllaiReviewGatewayClient(
             return currentPrincipal;
         }
 
-        return _guestSessionIdentity.TryGetPrincipal(sessionId, out var guestPrincipal)
+        // This resolves identity only; every session operation still verifies its persisted owner.
+        return _guestSessionIdentity.TryGetHistoryPrincipal(out var guestPrincipal)
             ? guestPrincipal
             : null;
     }

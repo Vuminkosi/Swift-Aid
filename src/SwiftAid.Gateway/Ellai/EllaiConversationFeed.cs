@@ -7,6 +7,26 @@ namespace SwiftAid.Gateway.Ellai;
 /// <summary>The chunk feed is transient; its durable snapshot repairs missed publications.</summary>
 public static class EllaiConversationFeed
 {
+    public static async Task<IResult> ListSessionsAsync(
+        HttpContext http, [Microsoft.AspNetCore.Mvc.FromServices] IEllaiSessionStore sessions,
+        CancellationToken cancellationToken, int offset = 0)
+    {
+        if (offset < 0 || offset > int.MaxValue - 20) return Results.BadRequest();
+        var actor = ActorContext.FromValidatedPrincipal(http.User);
+        var page = await ListOwnedSessionsAsync(sessions, actor.ActorId, offset, cancellationToken).ConfigureAwait(false);
+        http.Response.Headers.CacheControl = "no-store, private";
+        return Results.Json(page);
+    }
+
+    public static async Task<EllaiSessionHistoryPageDto> ListOwnedSessionsAsync(
+        IEllaiSessionStore sessions, string actorId, int offset, CancellationToken cancellationToken)
+    {
+        var rows = await sessions.ListOwnedAsync(actorId, offset, 21, cancellationToken).ConfigureAwait(false);
+        return new(rows.Take(20).Select(session => new EllaiSessionHistoryItemDto(
+            session.SessionId, session.Mode.ToString(), session.Status, session.UpdatedAtUtc)).ToArray(),
+            rows.Count > 20 ? offset + 20 : null);
+    }
+
     public static async Task<IResult> ReadAsync(
         HttpContext http, string sessionId, long? cursor, string? streamId,
         [Microsoft.AspNetCore.Mvc.FromServices] IEllaiUtteranceOutboxStore outbox,

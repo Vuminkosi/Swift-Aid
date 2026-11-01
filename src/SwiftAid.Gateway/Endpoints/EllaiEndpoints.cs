@@ -64,6 +64,7 @@ public static class EllaiEndpoints
 
             return await next(context);
         });
+        group.MapGet("/sessions", EllaiConversationFeed.ListSessionsAsync);
         group.MapPost("/sessions", StartAsync)
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))
             .WithName("StartEllaiSession")

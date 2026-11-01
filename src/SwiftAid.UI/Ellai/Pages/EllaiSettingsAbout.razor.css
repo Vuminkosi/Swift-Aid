@@ -109,6 +109,27 @@
     display: none;
 }
 
+.ellai-settings__defaults {
+    display: grid;
+    grid-template-columns: minmax(7rem, 1fr) 2fr;
+    gap: 0.5rem 1rem;
+    margin: 0;
+    font-size: 0.875rem;
+}
+
+.ellai-settings__defaults dd { margin: 0; }
+.ellai-settings__defaults dt { font-weight: 600; }
+
+.ellai-settings__turn {
+    padding-block: 0.75rem;
+    border-block-start: 1px solid var(--sa-border);
+}
+
+.ellai-settings__message {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
 @media (max-width: 600px) {
     .ellai-settings {
         padding-inline: 1rem;
