@@ -31,7 +31,7 @@ public sealed class SurveillanceMapDetailsGatewayClient(ICaseReportDetailsClient
             var candidates = await scope.ServiceProvider.GetRequiredService<ICaseMapCandidateStore>()
                 .GetAsync(actor.ActorId, workspaceId, countryCode, since, 501, ct);
             var rows = candidates.Where(item => item.WorkspaceId == workspaceId && item.CountryCode == countryCode && item.CreatedAtUtc >= since).Take(500).ToArray();
-            var places = new List<(CaseReportPlace Place, bool Animal)>();
+            var places = new List<(CaseReportPlace Place, bool Animal, SurveillanceMapCase Case)>();
             var unmapped = 0;
             foreach (var batch in rows.Chunk(8))
             {
@@ -39,7 +39,8 @@ public sealed class SurveillanceMapDetailsGatewayClient(ICaseReportDetailsClient
                 foreach (var result in results)
                 {
                     if (result.Report.Succeeded && result.Report.Value?.Location is { } place)
-                        places.Add((place, result.Row.Sector == "AnimalHealth"));
+                        places.Add((place, result.Row.Sector == "AnimalHealth", new(result.Row.CaseId,
+                            result.Row.Sector == "AnimalHealth", result.Row.Workflow, result.Row.CreatedAtUtc!.Value)));
                     else unmapped++;
                 }
             }
@@ -63,7 +64,8 @@ public sealed class SurveillanceMapDetailsGatewayClient(ICaseReportDetailsClient
                     (group.Key.Region is null || string.Equals(item.Name, group.Key.Region, StringComparison.OrdinalIgnoreCase) ||
                      item.Ancestors.Any(parent => string.Equals(parent.Name, group.Key.Region, StringComparison.OrdinalIgnoreCase)))).ToArray();
                 if (matches is not [{ Latitude: { } latitude, Longitude: { } longitude } match]) { unmapped += group.Count(); continue; }
-                points.Add(new(match.Id, match.Name, latitude, longitude, group.Count(item => !item.Animal), group.Count(item => item.Animal)));
+                points.Add(new(match.Id, match.Name, latitude, longitude, humanCount, animalCount,
+                    group.Select(item => item.Case).OrderByDescending(item => item.ReportedAtUtc).ToArray()));
             }
             var signals = new List<SurveillanceMapSignal>();
             var review = scope.ServiceProvider.GetService<ISignalReviewService>();

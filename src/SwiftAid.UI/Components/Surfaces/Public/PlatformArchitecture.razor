@@ -1,59 +1,125 @@
 <section class="platform-flow @(_paused ? "platform-flow--paused" : "")" aria-labelledby="platform-flow-title">
     <header class="platform-flow__heading">
         <div>
-            <p class="platform-flow__eyebrow">How SwiftAid works</p>
-            <h2 id="platform-flow-title">One report. A connected response.</h2>
-            <p>Follow an observation from the community to an authorized team’s review.</p>
+            <p class="platform-flow__eyebrow">The connected platform</p>
+            <h2 id="platform-flow-title">How SwiftAid comes together</h2>
+            <p>From an offline report to a shared understanding. Follow the services that connect people, evidence and action.</p>
         </div>
         <button type="button" class="platform-flow__toggle" aria-pressed="@_paused" @onclick="() => _paused = !_paused">
             @(_paused ? "Play flow" : "Pause flow")
         </button>
     </header>
-    <ol class="platform-flow__steps">
-        <li>
-            <span class="platform-flow__number">01</span>
-            <MudIcon Icon="@Icons.Material.Outlined.EditNote" aria-hidden="true" />
-            <h3>Capture</h3>
-            <p>Report by form, voice or a workspace CSV import. Keep drafts when offline.</p>
-            <span class="platform-flow__detail">Web · Android · iOS</span>
-        </li>
-        <li>
-            <span class="platform-flow__number">02</span>
-            <MudIcon Icon="@Icons.Material.Outlined.VerifiedUser" aria-hidden="true" />
-            <h3>Save &amp; synchronize</h3>
-            <p>Confirm receipt, preserve the original report and check workspace access.</p>
-            <span class="platform-flow__detail">Gateway · PostgreSQL</span>
-        </li>
-        <li>
-            <span class="platform-flow__number">03</span>
-            <MudIcon Icon="@Icons.Material.Outlined.Psychology" aria-hidden="true" />
-            <h3>Understand</h3>
-            <p>Ellai helps with requests. Report analysis organizes reported symptoms and exposures.</p>
-            <span class="platform-flow__detail">Muse Spark · BART MNLI</span>
-        </li>
-        <li>
-            <span class="platform-flow__number">04</span>
-            <MudIcon Icon="@Icons.Material.Outlined.TravelExplore" aria-hidden="true" />
-            <h3>Connect observations</h3>
-            <p>Look for relationships across place and time, keeping evidence and uncertainty visible.</p>
-            <span class="platform-flow__detail">Surveillance workers</span>
-        </li>
-        <li>
-            <span class="platform-flow__number">05</span>
-            <MudIcon Icon="@Icons.Material.Outlined.FactCheck" aria-hidden="true" />
-            <h3>Review &amp; follow through</h3>
-            <p>Authorized teams verify signals, review cases and coordinate the next action.</p>
-            <span class="platform-flow__detail">Human verification</span>
-        </li>
-    </ol>
-    <div class="platform-flow__lanes">
-        <div><strong>Conversation</strong><p>Speech → Muse Voice Transcribe → Muse Spark → MMS-TTS. Silero helps coordinate voice turns.</p></div>
-        <div><strong>Reliable processing</strong><p>Saved work → PostgreSQL outbox → NATS → workers. Processing can resume after a connection loss.</p></div>
-        <div><strong>Language expansion</strong><p>MMS-ASR and NLLB support the experimental native-language lane. Translation review and language validation remain required.</p></div>
+    <div class="platform-flow__legend" aria-label="Architecture legend">
+        <span class="client">People &amp; devices</span><span class="core">Trusted records</span>
+        <span class="ai">Conversation &amp; models</span><span class="jobs">Analysis &amp; review</span>
     </div>
-    <p class="platform-flow__note">Illustrated architecture, not a live activity display. Access checks and required approvals stay in place throughout.</p>
+    <p class="platform-flow__hint">Follow the arrows. On a small screen, scroll across the diagram to explore every connection.</p>
+    <div class="platform-flow__viewport" tabindex="0" role="region" aria-label="SwiftAid architecture diagram. Scroll horizontally to explore." aria-describedby="platform-flow-note">
+        <svg class="platform-flow__diagram" viewBox="0 0 1440 930" role="img" aria-labelledby="architecture-title architecture-description">
+            <title id="architecture-title">SwiftAid services and data flow</title>
+            <desc id="architecture-description">Web and mobile connect to the Gateway. Application rules authorize PostgreSQL records, private storage and jobs. The PostgreSQL outbox drives Ellai reasoning and tools. Voice uses Muse transcription, Silero and MMS-TTS. Worker processing includes translation, classification and surveillance review. A complete connection list follows this diagram.</desc>
+            <defs>
+                <marker id="architecture-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" />
+                </marker>
+            </defs>
+            @foreach (var edge in Edges)
+            {
+                <g class="platform-flow__connection @(edge.Optional ? "platform-flow__connection--optional" : "")">
+                    <title>@ConnectionLabel(edge)</title>
+                    <path class="platform-flow__edge" d="@edge.Path" marker-end="url(#architecture-arrow)" marker-start="@(edge.Both ? "url(#architecture-arrow)" : null)" />
+                    <path class="platform-flow__pulse" d="@edge.Path" />
+                </g>
+            }
+            @foreach (var node in Nodes)
+            {
+                <g class="platform-flow__node @node.Kind" transform="@($"translate({node.X} {node.Y})")">
+                    <title>@node.Title — @node.Detail</title>
+                    <rect width="202" height="82" rx="12" />
+                    <rect class="platform-flow__accent" x="0" y="17" width="4" height="48" rx="2" />
+                    <text x="16" y="30" class="platform-flow__name">@node.Title</text>
+                    <text x="16" y="55" class="platform-flow__detail">@node.Detail</text>
+                </g>
+            }
+        </svg>
+    </div>
+    <div class="platform-flow__footnotes">
+        <p><strong>Offline capture, connected intelligence.</strong> Mobile drafts stay on the device until synchronization. AI analysis uses available inference connectivity.</p>
+        <p><strong>Evidence stays accountable.</strong> PostgreSQL is authoritative. Search indexes and caches are derived. Tools retain access checks and approvals; signals require human review.</p>
+        <p><strong>Language &amp; guidance.</strong> Translation quality requires language review. Dynamic UI guidance integration is in progress. Local Llama reasoning is optional.</p>
+    </div>
+    <details class="platform-flow__connections">
+        <summary>Read all connections</summary>
+        <ul>@foreach (var edge in Edges) { <li>@ConnectionLabel(edge)</li> }</ul>
+    </details>
+    <p class="platform-flow__note" id="platform-flow-note">Illustrated service relationships, not live traffic or a service-health display. Dashed paths indicate optional reasoning or synchronization.</p>
 </section>
 
 @code {
     private bool _paused;
+    private sealed record Node(string Id, string Title, string Detail, int X, int Y, string Kind);
+    private sealed record Edge(string From, string To, string Path, bool Both = false, bool Optional = false);
+    private static readonly Node[] Nodes =
+    [
+        new("web", "Blazor web", "Browser workspace", 20, 40, "client"),
+        new("mobile", "MAUI mobile", "Android / iOS", 20, 170, "client"),
+        new("local", "Local drafts / SQLite", "Offline capture + sync", 20, 320, "client"),
+        new("gateway", "ASP.NET Core", "Gateway", 260, 100, "core"),
+        new("app", "Application rules", "Authorization + invariants", 500, 100, "core"),
+        new("pg", "PostgreSQL / PostGIS", "Authoritative records", 740, 20, "core"),
+        new("outbox", "Durable Ellai outbox", "Accepted work + recovery", 980, 20, "core"),
+        new("ellai", "Ellai worker", "Validated reasoning", 1220, 20, "ai"),
+        new("hosted", "Muse Spark", "Hosted reasoning", 1220, 180, "ai"),
+        new("ollama", "Meta Llama / Ollama", "Optional local inference", 1220, 310, "ai"),
+        new("sessions", "Multi-turn sessions", "Persistent context", 1220, 440, "ai"),
+        new("tools", "Agentic tools", "Authorized orchestration", 980, 180, "ai"),
+        new("guidance", "Dynamic UI guidance", "Bit.Bonboarding · in progress", 1220, 570, "ai"),
+        new("asr", "Muse Voice Transcribe", "Speech to text", 260, 300, "ai"),
+        new("vad", "Silero ONNX", "Voice turn coordination", 260, 430, "ai"),
+        new("tts", "MMS-TTS", "Spoken responses", 260, 560, "ai"),
+        new("media", "Private original media", "Original evidence", 500, 300, "core"),
+        new("minio", "MinIO", "Private object storage", 740, 300, "core"),
+        new("derived", "Derived data", "Index + cache", 500, 430, "core"),
+        new("qdrant", "Qdrant", "Private search index", 740, 430, "core"),
+        new("redis", "Redis", "Cache", 740, 560, "core"),
+        new("nats", "NATS", "Events + jobs", 500, 700, "jobs"),
+        new("workers", "Python workers", "Background processing", 740, 700, "jobs"),
+        new("nllb", "NLLB Translation", "Language bridge", 980, 430, "jobs"),
+        new("bart", "BART Large MNLI", "Report classification", 980, 560, "jobs"),
+        new("surveillance", "Surveillance analysis", "Spatial / temporal / clusters", 980, 700, "jobs"),
+        new("risk", "Signals + human review", "Evidence + uncertainty", 1220, 790, "jobs")
+    ];
+    private static readonly Edge[] Edges =
+    [
+        new("web", "gateway", "M222 81 C242 81 240 125 260 125"),
+        new("mobile", "gateway", "M222 211 C242 211 240 160 260 160"),
+        new("mobile", "local", "M121 252 L121 320", Both: true),
+        new("local", "gateway", "M222 361 C248 361 245 190 280 182", Optional: true),
+        new("gateway", "app", "M462 141 L500 141"),
+        new("app", "pg", "M702 125 C720 125 720 61 740 61", Both: true),
+        new("pg", "outbox", "M942 61 L980 61"),
+        new("outbox", "ellai", "M1182 61 L1220 61"),
+        new("ellai", "hosted", "M1321 102 L1321 180"),
+        new("ellai", "ollama", "M1390 102 C1430 130 1430 280 1390 310", Optional: true),
+        new("ellai", "sessions", "M1400 102 C1440 160 1440 410 1400 440"),
+        new("ellai", "guidance", "M1410 102 C1450 180 1450 540 1410 570"),
+        new("ellai", "tools", "M1240 102 C1240 135 1081 140 1081 180"),
+        new("tools", "app", "M980 221 L720 221 Q680 221 680 182"),
+        new("gateway", "asr", "M361 182 L361 300"),
+        new("gateway", "vad", "M315 182 C240 230 240 390 280 430"),
+        new("gateway", "tts", "M305 182 C230 240 225 520 270 560"),
+        new("app", "media", "M601 182 L601 300"),
+        new("app", "derived", "M520 182 C475 250 475 400 520 430"),
+        new("app", "nats", "M510 182 C465 250 465 660 520 700"),
+        new("media", "minio", "M702 341 L740 341"),
+        new("derived", "qdrant", "M702 471 L740 471"),
+        new("derived", "redis", "M702 490 C725 490 720 601 740 601"),
+        new("nats", "workers", "M702 741 L740 741"),
+        new("workers", "nllb", "M942 720 C960 720 955 471 980 471"),
+        new("workers", "bart", "M942 730 C970 730 965 601 980 601"),
+        new("workers", "surveillance", "M942 741 L980 741"),
+        new("surveillance", "risk", "M1182 741 C1200 741 1200 831 1220 831")
+    ];
+    private static string ConnectionLabel(Edge edge) =>
+        $"{Nodes.First(node => node.Id == edge.From).Title} {(edge.Both ? "↔" : "→")} {Nodes.First(node => node.Id == edge.To).Title}{(edge.Optional ? (edge.From == "local" ? " (synchronize)" : " (optional)") : "")}";
 }

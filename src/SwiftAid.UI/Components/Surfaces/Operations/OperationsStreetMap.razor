@@ -1,10 +1,15 @@
 @using SwiftAid.Contracts.Surveillance
 @inject IJSRuntime JavaScript
+@inject IDialogService Dialogs
 @implements IAsyncDisposable
 
 <div class="street-map">
     <div class="street-map__canvas" @ref="_element" role="region" aria-label="Interactive surveillance map. Scroll or pinch to zoom; drag or use arrow keys to pan." tabindex="0"></div>
     <div class="street-map__reset"><span>@(_zoom * 100)&#37;</span><MudButton Size="Size.Small" OnClick="ResetAsync">Reset view</MudButton></div>
+    <div class="street-map__legend" aria-label="Report group colors">
+        <span><i class="human"></i>Human</span><span><i class="animal"></i>Animal</span><span><i class="mixed"></i>Both</span>
+        <small>Report groups, not risk levels</small>
+    </div>
     @if (_unavailable)
     {
         <p role="status">The street map could not be loaded. Area totals remain available below.</p>
@@ -47,6 +52,17 @@
     }
 
     [JSInvokable] public Task ZoomChanged(double value) { _zoom = Math.Round(value, 2); return InvokeAsync(StateHasChanged); }
+    [JSInvokable]
+    public Task ViewCases(string pointId) => InvokeAsync(async () =>
+    {
+        var point = Points.FirstOrDefault(item => item.Id == pointId);
+        if (point?.Cases is not { Count: > 0 } cases) return;
+        var selected = cases.Where(item => item.Animal ? ShowAnimal : ShowHuman).ToArray();
+        if (selected.Length == 0) return;
+        await Dialogs.ShowAsync<MapCasesDialog>(point.Label,
+            new DialogParameters<MapCasesDialog> { { dialog => dialog.Cases, selected } },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true, CloseOnEscapeKey = true });
+    });
     [JSInvokable] public Task TilesUnavailable() { if (_tilesUnavailable) return Task.CompletedTask; _tilesUnavailable = true; return InvokeAsync(StateHasChanged); }
     private async Task ResetAsync() { if (_module is not null) await _module.InvokeVoidAsync("reset", _element); }
     public async ValueTask DisposeAsync()

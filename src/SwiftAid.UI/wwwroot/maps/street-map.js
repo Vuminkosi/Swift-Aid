@@ -29,9 +29,10 @@ function rings(feature) {
         return points;
     }));
 }
-function badge(count, animal = false) {
+function badge(count, human, animal) {
     const label = document.createElement('span'); label.textContent = count.toLocaleString();
-    return L.divIcon({ html: label, className: `sa-map-marker ${animal ? 'sa-map-marker--animal' : ''}`, iconSize: [36, 36], iconAnchor: [18, 18] });
+    const kind = human && animal ? 'mixed' : animal ? 'animal' : 'human';
+    return L.divIcon({ html: label, className: `sa-map-marker sa-map-marker--${kind}`, iconSize: [36, 36], iconAnchor: [18, 18] });
 }
 export async function initialize(element, receiver) {
     await load();
@@ -64,16 +65,33 @@ export function update(element, country, points, showHuman, showAnimal, focus) {
     if (!feature && !data.country) map.setView([-26.5, 31.5], 7);
     if (data.markers) map.removeLayer(data.markers);
     data.markers = L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 45,
-        iconCreateFunction: cluster => badge(cluster.getAllChildMarkers().reduce((total, marker) => total + (marker.options.reportCount || 0), 0)) });
+        iconCreateFunction: cluster => {
+            const markers = cluster.getAllChildMarkers();
+            return badge(markers.reduce((total, marker) => total + (marker.options.reportCount || 0), 0),
+                markers.some(marker => marker.options.human), markers.some(marker => marker.options.animal));
+        } });
     for (const point of points || []) {
         const total = (showHuman ? point.humanReports : 0) + (showAnimal ? point.animalReports : 0);
         if (!total || !Number.isFinite(point.latitude) || !Number.isFinite(point.longitude)) continue;
         const popup = document.createElement('div'); popup.className = 'sa-map-popup';
         const title = document.createElement('strong'); title.textContent = point.label; popup.append(title);
         const count = document.createElement('p'); count.textContent = `${total.toLocaleString()} reported cases`; popup.append(count);
+        if (point.cases?.length) {
+            const button = document.createElement('button'); button.type = 'button';
+            button.className = 'sa-map-popup__cases'; button.textContent = 'View cases >>';
+            button.addEventListener('click', async () => {
+                button.disabled = true;
+                try { await data.receiver.invokeMethodAsync('ViewCases', point.id); }
+                catch { button.textContent = 'Try viewing cases again'; }
+                finally { button.disabled = false; }
+            });
+            popup.append(button);
+        }
         const note = document.createElement('small'); note.textContent = 'Grouped at a public place reference; not individual case locations.'; popup.append(note);
-        const marker = L.marker([point.latitude, point.longitude], { icon: badge(total, !showHuman && showAnimal),
-            title: `${point.label}: ${total} reports`, reportCount: total, keyboard: true });
+        const human = showHuman && point.humanReports > 0, animal = showAnimal && point.animalReports > 0;
+        const kind = human && animal ? 'Human and animal' : animal ? 'Animal' : 'Human';
+        const marker = L.marker([point.latitude, point.longitude], { icon: badge(total, human, animal),
+            title: `${point.label}: ${total} reports (${kind})`, reportCount: total, human, animal, keyboard: true });
         marker.bindPopup(popup); data.markers.addLayer(marker);
     }
     data.markers.addTo(map);

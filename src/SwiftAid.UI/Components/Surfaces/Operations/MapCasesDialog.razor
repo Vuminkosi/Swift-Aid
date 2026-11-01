@@ -1,0 +1,24 @@
+@using SwiftAid.Contracts.Surveillance
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.caption">@Cases.Count reported cases in the current map view. Case details use your current access.</MudText>
+        <div class="map-cases" role="list" aria-label="Cases at this place">
+            @foreach (var item in Cases)
+            {
+                <div class="map-cases__row" role="listitem" @key="item.CaseId">
+                    <MudLink Href="@($"/case/{item.CaseId:D}")" OnClick="Close">Case @item.CaseId.ToString("N")[..8]</MudLink>
+                    <span>@(item.Animal ? "Animal" : "Human") · @item.Workflow</span>
+                    <time datetime="@item.ReportedAtUtc.ToString("O")">@item.ReportedAtUtc.ToString("dd MMM yyyy")</time>
+                </div>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions><MudButton OnClick="Close">Close</MudButton></DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter] public IReadOnlyList<SurveillanceMapCase> Cases { get; set; } = [];
+    private void Close() => Dialog.Close();
+}

@@ -32,6 +32,9 @@ public sealed class SurveillanceMapDetailsClientTests
             Assert.Equal(human, point.HumanReports);
             Assert.Equal(animal, point.AnimalReports);
             Assert.Equal(-26.5, point.Latitude);
+            Assert.NotNull(point.Cases);
+            Assert.Equal(rows.Select(row => row.CaseId).Order(), point.Cases.Select(row => row.CaseId).Order());
+            Assert.Equal(animal, point.Cases.Count(row => row.Animal));
         }
     }
 

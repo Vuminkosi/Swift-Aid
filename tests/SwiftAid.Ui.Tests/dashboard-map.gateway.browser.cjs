@@ -5,7 +5,7 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
 (async () => {
     const browser = await chromium.connectOverCDP(process.env.SWIFTAID_BROWSER_CDP || 'http://127.0.0.1:19226');
     const context = browser.contexts()[0];
-    const page = context.pages().find(candidate => /\/(dashboard|surveillance|my-cases)(\?|$)/.test(candidate.url()));
+    const page = context.pages().find(candidate => /\/(dashboard|surveillance|my-cases|ellai\/about)(\?|$)/.test(candidate.url()));
     assert.ok(page, 'Keep an authenticated operations page open in the test browser.');
     const base = process.env.SWIFTAID_GATEWAY_URL || 'http://localhost:8080';
     page.setDefaultTimeout(90000);
@@ -77,11 +77,12 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             const home = await anonymous.newPage();
             await home.goto(base, { waitUntil: 'domcontentloaded' });
             await home.locator('.platform-flow').waitFor();
-            assert.equal(await home.locator('.platform-flow__steps > li').count(), 5);
+            assert.equal(await home.locator('.platform-flow__node').count(), 27);
+            assert.equal(await home.locator('.platform-flow__edge').count(), 28);
             await home.getByRole('button', { name: 'Pause flow', exact: true }).click();
             await home.locator('.platform-flow--paused').waitFor();
             await home.emulateMedia({ reducedMotion: 'reduce' });
-            assert.equal(await home.locator('.platform-flow__steps li').first().evaluate(el => getComputedStyle(el, '::after').animationName), 'none');
+            assert.equal(await home.locator('.platform-flow__pulse').first().evaluate(el => getComputedStyle(el).animationName), 'none');
             await home.setViewportSize({ width: 390, height: 844 });
             await home.waitForFunction(() => document.documentElement.scrollWidth <= innerWidth + 1, null, { timeout: 5000 });
             for (const model of ['NLLB-200', 'MMS-ASR']) await home.getByRole('heading', { name: model, exact: true }).waitFor();
