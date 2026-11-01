@@ -1,11 +1,11 @@
 @using SwiftAid.UI.Components
 @using Microsoft.AspNetCore.Components.Web
 
-<PageTitle>SwiftAid — Healthier people. Safer communities.</PageTitle>
+<PageTitle>SwiftAid | AI-Powered Community Disease Surveillance</PageTitle>
 <HeadContent>
-    <meta name="description" content="SwiftAid helps communities report human and animal health concerns, find community sessions, and support accountable follow-through." />
-    <meta property="og:title" content="SwiftAid — Healthier people. Safer communities." />
-    <meta property="og:description" content="A community health support platform for reporting, community connection, and accountable follow-through." />
+    <meta name="description" content="SwiftAid is building offline-first community disease surveillance and early outbreak intelligence for underserved communities in Zimbabwe and Eswatini." />
+    <meta property="og:title" content="SwiftAid | AI-Powered Community Disease Surveillance" />
+    <meta property="og:description" content="An earlier voice in public health surveillance. Community reporting, local-language access, and potential outbreak signals for human verification." />
 </HeadContent>
 
 @code {
@@ -19,8 +19,9 @@
             <p class="web-landing__eyebrow">Community health, connected</p>
             <h1 id="web-landing-title">Healthier people.<br />Safer communities.<br /><span>Brighter tomorrows.</span></h1>
             <p class="web-landing__lead">
-                SwiftAid helps communities share health concerns about people and animals,
-                connect through published sessions, and support accountable follow-through.
+                An earlier voice in public health surveillance. SwiftAid is building
+                offline-first reporting and early outbreak intelligence for underserved
+                communities, starting in Zimbabwe and Eswatini.
             </p>
             <div class="web-landing__actions" aria-label="Get started">
                 <a class="web-landing__button web-landing__button--primary" href="/report">Report a concern</a>
@@ -43,12 +44,13 @@
     <section class="web-landing__intro" aria-labelledby="what-is-swiftaid-title">
         <div>
             <p class="web-landing__eyebrow">What SwiftAid is about</p>
-            <h2 id="what-is-swiftaid-title">Make the next step clearer.</h2>
+            <h2 id="what-is-swiftaid-title">Every report can help tell a bigger story.</h2>
         </div>
         <p>
-            SwiftAid is a community health support platform. It brings public reporting,
-            community connection, and authorized case workflows into one service while
-            keeping people in control of what they share and what happens next.
+            A concern in one village may be part of a wider pattern. Our vision is to connect
+            community reports with evidence that helps health teams investigate sooner.
+            Potential outbreak signals need verification by authorized health officials;
+            people stay in control of decisions and follow-through.
         </p>
     </section>
 
@@ -94,6 +96,33 @@
             <li><span>02</span><div><h3>Save or send</h3><p>Keep a draft on this device or submit it to the service when available.</p></div></li>
             <li><span>03</span><div><h3>Track the result</h3><p>A report is marked received only after the service confirms submission.</p></div></li>
         </ol>
+    </section>
+
+    <section id="meta-models" class="web-landing__models" aria-labelledby="meta-models-title">
+        <div class="web-landing__models-heading">
+            <p class="web-landing__eyebrow">Meta Models</p>
+            <h2 id="meta-models-title">Speak. Understand. Follow through.</h2>
+            <p>Ellai, SwiftAid's assistant, brings Meta's language and speech models together to make information easier to share and use.</p>
+        </div>
+        <div class="web-landing__model-list">
+            <article>
+                <span class="web-landing__model-number" aria-hidden="true">01</span>
+                <div><h3>Muse Voice Transcribe</h3><p>Turns spoken words into text for Ellai, making voice another way to ask a question or describe an observation.</p></div>
+            </article>
+            <article>
+                <span class="web-landing__model-number" aria-hidden="true">02</span>
+                <div><h3>Muse Spark</h3><p>Helps Ellai understand a request, find information you are allowed to see, and explain the next step. Actions that need your approval still wait for it.</p></div>
+            </article>
+            <article>
+                <span class="web-landing__model-number" aria-hidden="true">03</span>
+                <div><h3>MMS-TTS</h3><p>Gives Ellai a voice. Turn on Listen to Ellai to hear replies and brief updates while it checks information.</p></div>
+            </article>
+        </div>
+        <div class="web-landing__models-footer">
+            <p>English is our current voice starting point. We are working toward validated Shona and siSwati experiences. AI assistance needs a connection; saved reports and available offline materials support work between connections.</p>
+            <a class="web-landing__button web-landing__button--secondary" href="https://github.com/Vuminkosi/Swift-Aid">Explore SwiftAid on GitHub <span aria-hidden="true">&nbsp;↗</span></a>
+        </div>
+        <p class="web-landing__model-notice">MMS voice by Meta AI · <a href="https://huggingface.co/facebook/mms-tts-eng">English model</a> · <a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a>. This prototype uses it noncommercially. No Meta endorsement is implied.</p>
     </section>
 
     <section class="web-landing__community" aria-labelledby="community-title">
