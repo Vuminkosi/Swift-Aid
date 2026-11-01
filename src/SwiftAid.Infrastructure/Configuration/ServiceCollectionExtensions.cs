@@ -137,6 +137,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IIntakePromotionWorkspaceResolver, PostgresIntakePromotionWorkspaceResolver>();
         services.AddScoped<IIntakePromotionService, IntakePromotionProcessor>();
         services.AddScoped<IManagedCaseRegistrationProcessor, CaseRegistrationProcessor>();
+        services.AddScoped<SwiftAid.Application.Intake.Imports.ICaseImportStore, SwiftAid.Infrastructure.Persistence.IntakeImports.PostgresCaseImportStore>();
+        services.AddScoped<SwiftAid.Application.Intake.Imports.CaseCsvImportService>();
         var intakeCoordinationOptions = ReadIntakeCoordinationOptions(configuration);
         intakeCoordinationOptions.Validate();
         services.TryAddSingleton(intakeCoordinationOptions);

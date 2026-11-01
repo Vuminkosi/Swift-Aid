@@ -2333,6 +2333,125 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.IntakeImports.CaseImportEntity", b =>
+                {
+                    b.Property<Guid>("ImportId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ActorId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("text");
+
+                    b.Property<byte[]>("ContextHash")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("CountryCode")
+                        .IsRequired()
+                        .HasMaxLength(2)
+                        .HasColumnType("character varying(2)");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<long?>("FinalRow")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("LeaseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("LeaseUntilUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("NextRow")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("WorkspaceId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("text");
+
+                    b.HasKey("ImportId");
+
+                    b.HasIndex("WorkspaceId");
+
+                    b.HasIndex("ActorId", "UpdatedAtUtc");
+
+                    b.ToTable("case_imports", "swiftaid_ingestion", t =>
+                        {
+                            t.HasCheckConstraint("ck_case_import_cursor", "\"NextRow\" > 0 AND (\"FinalRow\" IS NULL OR \"FinalRow\" >= 0)");
+
+                            t.HasCheckConstraint("ck_case_import_hash", "octet_length(\"ContextHash\") = 32");
+
+                            t.HasCheckConstraint("ck_case_import_lease", "(\"LeaseId\" IS NULL) = (\"LeaseUntilUtc\" IS NULL)");
+
+                            t.HasCheckConstraint("ck_case_import_state", "\"State\" IN ('Running','Paused','Completed','Failed')");
+                        });
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.IntakeImports.CaseImportRowEntity", b =>
+                {
+                    b.Property<Guid>("ImportId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("RowNumber")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("CaseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CommandId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<byte[]>("ProtectedSource")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<byte[]>("SourceHash")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("ImportId", "RowNumber");
+
+                    b.HasIndex("ImportId", "State");
+
+                    b.ToTable("case_import_rows", "swiftaid_ingestion", t =>
+                        {
+                            t.HasCheckConstraint("ck_case_import_row_bounds", "\"RowNumber\" > 0 AND \"Attempts\" >= 0 AND octet_length(\"SourceHash\") = 32 AND octet_length(\"ProtectedSource\") BETWEEN 1 AND 524288");
+
+                            t.HasCheckConstraint("ck_case_import_row_state", "\"State\" IN ('Processing','Accepted','Replayed','Invalid','Denied','Conflict','RetryableFailure','Failed')");
+                        });
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.ManagedCaseEntity", b =>
                 {
                     b.Property<Guid>("CaseId")
@@ -3801,6 +3920,30 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasForeignKey("ParentId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_geo_locations_parent");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.IntakeImports.CaseImportEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.ActorEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ActorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.WorkspaceEntity", null)
+                        .WithMany()
+                        .HasForeignKey("WorkspaceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.IntakeImports.CaseImportRowEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.IntakeImports.CaseImportEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ImportId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.ManagedCaseEntity", b =>

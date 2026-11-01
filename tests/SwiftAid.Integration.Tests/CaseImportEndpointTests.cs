@@ -1,0 +1,122 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Security.Claims;
+using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using OpenIddict.Validation.AspNetCore;
+using SwiftAid.Application.Authorization;
+using SwiftAid.Application.Intake.Imports;
+using SwiftAid.Gateway.Endpoints;
+using SwiftAid.Infrastructure.Persistence;
+using SwiftAid.Infrastructure.Persistence.IntakeImports;
+
+namespace SwiftAid.Integration.Tests;
+
+[Collection(IntakePostgresCollection.Name)]
+public sealed class CaseImportEndpointTests
+{
+    [IntakePostgresFact]
+    public async Task Real_http_import_requires_authentication_and_csrf_and_restores_durable_status()
+    {
+        await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
+        await using var host = await Host.StartAsync(fixture);
+        var id = Guid.NewGuid();
+        var command = Guid.NewGuid();
+        using var anonymous = await host.Client.SendAsync(Request(id, command));
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        using var cookieRequest = Request(id, command);
+        cookieRequest.Headers.Add("Cookie", "swiftaid-import-test=authenticated");
+        using var csrf = await host.Client.SendAsync(cookieRequest);
+        Assert.Equal(HttpStatusCode.BadRequest, csrf.StatusCode);
+        using var authorized = Request(id, command);
+        authorized.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "synthetic-import-token");
+        using var accepted = await host.Client.SendAsync(authorized);
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        var first = JsonSerializer.Deserialize<CaseImportBatchResult>(await accepted.Content.ReadAsStringAsync(), Host.Json)!;
+        Assert.Equal("Accepted", Assert.Single(first.Rows).Status);
+        using var query = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/case-imports/{id:D}");
+        query.Headers.Authorization = authorized.Headers.Authorization;
+        using var restored = await host.Client.SendAsync(query);
+        Assert.Equal(HttpStatusCode.OK, restored.StatusCode);
+        var summary = JsonSerializer.Deserialize<CaseImportSummary>(await restored.Content.ReadAsStringAsync(), Host.Json)!;
+        Assert.Equal("Completed", summary.State);
+        Assert.Equal(1, summary.Accepted);
+        using var retry = Request(id, command);
+        retry.Headers.Authorization = authorized.Headers.Authorization;
+        using var replay = await host.Client.SendAsync(retry);
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        var second = JsonSerializer.Deserialize<CaseImportBatchResult>(await replay.Content.ReadAsStringAsync(), Host.Json)!;
+        Assert.Equal("Replayed", Assert.Single(second.Rows).Status);
+        Assert.Equal(first.Rows[0].CaseId, second.Rows[0].CaseId);
+    }
+
+    internal static HttpRequestMessage Request(Guid id, Guid command) => Host.Request(id, 1, true,
+        CaseImportPostgresTests.Context, CaseImportPostgresTests.Csv(command));
+
+    internal sealed class Host(WebApplication app, HttpClient client) : IAsyncDisposable
+    {
+        public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+        public HttpClient Client { get; } = client;
+
+        public static async Task<Host> StartAsync(CaseImportPostgresTests.Fixture fixture)
+        {
+            var builder = WebApplication.CreateBuilder();
+            builder.Logging.ClearProviders();
+            builder.WebHost.UseTestServer();
+            builder.Services.AddAntiforgery();
+            builder.Services.AddAuthentication(options =>
+            {
+                options.DefaultAuthenticateScheme = IdentityConstants.ApplicationScheme;
+                options.DefaultChallengeScheme = IdentityConstants.ApplicationScheme;
+            }).AddScheme<AuthenticationSchemeOptions, ImportAuthentication>(IdentityConstants.ApplicationScheme, _ => { })
+              .AddScheme<AuthenticationSchemeOptions, ImportAuthentication>(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme, _ => { });
+            builder.Services.AddAuthorization();
+            builder.Services.AddScoped(_ => new SwiftAidDbContext(new DbContextOptionsBuilder<SwiftAidDbContext>()
+                .UseNpgsql(fixture.Db.Database.GetConnectionString()).UseOpenIddict().Options));
+            builder.Services.AddScoped<ICaseImportStore>(services => new PostgresCaseImportStore(
+                services.GetRequiredService<SwiftAidDbContext>(), fixture.Protection, TimeProvider.System));
+            builder.Services.AddScoped(services => fixture.CreateService(services.GetRequiredService<SwiftAidDbContext>(), services.GetRequiredService<ICaseImportStore>()));
+            var app = builder.Build();
+            app.UseAuthentication();
+            app.UseAuthorization();
+            app.MapCaseImportEndpoints();
+            await app.StartAsync();
+            return new(app, app.GetTestClient());
+        }
+
+        public static HttpRequestMessage Request(Guid id, long start, bool final, CaseImportContext context, string csv)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/case-imports/{id:D}/rows?startRow={start}&finalBatch={final.ToString().ToLowerInvariant()}");
+            request.Headers.Add("X-SwiftAid-Import", Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(context, Json)));
+            request.Content = new StringContent(csv, Encoding.UTF8, "text/csv");
+            return request;
+        }
+
+        public async ValueTask DisposeAsync() { Client.Dispose(); await app.DisposeAsync(); }
+    }
+
+    private sealed class ImportAuthentication(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder)
+        : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
+    {
+        protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+        {
+            var authorized = Scheme.Name == IdentityConstants.ApplicationScheme
+                ? Request.Cookies["swiftaid-import-test"] == "authenticated"
+                : Request.Headers.Authorization == "Bearer synthetic-import-token";
+            return Task.FromResult(authorized
+                ? AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(new ClaimsIdentity(
+                    [new Claim(ClaimTypes.NameIdentifier, "officer-1"), new Claim(ActorContext.AccessEpochClaimType, "7")], Scheme.Name)), Scheme.Name))
+                : AuthenticateResult.NoResult());
+        }
+    }
+}

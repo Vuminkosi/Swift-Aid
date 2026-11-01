@@ -453,7 +453,7 @@ public sealed class CaseRegistrationBackendTests
         await lease.DisposeAsync();
     }
 
-    private static ActorContext CreateOfficer(string actorId) => ActorContext.FromValidatedPrincipal(
+    internal static ActorContext CreateOfficer(string actorId) => ActorContext.FromValidatedPrincipal(
         new ClaimsPrincipal(new ClaimsIdentity(
         [
             new Claim(ClaimTypes.NameIdentifier, actorId),
@@ -564,7 +564,7 @@ public sealed class CaseRegistrationBackendTests
         db.ChangeTracker.Clear();
     }
 
-    private static PostgresCaseRegistrationPersistence CreatePersistence(
+    internal static PostgresCaseRegistrationPersistence CreatePersistence(
         SwiftAidDbContext db,
         ProtectedPayloadOptions options,
         ProtectedPayloadDataProtectionProvider provider) =>
@@ -595,7 +595,7 @@ public sealed class CaseRegistrationBackendTests
         db.ChangeTracker.Clear();
     }
 
-    private sealed class SyntheticRegistrationKeyRing : IDisposable
+    internal sealed class SyntheticRegistrationKeyRing : IDisposable
     {
         private readonly string _rootPath;
         private readonly string _certificatePath;
@@ -658,7 +658,7 @@ public sealed class CaseRegistrationBackendTests
         public void Dispose() => PrivateKeyRingTestDirectory.DeleteRoot(_rootPath);
     }
 
-    private sealed class TestHostEnvironment(string environmentName) : IHostEnvironment
+    internal sealed class TestHostEnvironment(string environmentName) : IHostEnvironment
     {
         public string EnvironmentName { get; set; } = environmentName;
 

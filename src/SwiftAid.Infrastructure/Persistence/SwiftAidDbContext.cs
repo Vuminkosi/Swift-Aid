@@ -88,6 +88,8 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         modelBuilder.ApplyConfiguration(new IntakeRouteEntityConfiguration());
         modelBuilder.ApplyConfiguration(new IntakeAttachmentEntityConfiguration());
         modelBuilder.ApplyConfiguration(new IntakeOutboxEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new IntakeImports.CaseImportConfiguration());
+        modelBuilder.ApplyConfiguration(new IntakeImports.CaseImportRowConfiguration());
         modelBuilder.ApplyConfiguration(new IntakePromotionEntityConfiguration());
         modelBuilder.ApplyConfiguration(new IntakeEvidenceLinkEntityConfiguration());
         modelBuilder.ApplyConfiguration(new IntakeCoordinationActionEntityConfiguration());

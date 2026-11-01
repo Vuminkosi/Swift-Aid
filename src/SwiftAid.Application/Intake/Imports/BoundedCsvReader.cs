@@ -30,6 +30,8 @@ public static class BoundedCsvReader
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var character = buffer[index];
+                if (number == 0 && characters == 0 && fields.Count == 0 && field.Length == 0 && character == '\uFEFF')
+                    continue;
                 if (skipLineFeed)
                 {
                     skipLineFeed = false;

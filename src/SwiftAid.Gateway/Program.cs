@@ -213,6 +213,7 @@ app.MapPublicIntakeEndpoints();
 app.MapIntakeDecisionEndpoints();
 app.MapIntakeCoordinationEndpoints();
 app.MapManagedCaseRegistrationEndpoints();
+app.MapCaseImportEndpoints();
 app.MapCaseTimelineEndpoints();
 app.MapCaseDetailEndpoints();
 app.MapCaseQueueEndpoints();

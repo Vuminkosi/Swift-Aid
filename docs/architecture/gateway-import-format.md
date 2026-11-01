@@ -24,6 +24,48 @@ schema_version,command_id,case_id,external_record_id,subject_scope,narrative,obs
 - `ellai_validate_observations`: validates string-array shape and bounds; returns only count/format status, without echoing the evidence or claiming submission.
 - `ellai_locations`: uses the existing public registry, returns bounded candidates with registry-version provenance, and requires user selection.
 
-These tools run through the existing broker, session scope, budget, catalogue and progress narration. They are available in the public capture-assistance profile without exposing case queues, receipts or staff authority. They do not submit cases or approve administrative actions. Existing report forms and canonical services own durable submission; actual import endpoint/ledger delivery is tracked separately in the implementation plan.
+These tools run through the existing broker, session scope, budget, catalogue and progress narration. They are available in the public capture-assistance profile without exposing case queues, receipts or staff authority. They do not submit cases or approve administrative actions. Existing report forms and canonical services own durable submission.
+
+## Durable workspace imports
+
+Imports belong to an authorized workspace. The product entry point is Workspace → Imports; the bounded HTTP contract also supports operational automation. The workspace user flow is being integrated separately from the backend delivery.
+
+`POST /api/v1/case-imports/{importId}/rows?startRow=1&finalBatch=false` accepts UTF-8 `text/csv`, at most 1,000 rows and 8 MiB per HTTP batch. Every batch repeats the header. `X-SwiftAid-Import` carries base64 UTF-8 JSON:
+
+```json
+{
+  "workspaceId": "your-authorized-workspace",
+  "confirmations": {
+    "occurrenceCountryConfirmed": true,
+    "occurrenceCountryCode": "ZW",
+    "occurrenceCountryCatalogueVersion": "current-catalogue-version",
+    "reportReviewConfirmed": true,
+    "processingConfirmed": true,
+    "processingPolicyReference": "current-policy-reference",
+    "processingPolicyVersion": "current-policy-version",
+    "recordingConfirmed": null,
+    "recordingPolicyReference": null,
+    "recordingPolicyVersion": null
+  }
+}
+```
+
+Use current metadata/policy and actual user confirmations. Cookie requests require the existing antiforgery token; native bearer authentication follows the existing registration scheme. Guest intake receipts never authorize this endpoint. `GET /api/v1/case-imports/{importId}` returns owner-authorized durable counts and the next row, with live membership/grant/epoch checks.
+
+The ledger protects original row values using the configured data-protection key ring before invoking canonical managed-case registration. Source hashes, context, stable command IDs and lease fencing prevent changed-source replay and concurrent checkpoint corruption. Each case uses the existing registration transaction, protected events, receipt and domain outbox. A crash after case commit but before checkpoint retries the original command and receives its receipt, without creating a second case. Preserve key-ring material across restarts.
+
+States are Running, Paused, Completed and Failed. Row results distinguish Accepted, Replayed, Invalid, Denied, Conflict, RetryableFailure and Failed. Completed means the supplied file was processed; inspect rejected counts. Registration unavailability retries at the same checkpoint, bounded to five attempts. Interrupted/unavailable streams pause; earlier accepted rows remain committed. Resume with the same import ID, context, header order and unchanged source file. Completed imports cannot append rows. No automatic background reprocessing or source-file retention in MinIO is claimed; the caller resends remaining rows.
+
+For operational automation, `scripts/import-cases.py` streams bounded batches, queries the checkpoint before resuming, refuses redirects and reads its bearer token only from `SWIFTAID_IMPORT_ACCESS_TOKEN`:
+
+```powershell
+python scripts/import-cases.py designs/data/zimbabwe_10500_cases.csv --gateway https://your-gateway --context import-context.json --import-id YOUR-STABLE-UUID
+```
+
+The context file contains the reviewed object above, not credentials. HTTP is allowed only for loopback development. The command is optional tooling, not a replacement for the workspace import flow.
+
+Deploy migration `20261101054203_DurableCaseImports` after the ingestion-outbox migration. The existing `infra/postgres/case-authority-lock-helper.sql` must also be provisioned; EF migrations alone do not install the restricted replay helper. Restricted runtime grants for the new ledger require deployment verification before enabling imports outside development.
+
+Verification on 2026-11-01: six real PostgreSQL / ASP.NET TestServer tests cover creation, encrypted source retention, reopened-context replay, injected checkpoint failure after committed registration, independent row rejection, lease conflict, immutable source, checkpoint gaps, owner/epoch denial, HTTP authentication, cookie antiforgery rejection and history retrieval. Authentication and policy are deterministic fixtures; live identity/provider/browser validation is NOT VERIFIED. The supplied 15,000-row test verifies parsing/mapping only, not database import throughput.
 
 Verification: focused application tests cover malformed CSV, field bounds, cancellation, string-array compatibility, source preservation, unknown facts, owner mismatch, deterministic source hashes, tool scope/budget and registry provenance. The supplied-file fixture test is opt-in via `SWIFTAID_TEST_CASE_CSV_DIRECTORY`; missing local files are never silently fabricated.
