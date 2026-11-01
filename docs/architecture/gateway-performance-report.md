@@ -38,3 +38,22 @@ The first negative browser extension failed because it selected a file before th
 Command: integration test filter `FullyQualifiedName~CaseImportBrowserTests`, with `SWIFTAID_RUN_IMPORT_BROWSER=1`, the PostgreSQL fixture variables, installed Playwright/Chromium (`NODE_PATH` / optional `SWIFTAID_CHROMIUM_PATH`). The checked-in browser script is invoked by the test, not pointed at the shared Gateway. Screenshots and result JSON are local ignored evidence under `tests/SwiftAid.Ui.Tests/artifacts/pipeline-imports-20261101`.
 
 Limitations: identity and policy are deterministic fixtures; live account provisioning, native Android/iOS imports, dark-theme/screen-reader coverage, external providers and deployment to the shared Gateway are NOT VERIFIED. The browser fixture uses the real page but not the complete production navigation shell. Restricted database-role deployment verification is a separate gate.
+
+## Supplied 15,000-row durable ingestion measurement
+
+PASS, 2026-11-01, source at `f690055` plus the opt-in `CaseImportLoadTests` harness: all 10,500 Zimbabwe and 4,500 Eswatini records crossed the actual authenticated HTTP route, canonical registration and PostgreSQL import ledger in the disposable local fixture. Separate country workspaces and explicit human/animal grants were provisioned for the synthetic actor. Results: **15,000 newly accepted cases, zero initial replays/rejections, 15,000 unique receipts, 30,000 immutable case events and 30,000 durable domain-outbox rows**. Replaying each country's first 100-row batch after completion produced Replayed receipts without increasing unique counts.
+
+| Measurement | Observed value |
+|---|---:|
+| Total elapsed including replay/count assertions | 420.879 s |
+| Effective serial throughput | 35.64 reports/s |
+| Zimbabwe 10,500 rows | 290.466 s |
+| Eswatini 4,500 rows | 124.732 s |
+| Batches | 150 × 100 reports |
+| Batch response p50 / p95 / p99 | 2,727.6 / 3,106.9 / 3,237.0 ms |
+| Peak sampled test-host working set | 217.3 MiB |
+| Test-host CPU time | 93.77 s |
+
+Environment: Windows .NET 10.0.14 ASP.NET TestServer, PostgreSQL/PostGIS 17 Docker loopback, serial caller, real encryption/transactions; synthetic authentication/policy. Memory includes the test client and server in one process and is sampled after batches; it is not an OS-wide peak. A single mid-run Docker observation showed PostgreSQL at 128.2 MiB and 27.94% CPU; this is not a sustained-resource average. No broker drain or intelligence processing was included. This proves the supplied 15,000-row ingestion path, not 100,000/million-row capacity or multi-node behavior.
+
+Run with `SWIFTAID_RUN_IMPORT_LOAD=1`, `SWIFTAID_RUN_INTAKE_POSTGRES_FIXTURES=1`, the disposable connection variable and `SWIFTAID_TEST_CASE_CSV_DIRECTORY`; filter `FullyQualifiedName~CaseImportLoadTests`. Optional `SWIFTAID_IMPORT_LOAD_RESULT` writes measured JSON. Do not point the fixture at a shared database. Later shared-workspace changes require their own regression checks and are not retroactively covered by these numbers.
