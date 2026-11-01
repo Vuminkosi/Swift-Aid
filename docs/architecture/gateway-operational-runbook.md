@@ -1,5 +1,11 @@
 # Gateway ingestion operational runbook
 
+## Report-policy defaults
+
+Gateway defaults `Intake:Consent:ProcessingPolicyReference` to `/privacy#privacy-use-heading` and `RecordingPolicyReference` to `/privacy#privacy-sensitive-heading`, both at version `2026-11-01`. These reference the existing public privacy notice. Compose exposes `INTAKE_PROCESSING_POLICY_REFERENCE`, `INTAKE_PROCESSING_POLICY_VERSION`, `INTAKE_RECORDING_POLICY_REFERENCE` and `INTAKE_RECORDING_POLICY_VERSION` overrides. Bump the applicable version when its terms change. The import page and submission validator use the same configuration; confirmations and current-version matching remain required. All four values must be valid, even for imports without recordings. Blank configuration previously caused the import page to show unavailable settings.
+
+Verification (2026-11-01): the configuration regression failed with the blank defaults and passed after correction, including rejection of stale/missing confirmations. Chromium import/pause/refresh/resume and shared-workspace selection passed against disposable PostgreSQL with the real configured policy provider (2 tests passed, none skipped). This does not constitute validation of the user's live bulk CSV.
+
 ## Rollout
 
 Compose now runs `database-migrate` from the Gateway image before starting Gateway. The one-shot `--migrate-database` command starts no HTTP listeners or hosted workers, uses the canonical context and EF migration history, holds a PostgreSQL session advisory lock across discovery/application, and has a ten-minute cancellation deadline. Failure exits nonzero and blocks dependent service startup. Reruns are idempotent. Use normal `docker compose -f infra/compose.yml up -d --build`; `--no-deps` deliberately bypasses this deployment guarantee.

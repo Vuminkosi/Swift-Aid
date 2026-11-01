@@ -39,6 +39,11 @@ services:
       # The local emulator uses HTTP. Session cookies are explicitly development-only;
       # production keeps Secure __Host- cookies unless it overrides this setting.
       Authentication__AllowInsecureDevelopmentCookies: "true"
+      # Versioned report-handling defaults shared by the import UI and validator.
+      Intake__Consent__ProcessingPolicyReference: "${INTAKE_PROCESSING_POLICY_REFERENCE:-/privacy#privacy-use-heading}"
+      Intake__Consent__ProcessingPolicyVersion: "${INTAKE_PROCESSING_POLICY_VERSION:-2026-11-01}"
+      Intake__Consent__RecordingPolicyReference: "${INTAKE_RECORDING_POLICY_REFERENCE:-/privacy#privacy-sensitive-heading}"
+      Intake__Consent__RecordingPolicyVersion: "${INTAKE_RECORDING_POLICY_VERSION:-2026-11-01}"
 
       # Transport Security
       TransportSecurity__AllowPlaintextDevelopment: "true"

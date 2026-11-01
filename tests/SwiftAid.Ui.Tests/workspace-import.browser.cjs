@@ -1,5 +1,5 @@
 // Invoked by CaseImportBrowserTests: real Gateway component/services and disposable PostgreSQL.
-// Identity and policy are fixtures. No shared Gateway, real patient data or provider is contacted.
+// Identity and geography are fixtures; policy uses Gateway defaults. No shared Gateway or real patient data is contacted.
 const assert = require("node:assert/strict");
 const path = require("node:path");
 const fs = require("node:fs");

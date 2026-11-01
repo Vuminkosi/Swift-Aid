@@ -20,13 +20,15 @@ using SwiftAid.Client.Presentation.PublicWorkflows;
 using SwiftAid.Contracts.Intake;
 using SwiftAid.Gateway.Components.Pages;
 using SwiftAid.Gateway.Ingestion;
+using SwiftAid.Gateway.Presentation;
+using SwiftAid.Infrastructure.Persistence.Repositories.Intake;
 using SwiftAid.Infrastructure.Persistence;
 using SwiftAid.Infrastructure.Persistence.IntakeImports;
 using Xunit.Abstractions;
 
 namespace SwiftAid.Integration.Tests;
 
-/// <summary>Opt-in browser fixture: real component, registration and PostgreSQL; synthetic identity and policy.</summary>
+/// <summary>Opt-in browser fixture: real component, configured policy, registration and PostgreSQL; synthetic identity and metadata.</summary>
 [Collection(IntakePostgresCollection.Name)]
 public sealed class CaseImportBrowserTests(ITestOutputHelper output)
 {
@@ -51,7 +53,8 @@ public sealed class CaseImportBrowserTests(ITestOutputHelper output)
         builder.Services.AddScoped<AuthenticationStateProvider, FixtureAuthentication>();
         builder.Services.AddScoped<IWorkspaceImportClient, WorkspaceImportClient>();
         builder.Services.AddSingleton<IPublicIntakeMetadataClient, FixtureMetadata>();
-        builder.Services.AddSingleton<IPublicIntakeProcessingPolicyClient, FixtureMetadata>();
+        builder.Services.Configure<IntakeConsentOptions>(builder.Configuration.GetSection(IntakeConsentOptions.SectionName));
+        builder.Services.AddSingleton<IPublicIntakeProcessingPolicyClient, GatewayPublicIntakeProcessingPolicyClient>();
         builder.Services.AddScoped(_ => new SwiftAidDbContext(new DbContextOptionsBuilder<SwiftAidDbContext>()
             .UseNpgsql(fixture.Db.Database.GetConnectionString()).UseOpenIddict().Options));
         builder.Services.AddScoped(services => new PostgresCaseImportStore(services.GetRequiredService<SwiftAidDbContext>(), fixture.Protection, TimeProvider.System));
@@ -111,7 +114,7 @@ public sealed class CaseImportBrowserTests(ITestOutputHelper output)
             new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "officer-1"), new Claim(ActorContext.AccessEpochClaimType, "7")], "synthetic-fixture"))));
     }
 
-    private sealed class FixtureMetadata : IPublicIntakeMetadataClient, IPublicIntakeProcessingPolicyClient
+    private sealed class FixtureMetadata : IPublicIntakeMetadataClient
     {
         private static UiCapabilityResult<T> Result<T>(T value) => new(UiCapabilityResultCode.Success, value,
             new("import-test-fixture", "1", UiCapabilityProvenance.LiveService, DateTimeOffset.UtcNow, true));
@@ -119,8 +122,6 @@ public sealed class CaseImportBrowserTests(ITestOutputHelper output)
             Task.FromResult(Result(new PublicIntakeMetadata("1", "catalogue/fixture", "fixture-countries", "1", "fixture-privacy")));
         public Task<UiCapabilityResult<PublicIntakeCountryCatalogue>> GetCountriesAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(Result(new PublicIntakeCountryCatalogue("catalogue/fixture", "fixture-countries", [new("ZW", "Zimbabwe")])));
-        public Task<UiCapabilityResult<PublicReportProcessingPolicy>> GetPolicyAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result(new PublicReportProcessingPolicy("fixture-policy", "1")));
     }
 }
 
