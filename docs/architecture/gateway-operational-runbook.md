@@ -1,6 +1,14 @@
 # Gateway ingestion operational runbook
 
-## Report-policy defaults
+## Account workspace visibility
+
+The Gateway account page uses `GatewayWorkspaceAccessClient`, replacing the unavailable placeholder. Each operation creates a short persistence scope, checks the authenticated actor's current access epoch/status/expiry, and lists distinct active workspaces from active, unexpired organization memberships and participation links. Shared workspaces appear once. A requested selection must still be present in that authorized list. Selection is a display preference for the current interactive session; it does not create grants, expose case records or persist across a new session.
+
+The Workspace section links to `/organizations` for the existing organization creation and invitation-code workflows. Organization creation already creates its initial workspace and participation link. Invitation redemption retains the existing pending-review behavior. No membership or case access was broadened by this presentation repair. Workspace-load errors no longer presume the user is offline.
+
+Verification: 18 membership/invitation/real-PostgreSQL workspace tests passed, including two organizations, arbitrary selection rejection, revoked membership, stale session epoch and signed-out state. Authenticated browser behavior for the user's account remains NOT VERIFIED.
+
+## Report-policy configuration
 
 Gateway defaults `Intake:Consent:ProcessingPolicyReference` to `/privacy#privacy-use-heading` and `RecordingPolicyReference` to `/privacy#privacy-sensitive-heading`, both at version `2026-11-01`. These reference the existing public privacy notice. Compose exposes `INTAKE_PROCESSING_POLICY_REFERENCE`, `INTAKE_PROCESSING_POLICY_VERSION`, `INTAKE_RECORDING_POLICY_REFERENCE` and `INTAKE_RECORDING_POLICY_VERSION` overrides. Bump the applicable version when its terms change. The import page and submission validator use the same configuration; confirmations and current-version matching remain required. All four values must be valid, even for imports without recordings. Blank configuration previously caused the import page to show unavailable settings.
 

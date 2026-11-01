@@ -183,17 +183,3 @@ public sealed class GatewayAccountPresentationClient(
         DateTimeOffset.UtcNow,
         isAvailable);
 }
-
-/// <summary>Existing Gateway has no authoritative workspace catalog/selection endpoint.</summary>
-public sealed class GatewayUnavailableWorkspaceAccessClient : IWorkspaceAccessClient
-{
-    private static readonly UnavailableWorkspaceAccessClient Inner = new();
-
-    public Task<UiCapabilityResult<WorkspaceAccessState>> GetStateAsync(CancellationToken cancellationToken = default) =>
-        Inner.GetStateAsync(cancellationToken);
-
-    public Task<UiCapabilityResult<WorkspaceAccessState>> SelectWorkspaceAsync(
-        string workspaceId,
-        CancellationToken cancellationToken = default) =>
-        Inner.SelectWorkspaceAsync(workspaceId, cancellationToken);
-}

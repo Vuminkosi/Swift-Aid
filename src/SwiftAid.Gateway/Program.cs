@@ -71,7 +71,7 @@ builder.Services.AddScoped<ICaseCorrectionReadClient, CaseCorrectionReadGatewayC
 builder.Services.AddScoped<IAiInvestigationClient, UnavailableInvestigationClient>();
 builder.Services.AddScoped<IOrganizationManagementClient, UnavailableOrganizationManagementClient>();
 builder.Services.AddScoped<IAccountPresentationClient, GatewayAccountPresentationClient>();
-builder.Services.AddScoped<IWorkspaceAccessClient, GatewayUnavailableWorkspaceAccessClient>();
+builder.Services.AddScoped<IWorkspaceAccessClient, GatewayWorkspaceAccessClient>();
 builder.Services.AddScoped<IStaffSessionEditorClient, GatewayStaffSessionEditorClient>();
 builder.Services.AddScoped<IMapAggregateClient, MapAggregateGatewayClient>();
 builder.Services.AddScoped<ICaseWorkspaceClient, CaseWorkspaceGatewayClient>();

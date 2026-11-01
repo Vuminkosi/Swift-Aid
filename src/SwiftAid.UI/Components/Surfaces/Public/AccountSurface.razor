@@ -205,6 +205,13 @@
                     </SwiftAidSettingsRow>
                 }
             }
+            @if (Snapshot.IsSignedIn && !string.IsNullOrWhiteSpace(OrganizationsHref))
+            {
+                <SwiftAidSettingsRow Title="Organizations and invitations" Href="@OrganizationsHref"
+                                     Description="View your organizations, create a workspace or invite people."
+                                     AriaLabel="Manage organizations and invitations"
+                                     Icon="@Icons.Material.Outlined.Groups" />
+            }
         </SwiftAidSettingsGroup>
         @if (Snapshot.IsSignedIn)
         {
@@ -231,12 +238,6 @@
                     <SwiftAidSettingsRow Title="Connected sign-in methods" Href="@ManageMethodsHref"
                                          AriaLabel="Manage sign-in methods"
                                          Icon="@Icons.Material.Outlined.Link" />
-                }
-                @if (!string.IsNullOrWhiteSpace(OrganizationsHref))
-                {
-                    <SwiftAidSettingsRow Title="Organizations" Href="@OrganizationsHref"
-                                         AriaLabel="Manage organizations"
-                                         Icon="@Icons.Material.Outlined.Groups" />
                 }
                 @if (!string.IsNullOrWhiteSpace(ParticipationHref))
                 {
@@ -393,8 +394,8 @@
         : "Not signed in — your reports stay on this device.";
 
     private string WorkspaceUnavailableMessage => string.IsNullOrWhiteSpace(Snapshot.SelectedWorkspaceName)
-        ? "Try again when you are back online."
-        : $"Still showing {Snapshot.SelectedWorkspaceName}. Try again when you are back online.";
+        ? "Refresh to try again. If the problem continues, sign in again."
+        : $"Still showing {Snapshot.SelectedWorkspaceName}. Refresh to try again.";
 
     private string AvatarInitials
     {

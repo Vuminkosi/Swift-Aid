@@ -13,6 +13,16 @@ namespace SwiftAid.Ui.Tests;
 public sealed class AccountSurfaceSignOutTests
 {
     [Fact]
+    public async Task WorkspaceFailure_OffersOrganizationManagementWithoutClaimingTheUserIsOffline()
+    {
+        var markup = await RenderAsync(SignedInSnapshot(), withSignOutHandler: true, organizationsHref: "/organizations");
+        Assert.Contains("Organizations and invitations", markup, StringComparison.Ordinal);
+        Assert.Contains("href=\"/organizations\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Refresh to try again.", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("back online", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task SignedInSnapshot_OffersSignOut()
     {
         var markup = await RenderAsync(SignedInSnapshot(), withSignOutHandler: true);
@@ -85,7 +95,8 @@ public sealed class AccountSurfaceSignOutTests
         bool withSignOutHandler,
         string? signInHref = null,
         string? registerHref = null,
-        string? guestReportHref = null)
+        string? guestReportHref = null,
+        string? organizationsHref = null)
     {
         await using var services = CreateServices();
         await using var renderer = CreateRenderer(services);
@@ -97,7 +108,8 @@ public sealed class AccountSurfaceSignOutTests
                 [nameof(AccountSurface.OnRefresh)] = EventCallback.Factory.Create(new object(), static () => { }),
                 [nameof(AccountSurface.SignInHref)] = signInHref,
                 [nameof(AccountSurface.RegisterHref)] = registerHref,
-                [nameof(AccountSurface.GuestReportHref)] = guestReportHref
+                [nameof(AccountSurface.GuestReportHref)] = guestReportHref,
+                [nameof(AccountSurface.OrganizationsHref)] = organizationsHref
             };
             if (withSignOutHandler)
             {
