@@ -256,6 +256,10 @@ track at completion, ten successful response-audio requests, zero page errors,
 and effective AEC/NS/AGC enabled at 48kHz. No client utterance resubmissions were
 observed. This is real Gateway/provider integration with a fake microphone,
 not hardware echo rejection, natural barge-in or Android/iOS validation.
+The real `ellai-tool-progress.browser.cjs` rerun also passed: small talk completed
+in 7,321ms without acknowledgement; the tool request acknowledged at 8,377ms and
+completed at 15,583ms, with one acknowledgement, MMS playback, two restored
+history turns and no stale speech replay after refresh.
 
 Outstanding tour integration is broader than a missing prompt: the worker does
 not deliver validated UI intents to a connected model-planner/Bonboarding flow;

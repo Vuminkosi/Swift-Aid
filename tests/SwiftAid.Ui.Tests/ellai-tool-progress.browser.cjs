@@ -92,7 +92,8 @@ async function main() {
         await page.goto(`${process.env.SWIFTAID_GATEWAY_URL ?? "http://localhost:8080"}/ellai/about`);
         await page.getByRole("tab", { name: "Session history", exact: true }).click();
         await page.getByRole("button", { name: "View conversation", exact: true }).first().click();
-        await page.waitForFunction(() => document.querySelectorAll(".ellai-settings__turn").length === 2);
+        await page.getByRole("dialog").waitFor();
+        await page.waitForFunction(() => document.querySelectorAll(".ellai-conversation__turn").length === 2);
         await page.reload();
         await page.waitForTimeout(1500);
         assert.equal(audio.length, audioCount, "Refreshing history must not replay acknowledgement speech.");
