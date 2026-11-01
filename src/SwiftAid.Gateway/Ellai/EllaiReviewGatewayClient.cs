@@ -31,8 +31,9 @@ public sealed class EllaiReviewGatewayClient(
         if (principal.Identity?.IsAuthenticated != true
             && !_guestSessionIdentity.TryGetHistoryPrincipal(out principal)) return new([], null);
         var actor = ActorContext.FromValidatedPrincipal(principal);
+        await using var historyScope = _serviceProvider.CreateAsyncScope();
         return await EllaiConversationFeed.ListOwnedSessionsAsync(
-            _serviceProvider.GetRequiredService<IEllaiSessionStore>(), actor.ActorId, Math.Max(0, offset), cancellationToken)
+            historyScope.ServiceProvider.GetRequiredService<IEllaiSessionStore>(), actor.ActorId, Math.Max(0, offset), cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -41,7 +42,8 @@ public sealed class EllaiReviewGatewayClient(
         var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
         var principal = ResolvePrincipal(state.User, sessionId);
         if (principal is null) return new(EllaiClientOperationStatus.Unauthorized);
-        var session = await _serviceProvider.GetRequiredService<EllaiSessionService>()
+        await using var resumeScope = _serviceProvider.CreateAsyncScope();
+        var session = await resumeScope.ServiceProvider.GetRequiredService<EllaiSessionService>()
             .GetOwnedViewAsync(sessionId, principal, cancellationToken).ConfigureAwait(false);
         return session is null ? new(EllaiClientOperationStatus.Unauthorized)
             : new(EllaiClientOperationStatus.Accepted, session);
@@ -453,7 +455,8 @@ public sealed class EllaiReviewGatewayClient(
         var principal = ResolvePrincipal(state.User, sessionId);
         if (principal is null) return null;
         var actor = ActorContext.FromValidatedPrincipal(principal);
-        var outbox = _serviceProvider.GetRequiredService<IEllaiUtteranceOutboxStore>();
+        await using var responseScope = _serviceProvider.CreateAsyncScope();
+        var outbox = responseScope.ServiceProvider.GetRequiredService<IEllaiUtteranceOutboxStore>();
         var conversation = await outbox.ReadConversationAsync(sessionId, actor.ActorId, cancellationToken).ConfigureAwait(false);
         return store.ReadSince(sessionId, Math.Max(0, cursor)) with
         {
@@ -728,7 +731,8 @@ public sealed class EllaiReviewGatewayClient(
             var principal = ResolvePrincipal(state.User, sessionId);
             if (principal is null) return false;
             var actor = SwiftAid.Application.Authorization.ActorContext.FromValidatedPrincipal(principal);
-            var store = _serviceProvider.GetService<IEllaiSessionStore>();
+            await using var ownershipScope = _serviceProvider.CreateAsyncScope();
+            var store = ownershipScope.ServiceProvider.GetService<IEllaiSessionStore>();
             if (store is null) return false;
             var record = await store.GetAsync(sessionId, cancellationToken).ConfigureAwait(false);
             return record is not null

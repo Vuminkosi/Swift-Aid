@@ -42,6 +42,7 @@ public partial class EllaiGuidanceHost
             _uiObservationModule ??= await JS.InvokeAsync<IJSObjectReference>("import", token,
                 "./_content/SwiftAid.UI/js/ellai-ui-observations.js");
             var report = await _uiObservationModule.InvokeAsync<UiObservationReport>("collect", token);
+            if (report is null) return;
             report = report with { Platform = OperatingSystem.IsAndroid() ? "android" : OperatingSystem.IsIOS() ? "ios" : "web" };
             if (report.IsValid() && _sessionView?.SessionId == session.SessionId)
                 await ReviewClient.ReportUiObservationAsync(session.SessionId, report, token);
