@@ -20,7 +20,8 @@ public sealed record EllaiUtteranceServices(
     Func<string, CancellationToken, ValueTask>? OnTextDelta = null,
     IEllaiUtteranceOutboxStore? Outbox = null,
     Action<EllaiActivityEvent>? OnActivity = null,
-    Func<EllaiToolContext, EllaiToolRequest, CancellationToken, Task<EllaiToolResult>>? InvokeToolAsync = null);
+    Func<EllaiToolContext, EllaiToolRequest, CancellationToken, Task<EllaiToolResult>>? InvokeToolAsync = null,
+    IEllaiLanguageClient? Languages = null);
 
 /// <summary>Background execution of one accepted utterance with ledger,
 /// activity and journal wiring. Ordinary typed messages need no separate
@@ -77,8 +78,22 @@ public static class EllaiUtteranceRunner
             work.ConsentVersion, work.DataClassification, work.Actor, work.AllowedTools, work.ConsentPurpose);
         var conversation = services.Outbox is null ? [] : await services.Outbox.ReadConversationAsync(
             work.SessionId, work.Actor.ActorId, ct).ConfigureAwait(false);
+        var languages = work.Languages ?? new();
+        if (!languages.IsValid()) return new(false, false, "Unsupported language selection.", FailureCode: "InvalidLanguage");
+        var reasoningText = work.Utterance;
+        if (languages.InputLanguage != "eng")
+        {
+            if (services.Languages?.IsConfigured != true)
+                return new(false, false, "Translation is unavailable.", FailureCode: "TranslationUnavailable");
+            using var translationTiming = EllaiPipelineMetrics.Measure("input_translation");
+            var translated = await services.Languages.TranslateAsync(new(
+                work.CycleId + "-input", work.Utterance, languages.InputLanguage, "eng"), ct).ConfigureAwait(false);
+            reasoningText = translated.Text;
+        }
+        if (languages.OutputLanguage != "eng" && services.Languages?.IsConfigured != true)
+            return new(false, false, "Translation is unavailable.", FailureCode: "TranslationUnavailable");
         var request = new EllaiLoopRequest(
-            context, work.Utterance, ForMode(work.Mode),
+            context, reasoningText, ForMode(work.Mode),
             EllaiToolBroker.DescribeCatalogue(work.AllowedTools), maxTokensPerTurn,
             work.CycleId, work.ControllerEpoch,
             EllaiConversationContext.Build(conversation, work.ClientUtteranceId));
@@ -120,7 +135,7 @@ public static class EllaiUtteranceRunner
             activity: services.Activity,
             journal: services.Journal,
             isExecutionCurrentAsync: services.Sessions is null ? null : IsExecutionCurrentAsync,
-            onTextDelta: services.OnTextDelta is null
+            onTextDelta: services.OnTextDelta is null || languages.OutputLanguage != "eng"
                 ? null
                 : async (text, deltaCt) =>
                 {
@@ -132,11 +147,29 @@ public static class EllaiUtteranceRunner
             onActivity: services.OnActivity,
             invokeToolAsync: services.InvokeToolAsync)
             .ConfigureAwait(false);
+        var answer = outcome.Completed ? outcome.Decision?.DisplayText : null;
+        if (!string.IsNullOrWhiteSpace(answer) && languages.OutputLanguage != "eng")
+        {
+            // Never retry a reasoning/tool loop solely because presentation
+            // translation failed after its validated decision. Surface a durable
+            // failure, preserving committed tool receipts and idempotency.
+            try
+            {
+                using var translationTiming = EllaiPipelineMetrics.Measure("output_translation");
+                var translated = await services.Languages!.TranslateAsync(new(
+                    work.CycleId + "-output", answer, "eng", languages.OutputLanguage), ct).ConfigureAwait(false);
+                answer = translated.Text;
+            }
+            catch (Exception error) when (error is EllaiLanguageProviderException or InvalidDataException or ArgumentException)
+            {
+                return new(true, false, "The reply could not be translated.", FailureCode: "TranslationUnavailable");
+            }
+        }
         return new EllaiUtteranceOutcome(
             true,
             outcome.Completed,
             outcome.StopReason,
-            outcome.Completed ? outcome.Decision?.DisplayText : null,
+            answer,
             outcome.FailureCode);
     }
 

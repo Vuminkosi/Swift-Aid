@@ -8,6 +8,57 @@ namespace SwiftAid.Application.Tests.Ellai;
 [Trait("Task", "ELL-T06")]
 public sealed class EllaiUtteranceRunnerTests
 {
+    [Fact]
+    public async Task LanguagePreferencesTranslateBeforeReasoningAndAfterValidatedDecision()
+    {
+        var completions = new ScriptedCompletions(DecisionTurn);
+        var (consent, loop) = Services(completions, grant: true);
+        var languages = new TranslationFixture();
+        var original = Work() with { Utterance = "Synthetic source", Languages = new("sna", "ssw") };
+        var restored = EllaiUtteranceWorkEnvelope.Deserialize(EllaiUtteranceWorkEnvelope.Serialize(original, "turn")).ToWork();
+        Assert.Equal(original.Languages, restored.Languages);
+        Assert.Equal(original.Utterance, restored.Utterance);
+        var outcome = await EllaiUtteranceRunner.RunOneAsync(restored,
+            new(loop, null, null, consent, Languages: languages), 256, CancellationToken.None);
+        Assert.True(outcome.Completed);
+        Assert.Equal("Synthetic translated reply", outcome.DisplayText);
+        Assert.Contains(completions.Threads[0], message => message.Content.Contains("Translated input", StringComparison.Ordinal));
+        Assert.Collection(languages.Requests,
+            input => { Assert.Equal("sna", input.SourceLanguage); Assert.Equal("eng", input.TargetLanguage); },
+            output => { Assert.Equal("Hi there.", output.Text); Assert.Equal("ssw", output.TargetLanguage); });
+    }
+
+    [Fact]
+    public async Task OutputTranslationFailureDoesNotRetryReasoningOrPublishEnglishAsTheSelectedLanguage()
+    {
+        var completions = new ScriptedCompletions(DecisionTurn);
+        var (consent, loop) = Services(completions, grant: true);
+        var languages = new TranslationFixture { FailOutput = true };
+        var outcome = await EllaiUtteranceRunner.RunOneAsync(Work() with { Languages = new("eng", "sna") },
+            new(loop, null, null, consent, Languages: languages), 256, CancellationToken.None);
+        Assert.False(outcome.Completed);
+        Assert.Null(outcome.DisplayText);
+        Assert.Equal("TranslationUnavailable", outcome.FailureCode);
+        Assert.Single(completions.Threads);
+    }
+
+    private sealed class TranslationFixture : IEllaiLanguageClient
+    {
+        public bool IsConfigured => true;
+        public bool FailOutput { get; init; }
+        public List<EllaiTranslationRequest> Requests { get; } = [];
+        public Task<EllaiTranslationResult> TranslateAsync(EllaiTranslationRequest request, CancellationToken ct)
+        {
+            Requests.Add(request);
+            if (FailOutput && request.SourceLanguage == "eng") throw new EllaiLanguageProviderException("synthetic-failure", true);
+            return Task.FromResult(new EllaiTranslationResult(request.RequestId,
+                request.TargetLanguage == "eng" ? "Translated input" : "Synthetic translated reply",
+                request.SourceLanguage, request.TargetLanguage, "fixture", "fixture", 4, 1, "unreviewed"));
+        }
+        public Task<EllaiNativeTranscriptionResult> TranscribeAsync(EllaiNativeTranscriptionRequest request, CancellationToken ct) =>
+            throw new NotSupportedException();
+    }
+
     private sealed class ScriptedCompletions : IEllaiTurnCompletionClient
     {
         private readonly Queue<string> _replies;

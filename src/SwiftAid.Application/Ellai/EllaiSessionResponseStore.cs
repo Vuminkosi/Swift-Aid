@@ -168,7 +168,8 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null)
         }
     }
 
-    public EllaiSessionResponseDto Reconcile(string sessionId, string utteranceId, EllaiUtteranceResolution resolution)
+    public EllaiSessionResponseDto Reconcile(string sessionId, string utteranceId, EllaiUtteranceResolution resolution,
+        string language = "eng")
     {
         resolution.Validate();
         lock (_gate)
@@ -184,7 +185,7 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null)
             if (existing is not null) return existing;
             var response = new EllaiSessionResponseDto(++session.Sequence, sessionId,
                 resolution.AssistantText ?? string.Empty, _timeProvider.GetUtcNow(), utteranceId,
-                IsFinal: true, IsReconciliation: true, Outcome: resolution.Outcome);
+                IsFinal: true, IsReconciliation: true, Outcome: resolution.Outcome, Language: language);
             session.Items.AddLast(response);
             session.LastUpdatedAtUtc = response.CreatedAtUtc;
             while (session.Items.Count > MaximumResponsesPerSession) session.Items.RemoveFirst();

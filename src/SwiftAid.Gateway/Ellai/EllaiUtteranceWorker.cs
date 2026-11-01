@@ -132,7 +132,7 @@ public sealed class EllaiUtteranceWorker(
                 // Transient delivery is only a hint; the owner can recover the committed outcome
                 // from PostgreSQL even when this process exits before this publication.
                 scopedServices.GetService<EllaiSessionResponseStore>()?.Reconcile(
-                    work.SessionId, item.ClientUtteranceId, committed);
+                    work.SessionId, item.ClientUtteranceId, committed, work.Languages?.OutputLanguage ?? "eng");
                 progress.Finish(committed.Outcome);
             }
             _logger.LogInformation(
@@ -216,7 +216,7 @@ public sealed class EllaiUtteranceWorker(
                         string.Empty, 0, false, EllaiToolReasonCodes.DeniedByPolicy);
                 return await toolServices.GetRequiredService<EllaiToolBroker>()
                     .InvokeAsync(context, request, ct).ConfigureAwait(false);
-            });
+            }, scopedServices.GetService<IEllaiLanguageClient>());
         return await EllaiUtteranceRunner.RunOneAsync(
             work, dependencies, MaxTokensPerTurn, stoppingToken).ConfigureAwait(false);
     }

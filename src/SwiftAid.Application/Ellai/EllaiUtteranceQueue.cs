@@ -23,7 +23,8 @@ public sealed record EllaiUtteranceWork(
     string DataClassification = EllaiProcessingClassification.UnknownOrigin,
     IReadOnlySet<string>? AllowedTools = null,
     string ConsentPurpose = EllaiToolBroker.ToolReadPurpose,
-    string ClientUtteranceId = "");
+    string ClientUtteranceId = "",
+    EllaiLanguagePreferences? Languages = null);
 
 /// <summary>Single-flight utterance handoff: at most one queued-or-running
 /// work item per session, latest utterance wins. A newer utterance submitted

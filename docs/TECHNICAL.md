@@ -212,6 +212,23 @@ login); provider failures are not retried as alternate synthesis requests.
 Focused JavaScript regressions cover keyboard behavior, duplicate suppression,
 audio routing and PCM cleanup. These checks do not establish live voice quality.
 
+About also stores independent input/reply language preferences on the current
+device (English defaults; Shona, siSwati, Nyanja and Tsonga choices). Typed
+submissions persist these optional preferences in the existing version-1 outbox
+envelope; old clients/envelopes retain English behavior. Non-English input uses
+the private NLLB client before reasoning. Output translation follows a validated
+decision; English provisional chunks are withheld for translated replies. A
+failed output translation produces a terminal failure rather than rerunning the
+tool loop. Original user text remains in canonical history. Translation quality
+is unreviewed. Native-language microphone routing and MMS profile selection are
+still incomplete: controls explicitly state that voice uses English, and the
+audio endpoint refuses to synthesize translated text with the English voice.
+
+Gateway history, resume, ownership and response-history reads now use independent
+operation scopes, avoiding concurrent access to a circuit-scoped EF context.
+The overlap regression proves separate disposed stores, not real-device capture
+continuity. A missing optional UI observation no longer prevents text admission.
+
 **Status: Partial implementation. Report journey descriptors are registered at
 Gateway startup; complete model-generated guidance is not verified.**
 `EllaiUiRegistry` holds versioned semantic descriptors. `EllaiGuidancePlanValidator`,

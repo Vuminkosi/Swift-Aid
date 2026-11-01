@@ -69,7 +69,8 @@ public sealed record EllaiSessionResponseDto(
     bool IsFinal = true,
     bool IsReconciliation = false,
     string? Outcome = null,
-    EllaiInteractionProgressDto? Progress = null);
+    EllaiInteractionProgressDto? Progress = null,
+    string Language = "eng");
 
 /// <summary>Ephemeral runtime narration; never an assistant answer or approval receipt.</summary>
 public sealed record EllaiInteractionProgressDto(

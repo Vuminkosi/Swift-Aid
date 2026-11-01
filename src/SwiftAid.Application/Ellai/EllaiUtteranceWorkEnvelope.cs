@@ -25,7 +25,8 @@ public sealed record EllaiUtteranceWorkEnvelope(
     string ProcessingLabel,
     string DataClassification,
     string ConsentPurpose,
-    string[] AllowedTools)
+    string[] AllowedTools,
+    SwiftAid.Contracts.Ellai.EllaiLanguagePreferences? Languages = null)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -56,7 +57,8 @@ public sealed record EllaiUtteranceWorkEnvelope(
             work.ProcessingLabel,
             work.DataClassification,
             work.ConsentPurpose,
-            work.AllowedTools?.Order(StringComparer.Ordinal).ToArray() ?? []);
+            work.AllowedTools?.Order(StringComparer.Ordinal).ToArray() ?? [],
+            work.Languages);
         return JsonSerializer.Serialize(envelope, Json);
     }
 
@@ -81,7 +83,8 @@ public sealed record EllaiUtteranceWorkEnvelope(
             || string.IsNullOrWhiteSpace(ConsentPurpose)
             || AllowedTools is null
             || AllowedTools.Length > 32
-            || AllowedTools.Any(string.IsNullOrWhiteSpace))
+            || AllowedTools.Any(string.IsNullOrWhiteSpace)
+            || Languages is not null && !Languages.IsValid())
         {
             throw new InvalidOperationException("The persisted Ellai work envelope is invalid.");
         }
@@ -109,7 +112,8 @@ public sealed record EllaiUtteranceWorkEnvelope(
             DataClassification,
             new HashSet<string>(AllowedTools, StringComparer.Ordinal),
             ConsentPurpose,
-            ClientUtteranceId);
+            ClientUtteranceId,
+            Languages);
     }
 
     public static EllaiUtteranceWorkEnvelope Deserialize(string payloadJson)

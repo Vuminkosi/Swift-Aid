@@ -1114,7 +1114,7 @@
             StatusText = "Voice turn confirmed. Ellai is responding…";
             Phase = EllaiStatusPhases.Active;
             StateHasChanged();
-            await OnSend();
+            await SendConfirmedVoiceAsync();
         }
     }
 
@@ -1600,7 +1600,7 @@
                     : "Recording transcribed. Ellai is responding…";
                 Phase = EllaiStatusPhases.Active;
                 await InvokeAsync(StateHasChanged);
-                await InvokeAsync(OnSend);
+                await InvokeAsync(SendConfirmedVoiceAsync);
             }
             else if (mode == EllaiVoiceCaptureMode.Live)
             {
@@ -2233,6 +2233,15 @@
         Position = next;
     }
 
+    private bool _sendingConfirmedVoice;
+
+    private async Task SendConfirmedVoiceAsync()
+    {
+        _sendingConfirmedVoice = true;
+        try { await OnSend(); }
+        finally { _sendingConfirmedVoice = false; }
+    }
+
     private async Task OnSend()
     {
         if (!CanSubmitText)
@@ -2283,6 +2292,13 @@
         try
         {
             await ReportCurrentUiAsync(cancellationToken);
+            if (!_sendingConfirmedVoice)
+            {
+                await using var languages = await JS.InvokeAsync<IJSObjectReference>("import", cancellationToken,
+                    "./_content/SwiftAid.UI/js/ellai-language-preferences.js");
+                var selected = await languages.InvokeAsync<EllaiLanguagePreferences>("load", cancellationToken);
+                if (selected is not null && selected.IsValid()) request = request with { Languages = selected };
+            }
             var result = await ReviewClient.SubmitUtteranceAsync(request, cancellationToken);
             switch (result.Status)
             {

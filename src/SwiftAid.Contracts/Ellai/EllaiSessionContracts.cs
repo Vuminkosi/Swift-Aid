@@ -78,7 +78,8 @@ public sealed record SubmitUtteranceRequest(
     string InputSource,
     long ClientEpoch,
     string? FeatureId = null,
-    string? ResourceId = null);
+    string? ResourceId = null,
+    EllaiLanguagePreferences? Languages = null);
 
 /// <summary>Client UI-intent execution envelope; server-issued and expiring.</summary>
 public sealed record UiIntentEnvelope(

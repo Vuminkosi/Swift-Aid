@@ -5,6 +5,7 @@
 @inject IEllaiReviewClient ReviewClient
 @inject IDialogService Dialogs
 @inject IBrowserViewportService Viewport
+@inject IJSRuntime JS
 
 <MudContainer MaxWidth="MaxWidth.Medium" Class="ellai-settings">
     <section class="ellai-settings__hero" aria-labelledby="ellai-settings-title">
@@ -21,6 +22,29 @@
     <MudTabs Class="ellai-settings__tabs" aria-label="Ellai information and settings">
         <MudTabPanel Text="About & settings">
             <div class="ellai-settings__content">
+                <MudPaper Outlined="true" Class="ellai-settings__card">
+                    <MudText Typo="Typo.h6" HtmlTag="h2">Languages</MudText>
+                    <MudSelect T="string" Label="Your input language" Value="@_languages.InputLanguage"
+                               ValueChanged="SetInputLanguageAsync" Disabled="@(!_languagesLoaded)">
+                        @foreach (var language in LanguageOptions)
+                        {
+                            <MudSelectItem T="string" Value="@language.Code">@language.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudSelect T="string" Label="Ellai's reply language" Value="@_languages.OutputLanguage"
+                               ValueChanged="SetOutputLanguageAsync" Disabled="@(!_languagesLoaded)">
+                        @foreach (var language in LanguageOptions)
+                        {
+                            <MudSelectItem T="string" Value="@language.Code">@language.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudText Typo="Typo.caption">Default: English for input and replies. Choices are saved on this device.</MudText>
+                    <MudText Typo="Typo.caption">Other languages currently apply to typed messages. Voice uses English. Translations may contain mistakes.</MudText>
+                    @if (_languageSaveFailed)
+                    {
+                        <MudAlert Severity="Severity.Warning" role="status">Your language choices couldn't be saved. Please try again.</MudAlert>
+                    }
+                </MudPaper>
                 <MudPaper Outlined="true" Class="ellai-settings__card">
                     <MudText Typo="Typo.h6" HtmlTag="h2">A little help, when you need it</MudText>
                     <MudText Typo="Typo.body2">
@@ -110,6 +134,43 @@
 </MudContainer>
 
 @code {
+    private static readonly (string Code, string Name)[] LanguageOptions =
+        [("eng", "English"), ("sna", "Shona"), ("ssw", "siSwati"), ("nya", "Nyanja"), ("tso", "Tsonga")];
+    private EllaiLanguagePreferences _languages = new();
+    private bool _languagesLoaded;
+    private bool _languageSaveFailed;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            await using var module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/SwiftAid.UI/js/ellai-language-preferences.js");
+            var saved = await module.InvokeAsync<EllaiLanguagePreferences>("load");
+            _languages = saved is not null && saved.IsValid() ? saved : new();
+            _languagesLoaded = true;
+        }
+        catch (JSException) { _languageSaveFailed = true; }
+        catch (JSDisconnectedException) { return; }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private Task SetInputLanguageAsync(string language) => SaveLanguagesAsync(_languages with { InputLanguage = language });
+    private Task SetOutputLanguageAsync(string language) => SaveLanguagesAsync(_languages with { OutputLanguage = language });
+
+    private async Task SaveLanguagesAsync(EllaiLanguagePreferences value)
+    {
+        if (!value.IsValid()) return;
+        try
+        {
+            await using var module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/SwiftAid.UI/js/ellai-language-preferences.js");
+            _languageSaveFailed = !await module.InvokeAsync<bool>("save", value);
+            if (!_languageSaveFailed) _languages = value;
+        }
+        catch (JSException) { _languageSaveFailed = true; }
+        catch (JSDisconnectedException) { _languageSaveFailed = true; }
+    }
+
     private readonly CancellationTokenSource _lifetime = new();
     private readonly List<EllaiSessionHistoryItemDto> _sessions = [];
     private int? _nextOffset;

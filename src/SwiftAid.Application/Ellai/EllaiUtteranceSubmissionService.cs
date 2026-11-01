@@ -77,7 +77,8 @@ public sealed class EllaiUtteranceSubmissionService(
             dataClassification,
             allowedTools,
             EllaiConsentService.PublicProductHelpPurpose,
-            request.ClientUtteranceId);
+            request.ClientUtteranceId,
+            request.Languages);
         var payload = EllaiUtteranceWorkEnvelope.Serialize(work, request.ClientUtteranceId);
         var safeRequest = request with
         {
@@ -111,6 +112,8 @@ public sealed class EllaiUtteranceSubmissionService(
         && !string.IsNullOrWhiteSpace(request.ClientUtteranceId)
         && !string.IsNullOrWhiteSpace(request.FinalizedText)
         && request.FinalizedText.Length <= MaximumUtteranceLength
+        && (request.Languages is null || request.Languages.IsValid())
+        && (request.Languages?.InputLanguage is null or "eng" || request.FinalizedText.Length <= 6000)
         && string.Equals(request.InputSource, "typed", StringComparison.Ordinal)
         && (request.FeatureId is null
             || (!string.IsNullOrWhiteSpace(request.FeatureId) && request.FeatureId.Length <= 120))

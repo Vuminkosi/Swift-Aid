@@ -443,7 +443,7 @@ public static class EllaiGuestEndpoints
             return Results.NotFound();
         }
 
-        if (!speech.IsConfigured)
+        if (!speech.IsConfigured || response.Language != "eng")
         {
             return Results.Problem(
                 statusCode: StatusCodes.Status503ServiceUnavailable,
