@@ -205,6 +205,20 @@ public sealed class CaseImportPostgresTests
             return new(db, CaseRegistrationBackendTests.SyntheticRegistrationKeyRing.Create());
         }
 
+        internal async Task<CaseImportContext> CreateIsolatedWorkspaceAsync()
+        {
+            var workspace = "classification-fixture-" + Guid.NewGuid().ToString("N");
+            Db.Workspaces.Add(new WorkspaceEntity { WorkspaceId = workspace, OrganizationId = "org-zw-1", Status = PersistentResourceStatus.Active });
+            var original = await Db.AccessGrantGroups.AsNoTracking().FirstAsync(g => g.WorkspaceId == "workspace-1" && g.ActorId == Actor.ActorId && g.Status == PersistentGrantStatus.Active);
+            original.GrantGroupId = "classification-grant-" + Guid.NewGuid().ToString("N");
+            original.WorkspaceId = workspace;
+            Db.Add(original);
+            Db.AccessGrantOperations.Add(new AccessGrantOperationEntity { GrantGroupId = original.GrantGroupId, Operation = CaseOperation.ReadCase });
+            await Db.SaveChangesAsync();
+            Db.ChangeTracker.Clear();
+            return Context with { WorkspaceId = workspace };
+        }
+
         public CaseCsvImportService CreateService(SwiftAidDbContext db, ICaseImportStore? store = null, IIntakeSubmissionValidator? validator = null) => new(
             store ?? new PostgresCaseImportStore(db, Protection, TimeProvider.System),
             new CaseRegistrationProcessor(new PostgresCaseRegistrationUnitOfWork(db), new PostgresCaseRegistrationAuthorization(db),

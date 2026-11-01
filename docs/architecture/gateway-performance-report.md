@@ -1,5 +1,11 @@
 # Gateway ingestion verification and performance report
 
+## Classification backfill continuation, 2026-11-01
+
+PASS: real isolated Kestrel/Python/pinned BART CPU/PostgreSQL/JetStream integration with four synthetic reports. Reconciliation: **4 eligible, 1 newly classified, 2 reused, 1 unsupported-language abstention, 0 failed, 0 pending**. One English report had completed through the live broker path; another reused that fingerprint; a distinct English report required backfill inference. The integration test took approximately eight seconds including model startup. A measured live inference was 1,250.06 ms, with 1,418.80 ms for claim/inference/commit/redelivery/quarantine (startup excluded). These are single-run observations, not p95/p99 or sustained throughput. The four-record backfill checkpoint interval was 1.291 seconds. The corrected full suite passed ten tests.
+
+PASS: Python 57 passed / three opt-in skips; 301 application/Ellai tests / three provider skips; Ruff, strict mypy and EF model/migration alignment. New DB-context restart, paused admission, immutable snapshot, duplicate start, configuration change and scope denial are covered. Whole-process inference crash, sustained GPU/CPU utilization, concurrent interactive load, historical 15k classification, 100k/million processing, downstream detections and deployment remain **NOT VERIFIED**. The earlier disposable 15k ingestion database was removed; supplied-file row counts are not classification output counts.
+
 2026-11-01. Synthetic, disposable local Docker fixtures on Windows; .NET 10.0.14, PostgreSQL/PostGIS 17, NATS 2.15.1. No patient data.
 
 ## Final consolidated checks and delivery boundary

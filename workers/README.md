@@ -1,5 +1,23 @@
 # SwiftAid workers
 
+## Resumable classification backfill
+
+After the additive classification migrations and scoped worker configuration are deployed, start a snapshot with the existing machine credential. Keep the returned job ID; retrying that ID is idempotent. Supply actual authorized workspace/organization IDs.
+
+```powershell
+$classificationJob = [guid]::NewGuid().ToString()
+$classificationHeaders = @{ Authorization = "Bearer $env:CLASSIFICATION_WORKER_TOKEN" }
+$classificationBase = "$($env:CLASSIFICATION_GATEWAY_URL.TrimEnd('/'))/api/internal/classification"
+$classificationBody = @{ jobId = $classificationJob; workspaceId = $env:CLASSIFICATION_BACKFILL_WORKSPACE; organizationId = $env:CLASSIFICATION_BACKFILL_ORGANIZATION } | ConvertTo-Json
+Invoke-RestMethod "$classificationBase/backfills" -Method Post -Headers $classificationHeaders -ContentType 'application/json' -Body $classificationBody
+uv run --project workers --locked --extra classification python -m swiftaid_workers --classification-backfill $classificationJob
+Invoke-RestMethod "$classificationBase/backfills/$classificationJob" -Headers $classificationHeaders
+```
+
+Use `POST backfills/{id}/control` with `{"paused":true}` to pause or `{"paused":false}` to resume, then rerun the CLI with the same ID. Pausing does not discard an admitted model attempt. `ConfigurationChanged` requires restoring the pinned configuration or creating a new job intentionally. Counters distinguish reuse, new classification, abstention, failure and pending records; a completed job can contain failures. The worker never reimports CSVs. See [durability and verification](../docs/architecture/gateway-classification-implementation.md#durable-historical-backfill).
+
+The backfill CLI uses normal classification settings and transport validation. Historical pacing defaults to one second per item (`CLASSIFICATION_BACKFILL_INTERVAL_SECONDS`, range 0.1–60). Avoid running two model processes on a GPU unless measured capacity supports both. No 15k/million throughput claim follows from this command.
+
 Gateway-scoped Python background job consumers. Python 3.12 is required
 (`requires-python = ">=3.12,<3.13"` in `pyproject.toml`, pinned to `3.12` in
 `.python-version`). The project uses [uv](https://docs.astral.sh/uv/) as its only

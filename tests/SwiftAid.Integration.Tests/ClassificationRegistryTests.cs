@@ -16,6 +16,39 @@ namespace SwiftAid.Integration.Tests;
 [Collection(IntakePostgresCollection.Name)]
 public sealed class ClassificationRegistryTests
 {
+    [IntakePostgresFact]
+    public async Task Backfill_snapshots_revisions_resumes_after_restart_and_reconciles_without_reinference()
+    {
+        await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
+        var context = await fixture.CreateIsolatedWorkspaceAsync();
+        var notice = await ImportAsync(fixture, context);
+        var options = Settings();
+        var registry = Registry(fixture, options: options);
+        var lease = (await registry.ClaimAsync(notice, default)).Lease!;
+        await registry.CompleteAsync(Completion(lease), default);
+        var service = new ClassificationBackfillStore(fixture.Db, Options.Create(options), TimeProvider.System);
+        var request = new StartClassificationBackfill(Guid.NewGuid(), context.WorkspaceId, "org-zw-1");
+        var started = await service.StartAsync(request, default);
+        await service.BindResultAsync(request.JobId, notice.MessageId, lease.ConfigurationHash, default);
+        Assert.True(started.Eligible >= 1);
+        Assert.Equal(started.Eligible, (await service.StartAsync(request, default)).Eligible);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.StartAsync(request with { OrganizationId = "other-org" }, default));
+        await service.ControlAsync(request.JobId, true, default);
+        Assert.Null((await service.NextAsync(request.JobId, default)).Notice);
+        await ImportAsync(fixture, context); // A later accepted revision must not enter this snapshot.
+        await using var reopened = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var resumed = new ClassificationBackfillStore(reopened, Options.Create(options), TimeProvider.System);
+        Assert.Equal("Paused", (await resumed.StatusAsync(request.JobId, default)).State);
+        await resumed.ControlAsync(request.JobId, false, default);
+        var work = await resumed.NextAsync(request.JobId, default);
+        Assert.Equal(started.Eligible, work.Status.Eligible);
+        Assert.True(work.Status.Reused >= 1);
+        Assert.Equal(work.Status.Eligible, work.Status.Pending + work.Status.NewlyClassified + work.Status.Reused + work.Status.Abstained + work.Status.Failed);
+        Assert.Equal(1, (await reopened.Set<ClassificationResultEntity>().FindAsync(lease.ResultId))!.Attempts);
+        options.Profile = options.Profile with { TaxonomyVersion = "changed-after-snapshot" };
+        Assert.Equal("ConfigurationChanged", (await resumed.NextAsync(request.JobId, default)).Status.State);
+    }
+
     private static ClassificationOptions Settings() => new()
     {
         Enabled = true, WorkerTokenSha256 = new string('a', 64), Organizations = ["org-zw-1"],
@@ -26,9 +59,10 @@ public sealed class ClassificationRegistryTests
         ClassificationOptions? options = null, TimeProvider? clock = null) => new(db ?? fixture.Db,
             fixture.ClassificationPayloadStore(db ?? fixture.Db), Options.Create(options ?? Settings()), clock ?? TimeProvider.System, fixture.Protection);
 
-    private static async Task<IngestionNotice> ImportAsync(CaseImportPostgresTests.Fixture fixture)
+    private static async Task<IngestionNotice> ImportAsync(CaseImportPostgresTests.Fixture fixture,
+        SwiftAid.Application.Intake.Imports.CaseImportContext? context = null)
     {
-        var result = await fixture.Service.ProcessAsync(CaseImportPostgresTests.Actor, Guid.NewGuid(), CaseImportPostgresTests.Context,
+        var result = await fixture.Service.ProcessAsync(CaseImportPostgresTests.Actor, Guid.NewGuid(), context ?? CaseImportPostgresTests.Context,
             1, true, new StringReader(CaseImportPostgresTests.Csv(Guid.NewGuid()).Replace("\"sn\"", "\"en\"", StringComparison.Ordinal)), default);
         var id = Assert.Single(result.Rows).CaseId!.Value;
         var source = await fixture.Db.CaseEvents.AsNoTracking().SingleAsync(e => e.CaseId == id && e.EventType == "CaseReported");

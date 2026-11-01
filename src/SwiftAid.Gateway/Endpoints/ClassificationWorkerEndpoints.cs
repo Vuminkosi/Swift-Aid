@@ -38,8 +38,13 @@ public static class ClassificationWorkerEndpoints
             catch (ArgumentException) { return Results.BadRequest(new { code = "invalid-classification-contract" }); }
             catch (InvalidDataException) { return Results.BadRequest(new { code = "invalid-source-journal" }); }
         });
-        group.MapPost("/claim", async (ClassificationClaimRequest request, ClassificationRegistry registry, CancellationToken ct) =>
-            Results.Ok(await registry.ClaimAsync(request.Notice, ct)));
+        group.MapPost("/claim", async (ClassificationClaimRequest request, ClassificationRegistry registry, ClassificationBackfillStore backfill, CancellationToken ct) =>
+        {
+            if (request.BackfillJobId is { } id) await backfill.ValidateNoticeAsync(id, request.Notice.MessageId, ct);
+            var claim = await registry.ClaimAsync(request.Notice, ct);
+            if (request.BackfillJobId is { } job) await backfill.BindResultAsync(job, request.Notice.MessageId, claim.ConfigurationHash!, ct);
+            return Results.Ok(claim);
+        });
         group.MapPost("/complete", async (ClassificationCompletion request, ClassificationRegistry registry, CancellationToken ct) =>
             Results.Ok(new { state = await registry.CompleteAsync(request, ct) }));
         group.MapPost("/fail", async (ClassificationFailure request, ClassificationRegistry registry, CancellationToken ct) =>
@@ -48,6 +53,14 @@ public static class ClassificationWorkerEndpoints
             Results.Ok(new { state = await registry.RenewAsync(request, ct) }));
         group.MapPost("/quarantine", async (ClassificationQuarantine request, ClassificationRegistry registry, CancellationToken ct) =>
             Results.Ok(new { state = await registry.QuarantineAsync(request, ct) }));
+        group.MapPost("/backfills", async (StartClassificationBackfill request, ClassificationBackfillStore store, CancellationToken ct) =>
+            Results.Ok(await store.StartAsync(request, ct)));
+        group.MapGet("/backfills/{id:guid}", async (Guid id, ClassificationBackfillStore store, CancellationToken ct) =>
+            Results.Ok(await store.StatusAsync(id, ct)));
+        group.MapPost("/backfills/{id:guid}/next", async (Guid id, ClassificationBackfillStore store, CancellationToken ct) =>
+            Results.Ok(await store.NextAsync(id, ct)));
+        group.MapPost("/backfills/{id:guid}/control", async (Guid id, ClassificationBackfillControl request, ClassificationBackfillStore store, CancellationToken ct) =>
+            Results.Ok(await store.ControlAsync(id, request.Paused, ct)));
         return endpoints;
     }
 }

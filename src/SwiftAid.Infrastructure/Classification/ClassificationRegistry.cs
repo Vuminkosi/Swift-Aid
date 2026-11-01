@@ -44,7 +44,7 @@ public sealed class ClassificationRegistry(
         var inbox = await db.Set<ClassificationInboxEntity>().FindAsync([notice.MessageId, config], ct);
         if (inbox is not null && inbox.NoticeHash != noticeHash) throw new ArgumentException("Changed message identity.");
         if (inbox?.State is "Completed" or "Failed" or "Superseded")
-            return new(header.ReportRevision == notice.ReportRevision ? inbox.State : "Superseded", FailureCode: inbox.FailureCode);
+            return new(header.ReportRevision == notice.ReportRevision ? inbox.State : "Superseded", FailureCode: inbox.FailureCode, ConfigurationHash: config);
         inbox ??= new() { MessageId = notice.MessageId, ConfigurationId = config, NoticeHash = noticeHash, State = "Pending", UpdatedAtUtc = now };
         if (db.Entry(inbox).State == EntityState.Detached) db.Add(inbox);
 
@@ -101,7 +101,7 @@ public sealed class ClassificationRegistry(
         }
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
-        return response;
+        return response with { ConfigurationHash = config };
     }
 
     public async Task<string> CompleteAsync(ClassificationCompletion request, CancellationToken ct)

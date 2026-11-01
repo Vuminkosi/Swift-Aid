@@ -51,31 +51,8 @@ async def process_message(message: Any, gateway: Any, classifier: Any) -> None:
         if claim["state"] != "Leased":
             await message.nak(delay=5)
             return
-        lease = claim["lease"]
-
-        async def heartbeat() -> None:
-            while True:
-                await asyncio.sleep(20)
-                response = await gateway.post("renew", {"resultId": lease["resultId"], "leaseId": lease["leaseId"]})
-                if response["state"] != "Leased":
-                    return
-                await message.in_progress()
-
-        renewal = asyncio.create_task(heartbeat())
-        try:
-            result = await classifier.classify(lease)
-            outcome = await gateway.post("complete", result)
-        except (httpx.HTTPError, ConnectionError, asyncio.CancelledError):
-            raise
-        except (ValueError, RuntimeError, OSError) as error:
-            # Exceptions may contain model/source details: never log their text.
-            code = "model-configuration" if isinstance(error, ValueError) else "model-unavailable"
-            outcome = await gateway.post("fail", {"resultId": lease["resultId"], "leaseId": lease["leaseId"], "code": code})
-        finally:
-            renewal.cancel()
-            with suppress(asyncio.CancelledError, httpx.HTTPError):
-                await renewal
-        if outcome["state"] in TERMINAL:
+        state = await execute_claim(claim, gateway, classifier, message)
+        if state in TERMINAL:
             await message.ack_sync()
         else:
             await message.nak(delay=5)
@@ -85,6 +62,39 @@ async def process_message(message: Any, gateway: Any, classifier: Any) -> None:
         logger.warning("Classification delivery deferred: %s", type(error).__name__)
         # No ACK if the control plane or durable commit is unavailable.
         await message.nak(delay=10)
+
+
+async def execute_claim(claim: dict[str, Any], gateway: Any, classifier: Any, message: Any = None) -> str:
+    """Shared model lease execution for live delivery and historical backfill."""
+    if claim["state"] != "Leased":
+        return str(claim["state"])
+    lease = claim["lease"]
+
+    async def heartbeat() -> None:
+        while True:
+            await asyncio.sleep(20)
+            response = await gateway.post("renew", {"resultId": lease["resultId"], "leaseId": lease["leaseId"]})
+            if response["state"] != "Leased":
+                return
+            if message is not None:
+                await message.in_progress()
+
+    renewal = asyncio.create_task(heartbeat())
+    try:
+        try:
+            result = await classifier.classify(lease)
+            outcome = await gateway.post("complete", result)
+        except (httpx.HTTPError, ConnectionError, asyncio.CancelledError):
+            raise
+        except (ValueError, RuntimeError, OSError) as error:
+            # Exceptions may include protected input; log only bounded failure codes.
+            code = "model-configuration" if isinstance(error, ValueError) else "model-unavailable"
+            outcome = await gateway.post("fail", {"resultId": lease["resultId"], "leaseId": lease["leaseId"], "code": code})
+        return str(outcome["state"])
+    finally:
+        renewal.cancel()
+        with suppress(asyncio.CancelledError, httpx.HTTPError):
+            await renewal
 
 
 async def run_consumer(settings: Any, classifier: Any) -> None:

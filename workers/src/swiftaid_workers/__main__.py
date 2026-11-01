@@ -9,17 +9,24 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="SwiftAid gateway-scoped job worker")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--classification", action="store_true")
+    parser.add_argument("--classification-backfill", type=str, metavar="JOB_UUID")
     args = parser.parse_args()
-    if args.classification:
+    if args.classification or args.classification_backfill:
         import asyncio
+        from uuid import UUID
 
+        from swiftaid_workers.classification.backfill import run_backfill
         from swiftaid_workers.classification.bart import BartClassifier
         from swiftaid_workers.classification.consumer import run_consumer
         from swiftaid_workers.classification.settings import ClassificationSettings
+        job_id = str(UUID(args.classification_backfill)) if args.classification_backfill else None
         settings = ClassificationSettings()  # type: ignore[call-arg]
         classifier = BartClassifier(settings.device)
         classifier.load()
-        asyncio.run(run_consumer(settings, classifier))
+        if job_id:
+            asyncio.run(run_backfill(settings, classifier, job_id))
+        else:
+            asyncio.run(run_consumer(settings, classifier))
         return
     parser.error("Select --classification and supply its scoped runtime configuration.")
 

@@ -28,9 +28,16 @@ public sealed class ClassificationLiveTests(ITestOutputHelper output)
     public async Task Real_bart_gateway_commit_jetstream_redelivery_and_poison_quarantine()
     {
         await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
-        var imported = await fixture.Service.ProcessAsync(CaseImportPostgresTests.Actor, Guid.NewGuid(), CaseImportPostgresTests.Context,
+        var context = await fixture.CreateIsolatedWorkspaceAsync();
+        var imported = await fixture.Service.ProcessAsync(CaseImportPostgresTests.Actor, Guid.NewGuid(), context,
             1, true, new StringReader(CaseImportPostgresTests.Csv(Guid.NewGuid()).Replace("\"sn\"", "\"en\"", StringComparison.Ordinal)), default);
         var caseId = imported.Rows.Single().CaseId!.Value;
+        // A second identical report and an unsupported-language report exercise real backfill reuse/abstention.
+        foreach (var language in new[] { "en", "sn" })
+            await fixture.Service.ProcessAsync(CaseImportPostgresTests.Actor, Guid.NewGuid(), context, 1, true,
+                new StringReader(CaseImportPostgresTests.Csv(Guid.NewGuid()).Replace("\"sn\"", $"\"{language}\"", StringComparison.Ordinal)), default);
+        await fixture.Service.ProcessAsync(CaseImportPostgresTests.Actor, Guid.NewGuid(), context, 1, true,
+            new StringReader(CaseImportPostgresTests.Csv(Guid.NewGuid(), "[\"No fever reported\"]").Replace("\"sn\"", "\"en\"", StringComparison.Ordinal)), default);
         var source = await fixture.Db.CaseEvents.AsNoTracking().SingleAsync(e => e.CaseId == caseId && e.EventType == "CaseReported");
         var notice = new IngestionNotice(1, source.EventId, "case", caseId, source.AggregateVersion, source.ReportRevision, source.EventType, source.RecordedAtUtc);
         var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
@@ -49,6 +56,7 @@ public sealed class ClassificationLiveTests(ITestOutputHelper output)
             .UseNpgsql(fixture.Db.Database.GetConnectionString()).UseOpenIddict().Options));
         builder.Services.AddScoped(sp => fixture.ClassificationPayloadStore(sp.GetRequiredService<SwiftAidDbContext>()));
         builder.Services.AddScoped<ClassificationRegistry>();
+        builder.Services.AddScoped<ClassificationBackfillStore>();
         await using var app = builder.Build(); app.UseClassificationRequestLimit(); app.MapClassificationWorkerEndpoints(); await app.StartAsync();
         var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
         using var client = new HttpClient();
@@ -62,6 +70,7 @@ public sealed class ClassificationLiveTests(ITestOutputHelper output)
         foreach (var arg in new[] { "run", "--project", "workers", "--locked", "--extra", "classification", "python", "workers/tests/classification_live.py" }) start.ArgumentList.Add(arg);
         start.Environment["CLASSIFICATION_TEST_GATEWAY"] = address; start.Environment["CLASSIFICATION_TEST_TOKEN"] = token;
         start.Environment["CLASSIFICATION_TEST_NOTICE"] = path; start.Environment["HF_HUB_OFFLINE"] = "1";
+        start.Environment["CLASSIFICATION_TEST_WORKSPACE"] = context.WorkspaceId;
         try
         {
             using var process = Process.Start(start)!;

@@ -4,11 +4,13 @@ import json
 import os
 import time
 from pathlib import Path
+from uuid import uuid4
 
 import httpx
 import nats
 from nats.js.api import AckPolicy, ConsumerConfig
 
+from swiftaid_workers.classification.backfill import process_next
 from swiftaid_workers.classification.bart import BartClassifier
 from swiftaid_workers.classification.consumer import GatewayClient, process_message
 
@@ -53,6 +55,23 @@ async def main():
             "inferenceMilliseconds": prediction["inferenceMilliseconds"], "inputTokens": prediction["inputTokens"],
             "elapsedSeconds": time.perf_counter() - started, "redeliveries": replay.metadata.num_delivered - 1,
             "pendingAcknowledgements": info.num_ack_pending}))
+        job_id = str(uuid4())
+        started = await gateway.post("backfills", {"jobId": job_id,
+            "workspaceId": os.environ["CLASSIFICATION_TEST_WORKSPACE"], "organizationId": "org-zw-1"})
+        assert started["eligible"] == 4, started
+        await gateway.post(f"backfills/{job_id}/control", {"paused": True})
+        assert (await process_next(job_id, gateway, None))["state"] == "Paused"
+        await gateway.post(f"backfills/{job_id}/control", {"paused": False})
+        for _ in range(10):
+            status = await process_next(job_id, gateway, classifier)
+            if status["state"] == "Completed":
+                break
+        assert status["state"] == "Completed", status
+        assert (status["pending"], status["newlyClassified"], status["reused"], status["abstained"], status["failed"]) == (0, 1, 2, 1, 0), status
+        # A new HTTP client can reconcile the same job with no model loaded.
+        status = await process_next(job_id, GatewayClient(client), None)
+        assert status["state"] == "Completed"
+        print(json.dumps({"backfill": status}))
     await js.delete_consumer("SWIFTAID_INGESTION", durable)
     await connection.close()
 

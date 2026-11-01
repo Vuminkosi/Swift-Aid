@@ -949,6 +949,109 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                     b.ToTable("associations", "swiftaid_classification");
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.ClassificationBackfillEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("Abstained")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("ConfigurationHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("Eligible")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Failed")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("NewlyClassified")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("OrganizationId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<long>("Pending")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("ProfileJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<long>("Reused")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("WorkerId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("WorkspaceId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WorkspaceId", "OrganizationId");
+
+                    b.ToTable("backfills", "swiftaid_classification", t =>
+                        {
+                            t.HasCheckConstraint("ck_backfill_counts", "\"Eligible\" = \"Pending\" + \"NewlyClassified\" + \"Reused\" + \"Abstained\" + \"Failed\" AND LEAST(\"Pending\", \"NewlyClassified\", \"Reused\", \"Abstained\", \"Failed\") >= 0");
+
+                            t.HasCheckConstraint("ck_backfill_state", "\"State\" IN ('Running','Paused','Completed')");
+                        });
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.ClassificationBackfillItemEntity", b =>
+                {
+                    b.Property<Guid>("JobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SourceEventId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("Ordinal")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("ResultId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("JobId", "SourceEventId");
+
+                    b.HasIndex("ResultId");
+
+                    b.HasIndex("SourceEventId");
+
+                    b.HasIndex("JobId", "Ordinal")
+                        .IsUnique();
+
+                    b.HasIndex(new[] { "JobId", "Ordinal" }, "ix_backfill_pending")
+                        .HasFilter("\"State\" = 'Pending'");
+
+                    b.ToTable("backfill_items", "swiftaid_classification", t =>
+                        {
+                            t.HasCheckConstraint("ck_backfill_item_state", "\"State\" IN ('Pending','NewlyClassified','Reused','Abstained','Failed')");
+                        });
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.ClassificationConfigurationEntity", b =>
                 {
                     b.Property<string>("Id")
@@ -4052,6 +4155,35 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasForeignKey("ResultId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.CaseEventEntity", null)
+                        .WithMany()
+                        .HasForeignKey("SourceEventId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.ClassificationBackfillEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.WorkspaceOrganizationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("WorkspaceId", "OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.ClassificationBackfillItemEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.Classification.ClassificationBackfillEntity", null)
+                        .WithMany()
+                        .HasForeignKey("JobId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.Classification.ClassificationResultEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ResultId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("SwiftAid.Infrastructure.Persistence.CaseEventEntity", null)
                         .WithMany()

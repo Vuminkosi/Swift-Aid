@@ -42,10 +42,10 @@ public static partial class ClassificationFingerprint
     private static partial Regex Whitespace();
 }
 
-public sealed record ClassificationClaimRequest(IngestionNotice Notice);
+public sealed record ClassificationClaimRequest(IngestionNotice Notice, Guid? BackfillJobId = null);
 public sealed record ClassificationLease(Guid ResultId, Guid LeaseId, string ConfigurationHash, string Fingerprint,
     DateTimeOffset LeaseUntilUtc, string Text, ClassificationProfile Profile);
-public sealed record ClassificationClaim(string State, ClassificationLease? Lease = null, string? FailureCode = null);
+public sealed record ClassificationClaim(string State, ClassificationLease? Lease = null, string? FailureCode = null, string? ConfigurationHash = null);
 public sealed record ClassificationPrediction(string LabelId, double Score);
 public sealed record ClassificationCompletion(Guid ResultId, Guid LeaseId, string ConfigurationHash, string Fingerprint,
     IReadOnlyList<ClassificationPrediction> Predictions, string? AbstentionReason, int InputTokens, double InferenceMilliseconds);
