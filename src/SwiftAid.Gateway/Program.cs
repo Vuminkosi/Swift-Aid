@@ -190,6 +190,11 @@ builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.Classification
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.ClassificationBackfillStore>();
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.ClassificationOutboxDispatcher>();
 builder.Services.AddScoped<SwiftAid.Application.Classification.ICaseClassificationQuery, SwiftAid.Infrastructure.Classification.PostgresCaseClassificationQuery>();
+builder.Services.Configure<SwiftAid.Infrastructure.Surveillance.SurveillanceOptions>(builder.Configuration.GetSection("Surveillance"));
+builder.Services.AddScoped<SwiftAid.Infrastructure.Surveillance.SurveillanceProcessor>();
+builder.Services.AddScoped<SwiftAid.Infrastructure.Surveillance.SurveillanceOutboxDispatcher>();
+builder.Services.AddScoped<SwiftAid.Application.Surveillance.ISignalReviewService, SwiftAid.Infrastructure.Surveillance.PostgresSignalReviewService>();
+builder.Services.AddHostedService<SwiftAid.Gateway.Surveillance.SurveillanceWorker>();
 
 var app = builder.Build();
 app.UseClassificationRequestLimit();
@@ -224,6 +229,7 @@ app.MapManagedCaseRegistrationEndpoints();
 app.MapCaseImportEndpoints();
 app.MapClassificationWorkerEndpoints();
 app.MapCaseClassificationEndpoints();
+app.MapSurveillanceSignalEndpoints();
 app.MapCaseTimelineEndpoints();
 app.MapCaseDetailEndpoints();
 app.MapCaseQueueEndpoints();

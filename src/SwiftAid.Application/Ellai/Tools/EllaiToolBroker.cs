@@ -211,6 +211,7 @@ public sealed class EllaiToolBroker
     private readonly ICaseImportStore? _imports;
     private readonly ICaseImportWorkspaceReader? _importWorkspaces;
     private readonly SwiftAid.Application.Classification.ICaseClassificationQuery? _classification;
+    private readonly SwiftAid.Application.Surveillance.ISignalReviewService? _signals;
 
     /// <summary>Consent infrastructure is mandatory for consent-scoped reads.
     /// Ordinary typed messages use their own explicit classification and do
@@ -229,7 +230,8 @@ public sealed class EllaiToolBroker
         IEllaiUiObservationStore? uiObservations = null,
         EllaiProductFactCatalog? productFacts = null, IGeographicRegistry? geography = null,
         ICaseImportStore? imports = null, ICaseImportWorkspaceReader? importWorkspaces = null,
-        SwiftAid.Application.Classification.ICaseClassificationQuery? classification = null)
+        SwiftAid.Application.Classification.ICaseClassificationQuery? classification = null,
+        SwiftAid.Application.Surveillance.ISignalReviewService? signals = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _consent = consent ?? throw new ArgumentNullException(nameof(consent));
@@ -245,6 +247,7 @@ public sealed class EllaiToolBroker
         _imports = imports;
         _importWorkspaces = importWorkspaces;
         _classification = classification;
+        _signals = signals;
     }
 
     public async Task<EllaiToolResult> InvokeAsync(
@@ -390,8 +393,10 @@ public sealed class EllaiToolBroker
         try
         {
             var items = await _classification.GetAsync(context.Actor, caseId, ct).ConfigureAwait(false);
+            var signals = items is not null && _signals?.Enabled == true
+                ? await _signals.ForCaseAsync(context.Actor, caseId, ct).ConfigureAwait(false) : null;
             return items is null ? Deny(request.ToolName, "That case is unavailable.", EllaiToolReasonCodes.DeniedByPolicy) :
-                new(request.ToolName, true, null, [], JsonSerializer.Serialize(new { items,
+                new(request.ToolName, true, null, [], JsonSerializer.Serialize(new { items, signals,
                     interpretation = "Uncalibrated semantic patterns in reported evidence. Not clinical classification, diagnosis, urgency or outbreak confirmation. No new inference was performed." }), 1, false);
         }
         catch (Exception error) when (error is not OperationCanceledException and not OutOfMemoryException)

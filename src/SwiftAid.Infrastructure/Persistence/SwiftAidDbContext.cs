@@ -109,6 +109,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         Classification.ClassificationModel.Configure(modelBuilder);
         Classification.ClassificationBackfillModel.Configure(modelBuilder);
         Classification.ReportQualityModel.Configure(modelBuilder);
+        Surveillance.SurveillanceModel.Configure(modelBuilder);
         modelBuilder.ApplyConfiguration(new NotificationItemEntityConfiguration());
         modelBuilder.ApplyConfiguration(new NotificationDeliveryOutboxEntityConfiguration());
         modelBuilder.ApplyConfiguration(new PushDeviceEntityConfiguration());
