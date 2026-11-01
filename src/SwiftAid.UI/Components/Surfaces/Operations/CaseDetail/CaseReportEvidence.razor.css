@@ -1,6 +1,9 @@
-.case-report-evidence { padding: 1rem 0; border-top: 1px solid var(--sa-border); }
+.case-report-evidence { padding: 1rem 0; border-top: 1px solid var(--sa-border); min-width: 0; overflow-wrap: anywhere; }
 .case-report-evidence h2 { font-size: 1rem; margin: 0 0 .75rem; }
 .case-report-evidence h3 { font-size: .85rem; }
 .case-report-evidence p, .case-report-evidence li { font-size: .8rem; line-height: 1.6; }
 .case-report-evidence__text { white-space: pre-wrap; overflow-wrap: anywhere; }
-.case-report-evidence small { color: var(--sa-text-secondary); }
+.case-report-evidence small { display: block; color: var(--sa-text-secondary); }
+.case-report-evidence dl { margin: .5rem 0; font-size: .85rem; }
+.case-report-evidence dt { font-weight: 600; margin-top: .5rem; }
+.case-report-evidence dd { margin: .125rem 0; }

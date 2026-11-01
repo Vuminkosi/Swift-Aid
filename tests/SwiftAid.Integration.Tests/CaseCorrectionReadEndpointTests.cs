@@ -191,20 +191,25 @@ internal sealed class TestCorrectionReadHost : IAsyncDisposable
 
     public static async Task<TestCorrectionReadHost> StartAsync(
         CaseCorrectionReadResult result,
-        bool throwOnQueryResolution = false)
+        bool throwOnQueryResolution = false,
+        ICaseReportReadQuery? reportQuery = null,
+        bool registerBearer = true)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
-        builder.Services.AddAuthentication(options =>
+        var authentication = builder.Services.AddAuthentication(options =>
             {
                 options.DefaultAuthenticateScheme = IdentityConstants.ApplicationScheme;
                 options.DefaultChallengeScheme = IdentityConstants.ApplicationScheme;
             })
             .AddScheme<AuthenticationSchemeOptions, TestAuthenticationHandler>(
-                IdentityConstants.ApplicationScheme, _ => { })
-            .AddScheme<AuthenticationSchemeOptions, TestAuthenticationHandler>(
-                OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme, _ => { });
-        builder.Services.AddAuthorization();
+                IdentityConstants.ApplicationScheme, _ => { });
+        if (registerBearer) authentication.AddScheme<AuthenticationSchemeOptions, TestAuthenticationHandler>(
+            OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme, _ => { });
+        builder.Services.AddAuthorization(options => options.AddPolicy("SwiftAidStaffApi", policy =>
+            policy.AddAuthenticationSchemes(IdentityConstants.ApplicationScheme).RequireAuthenticatedUser()));
+
+        if (reportQuery is not null) builder.Services.AddSingleton(reportQuery);
 
         var query = new TestCorrectionReadQuery(result);
         if (throwOnQueryResolution)

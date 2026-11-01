@@ -31,7 +31,8 @@
     }
     else if (Areas.Count == 0)
     {
-        <OperationsStreetMap Country="@(FocusCountry ?? "SZ")" Points="@(Details?.Points ?? [])" Focus="Focus" />
+        <OperationsStreetMap Country="@(FocusCountry ?? "SZ")" Points="@(Details?.Points ?? [])" Focus="Focus"
+                             @bind-ShowHuman="_showHuman" @bind-ShowAnimal="_showAnimal" />
         <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="No area totals" Description="No area totals are available for these filters." />
     }
     else
@@ -49,20 +50,8 @@
                 </div>
             </div>
 
-            <div class="operations-map__layers" role="group" aria-label="Report groups shown on the map">
-                <MudCheckBox T="bool" @bind-Value="_showHuman" Label="Human reports" Color="Color.Primary" />
-                <MudCheckBox T="bool" @bind-Value="_showAnimal" Label="Animal reports" Color="Color.Secondary" />
-            </div>
-
-            @if (!_showHuman && !_showAnimal)
-            {
-                <SwiftAidStatePanel State="SwiftAidViewState.Information" Title="Choose a report group" Description="Turn on a group to view its totals on the map." />
-            }
-            else
-            {
-                <OperationsStreetMap Country="@(FocusCountry ?? "SZ")" Points="@(Details?.Points ?? [])"
-                                     ShowHuman="_showHuman" ShowAnimal="_showAnimal" Focus="Focus" />
-            }
+            <OperationsStreetMap Country="@(FocusCountry ?? "SZ")" Points="@(Details?.Points ?? [])"
+                                 @bind-ShowHuman="_showHuman" @bind-ShowAnimal="_showAnimal" Focus="Focus" />
 
             @if (SelectedArea is not null)
             {

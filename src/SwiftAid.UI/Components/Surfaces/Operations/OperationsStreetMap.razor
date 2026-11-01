@@ -6,10 +6,19 @@
 <div class="street-map">
     <div class="street-map__canvas" @ref="_element" role="region" aria-label="Interactive surveillance map. Scroll or pinch to zoom; drag or use arrow keys to pan." tabindex="0"></div>
     <div class="street-map__reset"><span>@(_zoom * 100)&#37;</span><MudButton Size="Size.Small" OnClick="ResetAsync">Reset view</MudButton></div>
-    <div class="street-map__legend" aria-label="Report group colors">
-        <span><i class="human"></i>Human</span><span><i class="animal"></i>Animal</span><span><i class="mixed"></i>Both</span>
+    <div class="street-map__legend" role="group" aria-label="Map layers">
+        <button type="button" aria-pressed="@(ShowHuman ? "true" : "false")" @onclick="ToggleHumanAsync"><i class="human" aria-hidden="true"></i>Human</button>
+        <button type="button" aria-pressed="@(ShowAnimal ? "true" : "false")" @onclick="ToggleAnimalAsync"><i class="animal" aria-hidden="true"></i>Animal</button>
+        <button type="button" aria-pressed="@(ShowHuman && ShowAnimal ? "true" : "false")" @onclick="ToggleBothAsync"><i class="mixed" aria-hidden="true"></i>Both</button>
+        <button type="button" aria-pressed="@(_showMedicalCenters ? "true" : "false")" @onclick="ToggleMedicalCenters"><i class="medical" aria-hidden="true">H</i>Medical centers &amp; clinics</button>
         <small>Report groups, not risk levels</small>
     </div>
+    @if (_showMedicalCenters)
+    {
+        <p role="status">@(_medicalCentersUnavailable ? "Medical-center locations could not be loaded." : _medicalCenterCount is null ? "Loading medical-center locations…" : _medicalCenterCount == 0 ? "No mapped medical centers or clinics are available for this country." : $"{_medicalCenterCount} mapped medical centers and clinics. Services and opening hours are not verified.")
+            <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a>
+        </p>
+    }
     @if (_unavailable)
     {
         <p role="status">The street map could not be loaded. Area totals remain available below.</p>
@@ -25,12 +34,34 @@
     [Parameter] public IReadOnlyList<SurveillanceMapPoint> Points { get; set; } = [];
     [Parameter] public bool ShowHuman { get; set; } = true;
     [Parameter] public bool ShowAnimal { get; set; } = true;
+    [Parameter] public EventCallback<bool> ShowHumanChanged { get; set; }
+    [Parameter] public EventCallback<bool> ShowAnimalChanged { get; set; }
     [Parameter] public OperationsMapSurface.MapFocus? Focus { get; set; }
     private ElementReference _element;
     private IJSObjectReference? _module;
     private DotNetObjectReference<OperationsStreetMap>? _reference;
     private bool _dirty = true, _unavailable, _tilesUnavailable;
     private double _zoom = 1;
+    private bool _showMedicalCenters = true, _medicalCentersUnavailable;
+    private int? _medicalCenterCount;
+
+    private async Task ToggleHumanAsync() { ShowHuman = !ShowHuman; _dirty = true; await ShowHumanChanged.InvokeAsync(ShowHuman); }
+    private async Task ToggleAnimalAsync() { ShowAnimal = !ShowAnimal; _dirty = true; await ShowAnimalChanged.InvokeAsync(ShowAnimal); }
+    private async Task ToggleBothAsync()
+    {
+        var show = !(ShowHuman && ShowAnimal);
+        ShowHuman = ShowAnimal = show;
+        _dirty = true;
+        await ShowHumanChanged.InvokeAsync(show);
+        await ShowAnimalChanged.InvokeAsync(show);
+    }
+    private void ToggleMedicalCenters() { _showMedicalCenters = !_showMedicalCenters; _dirty = true; }
+    [JSInvokable] public Task MedicalCentersStatus(int count, bool unavailable)
+    {
+        _medicalCenterCount = count;
+        _medicalCentersUnavailable = unavailable;
+        return InvokeAsync(StateHasChanged);
+    }
 
     protected override void OnParametersSet() => _dirty = true;
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -45,7 +76,7 @@
                 _reference = DotNetObjectReference.Create(this);
                 await _module.InvokeVoidAsync("initialize", _element, _reference);
             }
-            await _module.InvokeVoidAsync("update", _element, Country, Points, ShowHuman, ShowAnimal, Focus);
+            await _module.InvokeVoidAsync("update", _element, Country, Points, ShowHuman, ShowAnimal, Focus, _showMedicalCenters);
         }
         catch (JSDisconnectedException) { }
         catch (JSException) { _unavailable = true; await InvokeAsync(StateHasChanged); }

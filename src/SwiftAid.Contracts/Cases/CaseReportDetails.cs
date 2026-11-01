@@ -6,7 +6,18 @@ public sealed record CaseReportDetails(
     long ReportRevision,
     string? Narrative,
     IReadOnlyList<string> Observations,
-    CaseReportPlace? Location);
+    CaseReportPlace? Location,
+    CaseNearbyFacilities? NearbyFacilities = null);
+
+/// <summary>Distances computed privately from occurrence coordinates, never reporter GPS.</summary>
+public sealed record CaseNearbyFacilities(
+    NearbyMedicalFacility? Clinic,
+    NearbyMedicalFacility? Hospital,
+    bool ApproximateLocation,
+    double? LocationAccuracyMetres,
+    string? LocalityCentre = null);
+
+public sealed record NearbyMedicalFacility(string Name, string MapUrl, double DistanceKilometres);
 
 /// <summary>Reported place labels and registry references; never precise report coordinates.</summary>
 public sealed record CaseReportPlace(

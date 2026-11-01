@@ -19,6 +19,8 @@
     {
         <OperationsCaseDetailSurface CaseId="caseId"
                                      TimelineClient="TimelineClient"
+                                     LocationLabelOverride="@(_reportDetails?.Location is { } place ? CaseReportDisplay.LocationLabel(place) : null)"
+                                     LocationHref="@(_reportDetails?.Location is { } target ? CaseReportDisplay.MapHref(target) : null)"
                                      OverviewData="_overview"
                                      OnRefreshOverview="LoadOverviewAsync"
                                      CorrectionData="_correction" RefreshCorrectionAsync="LoadCorrectionAsync" SubmitCorrectionAsyncCallback="SubmitCorrectionAsync"
@@ -28,7 +30,9 @@
                                      ObservationsData="_observations" OnRefreshObservations="LoadObservationsAsync" RecordObservationAsyncCallback="RecordObservationAsync"
                                      WorkState="_workState" WorkItems="_workItems" WorkIsBusy="_workBusy"
                                      WorkStatusMessage="@_workStatusMessage" WorkStatusIsError="_workStatusIsError"
-                                     OnWorkAction="ExecuteWorkActionAsync" OnWorkRetry="LoadWorkAsync" />
+                                     OnWorkAction="ExecuteWorkActionAsync" OnWorkRetry="LoadWorkAsync">
+            <ReportContent><CaseReportEvidence Report="_reportDetails" Loading="_reportLoading" OnRetry="LoadReportAsync" /></ReportContent>
+        </OperationsCaseDetailSurface>
     }
     else
     {
@@ -47,6 +51,29 @@
 @code {
     [Parameter] public string? CaseId { get; set; }
     private Guid _loadedCaseId;
+    private CaseReportDetails? _reportDetails;
+    private bool _reportLoading;
+    private long _reportRequest;
+
+    private async Task LoadReportAsync()
+    {
+        var id = _loadedCaseId;
+        var request = ++_reportRequest;
+        _reportDetails = null;
+        _reportLoading = true;
+        try
+        {
+            var client = ServiceProvider.GetService<ICaseReportDetailsClient>();
+            if (client is not null)
+            {
+                var result = await client.GetAsync(id);
+                if (request == _reportRequest && _loadedCaseId == id && result.Succeeded)
+                    _reportDetails = result.Value;
+            }
+        }
+        finally { if (request == _reportRequest) _reportLoading = false; }
+    }
+
     private long _overviewRequest;
     private CaseDetailOverviewView? _overview;
     private CaseDetailCorrectionView? _correction;
@@ -77,12 +104,15 @@
                 _evidenceRequest++;
                 _downloadRequest++;
                 _workRequest++;
-                await Task.WhenAll(LoadOverviewAsync(), LoadCorrectionAsync(), LoadDiscussionAsync(), LoadEvidenceAsync(), LoadObservationsAsync(), LoadWorkAsync());
+                await Task.WhenAll(LoadReportAsync(), LoadOverviewAsync(), LoadCorrectionAsync(), LoadDiscussionAsync(), LoadEvidenceAsync(), LoadObservationsAsync(), LoadWorkAsync());
             }
         }
         else
         {
             _loadedCaseId = Guid.Empty;
+            _reportRequest++;
+            _reportDetails = null;
+            _reportLoading = false;
             _overviewRequest++;
             _overview = null;
             _correctionRequest++;

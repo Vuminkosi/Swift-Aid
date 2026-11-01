@@ -30,6 +30,33 @@ public sealed class CaseReportDisplayTests
         Assert.Equal(original, Assert.Single(report.Observations));
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("Test locality")]
+    public async Task NearbyFacilitiesShowSeparateTypesDistancesAndPublicMapLinks(string? localityCentre)
+    {
+        await using var services = new ServiceCollection().AddLogging().BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        var html = await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var output = await renderer.RenderComponentAsync<CaseReportEvidence>(ParameterView.FromDictionary(new Dictionary<string, object?>
+            {
+                [nameof(CaseReportEvidence.Report)] = new CaseReportDetails(Guid.NewGuid(), 1, null, [], null,
+                    new(new("Example clinic", "https://www.openstreetmap.org/node/1", 1.25),
+                        new("Example hospital", "https://www.openstreetmap.org/way/2", 3.5), true, 500, localityCentre))
+            }));
+            return output.ToHtmlString();
+        });
+        Assert.Contains("Example clinic", html);
+        Assert.Contains("Example hospital", html);
+        Assert.Contains("km away", html);
+        Assert.Contains("approximate", html, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("road distances", html);
+        if (localityCentre is not null) Assert.Contains("mapped centre of Test locality", html);
+        Assert.Contains("noopener noreferrer", html);
+        Assert.Contains("https://www.openstreetmap.org/node/1", html);
+    }
+
     [Fact]
     public async Task EvidenceRendersVerbatimTextAsTextRatherThanHtml()
     {
@@ -48,5 +75,6 @@ public sealed class CaseReportDisplayTests
         Assert.Contains("&lt;script&gt;", html);
         Assert.DoesNotContain("<script>", html);
         Assert.Contains("revision 2", html);
+        Assert.Contains("Distances unavailable", html);
     }
 }

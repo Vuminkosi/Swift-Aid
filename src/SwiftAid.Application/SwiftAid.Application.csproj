@@ -12,4 +12,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="..\SwiftAid.UI\wwwroot\maps\medical-centers-v1.json" LogicalName="SwiftAid.MedicalCenters.json" />
+  </ItemGroup>
+
 </Project>

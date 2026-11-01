@@ -23,6 +23,43 @@
             </ul>
         }
         <small>Recorded evidence · report revision @Report.ReportRevision</small>
+        <section aria-label="Nearby medical facilities">
+            <h3>Nearest clinic and hospital</h3>
+            @if (Report.NearbyFacilities is { } nearby)
+            {
+                <dl>
+                    @foreach (var entry in new[] { (Label: "Clinic", Facility: nearby.Clinic), (Label: "Hospital", Facility: nearby.Hospital) })
+                    {
+                        <dt>@entry.Label</dt>
+                        <dd>
+                            @if (entry.Facility is { } facility)
+                            {
+                                <a href="@facility.MapUrl" target="_blank" rel="noopener noreferrer">@facility.Name ↗</a>
+                                <span> · @facility.DistanceKilometres.ToString("N1") km away</span>
+                            }
+                            else { <span>No mapped @entry.Label.ToLowerInvariant() available in this country.</span> }
+                        </dd>
+                    }
+                </dl>
+                @if (nearby.LocalityCentre is { } locality)
+                {
+                    <small>Approximate straight-line distances from the mapped centre of @locality, not the exact report location or road distances.</small>
+                }
+                else
+                {
+                    <small>Straight-line distances from the @(nearby.ApproximateLocation ? "approximate " : "")reported location, not road distances.</small>
+                }
+                <small>Nearest among mapped facilities; services are not verified.</small>
+                @if (nearby.LocationAccuracyMetres is { } accuracy)
+                {
+                    <small>Reported location accuracy: @accuracy.ToString("N0") m.</small>
+                }
+            }
+            else
+            {
+                <p>Distances unavailable: no usable report coordinates or uniquely matched locality centre.</p>
+            }
+        </section>
     }
     else
     {

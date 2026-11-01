@@ -114,6 +114,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<ICaseEvidenceUploadClient, UnavailableCaseEvidenceUploadClient>();
         builder.Services.AddSingleton<ICaseEvidenceContentClient, UnavailableCaseEvidenceContentClient>();
         builder.Services.AddSingleton<ICaseDetailSummaryClient, CaseDetailSummaryHttpClient>();
+        builder.Services.AddSingleton<ICaseReportDetailsClient, CaseReportDetailsHttpClient>();
         builder.Services.AddTransient<SwiftAid.Contracts.Cases.ICaseTranslationClient>(sp =>
             new SwiftAid.Client.Cases.CaseTranslationHttpClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.NotificationApi")));
         builder.Services.AddTransient<SwiftAid.Contracts.Cases.ICaseClassificationClient>(sp =>

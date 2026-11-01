@@ -1,3 +1,5 @@
+import { selectMedicalCenters, medicalCenterSource } from './medical-centers.js';
+
 const maps = new WeakMap();
 let libraries;
 const asset = path => new URL(path, import.meta.url).href;
@@ -39,7 +41,14 @@ export async function initialize(element, receiver) {
     if (maps.has(element)) return;
     const map = L.map(element, { zoomControl: true, scrollWheelZoom: true, touchZoom: true, keyboard: true, minZoom: 2, maxZoom: 18 });
     const geometry = await (await fetch(asset('./natural-earth-countries-v1.json'), { cache: 'force-cache' })).json();
-    const data = { map, geometry, receiver, markers: null, outline: null, country: null, focus: null, focusKey: null, initialZoom: 1 };
+    let medicalCatalogue = null, medicalUnavailable = false;
+    try {
+        const response = await fetch(asset('./medical-centers-v1.json'), { cache: 'force-cache' });
+        if (!response.ok) throw new Error('Medical-center catalogue unavailable.');
+        medicalCatalogue = await response.json();
+        if (medicalCatalogue.version !== 1 || !Array.isArray(medicalCatalogue.facilities)) throw new Error('Invalid medical-center catalogue.');
+    } catch { medicalUnavailable = true; }
+    const data = { map, geometry, receiver, medicalCatalogue, medicalUnavailable, facilities: null, markers: null, outline: null, country: null, focus: null, focusKey: null, initialZoom: 1 };
     maps.set(element, data);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors · Places: <a href="https://www.geonames.org/">GeoNames</a>',
@@ -49,7 +58,7 @@ export async function initialize(element, receiver) {
     const resize = new ResizeObserver(() => map.invalidateSize({ pan: false })); resize.observe(element); data.resize = resize;
     element.addEventListener('keydown', event => { if (event.key === 'Home') { event.preventDefault(); reset(element); } });
 }
-export function update(element, country, points, showHuman, showAnimal, focus) {
+export function update(element, country, points, showHuman, showAnimal, focus, showMedicalCenters = true) {
     const data = maps.get(element); if (!data) return;
     const { map } = data;
     const feature = data.geometry.features.find(item => item.code === country);
@@ -95,6 +104,29 @@ export function update(element, country, points, showHuman, showAnimal, focus) {
         marker.bindPopup(popup); data.markers.addLayer(marker);
     }
     data.markers.addTo(map);
+    if (data.facilities) { map.removeLayer(data.facilities); data.facilities = null; }
+    const facilities = selectMedicalCenters(data.medicalCatalogue, country);
+    data.receiver.invokeMethodAsync('MedicalCentersStatus', facilities.length, data.medicalUnavailable).catch(() => {});
+    if (showMedicalCenters) {
+        data.facilities = L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 35,
+            iconCreateFunction: cluster => {
+                const label = document.createElement('span'); label.textContent = `M ${cluster.getChildCount()}`;
+                return L.divIcon({ html: label, className: 'sa-medical-marker', iconSize: [40, 28], iconAnchor: [20, 14] });
+            } });
+        for (const facility of facilities) {
+            const label = document.createElement('span'); label.textContent = facility.type === 'Clinic' ? 'C' : 'H';
+            const popup = document.createElement('div'); popup.className = 'sa-medical-popup';
+            const title = document.createElement('strong'); title.textContent = facility.name; popup.append(title);
+            const note = document.createElement('small'); note.textContent = `${facility.type}. Services and opening hours are not verified.`; popup.append(note);
+            const source = document.createElement('a'); source.textContent = 'View on OpenStreetMap';
+            source.href = medicalCenterSource(facility); source.target = '_blank'; source.rel = 'noopener noreferrer'; popup.append(source);
+            L.marker([facility.latitude, facility.longitude], {
+                icon: L.divIcon({ html: label, className: 'sa-medical-marker', iconSize: [28, 28], iconAnchor: [14, 14] }),
+                title: facility.name + ' — ' + facility.type.toLowerCase(), keyboard: true
+            }).bindPopup(popup).addTo(data.facilities);
+        }
+        data.facilities.addTo(map);
+    }
     if (data.focus) { map.removeLayer(data.focus); data.focus = null; }
     if (focus && Number.isFinite(focus.latitude) && Number.isFinite(focus.longitude)) {
         data.focus = L.circleMarker([focus.latitude, focus.longitude], { radius: 8, color: '#6d28d9', fillOpacity: .7 }).addTo(map);

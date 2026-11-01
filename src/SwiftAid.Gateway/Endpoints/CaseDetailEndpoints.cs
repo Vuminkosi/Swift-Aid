@@ -36,6 +36,35 @@ public static class CaseDetailEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
 
+        endpoints.MapGet("/api/v1/cases/{caseId:guid}/report-details", async (
+            Guid caseId, HttpContext context, CancellationToken ct) =>
+        {
+            context.Response.Headers.CacheControl = "no-store, private";
+            context.Response.Headers.Pragma = "no-cache";
+            try
+            {
+                var actor = TryGetActor(context);
+                if (actor is null) return Results.Unauthorized();
+                var query = context.RequestServices.GetService<ICaseReportReadQuery>();
+                if (query is null) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+                var report = await query.GetAsync(actor, caseId, ct);
+                return report is null ? Results.NotFound() : Results.Ok(report);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (UnauthorizedAccessException) { return Results.NotFound(); }
+            catch (Exception exception)
+            {
+                context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("CaseReportDetails")
+                    .LogWarning(exception, "Authorized report details could not be loaded.");
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
+        }).RequireAuthorization("SwiftAidStaffApi")
+            .WithName("GetCaseReportDetails")
+            .Produces<SwiftAid.Contracts.Cases.CaseReportDetails>()
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
         endpoints.MapGet("/api/v1/cases/{caseId:guid}/correction", GetCorrectionReadAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
             .WithName("GetCaseCorrectionRead")

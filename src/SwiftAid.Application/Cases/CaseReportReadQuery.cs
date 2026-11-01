@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases.Commands;
+using SwiftAid.Application.Intake;
 using SwiftAid.Contracts.Cases;
 using SwiftAid.Domain.Cases;
 
@@ -15,7 +16,8 @@ public interface ICaseReportReadQuery
 public sealed class CaseReportReadQuery(
     ICaseAccessPolicy policy,
     ICaseCommandUnitOfWork unitOfWork,
-    ICaseCommandPersistence persistence) : ICaseReportReadQuery
+    ICaseCommandPersistence persistence,
+    IGeographicRegistry? registry = null) : ICaseReportReadQuery
 {
     public async Task<CaseReportDetails?> GetAsync(ActorContext actor, Guid caseId, CancellationToken ct)
     {
@@ -33,6 +35,8 @@ public sealed class CaseReportReadQuery(
             var aggregate = await persistence.ReplayCaseAsync(lease, ct);
             if (aggregate.CaseId != caseId || aggregate.ReportData is null) return null;
             var result = Project(aggregate);
+            if (result.NearbyFacilities is null && registry is not null)
+                result = result with { NearbyFacilities = await NearbyMedicalFacilities.FindFromLocalityAsync(result.Location, registry, ct) };
             await lease.CommitAsync(ct);
             return result;
         }
@@ -62,6 +66,6 @@ public sealed class CaseReportReadQuery(
             evidence?.Narrative?.Text ?? legacy?.Report.Narrative, observations.ToArray(),
             location is null ? null : new(location.CountryCode, location.Region.ReportedName,
                 location.Area.ReportedName, location.Locality.ReportedName, location.Region.NormalizedId,
-                location.Area.NormalizedId, location.Locality.NormalizedId));
+                location.Area.NormalizedId, location.Locality.NormalizedId), NearbyMedicalFacilities.Find(location));
     }
 }

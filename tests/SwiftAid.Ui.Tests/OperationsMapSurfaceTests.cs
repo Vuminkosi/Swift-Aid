@@ -71,6 +71,10 @@ public sealed class OperationsMapSurfaceTests
         Assert.Contains("Map of reported cases", markup, StringComparison.Ordinal);
         Assert.Contains("Interactive surveillance map", markup, StringComparison.Ordinal);
         Assert.Contains("Reset view", markup, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Map layers\"", markup, StringComparison.Ordinal);
+        Assert.Contains("aria-pressed=\"true\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Medical centers", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("operations-map__layers", markup, StringComparison.Ordinal);
         Assert.Contains("Recent signals", markup, StringComparison.Ordinal);
         Assert.Contains("Updated", markup, StringComparison.Ordinal);
         Assert.Contains("the last 30 days", markup, StringComparison.Ordinal);

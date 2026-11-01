@@ -27,8 +27,7 @@
 }
 
 .operations-map__filters,
-.operations-map__tools,
-.operations-map__layers {
+.operations-map__tools {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
@@ -114,10 +113,6 @@
     min-width: 3.5rem;
     text-align: center;
     font-variant-numeric: tabular-nums;
-}
-
-.operations-map__layers {
-    padding-block: 0.25rem;
 }
 
 .operations-map__viewport {
