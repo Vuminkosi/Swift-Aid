@@ -11,7 +11,7 @@ if (process.env.SWIFTAID_RUN_LIVE_PROVIDER !== '1') {
     try {
         const page = await browser.newPage();
         await page.goto(process.env.SWIFTAID_TEST_GATEWAY || 'http://localhost:8080');
-        const result = await page.evaluate(async () => {
+        const result = await page.evaluate(async outputLanguage => {
             const root = '/api/v1/ellai/guest';
             const post = async (url, body) => {
                 const token = (await (await fetch(root + '/antiforgery')).json()).requestToken;
@@ -26,7 +26,8 @@ if (process.env.SWIFTAID_RUN_LIVE_PROVIDER !== '1') {
             try {
                 const response = await post(`/sessions/${session.sessionId}/utterances`, {
                     clientUtteranceId: id, sessionId: session.sessionId, expectedSessionVersion: session.sessionVersion,
-                    finalizedText: 'What does an intake receipt mean?', transcriptRef: null, inputSource: 'typed', clientEpoch: session.sessionVersion
+                    finalizedText: 'What does an intake receipt mean?', transcriptRef: null, inputSource: 'typed', clientEpoch: session.sessionVersion,
+                    languages: { inputLanguage: 'eng', outputLanguage }
                 });
                 if (!response.ok) throw new Error('Submission failed: ' + response.status);
                 const admissionMs = Math.round(performance.now() - started);
@@ -44,7 +45,7 @@ if (process.env.SWIFTAID_RUN_LIVE_PROVIDER !== '1') {
                 const current = await (await fetch(`${root}/sessions/${session.sessionId}`)).json();
                 await post(`/sessions/${session.sessionId}/cancel`, { expectedSessionVersion: current.sessionVersion });
             }
-        });
+        }, process.env.SWIFTAID_TEST_OUTPUT_LANGUAGE || 'eng');
         console.log(JSON.stringify(result));
         assert.equal(result.outcome, 'Completed');
         assert(result.responseLength > 0);

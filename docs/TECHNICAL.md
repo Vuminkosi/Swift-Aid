@@ -201,8 +201,9 @@ viewports use full-screen. Pinned MIT-licensed `MudX.MudBlazor.Extension` 9.10.0
 provides encoded chat bubbles for durable user/assistant turns. The existing
 owner-authorized response query supplies history; transient progress is excluded.
 Loading, retry, empty history and terminal outcomes remain distinct. Component
-tests cover completed, failed and cancelled turns and HTML encoding. Native-device
-and deployed-browser validation of this dialog remains pending.
+tests cover completed, failed and cancelled turns and HTML encoding. Deployed
+Chromium checks pass preference restoration, populated medium desktop chat and
+full-screen chat at 390px. Native-device validation remains pending.
 
 The shared composer intercepts unmodified Enter locally, preserving Shift+Enter
 and IME composition, and passes the current input value through the existing
@@ -233,6 +234,18 @@ IDs and query strings. Reasoning receives its display name as advisory context
 alongside the Gateway's current UTC time. This does not grant navigation or data
 permissions, and no user timezone is inferred. Server-submitted voice turns still
 need the corresponding page-context propagation; this remains incomplete.
+
+Local Compose validation on 1 November 2026: 75 shared surface regressions, 21
+runner/admission tests, 11 JavaScript tests, and six Gateway/language contract
+tests passed (one opt-in provider test skipped). The separate real-provider HTTP
+feed test completed and restored English history after reload: admission 310ms,
+first text 12,444ms, durable completion 20,496ms. The same test with Shona output
+completed via NLLB and restored history in 76,921ms. These synthetic measurements
+do not establish native-speaker quality, low latency, acoustics or continuous
+voice readiness. Commands: `node tests/SwiftAid.Ui.Tests/ellai-settings.gateway.browser.cjs`
+against an authenticated CDP page, and `SWIFTAID_RUN_LIVE_PROVIDER=1 node
+tests/SwiftAid.Ui.Tests/ellai-text.gateway.browser.cjs` (add
+`SWIFTAID_TEST_OUTPUT_LANGUAGE=sna` for translated output).
 
 **Status: Partial implementation. Report journey descriptors are registered at
 Gateway startup; complete model-generated guidance is not verified.**

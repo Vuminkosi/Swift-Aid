@@ -137,6 +137,7 @@
     private static readonly (string Code, string Name)[] LanguageOptions =
         [("eng", "English"), ("sna", "Shona"), ("ssw", "siSwati"), ("nya", "Nyanja"), ("tso", "Tsonga")];
     private EllaiLanguagePreferences _languages = new();
+    private readonly SemaphoreSlim _languageSaveGate = new(1, 1);
     private bool _languagesLoaded;
     private bool _languageSaveFailed;
 
@@ -161,14 +162,18 @@
     private async Task SaveLanguagesAsync(EllaiLanguagePreferences value)
     {
         if (!value.IsValid()) return;
+        // Keep the next selection based on the latest choice even while the
+        // preceding browser-storage interop is awaiting its response.
+        _languages = value;
+        await _languageSaveGate.WaitAsync();
         try
         {
             await using var module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/SwiftAid.UI/js/ellai-language-preferences.js");
             _languageSaveFailed = !await module.InvokeAsync<bool>("save", value);
-            if (!_languageSaveFailed) _languages = value;
         }
         catch (JSException) { _languageSaveFailed = true; }
         catch (JSDisconnectedException) { _languageSaveFailed = true; }
+        finally { _languageSaveGate.Release(); }
     }
 
     private readonly CancellationTokenSource _lifetime = new();
