@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Client.Presentation;
 using SwiftAid.Gateway.Presentation;
+using SwiftAid.Gateway.Ingestion;
 using SwiftAid.Infrastructure.Identity;
 using SwiftAid.Infrastructure.Persistence;
 
@@ -38,6 +39,11 @@ public sealed class GatewayWorkspaceAccessTests
         Assert.True(state.Succeeded);
         Assert.Contains(state.Value!.Workspaces, w => w.Id == first + "-general");
         Assert.Contains(state.Value.Workspaces, w => w.Id == second + "-general");
+        var imports = new WorkspaceImportClient(auth, provider.GetRequiredService<IServiceScopeFactory>());
+        var destinations = await imports.GetDestinationsAsync(default);
+        Assert.Contains(destinations, d => d.OrganizationId == first && d.WorkspaceId == first + "-general");
+        Assert.Contains(destinations, d => d.OrganizationId == second && d.WorkspaceId == second + "-general");
+        Assert.False(await fixture.Db.AccessGrantGroups.AnyAsync(g => g.OrganizationId == first || g.OrganizationId == second));
         var selected = await client.SelectWorkspaceAsync(second + "-general");
         Assert.Equal(second + "-general", selected.Value!.SelectedWorkspaceId);
         Assert.Equal(selected.Value.SelectedWorkspaceId, (await client.GetStateAsync()).Value!.SelectedWorkspaceId);
@@ -48,6 +54,7 @@ public sealed class GatewayWorkspaceAccessTests
         await fixture.Db.SaveChangesAsync();
         state = await client.GetStateAsync();
         Assert.DoesNotContain(state.Value!.Workspaces, w => w.Id == second + "-general");
+        Assert.DoesNotContain(await imports.GetDestinationsAsync(default), d => d.OrganizationId == second);
         Assert.Equal(UiCapabilityResultCode.Denied, (await client.SelectWorkspaceAsync(second + "-general")).Code);
         auth.Epoch = 999999;
         Assert.Equal(UiCapabilityResultCode.Denied, (await client.GetStateAsync()).Code);

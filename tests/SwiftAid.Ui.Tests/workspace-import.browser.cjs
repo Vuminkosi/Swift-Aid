@@ -61,11 +61,11 @@ async function main() {
         await page.screenshot({ path: path.join(artifacts, "workspace-import-restored-issue.png"), fullPage: true });
         await page.getByRole("button", { name: "New import", exact: true }).click();
         await page.getByRole("button", { name: "Import cases", exact: true }).waitFor();
-        const sharedLabel = process.env.SWIFTAID_IMPORT_BROWSER_SHARED_ORG + " / workspace-1 · Zimbabwe";
+        const sharedLabel = process.env.SWIFTAID_IMPORT_BROWSER_SHARED_ORG + " / workspace-1";
         const selectSharedOrganization = async () => {
-            await page.getByLabel("Organization, workspace and country", { exact: true }).click();
+            await page.getByLabel("Organization and workspace", { exact: true }).click();
             await page.getByText(sharedLabel, { exact: true }).last().click();
-            await page.getByText("Organization: " + process.env.SWIFTAID_IMPORT_BROWSER_SHARED_ORG, { exact: true }).waitFor();
+            await page.getByRole("combobox", { name: "Occurrence country", exact: true }).waitFor();
         };
         await selectSharedOrganization();
         await page.getByLabel("Case reports file", { exact: true }).setInputFiles(process.env.SWIFTAID_IMPORT_BROWSER_SHARED_FILE);

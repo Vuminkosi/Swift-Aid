@@ -20,9 +20,9 @@
     {
         <MudProgressLinear Indeterminate="true" Color="Color.Primary" aria-label="Loading import access" />
     }
-    else if (_workspaces.Count == 0 || _catalogue is null || _policy is null)
+    else if (_destinations.Count == 0 || _catalogue is null || _policy is null)
     {
-        <MudAlert Severity="Severity.Info">@(_message ?? "No workspace is currently available for importing cases. Ask your organization to review your access.")</MudAlert>
+        <MudAlert Severity="Severity.Info">@(_message ?? "No workspace is linked to your current organization memberships.")</MudAlert>
         <MudButton OnClick="LoadAsync" Variant="Variant.Text" Color="Color.Primary">Refresh access</MudButton>
     }
     else
@@ -31,16 +31,23 @@
             <MudItem xs="12" md="7">
                 <MudPaper Outlined="true" Elevation="0" Class="pa-4">
                     <MudStack Spacing="3">
-                        <MudSelect T="CaseImportWorkspace" Label="Organization, workspace and country" Value="_workspace" ValueChanged="SelectWorkspaceAsync"
-                                   Disabled="@(_busy || _importId.HasValue)" Variant="Variant.Outlined" ToStringFunc="WorkspaceLabel">
-                            @foreach (var workspace in _workspaces)
+                        <MudSelect T="ImportDestination" Label="Organization and workspace" Value="_destination" ValueChanged="SelectDestinationAsync"
+                                   Disabled="@(_busy || _importId.HasValue)" Variant="Variant.Outlined" ToStringFunc="DestinationLabel">
+                            @foreach (var destination in _destinations)
                             {
-                                <MudSelectItem T="CaseImportWorkspace" Value="workspace">@WorkspaceLabel(workspace)</MudSelectItem>
+                                <MudSelectItem T="ImportDestination" Value="destination">@DestinationLabel(destination)</MudSelectItem>
                             }
                         </MudSelect>
-                        @if (_workspace is not null)
+                        <MudSelect T="string" Label="Occurrence country" Value="_country" ValueChanged="SelectCountryAsync"
+                                   Disabled="@(_busy || _importId.HasValue)" Variant="Variant.Outlined">
+                            @foreach (var country in _catalogue.Countries)
+                            {
+                                <MudSelectItem T="string" Value="@country.Code">@country.Label</MudSelectItem>
+                            }
+                        </MudSelect>
+                        @if (_destination is not null && !string.IsNullOrEmpty(_country) && _workspace is null)
                         {
-                            <MudText Typo="Typo.caption">Organization: @_workspace.OrganizationId</MudText>
+                            <MudAlert Severity="Severity.Info">Your account does not yet have case-import access for this workspace and country.</MudAlert>
                         }
                         <div class="case-imports__file">
                             <label for="case-import-file">Case reports file</label>
@@ -136,6 +143,9 @@
     private readonly CancellationTokenSource _lifetime = new();
     private CancellationTokenSource? _run;
     private IReadOnlyList<CaseImportWorkspace> _workspaces = [];
+    private IReadOnlyList<ImportDestination> _destinations = [];
+    private ImportDestination? _destination;
+    private string? _country;
     private IReadOnlyList<CaseImportHistoryItem> _recent = [];
     private readonly List<CaseImportRowOutcome> _issues = [];
     private CaseImportWorkspace? _workspace;
@@ -158,32 +168,50 @@
         try
         {
             _workspaces = await Imports.GetWorkspacesAsync(_lifetime.Token);
+            _destinations = await Imports.GetDestinationsAsync(_lifetime.Token);
             var countries = await Metadata.GetCountriesAsync(_lifetime.Token);
             var policy = await Policy.GetPolicyAsync(_lifetime.Token);
             _catalogue = countries.Succeeded && countries.Metadata.IsAvailable ? countries.Value : null;
             _policy = policy.Succeeded && policy.Metadata.IsAvailable && policy.Metadata.Provenance == UiCapabilityProvenance.LiveService ? policy.Value : null;
-            _workspace = _workspaces.FirstOrDefault();
-            if (_workspace is not null) await SelectWorkspaceAsync(_workspace);
+            var first = _workspaces.FirstOrDefault();
+            _country = first?.CountryCode;
+            await SelectDestinationAsync(_destinations.FirstOrDefault(d => d.WorkspaceId == first?.WorkspaceId && d.OrganizationId == first?.OrganizationId)
+                ?? _destinations.FirstOrDefault());
             _message = _catalogue is null || _policy is null ? "Import settings could not be loaded. Refresh to try again." : null;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             _workspaces = [];
+            _destinations = [];
             _message = "Import access could not be loaded. Refresh to try again.";
         }
         finally { _loading = false; }
     }
 
-    private string WorkspaceLabel(CaseImportWorkspace? workspace) => workspace is null ? string.Empty :
-        $"{workspace.OrganizationId} / {workspace.WorkspaceId} · {_catalogue?.Countries.FirstOrDefault(country => country.Code == workspace.CountryCode)?.Label ?? workspace.CountryCode}";
+    private static string DestinationLabel(ImportDestination? destination) => destination is null ? string.Empty :
+        $"{destination.OrganizationId} / {destination.WorkspaceId}";
 
-    private async Task SelectWorkspaceAsync(CaseImportWorkspace? workspace)
+    private async Task SelectDestinationAsync(ImportDestination? destination)
     {
         if (_busy || _importId.HasValue) return;
-        _workspace = workspace;
+        _destination = destination;
+        await UpdateSelectionAsync();
+    }
+
+    private async Task SelectCountryAsync(string? country)
+    {
+        if (_busy || _importId.HasValue) return;
+        _country = country;
+        await UpdateSelectionAsync();
+    }
+
+    private async Task UpdateSelectionAsync()
+    {
+        _workspace = _workspaces.FirstOrDefault(w => w.WorkspaceId == _destination?.WorkspaceId &&
+            w.OrganizationId == _destination?.OrganizationId && w.CountryCode == _country);
         _reviewed = _confirmed = false;
         _recent = [];
-        try { if (workspace is not null) _recent = await Imports.GetRecentAsync(workspace, _lifetime.Token); }
+        try { if (_workspace is not null) _recent = await Imports.GetRecentAsync(_workspace, _lifetime.Token); }
         catch (Exception exception) when (exception is not OutOfMemoryException) { _message = "Recent imports could not be loaded."; }
     }
 
