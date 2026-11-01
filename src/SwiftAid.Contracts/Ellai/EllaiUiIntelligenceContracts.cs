@@ -75,7 +75,23 @@ public sealed record UiObservationReport(
     string ViewInstanceId,
     string ContextStamp,
     string Platform,
-    IReadOnlyList<string> MountedControlIds);
+    IReadOnlyList<string> MountedControlIds,
+    IReadOnlyList<UiControlState>? ControlStates = null)
+{
+    public bool IsValid() =>
+        !string.IsNullOrWhiteSpace(ViewInstanceId) && ViewInstanceId.Length <= 120 &&
+        !string.IsNullOrWhiteSpace(ContextStamp) && ContextStamp.Length <= 120 &&
+        !string.IsNullOrWhiteSpace(Platform) && Platform.Length <= 40 &&
+        MountedControlIds is { Count: <= 20 } &&
+        MountedControlIds.All(id => !string.IsNullOrWhiteSpace(id) && id.Length <= 120) &&
+        MountedControlIds.Distinct(StringComparer.Ordinal).Count() == MountedControlIds.Count &&
+        (ControlStates is null || ControlStates.Count <= 20 &&
+            ControlStates.All(state => state is not null && MountedControlIds.Contains(state.ControlId) && Enum.IsDefined(state.State)) &&
+            ControlStates.Select(state => state.ControlId).Distinct(StringComparer.Ordinal).Count() == ControlStates.Count);
+}
+
+/// <summary>Presentation evidence only; never grants authorization or proves a business action.</summary>
+public sealed record UiControlState(string ControlId, UiObservationState State);
 
 /// <summary>Bounded timestamped observation of a registered control.</summary>
 public sealed record UiControlObservation(

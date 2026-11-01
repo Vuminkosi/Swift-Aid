@@ -671,18 +671,14 @@ public sealed class EllaiReviewGatewayClient(
             var currentState = await _authenticationStateProvider
                 .GetAuthenticationStateAsync().ConfigureAwait(false);
             var currentPrincipal = ResolvePrincipal(currentState.User, sessionId);
-            if (currentPrincipal is null || _guestSessionIdentity.IsGuestPrincipal(currentPrincipal))
+            if (currentPrincipal is null)
             {
                 return false;
             }
 
             var observations = _serviceProvider.GetService<IEllaiUiObservationStore>();
             if (observations is null
-                || string.IsNullOrWhiteSpace(report.ViewInstanceId)
-                || string.IsNullOrWhiteSpace(report.ContextStamp)
-                || string.IsNullOrWhiteSpace(report.Platform)
-                || report.MountedControlIds.Count == 0
-                || report.MountedControlIds.Count > InMemoryEllaiUiObservationStore.MaxMountedControls)
+                || !report.IsValid())
             {
                 return false;
             }
@@ -693,7 +689,7 @@ public sealed class EllaiReviewGatewayClient(
                     .Where(id => !string.IsNullOrWhiteSpace(id))
                     .Select(id => id.Trim())
                     .ToList(),
-                DateTimeOffset.UtcNow), cancellationToken).ConfigureAwait(false);
+                DateTimeOffset.UtcNow, report.ControlStates), cancellationToken).ConfigureAwait(false);
             return true;
         }
         catch (OperationCanceledException)

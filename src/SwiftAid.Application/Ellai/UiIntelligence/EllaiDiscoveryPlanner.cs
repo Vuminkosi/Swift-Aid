@@ -14,7 +14,8 @@ public interface IEllaiUiDiscoveryService
         string viewInstanceId,
         string contextStamp,
         string platform,
-        DateTimeOffset now);
+        DateTimeOffset now,
+        IReadOnlyList<UiControlState>? controlStates = null);
 }
 
 /// <summary>Planner seam: composes registry descriptors plus live
@@ -40,16 +41,27 @@ public sealed class EllaiUiDiscoveryService : IEllaiUiDiscoveryService
         string viewInstanceId,
         string contextStamp,
         string platform,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        IReadOnlyList<UiControlState>? controlStates = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(mountedControlIds);
         return snapshot.Descriptors
             .Select(d => new UiControlObservation(
                 d.ControlId, d.DescriptorVersion, viewInstanceId, contextStamp,
-                mountedControlIds.Contains(d.ControlId) ? UiObservationState.Ready : UiObservationState.Unmounted,
+                ResolveState(d.ControlId, mountedControlIds, controlStates),
                 platform, now, null))
             .ToList();
+    }
+
+    private static UiObservationState ResolveState(string controlId, IReadOnlySet<string> mounted,
+        IReadOnlyList<UiControlState>? states)
+    {
+        if (!mounted.Contains(controlId)) return UiObservationState.Unmounted;
+        var matches = states?.Where(s => s.ControlId == controlId).ToArray();
+        if (matches is null || matches.Length == 0) return UiObservationState.Unknown;
+        if (matches.Length != 1) return UiObservationState.Ambiguous;
+        return Enum.IsDefined(matches[0].State) ? matches[0].State : UiObservationState.Unknown;
     }
 }
 

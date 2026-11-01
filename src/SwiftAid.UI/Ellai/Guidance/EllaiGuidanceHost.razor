@@ -286,6 +286,7 @@
             }
         }
 
+        _ = MonitorUiObservationsAsync();
         await RestoreConversationAsync();
         await InvokeAsync(StateHasChanged);
     }
@@ -2281,6 +2282,7 @@
         Phase = EllaiStatusPhases.Active;
         try
         {
+            await ReportCurrentUiAsync(cancellationToken);
             var result = await ReviewClient.SubmitUtteranceAsync(request, cancellationToken);
             switch (result.Status)
             {
@@ -2982,6 +2984,7 @@
 
     public void Dispose()
     {
+        _uiObservationLifetime.Cancel();
         if (_sessionContinuity is not null) _ = _sessionContinuity.DisposeAsync();
         if (_nativeVoiceCapture is not null)
         {

@@ -616,7 +616,7 @@ public static class EllaiEndpoints
         return Results.Json(MapReceipts(receipts), statusCode: StatusCodes.Status200OK);
     }
 
-    private static Task<IResult> ReportUiObservationAsync(
+    internal static Task<IResult> ReportUiObservationAsync(
         string sessionId,
         ReportUiObservationApiRequest? request,
         IEllaiUiObservationStore observations,
@@ -624,14 +624,8 @@ public static class EllaiEndpoints
     {
         if (request is null
             || !string.Equals(request.SessionId, sessionId, StringComparison.Ordinal)
-            || string.IsNullOrWhiteSpace(request.ViewInstanceId)
-            || string.IsNullOrWhiteSpace(request.ContextStamp)
-            || string.IsNullOrWhiteSpace(request.Platform)
-            || request.MountedControlIds is null
-            || request.MountedControlIds.Count == 0
-            || request.MountedControlIds.Count > InMemoryEllaiUiObservationStore.MaxMountedControls
-            || request.MountedControlIds.Any(id =>
-                string.IsNullOrWhiteSpace(id) || id.Length > 120))
+            || !new UiObservationReport(request.ViewInstanceId, request.ContextStamp,
+                request.Platform, request.MountedControlIds, request.ControlStates).IsValid())
         {
             return Task.FromResult(Results.Problem(
                 statusCode: StatusCodes.Status400BadRequest,
@@ -651,7 +645,7 @@ public static class EllaiEndpoints
                 .Where(id => !string.IsNullOrWhiteSpace(id))
                 .Select(id => id.Trim())
                 .ToList(),
-            DateTimeOffset.UtcNow), cancellationToken);
+            DateTimeOffset.UtcNow, request.ControlStates), cancellationToken);
         return Results.Json(true, statusCode: StatusCodes.Status200OK);
     }
 
@@ -839,7 +833,8 @@ public sealed record ReportUiObservationApiRequest(
     string ViewInstanceId,
     string ContextStamp,
     string Platform,
-    IReadOnlyList<string> MountedControlIds);
+    IReadOnlyList<string> MountedControlIds,
+    IReadOnlyList<UiControlState>? ControlStates = null);
 
 /// <summary>Review registration for a validated pending plan: binds the
 /// dialog instance to one server-tracked review (duplicate ids focus it).

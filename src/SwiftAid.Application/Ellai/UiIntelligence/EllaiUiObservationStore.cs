@@ -10,7 +10,8 @@ public sealed record StoredUiObservationReport(
     string ContextStamp,
     string Platform,
     IReadOnlyList<string> MountedControlIds,
-    DateTimeOffset ReceivedAtUtc);
+    DateTimeOffset ReceivedAtUtc,
+    IReadOnlyList<UiControlState>? ControlStates = null);
 
 public interface IEllaiUiObservationStore
 {
@@ -35,6 +36,10 @@ public sealed class InMemoryEllaiUiObservationStore : IEllaiUiObservationStore
     {
         ArgumentNullException.ThrowIfNull(report);
         ArgumentException.ThrowIfNullOrWhiteSpace(report.SessionId);
+        ct.ThrowIfCancellationRequested();
+        if (!new UiObservationReport(report.ViewInstanceId, report.ContextStamp, report.Platform,
+                report.MountedControlIds, report.ControlStates).IsValid())
+            throw new ArgumentException("Invalid UI observation report.", nameof(report));
         var cleaned = report.MountedControlIds
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Select(id => id.Trim())
@@ -43,7 +48,13 @@ public sealed class InMemoryEllaiUiObservationStore : IEllaiUiObservationStore
             .ToList();
         lock (_gate)
         {
-            _latest[report.SessionId] = report with { MountedControlIds = cleaned };
+            if (!_latest.ContainsKey(report.SessionId) && _latest.Count >= 4096)
+                _latest.Remove(_latest.MinBy(entry => entry.Value.ReceivedAtUtc).Key);
+            _latest[report.SessionId] = report with
+            {
+                MountedControlIds = cleaned.AsReadOnly(),
+                ControlStates = report.ControlStates?.ToList().AsReadOnly()
+            };
         }
 
         return Task.CompletedTask;

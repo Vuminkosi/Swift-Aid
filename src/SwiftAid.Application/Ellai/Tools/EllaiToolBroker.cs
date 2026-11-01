@@ -821,10 +821,13 @@ public sealed class EllaiToolBroker
         var now = DateTimeOffset.UtcNow;
         var mounted = new HashSet<string>(report.MountedControlIds, StringComparer.Ordinal);
         var observations = _uiDiscovery.Observe(
-            snapshot, mounted, report.ViewInstanceId, report.ContextStamp, report.Platform, now);
+            snapshot, mounted, report.ViewInstanceId, report.ContextStamp, report.Platform, report.ReceivedAtUtc,
+            report.ControlStates);
         var byId = observations.ToDictionary(o => o.ControlId, StringComparer.Ordinal);
-        var ordered = requested.Select(id => byId[id]).ToList();
         var age = now - report.ReceivedAtUtc;
+        var stale = age < TimeSpan.Zero || age > TimeSpan.FromSeconds(45) ||
+            !string.Equals(report.ViewInstanceId, view.Trim(), StringComparison.Ordinal);
+        var ordered = requested.Select(id => stale ? byId[id] with { State = UiObservationState.Stale } : byId[id]).ToList();
         var lines = ordered.Select(o =>
             $"control {o.ControlId} · {o.State} · view {o.ViewInstanceId} · {o.Platform}");
         var evidence = ordered.Select(o => new EvidenceRef(

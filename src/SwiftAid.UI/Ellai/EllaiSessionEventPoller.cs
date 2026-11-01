@@ -773,18 +773,14 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
     public async Task<bool> ReportUiObservationAsync(
         string sessionId, UiObservationReport report, CancellationToken cancellationToken)
     {
-        if (_useGuestRoutes)
-        {
-            return false;
-        }
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentNullException.ThrowIfNull(report);
         try
         {
-            using var response = await _http.PostAsJsonAsync(
-                $"api/v1/ellai/sessions/{Uri.EscapeDataString(sessionId)}/ui-observations",
-                new { sessionId, report.ViewInstanceId, report.ContextStamp, report.Platform, report.MountedControlIds },
-                Json, cancellationToken).ConfigureAwait(false);
+            using var response = await PostAsJsonAsync(
+                $"{SessionRoute(sessionId)}/ui-observations",
+                new { sessionId, report.ViewInstanceId, report.ContextStamp, report.Platform, report.MountedControlIds, report.ControlStates },
+                cancellationToken).ConfigureAwait(false);
             return response.IsSuccessStatusCode;
         }
         catch (OperationCanceledException)

@@ -32,7 +32,7 @@ public sealed class EllaiDiscoveryPlannerTests
 
         var observations = discovery.Observe(
             Snapshot(registry), new HashSet<string> { "cases.queue" },
-            "view-1", "ctx-1", "web", DateTimeOffset.UtcNow);
+            "view-1", "ctx-1", "web", DateTimeOffset.UtcNow, [new("cases.queue", UiObservationState.Ready), new("cases.refund", UiObservationState.Ready)]);
 
         Assert.Equal(2, observations.Count);
         Assert.Equal(UiObservationState.Ready,
@@ -51,7 +51,7 @@ public sealed class EllaiDiscoveryPlannerTests
         var discovery = new EllaiUiDiscoveryService();
         var observations = discovery.Observe(
             snapshot, new HashSet<string> { "cases.queue", "cases.refund" },
-            "view-1", "ctx-1", "web", DateTimeOffset.UtcNow);
+            "view-1", "ctx-1", "web", DateTimeOffset.UtcNow, [new("cases.queue", UiObservationState.Ready), new("cases.refund", UiObservationState.Ready)]);
         var planner = new EllaiGuidancePlanner();
 
         var draft = planner.ComposeDraft("view queue", GuidanceMode.Navigation, snapshot, observations, 8);
@@ -68,7 +68,7 @@ public sealed class EllaiDiscoveryPlannerTests
         registry.Register(Descriptor("cases.queue"));
         var snapshot = Snapshot(registry);
         var observations = new EllaiUiDiscoveryService().Observe(
-            snapshot, new HashSet<string>(), "view-1", "ctx-1", "web", DateTimeOffset.UtcNow);
+            snapshot, new HashSet<string>(), "view-1", "ctx-1", "web", DateTimeOffset.UtcNow, [new("cases.queue", UiObservationState.Ready), new("cases.refund", UiObservationState.Ready)]);
         var planner = new EllaiGuidancePlanner();
 
         var draft = planner.ComposeDraft("view queue", GuidanceMode.Navigation, snapshot, observations, 8);
@@ -86,7 +86,7 @@ public sealed class EllaiDiscoveryPlannerTests
         var snapshot = Snapshot(registry);
         var observations = new EllaiUiDiscoveryService().Observe(
             snapshot, new HashSet<string> { "cases.queue" },
-            "view-1", "ctx-1", "web", DateTimeOffset.UtcNow);
+            "view-1", "ctx-1", "web", DateTimeOffset.UtcNow, [new("cases.queue", UiObservationState.Ready), new("cases.refund", UiObservationState.Ready)]);
         var draft = new EllaiGuidancePlanner().ComposeDraft(
             "view queue", GuidanceMode.Navigation, snapshot, observations, 8);
 

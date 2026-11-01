@@ -31,7 +31,10 @@ public sealed class EllaiModelGuidancePlanner(IEllaiTurnCompletionClient complet
                 "Do not invent observed state or completion evidence. Never submit, approve, or modify a report. " +
                 "Questions have questionId, text, choiceIds. If context is insufficient, return NeedsInput with no steps. " +
                 "Keep each explanation under 1000 characters. Preserve the requested objective and mode."),
-            new("user", JsonSerializer.Serialize(new { objective, mode, snapshot, observations }, Json))
+            new("user", JsonSerializer.Serialize(new { objective, mode, snapshot.CatalogueVersion, snapshot.UiContractVersion,
+                controls = snapshot.Descriptors.Select(d => new { d.ControlId, d.DescriptorVersion, d.ElementKind,
+                    d.GoalTags, d.ProductFactIds, d.ObjectiveId, d.RiskClass, d.SupportedModes, d.PrerequisiteIds, d.SuccessorIds }),
+                observations = observations.Select(o => new { o.ControlId, o.DescriptorVersion, o.State, o.ViewInstanceId, o.ContextStamp, o.ObservedAtUtc }) }, Json))
         ], 2048, ct).ConfigureAwait(false);
         try
         {

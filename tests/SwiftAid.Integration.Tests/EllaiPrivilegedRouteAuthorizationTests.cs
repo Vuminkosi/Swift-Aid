@@ -159,7 +159,7 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             "server-guest-question", started.Session.SessionId, started.Session.SessionVersion,
             "What does an intake receipt mean?", null, "typed", 1), CancellationToken.None);
         Assert.Equal(EllaiClientOperationStatus.Accepted, submitted.Status);
-        Assert.False(await client.ReportUiObservationAsync(
+        Assert.True(await client.ReportUiObservationAsync(
             started.Session.SessionId,
             new UiObservationReport("view", "context", "web", ["public-home"]),
             CancellationToken.None));

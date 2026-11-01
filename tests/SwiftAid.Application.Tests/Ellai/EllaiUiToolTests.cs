@@ -7,6 +7,22 @@ namespace SwiftAid.Application.Tests.Ellai;
 [Trait("Task", "ELL-T07")]
 public sealed class EllaiUiToolTests
 {
+    [Theory]
+    [InlineData(46, "view-9", UiObservationState.Ready, "Stale")]
+    [InlineData(0, "other", UiObservationState.Ready, "Stale")]
+    [InlineData(-10, "view-9", UiObservationState.Ready, "Stale")]
+    [InlineData(0, "view-9", UiObservationState.Hidden, "Hidden")]
+    [InlineData(0, "view-9", UiObservationState.Disabled, "Disabled")]
+    public async Task ObserveNeverUpgradesStaleHiddenOrDisabledControls(int age, string view, UiObservationState state, string expected)
+    {
+        var store = new InMemoryEllaiUiObservationStore();
+        await store.RecordAsync(new("session-1", "view-9", "ctx", "web", ["cases.queue"],
+            DateTimeOffset.UtcNow.AddSeconds(-age), [new("cases.queue", state)]), CancellationToken.None);
+        var result = await GrantedBroker(SeededRegistry(), store).InvokeAsync(Context,
+            new(EllaiToolNames.UiObserve, Args(("controls", "cases.queue"), ("view", view))), CancellationToken.None);
+        Assert.Contains(expected, result.ResultSummary, StringComparison.Ordinal);
+    }
+
     private static readonly EllaiToolContext Context = new(
         "session-1", "epoch-1", "cases", "case-1", 4, true, "consent/1", EllaiProcessingClassification.SyntheticDemo);
 
@@ -111,7 +127,7 @@ public sealed class EllaiUiToolTests
         var store = new InMemoryEllaiUiObservationStore();
         await store.RecordAsync(new StoredUiObservationReport(
             "session-1", "view-9", "ctx-9", "web",
-            new[] { "cases.queue" }, DateTimeOffset.UtcNow), CancellationToken.None);
+            new[] { "cases.queue" }, DateTimeOffset.UtcNow, [new("cases.queue", UiObservationState.Ready)]), CancellationToken.None);
         var broker = GrantedBroker(SeededRegistry(), store);
 
         var result = await broker.InvokeAsync(
@@ -134,7 +150,7 @@ public sealed class EllaiUiToolTests
         var store = new InMemoryEllaiUiObservationStore();
         await store.RecordAsync(new StoredUiObservationReport(
             "session-1", "view-9", "ctx-9", "web",
-            new[] { "cases.queue" }, DateTimeOffset.UtcNow), CancellationToken.None);
+            new[] { "cases.queue" }, DateTimeOffset.UtcNow, [new("cases.queue", UiObservationState.Ready)]), CancellationToken.None);
         var broker = GrantedBroker(SeededRegistry(), store);
 
         var result = await broker.InvokeAsync(
@@ -153,7 +169,7 @@ public sealed class EllaiUiToolTests
         var store = new InMemoryEllaiUiObservationStore();
         await store.RecordAsync(new StoredUiObservationReport(
             "session-1", "view-9", "ctx-9", "web",
-            new[] { "cases.queue" }, DateTimeOffset.UtcNow), CancellationToken.None);
+            new[] { "cases.queue" }, DateTimeOffset.UtcNow, [new("cases.queue", UiObservationState.Ready)]), CancellationToken.None);
         var broker = GrantedBroker(SeededRegistry(), store);
 
         var result = await broker.InvokeAsync(
@@ -220,7 +236,7 @@ public sealed class EllaiUiToolTests
         var store = new InMemoryEllaiUiObservationStore();
         await store.RecordAsync(new StoredUiObservationReport(
             "session-1", "view-1", "ctx-1", "web",
-            new[] { "cases.queue" }, DateTimeOffset.UtcNow), CancellationToken.None);
+            new[] { "cases.queue" }, DateTimeOffset.UtcNow, [new("cases.queue", UiObservationState.Ready)]), CancellationToken.None);
         await store.RecordAsync(new StoredUiObservationReport(
             "session-2", "view-2", "ctx-2", "web",
             new[] { "cases.summary" }, DateTimeOffset.UtcNow), CancellationToken.None);

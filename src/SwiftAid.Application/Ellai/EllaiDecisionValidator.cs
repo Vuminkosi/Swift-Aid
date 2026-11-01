@@ -123,8 +123,14 @@ public static class EllaiDecisionValidator
         {
             return ["The guidance status or mode is unsupported."];
         }
+        if (string.IsNullOrWhiteSpace(draft.Objective) || draft.Objective.Length > 2000 ||
+            draft.Questions.Count > MaxQuestions || draft.Questions.Any(q => q is null || string.IsNullOrWhiteSpace(q.QuestionId) ||
+                string.IsNullOrWhiteSpace(q.Text) || q.Text.Length > 1000 || q.ChoiceIds is null || q.ChoiceIds.Count > 10))
+            return ["Guidance requires a bounded objective and valid questions."];
         if (draft.Steps.Any(step => step is null || string.IsNullOrWhiteSpace(step.StepKey)
             || string.IsNullOrWhiteSpace(step.ControlId) || string.IsNullOrWhiteSpace(step.Explanation)
+            || string.IsNullOrWhiteSpace(step.ObjectiveId) || step.StepKey.Length > 120 || step.ControlId.Length > 120
+            || step.FactIds is null || step.EvidenceIds is null || step.FactIds.Count > 20 || step.EvidenceIds.Count > 20
             || !Enum.IsDefined(step.Behavior)))
         {
             return ["Guidance steps require valid identifiers, explanations and behaviors."];
@@ -199,6 +205,16 @@ public static class EllaiDecisionValidator
             {
                 errors.Add($"Step {step.StepKey} references unknown nextStepKey {step.NextStepKey}.");
             }
+        }
+
+        if (errors.Count == 0 && draft.Steps.Count > 0)
+        {
+            var byKey = draft.Steps.ToDictionary(step => step.StepKey, StringComparer.Ordinal);
+            var visited = new HashSet<string>(StringComparer.Ordinal);
+            string? next = draft.Steps[0].StepKey;
+            while (next is not null && visited.Add(next)) next = byKey[next].NextStepKey;
+            if (next is not null || visited.Count != draft.Steps.Count)
+                errors.Add("Guidance steps must form one connected, acyclic sequence.");
         }
 
         return errors;

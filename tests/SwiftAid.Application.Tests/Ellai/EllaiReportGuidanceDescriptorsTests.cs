@@ -52,7 +52,8 @@ public sealed class EllaiReportGuidanceDescriptorsTests
             new HashSet<string>());
         var mounted = snapshot.Descriptors.Select(d => d.ControlId).ToHashSet(StringComparer.Ordinal);
         var observations = new EllaiUiDiscoveryService().Observe(
-            snapshot, mounted, "view-1", "ctx-1", "web", DateTimeOffset.UtcNow);
+            snapshot, mounted, "view-1", "ctx-1", "web", DateTimeOffset.UtcNow,
+            mounted.Select(id => new UiControlState(id, UiObservationState.Ready)).ToArray());
         var draft = new EllaiGuidancePlanner().ComposeDraft(
             "Show me how to create and submit a report", GuidanceMode.Navigation, snapshot, observations, 8);
 

@@ -115,6 +115,9 @@ public static class EllaiGuestEndpoints
             return await next(context).ConfigureAwait(false);
         });
 
+        group.MapPost("/sessions/{sessionId}/ui-observations", EllaiEndpoints.ReportUiObservationAsync)
+            .WithMetadata(new RequestSizeLimitAttribute(8 * 1024));
+
         group.MapGet("/antiforgery", GetAntiforgeryToken)
             .WithName("GetEllaiGuestAntiforgeryToken")
             .Produces<EllaiGuestAntiforgeryToken>(StatusCodes.Status200OK);
