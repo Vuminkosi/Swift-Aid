@@ -66,6 +66,12 @@ The original organization is retained for old-client requests that omit `organiz
 
 ## Isolated tests
 
+### Import measurements
+
+Subscribe a .NET/OpenTelemetry metrics reader to meter `SwiftAid.Ingestion.Imports`. `swiftaid.ingestion.import.duration` is a millisecond histogram with the bounded `stage` label: batch, admission, validation, registration and checkpoint. `swiftaid.ingestion.import.rows` counts durably checkpointed row attempts by bounded `status` (Accepted, Replayed, Invalid, Denied, Conflict, RetryableFailure, Failed). Replays/retries are attempts, not new case counts. Use the canonical receipt/case ledger for unique accepted cases.
+
+No actor, organization, workspace, import, case identifier or source text is a metric label. Listener failure cannot change the durable application result. The instrumentation was observed with a real MeterListener during PostgreSQL registration and replay; no telemetry backend/exporter or production dashboard is configured or claimed by this slice.
+
 ### Restricted import runtime
 
 For a **new, dedicated restricted case/import database login**, apply `case-authority-lock-helper.sql` with its existing NOLOGIN helper owner, then `case-command-runtime-grants.sql`, then `case-import-runtime-grants.sql`. Supply the existing `runtime_role` to each script; none creates credentials. The import extension grants the canonical registration inserts (including its notification/outbox transaction), the bounded workspace lock function and import ledger access. Immutable source/context columns cannot be updated, and the application cannot write organization links/memberships or mark outbox rows published. The migration/deployment identity remains separate.

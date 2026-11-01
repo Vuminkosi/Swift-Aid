@@ -15,6 +15,7 @@ public sealed class CaseCsvImportService(ICaseImportStore store, IManagedCaseReg
     public async Task<CaseImportBatchResult> ProcessAsync(ActorContext actor, Guid importId, CaseImportContext context,
         long startRow, bool finalBatch, TextReader reader, CancellationToken ct)
     {
+        using var batchMeasurement = CaseImportMetrics.Measure("batch");
         if (string.IsNullOrWhiteSpace(context.WorkspaceId) || context.WorkspaceId.Length > 200 || context.Confirmations is null)
             throw new CaseImportException("invalid-import-context");
         if (context.OrganizationId is not null && (string.IsNullOrWhiteSpace(context.OrganizationId) || context.OrganizationId.Length > 200 ||
@@ -33,7 +34,9 @@ public sealed class CaseCsvImportService(ICaseImportStore store, IManagedCaseReg
         if (!await records.MoveNextAsync()) throw new CaseImportException("csv-header-missing");
         var header = records.Current.Fields;
         CaseCsvImportAdapter.ValidateHeader(header);
-        var lease = await store.OpenAsync(actor, importId, context, startRow, ct);
+        CaseImportLease lease;
+        using (CaseImportMetrics.Measure("admission"))
+            lease = await store.OpenAsync(actor, importId, context, startRow, ct);
         var outcomes = new List<CaseImportRowOutcome>();
         var state = "Paused";
         string? error = null;
@@ -61,7 +64,10 @@ public sealed class CaseCsvImportService(ICaseImportStore store, IManagedCaseReg
                     var failureCode = "validation-unavailable";
                     try
                     {
-                        if (!await validator.ValidateAsync(record.Submission, new IntakeLimits(), ct))
+                        bool valid;
+                        using (CaseImportMetrics.Measure("validation"))
+                            valid = await validator.ValidateAsync(record.Submission, new IntakeLimits(), ct);
+                        if (!valid)
                         {
                             outcome = new(rowNumber, record.CommandId, "Invalid", null, "current-policy-or-country");
                         }
@@ -71,7 +77,9 @@ public sealed class CaseCsvImportService(ICaseImportStore store, IManagedCaseReg
                             var report = IntakePromotionMapper.ToCapturedReport(record.CommandId,
                                 $"csv:{record.CommandId:N}:{record.SourceReference}", record.Submission);
                             var request = new RegisterManagedCaseRequest(record.CommandId, context.WorkspaceId, report, context.OrganizationId);
-                            var result = await registration.RegisterAsync(actor, request, ct);
+                            CaseRegistrationResult result;
+                            using (CaseImportMetrics.Measure("registration"))
+                                result = await registration.RegisterAsync(actor, request, ct);
                             var status = result.Status == CaseRegistrationStatus.Unavailable
                                 ? attempts >= 5 ? "Failed" : "RetryableFailure"
                                 : result.Status.ToString();
@@ -87,7 +95,9 @@ public sealed class CaseCsvImportService(ICaseImportStore store, IManagedCaseReg
                         outcome = new(rowNumber, record.CommandId, attempts >= 5 ? "Failed" : "RetryableFailure", null, failureCode);
                     }
                 }
-                await store.CompleteRowAsync(lease, outcome, ct);
+                using (CaseImportMetrics.Measure("checkpoint"))
+                    await store.CompleteRowAsync(lease, outcome, ct);
+                CaseImportMetrics.RecordCommittedRow(outcome.Status);
                 outcomes.Add(outcome);
                 if (outcome.Status == "RetryableFailure") { error = outcome.ErrorCode ?? "registration-unavailable"; break; }
                 if (outcome.Status == "Denied") { error = "registration-denied"; break; }
