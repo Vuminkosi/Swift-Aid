@@ -1,0 +1,151 @@
+@using SwiftAid.Contracts.Cases
+@using Microsoft.Extensions.DependencyInjection
+@inject IServiceProvider Services
+@implements IDisposable
+
+<section class="classification-panel" aria-labelledby="case-classification-heading" aria-busy="@_loading.ToString().ToLowerInvariant()">
+    <div class="classification-panel__heading">
+        <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="case-classification-heading">Report analysis</MudText>
+        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Outlined.Refresh" Disabled="_loading" OnClick="LoadAsync" aria-label="Refresh report analysis">Refresh</MudButton>
+    </div>
+    @if (_loading)
+    {
+        <div role="status"><MudProgressLinear Indeterminate="true" Color="Color.Primary" /><MudText Typo="Typo.caption">Loading analysis…</MudText></div>
+    }
+    else if (_snapshot?.Access == CaseClassificationAccess.Denied)
+    {
+        <MudText Typo="Typo.body2" role="status">Analysis is not available for this case.</MudText>
+    }
+    else if (_snapshot?.Access != CaseClassificationAccess.Available)
+    {
+        <MudText Typo="Typo.body2" role="status">We couldn’t load the analysis. Check your connection and try Refresh.</MudText>
+    }
+    else if (_snapshot.Items.OrderByDescending(i => i.CurrentConfiguration).ThenByDescending(i => i.CreatedAtUtc).FirstOrDefault() is { } item)
+    {
+        <div class="classification-panel__status" role="status" aria-live="polite">
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@StatusColor(item)">@StatusLabel(item)</MudChip>
+            @if (!item.CurrentConfiguration) { <MudText Typo="Typo.caption">Earlier analysis</MudText> }
+            <MudText Typo="Typo.caption">Report revision @item.ReportRevision · @Language(item.SourceLanguage)</MudText>
+        </div>
+        @if (item.State == "Completed" && item.AbstentionReason is null)
+        {
+            <MudText Typo="Typo.body2">Reported patterns</MudText>
+            <div class="classification-panel__patterns">
+                @foreach (var label in item.Labels.Where(l => l.Selected))
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@PatternLabel(label)</MudChip>
+                }
+            </div>
+            @if (!item.Labels.Any(l => l.Selected)) { <MudText Typo="Typo.caption">No clear pattern was identified.</MudText> }
+            <MudText Typo="Typo.caption" Color="Color.Secondary">These patterns describe the report. They do not confirm a diagnosis.</MudText>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2">@StateDescription(item)</MudText>
+        }
+        @if (item.Quality is { Findings.Count: > 0 } quality)
+        {
+            <MudText Typo="Typo.subtitle2" HtmlTag="h3" Class="mt-3">Details to review</MudText>
+            <ul class="classification-panel__findings">
+                @foreach (var finding in quality.Findings) { <li>@FindingLabel(finding.Code)</li> }
+            </ul>
+        }
+    }
+    else
+    {
+        <MudText Typo="Typo.body2" role="status">No analysis is available for this report yet.</MudText>
+    }
+</section>
+
+@code {
+    [Parameter] public Guid CaseId { get; set; }
+    [Parameter] public ICaseClassificationClient? Client { get; set; }
+    private CaseClassificationSnapshot? _snapshot;
+    private Guid? _loadedCase;
+    private CancellationTokenSource? _request;
+    private long _generation;
+    private bool _loading;
+    private bool _disposed;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedCase != CaseId) { _loadedCase = CaseId; await LoadAsync(); }
+    }
+
+    private async Task LoadAsync()
+    {
+        _request?.Cancel(); _request?.Dispose();
+        _request = new CancellationTokenSource();
+        var token = _request.Token;
+        var generation = ++_generation;
+        var id = CaseId;
+        _snapshot = null;
+        _loading = true;
+        try
+        {
+            var client = Client ?? Services.GetService<ICaseClassificationClient>();
+            var result = client is null || id == Guid.Empty ? new(id, [], CaseClassificationAccess.Unavailable)
+                : await client.GetAsync(id, token);
+            if (!_disposed && generation == _generation && id == CaseId)
+                _snapshot = result.IsValidFor(id) ? result : new(id, [], CaseClassificationAccess.Unavailable);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception)
+        {
+            if (!_disposed && generation == _generation) _snapshot = new(id, [], CaseClassificationAccess.Unavailable);
+        }
+        finally { if (!_disposed && generation == _generation) _loading = false; }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true; _generation++;
+        _request?.Cancel(); _request?.Dispose();
+    }
+
+    private static string StatusLabel(CaseClassificationItem item) => item.State switch
+    {
+        "Completed" => item.AbstentionReason is null ? "Analyzed" : "Not classified",
+        "Failed" => "Analysis failed", "RetryScheduled" => "Retrying", "Leased" => "Analyzing…", _ => "Waiting"
+    };
+    private static Color StatusColor(CaseClassificationItem item) => item.State == "Failed" ? Color.Warning : Color.Default;
+    private static string StateDescription(CaseClassificationItem item) => item.State switch
+    {
+        "Failed" => "Analysis could not be completed. The original report is still available.",
+        "RetryScheduled" => "Analysis will be tried again. Refresh to check for an update.",
+        "Pending" or "Leased" => "Analysis is in progress. Refresh to check for an update.",
+        _ => item.AbstentionReason switch
+        {
+            "unsupported-language" => "This report’s language is not supported for analysis yet.",
+            "input-too-long" => "The report is too long to classify automatically.",
+            "empty-input" => "There is no report text available to analyze.",
+            _ => "No classification is available."
+        }
+    };
+    private static string Language(string code) => code switch { "en" => "English", "sn" => "Shona", "ss" => "siSwati", "nd" => "Ndebele", _ => "Language not identified" };
+    private static string PatternLabel(CaseClassificationPattern label) => label.Id switch
+    {
+        "human" => "Human health", "animal" => "Animal health", "environmental" => "Environmental concern",
+        "unrelated" => "Other concern", "gastrointestinal" => "Gastrointestinal symptoms", "respiratory" => "Respiratory symptoms",
+        "febrile" => "Fever", "neurological" => "Neurological symptoms", "rash-fever" => "Rash with fever",
+        "water-exposure" => "Reported water exposure", "food-exposure" => "Reported food exposure", "animal-exposure" => "Reported animal contact",
+        _ => label.Description
+    };
+    private static string FindingLabel(string code) => code switch
+    {
+        "occurrence-not-known" => "When the symptoms or event started is not known.",
+        "occurrence-not-exact" => "The reported start time is approximate or given as a date or range.",
+        "occurrence-after-receipt" => "The reported start time is later than receipt. Check the dates and clock settings.",
+        "occurrence-after-capture" => "The reported start time is later than capture. Check the dates.",
+        "capture-time-not-recorded" => "When this report was captured is not recorded.",
+        "capture-after-receipt" => "The capture time is later than receipt. Check the dates and clock settings.",
+        "geography-not-exact" => "The location is approximate or unknown.",
+        "incomplete-coordinate-pair" => "The location coordinates are incomplete.",
+        "region-not-known" => "The region is not known.",
+        "text-evidence-unavailable" => "There is no text to analyze. Original evidence is still available.",
+        "repeated-observation-text" => "Some observations repeat the same text. Check whether they describe separate events.",
+        "animal-count-relationship" => "Some animal counts are inconsistent. Review the affected, at-risk and death counts.",
+        "legacy-context-unavailable" => "Time and location details are not available for this earlier report.",
+        _ => "Some report details need review."
+    };
+}

@@ -17,7 +17,7 @@ public static class CaseClassificationEndpoints
             {
                 var actor = ActorContext.FromValidatedPrincipal(context.User);
                 var result = await query.GetAsync(actor, caseId, ct);
-                return result is null ? Results.NotFound() : Results.Ok(new { items = result, interpretation = "Reported semantic patterns; not a diagnosis or calibrated disease probability." });
+                return result is null ? Results.NotFound() : Results.Ok(new { caseId, items = result, interpretation = "Reported semantic patterns; not a diagnosis or calibrated disease probability." });
             }
             catch (UnauthorizedAccessException) { return Results.NotFound(); }
         }).RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = string.Join(",", IdentityConstants.ApplicationScheme,

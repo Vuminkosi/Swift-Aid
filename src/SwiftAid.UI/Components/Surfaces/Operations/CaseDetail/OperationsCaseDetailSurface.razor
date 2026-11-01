@@ -51,6 +51,7 @@
                 var state = OverviewData?.State ?? CaseDetailPanelState.Unavailable;
                 <CaseDetailUnavailable State="state" Title="@(PanelTitle(state, "Case summary"))" Description="@(PanelDescription(state, "case summary"))" OnRetry="OnRefreshOverview" />
             }
+            <CaseClassificationPanel CaseId="CaseId" />
             <section class="case-detail__section" aria-labelledby="correction-heading">
                 <div class="case-detail__section-heading">
                     <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="correction-heading">Report correction</MudText>
