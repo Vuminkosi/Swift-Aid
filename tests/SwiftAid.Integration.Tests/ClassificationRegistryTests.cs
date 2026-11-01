@@ -81,6 +81,8 @@ public sealed class ClassificationRegistryTests
         var registry = Registry(fixture);
         var claim = await registry.ClaimAsync(notice, default);
         Assert.Equal("Leased", claim.State);
+        var quality = await fixture.Db.Set<ReportQualityEntity>().SingleAsync(q => q.SourceEventId == notice.MessageId);
+        Assert.Contains("geography-not-exact", quality.AssessmentJson);
         Assert.NotEmpty(claim.Lease!.Text);
         Assert.Equal("Busy", (await registry.ClaimAsync(notice, default)).State);
         var complete = Completion(claim.Lease);
@@ -91,6 +93,9 @@ public sealed class ClassificationRegistryTests
         Assert.Equal("Conflict", await registry.CompleteAsync(complete with { InferenceMilliseconds = 123 }, default));
         Assert.Equal(1, await fixture.Db.Set<ClassificationEventEntity>().CountAsync(e => e.ResultId == claim.Lease.ResultId && e.EventType == "ClassificationCompleted"));
         Assert.Equal(ClinicalClassification.Unclassified, (await fixture.Db.ManagedCases.FindAsync(notice.SourceId))!.Classification);
+        Assert.Equal(1, await fixture.Db.Set<ReportQualityEntity>().CountAsync(q => q.SourceEventId == notice.MessageId));
+        await Assert.ThrowsAsync<Npgsql.PostgresException>(() => fixture.Db.Set<ReportQualityEntity>()
+            .Where(q => q.SourceEventId == notice.MessageId).ExecuteUpdateAsync(s => s.SetProperty(q => q.AssessmentJson, "{}")));
     }
 
     [IntakePostgresFact]
@@ -166,6 +171,8 @@ public sealed class ClassificationRegistryTests
         var query = new PostgresCaseClassificationQuery(fixture.Db, policy, unit, Options.Create(settings));
         var items = await query.GetAsync(CaseImportPostgresTests.Actor, notice.SourceId, default);
         var evidence = Assert.Single(items!);
+        Assert.NotNull(evidence.Quality);
+        Assert.Contains(evidence.Quality.Findings, f => f.Code == "geography-not-exact");
         Assert.Equal(claim.Lease!.ResultId, evidence.ResultId); Assert.Equal("en", evidence.SourceLanguage);
         Assert.True(evidence.CurrentConfiguration); Assert.Equal(settings.Profile.Labels.Count, evidence.Labels.Count);
         var broker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService(), classification: query);

@@ -43,7 +43,8 @@ public sealed class ClassificationRegistry(
         var config = profile.Hash;
         var inbox = await db.Set<ClassificationInboxEntity>().FindAsync([notice.MessageId, config], ct);
         if (inbox is not null && inbox.NoticeHash != noticeHash) throw new ArgumentException("Changed message identity.");
-        if (inbox?.State is "Completed" or "Failed" or "Superseded")
+        if (inbox?.State is "Completed" or "Failed" or "Superseded" &&
+            await db.Set<ReportQualityEntity>().AnyAsync(q => q.SourceEventId == source.EventId && q.Version == ReportQualityRules.Version, ct))
             return new(header.ReportRevision == notice.ReportRevision ? inbox.State : "Superseded", FailureCode: inbox.FailureCode, ConfigurationHash: config);
         inbox ??= new() { MessageId = notice.MessageId, ConfigurationId = config, NoticeHash = noticeHash, State = "Pending", UpdatedAtUtc = now };
         if (db.Entry(inbox).State == EntityState.Detached) db.Add(inbox);
@@ -51,8 +52,25 @@ public sealed class ClassificationRegistry(
         // Read the immutable facts revision, even when this notice is an administrative event.
         var plaintext = await payloads.UnprotectForClassificationAsync(source, Options.Organizations, ct);
         string text;
-        try { text = ExtractText(CaseEventJournalReader.Read(source, plaintext)); }
+        ReportQualityAssessment quality;
+        try
+        {
+            var sourceEvent = CaseEventJournalReader.Read(source, plaintext);
+            text = ExtractText(sourceEvent);
+            var facts = sourceEvent switch
+            {
+                CaseReported reported => reported.ReportData,
+                CaseReportCorrected corrected => corrected.CorrectedReportData,
+                _ => throw new InvalidDataException()
+            };
+            quality = ReportQualityRules.Assess(facts, source.RecordedAtUtc);
+        }
         finally { CryptographicOperations.ZeroMemory(plaintext); }
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO swiftaid_classification.quality_assessments ("SourceEventId", "Version", "CaseId", "ReportRevision", "AssessmentJson", "CreatedAtUtc")
+            VALUES ({source.EventId}, {ReportQualityRules.Version}, {source.CaseId}, {source.ReportRevision}, {JsonSerializer.Serialize(quality)}::jsonb, {now})
+            ON CONFLICT ("SourceEventId", "Version") DO NOTHING
+            """, ct);
         if (text.Length > 32000) throw new ArgumentException("Classifiable input exceeds its source limit.");
         var fingerprint = ClassificationFingerprint.Create(header.OrganizationId, header.WorkspaceId, header.SensitivityCode, text, profile);
         await LockAsync($"classification-fingerprint:{fingerprint}", ct);

@@ -1283,6 +1283,35 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.ReportQualityEntity", b =>
+                {
+                    b.Property<Guid>("SourceEventId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Version")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("AssessmentJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<Guid>("CaseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("ReportRevision")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("SourceEventId", "Version");
+
+                    b.HasIndex("CaseId", "ReportRevision");
+
+                    b.ToTable("quality_assessments", "swiftaid_classification");
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.CommandReceiptEntity", b =>
                 {
                     b.Property<Guid>("ReceiptId")
@@ -4220,6 +4249,21 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                     b.HasOne("SwiftAid.Infrastructure.Persistence.WorkspaceOrganizationEntity", null)
                         .WithMany()
                         .HasForeignKey("WorkspaceId", "OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Classification.ReportQualityEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.ManagedCaseEntity", null)
+                        .WithMany()
+                        .HasForeignKey("CaseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.CaseEventEntity", null)
+                        .WithMany()
+                        .HasForeignKey("SourceEventId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

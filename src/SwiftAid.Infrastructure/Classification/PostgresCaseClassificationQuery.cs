@@ -30,6 +30,10 @@ public sealed class PostgresCaseClassificationQuery(SwiftAidDbContext db, ICaseA
                                      header.OrganizationId == result.OrganizationId && header.WorkspaceId == result.WorkspaceId
                                  orderby association.CreatedAtUtc descending
                                  select new { association, result, config }).Take(10).ToListAsync(ct);
+            var sourceIds = records.Select(row => row.association.SourceEventId).ToArray();
+            var quality = await db.Set<ReportQualityEntity>().AsNoTracking()
+                .Where(q => sourceIds.Contains(q.SourceEventId) && q.Version == ReportQualityRules.Version)
+                .ToDictionaryAsync(q => q.SourceEventId, q => q.AssessmentJson, ct);
             var evidence = records.Select(row =>
             {
                 var profile = JsonSerializer.Deserialize<ClassificationProfile>(row.config.ProfileJson)!;
@@ -40,7 +44,9 @@ public sealed class PostgresCaseClassificationQuery(SwiftAidDbContext db, ICaseA
                     row.association.Reused, profile.ModelId, profile.ModelRevision, profile.TaxonomyVersion, profile.SourceLanguage,
                     row.result.AbstentionReason, row.result.FailureCode, row.result.CreatedAtUtc,
                     completed?.Predictions.Select(p => new ClassifiedLabel(p.LabelId, profile.Labels.Single(l => l.Id == p.LabelId).Description,
-                        p.Score, p.Score >= profile.SelectionThreshold)).ToArray() ?? []);
+                        p.Score, p.Score >= profile.SelectionThreshold)).ToArray() ?? [],
+                    quality.TryGetValue(row.association.SourceEventId, out var assessment)
+                        ? JsonSerializer.Deserialize<ReportQualityAssessment>(assessment) : null);
             }).ToArray();
             await lease.CommitAsync(ct);
             return evidence;
