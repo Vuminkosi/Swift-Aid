@@ -45,7 +45,9 @@ PostgreSQL is authoritative. ASP.NET Core owns identity, authorization, receipts
 - Offline coordinators preserve stable command/submission IDs. Guest coordination loads a local queue into memory; this is not a server bulk-import implementation or million-record capacity claim.
 - No authoritative processing checkpoint/status query exists for the new ingestion stages. Tenant ownership must be resolved in Gateway; broker IDs alone confer no access.
 - Ellai has an independent PostgreSQL utterance outbox and existing approval receipts. Neither is being replaced by JetStream.
-- Existing OpenTelemetry integration and Ellai metrics do not establish ingestion queue-age, throughput or processing-latency coverage.
+- Existing Ellai metrics do not establish ingestion queue-age, throughput or processing-latency coverage. No application OpenTelemetry exporter registration was found; instrumentation and export must be verified separately.
+
+Follow-up fault injection confirmed another P1 defect: the installed NATS client throws for duplicate PubAck in `EnsureSuccess()`. All three existing publisher adapters used it. Valid duplicate storage acknowledgements now receive the same stream/sequence validation as first publication; the real broker replay regression verifies the correction.
 
 ## Audit checks and limits
 

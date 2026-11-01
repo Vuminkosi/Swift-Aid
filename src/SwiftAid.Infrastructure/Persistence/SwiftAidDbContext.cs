@@ -625,11 +625,12 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
             table.HasCheckConstraint("ck_domain_outbox_attempt_count", "attempt_count >= 0");
             table.HasCheckConstraint("ck_domain_outbox_message_type", "length(btrim(message_type)) > 0");
             table.HasCheckConstraint("ck_domain_outbox_lease", "published_at_utc IS NULL OR lease_until_utc IS NULL");
+            table.HasCheckConstraint("ck_domain_outbox_fence", "(lease_id IS NULL) = (lease_until_utc IS NULL) AND (exhausted_at_utc IS NULL OR (published_at_utc IS NULL AND lease_id IS NULL))");
         });
         outbox.HasKey(entity => entity.OutboxId).HasName("pk_domain_outbox");
         outbox.HasIndex(entity => entity.EventId).IsUnique().HasDatabaseName("ux_domain_outbox_event");
         outbox.HasIndex(entity => new { entity.AvailableAtUtc, entity.CreatedAtUtc })
-            .HasFilter("published_at_utc IS NULL")
+            .HasFilter("published_at_utc IS NULL AND exhausted_at_utc IS NULL")
             .HasDatabaseName("ix_domain_outbox_pending");
         outbox.Property(entity => entity.OutboxId).HasColumnName("outbox_id");
         outbox.Property(entity => entity.EventId).HasColumnName("event_id");
@@ -639,6 +640,9 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         outbox.Property(entity => entity.AttemptCount).HasColumnName("attempt_count");
         outbox.Property(entity => entity.LeaseUntilUtc).HasColumnName("lease_until_utc").HasColumnType("timestamp with time zone");
         outbox.Property(entity => entity.PublishedAtUtc).HasColumnName("published_at_utc").HasColumnType("timestamp with time zone");
+        outbox.Property(entity => entity.LeaseId).HasColumnName("lease_id");
+        outbox.Property(entity => entity.ExhaustedAtUtc).HasColumnName("exhausted_at_utc");
+        outbox.Property(entity => entity.LastFailureCode).HasColumnName("last_failure_code").HasMaxLength(80);
         outbox.HasOne<CaseEventEntity>().WithMany().HasForeignKey(entity => entity.EventId)
             .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_domain_outbox_event");
     }

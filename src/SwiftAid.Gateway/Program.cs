@@ -182,6 +182,7 @@ builder.Services.AddScoped<INotificationChangeSignal>(serviceProvider =>
         : ActivatorUtilities.CreateInstance<PollingNotificationChangeSignal>(serviceProvider);
 });
 builder.Services.AddHostedService<NotificationDeliveryWorker>();
+builder.Services.AddHostedService<SwiftAid.Gateway.Ingestion.IngestionOutboxWorker>();
 
 var app = builder.Build();
 

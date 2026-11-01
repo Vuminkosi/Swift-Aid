@@ -60,7 +60,7 @@ public sealed class JetStreamEventPublisher : IEventPublisher
                 },
                 cancellationToken: cancellationToken).ConfigureAwait(false);
 
-            acknowledgement.EnsureSuccess();
+            acknowledgement.EnsureStored();
             if (!string.Equals(acknowledgement.Stream, _options.EventStream, StringComparison.Ordinal))
             {
                 _logger.LogWarning("JetStream acknowledged a case event on an unexpected stream.");

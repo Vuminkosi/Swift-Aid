@@ -10,4 +10,9 @@ public sealed class IntakeOutboxEntity
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset? PublishedAtUtc { get; set; }
     public int Attempts { get; set; }
+    public DateTimeOffset AvailableAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public Guid? LeaseId { get; set; }
+    public DateTimeOffset? LeaseUntilUtc { get; set; }
+    public DateTimeOffset? ExhaustedAtUtc { get; set; }
+    public string? LastFailureCode { get; set; }
 }

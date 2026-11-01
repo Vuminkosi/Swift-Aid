@@ -21,3 +21,5 @@
 - Source changes, schema tests, isolated integration tests and live user/device verification are separate evidence levels. No production-ready declaration without the required integrated scenarios and measured capacity.
 
 Progress and exact delivered/unimplemented boundaries will be updated as slices complete.
+
+Slice 1 implemented and verified: additive leased dispatch for both original outboxes, duplicate-PubAck correction for existing publishers, bounded opt-in stream provisioning and operations documentation. Focused final check: 28 passed, zero skipped, plus real ACL bootstrap and Compose validation. Consumer completion and intelligence stages remain separate outstanding work.

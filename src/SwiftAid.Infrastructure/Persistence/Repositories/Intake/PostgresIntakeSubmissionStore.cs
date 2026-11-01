@@ -154,6 +154,7 @@ public sealed class PostgresIntakeSubmissionStore : IIntakeSubmissionStore
             Revision = 1,
             EventType = "IntakeReceived",
             CreatedAtUtc = receivedAtUtc,
+            AvailableAtUtc = receivedAtUtc,
             Attempts = 0
         });
 

@@ -161,7 +161,7 @@ internal sealed class JetStreamJobMessageTransport(INatsJSContext jetStream) : I
             },
             cancellationToken: cancellationToken).ConfigureAwait(false);
 
-        acknowledgement.EnsureSuccess();
+        acknowledgement.EnsureStored();
         return new JobMessageAcknowledgement(true, acknowledgement.Stream, acknowledgement.Seq);
     }
 }

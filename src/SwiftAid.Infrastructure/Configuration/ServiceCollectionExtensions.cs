@@ -252,6 +252,9 @@ public static class ServiceCollectionExtensions
 
         if (natsOptions.Enabled)
         {
+            services.AddScoped<IIngestionOutbox, PostgresIngestionOutbox>();
+            services.AddScoped<IngestionDispatchService>();
+            services.AddSingleton<IIngestionNoticePublisher, JetStreamIngestionNoticePublisher>();
             services.AddSingleton<INatsClient>(_ => new NatsClient(new NatsOpts
             {
                 Url = natsOptions.Url,

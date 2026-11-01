@@ -63,7 +63,7 @@ public sealed class JetStreamInAppNotificationPublisher : IInAppNotificationPubl
                 },
                 cancellationToken: cancellationToken).ConfigureAwait(false);
 
-            acknowledgement.EnsureSuccess();
+            acknowledgement.EnsureStored();
             if (!string.Equals(acknowledgement.Stream, _options.NotificationStream, StringComparison.Ordinal))
             {
                 _logger.LogWarning("JetStream acknowledged an in-app notification on an unexpected stream.");

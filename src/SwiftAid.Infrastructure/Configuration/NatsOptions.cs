@@ -6,6 +6,9 @@ public sealed class NatsOptions
 
     public bool Enabled { get; set; }
 
+    /// <summary>Enable only after additive migration and ingestion stream provisioning.</summary>
+    public bool IngestionDispatchEnabled { get; set; }
+
     public string Url { get; set; } = string.Empty;
 
     public string Username { get; set; } = string.Empty;

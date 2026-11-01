@@ -209,6 +209,9 @@ public sealed class DomainOutboxEntity
     public int AttemptCount { get; set; }
     public DateTimeOffset? LeaseUntilUtc { get; set; }
     public DateTimeOffset? PublishedAtUtc { get; set; }
+    public Guid? LeaseId { get; set; }
+    public DateTimeOffset? ExhaustedAtUtc { get; set; }
+    public string? LastFailureCode { get; set; }
 }
 
 public sealed class SecurityAuditEntryEntity

@@ -1,5 +1,9 @@
 # SwiftAid Technical Reference (Ellai runtime)
 
+Current ingestion implementation, event contracts, rollout and measured verification are maintained in
+[Gateway processing architecture](architecture/gateway-processing-architecture.md). Publication and
+processing completion are separate states; refer to its audit and performance report for current limits.
+
 **Status: DRAFT — pending maintainer review.** This file is the intended
 approved source for Ellai's `ellai_docs_search` / `ellai_docs_get` tools and
 for the documentation-first reasoning contract. Until a maintainer reviews

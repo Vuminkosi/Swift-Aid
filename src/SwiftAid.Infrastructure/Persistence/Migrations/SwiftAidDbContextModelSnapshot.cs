@@ -1013,6 +1013,19 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("event_id");
 
+                    b.Property<DateTimeOffset?>("ExhaustedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("exhausted_at_utc");
+
+                    b.Property<string>("LastFailureCode")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("last_failure_code");
+
+                    b.Property<Guid?>("LeaseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lease_id");
+
                     b.Property<DateTimeOffset?>("LeaseUntilUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("lease_until_utc");
@@ -1035,11 +1048,13 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("AvailableAtUtc", "CreatedAtUtc")
                         .HasDatabaseName("ix_domain_outbox_pending")
-                        .HasFilter("published_at_utc IS NULL");
+                        .HasFilter("published_at_utc IS NULL AND exhausted_at_utc IS NULL");
 
                     b.ToTable("domain_outbox", null, t =>
                         {
                             t.HasCheckConstraint("ck_domain_outbox_attempt_count", "attempt_count >= 0");
+
+                            t.HasCheckConstraint("ck_domain_outbox_fence", "(lease_id IS NULL) = (lease_until_utc IS NULL) AND (exhausted_at_utc IS NULL OR (published_at_utc IS NULL AND lease_id IS NULL))");
 
                             t.HasCheckConstraint("ck_domain_outbox_lease", "published_at_utc IS NULL OR lease_until_utc IS NULL");
 
@@ -1920,6 +1935,12 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("attempts");
 
+                    b.Property<DateTimeOffset>("AvailableAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("available_at_utc")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at_utc");
@@ -1928,6 +1949,23 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("event_type");
+
+                    b.Property<DateTimeOffset?>("ExhaustedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("exhausted_at_utc");
+
+                    b.Property<string>("LastFailureCode")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("last_failure_code");
+
+                    b.Property<Guid?>("LeaseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lease_id");
+
+                    b.Property<DateTimeOffset?>("LeaseUntilUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_until_utc");
 
                     b.Property<DateTimeOffset?>("PublishedAtUtc")
                         .HasColumnType("timestamp with time zone")
@@ -1944,9 +1982,9 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                     b.HasKey("OutboxId")
                         .HasName("pk_intake_outbox");
 
-                    b.HasIndex("CreatedAtUtc", "OutboxId")
+                    b.HasIndex("AvailableAtUtc", "CreatedAtUtc", "OutboxId")
                         .HasDatabaseName("ix_intake_outbox_pending")
-                        .HasFilter("published_at_utc IS NULL");
+                        .HasFilter("published_at_utc IS NULL AND exhausted_at_utc IS NULL");
 
                     b.HasIndex("ReceiptId", "Revision", "EventType")
                         .IsUnique()
@@ -1957,6 +1995,8 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_intake_outbox_attempts", "attempts >= 0");
 
                             t.HasCheckConstraint("ck_intake_outbox_event_type", "event_type IN ('IntakeReceived')");
+
+                            t.HasCheckConstraint("ck_intake_outbox_lease", "(lease_id IS NULL) = (lease_until_utc IS NULL) AND (published_at_utc IS NULL OR lease_id IS NULL) AND (exhausted_at_utc IS NULL OR (published_at_utc IS NULL AND lease_id IS NULL))");
 
                             t.HasCheckConstraint("ck_intake_outbox_revision", "revision > 0");
                         });
