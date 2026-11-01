@@ -187,6 +187,7 @@ builder.Services.AddHostedService<SwiftAid.Gateway.Ingestion.IngestionOutboxWork
 builder.Services.Configure<SwiftAid.Infrastructure.Classification.ClassificationOptions>(builder.Configuration.GetSection("Classification"));
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.ClassificationRegistry>();
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.ClassificationOutboxDispatcher>();
+builder.Services.AddScoped<SwiftAid.Application.Classification.ICaseClassificationQuery, SwiftAid.Infrastructure.Classification.PostgresCaseClassificationQuery>();
 
 var app = builder.Build();
 app.UseClassificationRequestLimit();
@@ -220,6 +221,7 @@ app.MapIntakeCoordinationEndpoints();
 app.MapManagedCaseRegistrationEndpoints();
 app.MapCaseImportEndpoints();
 app.MapClassificationWorkerEndpoints();
+app.MapCaseClassificationEndpoints();
 app.MapCaseTimelineEndpoints();
 app.MapCaseDetailEndpoints();
 app.MapCaseQueueEndpoints();

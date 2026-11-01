@@ -22,7 +22,7 @@ public sealed record ClassificationProfile(
         if (string.IsNullOrWhiteSpace(ModelId) || !Regex.IsMatch(ModelRevision, "^[a-f0-9]{40}$") ||
             string.IsNullOrWhiteSpace(TaxonomyVersion) || PreprocessingVersion != "nfc-whitespace-v1" ||
             string.IsNullOrWhiteSpace(HypothesisVersion) || HypothesisTemplate.Split("{}").Length != 2 ||
-            SourceLanguage is not ("en" or "sn" or "ss" or "und") || MaximumTokens is < 64 or > 1024 ||
+            !Regex.IsMatch(SourceLanguage, "^[a-z]{2,3}$") || MaximumTokens is < 64 or > 1024 ||
             !double.IsFinite(SelectionThreshold) || SelectionThreshold is < 0 or > 1 ||
             Labels.Count is < 1 or > 32 || Labels.Select(label => label.Id).Distinct().Count() != Labels.Count ||
             Labels.Any(label => !Regex.IsMatch(label.Id, "^[a-z][a-z0-9-]{0,63}$") ||

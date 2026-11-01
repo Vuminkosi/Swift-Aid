@@ -51,6 +51,7 @@ execute/approve/sql/shell.
 | `ellai_import_destinations` | Current actor-authorized organization/workspace/country destinations, at most 20; directs staff to Workspace Imports without submitting anything. |
 | `ellai_imports` | At most 20 actor-owned recent imports for an explicit organization/workspace/country, with current membership and access checks. |
 | `ellai_import_status` | Durable actor-owned import counts, checkpoint and state; no original source content. Import completion does not establish intelligence-processing completion. |
+| `ellai_classification_evidence` | Persisted semantic scores, source-event references, language, model/taxonomy versions and processing outcomes for an authorized current case revision. Rechecks current case access; never runs inference or changes clinical classification. |
 | `ellai_now` | Current server time (UTC, round-trip + unix ms); no domain data. |
 | `ellai_docs_search` | Search this approved reference by topic/section id. |
 | `ellai_docs_get` | Retrieve one approved section excerpt with provenance. |

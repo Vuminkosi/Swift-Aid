@@ -3,6 +3,10 @@ using Microsoft.Extensions.Options;
 using SwiftAid.Application.Classification;
 using SwiftAid.Contracts.Events;
 using SwiftAid.Domain.Cases;
+using SwiftAid.Application.Authorization;
+using SwiftAid.Application.Ellai;
+using SwiftAid.Infrastructure.Authorization;
+using SwiftAid.Infrastructure.Persistence.Transactions;
 using SwiftAid.Infrastructure.Classification;
 using SwiftAid.Infrastructure.Persistence;
 using SwiftAid.Infrastructure.Persistence.Classification;
@@ -20,12 +24,12 @@ public sealed class ClassificationRegistryTests
 
     private static ClassificationRegistry Registry(CaseImportPostgresTests.Fixture fixture, SwiftAidDbContext? db = null,
         ClassificationOptions? options = null, TimeProvider? clock = null) => new(db ?? fixture.Db,
-            fixture.ClassificationPayloadStore(db ?? fixture.Db), Options.Create(options ?? Settings()), clock ?? TimeProvider.System);
+            fixture.ClassificationPayloadStore(db ?? fixture.Db), Options.Create(options ?? Settings()), clock ?? TimeProvider.System, fixture.Protection);
 
     private static async Task<IngestionNotice> ImportAsync(CaseImportPostgresTests.Fixture fixture)
     {
         var result = await fixture.Service.ProcessAsync(CaseImportPostgresTests.Actor, Guid.NewGuid(), CaseImportPostgresTests.Context,
-            1, true, new StringReader(CaseImportPostgresTests.Csv(Guid.NewGuid())), default);
+            1, true, new StringReader(CaseImportPostgresTests.Csv(Guid.NewGuid()).Replace("\"sn\"", "\"en\"", StringComparison.Ordinal)), default);
         var id = Assert.Single(result.Rows).CaseId!.Value;
         var source = await fixture.Db.CaseEvents.AsNoTracking().SingleAsync(e => e.CaseId == id && e.EventType == "CaseReported");
         fixture.Db.ChangeTracker.Clear();
@@ -111,6 +115,56 @@ public sealed class ClassificationRegistryTests
     {
         public DateTimeOffset Now { get; set; } = DateTimeOffset.UtcNow;
         public override DateTimeOffset GetUtcNow() => Now;
+    }
+
+    [IntakePostgresFact]
+    public async Task Authorized_query_and_ellai_read_persisted_results_without_inference_or_lease_disclosure()
+    {
+        await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
+        var notice = await ImportAsync(fixture);
+        var settings = Settings();
+        var registry = Registry(fixture, options: settings);
+        var claim = await registry.ClaimAsync(notice, default);
+        await registry.CompleteAsync(Completion(claim.Lease!), default);
+        fixture.Db.ChangeTracker.Clear();
+        var unit = new PostgresCaseCommandUnitOfWork(fixture.Db);
+        var policy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(fixture.Db, unit), new PostgresCaseAccessDescriptorStore(fixture.Db, unit));
+        var query = new PostgresCaseClassificationQuery(fixture.Db, policy, unit, Options.Create(settings));
+        var items = await query.GetAsync(CaseImportPostgresTests.Actor, notice.SourceId, default);
+        var evidence = Assert.Single(items!);
+        Assert.Equal(claim.Lease!.ResultId, evidence.ResultId); Assert.Equal("en", evidence.SourceLanguage);
+        Assert.True(evidence.CurrentConfiguration); Assert.Equal(settings.Profile.Labels.Count, evidence.Labels.Count);
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService(), classification: query);
+        var context = new EllaiToolContext("classification-session", "classification-scope", "public.product-help", null, 4, true,
+            Actor: CaseImportPostgresTests.Actor, DataClassification: EllaiProcessingClassification.UserProvidedNonSensitive,
+            ConsentPurpose: EllaiConsentService.PublicProductHelpPurpose);
+        var request = new EllaiToolRequest(EllaiToolNames.ClassificationEvidence, new Dictionary<string, string> { ["case_id"] = notice.SourceId.ToString("D") });
+        var response = await broker.InvokeAsync(context, request, default);
+        Assert.True(response.Allowed); Assert.DoesNotContain(claim.Lease.LeaseId.ToString("D"), response.ResultSummary);
+        Assert.DoesNotContain("Original supplied concern", response.ResultSummary);
+        var foreign = await SharedWorkspaceImportTests.AddOrganizationAsync(fixture.Db);
+        Assert.Null(await query.GetAsync(foreign.Actor, notice.SourceId, default));
+        Assert.False((await broker.InvokeAsync(context with { Actor = null }, request, default)).Allowed);
+        Assert.False((await broker.InvokeAsync(context with { Actor = foreign.Actor }, request, default)).Allowed);
+        Assert.Equal(1, (await fixture.Db.Set<ClassificationResultEntity>().AsNoTracking().SingleAsync(r => r.Id == claim.Lease.ResultId)).Attempts);
+    }
+
+    [IntakePostgresFact]
+    public async Task Source_language_overrides_the_worker_fallback_and_unsupported_language_abstains()
+    {
+        await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
+        var imported = await fixture.Service.ProcessAsync(CaseImportPostgresTests.Actor, Guid.NewGuid(), CaseImportPostgresTests.Context,
+            1, true, new StringReader(CaseImportPostgresTests.Csv(Guid.NewGuid())), default);
+        var id = imported.Rows.Single().CaseId!.Value;
+        var source = await fixture.Db.CaseEvents.AsNoTracking().SingleAsync(e => e.CaseId == id && e.EventType == "CaseReported");
+        fixture.Db.ChangeTracker.Clear();
+        var registry = Registry(fixture);
+        var claim = await registry.ClaimAsync(new(1, source.EventId, "case", id, source.AggregateVersion, source.ReportRevision, source.EventType, source.RecordedAtUtc), default);
+        Assert.Equal("sn", claim.Lease!.Profile.SourceLanguage);
+        await Assert.ThrowsAsync<ArgumentException>(() => registry.CompleteAsync(Completion(claim.Lease), default));
+        fixture.Db.ChangeTracker.Clear();
+        Assert.Equal("Completed", await registry.CompleteAsync(Completion(claim.Lease) with
+            { Predictions = [], AbstentionReason = "unsupported-language", InputTokens = 0 }, default));
     }
 
     [IntakePostgresFact]

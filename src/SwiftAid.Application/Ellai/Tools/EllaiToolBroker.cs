@@ -47,12 +47,13 @@ public static class EllaiToolNames
     public const string ImportDestinations = "ellai_import_destinations";
     public const string Imports = "ellai_imports";
     public const string ImportStatus = "ellai_import_status";
+    public const string ClassificationEvidence = "ellai_classification_evidence";
 
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
     {
         State, Evidence, Topic, Capabilities, Receipts, ProductFacts, Now,
         DocsSearch, DocsGet, UiCatalogue, UiObserve, IngestionSchema, ValidateObservations, Locations,
-        ImportDestinations, Imports, ImportStatus
+        ImportDestinations, Imports, ImportStatus, ClassificationEvidence
     };
 }
 
@@ -181,6 +182,7 @@ public sealed class EllaiToolBroker
         $"{EllaiToolNames.ImportDestinations}() — current authorized organization/workspace/country destinations for Workspace imports; staff only.",
         $"{EllaiToolNames.Imports}(workspace_id, organization_id, country) — the current user's recent imports in one permitted destination; staff only.",
         $"{EllaiToolNames.ImportStatus}(import_id) — the current user's durable import state and saved/rejected/retry counts; no case contents and no submission.",
+        $"{EllaiToolNames.ClassificationEvidence}(case_id) — persisted semantic classification evidence for an authorized current case revision; no inference, diagnosis or clinical probability.",
     };
 
     public static string DescribeCatalogue(IReadOnlySet<string>? allowedTools = null) =>
@@ -208,6 +210,7 @@ public sealed class EllaiToolBroker
     private readonly IGeographicRegistry? _geography;
     private readonly ICaseImportStore? _imports;
     private readonly ICaseImportWorkspaceReader? _importWorkspaces;
+    private readonly SwiftAid.Application.Classification.ICaseClassificationQuery? _classification;
 
     /// <summary>Consent infrastructure is mandatory for consent-scoped reads.
     /// Ordinary typed messages use their own explicit classification and do
@@ -225,7 +228,8 @@ public sealed class EllaiToolBroker
         EllaiUiRegistry? uiRegistry = null, IEllaiUiDiscoveryService? uiDiscovery = null,
         IEllaiUiObservationStore? uiObservations = null,
         EllaiProductFactCatalog? productFacts = null, IGeographicRegistry? geography = null,
-        ICaseImportStore? imports = null, ICaseImportWorkspaceReader? importWorkspaces = null)
+        ICaseImportStore? imports = null, ICaseImportWorkspaceReader? importWorkspaces = null,
+        SwiftAid.Application.Classification.ICaseClassificationQuery? classification = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _consent = consent ?? throw new ArgumentNullException(nameof(consent));
@@ -240,6 +244,7 @@ public sealed class EllaiToolBroker
         _geography = geography;
         _imports = imports;
         _importWorkspaces = importWorkspaces;
+        _classification = classification;
     }
 
     public async Task<EllaiToolResult> InvokeAsync(
@@ -342,6 +347,8 @@ public sealed class EllaiToolBroker
 
         if (canonical is EllaiToolNames.ImportDestinations or EllaiToolNames.Imports or EllaiToolNames.ImportStatus)
             return Bound(await ReadImportsAsync(context, request, ct).ConfigureAwait(false));
+        if (canonical == EllaiToolNames.ClassificationEvidence)
+            return Bound(await ReadClassificationAsync(context, request, ct).ConfigureAwait(false));
 
         return Bound(canonical switch
         {
@@ -372,6 +379,23 @@ public sealed class EllaiToolBroker
         });
         return new(request.ToolName, true, null,
             [new EvidenceRef("ProductFact", "ingestion-schema", "1", "capture", "ingestion-schema/1")], summary, 1, false);
+    }
+
+    private async Task<EllaiToolResult> ReadClassificationAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
+    {
+        if (context.Actor is null) return Deny(request.ToolName, "Current staff case access is required.", EllaiToolReasonCodes.DeniedByPolicy);
+        if (request.Arguments.Count != 1 || !request.Arguments.TryGetValue("case_id", out var value) || !Guid.TryParse(value, out var caseId))
+            return Deny(request.ToolName, "Supply one case_id.", EllaiToolReasonCodes.InvalidArguments);
+        if (_classification is null) return Deny(request.ToolName, "Classification evidence is unavailable.", EllaiToolReasonCodes.Unavailable);
+        try
+        {
+            var items = await _classification.GetAsync(context.Actor, caseId, ct).ConfigureAwait(false);
+            return items is null ? Deny(request.ToolName, "That case is unavailable.", EllaiToolReasonCodes.DeniedByPolicy) :
+                new(request.ToolName, true, null, [], JsonSerializer.Serialize(new { items,
+                    interpretation = "Uncalibrated semantic patterns in reported evidence. Not clinical classification, diagnosis, urgency or outbreak confirmation. No new inference was performed." }), 1, false);
+        }
+        catch (Exception error) when (error is not OperationCanceledException and not OutOfMemoryException)
+        { return Deny(request.ToolName, "Classification evidence is unavailable.", EllaiToolReasonCodes.Unavailable); }
     }
 
     private async Task<EllaiToolResult> ReadImportsAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)

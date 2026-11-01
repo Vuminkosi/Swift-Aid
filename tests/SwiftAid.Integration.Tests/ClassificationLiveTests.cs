@@ -29,7 +29,7 @@ public sealed class ClassificationLiveTests(ITestOutputHelper output)
     {
         await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
         var imported = await fixture.Service.ProcessAsync(CaseImportPostgresTests.Actor, Guid.NewGuid(), CaseImportPostgresTests.Context,
-            1, true, new StringReader(CaseImportPostgresTests.Csv(Guid.NewGuid())), default);
+            1, true, new StringReader(CaseImportPostgresTests.Csv(Guid.NewGuid()).Replace("\"sn\"", "\"en\"", StringComparison.Ordinal)), default);
         var caseId = imported.Rows.Single().CaseId!.Value;
         var source = await fixture.Db.CaseEvents.AsNoTracking().SingleAsync(e => e.CaseId == caseId && e.EventType == "CaseReported");
         var notice = new IngestionNotice(1, source.EventId, "case", caseId, source.AggregateVersion, source.ReportRevision, source.EventType, source.RecordedAtUtc);
@@ -44,6 +44,7 @@ public sealed class ClassificationLiveTests(ITestOutputHelper output)
             options.Profile = options.Profile with { SourceLanguage = "en", TaxonomyVersion = Guid.NewGuid().ToString("N") };
         });
         builder.Services.AddSingleton(TimeProvider.System);
+        builder.Services.AddSingleton<Microsoft.AspNetCore.DataProtection.IDataProtectionProvider>(fixture.Protection);
         builder.Services.AddScoped(_ => new SwiftAidDbContext(new DbContextOptionsBuilder<SwiftAidDbContext>()
             .UseNpgsql(fixture.Db.Database.GetConnectionString()).UseOpenIddict().Options));
         builder.Services.AddScoped(sp => fixture.ClassificationPayloadStore(sp.GetRequiredService<SwiftAidDbContext>()));

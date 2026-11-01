@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SwiftAid.Application.Classification;
@@ -9,13 +10,14 @@ using SwiftAid.Infrastructure.Persistence;
 using SwiftAid.Infrastructure.Persistence.Classification;
 using SwiftAid.Infrastructure.Persistence.Processing;
 using SwiftAid.Infrastructure.Persistence.Protection;
+using SwiftAid.Infrastructure.Persistence.IntakeImports;
 
 namespace SwiftAid.Infrastructure.Classification;
 
 /// <summary>Gateway-owned, fenced classification persistence. No inference occurs inside SQL transactions.</summary>
 public sealed class ClassificationRegistry(
     SwiftAidDbContext db, PostgresProtectedCaseEventPayloadStore payloads,
-    IOptions<ClassificationOptions> configured, TimeProvider clock)
+    IOptions<ClassificationOptions> configured, TimeProvider clock, IDataProtectionProvider protection)
 {
     private ClassificationOptions Options => configured.Value;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -24,18 +26,21 @@ public sealed class ClassificationRegistry(
     {
         Options.Validate();
         if (!notice.IsValid() || notice.SourceKind != "case") throw new ArgumentException("Unsupported notice.");
-        var profile = Options.Profile;
-        var config = profile.Hash;
         var noticeHash = ClassificationFingerprint.Hash(JsonSerializer.Serialize(notice, Json));
         var now = clock.GetUtcNow();
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        await LockAsync($"classification-inbox:{notice.MessageId}:{config}", ct);
+        await LockAsync($"classification-inbox:{notice.MessageId}:{Options.Profile.Hash}", ct);
         var sourceNotice = await db.CaseEvents.AsNoTracking().SingleOrDefaultAsync(e => e.EventId == notice.MessageId, ct);
         if (sourceNotice is null || sourceNotice.CaseId != notice.SourceId || sourceNotice.AggregateVersion != notice.SourceVersion ||
             sourceNotice.ReportRevision != notice.ReportRevision || sourceNotice.EventType != notice.EventType || sourceNotice.RecordedAtUtc != notice.RecordedAtUtc)
             throw new ArgumentException("Notice does not match a committed source event.");
         var header = await db.ManagedCases.AsNoTracking().SingleAsync(c => c.CaseId == notice.SourceId, ct);
         await RequireScopeAsync(header.WorkspaceId, header.OrganizationId, ct);
+        var source = await db.CaseEvents.AsNoTracking().Where(e => e.CaseId == header.CaseId && e.ReportRevision == notice.ReportRevision &&
+            (e.EventType == "CaseReported" || e.EventType == "CaseReportCorrected")).OrderByDescending(e => e.AggregateVersion).FirstAsync(ct);
+        var sourceLanguage = await ReadImportedLanguageAsync(source, header, ct);
+        var profile = Options.Profile with { SourceLanguage = sourceLanguage ?? Options.Profile.SourceLanguage };
+        var config = profile.Hash;
         var inbox = await db.Set<ClassificationInboxEntity>().FindAsync([notice.MessageId, config], ct);
         if (inbox is not null && inbox.NoticeHash != noticeHash) throw new ArgumentException("Changed message identity.");
         if (inbox?.State is "Completed" or "Failed" or "Superseded")
@@ -44,8 +49,6 @@ public sealed class ClassificationRegistry(
         if (db.Entry(inbox).State == EntityState.Detached) db.Add(inbox);
 
         // Read the immutable facts revision, even when this notice is an administrative event.
-        var source = await db.CaseEvents.AsNoTracking().Where(e => e.CaseId == header.CaseId && e.ReportRevision == notice.ReportRevision &&
-            (e.EventType == "CaseReported" || e.EventType == "CaseReportCorrected")).OrderByDescending(e => e.AggregateVersion).FirstAsync(ct);
         var plaintext = await payloads.UnprotectForClassificationAsync(source, Options.Organizations, ct);
         string text;
         try { text = ExtractText(CaseEventJournalReader.Read(source, plaintext)); }
@@ -215,4 +218,32 @@ public sealed class ClassificationRegistry(
     }
     private static string EvidenceText(ReportEvidence evidence) => string.Join("\n",
         new[] { evidence.Narrative?.Text ?? "" }.Concat(evidence.Observations.Select(o => o.Text)));
+
+    private async Task<string?> ReadImportedLanguageAsync(CaseEventEntity source, ManagedCaseEntity header, CancellationToken ct)
+    {
+        // Only the accepted source row for this exact immutable command supplies language.
+        // Later corrections and unrelated imports cannot borrow its language or plaintext.
+        var rows = await (from row in db.Set<CaseImportRowEntity>().AsNoTracking()
+                          join job in db.Set<CaseImportEntity>().AsNoTracking() on row.ImportId equals job.ImportId
+                          where row.CaseId == source.CaseId && row.CommandId == source.CommandId && job.ActorId == source.ActorId &&
+                              job.WorkspaceId == header.WorkspaceId && (job.OrganizationId == null || job.OrganizationId == header.OrganizationId) &&
+                              (row.State == "Accepted" || row.State == "Replayed")
+                          orderby job.CreatedAtUtc, row.RowNumber
+                          select new { row.ImportId, row.RowNumber, row.ProtectedSource, row.SourceHash, job.ActorId }).Take(1).ToListAsync(ct);
+        if (rows.Count == 0) return null;
+        var item = rows[0];
+        var plaintext = protection.CreateProtector("SwiftAid.CaseImport.Row.v1", item.ActorId, item.ImportId.ToString("N"),
+            item.RowNumber.ToString(System.Globalization.CultureInfo.InvariantCulture)).Unprotect(item.ProtectedSource);
+        try
+        {
+            if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(plaintext), item.SourceHash)) throw new InvalidDataException("Invalid import provenance.");
+            using var document = JsonDocument.Parse(plaintext);
+            var columns = document.RootElement.GetProperty("columns").EnumerateArray().Select(c => c.GetString()).ToArray();
+            var index = Array.IndexOf(columns, "source_language");
+            if (index < 0) return "und";
+            var language = document.RootElement.GetProperty("values")[index].GetString()?.Trim().ToLowerInvariant().Split('-')[0];
+            return language is { Length: 2 or 3 } && language.All(char.IsAsciiLetterLower) ? language : "und";
+        }
+        finally { CryptographicOperations.ZeroMemory(plaintext); }
+    }
 }
