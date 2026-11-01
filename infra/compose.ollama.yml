@@ -1,0 +1,23 @@
+# Optional local text reasoning. No public Ollama port and no automatic model download.
+# Apply after compose.yml; see README.md. This does not configure speech recognition.
+services:
+  gateway:
+    environment:
+      Ellai__ReasoningBackend: ollama
+      Ellai__Reasoning__Ollama__Endpoint: http://ollama:11434
+      Ellai__Reasoning__Ollama__Model: ${ELLAI_LOCAL_MODEL:-llama3.2:3b}
+    depends_on:
+      ollama:
+        condition: service_started
+
+  ollama:
+    # Development default; set OLLAMA_IMAGE to an evaluated digest for reproducibility.
+    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - application
+    restart: unless-stopped
+
+volumes:
+  ollama-data:
