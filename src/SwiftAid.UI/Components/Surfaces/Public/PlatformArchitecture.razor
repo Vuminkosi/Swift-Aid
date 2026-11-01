@@ -1,0 +1,59 @@
+<section class="platform-flow @(_paused ? "platform-flow--paused" : "")" aria-labelledby="platform-flow-title">
+    <header class="platform-flow__heading">
+        <div>
+            <p class="platform-flow__eyebrow">How SwiftAid works</p>
+            <h2 id="platform-flow-title">One report. A connected response.</h2>
+            <p>Follow an observation from the community to an authorized team’s review.</p>
+        </div>
+        <button type="button" class="platform-flow__toggle" aria-pressed="@_paused" @onclick="() => _paused = !_paused">
+            @(_paused ? "Play flow" : "Pause flow")
+        </button>
+    </header>
+    <ol class="platform-flow__steps">
+        <li>
+            <span class="platform-flow__number">01</span>
+            <MudIcon Icon="@Icons.Material.Outlined.EditNote" aria-hidden="true" />
+            <h3>Capture</h3>
+            <p>Report by form, voice or a workspace CSV import. Keep drafts when offline.</p>
+            <span class="platform-flow__detail">Web · Android · iOS</span>
+        </li>
+        <li>
+            <span class="platform-flow__number">02</span>
+            <MudIcon Icon="@Icons.Material.Outlined.VerifiedUser" aria-hidden="true" />
+            <h3>Save &amp; synchronize</h3>
+            <p>Confirm receipt, preserve the original report and check workspace access.</p>
+            <span class="platform-flow__detail">Gateway · PostgreSQL</span>
+        </li>
+        <li>
+            <span class="platform-flow__number">03</span>
+            <MudIcon Icon="@Icons.Material.Outlined.Psychology" aria-hidden="true" />
+            <h3>Understand</h3>
+            <p>Ellai helps with requests. Report analysis organizes reported symptoms and exposures.</p>
+            <span class="platform-flow__detail">Muse Spark · BART MNLI</span>
+        </li>
+        <li>
+            <span class="platform-flow__number">04</span>
+            <MudIcon Icon="@Icons.Material.Outlined.TravelExplore" aria-hidden="true" />
+            <h3>Connect observations</h3>
+            <p>Look for relationships across place and time, keeping evidence and uncertainty visible.</p>
+            <span class="platform-flow__detail">Surveillance workers</span>
+        </li>
+        <li>
+            <span class="platform-flow__number">05</span>
+            <MudIcon Icon="@Icons.Material.Outlined.FactCheck" aria-hidden="true" />
+            <h3>Review &amp; follow through</h3>
+            <p>Authorized teams verify signals, review cases and coordinate the next action.</p>
+            <span class="platform-flow__detail">Human verification</span>
+        </li>
+    </ol>
+    <div class="platform-flow__lanes">
+        <div><strong>Conversation</strong><p>Speech → Muse Voice Transcribe → Muse Spark → MMS-TTS. Silero helps coordinate voice turns.</p></div>
+        <div><strong>Reliable processing</strong><p>Saved work → PostgreSQL outbox → NATS → workers. Processing can resume after a connection loss.</p></div>
+        <div><strong>Language expansion</strong><p>MMS-ASR and NLLB support the experimental native-language lane. Translation review and language validation remain required.</p></div>
+    </div>
+    <p class="platform-flow__note">Illustrated architecture, not a live activity display. Access checks and required approvals stay in place throughout.</p>
+</section>
+
+@code {
+    private bool _paused;
+}

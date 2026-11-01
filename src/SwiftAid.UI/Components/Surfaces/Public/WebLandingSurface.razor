@@ -97,11 +97,13 @@
         </ol>
     </section>
 
+    <PlatformArchitecture />
+
     <section id="meta-models" class="web-landing__models" aria-labelledby="meta-models-title">
         <div class="web-landing__models-heading">
             <p class="web-landing__eyebrow">Meta Models</p>
             <h2 id="meta-models-title">Speak. Understand. Follow through.</h2>
-            <p>Ask Ellai in your own words, find the information you need, and hear the reply. Meta's language and speech models support each step.</p>
+            <p>Different models do different jobs: conversation, speech, report analysis and translation. Each result stays connected to its source and the access of the person using it.</p>
         </div>
         <div class="web-landing__model-list">
             <article>
@@ -119,6 +121,14 @@
             <article>
                 <span class="web-landing__model-number" aria-hidden="true">04</span>
                 <div><h3>BART Large MNLI</h3><p>Helps organize English case reports by reported symptoms and exposures, such as respiratory symptoms or contact with water. Health workers can review these patterns alongside the original report in case details. The labels describe what was reported; they do not establish a diagnosis or confirm an outbreak.</p></div>
+            </article>
+            <article>
+                <span class="web-landing__model-number" aria-hidden="true">05</span>
+                <div><h3>NLLB-200</h3><p>Translates between English and supported local languages in the experimental language workflow. Original wording is preserved, and translations require review before they can support report analysis. Local-language quality is still being validated.</p></div>
+            </article>
+            <article>
+                <span class="web-landing__model-number" aria-hidden="true">06</span>
+                <div><h3>MMS-ASR</h3><p>Supports experimental speech recognition for Shona, Nyanja and Tsonga. It is a separate language-testing path; it is not yet the default for Ellai’s continuous conversations.</p></div>
             </article>
         </div>
         <aside class="web-landing__voice-support" aria-labelledby="silero-title">
