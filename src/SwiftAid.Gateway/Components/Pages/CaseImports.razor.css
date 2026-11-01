@@ -1,0 +1,16 @@
+.case-imports__file ::deep input[type="file"] {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    margin-block: .5rem;
+}
+
+.case-imports__counts {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: .5rem 1rem;
+    margin-block: 1rem;
+}
+
+.case-imports__counts dd { margin: 0; font-weight: 600; }
+.case-imports__history { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-block: .75rem; }

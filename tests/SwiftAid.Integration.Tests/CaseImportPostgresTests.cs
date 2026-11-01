@@ -89,6 +89,10 @@ public sealed class CaseImportPostgresTests
         Assert.Equal(1, result.Summary!.Rejected);
         Assert.Equal(1, result.Summary.Accepted);
         Assert.Equal(3, result.Summary.NextRow);
+        var restored = await fixture.Store.GetIssuesAsync(Actor, result.ImportId, 0, default);
+        Assert.Equal("Invalid", Assert.Single(restored).Status);
+        Assert.Empty(await fixture.Store.GetIssuesAsync(Actor, result.ImportId, 1, default));
+        Assert.Empty(await fixture.Store.GetIssuesAsync(CaseRegistrationBackendTests.CreateOfficer("another-actor"), result.ImportId, 0, default));
     }
 
     [IntakePostgresFact]
@@ -131,6 +135,43 @@ public sealed class CaseImportPostgresTests
             "Original supplied concern", observations, "2026-06-04T16:46:59+02:00", "2026-06-02T21:51:59+02:00", "ZW", "Manicaland", "", "Rusape", "ZW:place:rusape", "", "", "Approximate", "", "", "sn", "SYNTHETIC:SWIFTAID:1" }
             .Select((value, index) => index == 2 ? "" : "\"" + value.Replace("\"", "\"\"") + "\"")) + "\n";
 
+    [IntakePostgresFact]
+    public async Task Workspace_destinations_and_recent_imports_follow_current_owner_scope()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        Assert.Contains(await fixture.Store.GetWorkspacesAsync(Actor, default),
+            scope => scope.WorkspaceId == Context.WorkspaceId && scope.CountryCode == "ZW");
+        Assert.Empty(await fixture.Store.GetWorkspacesAsync(CaseRegistrationBackendTests.CreateOfficer("another-actor"), default));
+        var id = Guid.NewGuid();
+        await fixture.Service.ProcessAsync(Actor, id, Context, 1, true, new StringReader(Csv(Guid.NewGuid())), default);
+        var history = await fixture.Store.GetRecentAsync(Actor, Context.WorkspaceId, "ZW", default);
+        Assert.Contains(history, item => item.ImportId == id && item.State == "Completed");
+        Assert.DoesNotContain(await fixture.Store.GetWorkspacesAsync(Actor, default), scope => scope.CountryCode == "SZ");
+        await Assert.ThrowsAsync<CaseImportException>(() => fixture.Store.GetRecentAsync(Actor, "another-workspace", "ZW", default));
+        await fixture.Db.ActorAccessStates.Where(row => row.ActorId == Actor.ActorId)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.AccessEpoch, Actor.AccessEpoch + 1));
+        Assert.Empty(await fixture.Store.GetWorkspacesAsync(Actor, default));
+        await Assert.ThrowsAsync<CaseImportException>(() => fixture.Store.GetRecentAsync(Actor, Context.WorkspaceId, "ZW", default));
+    }
+
+    [IntakePostgresFact]
+    public async Task Completed_import_is_sealed_and_denied_replay_cannot_erase_saved_case()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var id = Guid.NewGuid();
+        var command = Guid.NewGuid();
+        await fixture.Service.ProcessAsync(Actor, id, Context, 1, true, new StringReader(Csv(command)), default);
+        var append = await Assert.ThrowsAsync<CaseImportException>(() => fixture.Store.OpenAsync(Actor, id, Context, 2, default));
+        Assert.Equal("import-completed", append.Code);
+        var lease = await fixture.Store.OpenAsync(Actor, id, Context, 1, default);
+        await fixture.Store.CompleteRowAsync(lease, new(1, command, "Denied", null, "registration-denied"), default);
+        await fixture.Store.CloseAsync(lease, "Paused", "registration-denied", default);
+        var status = await fixture.Store.GetAsync(Actor, id, default);
+        Assert.Equal("Completed", status!.State);
+        Assert.Equal(1, status.Accepted);
+        Assert.Equal(0, status.Rejected);
+    }
+
     internal sealed class Fixture : IAsyncDisposable
     {
         private readonly CaseRegistrationBackendTests.SyntheticRegistrationKeyRing _keys;
@@ -162,10 +203,10 @@ public sealed class CaseImportPostgresTests
             return new(db, CaseRegistrationBackendTests.SyntheticRegistrationKeyRing.Create());
         }
 
-        public CaseCsvImportService CreateService(SwiftAidDbContext db, ICaseImportStore? store = null) => new(
+        public CaseCsvImportService CreateService(SwiftAidDbContext db, ICaseImportStore? store = null, IIntakeSubmissionValidator? validator = null) => new(
             store ?? new PostgresCaseImportStore(db, Protection, TimeProvider.System),
             new CaseRegistrationProcessor(new PostgresCaseRegistrationUnitOfWork(db), new PostgresCaseRegistrationAuthorization(db),
-                CaseRegistrationBackendTests.CreatePersistence(db, _keys.CreateOptions(), Protection)), new FixtureValidator());
+                CaseRegistrationBackendTests.CreatePersistence(db, _keys.CreateOptions(), Protection)), validator ?? new FixtureValidator());
 
         public async ValueTask DisposeAsync() { await Db.DisposeAsync(); Protection.Dispose(); _keys.Dispose(); }
     }

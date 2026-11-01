@@ -28,7 +28,9 @@ These tools run through the existing broker, session scope, budget, catalogue an
 
 ## Durable workspace imports
 
-Imports belong to an authorized workspace. The product entry point is Workspace → Imports; the bounded HTTP contract also supports operational automation. The workspace user flow is being integrated separately from the backend delivery.
+Imports belong to an authorized workspace. Open **Workspace → Imports** (`/workspace/imports`), or **Cases → Import cases**. Select an authorized workspace/country, choose the supplied-format CSV, review its details and start. The page streams files up to 64 MiB in batches bounded to 100 rows and 1 MiB of UTF-8 text. Pause finishes the current bounded batch; leaving the page cancels its capture/processing lifetime without undoing committed cases. Recent imports and paged sanitized rejection details restore from PostgreSQL after refresh. Resume requires selecting the unchanged original file. No credentials or command-line setup are required in the UI.
+
+The bounded HTTP contract also supports operational automation. The web workspace uses the same application service through a short-lived service scope per operation; authenticated server identity supplies the actor, and every batch/row rechecks live access. The destination catalogue is bounded to 100 currently authorized workspace/country pairs; recent history to 20 owner-only imports for the selected scope. Source row text is not returned by history queries. Native Android/iOS import navigation is not implemented in this slice; responsive browser layout is not native-app verification.
 
 `POST /api/v1/case-imports/{importId}/rows?startRow=1&finalBatch=false` accepts UTF-8 `text/csv`, at most 1,000 rows and 8 MiB per HTTP batch. Every batch repeats the header. `X-SwiftAid-Import` carries base64 UTF-8 JSON:
 

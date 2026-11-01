@@ -54,6 +54,7 @@ builder.Services.AddScoped<IWorkspaceAccessClient, GatewayUnavailableWorkspaceAc
 builder.Services.AddScoped<IStaffSessionEditorClient, GatewayStaffSessionEditorClient>();
 builder.Services.AddScoped<IMapAggregateClient, MapAggregateGatewayClient>();
 builder.Services.AddScoped<ICaseWorkspaceClient, CaseWorkspaceGatewayClient>();
+builder.Services.AddScoped<SwiftAid.Gateway.Ingestion.IWorkspaceImportClient, SwiftAid.Gateway.Ingestion.WorkspaceImportClient>();
 builder.Services.AddScoped<IWorkManagementClient, CommandBackedWorkManagementClient>();
 builder.Services.AddScoped<IIntakeReviewClient, GatewayIntakeReviewClient>();
 

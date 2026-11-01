@@ -8,7 +8,7 @@ using SwiftAid.Contracts.Commands;
 
 namespace SwiftAid.Infrastructure.Persistence.IntakeImports;
 
-public sealed class PostgresCaseImportStore(SwiftAidDbContext db, IDataProtectionProvider protection, TimeProvider clock) : ICaseImportStore
+public sealed class PostgresCaseImportStore(SwiftAidDbContext db, IDataProtectionProvider protection, TimeProvider clock) : ICaseImportStore, ICaseImportWorkspaceReader
 {
     private static readonly TimeSpan LeaseDuration = TimeSpan.FromMinutes(2);
 
@@ -145,7 +145,46 @@ public sealed class PostgresCaseImportStore(SwiftAidDbContext db, IDataProtectio
 
     private async Task EnsureScopeAsync(ActorContext actor, string workspace, string country, DateTimeOffset now, CancellationToken ct)
     {
-        var permitted = await (from state in db.ActorAccessStates
+        if (!await AllowedWorkspaces(actor, now).AnyAsync(scope => scope.WorkspaceId == workspace && scope.CountryCode == country, ct))
+            throw new CaseImportException("not-authorized");
+    }
+
+    public async Task<IReadOnlyList<CaseImportWorkspace>> GetWorkspacesAsync(ActorContext actor, CancellationToken ct) =>
+        await AllowedWorkspaces(actor, clock.GetUtcNow()).Distinct().OrderBy(scope => scope.WorkspaceId)
+            .ThenBy(scope => scope.CountryCode).Take(100)
+            .Select(scope => new CaseImportWorkspace(scope.WorkspaceId, scope.OrganizationId, scope.CountryCode)).ToArrayAsync(ct);
+
+    public async Task<IReadOnlyList<CaseImportHistoryItem>> GetRecentAsync(ActorContext actor, string workspaceId, string countryCode, CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        await EnsureScopeAsync(actor, workspaceId, countryCode, now, ct);
+        return await db.Set<CaseImportEntity>().AsNoTracking()
+            .Where(job => job.ActorId == actor.ActorId && job.WorkspaceId == workspaceId && job.CountryCode == countryCode)
+            .OrderByDescending(job => job.UpdatedAtUtc).ThenBy(job => job.ImportId).Take(20)
+            .Select(job => new CaseImportHistoryItem(job.ImportId, job.WorkspaceId, job.CountryCode,
+                job.State == "Running" && job.LeaseUntilUtc <= now ? "Paused" : job.State, job.UpdatedAtUtc)).ToArrayAsync(ct);
+    }
+
+    private sealed class WorkspaceScope
+    {
+        public required string WorkspaceId { get; init; }
+        public required string OrganizationId { get; init; }
+        public required string CountryCode { get; init; }
+    }
+
+    public async Task<IReadOnlyList<CaseImportRowOutcome>> GetIssuesAsync(ActorContext actor, Guid importId, long afterRow, CancellationToken ct)
+    {
+        if (afterRow < 0) throw new CaseImportException("invalid-cursor");
+        // Reuse owner and current-scope authorization before returning even sanitized row metadata.
+        if (await GetAsync(actor, importId, ct) is null) return [];
+        return await db.Set<CaseImportRowEntity>().AsNoTracking()
+            .Where(row => row.ImportId == importId && row.RowNumber > afterRow && row.State != "Accepted" && row.State != "Replayed")
+            .OrderBy(row => row.RowNumber).Take(20)
+            .Select(row => new CaseImportRowOutcome(row.RowNumber, row.CommandId, row.State, row.CaseId, row.ErrorCode)).ToArrayAsync(ct);
+    }
+
+    private IQueryable<WorkspaceScope> AllowedWorkspaces(ActorContext actor, DateTimeOffset now) =>
+        from state in db.ActorAccessStates
             join person in db.Actors on state.ActorId equals person.ActorId
             join grant in db.AccessGrantGroups on person.ActorId equals grant.ActorId
             join operation in db.AccessGrantOperations on grant.GrantGroupId equals operation.GrantGroupId
@@ -154,14 +193,12 @@ public sealed class PostgresCaseImportStore(SwiftAidDbContext db, IDataProtectio
             join scope in db.Workspaces on grant.WorkspaceId equals scope.WorkspaceId
             where person.ActorId == actor.ActorId && state.AccessEpoch == actor.AccessEpoch &&
                 person.Status == PersistentActorStatus.Active && (person.ExpiresAtUtc == null || person.ExpiresAtUtc > now) &&
-                scope.WorkspaceId == workspace && scope.OrganizationId == organization.OrganizationId &&
+                scope.OrganizationId == organization.OrganizationId &&
                 scope.Status == PersistentResourceStatus.Active && organization.Status == PersistentResourceStatus.Active &&
-                grant.CountryCode == country && grant.Status == PersistentGrantStatus.Active && grant.ValidFromUtc <= now &&
+                grant.Status == PersistentGrantStatus.Active && grant.ValidFromUtc <= now &&
                 grant.ExpiresAtUtc > now && operation.Operation == CaseOperation.ReadCase &&
                 membership.ActorId == person.ActorId && membership.OrganizationId == organization.OrganizationId &&
                 membership.Status == PersistentMembershipStatus.Active && membership.ValidFromUtc <= now &&
                 (membership.ExpiresAtUtc == null || membership.ExpiresAtUtc > now)
-            select person.ActorId).AnyAsync(ct);
-        if (!permitted) throw new CaseImportException("not-authorized");
-    }
+            select new WorkspaceScope { WorkspaceId = scope.WorkspaceId, OrganizationId = organization.OrganizationId, CountryCode = grant.CountryCode };
 }

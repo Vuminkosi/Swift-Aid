@@ -68,7 +68,7 @@ public sealed class CaseImportEndpointTests
         public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
         public HttpClient Client { get; } = client;
 
-        public static async Task<Host> StartAsync(CaseImportPostgresTests.Fixture fixture)
+        public static async Task<Host> StartAsync(CaseImportPostgresTests.Fixture fixture, SwiftAid.Application.Intake.IIntakeSubmissionValidator? validator = null)
         {
             var builder = WebApplication.CreateBuilder();
             builder.Logging.ClearProviders();
@@ -85,7 +85,7 @@ public sealed class CaseImportEndpointTests
                 .UseNpgsql(fixture.Db.Database.GetConnectionString()).UseOpenIddict().Options));
             builder.Services.AddScoped<ICaseImportStore>(services => new PostgresCaseImportStore(
                 services.GetRequiredService<SwiftAidDbContext>(), fixture.Protection, TimeProvider.System));
-            builder.Services.AddScoped(services => fixture.CreateService(services.GetRequiredService<SwiftAidDbContext>(), services.GetRequiredService<ICaseImportStore>()));
+            builder.Services.AddScoped(services => fixture.CreateService(services.GetRequiredService<SwiftAidDbContext>(), services.GetRequiredService<ICaseImportStore>(), validator));
             var app = builder.Build();
             app.UseAuthentication();
             app.UseAuthorization();
