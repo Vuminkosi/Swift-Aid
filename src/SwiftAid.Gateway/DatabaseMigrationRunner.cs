@@ -32,6 +32,12 @@ public static class DatabaseMigrationRunner
 
             var pending = (await db.Database.GetPendingMigrationsAsync(ct)).Count();
             await db.Database.MigrateAsync(ct);
+            // Refresh bounded public reference data under the same deployment lock.
+            // This is idempotent and does not modify case reports or their locations.
+            var geography = new SwiftAid.Infrastructure.Intake.Geography.GeographicRegistryImporter(
+                db, TimeProvider.System,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<SwiftAid.Infrastructure.Intake.Geography.GeographicRegistryImporter>.Instance);
+            await geography.ImportAsync(ct);
             return pending;
         }
         finally

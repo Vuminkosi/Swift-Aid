@@ -85,7 +85,8 @@ public sealed class GeographicRegistryImporter(
                 !string.Equals(current.LocationKind, kind.ToString(), StringComparison.Ordinal) ||
                 !string.Equals(current.ParentId, record.ParentId, StringComparison.Ordinal) ||
                 current.Latitude != record.Latitude ||
-                current.Longitude != record.Longitude;
+                current.Longitude != record.Longitude ||
+                (!string.IsNullOrWhiteSpace(record.Source) && current.Source != record.Source);
             if (!changed)
             {
                 continue;
@@ -97,6 +98,7 @@ public sealed class GeographicRegistryImporter(
             current.ParentId = string.IsNullOrWhiteSpace(record.ParentId) ? null : record.ParentId;
             current.Latitude = record.Latitude;
             current.Longitude = record.Longitude;
+            current.Source = string.IsNullOrWhiteSpace(record.Source) ? current.Source : record.Source;
             current.Verification = string.IsNullOrWhiteSpace(record.Verification) ? current.Verification : record.Verification;
             current.ImportedAtUtc = now;
             updated++;

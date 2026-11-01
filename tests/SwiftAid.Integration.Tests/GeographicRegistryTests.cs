@@ -41,10 +41,31 @@ public sealed class GeographicRegistryTests : IAsyncDisposable
         Assert.Equal(264, first.TotalRecords);
         Assert.Equal(264, first.Inserted);
         Assert.Equal(0, first.Updated);
-        Assert.Equal(264, first.MissingCoordinates);
+        Assert.Equal(153, first.MissingCoordinates);
         Assert.Equal(264, second.TotalRecords);
         Assert.Equal(0, second.Inserted);
         Assert.Equal(0, second.Updated);
+    }
+
+    [Fact]
+    public async Task Reimport_updates_missing_public_coordinates_and_provenance_without_duplicates()
+    {
+        var importer = _provider.GetRequiredService<IGeographicRegistryImporter>();
+        await importer.ImportAsync(CancellationToken.None);
+        var place = await _dbContext.GeographicLocations.SingleAsync(item => item.LocationId == "SZ:place:sidvokodvo");
+        place.Latitude = null;
+        place.Longitude = null;
+        place.Source = "original seed";
+        await _dbContext.SaveChangesAsync();
+
+        var result = await importer.ImportAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.Updated);
+        Assert.Equal(0, result.Inserted);
+        Assert.NotNull(place.Latitude);
+        Assert.NotNull(place.Longitude);
+        Assert.Contains("geonames.org", place.Source);
+        Assert.Equal(0, (await importer.ImportAsync(CancellationToken.None)).Updated);
     }
 
     [Fact]
