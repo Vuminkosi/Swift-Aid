@@ -29,15 +29,23 @@ public static class IntakePromotionMapper
             throw new ArgumentException("A receipt identifier is required.", nameof(receiptId));
         }
 
-        var reportId = IntakePromotionIds.ReportId(receiptId);
+        return ToCapturedReport(IntakePromotionIds.ReportId(receiptId), $"intake:{receiptId:N}", submission);
+    }
+
+    /// <summary>Maps source-attributed capture without claiming that an import is a promoted intake receipt.</summary>
+    public static CaseReportEventData ToCapturedReport(Guid reportId, string sourcePrefix, IntakeSubmission submission)
+    {
+        ArgumentNullException.ThrowIfNull(submission);
+        if (reportId == Guid.Empty || string.IsNullOrWhiteSpace(sourcePrefix) || sourcePrefix.Length > 400)
+            throw new ArgumentException("A stable report and source reference are required.");
         var context = new ReportContext(
-            ToOccurrenceFact(receiptId, submission.Occurrence),
+            ToOccurrenceFact(sourcePrefix, submission.Occurrence),
             submission.CapturedAt.Value?.ToUniversalTime(),
             submission.CapturedAt.OriginalOffset,
             submission.CapturedAt.ZoneId,
             submission.CapturedAt.Precision,
             submission.Location);
-        var evidence = ToEvidence(receiptId, submission);
+        var evidence = ToEvidence(sourcePrefix, submission);
         var confirmations = new ReportConfirmations(
             submission.Confirmations.ReportReviewConfirmed,
             submission.Confirmations.OccurrenceCountryCode,
@@ -55,9 +63,9 @@ public static class IntakePromotionMapper
                 HumanReport.Create(
                     reportId,
                     context,
-                    ReportedFact<string>.Unknown(ReporterProvenance(receiptId, "subject-reference")),
-                    ReportedFact<int>.Unknown(ReporterProvenance(receiptId, "age")),
-                    ReportedFact<string>.Unknown(ReporterProvenance(receiptId, "concern")),
+                    ReportedFact<string>.Unknown(ReporterProvenance(sourcePrefix, "subject-reference")),
+                    ReportedFact<int>.Unknown(ReporterProvenance(sourcePrefix, "age")),
+                    ReportedFact<string>.Unknown(ReporterProvenance(sourcePrefix, "concern")),
                     evidence),
                 confirmations)
             : new CaseReportEventData.AnimalV2(
@@ -65,12 +73,12 @@ public static class IntakePromotionMapper
                     reportId,
                     context,
                     ToAnimalSubjectScope(submission.SubjectScope),
-                    ReportedFact<string>.Unknown(ReporterProvenance(receiptId, "species")),
-                    ReportedFact<string>.Unknown(ReporterProvenance(receiptId, "holding")),
+                    ReportedFact<string>.Unknown(ReporterProvenance(sourcePrefix, "species")),
+                    ReportedFact<string>.Unknown(ReporterProvenance(sourcePrefix, "holding")),
                     evidence,
-                    UnknownCount(ReporterProvenance(receiptId, "animals-at-risk")),
-                    UnknownCount(ReporterProvenance(receiptId, "animals-affected")),
-                    UnknownCount(ReporterProvenance(receiptId, "animals-dead"))),
+                    UnknownCount(ReporterProvenance(sourcePrefix, "animals-at-risk")),
+                    UnknownCount(ReporterProvenance(sourcePrefix, "animals-affected")),
+                    UnknownCount(ReporterProvenance(sourcePrefix, "animals-dead"))),
                 confirmations);
 
         switch (report)
@@ -88,36 +96,36 @@ public static class IntakePromotionMapper
         return report;
     }
 
-    private static ReportedFact<ReportedTime> ToOccurrenceFact(Guid receiptId, ReportedTime occurrence)
+    private static ReportedFact<ReportedTime> ToOccurrenceFact(string sourcePrefix, ReportedTime occurrence)
     {
-        var provenance = new ReportProvenance(ReportSourceKind.ReporterObservation, $"intake:{receiptId:N}:occurrence");
+        var provenance = new ReportProvenance(ReportSourceKind.ReporterObservation, $"{sourcePrefix}:occurrence");
         return occurrence is { Value: null, Precision: ReportedTimePrecision.Unknown }
             ? ReportedFact<ReportedTime>.Unknown(provenance)
             : ReportedFact<ReportedTime>.Known(occurrence, provenance);
     }
 
-    private static ReportEvidence ToEvidence(Guid receiptId, IntakeSubmission submission)
+    private static ReportEvidence ToEvidence(string sourcePrefix, IntakeSubmission submission)
     {
         ReportedText? narrative = string.IsNullOrWhiteSpace(submission.Narrative)
             ? null
             : new ReportedText(
                 submission.Narrative,
-                new ReportProvenance(ReportSourceKind.ReporterNarrative, $"intake:{receiptId:N}:narrative"));
+                new ReportProvenance(ReportSourceKind.ReporterNarrative, $"{sourcePrefix}:narrative"));
         var observations = submission.Observations
             .Select((text, index) => new ReportedText(
                 text,
-                new ReportProvenance(ReportSourceKind.ReporterObservation, $"intake:{receiptId:N}:observation:{index}")))
+                new ReportProvenance(ReportSourceKind.ReporterObservation, $"{sourcePrefix}:observation:{index}")))
             .ToArray();
         ReportEvidenceReference? originalAudio = submission.OriginalAudioAttachmentIds.Count == 0
             ? null
             : new ReportEvidenceReference(
                 $"intake-attachment:{submission.OriginalAudioAttachmentIds[0]:D}",
-                new ReportProvenance(ReportSourceKind.OriginalAudio, $"intake:{receiptId:N}:audio"));
+                new ReportProvenance(ReportSourceKind.OriginalAudio, $"{sourcePrefix}:audio"));
         return new ReportEvidence(narrative, observations, originalAudio);
     }
 
-    private static ReportProvenance ReporterProvenance(Guid receiptId, string name) =>
-        new(ReportSourceKind.ReporterObservation, $"intake:{receiptId:N}:{name}");
+    private static ReportProvenance ReporterProvenance(string sourcePrefix, string name) =>
+        new(ReportSourceKind.ReporterObservation, $"{sourcePrefix}:{name}");
 
     private static AnimalCount UnknownCount(ReportProvenance provenance) =>
         new(ReportedValue<int>.Unknown, provenance, null, null);

@@ -20,3 +20,9 @@ Test command and environment variables are in [the runbook](gateway-operational-
 NOT VERIFIED: 10,000/100,000/1,000,000/multi-million full ingestion and processing runs; sustained throughput, p95/p99 end-to-end latency, CPU/working-set limits, multi-node HA, actual process/network restart, full consumer result-before-ACK, statistical detection accuracy, physical devices and external providers. Stream capacity settings are limits, not measured throughput.
 
 The largest concurrency assertion in the initial functional run is twelve independent intake notices claimed by two database connections without overlap. Test timing is not a throughput benchmark. Additional measured slices will be appended without replacing these limits with estimates.
+
+## CSV adapter and Ellai assistance slice
+
+PASS: 330 focused application tests, 3 existing skips, zero failures (`--filter 'FullyQualifiedName~Ellai|FullyQualifiedName~CaseCsvImport|FullyQualifiedName~IntakePromotion'`). Includes existing promotion behavior after sharing the source-attributed report mapper.
+
+PASS: actual supplied Zimbabwe 10,500 + Eswatini 4,500 CSV rows streamed, parsed and mapped to typed reports in one fixture test (508 ms reported test duration). Command: `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter FullyQualifiedName~CaseCsvSuppliedFixtureTests`, with `SWIFTAID_TEST_CASE_CSV_DIRECTORY` set to the local `designs/data` directory. This is **15,000-row parsing/mapping evidence only**, not database ingestion throughput or full pipeline capacity. Provider-driven Ellai conversations and client UI use of the new tools remain NOT VERIFIED.

@@ -72,7 +72,7 @@ public sealed class EllaiReadToolTests
             var broker = new EllaiToolBroker(
                 new EllaiPolicyService(), consent, new EllaiTechnicalDocs(docsPath), null,
                 new EllaiReceiptStore(), topics, registry,
-                new EllaiUiDiscoveryService(), observations);
+                new EllaiUiDiscoveryService(), observations, geography: new EllaiIngestionToolTests.Registry());
 
             foreach (var tool in EllaiToolNames.All)
             {
@@ -89,6 +89,8 @@ public sealed class EllaiReadToolTests
                                     ["view"] = "view-1",
                                 }
                                 : new Dictionary<string, string>();
+                if (tool == EllaiToolNames.ValidateObservations) args["observations_json"] = "[\"Reported concern\"]";
+                if (tool == EllaiToolNames.Locations) args["q"] = "Rusape";
                 var result = await broker.InvokeAsync(
                     Context, new EllaiToolRequest(tool, args),
                     CancellationToken.None);

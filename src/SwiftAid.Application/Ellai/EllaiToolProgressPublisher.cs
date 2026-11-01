@@ -97,6 +97,9 @@ public sealed class EllaiToolProgressPublisher(
         EllaiToolNames.Receipts => ("Checking the action result", "I'll check what happened."),
         EllaiToolNames.UiCatalogue or EllaiToolNames.UiObserve => ("Checking the current screen", "Let me check this screen."),
         EllaiToolNames.Now => ("Checking the current time", "One moment."),
+        EllaiToolNames.IngestionSchema => ("Checking report requirements", "Let me check what's needed."),
+        EllaiToolNames.ValidateObservations => ("Checking the reported observations", "I'll check that format."),
+        EllaiToolNames.Locations => ("Finding the reported location", "Let me find that place."),
         _ => ("Checking that for you", turnId.Length % 2 == 0 ? "Hmm, let me check that." : "One moment."),
     };
 }

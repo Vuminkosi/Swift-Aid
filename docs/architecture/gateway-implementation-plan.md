@@ -23,3 +23,5 @@
 Progress and exact delivered/unimplemented boundaries will be updated as slices complete.
 
 Slice 1 implemented and verified: additive leased dispatch for both original outboxes, duplicate-PubAck correction for existing publishers, bounded opt-in stream provisioning and operations documentation. Focused final check: 28 passed, zero skipped, plus real ACL bootstrap and Compose validation. Consumer completion and intelligence stages remain separate outstanding work.
+
+Next independently verified slice: strict bounded CSV adapter compatible with all 15,000 supplied records; shared source-attributed report mapping; Ellai schema, observation-format validation and public geographic lookup tools. These tools do not bypass human submission/approvals. Durable bulk import orchestration remains the next dependency, not a claim made by parser tests. See [format details](gateway-import-format.md).

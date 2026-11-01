@@ -12,7 +12,7 @@ namespace SwiftAid.Gateway.Endpoints;
 
 /// <summary>Public Ellai surface for anonymous guests. The signed guest
 /// cookie binds each request to one opaque actor; guest sessions have no
-/// workspace grants and their utterance path is restricted to public facts.</summary>
+/// workspace grants; tools are restricted to public facts and non-writing capture assistance.</summary>
 public static class EllaiGuestEndpoints
 {
     public const string AuthenticationScheme = "SwiftAid.EllaiGuest";

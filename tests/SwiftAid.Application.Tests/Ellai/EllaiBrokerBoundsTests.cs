@@ -199,7 +199,7 @@ public sealed class EllaiBrokerBoundsTests
     {
         Assert.False(EllaiToolNames.All.Contains("ellai_voice_capability"));
         Assert.False(EllaiToolNames.All.Contains("ellai_guidance_session"));
-        Assert.Equal(11, EllaiToolNames.All.Count);
+        Assert.Equal(14, EllaiToolNames.All.Count);
     }
 
     [Fact]

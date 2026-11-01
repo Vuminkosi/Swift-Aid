@@ -3,6 +3,8 @@ using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases;
 using SwiftAid.Contracts.Cases;
 using SwiftAid.Contracts.Ellai;
+using SwiftAid.Application.Intake;
+using SwiftAid.Application.Intake.Imports;
 
 namespace SwiftAid.Application.Ellai;
 
@@ -39,11 +41,14 @@ public static class EllaiToolNames
     /// channel: Ready only for entitled controls the current view reports
     /// mounted. Marked ClientObservation with server-stamped freshness.</summary>
     public const string UiObserve = "ellai_ui_observe";
+    public const string IngestionSchema = "ellai_ingestion_schema";
+    public const string ValidateObservations = "ellai_validate_observations";
+    public const string Locations = "ellai_locations";
 
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
     {
         State, Evidence, Topic, Capabilities, Receipts, ProductFacts, Now,
-        DocsSearch, DocsGet, UiCatalogue, UiObserve
+        DocsSearch, DocsGet, UiCatalogue, UiObserve, IngestionSchema, ValidateObservations, Locations
     };
 }
 
@@ -166,6 +171,9 @@ public sealed class EllaiToolBroker
         $"{EllaiToolNames.DocsGet}(section) — one approved section excerpt.",
         $"{EllaiToolNames.UiCatalogue}(goal?, limit?) — entitled control descriptors.",
         $"{EllaiToolNames.UiObserve}(controls, view, context?) — live mounted-control facts.",
+        $"{EllaiToolNames.IngestionSchema}() — canonical case CSV fields, capture requirements and authority boundaries; no submission.",
+        $"{EllaiToolNames.ValidateObservations}(observations_json) — validate a bounded JSON array of original reported strings; no inference or submission.",
+        $"{EllaiToolNames.Locations}(q, country?, limit?) — search the public geographic registry; present matches for user selection, never guess a location.",
     };
 
     public static string DescribeCatalogue(IReadOnlySet<string>? allowedTools = null) =>
@@ -190,6 +198,7 @@ public sealed class EllaiToolBroker
     private readonly IEllaiUiDiscoveryService? _uiDiscovery;
     private readonly IEllaiUiObservationStore? _uiObservations;
     private readonly EllaiProductFactCatalog _productFacts;
+    private readonly IGeographicRegistry? _geography;
 
     /// <summary>Consent infrastructure is mandatory for consent-scoped reads.
     /// Ordinary typed messages use their own explicit classification and do
@@ -206,7 +215,7 @@ public sealed class EllaiToolBroker
         IEllaiApprovalStore? receipts = null, EllaiTopicService? topics = null,
         EllaiUiRegistry? uiRegistry = null, IEllaiUiDiscoveryService? uiDiscovery = null,
         IEllaiUiObservationStore? uiObservations = null,
-        EllaiProductFactCatalog? productFacts = null)
+        EllaiProductFactCatalog? productFacts = null, IGeographicRegistry? geography = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _consent = consent ?? throw new ArgumentNullException(nameof(consent));
@@ -218,6 +227,7 @@ public sealed class EllaiToolBroker
         _uiDiscovery = uiDiscovery;
         _uiObservations = uiObservations;
         _productFacts = productFacts ?? new EllaiProductFactCatalog();
+        _geography = geography;
     }
 
     public async Task<EllaiToolResult> InvokeAsync(
@@ -256,7 +266,13 @@ public sealed class EllaiToolBroker
 
         foreach (var (key, value) in request.Arguments)
         {
-            if (value.Length > 120 || LooksLikeCode(value))
+            if (canonical == EllaiToolNames.ValidateObservations && key == "observations_json")
+            {
+                if (value is null || value.Length > BoundedCsvReader.MaximumFieldCharacters)
+                    return Bound(Deny(request.ToolName, "The observations input is too large.", EllaiToolReasonCodes.InvalidArguments));
+                continue;
+            }
+            if (value is null || value.Length > 120 || LooksLikeCode(value))
             {
                 return Bound(Deny(request.ToolName, $"Argument {key} is not an allowed bounded reference.", EllaiToolReasonCodes.InvalidArguments));
             }
@@ -309,6 +325,9 @@ public sealed class EllaiToolBroker
             return Bound(await ReadUiObserveAsync(context, request, ct).ConfigureAwait(false));
         }
 
+        if (canonical == EllaiToolNames.Locations)
+            return Bound(await ReadLocationsAsync(request, ct).ConfigureAwait(false));
+
         return Bound(canonical switch
         {
             EllaiToolNames.Evidence => Allow(request.ToolName, "Authorized versioned source items.", Math.Min(request.Arguments.Count, MaxItems), request.Arguments.Count > MaxItems),
@@ -317,8 +336,70 @@ public sealed class EllaiToolBroker
             EllaiToolNames.Now => Allow(request.ToolName, DescribeNow(DateTimeOffset.UtcNow), 1, false),
             EllaiToolNames.DocsSearch => SearchDocs(request),
             EllaiToolNames.DocsGet => GetDocs(request),
+            EllaiToolNames.IngestionSchema => ReadIngestionSchema(request),
+            EllaiToolNames.ValidateObservations => ValidateObservations(request),
             _ => Deny(request.ToolName, "Unregistered tool.", EllaiToolReasonCodes.UnregisteredTool)
         });
+    }
+
+    private static EllaiToolResult ReadIngestionSchema(EllaiToolRequest request)
+    {
+        if (request.Arguments.Count != 0)
+            return Deny(request.ToolName, "This tool takes no arguments.", EllaiToolReasonCodes.InvalidArguments);
+        var summary = JsonSerializer.Serialize(new
+        {
+            schemaVersion = 1, columns = CaseCsvImportAdapter.Columns,
+            observations = "observations_json is an array of up to 32 original strings, each at most 300 characters; never objects or inferred diagnoses.",
+            capture = "Preserve source narrative, occurrence/capture timestamps and explicit unknowns. Dates with a time require an offset. Ask for missing facts without inventing them.",
+            authority = "Public intake returns a private unverified receipt. Managed-case capture requires current staff authorization and explicit report review. A source case_id is not the destination case ID. Empty workspace/owner fields use the authorized import context and submitting officer.",
+            submission = "These tools only prepare or validate capture. Use the existing report form to submit; never claim a report was saved without its durable receipt.",
+            provenance = "CaseCsvImportAdapter/v1"
+        });
+        return new(request.ToolName, true, null,
+            [new EvidenceRef("ProductFact", "ingestion-schema", "1", "capture", "ingestion-schema/1")], summary, 1, false);
+    }
+
+    private static EllaiToolResult ValidateObservations(EllaiToolRequest request)
+    {
+        if (request.Arguments.Count != 1 || !request.Arguments.TryGetValue("observations_json", out var json))
+            return Deny(request.ToolName, "Supply observations_json as an array of reported strings.", EllaiToolReasonCodes.InvalidArguments);
+        try
+        {
+            var observations = CaseCsvImportAdapter.ParseObservations(json);
+            // Do not echo source text into logs/progress or turn validation into clinical interpretation.
+            return Allow(request.ToolName, $"Valid observations format: {observations.Count} original strings. Nothing has been submitted.", 1, false);
+        }
+        catch (Exception exception) when (exception is JsonException or ArgumentException)
+        {
+            return Deny(request.ToolName, "Use a JSON array of up to 32 nonempty strings, each at most 300 characters.", EllaiToolReasonCodes.InvalidArguments);
+        }
+    }
+
+    private async Task<EllaiToolResult> ReadLocationsAsync(EllaiToolRequest request, CancellationToken ct)
+    {
+        if (request.Arguments.Keys.Any(key => key is not ("q" or "country" or "limit")) ||
+            !request.Arguments.TryGetValue("q", out var query) || string.IsNullOrWhiteSpace(query))
+            return Deny(request.ToolName, "Supply a place name to search.", EllaiToolReasonCodes.InvalidArguments);
+        var limit = 5;
+        if (request.Arguments.TryGetValue("limit", out var text) && (!int.TryParse(text, out limit) || limit is < 1 or > 10))
+            return Deny(request.ToolName, "Use a limit from 1 to 10.", EllaiToolReasonCodes.InvalidArguments);
+        request.Arguments.TryGetValue("country", out var country);
+        if (country is not null && (country.Length != 2 || country.Any(character => character is < 'A' or > 'Z')))
+            return Deny(request.ToolName, "Use a two-letter uppercase country code.", EllaiToolReasonCodes.InvalidArguments);
+        if (_geography is null) return Deny(request.ToolName, "Location search is unavailable.", EllaiToolReasonCodes.Unavailable);
+        try
+        {
+            var matches = await _geography.SearchAsync(query, country, limit, ct).ConfigureAwait(false);
+            var items = matches.Results.Take(limit).Select(item => new { item.Id, item.Name, item.CountryCode, item.Ancestors }).ToArray();
+            return new(request.ToolName, true, null,
+                items.Select(item => new EvidenceRef("GeographicRegistry", item.Id, matches.RegistryVersion, "name", item.Id)).ToArray(),
+                JsonSerializer.Serialize(new { matches.RegistryVersion, matches = items, requiresUserSelection = true }),
+                items.Length, matches.TotalCount > items.Length);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
+        {
+            return Deny(request.ToolName, "Location search is unavailable.", EllaiToolReasonCodes.Unavailable);
+        }
     }
 
     /// <summary>Live <c>ellai_state</c> projections. Without a projection
