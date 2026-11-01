@@ -198,9 +198,10 @@ public sealed class OrganizationMembershipService(
             .Where(organization => organizationIds.Contains(organization.OrganizationId))
             .ToDictionaryAsync(organization => organization.OrganizationId, cancellationToken)
             .ConfigureAwait(false);
-        var workspaces = await _dbContext.Workspaces
+        var workspaces = await _dbContext.WorkspaceOrganizations
             .AsNoTracking()
-            .Where(workspace => organizationIds.Contains(workspace.OrganizationId))
+            .Where(workspace => organizationIds.Contains(workspace.OrganizationId) && workspace.Status == PersistentResourceStatus.Active &&
+                _dbContext.Workspaces.Any(scope => scope.WorkspaceId == workspace.WorkspaceId && scope.Status == PersistentResourceStatus.Active))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 

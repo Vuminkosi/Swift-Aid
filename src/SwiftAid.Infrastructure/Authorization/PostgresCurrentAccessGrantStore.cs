@@ -73,7 +73,8 @@ public sealed class PostgresCurrentAccessGrantStore : ICurrentAccessGrantStore
         var workspace = await _dbContext.Workspaces
             .AsNoTracking()
             .SingleOrDefaultAsync(entity =>
-                entity.WorkspaceId == resource.WorkspaceId && entity.OrganizationId == resource.OrganizationId,
+                entity.WorkspaceId == resource.WorkspaceId && _dbContext.WorkspaceOrganizations.Any(link =>
+                    link.WorkspaceId == entity.WorkspaceId && link.OrganizationId == resource.OrganizationId && link.Status == PersistentResourceStatus.Active),
                 cancellationToken)
             .ConfigureAwait(false);
         var membership = await _dbContext.OrganizationMemberships

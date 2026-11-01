@@ -21,7 +21,7 @@ public sealed class WorkspaceImportClient(AuthenticationStateProvider authentica
 
     public Task<IReadOnlyList<CaseImportHistoryItem>> GetRecentAsync(CaseImportWorkspace workspace, CancellationToken ct) =>
         InScopeAsync((services, actor) => services.GetRequiredService<ICaseImportWorkspaceReader>()
-            .GetRecentAsync(actor, workspace.WorkspaceId, workspace.CountryCode, ct));
+            .GetRecentAsync(actor, workspace.WorkspaceId, workspace.CountryCode, ct, workspace.OrganizationId));
 
     public Task<CaseImportSummary?> GetAsync(Guid importId, CancellationToken ct) =>
         InScopeAsync((services, actor) => services.GetRequiredService<ICaseImportStore>().GetAsync(actor, importId, ct));

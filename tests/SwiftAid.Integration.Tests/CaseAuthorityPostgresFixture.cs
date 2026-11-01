@@ -197,6 +197,9 @@ internal sealed class CaseAuthorityPostgresFixture : IAsyncDisposable
         await dbContext.ActorAccessStates
             .Where(entity => entity.ActorId == ActorId || entity.ActorId == OwnerActorId || entity.ActorId == NewOwnerActorId)
             .ExecuteDeleteAsync().ConfigureAwait(false);
+        await dbContext.WorkspaceOrganizations
+            .Where(entity => entity.WorkspaceId == WorkspaceId || entity.WorkspaceId == AlternateWorkspaceId)
+            .ExecuteDeleteAsync().ConfigureAwait(false);
         await dbContext.Workspaces
             .Where(entity => entity.WorkspaceId == WorkspaceId || entity.WorkspaceId == AlternateWorkspaceId)
             .ExecuteDeleteAsync().ConfigureAwait(false);

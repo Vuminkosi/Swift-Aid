@@ -2372,6 +2372,10 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                     b.Property<long>("NextRow")
                         .HasColumnType("bigint");
 
+                    b.Property<string>("OrganizationId")
+                        .HasMaxLength(200)
+                        .HasColumnType("text");
+
                     b.Property<string>("State")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -2387,9 +2391,9 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
 
                     b.HasKey("ImportId");
 
-                    b.HasIndex("WorkspaceId");
-
                     b.HasIndex("ActorId", "UpdatedAtUtc");
+
+                    b.HasIndex("WorkspaceId", "OrganizationId");
 
                     b.ToTable("case_imports", "swiftaid_ingestion", t =>
                         {
@@ -3468,6 +3472,40 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.WorkspaceOrganizationEntity", b =>
+                {
+                    b.Property<string>("WorkspaceId")
+                        .HasColumnType("text")
+                        .HasColumnName("workspace_id");
+
+                    b.Property<string>("OrganizationId")
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.HasKey("WorkspaceId", "OrganizationId")
+                        .HasName("pk_workspace_organizations");
+
+                    b.HasIndex("OrganizationId", "WorkspaceId");
+
+                    b.ToTable("workspace_organizations", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_workspace_organizations_status", "status IN ('Active', 'Suspended', 'Revoked')");
+                        });
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserClaim<string>", b =>
                 {
                     b.HasOne("SwiftAid.Infrastructure.Identity.SwiftAidUser", null)
@@ -3637,10 +3675,9 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_access_grant_groups_revoker");
 
-                    b.HasOne("SwiftAid.Infrastructure.Persistence.WorkspaceEntity", null)
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.WorkspaceOrganizationEntity", null)
                         .WithMany()
                         .HasForeignKey("WorkspaceId", "OrganizationId")
-                        .HasPrincipalKey("WorkspaceId", "OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_access_grant_groups_workspace_scope");
@@ -3935,6 +3972,11 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasForeignKey("WorkspaceId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.WorkspaceOrganizationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("WorkspaceId", "OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.IntakeImports.CaseImportRowEntity", b =>
@@ -3955,10 +3997,9 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasConstraintName("fk_managed_cases_accountable_owner");
 
-                    b.HasOne("SwiftAid.Infrastructure.Persistence.WorkspaceEntity", null)
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.WorkspaceOrganizationEntity", null)
                         .WithMany()
                         .HasForeignKey("WorkspaceId", "OrganizationId")
-                        .HasPrincipalKey("WorkspaceId", "OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_managed_cases_workspace_scope");
@@ -4099,6 +4140,21 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_workspaces_organization");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.WorkspaceOrganizationEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.OrganizationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.WorkspaceEntity", null)
+                        .WithMany()
+                        .HasForeignKey("WorkspaceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreApplication", b =>

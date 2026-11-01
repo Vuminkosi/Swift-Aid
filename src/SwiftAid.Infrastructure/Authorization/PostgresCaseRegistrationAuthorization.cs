@@ -71,16 +71,22 @@ public sealed class PostgresCaseRegistrationAuthorization : ICaseRegistrationAut
             return Denied(AccessDecisionCode.ResourceSourceUnavailable);
         }
 
-        var membership = await ActiveMembershipAsync(actor.ActorId, workspace.OrganizationId, cancellationToken)
+        var organizationId = request.OrganizationId ?? workspace.OrganizationId;
+        // Holds the workspace authority anchor through commit, serializing link revocation with registration.
+        var linked = await _dbContext.Database.SqlQuery<bool>($"SELECT swiftaid_internal.lock_workspace_organization({request.WorkspaceId}, {organizationId}) AS \"Value\"")
+            .SingleAsync(cancellationToken).ConfigureAwait(false);
+        if (!linked) return Denied(AccessDecisionCode.WorkspaceOutsideGrant);
+
+        var membership = await ActiveMembershipAsync(actor.ActorId, organizationId, cancellationToken)
             .ConfigureAwait(false);
         if (membership is null)
         {
-            return await MissingMembershipCodeAsync(actor.ActorId, workspace.OrganizationId, cancellationToken)
+            return await MissingMembershipCodeAsync(actor.ActorId, organizationId, cancellationToken)
                 .ConfigureAwait(false);
         }
 
         var match = await FindGrantGroupAsync(
-            actor.ActorId, membership.MembershipId, workspace.OrganizationId, request.WorkspaceId,
+            actor.ActorId, membership.MembershipId, organizationId, request.WorkspaceId,
             scope.CountryCode, scope.Sector, null, cancellationToken).ConfigureAwait(false);
         if (match is not null)
         {
@@ -88,7 +94,7 @@ public sealed class PostgresCaseRegistrationAuthorization : ICaseRegistrationAut
         }
 
         return await MissedGrantCodeAsync(
-            actor.ActorId, membership.MembershipId, workspace.OrganizationId, request.WorkspaceId,
+            actor.ActorId, membership.MembershipId, organizationId, request.WorkspaceId,
             scope.CountryCode, scope.Sector, null, cancellationToken).ConfigureAwait(false);
     }
 
@@ -275,6 +281,8 @@ public sealed class PostgresCaseRegistrationAuthorization : ICaseRegistrationAut
                 (sensitivityCode == null || item.SensitivityCode == sensitivityCode) &&
                 organization.Status == PersistentResourceStatus.Active &&
                 workspace.Status == PersistentResourceStatus.Active &&
+                _dbContext.WorkspaceOrganizations.Any(link => link.WorkspaceId == workspace.WorkspaceId &&
+                    link.OrganizationId == organization.OrganizationId && link.Status == PersistentResourceStatus.Active) &&
                 _dbContext.AccessGrantOperations.AsNoTracking().Any(operation =>
                     operation.GrantGroupId == item.GrantGroupId &&
                     operation.Operation == CaseOperation.ReadCase)

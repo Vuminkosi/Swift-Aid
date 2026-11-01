@@ -5,7 +5,7 @@ namespace SwiftAid.Application.Cases.Registration;
 /// <summary>Trusted-workspace staff registration input; identity and initial owner come from the server actor.</summary>
 public sealed record RegisterManagedCaseRequest
 {
-    public RegisterManagedCaseRequest(Guid commandId, string workspaceId, CaseReportEventData report)
+    public RegisterManagedCaseRequest(Guid commandId, string workspaceId, CaseReportEventData report, string? organizationId = null)
     {
         if (commandId == Guid.Empty)
         {
@@ -18,6 +18,9 @@ public sealed record RegisterManagedCaseRequest
         }
 
         ArgumentNullException.ThrowIfNull(report);
+        if (organizationId is not null && (string.IsNullOrWhiteSpace(organizationId) || organizationId.Length > 200 ||
+            organizationId != organizationId.Trim() || organizationId.Any(char.IsControl)))
+            throw new ArgumentException("A canonical organization identifier is required.", nameof(organizationId));
         var (reportCountry, confirmations, originalAudioPresent) = report switch
         {
             CaseReportEventData.HumanV2 human => (
@@ -42,6 +45,7 @@ public sealed record RegisterManagedCaseRequest
 
         CommandId = commandId;
         WorkspaceId = workspaceId;
+        OrganizationId = organizationId;
         Report = report;
     }
 
@@ -49,6 +53,9 @@ public sealed record RegisterManagedCaseRequest
 
     /// <summary>A scope hint checked against the authenticated actor's current grant.</summary>
     public string WorkspaceId { get; }
+
+    /// <summary>Explicit organization within a shared workspace; omitted legacy requests use its original organization.</summary>
+    public string? OrganizationId { get; }
 
     /// <summary>Immutable typed report data; confirmations are carried by the HumanV2/AnimalV2 variant.</summary>
     public CaseReportEventData Report { get; }

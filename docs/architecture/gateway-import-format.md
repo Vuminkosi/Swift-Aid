@@ -66,8 +66,18 @@ python scripts/import-cases.py designs/data/zimbabwe_10500_cases.csv --gateway h
 
 The context file contains the reviewed object above, not credentials. HTTP is allowed only for loopback development. The command is optional tooling, not a replacement for the workspace import flow.
 
-Deploy migration `20261101054203_DurableCaseImports` after the ingestion-outbox migration. The existing `infra/postgres/case-authority-lock-helper.sql` must also be provisioned; EF migrations alone do not install the restricted replay helper. Restricted runtime grants for the new ledger require deployment verification before enabling imports outside development.
+Deploy migration `20261101054203_DurableCaseImports` after the ingestion-outbox migration, followed by `20261101061649_SharedOrganizationWorkspaces`. The existing `infra/postgres/case-authority-lock-helper.sql` must also be provisioned; EF migrations alone do not install the restricted replay helper. Restricted runtime grants for the new ledger require deployment verification before enabling imports outside development.
 
 Verification on 2026-11-01: six real PostgreSQL / ASP.NET TestServer tests cover creation, encrypted source retention, reopened-context replay, injected checkpoint failure after committed registration, independent row rejection, lease conflict, immutable source, checkpoint gaps, owner/epoch denial, HTTP authentication, cookie antiforgery rejection and history retrieval. Authentication and policy are deterministic fixtures; live identity/provider/browser validation is NOT VERIFIED. The supplied 15,000-row test verifies parsing/mapping only, not database import throughput.
 
 Verification: focused application tests cover malformed CSV, field bounds, cancellation, string-array compatibility, source preservation, unknown facts, owner mismatch, deterministic source hashes, tool scope/budget and registry provenance. The supplied-file fixture test is opt-in via `SWIFTAID_TEST_CASE_CSV_DIRECTORY`; missing local files are never silently fabricated.
+
+## Shared workspaces
+
+Owner-directed decision, 2026-11-01: multiple organizations can share a workspace. `workspace_organizations` stores explicit active/suspended/revoked links. Each case still belongs to exactly one organization; linking a workspace does not grant membership, country/sector permissions or access to another organization's cases. Access grants and case projections reference the composite link. Original workspace organizations are backfilled, and existing EF workspace-creation callers create the original link automatically.
+
+The workspace Imports page selects an organization, workspace and occurrence country from current authorized destinations. New import contexts include optional `organizationId`; the managed registration API accepts the same optional field. It is checked against current membership and grants, persisted with the import and bound to the command hash. Omitting it preserves the original workspace organization and existing canonical receipt bytes. Null is omitted from import-context serialization so pre-existing imports can resume with their original hashes. Old clients remain compatible but cannot choose a secondary organization until they supply the new field.
+
+Link revocation serializes against the existing workspace authority lock, including new registrations. Notifications, case access, command/assignment validation, membership workspace listings and import history honor the active link. Resuming an import reuses its durable organization context. History remains actor-owned and organization-filtered.
+
+Link provisioning is an operator workflow using `infra/postgres/workspace-organization-link.sql`; no new self-service administration permission is inferred. See the operational runbook. Cases and source history are retained when a link is suspended or revoked. Automatic downgrade is refused when secondary links exist; fix forward.

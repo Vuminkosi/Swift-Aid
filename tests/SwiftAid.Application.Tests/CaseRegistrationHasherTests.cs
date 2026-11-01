@@ -15,6 +15,19 @@ public sealed class CaseRegistrationHasherTests
     private static readonly Guid ReportId = Guid.Parse("faed0d15-8074-4d75-ae25-a76742d49a12");
 
     [Fact]
+    public void Selected_organization_is_bound_to_the_receipt_without_changing_legacy_hashes()
+    {
+        var legacy = CreateRequest();
+        var actor = CreateActor("officer-1");
+        var first = new RegisterManagedCaseRequest(legacy.CommandId, legacy.WorkspaceId, legacy.Report, "organization-a");
+        var second = new RegisterManagedCaseRequest(legacy.CommandId, legacy.WorkspaceId, legacy.Report, "organization-b");
+        var firstHash = CanonicalCaseRegistrationHasher.CreateSnapshot(actor, first).CanonicalPayloadHash.ToArray();
+        Assert.NotEqual(firstHash, CanonicalCaseRegistrationHasher.CreateSnapshot(actor, second).CanonicalPayloadHash.ToArray());
+        Assert.NotEqual(firstHash, CanonicalCaseRegistrationHasher.CreateSnapshot(actor, legacy).CanonicalPayloadHash.ToArray());
+        Assert.Equal("organization-a", CanonicalCaseRegistrationHasher.CreateSnapshot(actor, first).OrganizationId);
+    }
+
+    [Fact]
     public void Canonical_json_and_hash_match_the_normative_utf8_golden_vector()
     {
         const string expectedJson = "{\"protocolId\":\"swiftaid.case-command-receipt\",\"receiptProtocolVersion\":1,\"wireCommandSchemaVersion\":1,\"actorId\":\"officer-1\",\"commandId\":\"6a2bda2c-0d06-4e8a-9a56-36b86d1d4401\",\"commandType\":\"RegisterManagedCase\",\"workspaceId\":\"workspace-1\",\"report\":{\"kind\":\"HumanV2\",\"data\":{\"reportId\":\"faed0d15-8074-4d75-ae25-a76742d49a12\",\"context\":{\"occurrence\":{\"value\":{\"state\":\"Unknown\",\"value\":null},\"provenance\":{\"source\":\"ReporterObservation\",\"stableReference\":\"obs-1\"}},\"capturedAtUtc\":null,\"capturedOffset\":null,\"capturedZoneId\":null,\"capturePrecision\":\"Unknown\",\"location\":{\"countryCode\":\"SZ\",\"region\":{\"reportedName\":null,\"normalizedId\":null,\"presence\":\"Unknown\"},\"area\":{\"reportedName\":null,\"normalizedId\":null,\"presence\":\"Unknown\"},\"locality\":{\"reportedName\":null,\"normalizedId\":null,\"presence\":\"Unknown\"},\"latitude\":null,\"longitude\":null,\"accuracyMetres\":null,\"source\":\"Reporter\",\"precision\":\"Unknown\",\"catalogueVersion\":null}},\"pseudonymousSubjectReference\":{\"value\":{\"state\":\"Unknown\",\"value\":null},\"provenance\":{\"source\":\"ReporterObservation\",\"stableReference\":\"obs-1\"}},\"ageYears\":{\"value\":{\"state\":\"Unknown\",\"value\":null},\"provenance\":{\"source\":\"ReporterObservation\",\"stableReference\":\"obs-1\"}},\"reportedConcern\":{\"value\":{\"state\":\"Unknown\",\"value\":null},\"provenance\":{\"source\":\"ReporterObservation\",\"stableReference\":\"obs-1\"}},\"evidence\":{\"narrative\":{\"text\":\"Concern: naïve\",\"provenance\":{\"source\":\"ReporterNarrative\",\"stableReference\":\"narrative-1\"}},\"observations\":[],\"originalAudio\":null}}},\"confirmations\":{\"reportReviewConfirmed\":true,\"occurrenceCountryCode\":\"SZ\",\"occurrenceCountryCatalogueVersion\":\"catalogue-3\",\"occurrenceCountryConfirmed\":true,\"processingConfirmed\":true,\"processingPolicyReference\":\"policy-intake\",\"processingPolicyVersion\":\"2026-10\",\"recordingConfirmed\":null,\"recordingPolicyReference\":null,\"recordingPolicyVersion\":null}}";

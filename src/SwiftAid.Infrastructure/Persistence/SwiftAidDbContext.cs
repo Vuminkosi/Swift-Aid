@@ -30,6 +30,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
     public DbSet<ActorAccessStateEntity> ActorAccessStates => Set<ActorAccessStateEntity>();
     public DbSet<OrganizationEntity> Organizations => Set<OrganizationEntity>();
     public DbSet<WorkspaceEntity> Workspaces => Set<WorkspaceEntity>();
+    public DbSet<WorkspaceOrganizationEntity> WorkspaceOrganizations => Set<WorkspaceOrganizationEntity>();
     public DbSet<OrganizationMembershipEntity> OrganizationMemberships => Set<OrganizationMembershipEntity>();
     public DbSet<AccessGrantGroupEntity> AccessGrantGroups => Set<AccessGrantGroupEntity>();
     public DbSet<AccessGrantRegionEntity> AccessGrantRegions => Set<AccessGrantRegionEntity>();
@@ -68,6 +69,32 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
     public DbSet<Ellai.EllaiTopicEntity> EllaiTopics => Set<Ellai.EllaiTopicEntity>();
     public DbSet<Ellai.EllaiConsentGrantEntity> EllaiConsentGrants => Set<Ellai.EllaiConsentGrantEntity>();
     public DbSet<Ellai.EllaiUsageSampleEntity> EllaiUsageSamples => Set<Ellai.EllaiUsageSampleEntity>();
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        AddInitialWorkspaceOrganizations();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        AddInitialWorkspaceOrganizations();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void AddInitialWorkspaceOrganizations()
+    {
+        // Keep existing workspace-creation callers compatible. Additional organizations are explicit links.
+        foreach (var entry in ChangeTracker.Entries<WorkspaceEntity>().Where(entry => entry.State == EntityState.Added).ToArray())
+        {
+            var workspace = entry.Entity;
+            if (ChangeTracker.Entries<WorkspaceOrganizationEntity>().Any(link => link.Entity.WorkspaceId == workspace.WorkspaceId &&
+                link.Entity.OrganizationId == workspace.OrganizationId)) continue;
+            WorkspaceOrganizations.Add(new WorkspaceOrganizationEntity { WorkspaceId = workspace.WorkspaceId,
+                OrganizationId = workspace.OrganizationId, Status = workspace.Status,
+                CreatedAtUtc = DateTimeOffset.UtcNow, UpdatedAtUtc = DateTimeOffset.UtcNow });
+        }
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -273,6 +300,19 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         workspaces.Property(entity => entity.Status).HasColumnName("status").HasConversion<string>().HasColumnType("text");
         workspaces.HasOne<OrganizationEntity>().WithMany().HasForeignKey(entity => entity.OrganizationId)
             .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_workspaces_organization");
+
+        var links = modelBuilder.Entity<WorkspaceOrganizationEntity>();
+        links.ToTable("workspace_organizations", table =>
+            table.HasCheckConstraint("ck_workspace_organizations_status", "status IN ('Active', 'Suspended', 'Revoked')"));
+        links.HasKey(entity => new { entity.WorkspaceId, entity.OrganizationId }).HasName("pk_workspace_organizations");
+        links.Property(entity => entity.WorkspaceId).HasColumnName("workspace_id").HasColumnType("text");
+        links.Property(entity => entity.OrganizationId).HasColumnName("organization_id").HasColumnType("text");
+        links.Property(entity => entity.Status).HasColumnName("status").HasConversion<string>().HasColumnType("text");
+        links.Property(entity => entity.CreatedAtUtc).HasColumnName("created_at_utc");
+        links.Property(entity => entity.UpdatedAtUtc).HasColumnName("updated_at_utc");
+        links.HasIndex(entity => new { entity.OrganizationId, entity.WorkspaceId });
+        links.HasOne<WorkspaceEntity>().WithMany().HasForeignKey(entity => entity.WorkspaceId).OnDelete(DeleteBehavior.Restrict);
+        links.HasOne<OrganizationEntity>().WithMany().HasForeignKey(entity => entity.OrganizationId).OnDelete(DeleteBehavior.Restrict);
     }
 
     private static void ConfigureOrganizationsAndAccess(ModelBuilder modelBuilder)
@@ -408,7 +448,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
             .HasForeignKey(entity => new { entity.MembershipId, entity.ActorId, entity.OrganizationId })
             .HasPrincipalKey(entity => new { entity.MembershipId, entity.ActorId, entity.OrganizationId })
             .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_access_grant_groups_membership_scope");
-        grant.HasOne<WorkspaceEntity>().WithMany()
+        grant.HasOne<WorkspaceOrganizationEntity>().WithMany()
             .HasForeignKey(entity => new { entity.WorkspaceId, entity.OrganizationId })
             .HasPrincipalKey(entity => new { entity.WorkspaceId, entity.OrganizationId })
             .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_access_grant_groups_workspace_scope");
@@ -495,7 +535,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         managedCase.Property(entity => entity.OutcomeVersion).HasColumnName("outcome_version");
         managedCase.Property(entity => entity.CreatedAtUtc).HasColumnName("created_at_utc").HasColumnType("timestamp with time zone");
         managedCase.Property(entity => entity.UpdatedAtUtc).HasColumnName("updated_at_utc").HasColumnType("timestamp with time zone");
-        managedCase.HasOne<WorkspaceEntity>().WithMany()
+        managedCase.HasOne<WorkspaceOrganizationEntity>().WithMany()
             .HasForeignKey(entity => new { entity.WorkspaceId, entity.OrganizationId })
             .HasPrincipalKey(entity => new { entity.WorkspaceId, entity.OrganizationId })
             .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_managed_cases_workspace_scope");

@@ -68,6 +68,16 @@ public sealed class WorkspaceEntity
     public PersistentResourceStatus Status { get; set; }
 }
 
+/// <summary>Explicit participating organization; workspace sharing never implies case sharing.</summary>
+public sealed class WorkspaceOrganizationEntity
+{
+    public required string WorkspaceId { get; set; }
+    public required string OrganizationId { get; set; }
+    public PersistentResourceStatus Status { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset UpdatedAtUtc { get; set; }
+}
+
 public sealed class OrganizationMembershipEntity
 {
     public Guid MembershipId { get; set; }

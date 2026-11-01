@@ -34,6 +34,7 @@ public sealed class CaseImportBrowserTests(ITestOutputHelper output)
     public async Task Workspace_file_pause_refresh_resume_and_saved_cases_work_in_chromium()
     {
         await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
+        var shared = await SharedWorkspaceImportTests.AddOrganizationAsync(fixture.Db, CaseImportPostgresTests.Actor.ActorId);
         var root = FindRoot();
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
@@ -70,11 +71,16 @@ public sealed class CaseImportBrowserTests(ITestOutputHelper output)
         Directory.CreateDirectory(directory);
         var file = Path.Combine(directory, "synthetic-import.csv");
         await File.WriteAllTextAsync(file, csv);
+        var sharedCommand = Guid.NewGuid();
+        var sharedFile = Path.Combine(directory, "synthetic-shared-import.csv");
+        await File.WriteAllTextAsync(sharedFile, CaseImportPostgresTests.Csv(sharedCommand));
         var start = new ProcessStartInfo("node") { WorkingDirectory = root, UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
         start.ArgumentList.Add(Path.Combine(root, "tests", "SwiftAid.Ui.Tests", "workspace-import.browser.cjs"));
         start.Environment["SWIFTAID_IMPORT_BROWSER_URL"] = address;
         start.Environment["SWIFTAID_IMPORT_BROWSER_FILE"] = file;
         start.Environment["SWIFTAID_IMPORT_BROWSER_ARTIFACTS"] = directory;
+        start.Environment["SWIFTAID_IMPORT_BROWSER_SHARED_ORG"] = shared.Organization;
+        start.Environment["SWIFTAID_IMPORT_BROWSER_SHARED_FILE"] = sharedFile;
         using var process = Process.Start(start)!;
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
@@ -86,7 +92,10 @@ public sealed class CaseImportBrowserTests(ITestOutputHelper output)
         Assert.Equal(0, process.ExitCode);
         Assert.Equal(250, await fixture.Db.CommandReceipts.CountAsync(row => commands.Contains(row.CommandId)));
         Assert.Equal(500, await fixture.Db.CaseEvents.CountAsync(row => commands.Contains(row.CommandId)));
+        var sharedCase = await fixture.Db.CommandReceipts.Where(row => row.CommandId == sharedCommand).Select(row => row.CaseId).SingleAsync();
+        Assert.True(await fixture.Db.ManagedCases.AnyAsync(row => row.CaseId == sharedCase && row.OrganizationId == shared.Organization && row.WorkspaceId == "workspace-1"));
         File.Delete(file);
+        File.Delete(sharedFile);
     }
 
     private static string FindRoot()

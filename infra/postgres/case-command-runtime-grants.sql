@@ -71,6 +71,7 @@ WITH required_relations(relation_name) AS (
     VALUES
         ('organizations'),
         ('workspaces'),
+        ('workspace_organizations'),
         ('actor_access_states'),
         ('actors'),
         ('organization_memberships'),
@@ -86,7 +87,7 @@ WITH required_relations(relation_name) AS (
         ('domain_outbox'),
         ('security_audit_entries')
 )
-SELECT count(*) = 16 AS required_relations_precondition
+SELECT count(*) = 17 AS required_relations_precondition
   FROM required_relations AS required
   JOIN pg_catalog.pg_namespace AS namespace ON namespace.nspname = 'public'
   JOIN pg_catalog.pg_class AS relation
@@ -155,6 +156,7 @@ WITH grant_contract(relation_name, update_columns, insert_columns) AS (
     VALUES
         ('organizations', ARRAY[]::text[], ARRAY[]::text[]),
         ('workspaces', ARRAY[]::text[], ARRAY[]::text[]),
+        ('workspace_organizations', ARRAY[]::text[], ARRAY[]::text[]),
         ('actor_access_states', ARRAY['access_epoch', 'version', 'updated_at_utc']::text[], ARRAY[]::text[]),
         ('actors', ARRAY[]::text[], ARRAY[]::text[]),
         ('organization_memberships', ARRAY[]::text[], ARRAY[]::text[]),
@@ -223,6 +225,7 @@ WITH select_allowlist(relation_name) AS (
     VALUES
         ('organizations'),
         ('workspaces'),
+        ('workspace_organizations'),
         ('actor_access_states'),
         ('actors'),
         ('organization_memberships'),
@@ -310,6 +313,7 @@ GRANT UPDATE (
 GRANT SELECT ON public.protected_event_payloads TO :"runtime_role";
 GRANT SELECT ON public.case_events TO :"runtime_role";
 GRANT SELECT ON public.command_receipts TO :"runtime_role";
+GRANT SELECT ON public.workspace_organizations TO :"runtime_role";
 
 GRANT INSERT (payload_id, protected_bytes, protection_purpose_version, created_at_utc)
     ON public.protected_event_payloads TO :"runtime_role";
@@ -337,6 +341,7 @@ WITH grant_contract(relation_name, update_columns, insert_columns) AS (
     VALUES
         ('organizations', ARRAY[]::text[], ARRAY[]::text[]),
         ('workspaces', ARRAY[]::text[], ARRAY[]::text[]),
+        ('workspace_organizations', ARRAY[]::text[], ARRAY[]::text[]),
         ('actor_access_states', ARRAY['access_epoch', 'version', 'updated_at_utc']::text[], ARRAY[]::text[]),
         ('actors', ARRAY[]::text[], ARRAY[]::text[]),
         ('organization_memberships', ARRAY[]::text[], ARRAY[]::text[]),
@@ -445,6 +450,7 @@ SELECT NOT EXISTS (
            VALUES
                ('organizations'),
                ('workspaces'),
+               ('workspace_organizations'),
                ('actor_access_states'),
                ('actors'),
                ('organization_memberships'),

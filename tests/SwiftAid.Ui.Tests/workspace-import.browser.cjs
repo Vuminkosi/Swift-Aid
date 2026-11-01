@@ -59,8 +59,29 @@ async function main() {
         await page.getByRole("heading", { name: "Reports to review", exact: true }).waitFor();
         assert.match(await page.locator(".case-imports__counts").innerText(), /Cases saved\s+1/);
         await page.screenshot({ path: path.join(artifacts, "workspace-import-restored-issue.png"), fullPage: true });
+        await page.getByRole("button", { name: "New import", exact: true }).click();
+        await page.getByRole("button", { name: "Import cases", exact: true }).waitFor();
+        const sharedLabel = process.env.SWIFTAID_IMPORT_BROWSER_SHARED_ORG + " / workspace-1 · Zimbabwe";
+        const selectSharedOrganization = async () => {
+            await page.getByLabel("Organization, workspace and country", { exact: true }).click();
+            await page.getByText(sharedLabel, { exact: true }).last().click();
+            await page.getByText("Organization: " + process.env.SWIFTAID_IMPORT_BROWSER_SHARED_ORG, { exact: true }).waitFor();
+        };
+        await selectSharedOrganization();
+        await page.getByLabel("Case reports file", { exact: true }).setInputFiles(process.env.SWIFTAID_IMPORT_BROWSER_SHARED_FILE);
+        await page.getByRole("checkbox", { name: /reviewed these reports/ }).check();
+        await page.getByRole("checkbox", { name: /may be processed/ }).check();
+        await page.getByRole("button", { name: "Import cases", exact: true }).click();
+        await page.getByText("Import complete. Your cases are saved.", { exact: true }).waitFor();
+        assert.match(await page.locator(".case-imports__counts").innerText(), /Cases saved\s+1/);
+        await page.reload();
+        await selectSharedOrganization();
+        await page.getByRole("button", { name: "View result", exact: true }).first().click();
+        await page.getByText("Import complete. Your cases are saved.", { exact: true }).waitFor();
+        assert.match(await page.locator(".case-imports__counts").innerText(), /Cases saved\s+1/);
+        await page.screenshot({ path: path.join(artifacts, "workspace-import-shared-organization.png"), fullPage: true });
         assert.deepEqual(errors, []);
-        const result = { scenario: "250 rows, pause, refresh, resume, durable restore, invalid-row recovery", elapsedMs: Date.now() - started, pageErrors: errors, desktop: "1440x1000", compact: "390x844", authentication: "fixture", persistence: "real PostgreSQL" };
+        const result = { scenario: "250 rows, pause, refresh, resume, durable restore, invalid-row recovery, second organization in shared workspace", elapsedMs: Date.now() - started, pageErrors: errors, desktop: "1440x1000", compact: "390x844", authentication: "fixture", persistence: "real PostgreSQL" };
         fs.writeFileSync(path.join(artifacts, "result.json"), JSON.stringify(result, null, 2));
         console.log(JSON.stringify(result));
     } finally { await browser.close(); }

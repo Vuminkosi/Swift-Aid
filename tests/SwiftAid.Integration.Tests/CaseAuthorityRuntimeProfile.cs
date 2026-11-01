@@ -25,7 +25,7 @@ internal sealed class CaseAuthorityRuntimeProfile : IAsyncDisposable
     ];
 
     private static readonly string[] RuntimeScriptSelectRelations =
-    ["protected_event_payloads", "case_events", "command_receipts"];
+    ["protected_event_payloads", "case_events", "command_receipts", "workspace_organizations"];
 
     private static readonly IReadOnlyDictionary<string, string[]> HelperColumns = new Dictionary<string, string[]>(StringComparer.Ordinal)
     {

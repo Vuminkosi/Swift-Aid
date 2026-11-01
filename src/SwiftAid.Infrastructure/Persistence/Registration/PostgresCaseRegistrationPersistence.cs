@@ -462,6 +462,7 @@ public sealed class PostgresCaseRegistrationPersistence : ICaseRegistrationPersi
                 item.ActorId == snapshot.ActorId &&
                 member.ActorId == snapshot.ActorId &&
                 item.OrganizationId == member.OrganizationId &&
+                (snapshot.OrganizationId == null || item.OrganizationId == snapshot.OrganizationId) &&
                 member.Status == PersistentMembershipStatus.Active &&
                 member.ValidFromUtc <= request.RecordedAtUtc &&
                 (member.ExpiresAtUtc == null || member.ExpiresAtUtc > request.RecordedAtUtc) &&
@@ -473,6 +474,8 @@ public sealed class PostgresCaseRegistrationPersistence : ICaseRegistrationPersi
                 item.Sector == sector &&
                 organization.Status == PersistentResourceStatus.Active &&
                 workspace.Status == PersistentResourceStatus.Active &&
+                _dbContext.WorkspaceOrganizations.Any(link => link.WorkspaceId == item.WorkspaceId &&
+                    link.OrganizationId == item.OrganizationId && link.Status == PersistentResourceStatus.Active) &&
                 access.AccessEpoch == request.AccessEpoch &&
                 _dbContext.AccessGrantOperations.AsNoTracking().Any(operation =>
                     operation.GrantGroupId == item.GrantGroupId &&

@@ -50,6 +50,20 @@ For intake, use `swiftaid_intake.intake_outbox` and `attempts`. Check exactly on
 - Consumer restart/replay, poison processing, media reconciliation and late-data detection: not implemented by the dispatch slice. Do not purge retained messages based on publication timestamps.
 - Rollback: disable dispatch first. Prefer fix-forward. Dropping the additive columns loses delivery diagnostics and requires deliberate operator review.
 
+## Shared workspace rollout and links
+
+Apply `20261101061649_SharedOrganizationWorkspaces` before deploying the updated application. It backfills each original organization link, adds the optional import organization and retargets the existing case/grant composite foreign keys. It does not move or share existing cases. The migration also installs a fixed-search-path, PUBLIC-revoked lock function and a link-change trigger. Existing restricted case readers need SELECT on `workspace_organizations`; registration runtimes additionally need EXECUTE on `swiftaid_internal.lock_workspace_organization(text,text)`. Run the reviewed role provisioning scripts with a privileged deployment identity, never the application login.
+
+Only a privileged database operator may add or change a link. The application case-writer profile has no link writes. Example, using a separately configured secure PostgreSQL connection (no credentials in the command):
+
+```powershell
+psql -v workspace_id=YOUR_WORKSPACE -v organization_id=YOUR_ORGANIZATION -v operator_actor_id=YOUR_REGISTERED_OPERATOR -v link_status=Active -v change_reference=YOUR_CHANGE_REFERENCE -f infra/postgres/workspace-organization-link.sql
+```
+
+Use `Suspended` or `Revoked` to disable participation while retaining historical references. The script uses one transaction, a bounded lock wait and the existing security audit ledger, including the database operator, IDs and change reference. It requires active workspace/organization resources and a registered active operator. It does not create memberships, access grants, case shares or approval receipts. Concurrent case work finishes before revocation commits; subsequent checks deny the revoked link. Existing cases keep their original organization. A workspace's legacy/default organization must not be changed as a shortcut for relinking historical data.
+
+The original organization is retained for old-client requests that omit `organizationId`. New imports explicitly select their organization. Adding secondary links is a forward migration: the downgrade guard refuses to remove a populated shared-workspace relationship.
+
 ## Isolated tests
 
 Set `SWIFTAID_RUN_INTAKE_POSTGRES_FIXTURES=1` and `SWIFTAID_TEST_INTAKE_POSTGRES_CONNECTION` to a disposable loopback database named `swiftaid_intake_test`. The tests delete outbox fixture rows. Set `SWIFTAID_TEST_INGESTION_NATS_URL=nats://127.0.0.1:44229` to a disposable broker for the crash/replay case. Never point these at shared data.

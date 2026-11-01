@@ -31,13 +31,17 @@
             <MudItem xs="12" md="7">
                 <MudPaper Outlined="true" Elevation="0" Class="pa-4">
                     <MudStack Spacing="3">
-                        <MudSelect T="CaseImportWorkspace" Label="Workspace and country" Value="_workspace" ValueChanged="SelectWorkspaceAsync"
+                        <MudSelect T="CaseImportWorkspace" Label="Organization, workspace and country" Value="_workspace" ValueChanged="SelectWorkspaceAsync"
                                    Disabled="@(_busy || _importId.HasValue)" Variant="Variant.Outlined" ToStringFunc="WorkspaceLabel">
                             @foreach (var workspace in _workspaces)
                             {
                                 <MudSelectItem T="CaseImportWorkspace" Value="workspace">@WorkspaceLabel(workspace)</MudSelectItem>
                             }
                         </MudSelect>
+                        @if (_workspace is not null)
+                        {
+                            <MudText Typo="Typo.caption">Organization: @_workspace.OrganizationId</MudText>
+                        }
                         <div class="case-imports__file">
                             <label for="case-import-file">Case reports file</label>
                             <InputFile @key="_filePickerGeneration" id="case-import-file" OnChange="SelectFile" accept=".csv,text/csv" disabled="@(_busy || _summary?.State == "Completed")" />
@@ -171,7 +175,7 @@
     }
 
     private string WorkspaceLabel(CaseImportWorkspace? workspace) => workspace is null ? string.Empty :
-        $"{workspace.WorkspaceId} · {_catalogue?.Countries.FirstOrDefault(country => country.Code == workspace.CountryCode)?.Label ?? workspace.CountryCode}";
+        $"{workspace.OrganizationId} / {workspace.WorkspaceId} · {_catalogue?.Countries.FirstOrDefault(country => country.Code == workspace.CountryCode)?.Label ?? workspace.CountryCode}";
 
     private async Task SelectWorkspaceAsync(CaseImportWorkspace? workspace)
     {
@@ -199,12 +203,13 @@
         _pause = false;
         _issues.Clear();
         _run = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-        _context ??= new(_workspace!.WorkspaceId, new(true, _workspace.CountryCode, _catalogue.Version,
-            true, true, _policy.Reference, _policy.Version, null, null, null));
         _importId ??= Guid.NewGuid();
         try
         {
             _summary = await Imports.GetAsync(_importId.Value, _run.Token);
+            _context ??= new(_workspace!.WorkspaceId, new(true, _workspace.CountryCode, _catalogue.Version,
+                true, true, _policy.Reference, _policy.Version, null, null, null),
+                _summary is null ? _workspace.OrganizationId : _summary.OrganizationId);
             if (_summary?.State == "Completed") { _message = CompletionMessage(); return; }
             await using var stream = _file!.OpenReadStream(64L * 1024 * 1024, _run.Token);
             using var reader = new StreamReader(stream, new UTF8Encoding(false, true), false, 4096, leaveOpen: true);

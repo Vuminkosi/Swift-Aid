@@ -9,6 +9,6 @@ public sealed record CaseImportHistoryItem(Guid ImportId, string WorkspaceId, st
 public interface ICaseImportWorkspaceReader
 {
     Task<IReadOnlyList<CaseImportWorkspace>> GetWorkspacesAsync(ActorContext actor, CancellationToken ct);
-    Task<IReadOnlyList<CaseImportHistoryItem>> GetRecentAsync(ActorContext actor, string workspaceId, string countryCode, CancellationToken ct);
+    Task<IReadOnlyList<CaseImportHistoryItem>> GetRecentAsync(ActorContext actor, string workspaceId, string countryCode, CancellationToken ct, string? organizationId = null);
     Task<IReadOnlyList<CaseImportRowOutcome>> GetIssuesAsync(ActorContext actor, Guid importId, long afterRow, CancellationToken ct);
 }

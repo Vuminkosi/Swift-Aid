@@ -17,6 +17,9 @@ public sealed class CaseCsvImportService(ICaseImportStore store, IManagedCaseReg
     {
         if (string.IsNullOrWhiteSpace(context.WorkspaceId) || context.WorkspaceId.Length > 200 || context.Confirmations is null)
             throw new CaseImportException("invalid-import-context");
+        if (context.OrganizationId is not null && (string.IsNullOrWhiteSpace(context.OrganizationId) || context.OrganizationId.Length > 200 ||
+            context.OrganizationId != context.OrganizationId.Trim() || context.OrganizationId.Any(char.IsControl)))
+            throw new CaseImportException("invalid-import-context");
         // Check context shape before persisting an accepted import. Country/policy currency is also checked per row.
         var confirmations = context.Confirmations;
         if (!confirmations.ReportReviewConfirmed || !confirmations.ProcessingConfirmed || !confirmations.OccurrenceCountryConfirmed ||
@@ -63,7 +66,7 @@ public sealed class CaseCsvImportService(ICaseImportStore store, IManagedCaseReg
                     {
                         var report = IntakePromotionMapper.ToCapturedReport(record.CommandId,
                             $"csv:{record.CommandId:N}:{record.SourceReference}", record.Submission);
-                        var request = new RegisterManagedCaseRequest(record.CommandId, context.WorkspaceId, report);
+                        var request = new RegisterManagedCaseRequest(record.CommandId, context.WorkspaceId, report, context.OrganizationId);
                         var result = await registration.RegisterAsync(actor, request, ct);
                         var status = result.Status == CaseRegistrationStatus.Unavailable
                             ? attempts >= 5 ? "Failed" : "RetryableFailure"

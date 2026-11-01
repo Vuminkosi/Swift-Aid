@@ -5,7 +5,7 @@ namespace SwiftAid.Application.Intake.Imports;
 public sealed record CaseImportLease(Guid ImportId, Guid LeaseId, ActorContext Actor, CaseImportContext Context);
 public sealed record CaseImportRowOutcome(long RowNumber, Guid? CommandId, string Status, Guid? CaseId, string? ErrorCode);
 public sealed record CaseImportSummary(Guid ImportId, string State, long NextRow, long Accepted, long Rejected,
-    long Retryable, long Unresolved, string? ErrorCode, DateTimeOffset UpdatedAtUtc);
+    long Retryable, long Unresolved, string? ErrorCode, DateTimeOffset UpdatedAtUtc, string? OrganizationId = null);
 public sealed record CaseImportBatchResult(Guid ImportId, IReadOnlyList<CaseImportRowOutcome> Rows, CaseImportSummary? Summary, string? ErrorCode);
 
 public sealed class CaseImportException(string code) : Exception("The import operation could not be completed.")

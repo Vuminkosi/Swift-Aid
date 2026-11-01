@@ -272,7 +272,9 @@ public sealed class PostgresCaseCommandPersistence : ICaseCommandPersistence
                 SELECT 1
                 FROM public.managed_cases AS mc
                 JOIN public.organizations AS org ON org.organization_id = mc.organization_id
-                JOIN public.workspaces AS ws ON ws.workspace_id = mc.workspace_id AND ws.organization_id = mc.organization_id
+                JOIN public.workspaces AS ws ON ws.workspace_id = mc.workspace_id
+                JOIN public.workspace_organizations AS workspace_link ON workspace_link.workspace_id = mc.workspace_id
+                  AND workspace_link.organization_id = mc.organization_id AND workspace_link.status = 'Active'
                 JOIN public.actors AS actor ON actor.actor_id = @target_actor_id
                 JOIN public.actor_access_states AS access_state ON access_state.actor_id = actor.actor_id
                 JOIN public.organization_memberships AS member
@@ -675,7 +677,10 @@ public sealed class PostgresCaseCommandPersistence : ICaseCommandPersistence
               AND (actor.expires_at_utc IS NULL OR actor.expires_at_utc > clock_timestamp())
               AND org.organization_id = mc.organization_id AND org.status = 'Active'
               AND workspace.workspace_id = mc.workspace_id
-              AND workspace.organization_id = mc.organization_id AND workspace.status = 'Active'
+              AND workspace.status = 'Active'
+              AND EXISTS (SELECT 1 FROM public.workspace_organizations workspace_link
+                  WHERE workspace_link.workspace_id = mc.workspace_id AND workspace_link.organization_id = mc.organization_id
+                    AND workspace_link.status = 'Active')
               AND member.actor_id = actor.actor_id
               AND member.organization_id = mc.organization_id
               AND member.status = 'Active'

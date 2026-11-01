@@ -8,6 +8,7 @@ public sealed class CaseImportEntity
     public Guid ImportId { get; set; }
     public required string ActorId { get; set; }
     public required string WorkspaceId { get; set; }
+    public string? OrganizationId { get; set; }
     public required string CountryCode { get; set; }
     public required byte[] ContextHash { get; set; }
     public required string State { get; set; }
@@ -48,6 +49,8 @@ public sealed class CaseImportConfiguration : IEntityTypeConfiguration<CaseImpor
         builder.HasKey(row => row.ImportId);
         builder.Property(row => row.ActorId).HasMaxLength(200);
         builder.Property(row => row.WorkspaceId).HasMaxLength(200);
+        builder.Property(row => row.OrganizationId).HasMaxLength(200);
+        builder.HasOne<WorkspaceOrganizationEntity>().WithMany().HasForeignKey(row => new { row.WorkspaceId, row.OrganizationId }).OnDelete(DeleteBehavior.Restrict);
         builder.Property(row => row.CountryCode).HasMaxLength(2);
         builder.Property(row => row.State).HasMaxLength(32);
         builder.Property(row => row.ErrorCode).HasMaxLength(80);

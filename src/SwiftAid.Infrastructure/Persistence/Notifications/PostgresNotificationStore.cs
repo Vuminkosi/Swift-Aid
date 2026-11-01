@@ -189,7 +189,8 @@ public sealed class PostgresNotificationStore(
                     organization.Status == PersistentResourceStatus.Active) &&
                 dbContext.Workspaces.Any(workspace =>
                     workspace.WorkspaceId == caseRow.WorkspaceId &&
-                    workspace.OrganizationId == caseRow.OrganizationId &&
+                    dbContext.WorkspaceOrganizations.Any(link => link.WorkspaceId == workspace.WorkspaceId &&
+                        link.OrganizationId == caseRow.OrganizationId && link.Status == PersistentResourceStatus.Active) &&
                     workspace.Status == PersistentResourceStatus.Active) &&
                 dbContext.OrganizationMemberships.Any(membership =>
                     membership.ActorId == actorId &&

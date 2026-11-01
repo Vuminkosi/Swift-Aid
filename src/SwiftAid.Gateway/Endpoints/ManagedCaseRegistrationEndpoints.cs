@@ -77,7 +77,7 @@ public static class ManagedCaseRegistrationEndpoints
         }
 
         var report = ToDomainReport(request.Report);
-        return new RegisterManagedCaseRequest(request.CommandId, request.WorkspaceId, report);
+        return new RegisterManagedCaseRequest(request.CommandId, request.WorkspaceId, report, request.OrganizationId);
     }
 
     /// <summary>Maps only safe processor outcomes to HTTP; nonaccepted outcomes disclose no case ID.</summary>
@@ -420,7 +420,8 @@ public sealed record ManagedCaseRegistrationApiRequest(
     int SchemaVersion,
     Guid CommandId,
     string? WorkspaceId,
-    CaseReportV2Payload? Report);
+    CaseReportV2Payload? Report,
+    string? OrganizationId = null);
 
 /// <summary>Safe receipt returned only after accepted registration or authorized receipt replay.</summary>
 public sealed record ManagedCaseRegistrationResponse(

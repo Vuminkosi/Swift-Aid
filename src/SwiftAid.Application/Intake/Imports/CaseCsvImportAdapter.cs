@@ -7,7 +7,8 @@ using SwiftAid.Domain.Intake;
 
 namespace SwiftAid.Application.Intake.Imports;
 
-public sealed record CaseImportContext(string WorkspaceId, IntakeConfirmations Confirmations);
+public sealed record CaseImportContext(string WorkspaceId, IntakeConfirmations Confirmations,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? OrganizationId = null);
 
 /// <summary>Original CSV values remain separate from their normalized submission. Source IDs never confer authority.</summary>
 public sealed record CaseImportRecord(long RowNumber, Guid CommandId, Guid? SourceCaseId, string ExternalRecordId,

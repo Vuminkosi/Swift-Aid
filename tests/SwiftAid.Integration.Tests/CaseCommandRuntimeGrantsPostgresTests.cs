@@ -11,6 +11,7 @@ public sealed class CaseCommandRuntimeGrantsPostgresTests
     [
         "organizations",
         "workspaces",
+        "workspace_organizations",
         "actor_access_states",
         "actors",
         "organization_memberships",

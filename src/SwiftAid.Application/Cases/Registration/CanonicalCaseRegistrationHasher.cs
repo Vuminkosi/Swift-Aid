@@ -54,7 +54,8 @@ public static class CanonicalCaseRegistrationHasher
             request.WorkspaceId,
             receiptProtocolVersion,
             wireCommandSchemaVersion,
-            report);
+            report,
+            request.OrganizationId);
         return new CanonicalCaseRegistrationSnapshot(
             receiptProtocolVersion,
             wireCommandSchemaVersion,
@@ -63,7 +64,7 @@ public static class CanonicalCaseRegistrationHasher
             request.WorkspaceId,
             request.Report,
             GetConfirmations(request.Report),
-            SHA256.HashData(canonicalBytes));
+            SHA256.HashData(canonicalBytes), request.OrganizationId);
     }
 
     private static ReportSnapshot SnapshotHuman(CaseReportEventData.HumanV2 value)
@@ -94,7 +95,8 @@ public static class CanonicalCaseRegistrationHasher
         string workspaceId,
         int receiptProtocolVersion,
         int wireCommandSchemaVersion,
-        ReportSnapshot report)
+        ReportSnapshot report,
+        string? organizationId)
     {
         var buffer = new ArrayBufferWriter<byte>();
         // This private byte protocol is deliberately separate from command/event wire JSON.
@@ -112,6 +114,8 @@ public static class CanonicalCaseRegistrationHasher
             writer.WriteString("commandId", commandId.ToString("D"));
             writer.WriteString("commandType", CommandType);
             writer.WriteString("workspaceId", workspaceId);
+            // Absent scope preserves the existing v1 golden bytes and receipt replay exactly.
+            if (organizationId is not null) writer.WriteString("organizationId", organizationId);
             writer.WritePropertyName("report");
             report.WriteReport(writer);
             writer.WritePropertyName("confirmations");
@@ -377,7 +381,8 @@ public sealed class CanonicalCaseRegistrationSnapshot
         string workspaceId,
         CaseReportEventData report,
         ReportConfirmations confirmations,
-        byte[] canonicalPayloadHash)
+        byte[] canonicalPayloadHash,
+        string? organizationId = null)
     {
         ProtocolId = CanonicalCaseRegistrationHasher.ProtocolId;
         ReceiptProtocolVersion = receiptProtocolVersion;
@@ -385,6 +390,7 @@ public sealed class CanonicalCaseRegistrationSnapshot
         ActorId = actorId;
         CommandId = commandId;
         WorkspaceId = workspaceId;
+        OrganizationId = organizationId;
         Report = report;
         Confirmations = confirmations;
         _canonicalPayloadHash = canonicalPayloadHash.ToArray();
@@ -396,6 +402,7 @@ public sealed class CanonicalCaseRegistrationSnapshot
     public string ActorId { get; }
     public Guid CommandId { get; }
     public string WorkspaceId { get; }
+    public string? OrganizationId { get; }
     public CaseReportEventData Report { get; }
     public ReportConfirmations Confirmations { get; }
     public ImmutableArray<byte> CanonicalPayloadHash => ImmutableArray.CreateRange(_canonicalPayloadHash);
