@@ -2,12 +2,13 @@ using System.Net.WebSockets;
 
 namespace SwiftAid.Gateway.Ellai;
 
-/// <summary>Exposes one browser WebSocket's binary PCM messages as a bounded
+/// <summary>Exposes one client WebSocket's binary PCM messages as a bounded
 /// sequential stream for the existing realtime transcription pipeline.</summary>
 internal sealed class EllaiVoiceWebSocketStream(WebSocket socket) : Stream
 {
     private const int MaximumMessageBytes = 32 * 1024 * 1024;
     private long _receivedBytes;
+    public long ReceivedBytes => _receivedBytes;
 
     public override bool CanRead => true;
     public override bool CanSeek => false;

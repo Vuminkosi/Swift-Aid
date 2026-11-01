@@ -65,6 +65,8 @@ public sealed class EllaiUtteranceWorker(
         CancellationToken stoppingToken)
     {
         EllaiUtteranceWork work;
+        _logger.LogInformation("Ellai worker pickup: session={SessionId} turn={TurnId} attempt={Attempt}.",
+            item.SessionId, item.ClientUtteranceId, item.AttemptCount);
         if (item.AcceptedAtUtc is { } acceptedAt)
         {
             EllaiPipelineMetrics.Record("admission_to_pickup", (DateTimeOffset.UtcNow - acceptedAt).TotalMilliseconds);

@@ -43,8 +43,8 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
         _authentication = authentication ?? throw new ArgumentNullException(nameof(authentication));
         if (authenticatedHttp is not null && guestHttp is not null)
         {
-            _authenticated = new EllaiReviewHttpClient(authenticatedHttp);
-            _guest = new EllaiReviewHttpClient(guestHttp, useGuestRoutes: true);
+            _authenticated = new EllaiReviewHttpClient(authenticatedHttp, useLiveVoiceWebSocket: true);
+            _guest = new EllaiReviewHttpClient(guestHttp, useGuestRoutes: true, useLiveVoiceWebSocket: true);
         }
     }
 

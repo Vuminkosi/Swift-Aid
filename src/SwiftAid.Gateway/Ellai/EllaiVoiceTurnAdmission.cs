@@ -23,6 +23,9 @@ internal sealed class EllaiVoiceTurnAdmission(
                 if (!turn.ServerSubmission || turn.Admission is not null) continue;
                 var result = await SubmitAsync(turn.TurnId.ToString("N"), turn.Transcript).ConfigureAwait(false);
                 coordinator.RecordSubmission(sessionId, turn.TurnId, result);
+                services.GetService<ILogger<EllaiVoiceTurnAdmission>>()?.LogInformation(
+                    "Voice turn admission: session={SessionId} turn={TurnId} sequence={Sequence} outcome={Outcome}.",
+                    sessionId, turn.TurnId, turn.Sequence, result.Status);
             }
         }
         finally { _gate.Release(); }

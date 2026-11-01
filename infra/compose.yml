@@ -35,6 +35,17 @@ services:
       # Production deployments must override this to Production with TLS endpoints.
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_HTTP_PORTS: "8080"
+      Logging__LogLevel__SwiftAid: Information
+      Logging__LogLevel__Microsoft.AspNetCore.Hosting: Warning
+      Logging__LogLevel__Microsoft.EntityFrameworkCore: Error
+      Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command: Error
+      Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Transaction: Error
+      Logging__LogLevel__Npgsql: Error
+      Logging__LogLevel__System.Net.Http.HttpClient: Warning
+      Logging__Console__FormatterName: simple
+      Logging__Console__FormatterOptions__SingleLine: "true"
+      Logging__Console__FormatterOptions__TimestampFormat: "HH:mm:ss.fff "
+      Logging__Console__FormatterOptions__UseUtcTimestamp: "true"
       AllowedHosts: "localhost;127.0.0.1;[::1];10.0.2.2;swiftaid.online"
       # The local emulator uses HTTP. Session cookies are explicitly development-only;
       # production keeps Secure __Host- cookies unless it overrides this setting.
@@ -405,6 +416,8 @@ services:
       CLASSIFICATION_GATEWAY_URL: "http://127.0.0.1:8080"
       CLASSIFICATION_ALLOW_LOOPBACK_HTTP: "true"
       CLASSIFICATION_DEVICE: cpu
+      SWIFTAID_LOG_LEVEL: INFO
+      PYTHONUNBUFFERED: "1"
       CLASSIFICATION_HEALTH_FILE: /tmp/classification-ready
       HF_HOME: /models
       HF_HUB_DISABLE_TELEMETRY: "1"

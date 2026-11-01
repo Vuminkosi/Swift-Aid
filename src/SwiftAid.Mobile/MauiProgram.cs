@@ -174,7 +174,7 @@ public static class MauiProgram
                     client.BaseAddress = gatewayBaseAddress;
                     client.Timeout = TimeSpan.FromSeconds(30);
                 })
-                    .ConfigurePrimaryHttpMessageHandler(static () => new HttpClientHandler
+                    .ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler
                     {
                         AllowAutoRedirect = false,
                         UseCookies = false,
@@ -190,7 +190,7 @@ public static class MauiProgram
                     client.BaseAddress = gatewayBaseAddress;
                     client.Timeout = TimeSpan.FromSeconds(30);
                 })
-                    .ConfigurePrimaryHttpMessageHandler(static () => new HttpClientHandler
+                    .ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler
                     {
                         AllowAutoRedirect = false,
                         UseCookies = false,

@@ -19,6 +19,7 @@ async function main() {
     let firstCompletedAt;
     let responseAudioRequests = 0;
     let blockedVoicePolls = 0;
+    const voiceStates = [];
     const expectedTurns = Number(process.env.SWIFTAID_EXPECTED_VOICE_TURNS ?? 5);
     assert.ok(Number.isInteger(expectedTurns) && expectedTurns > 0);
     page.on("pageerror", error => errors.push(error.message));
@@ -40,7 +41,14 @@ async function main() {
         try {
         if (!response.ok()) return;
         const url = new URL(response.url());
-        if (url.pathname.endsWith("/voice/state")) lastVoice = await response.json();
+        if (url.pathname.endsWith("/voice/state")) {
+            lastVoice = await response.json();
+            sessionId ??= lastVoice.sessionId;
+            if (voiceStates.at(-1)?.state !== lastVoice.state) voiceStates.push({
+                state: lastVoice.state, speechMs: lastVoice.confirmedSpeechMilliseconds,
+                silenceMs: lastVoice.silenceMilliseconds,
+            });
+        }
         if (url.pathname.endsWith("/guest/sessions") && response.request().method() === "POST") sessionId = (await response.json()).sessionId;
         if (/\/responses\/\d+\/audio$/.test(url.pathname)) responseAudioRequests++;
         if (url.pathname.endsWith("/responses")) {
@@ -79,7 +87,7 @@ async function main() {
             sessionId, elapsedMs: Date.now() - started, frames, submitted, blockedVoicePolls,
             firstCompletedMs: firstCompletedAt ? firstCompletedAt - started : null,
             responseAudioRequests,
-            voiceState: lastVoice?.state, voiceEpoch: lastVoice?.epoch,
+            voiceState: lastVoice?.state, voiceEpoch: lastVoice?.epoch, voiceStates,
             completedTurns: conversation.filter(turn => turn.outcome === "Completed").length,
             outcomes: conversation.map(turn => turn.outcome),
             captureStarts: capture.starts,

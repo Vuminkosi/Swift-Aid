@@ -178,6 +178,8 @@ public sealed class EllaiVoiceTranscriptionService(
             var transcript = string.Empty;
             if (adapter is not null)
             {
+                logger?.LogInformation("Voice ASR dispatch: session={SessionId} capture={CaptureId} mode={ProviderMode} finiteInput={FiniteInput}.",
+                    turn?.SessionId, turn?.VoiceCaptureId, options.AsrMode, finiteInput);
                 var finalizedTurns = new List<(string ProviderTurnId, string Text)>();
                 var unscopedTurnSequence = 0L;
                 var vadStream = services.GetService<SileroVoiceActivityAudioStream>();
@@ -213,6 +215,8 @@ public sealed class EllaiVoiceTranscriptionService(
                         },
                         async (finalTurn, _) =>
                         {
+                            logger?.LogInformation("Voice provider final: session={SessionId} capture={CaptureId} providerTurn={ProviderTurnId} characters={Characters}.",
+                                turn?.SessionId, turn?.VoiceCaptureId, finalTurn.TurnId, finalTurn.Text.Length);
                             var providerTurnId = finalTurn.TurnId?.ToString(
                                 System.Globalization.CultureInfo.InvariantCulture)
                                 ?? $"unscoped:{Interlocked.Increment(ref unscopedTurnSequence)}";
@@ -233,8 +237,8 @@ public sealed class EllaiVoiceTranscriptionService(
                 catch (Exception ex)
                 {
                     logger?.LogWarning(
-                        "Ellai realtime transcription failed ({FailureType}); checking upload fallback.",
-                        ex.GetType().Name);
+                        "Ellai realtime transcription failed: session={SessionId} capture={CaptureId} failure={FailureType}; checking upload fallback.",
+                        turn?.SessionId, turn?.VoiceCaptureId, ex.GetType().Name);
                     if (!finiteInput && !boundedAudio.InputCompleted)
                     {
                         // The client owns the still-running microphone and its recovery copy.
@@ -364,6 +368,8 @@ public sealed class EllaiVoiceTranscriptionService(
         EllaiVoiceTurnAdmission? admission)
     {
         var vadEnabled = true;
+        EllaiVoiceTurnState? lastState = null;
+        var lastDiagnostic = System.Diagnostics.Stopwatch.GetTimestamp();
         var turnCoordinator = turn is null ? null : services.GetService<EllaiVoiceTurnCoordinator>();
         try
         {
@@ -382,6 +388,15 @@ public sealed class EllaiVoiceTranscriptionService(
                             {
                                 var bargeIn = turnCoordinator.ObserveAcousticFrame(
                                     turn, activity, TimeSpan.FromMilliseconds(32));
+                                var snapshot = turnCoordinator.GetSnapshot(turn.SessionId);
+                                if (snapshot.State != lastState || System.Diagnostics.Stopwatch.GetElapsedTime(lastDiagnostic) >= TimeSpan.FromSeconds(5))
+                                {
+                                    lastState = snapshot.State;
+                                    lastDiagnostic = System.Diagnostics.Stopwatch.GetTimestamp();
+                                    logger?.LogInformation("Voice activity: session={SessionId} capture={CaptureId} epoch={Epoch} state={State} frame={Frame} speechMs={SpeechMs} silenceMs={SilenceMs}.",
+                                        turn.SessionId, turn.VoiceCaptureId, turn.Epoch, snapshot.State, activity.Sequence,
+                                        snapshot.ConfirmedSpeech.TotalMilliseconds, snapshot.Silence.TotalMilliseconds);
+                                }
                                 if (bargeIn is not null)
                                 {
                                     playbackCoordinator?.Interrupt(

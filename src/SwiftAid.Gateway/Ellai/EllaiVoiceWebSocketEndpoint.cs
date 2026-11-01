@@ -36,9 +36,13 @@ public static class EllaiVoiceWebSocketEndpoint
         }
 
         using var socket = await http.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
+        var logger = http.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("SwiftAid.Ellai.VoiceTransport");
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        await using var audio = new EllaiVoiceWebSocketStream(socket);
+        logger.LogInformation("Voice connected: session={SessionId} capture={CaptureId} transport=WebSocket offsetSamples={OffsetSamples}.",
+            sessionId, captureId, Math.Max(0, offset));
         try
         {
-            await using var audio = new EllaiVoiceWebSocketStream(socket);
             var result = await transcription.TranscribeAsync(
                 sessionId,
                 SwiftAid.Contracts.Ellai.EllaiVoiceCaptureMode.Live,
@@ -50,7 +54,7 @@ public static class EllaiVoiceWebSocketEndpoint
                 submissionPrincipal: http.Request.Query["serverSubmission"] == "true" ? principal : null)
                 .ConfigureAwait(false);
 
-            if (socket.State == WebSocketState.Open)
+            if (socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
             {
                 await socket.CloseOutputAsync(result is null ? WebSocketCloseStatus.EndpointUnavailable : WebSocketCloseStatus.NormalClosure,
                     result is null ? "Voice stream needs recovery." : "Voice stream completed.", CancellationToken.None).ConfigureAwait(false);
@@ -58,19 +62,26 @@ public static class EllaiVoiceWebSocketEndpoint
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            if (socket.State == WebSocketState.Open)
+            if (socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
             {
                 await socket.CloseOutputAsync(WebSocketCloseStatus.EndpointUnavailable,
                     "Voice stream cancelled.", CancellationToken.None).ConfigureAwait(false);
             }
         }
-        catch (Exception)
+        catch (Exception exception)
         {
-            if (socket.State == WebSocketState.Open)
+            logger.LogWarning("Voice transport failed: session={SessionId} capture={CaptureId} failure={FailureType}.",
+                sessionId, captureId, exception.GetType().Name);
+            if (socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
             {
                 await socket.CloseOutputAsync(WebSocketCloseStatus.InternalServerError,
                     "Voice stream failed.", CancellationToken.None).ConfigureAwait(false);
             }
+        }
+        finally
+        {
+            logger.LogInformation("Voice disconnected: session={SessionId} capture={CaptureId} bytes={AudioBytes} elapsedMs={ElapsedMs} close={CloseStatus}.",
+                sessionId, captureId, audio.ReceivedBytes, started.ElapsedMilliseconds, socket.CloseStatus);
         }
 
         return Results.Empty;

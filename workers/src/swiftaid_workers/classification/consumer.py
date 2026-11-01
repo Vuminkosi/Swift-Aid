@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import time
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -70,6 +71,8 @@ async def execute_claim(claim: dict[str, Any], gateway: Any, classifier: Any, me
     if claim["state"] != "Leased":
         return str(claim["state"])
     lease = claim["lease"]
+    started = time.monotonic()
+    logger.info("Classification claimed result=%s", lease["resultId"])
 
     async def heartbeat() -> None:
         while True:
@@ -91,6 +94,8 @@ async def execute_claim(claim: dict[str, Any], gateway: Any, classifier: Any, me
             # Exceptions may include protected input; log only bounded failure codes.
             code = "model-configuration" if isinstance(error, ValueError) else "model-unavailable"
             outcome = await gateway.post("fail", {"resultId": lease["resultId"], "leaseId": lease["leaseId"], "code": code})
+        logger.info("Classification outcome result=%s state=%s elapsed_ms=%d", lease["resultId"],
+                    outcome["state"], (time.monotonic() - started) * 1000)
         return str(outcome["state"])
     finally:
         renewal.cancel()
@@ -129,7 +134,7 @@ async def run_consumer(settings: Any, classifier: Any) -> None:
                 if getattr(settings, "health_file", None):
                     from swiftaid_workers.classification.health import monitor
                     group.create_task(monitor(connection, client, Path(settings.health_file)))
-                logger.warning("Classification consumer connected; model loaded; durable=%s", settings.durable)
+                logger.info("Classification consumer connected; model loaded; durable=%s", settings.durable)
                 for _ in range(settings.concurrency):
                     group.create_task(lane())
         finally:
