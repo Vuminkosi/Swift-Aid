@@ -33,6 +33,10 @@ public sealed class DatabaseMigrationDeploymentTests
             Assert.Equal(0, await DatabaseMigrationRunner.RunAsync(connection, default));
             await using var verified = new SwiftAidDbContext(options);
             Assert.Empty(await verified.Database.GetPendingMigrationsAsync());
+            Assert.True(await verified.Database.SqlQueryRaw<bool>("""
+                SELECT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+                    WHERE n.nspname='swiftaid_internal' AND p.proname='lock_case_authority' AND NOT p.prosecdef) AS "Value"
+                """).SingleAsync());
             await verified.Database.ExecuteSqlRawAsync("SELECT 1 FROM swiftaid_classification.results LIMIT 1");
 
             using var cancelled = new CancellationTokenSource();

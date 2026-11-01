@@ -59,6 +59,13 @@ public sealed class GatewayWorkspaceAccessTests
         var imported = await fixture.Service.ProcessAsync(CaseImportPostgresTests.Actor, Guid.NewGuid(), context, 1, true,
             new StringReader(CaseImportPostgresTests.Csv(Guid.NewGuid())), default);
         Assert.NotNull(Assert.Single(imported.Rows).CaseId);
+        var unit = new SwiftAid.Infrastructure.Persistence.Transactions.PostgresCaseCommandUnitOfWork(fixture.Db);
+        var policy = new CaseAccessPolicy(new SwiftAid.Infrastructure.Authorization.PostgresCurrentAccessGrantStore(fixture.Db, unit),
+            new SwiftAid.Infrastructure.Authorization.PostgresCaseAccessDescriptorStore(fixture.Db, unit));
+        var queue = new SwiftAid.Application.Cases.CaseQueueQuery(
+            new SwiftAid.Infrastructure.Persistence.Repositories.Cases.PostgresCaseQueueStore(fixture.Db), policy, unit);
+        var listed = await queue.GetMineAsync(CaseImportPostgresTests.Actor, 100, default);
+        Assert.Contains(listed.Items, item => item.CaseId == imported.Rows[0].CaseId);
         var selected = await client.SelectWorkspaceAsync(second + "-general");
         Assert.Equal(second + "-general", selected.Value!.SelectedWorkspaceId);
         Assert.Equal(selected.Value.SelectedWorkspaceId, (await client.GetStateAsync()).Value!.SelectedWorkspaceId);

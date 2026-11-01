@@ -26,8 +26,8 @@ public sealed class MapAggregatePostgresTests
     [IntakePostgresFact]
     public async Task OwnedCases_AggregatedByCountryAndRegion_OldRecordsExcluded()
     {
-        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
-        await CaseRegistrationBackendTests.SeedRegistrationGrantAsync(db);
+        await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
+        var db = fixture.Db;
         var recentIds = new List<Guid>();
         for (var index = 0; index < 5; index++)
         {
@@ -63,8 +63,8 @@ public sealed class MapAggregatePostgresTests
     [IntakePostgresFact]
     public async Task FewOwnedCases_CountryRowIsSuppressed()
     {
-        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
-        await CaseRegistrationBackendTests.SeedRegistrationGrantAsync(db);
+        await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
+        var db = fixture.Db;
         await IntakeDecisionStoreTests.SeedManagedCaseAsync(db);
 
         var result = await CreateQuery(db).GetAsync(
