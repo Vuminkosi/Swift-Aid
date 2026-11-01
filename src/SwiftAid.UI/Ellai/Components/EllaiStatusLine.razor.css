@@ -3,8 +3,13 @@
     gap: 0.125rem;
 }
 
+.ellai-status__thinking {
+    color: var(--ais-chart-3, #7C3AED);
+}
+
 .ellai-status__dot {
     display: inline-block;
+    font-weight: 900;
     animation: ellai-thinking 1.4s ease-in-out infinite;
 }
 
