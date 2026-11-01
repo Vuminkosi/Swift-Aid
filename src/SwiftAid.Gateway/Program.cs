@@ -108,7 +108,12 @@ builder.Services.AddScoped(_ => new SwiftAid.Application.Ellai.EllaiTechnicalDoc
     SwiftAid.Application.Ellai.EllaiTechnicalDocs.TryResolvePath(
         builder.Environment.ContentRootPath,
         builder.Configuration["Ellai:Docs:Path"] ?? "docs/TECHNICAL.md")));
-builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiUiRegistry>();
+builder.Services.AddSingleton(_ =>
+{
+    var registry = new SwiftAid.Application.Ellai.EllaiUiRegistry();
+    SwiftAid.Application.Ellai.EllaiReportGuidanceDescriptors.RegisterAll(registry);
+    return registry;
+});
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiGuidancePlanValidator>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.IEllaiUiDiscoveryService, SwiftAid.Application.Ellai.EllaiUiDiscoveryService>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.IEllaiGuidancePlanner, SwiftAid.Application.Ellai.EllaiGuidancePlanner>();

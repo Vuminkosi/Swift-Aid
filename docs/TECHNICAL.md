@@ -195,11 +195,13 @@ Edit / Reject / Cancel); text or voice consent is never approval.
 
 ## 5. Dynamic UI Intelligence and surface
 
-**Status: Implemented, unit-verified (observation channel live; no
-production descriptors registered yet).** `EllaiUiRegistry` holds versioned
-semantic descriptors; `EllaiGuidancePlanValidator`, `EllaiBonboardingCompiler`
-and `EllaiGuidanceSessionCoordinator` plan, compile and activate one guidance
-at a time. The single compact composer (`EllaiCompactComposer`) attaches
+**Status: Partial implementation. Report journey descriptors are registered at
+Gateway startup; complete model-generated guidance is not verified.**
+`EllaiUiRegistry` holds versioned semantic descriptors. `EllaiGuidancePlanValidator`,
+`EllaiBonboardingCompiler` and `EllaiGuidanceSessionCoordinator` provide validation,
+compilation and coordination components, but their presence does not establish a
+connected Muse planning-to-rendering workflow. The current draft composer is
+deterministic; it does not call Muse. The single compact composer (`EllaiCompactComposer`) attaches
 under the active Bonboarding card; `EllaiStatusLine` projects activity;
 `EllaiPlanReview` renders the approval card; `EllaiLauncherMenu` is the one
 shared launcher on every layout for guest and signed-in users; Settings/About
@@ -210,10 +212,11 @@ in-process and HTTP), the server keeps the latest per session in
 `IEllaiUiObservationStore`, and `ellai_ui_catalogue` / `ellai_ui_observe`
 read the registry plus that channel through the same consent, budget and
 byte-bound pipeline as every tool. An absent report yields an authorized
-empty, never a fabricated view. Production descriptors are not registered
-next to owning features yet, so live catalogue/observe reads are
-authorized-empty until that registration lands; capability-gated descriptors
-stay excluded fail-closed (no scope-capability source yet).
+empty, never a fabricated view. The public report journey descriptors
+(`EllaiReportGuidanceDescriptors`, feature `report`, nine controls from
+`report.entry` to `report.receipt`, submit human-owned R3) are seeded at
+Gateway startup; capability-gated descriptors stay excluded fail-closed
+(no scope-capability source yet).
 
 ## 6. Voice, reasoning routes, memory
 

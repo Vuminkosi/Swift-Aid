@@ -294,7 +294,7 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
         Assert.NotNull(outbox);
         var work = EllaiUtteranceWorkEnvelope.Deserialize(outbox!.PayloadJson);
         Assert.Equal("What does an intake receipt mean?", work.Utterance);
-        Assert.Equal([EllaiToolNames.ProductFacts], work.AllowedTools);
+        Assert.Equal([EllaiToolNames.IngestionSchema, EllaiToolNames.Locations, EllaiToolNames.ProductFacts, EllaiToolNames.ValidateObservations], work.AllowedTools);
     }
 
     [Fact]
@@ -401,7 +401,7 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             Assert.NotNull(work);
             var envelope = EllaiUtteranceWorkEnvelope.Deserialize(work!.PayloadJson);
             Assert.StartsWith("ellai-guest-", envelope.ActorId, StringComparison.Ordinal);
-            Assert.Equal([EllaiToolNames.ProductFacts], envelope.AllowedTools);
+            Assert.Equal([EllaiToolNames.IngestionSchema, EllaiToolNames.Locations, EllaiToolNames.ProductFacts, EllaiToolNames.ValidateObservations], envelope.AllowedTools);
             Assert.Equal("What does an intake receipt mean?", envelope.Utterance);
 
             for (var turn = 2; turn <= EllaiSessionService.DefaultCyclesAllowed + 1; turn++)

@@ -214,7 +214,7 @@
                     </div>
                 }
 
-                <MudSelect T="string" Label="Country where the event happened" Variant="Variant.Outlined"
+                <MudSelect T="string" id="guided-report-country" Label="Country where the event happened" Variant="Variant.Outlined"
                            Value="Draft.CountryCode" ValueChanged="CountryChangedAsync" Disabled="@(!HasCountryCatalogue)" Clearable="true">
                     @foreach (var country in Countries)
                     {
@@ -371,7 +371,7 @@
                         @(_saving ? DraftSavingLabel : DraftSaveButtonLabel)
                     </MudButton>
                 }
-                <MudButton ButtonType="ButtonType.Button" Color="Color.Primary" Variant="Variant.Text" Disabled="@(!CanSubmit || _submitting)" OnClick="SubmitAsync" StartIcon="@Icons.Material.Filled.Cancel">
+                <MudButton id="report-submit" ButtonType="ButtonType.Button" Color="Color.Primary" Variant="Variant.Text" Disabled="@(!CanSubmit || _submitting)" OnClick="SubmitAsync" StartIcon="@Icons.Material.Filled.Cancel">
                     @(_submitting ? SubmitProgressLabel : SubmitButtonLabel)
                 </MudButton>
                 @if (!CanSubmit)
