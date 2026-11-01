@@ -109,7 +109,10 @@ async function playPcm(sessionId, sequence, purpose, playbackId) {
             cache: "no-store",
             signal: record.controller.signal,
         });
-        if (response.status === 401) {
+        // A valid guest cookie can coexist with a signed-in session. The guest
+        // route hides sessions it does not own with 404; the staff route still
+        // performs its own authentication and ownership checks.
+        if (response.status === 401 || response.status === 404) {
             await response.body?.cancel();
             response = await fetch(makeUrl(sessionId, sequence, false, purpose, playbackId), {
                 credentials: "same-origin",

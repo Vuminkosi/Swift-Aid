@@ -28,8 +28,7 @@
             <MudTextField T="string" Value="@InputText" ValueChanged="OnInputChanged"
                           Label="Message Ellai" Placeholder="Ask Ellai…" MaxLength="8000" Lines="1" Sizing="InputSizing.Auto" MaxLines="5"
                           Disabled="@(IsRecordingAudio || IsLiveSpeaking)"
-                          Immediate="true"
-                          @onkeydown="OnInputKeyDown" />
+                          Immediate="true" />
             <span class="ellai-composer__field-actions">
                 @if (IsRecordingAudio && OnStopVoice.HasDelegate)
                 {
@@ -207,16 +206,28 @@
         await InputTextChanged.InvokeAsync(value);
     }
 
-    private async Task OnInputKeyDown(KeyboardEventArgs e)
+    private IJSObjectReference? _inputModule;
+
+    [JSInvokable]
+    public async Task SubmitKeyboardMessage(string value)
     {
-        if (e.Key == "Enter" && e.ShiftKey == false && CanSend)
+        if (IsRecordingAudio || IsLiveSpeaking || string.IsNullOrWhiteSpace(value) || value.Length > 8000)
         {
-            await OnSend.InvokeAsync();
+            return;
         }
+        await OnInputChanged(value);
+        if (CanSend) await OnSend.InvokeAsync();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (_inputModule is null)
+        {
+            _inputModule = await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./_content/SwiftAid.UI/js/ellai-composer-input.js");
+            _dotnetReference ??= DotNetObjectReference.Create(this);
+            await _inputModule.InvokeVoidAsync("attach", _rootElement, _dotnetReference);
+        }
         if (Placement != EllaiSurfacePlacement.Floating)
         {
             if (_dragAttached && _dragModule is not null)
@@ -299,6 +310,15 @@
 
     public async ValueTask DisposeAsync()
     {
+        if (_inputModule is not null)
+        {
+            try
+            {
+                await _inputModule.InvokeVoidAsync("detach", _rootElement);
+                await _inputModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException) { }
+        }
         if (_dragModule is not null)
         {
             try

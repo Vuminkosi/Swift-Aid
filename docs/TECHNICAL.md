@@ -204,6 +204,14 @@ Loading, retry, empty history and terminal outcomes remain distinct. Component
 tests cover completed, failed and cancelled turns and HTML encoding. Native-device
 and deployed-browser validation of this dialog remains pending.
 
+The shared composer intercepts unmodified Enter locally, preserving Shift+Enter
+and IME composition, and passes the current input value through the existing
+submission gate. Browser speech retries the owner-authorized staff audio route
+when the guest route returns 401 or 404 (a guest cookie may coexist with a staff
+login); provider failures are not retried as alternate synthesis requests.
+Focused JavaScript regressions cover keyboard behavior, duplicate suppression,
+audio routing and PCM cleanup. These checks do not establish live voice quality.
+
 **Status: Partial implementation. Report journey descriptors are registered at
 Gateway startup; complete model-generated guidance is not verified.**
 `EllaiUiRegistry` holds versioned semantic descriptors. `EllaiGuidancePlanValidator`,

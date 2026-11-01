@@ -83,3 +83,31 @@ test("playback preserves the Gateway sample rate without an extra processing sta
     assert.deepEqual(sampleRates, [16000]);
     assert.equal(sources.length, 1);
 });
+
+test("signed-in playback recovers when an existing guest cookie hides the staff session", async () => {
+    failAfterChunk = false;
+    configure();
+    const pcmFetch = globalThis.fetch;
+    const urls = [];
+    let cancelled = false;
+    globalThis.fetch = async url => {
+        urls.push(url);
+        return urls.length === 1
+            ? { ok: false, status: 404, body: { async cancel() { cancelled = true; } } }
+            : pcmFetch();
+    };
+    await playback.playResponse("session-test", 1, "playback-test");
+    assert.equal(urls.length, 2);
+    assert.match(urls[0], /\/guest\/sessions\//);
+    assert.doesNotMatch(urls[1], /\/guest\//);
+    assert.equal(cancelled, true);
+    assert.equal(sources.length, 1);
+});
+
+test("provider failures do not trigger another synthesis request", async () => {
+    configure();
+    let requests = 0;
+    globalThis.fetch = async () => { requests++; return { ok: false, status: 503 }; };
+    await assert.rejects(playback.playResponse("session-test", 1, "playback-test"), /503/);
+    assert.equal(requests, 1);
+});
