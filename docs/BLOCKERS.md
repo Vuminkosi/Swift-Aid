@@ -9,5 +9,6 @@
 | BL-005 | Current task ownership | Unreconciled | `docs/TASK-OWNERS.md` is a historical 27 October snapshot. Refresh from active handoffs before editing shared contracts, migrations, package locks or generated files. |
 | BL-006 | SW-00-005 owner decisions PC-01–PC-08 | Unverified | Existing decisions contain unresolved organizer and rights questions; no fresh owner-approved decision evidence was found in the current audit. Keep gated capabilities disabled. |
 | BL-007 | SW-06-006 session subscriptions | Missing implementation | The current Gateway registration uses `UnavailableSubscriptionClient`; source search found no subscription API or durable store. Implement on the current session contract and verify login, idempotent subscribe/unsubscribe and reminder suppression before enabling the UI action. |
+| BL-008 | SW-00-008 demo/model/data/asset rights | Blocked / partial | See [rights review](RIGHTS-REVIEW-2026-11-02.md): missing speaker-consent register, unresolved notification/brand asset and source rights, and NLLB's research/noncommercial/production restrictions. |
 
 The unrelated restarting `redis` container is owned by the `core-banking-sim` Compose project, not SwiftAid. It is recorded in `docs/BASELINE-AUDIT.md` as an external runtime observation and is not a SwiftAid service blocker. No foreign service or data was changed.

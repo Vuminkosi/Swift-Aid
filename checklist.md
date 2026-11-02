@@ -13,6 +13,7 @@
 | SW-00-003 | Passed | [Reuse matrix](docs/REUSE-MATRIX.md) maps the module implementations, Gateway handlers, and located tests; absent or blocked boundaries are called out. |
 | SW-00-004 | Failed / partial baseline | Source, Python worker, Android Release and Compose checks ran. The UI suite has 7 failures; full solution run also reported missing iOS NuGet assets. See [baseline audit](docs/BASELINE-AUDIT.md). |
 | SW-00-008 | Blocked / partial | [Rights review](docs/RIGHTS-REVIEW-2026-11-02.md) records model-card restrictions and synthetic-fixture evidence; recording consent and multiple asset/source rights remain unresolved. |
+| SW-00-009 | Passed | [Test evidence log](docs/TEST-EVIDENCE-LOG.md) indexes baseline commands/results and assigns stable blocker IDs; regression coordination and active code-path ownership boundaries are stated. |
 | SW-01-004 | In progress | Corrected one Gateway audio endpoint service-binding defect; focused authorization integration suite passes. Broader command/event/audio contract inventory remains. |
 
 ## Usage and release accounting
@@ -38,7 +39,7 @@
 - [x] **SW-00-006** — Confirm safety policy: no AI diagnosis, clinical advice, symptom-derived priority/triage, automatic outbreak confirmation, unapproved social publication or clinical education generation. Evidence: [safety policy audit](docs/SAFETY-POLICY-AUDIT.md) maps the current source requirements and code-level disabled gates; runtime enforcement and full user journeys remain NOT VERIFIED.
 - [x] **SW-00-007** — Mark experimental NLLB classification, inferred signals and cross-sector analysis disabled by default; gate configuration at backend, workers, tools and UI. Evidence: [inference gate audit](docs/INFERENCE-GATE-AUDIT.md). Source review confirms default-off backend admission and job gates; cross-sector inference has no runtime activation path. Deployed configuration and rendered UI remain NOT VERIFIED.
 - [ ] **SW-00-008** — Declare synthetic-only demo fixtures and consented recordings; review model/data/asset licensing and NLLB research/noncommercial limitations. Blocked / partial: [rights review](docs/RIGHTS-REVIEW-2026-11-02.md) found no recording-consent register and unresolved asset/source rights; exact model-card restrictions are recorded.
-- [ ] **SW-00-009** — Set up test evidence log, issue IDs, regression ownership and traceability map; never mark documentation assertions as runtime verification.
+- [x] **SW-00-009** — Set up test evidence log, issue IDs, regression ownership and traceability map; never mark documentation assertions as runtime verification. Evidence: [test evidence log](docs/TEST-EVIDENCE-LOG.md), [acceptance](docs/ACCEPTANCE.md), [traceability](docs/TRACEABILITY.md), [blockers](docs/BLOCKERS.md). Active code owners remain unassigned where no current handoff exists.
 - [ ] **SW-00-010** — Confirm shared contract/migration ownership and non-destructive operating rules; no deployment/reset/push without appropriate authorization.
 
 ### Phase 01 — Infrastructure and canonical contracts (`P0`)
