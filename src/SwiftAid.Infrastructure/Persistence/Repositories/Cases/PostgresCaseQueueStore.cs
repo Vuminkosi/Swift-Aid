@@ -16,12 +16,16 @@ public sealed class PostgresCaseQueueStore(SwiftAidDbContext dbContext) : ICaseQ
     public Task<IReadOnlyList<CaseQueueCandidate>> GetOwnedCasesAsync(string ownerActorId, int take, CancellationToken ct) =>
         ReadAsync(ownerActorId, take, null, null, null, ct);
 
+    public Task<IReadOnlyList<CaseQueueCandidate>> GetOwnedCasesAsync(
+        string ownerActorId, int take, CaseQueueFilter filter, CancellationToken ct) =>
+        ReadAsync(ownerActorId, take, null, filter.CountryCode, null, ct, filter.Workflow, filter.NewestReportedFirst);
+
     public Task<IReadOnlyList<CaseQueueCandidate>> GetAsync(string ownerActorId, string workspaceId,
         string countryCode, DateTimeOffset sinceUtc, int take, CancellationToken ct) =>
         ReadAsync(ownerActorId, take, workspaceId, countryCode, sinceUtc, ct);
 
     private async Task<IReadOnlyList<CaseQueueCandidate>> ReadAsync(
-        string ownerActorId, int take, string? workspaceId, string? countryCode, DateTimeOffset? sinceUtc, CancellationToken ct)
+        string ownerActorId, int take, string? workspaceId, string? countryCode, DateTimeOffset? sinceUtc, CancellationToken ct, string? workflow = null, bool newestReportedFirst = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(ownerActorId);
         if (take < 1)
@@ -29,10 +33,13 @@ public sealed class PostgresCaseQueueStore(SwiftAidDbContext dbContext) : ICaseQ
             throw new ArgumentOutOfRangeException(nameof(take), "The queue take must be positive.");
         }
 
+        var workflowValue = workflow is null ? (SwiftAid.Domain.Cases.CaseWorkflow?)null
+            : Enum.Parse<SwiftAid.Domain.Cases.CaseWorkflow>(workflow);
         var rows = await _dbContext.ManagedCases.AsNoTracking()
             .Where(item => item.AccountableOwnerActorId == ownerActorId)
             .Where(item => workspaceId == null || item.WorkspaceId == workspaceId)
             .Where(item => countryCode == null || item.CountryCode == countryCode)
+            .Where(item => workflowValue == null || item.Workflow == workflowValue)
             .Where(item => sinceUtc == null || item.CreatedAtUtc >= sinceUtc)
             .Select(item => new
             {
@@ -50,7 +57,7 @@ public sealed class PostgresCaseQueueStore(SwiftAidDbContext dbContext) : ICaseQ
                     .Where(journal => journal.CaseId == item.CaseId)
                     .Max(journal => (DateTimeOffset?)journal.RecordedAtUtc)
             })
-            .OrderByDescending(item => item.LastRecordedAtUtc ?? item.UpdatedAtUtc)
+            .OrderByDescending(item => newestReportedFirst ? item.CreatedAtUtc : item.LastRecordedAtUtc ?? item.UpdatedAtUtc)
             .ThenBy(item => item.CaseId)
             .Take(take)
             .ToArrayAsync(ct).ConfigureAwait(false);

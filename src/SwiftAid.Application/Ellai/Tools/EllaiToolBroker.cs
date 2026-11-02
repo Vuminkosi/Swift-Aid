@@ -165,7 +165,7 @@ public sealed class EllaiToolBroker
     /// consent applies only to explicitly consent-scoped processing lanes.</summary>
     private static readonly string[] ToolDescriptions =
     {
-        $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, ref?) — permitted feature or owned-case queue; no country/review filter. Workflow is not classification review status.",
+        $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, country?, workflow?, sort?) — permitted feature or owned-case queue. country is an uppercase two-letter code (Zimbabwe=ZW, Eswatini=SZ); workflow is Reported, UnderReview, Active, AwaitingFollowUp or Resolved; sort=latest-reported or latest-updated. Reported is a recorded workflow, not proof that no human reviewed a case. Classification review status is not supplied; clarify ambiguous unreviewed requests.",
         $"{EllaiToolNames.Evidence}(ref, field?) — versioned source items with provenance.",
         $"{EllaiToolNames.Topic}(ref) — session topic candidates with checkpoints.",
         $"{EllaiToolNames.Capabilities}(feature?) — capability readiness, no credentials.",
@@ -538,10 +538,26 @@ public sealed class EllaiToolBroker
                 EllaiToolReasonCodes.InvalidArguments);
         }
 
+        if (request.Arguments.Keys.Any(key => key is not ("projection" or "limit" or "ref" or "country" or "workflow" or "sort")))
+            return Deny(request.ToolName, "This queue supports country, workflow and sort filters only.",
+                EllaiToolReasonCodes.InvalidArguments);
+
+        request.Arguments.TryGetValue("country", out var country);
+        request.Arguments.TryGetValue("workflow", out var workflow);
+        request.Arguments.TryGetValue("sort", out var sort);
+        if ((country is not null && (country.Length != 2 || country.Any(c => c is < 'A' or > 'Z')))
+            || (workflow is not null && workflow is not ("Reported" or "UnderReview" or "Active" or "AwaitingFollowUp" or "Resolved"))
+            || (sort is not null && sort is not ("latest-reported" or "latest-updated")))
+            return Deny(request.ToolName, "Use a two-letter country, a recorded workflow and latest-reported or latest-updated sort.",
+                EllaiToolReasonCodes.InvalidArguments);
+
         CaseQueueResult result;
         try
         {
-            result = await _queue.GetMineAsync(context.Actor, limit, ct).ConfigureAwait(false);
+            result = country is null && workflow is null && sort is null
+                ? await _queue.GetMineAsync(context.Actor, limit, ct).ConfigureAwait(false)
+                : await _queue.GetMineAsync(context.Actor, limit,
+                    new CaseQueueFilter(country, workflow, sort == "latest-reported"), ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

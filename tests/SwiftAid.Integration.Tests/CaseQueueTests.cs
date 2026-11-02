@@ -54,6 +54,27 @@ public sealed class CaseQueueTests
     }
 
     [IntakePostgresFact]
+    public async Task FilteredOwnedCasesApplyCountryAndWorkflowBeforeLimit()
+    {
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var target = await IntakeDecisionStoreTests.SeedManagedCaseAsync(db, "org-sz-1");
+        var otherCountry = await IntakeDecisionStoreTests.SeedManagedCaseAsync(db);
+        var otherWorkflow = await IntakeDecisionStoreTests.SeedManagedCaseAsync(db, "org-sz-1");
+        await db.ManagedCases.Where(x => x.CaseId == otherWorkflow)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.Workflow, CaseWorkflow.Active));
+        var now = DateTimeOffset.UtcNow;
+        await SeedEventAsync(db, target, 1, "CaseReported", now);
+        await SeedEventAsync(db, otherCountry, 1, "CaseReported", now.AddDays(1));
+        await SeedEventAsync(db, otherWorkflow, 1, "CaseReported", now.AddDays(2));
+
+        var rows = await new PostgresCaseQueueStore(db).GetOwnedCasesAsync("officer-1", 1,
+            new CaseQueueFilter("SZ", "Reported", true), CancellationToken.None);
+        Assert.Equal(target, Assert.Single(rows).CaseId);
+        Assert.Empty(await new PostgresCaseQueueStore(db).GetOwnedCasesAsync("another-owner", 1,
+            new CaseQueueFilter("SZ", "Reported", true), CancellationToken.None));
+    }
+
+    [IntakePostgresFact]
     public async Task OwnedCases_ListedNewestFirst()
     {
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();

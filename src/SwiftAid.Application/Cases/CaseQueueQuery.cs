@@ -19,11 +19,18 @@ public sealed record CaseQueueCandidate(
     string? WorkspaceId = null,
     DateTimeOffset? CreatedAtUtc = null);
 
+/// <summary>Recorded routing filters, not clinical or classification-review inference.</summary>
+public sealed record CaseQueueFilter(string? CountryCode = null, string? Workflow = null, bool NewestReportedFirst = false);
+
 /// <summary>Persistence port for the "my cases" queue. Rows arrive newest-first.</summary>
 public interface ICaseQueueStore
 {
     Task<IReadOnlyList<CaseQueueCandidate>> GetOwnedCasesAsync(
         string ownerActorId, int take, CancellationToken ct);
+
+    Task<IReadOnlyList<CaseQueueCandidate>> GetOwnedCasesAsync(
+        string ownerActorId, int take, CaseQueueFilter filter, CancellationToken ct) =>
+        throw new NotSupportedException("Filtered case queries are unavailable.");
 }
 
 /// <summary>Bounded map candidates; callers must authorize each report before using its evidence.</summary>
@@ -39,6 +46,9 @@ public interface ICaseQueueQuery
         ActorContext actor,
         int? limit,
         CancellationToken ct);
+
+    Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CaseQueueFilter filter,
+        CancellationToken ct) => throw new NotSupportedException("Filtered case queries are unavailable.");
 }
 
 /// <summary>
@@ -61,9 +71,21 @@ public sealed class CaseQueueQuery(
     private readonly ICaseCommandUnitOfWork _unitOfWork =
         unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
 
-    public async Task<CaseQueueResult> GetMineAsync(
-        ActorContext actor,
-        int? limit,
+    public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CancellationToken ct) =>
+        ReadAsync(actor, limit, null, ct);
+
+    public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CaseQueueFilter filter,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        if (filter.CountryCode is { } country && (country.Length != 2 || country.Any(c => c is < 'A' or > 'Z')))
+            throw new ArgumentException("Country must be an uppercase two-letter code.", nameof(filter));
+        if (filter.Workflow is { } workflow && workflow is not ("Reported" or "UnderReview" or "Active" or "AwaitingFollowUp" or "Resolved"))
+            throw new ArgumentException("Unknown recorded workflow.", nameof(filter));
+        return ReadAsync(actor, limit, filter, ct);
+    }
+
+    private async Task<CaseQueueResult> ReadAsync(ActorContext actor, int? limit, CaseQueueFilter? filter,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(actor);
@@ -76,9 +98,11 @@ public sealed class CaseQueueQuery(
         IReadOnlyList<CaseQueueCandidate> candidates;
         try
         {
-            candidates = await _store.GetOwnedCasesAsync(actor.ActorId, take, ct).ConfigureAwait(false);
+            candidates = filter is null
+                ? await _store.GetOwnedCasesAsync(actor.ActorId, take, ct).ConfigureAwait(false)
+                : await _store.GetOwnedCasesAsync(actor.ActorId, take, filter, ct).ConfigureAwait(false);
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return new CaseQueueResult(CaseQueueAccess.Unavailable, []);
         }

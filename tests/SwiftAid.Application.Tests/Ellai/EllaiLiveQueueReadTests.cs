@@ -32,6 +32,14 @@ public sealed class EllaiLiveQueueReadTests
             return Task.FromResult(Result);
         }
 
+        public CaseQueueFilter? LastFilter { get; private set; }
+
+        public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CaseQueueFilter filter, CancellationToken ct)
+        {
+            LastFilter = filter;
+            return GetMineAsync(actor, limit, ct);
+        }
+
         public ActorContext? LastActor { get; private set; }
 
         public int? LastLimit { get; private set; }
@@ -88,6 +96,34 @@ public sealed class EllaiLiveQueueReadTests
             new[] { "7", "9" },
             result.Evidence.Select(e => e.Version).ToArray());
         Assert.True(EllaiToolBroker.MeasureEnvelopeBytes(result) <= EllaiToolBroker.MaxResultBytes);
+    }
+
+    [Fact]
+    public async Task QueueFiltersReachAuthorizedQueryBeforeLimiting()
+    {
+        var queue = new FakeQueue();
+        var result = await GrantedBroker(queue).InvokeAsync(Context with { Actor = TestActor() },
+            new EllaiToolRequest(EllaiToolNames.State, Args(("projection", "queue"), ("country", "ZW"),
+                ("workflow", "Reported"), ("sort", "latest-reported"), ("limit", "5"))), CancellationToken.None);
+        Assert.True(result.Allowed);
+        Assert.Equal(new CaseQueueFilter("ZW", "Reported", true), queue.LastFilter);
+        Assert.Equal(5, queue.LastLimit);
+        Assert.Equal("actor-1", queue.LastActor?.ActorId);
+    }
+
+    [Theory]
+    [InlineData("country", "Zimbabwe")]
+    [InlineData("workflow", "Unreviewed")]
+    [InlineData("sort", "risk")]
+    [InlineData("reviewStatus", "Unreviewed")]
+    public async Task UnsupportedFiltersDoNotSilentlyReturnUnfilteredCases(string key, string value)
+    {
+        var queue = new FakeQueue();
+        var result = await GrantedBroker(queue).InvokeAsync(Context with { Actor = TestActor() },
+            new EllaiToolRequest(EllaiToolNames.State, Args(("projection", "queue"), (key, value))), CancellationToken.None);
+        Assert.False(result.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.InvalidArguments, result.ReasonCode);
+        Assert.Null(queue.LastActor);
     }
 
     [Fact]
