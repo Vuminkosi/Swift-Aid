@@ -434,3 +434,7 @@ Source/configuration review in [SW-01-005 audit](SW-01-005-AUTHORITATIVE-WRITES.
 ## SW-01-006 durability and replay audit - 2 November 2026
 
 Read-only inventory in [durability audit](SW-01-006-DURABILITY-AUDIT.md) found stable command IDs/receipts/version checks in the managed case path and multiple purpose-specific outboxes and worker lease implementations. Universal durable inbox, ACK-after-commit, stale-lease rejection, dead-letter and reconciliation evidence across all lanes remains NOT VERIFIED. No tests or source changes were made. Kept SW-01-006 partial pending lane-by-lane mapping and ownership confirmation (BL-005); EV-021.
+
+## SW-01-007 status separation audit - 2 November 2026
+
+Source map in [SW-01-007 status audit](SW-01-007-STATUS-SEPARATION.md) distinguishes local transport/outbox, command acceptance, projection freshness, media upload, AI processing and notification delivery states. Contract/state examples exist, but full UI/API transition mapping and browser/device journeys are NOT VERIFIED. No tests run; EV-022.
