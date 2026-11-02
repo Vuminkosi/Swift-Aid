@@ -1,21 +1,50 @@
-@using SwiftAid.UI.Components.Layout
+@using SwiftAid.Contracts.Ellai
+@implements IEllaiUiContextProvider
 
+<SwiftAid.UI.Ellai.Guidance.EllaiSemanticContext Provider="this" />
 <MudNavMenu Class="swiftaid-nav-menu">
-    <MudNavLink Href="/dashboard" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Dashboard">Dashboard</MudNavLink>
-    <MudNavLink Href="/my-cases" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.FolderOpen">Cases</MudNavLink>
-    <MudNavLink Href="/assignments" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.AssignmentInd">Assignments</MudNavLink>
-    <MudNavLink Href="/surveillance" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Map">Surveillance</MudNavLink>
-    <MudNavLink Href="/reports" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Assessment">Reports</MudNavLink>
-    <MudNavLink Href="/monitoring" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.MonitorHeart">Monitoring</MudNavLink>
-    <MudNavLink Href="/organizations" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Groups">Users</MudNavLink>
+    @foreach (var destination in EllaiNavigationManifest.Destinations.Where(item => item.Group == "Main"))
+    {
+        <MudNavLink @key="destination.Id" Href="@destination.Route" Match="NavLinkMatch.Prefix" Icon="@NavigationIcon(destination.Id)"
+                    data-ellai-control="@destination.ControlId" data-bonboarding-anchor="@destination.Anchor">@destination.Label</MudNavLink>
+    }
     <MudNavGroup Title="Workspace" Icon="@Icons.Material.Filled.Work" Expanded="false">
-        <MudNavLink Href="/workspace/imports" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.UploadFile">Imports</MudNavLink>
-        <MudNavLink Href="/assistance" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.VolunteerActivism">Assistance</MudNavLink>
-        <MudNavLink Href="/follow-ups" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Schedule">Follow-ups</MudNavLink>
-        <MudNavLink Href="/escalations" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.WarningAmber">Escalations</MudNavLink>
-        <MudNavLink Href="/intake-coordination" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Inbox">Intake coordination</MudNavLink>
-        <MudNavLink Href="/investigations" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Search">Investigations</MudNavLink>
+        @foreach (var destination in EllaiNavigationManifest.Destinations.Where(item => item.Group == "Workspace"))
+        {
+            <MudNavLink @key="destination.Id" Href="@destination.Route" Match="NavLinkMatch.Prefix" Icon="@NavigationIcon(destination.Id)"
+                        data-ellai-control="@destination.ControlId" data-bonboarding-anchor="@destination.Anchor">@destination.Label</MudNavLink>
+        }
     </MudNavGroup>
-    <MudNavLink Href="/sessions" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Event">Community</MudNavLink>
-    <MudNavLink Href="/account" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Settings">Settings</MudNavLink>
+    @foreach (var destination in EllaiNavigationManifest.Destinations.Where(item => item.Group == "Secondary"))
+    {
+        <MudNavLink @key="destination.Id" Href="@destination.Route" Match="NavLinkMatch.Prefix" Icon="@NavigationIcon(destination.Id)"
+                    data-ellai-control="@destination.ControlId" data-bonboarding-anchor="@destination.Anchor">@destination.Label</MudNavLink>
+    }
 </MudNavMenu>
+
+@code {
+    public string ComponentId => EllaiNavigationManifest.Definition.ComponentId;
+    public EllaiUiManifest Describe() => EllaiNavigationManifest.Definition;
+    public EllaiUiState GetState() => new(ComponentId, false, false,
+        EllaiNavigationManifest.Controls.Select(control => new UiControlState(control.ControlId, UiObservationState.Ready)).ToArray());
+
+    private static string NavigationIcon(string id) => id switch
+    {
+        "dashboard" => Icons.Material.Filled.Dashboard,
+        "cases" => Icons.Material.Filled.FolderOpen,
+        "assignments" => Icons.Material.Filled.AssignmentInd,
+        "surveillance" => Icons.Material.Filled.Map,
+        "reports" => Icons.Material.Filled.Assessment,
+        "monitoring" => Icons.Material.Filled.MonitorHeart,
+        "organizations" => Icons.Material.Filled.Groups,
+        "imports" => Icons.Material.Filled.UploadFile,
+        "assistance" => Icons.Material.Filled.VolunteerActivism,
+        "follow-ups" => Icons.Material.Filled.Schedule,
+        "escalations" => Icons.Material.Filled.WarningAmber,
+        "intake-coordination" => Icons.Material.Filled.Inbox,
+        "investigations" => Icons.Material.Filled.Search,
+        "sessions" => Icons.Material.Filled.Event,
+        "account" => Icons.Material.Filled.Settings,
+        _ => Icons.Material.Filled.Link,
+    };
+}

@@ -23,6 +23,25 @@ public sealed class AuthorizedLayoutNavigationAccessibilityTests
     private const string NavigationDrawerId = "swiftaid-authorized-navigation";
 
     [Fact]
+    public async Task Menu_RendersTrustedRoutesAndMatchingSemanticAnchors()
+    {
+        await using var services = CreateServices(Breakpoint.Md, out _);
+        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        var html = await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var rendered = await renderer.RenderComponentAsync<SwiftAidNavMenu>();
+            return rendered.ToHtmlString();
+        });
+
+        foreach (var destination in EllaiNavigationManifest.Destinations)
+        {
+            Assert.Contains($"href=\"{destination.Route}\"", html);
+            Assert.Contains($"data-ellai-control=\"{destination.ControlId}\"", html);
+            Assert.Contains($"data-bonboarding-anchor=\"{destination.Anchor}\"", html);
+        }
+    }
+
+    [Fact]
     public async Task AuthorizedLayout_RendersEllaiLauncherConnectedToGuidanceHost()
     {
         await using var serviceProvider = CreateServices(Breakpoint.Md, out _);
