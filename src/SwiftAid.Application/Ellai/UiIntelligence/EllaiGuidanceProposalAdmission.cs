@@ -279,12 +279,11 @@ public sealed class EllaiGuidanceProposalAdmission(
             if (checkpoint?.Plan is null || checkpoint.ProposalId != proposalId ||
                 checkpoint.ScopeEpoch != authority.ScopeEpoch || checkpoint.InteractionEpoch > session.InteractionEpoch ||
                 latestProposals.Any(item => item.Proposal.Kind == UiIntentKind.StartGuidance)) return new("Stale");
-            var origin = turns.SingleOrDefault(turn => turn.Outcome == "Completed" &&
-                EllaiConversationProjection.ToClient(turn).UiProposals.Any(item => item.ProposalId == proposalId));
-            if (origin is null || turns.Any(turn => turn.Sequence > origin.Sequence && turn.Outcome == "Completed" &&
-                EllaiConversationProjection.ToClient(turn).UiProposals.Any(item => item.Proposal.Kind == UiIntentKind.StartGuidance)))
-                return new("Stale");
-            proposal = EllaiConversationProjection.ToClient(origin).UiProposals.Single(item => item.ProposalId == proposalId).Proposal;
+            var origin = await outbox.ReadLatestGuidanceTurnAsync(sessionId, authority.OwnerActorId, ct).ConfigureAwait(false);
+            // This query deliberately spans durable history: a superseding proposal must
+            // still invalidate the old plan after both proposals leave the recent window.
+            proposal = origin is null ? null : EllaiConversationProjection.ToClient(origin).UiProposals
+                .SingleOrDefault(item => item.ProposalId == proposalId)?.Proposal;
         }
         if (proposal is null) return new("Stale");
         if (proposal.Kind != UiIntentKind.StartGuidance || proposal.FeatureId != "ellai.guidance" ||

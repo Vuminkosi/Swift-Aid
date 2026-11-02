@@ -362,6 +362,18 @@ public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext) : IEl
             candidate.AcceptedAtUtc);
     }
 
+    public Task<EllaiConversationTurn?> ReadLatestGuidanceTurnAsync(string sessionId, string ownerActorId, CancellationToken ct) =>
+        _dbContext.Set<EllaiUtteranceEntity>().AsNoTracking()
+            .Where(turn => turn.SessionId == sessionId && turn.Outcome == "Completed" && turn.UiProposalsJson != null &&
+                EF.Functions.JsonContains(turn.UiProposalsJson, "[{\"kind\":\"StartGuidance\"}]") &&
+                _dbContext.Set<EllaiSessionEntity>().Any(session =>
+                    session.SessionId == turn.SessionId && session.OwnerActorId == ownerActorId))
+            .OrderByDescending(turn => turn.Sequence).ThenByDescending(turn => turn.ClientUtteranceId)
+            .Select(turn => new EllaiConversationTurn(turn.SessionId, turn.ClientUtteranceId,
+                turn.Sequence, turn.UserText, turn.AssistantText, turn.Outcome,
+                turn.AttemptCount, turn.CompletedAtUtc) { UiProposalsJson = turn.UiProposalsJson })
+            .FirstOrDefaultAsync(ct);
+
     public async Task<IReadOnlyList<EllaiConversationTurn>> ReadConversationAsync(
         string sessionId, string ownerActorId, CancellationToken ct)
     {

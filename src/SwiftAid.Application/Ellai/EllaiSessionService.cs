@@ -79,6 +79,9 @@ public sealed record EllaiUtteranceOutboxItem(
 
 public interface IEllaiUtteranceOutboxStore
 {
+    /// <summary>Latest completed guidance proposal across durable history, independent of the recent-message window.</summary>
+    Task<EllaiConversationTurn?> ReadLatestGuidanceTurnAsync(string sessionId, string ownerActorId, CancellationToken ct);
+
     Task<IReadOnlyList<EllaiConversationTurn>> ReadConversationAsync(
         string sessionId, string ownerActorId, CancellationToken ct);
 
@@ -255,6 +258,25 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
                 .Select(pair => new EllaiConversationTurn(sessionId, pair.Key.ClientUtteranceId,
                     pair.Value.Sequence, pair.Value.UserText, pair.Value.AssistantText,
                     pair.Value.Outcome, pair.Value.AttemptCount, pair.Value.CompletedAtUtc) { UiProposalsJson = pair.Value.UiProposalsJson }).ToArray());
+        }
+    }
+
+    public Task<EllaiConversationTurn?> ReadLatestGuidanceTurnAsync(string sessionId, string ownerActorId, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            if (!_sessions.TryGetValue(sessionId, out var session) || session.OwnerActorId != ownerActorId)
+                return Task.FromResult<EllaiConversationTurn?>(null);
+            var turn = _utterances.Where(pair => pair.Key.SessionId == sessionId && pair.Value.Outcome == "Completed" &&
+                    pair.Value.UiProposalsJson is not null && EllaiUiProposalPayload.Deserialize(pair.Value.UiProposalsJson)
+                        .Any(proposal => proposal.Kind == UiIntentKind.StartGuidance))
+                .OrderByDescending(pair => pair.Value.Sequence)
+                .Select(pair => new EllaiConversationTurn(sessionId, pair.Key.ClientUtteranceId,
+                    pair.Value.Sequence, pair.Value.UserText, pair.Value.AssistantText,
+                    pair.Value.Outcome, pair.Value.AttemptCount, pair.Value.CompletedAtUtc) { UiProposalsJson = pair.Value.UiProposalsJson })
+                .FirstOrDefault();
+            return Task.FromResult(turn);
         }
     }
 

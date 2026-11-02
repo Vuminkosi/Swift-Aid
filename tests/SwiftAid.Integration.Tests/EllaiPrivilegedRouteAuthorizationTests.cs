@@ -724,6 +724,9 @@ public sealed class CountingEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
         DateTimeOffset completedAtUtc, CancellationToken ct, EllaiUtteranceResolution? resolution = null) =>
         _inner.CompleteAsync(sessionId, clientUtteranceId, attemptCount, completedAtUtc, ct, resolution);
 
+    public Task<EllaiConversationTurn?> ReadLatestGuidanceTurnAsync(string sessionId, string ownerActorId, CancellationToken ct) =>
+        _inner.ReadLatestGuidanceTurnAsync(sessionId, ownerActorId, ct);
+
     public Task<IReadOnlyList<EllaiConversationTurn>> ReadConversationAsync(string sessionId, string ownerActorId, CancellationToken ct) =>
         _inner.ReadConversationAsync(sessionId, ownerActorId, ct);
 

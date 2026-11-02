@@ -35,6 +35,37 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
     public Task InitializeAsync() => Task.CompletedTask;
 
     [EllaiPostgresFact]
+    public async Task LatestGuidanceLookupSpansHistoryWindowAndEnforcesOwnerAndOutcome()
+    {
+        var id = $"guidance-history-{Guid.NewGuid():N}";
+        _sessionIds.Add(id);
+        var now = DateTimeOffset.UtcNow;
+        var proposal = EllaiUiProposalPayload.Serialize([new(UiIntentKind.StartGuidance, "ellai.guidance", null, null,
+            new Dictionary<string, string> { ["feature"] = "report", ["objective"] = "Show report form" })]);
+        await using (var db = CreateDbContext())
+        {
+            await new PostgresEllaiSessionStore(db).CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1, 0, 12,
+                Actor.ActorId, "scope-test", null, null, now), default);
+            for (var index = 0; index < 108; index++)
+                db.Set<EllaiUtteranceEntity>().Add(new()
+                {
+                    SessionId = id, ClientUtteranceId = $"turn-{index}", Sequence = index + 1,
+                    AcceptedAtUtc = now, CompletedAtUtc = now, AssistantText = "Synthetic response",
+                    Outcome = index == 107 ? "TerminalFailure" : "Completed",
+                    UiProposalsJson = index is 0 or 1 or 107 ? proposal : null,
+                });
+            await db.SaveChangesAsync();
+        }
+        await using var restoredDb = CreateDbContext();
+        var restored = new PostgresEllaiSessionStore(restoredDb);
+        Assert.Equal(100, (await restored.ReadConversationAsync(id, Actor.ActorId, default)).Count);
+        var latest = await restored.ReadLatestGuidanceTurnAsync(id, Actor.ActorId, default);
+        Assert.Equal("turn-1", latest!.ClientUtteranceId);
+        Assert.Null(await restored.ReadLatestGuidanceTurnAsync(id, "foreign-owner", default));
+        Assert.Null(await restored.ReadLatestGuidanceTurnAsync("missing-session", Actor.ActorId, default));
+    }
+
+    [EllaiPostgresFact]
     public async Task GuidanceCheckpointSurvivesFreshContextAndRejectsStaleConcurrentUpdate()
     {
         var id = $"guidance-{Guid.NewGuid():N}";

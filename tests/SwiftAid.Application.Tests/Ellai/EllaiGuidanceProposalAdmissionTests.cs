@@ -408,6 +408,33 @@ public sealed class EllaiGuidanceProposalAdmissionTests
         }
     }
 
+    [Theory]
+    [InlineData(false, "Ready")]
+    [InlineData(true, "Stale")]
+    public async Task GuidanceSurvivesHistoryWindowWithoutRevivingSupersededPlans(bool replacement, string expected)
+    {
+        var (service, store, observations, id) = await Fixture();
+        await SeedProgress(store, observations, id);
+        for (var index = 0; index < 105; index++)
+        {
+            var current = (await store.GetAsync("session", default))!;
+            var turnId = $"followup-{index}";
+            await store.TryAcceptUtteranceAsync(current with { SessionVersion = current.SessionVersion + 1,
+                InteractionEpoch = current.InteractionEpoch + 1 }, current.SessionVersion, turnId, default, "{}");
+            var claim = (await store.ClaimNextAsync(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(1), default))!;
+            await store.CompleteAsync("session", turnId, claim.AttemptCount, DateTimeOffset.UtcNow, default,
+                EllaiUtteranceResolution.Completed("An ordinary reply", current.InteractionEpoch + 1) with
+                {
+                    UiProposalsJson = replacement && index == 0 ? EllaiUiProposalPayload.Serialize([
+                        new(UiIntentKind.StartGuidance, "ellai.guidance", null, null,
+                            new Dictionary<string, string> { ["feature"] = "report", ["objective"] = "A replacement tour" })]) : null,
+                });
+        }
+        Assert.Equal(100, (await store.ReadConversationAsync("session", "owner", default)).Count);
+        var authority = new EllaiUiEntitlements("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>());
+        Assert.Equal(expected, (await service.AdmitAsync("session", id, authority, default)).Status);
+    }
+
     private static async Task<EllaiGuidanceCheckpoint> SeedProgress(InMemoryEllaiSessionStore store,
         InMemoryEllaiUiObservationStore observations, string proposalId, PlanStepBehavior behavior = PlanStepBehavior.Explain)
     {
