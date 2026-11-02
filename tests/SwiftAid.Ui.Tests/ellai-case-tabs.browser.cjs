@@ -38,6 +38,11 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
                 await page.waitForFunction(label => Array.from(document.querySelectorAll('[role=tab]')).some(tab => tab.textContent.includes(label) && tab.getAttribute('aria-selected') === 'true'), label);
                 assert(new URL(page.url()).searchParams.get('keep') === 'value');
                 assert(new URL(page.url()).searchParams.get('tab') === key);
+                if (key === 'overview') {
+                    for (const label of ['Clinical classification', 'Administrative workflow', 'Operational priority']) {
+                        await page.locator('dt').filter({ hasText: label }).waitFor();
+                    }
+                }
                 await page.waitForFunction(async key => {
                     const report = (await import('/_content/SwiftAid.UI/js/ellai-ui-observations.js')).collect();
                     return report.controlStates.some(control => control.controlId === 'case-detail.' + key && control.state === 4);

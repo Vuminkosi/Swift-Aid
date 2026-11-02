@@ -41,8 +41,9 @@
                     <p>@overview.Summary</p>
                     <dl class="case-detail__facts">
                         <div><dt>Type</dt><dd>@SubjectTypeLabel(overview.SubjectType)</dd></div>
-                        <div><dt>Classification</dt><dd>@overview.ClassificationLabel</dd></div>
-                        <div><dt>Priority</dt><dd>@overview.PriorityLabel</dd></div>
+                        <div><dt>Clinical classification</dt><dd>@overview.ClassificationLabel</dd></div>
+                        <div><dt>Administrative workflow</dt><dd>@overview.Workflow</dd></div>
+                        <div><dt>Operational priority</dt><dd>@overview.PriorityLabel</dd></div>
                         <div><dt>Location</dt><dd>
                             @if (LocationHref is not null) { <MudLink Href="@LocationHref">@(LocationLabelOverride ?? overview.LocationLabel)</MudLink> }
                             else { @(overview.LocationLabel == overview.CountryLabel ? overview.CountryLabel : $"{overview.LocationLabel}, {overview.CountryLabel}") }
