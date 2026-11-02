@@ -46,6 +46,7 @@ The master orchestrator owns checklist status, evidence linking and regression c
 | EV-034 | Read-only SW-02-008 identity failure-path review | PARTIAL: selected disabled/unverified provider and reauthentication proof-mismatch tests exist; no full membership/provider outage/revocation web/mobile matrix was run. | SW-02-008, [failure-path audit](SW-02-008-IDENTITY-FAILURE-AUDIT.md) |
 | EV-035 | Read-only SW-02-009 guest/account isolation audit | PARTIAL: separate guest encrypted storage and staff auth lifecycle source paths exist; browser restart test is unavailable locally without Playwright; no account-switch/device journey run. | SW-02-009 / BL-003, [isolation audit](SW-02-009-GUEST-ACCOUNT-ISOLATION-AUDIT.md) |
 | EV-036 | Read-only SW-02-010 onboarding/account UX inventory | PARTIAL: Gateway/Mobile account and welcome page/test sources exist; no rendered responsive, accessibility, browser/device or persistent first-use workflow evidence. No tests run. | SW-02-010 / BL-003, [UX audit](SW-02-010-ONBOARDING-UX-AUDIT.md) |
+| EV-037 | `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false --filter FullyQualifiedName~GeographicRegistryTests --verbosity minimal` | PASS: 7 passed, 0 failed/skipped using in-memory SQLite; importer/reconciler/search scope only, live PostgreSQL migration NOT VERIFIED. | SW-03-001/002, [geographic seed audit](SW-03-001-GEOGRAPHIC-SEED-AUDIT.md) |
 
 ## Active regression and blocker ownership
 

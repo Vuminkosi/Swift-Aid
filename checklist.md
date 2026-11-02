@@ -79,8 +79,8 @@
 
 **Exit gate:** Evidence for all applicable checks below; blockers and conditional gates explicitly accounted for.
 
-- [ ] **SW-03-001** — Import/version canonical countries SZ/ZW/ZA, administrative hierarchy and distinct settlements with source, precision, aliases and verification state.
-- [ ] **SW-03-002** — Use an idempotent reconciler; do not invent coordinates, parents, completeness, source authority or official prevalence.
+- [ ] **SW-03-001** — Import/version canonical countries SZ/ZW/ZA, administrative hierarchy and distinct settlements with source, precision, aliases and verification state. Partial: seed1 contains 264 source/verification-tagged locations, but explicitly only selected settlements; [audit](docs/SW-03-001-GEOGRAPHIC-SEED-AUDIT.md).
+- [x] **SW-03-002** — Use an idempotent reconciler; do not invent coordinates, parents, completeness, source authority or official prevalence. PASS for the bounded seed importer: focused in-memory SQLite suite passed 7/7, including idempotent repeat, provenance refresh, repair and preserving 153 missing coordinates; live PostgreSQL migration not covered. [Evidence](docs/SW-03-001-GEOGRAPHIC-SEED-AUDIT.md).
 - [ ] **SW-03-003** — Provide indexed debounced search-first SwiftAidLocationPicker with disambiguated administrative context and stable IDs.
 - [ ] **SW-03-004** — Provide country-specific cascade fallback, manual unknown/provisional location and authorized verification workflow.
 - [ ] **SW-03-005** — Distinguish verified point, locality centroid, administrative representative point, user pin and consented device GPS.

@@ -494,3 +494,7 @@ Source inventory in [SW-02-009 isolation audit](SW-02-009-GUEST-ACCOUNT-ISOLATIO
 ## SW-02-010 onboarding/account UX inventory - 2 November 2026
 
 UX/source inventory in [SW-02-010 audit](SW-02-010-ONBOARDING-UX-AUDIT.md) found Gateway/Mobile welcome, sign-in, profile/account pages, local welcome stores and UI test sources. No rendered responsive/accessibility, browser/device or persistent first-use journey was performed; Playwright remains unavailable (BL-003). No tests run; EV-036.
+
+## SW-03-001/002 geographic seed and reconciler audit - 2 November 2026
+
+The seed contains 264 SZ/ZW/ZA locations with source/verification metadata; it explicitly covers selected settlements only, with 153 rows lacking coordinates. Focused command dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false --filter FullyQualifiedName~GeographicRegistryTests --verbosity minimal PASS 7/7 using in-memory SQLite. SW-03-002 passes for this bounded seed importer; SW-03-001 remains partial on coverage/precision. Live PostgreSQL import not verified. See [audit](SW-03-001-GEOGRAPHIC-SEED-AUDIT.md), EV-037.
