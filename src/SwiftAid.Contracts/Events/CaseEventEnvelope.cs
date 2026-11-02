@@ -16,7 +16,8 @@ public enum CaseEventType
     CaseFollowUpOutcomeRecorded,
     CaseEscalationRaised,
     CaseEscalationAcknowledged,
-    CaseEscalationClosed
+    CaseEscalationClosed,
+    CaseAssignmentAcknowledged
 }
 
 public abstract record CaseEventPayload;
@@ -30,6 +31,8 @@ public sealed record CaseReportPayload(
 public sealed record CaseReportedPayload(string WorkspaceId, CaseReportPayload Report) : CaseEventPayload;
 
 public sealed record CaseAssignedPayload(string AccountableOwnerId) : CaseEventPayload;
+
+public sealed record CaseAssignmentAcknowledgedPayload(long AssignmentVersion) : CaseEventPayload;
 
 public sealed record CaseReportCorrectedPayload(
     CaseReportPayload Report,

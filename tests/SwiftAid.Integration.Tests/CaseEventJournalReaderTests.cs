@@ -13,6 +13,45 @@ public sealed class CaseEventJournalReaderTests
     private static readonly DateTimeOffset RecordedAtUtc = new(2026, 10, 27, 8, 1, 0, TimeSpan.Zero);
 
     [Fact]
+    public void AssignmentAcknowledgementRoundTripsAndReplays()
+    {
+        var events = CaseAggregate.CreateManagedCase(Guid.NewGuid(), Guid.NewGuid(), "workspace-1", CreateHumanReport(),
+            null, RecordedAtUtc, new ActorCapabilities("worker-1", CaseCapability.AcceptReport));
+        var aggregate = CaseAggregate.Replay(events);
+        var acknowledged = Assert.Single(aggregate.Decide(new AcknowledgeAssignmentCommand(Guid.NewGuid(), 2, 2, null, RecordedAtUtc),
+            new("worker-1", CaseCapability.AcknowledgeAssignment)));
+        var bytes = Serializer.SerializeToUtf8Bytes(acknowledged);
+        var restored = Assert.IsType<CaseAssignmentAcknowledged>(CaseEventJournalReader.Read(ToRow(acknowledged), bytes));
+        Assert.Equal(2, restored.AssignmentVersion);
+        Assert.Equal(acknowledged.EventId, restored.EventId);
+        Assert.Equal(bytes, Serializer.SerializeToUtf8Bytes(restored));
+        Assert.Equal(RecordedAtUtc, CaseAggregate.Replay(events.Append(restored)).AssignmentAcknowledgedAtUtc);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(3)]
+    [InlineData(4)]
+    public void AssignmentAcknowledgementRejectsInvalidAssignmentVersions(long version)
+    {
+        var acknowledged = new CaseAssignmentAcknowledged(Guid.NewGuid(), 3, 1, Guid.NewGuid(), "worker-1", null, RecordedAtUtc, 2);
+        var document = System.Text.Json.Nodes.JsonNode.Parse(Serializer.SerializeToUtf8Bytes(acknowledged))!;
+        document["payload"]!["assignmentVersion"] = version;
+        Assert.Throws<InvalidDataException>(() => CaseEventJournalReader.Read(ToRow(acknowledged),
+            System.Text.Encoding.UTF8.GetBytes(document.ToJsonString())));
+    }
+
+    [Fact]
+    public void AssignmentAcknowledgementCannotChangeJournalActor()
+    {
+        var acknowledged = new CaseAssignmentAcknowledged(Guid.NewGuid(), 3, 1, Guid.NewGuid(), "worker-1", null, RecordedAtUtc, 2);
+        var row = ToRow(acknowledged);
+        row.ActorId = "other-worker";
+        Assert.Throws<InvalidDataException>(() => CaseEventJournalReader.Read(row, Serializer.SerializeToUtf8Bytes(acknowledged)));
+    }
+
+    [Fact]
     public void Read_V2TypedReport_RestoresTheTypedReportAndConfirmationWithoutLegacyProjection()
     {
         var eventData = CreateHumanReport();

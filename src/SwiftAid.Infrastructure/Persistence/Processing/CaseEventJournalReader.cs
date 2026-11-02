@@ -63,6 +63,12 @@ internal static class CaseEventJournalReader
                     ["workspaceId", "report"], ValidateReportPayload),
                 nameof(CaseEventType.CaseAssigned) => Read<CaseAssignedPayload>(serialized,
                     ["accountableOwnerId"], ValidateAssignedPayload),
+                nameof(CaseEventType.CaseAssignmentAcknowledged) => Read<CaseAssignmentAcknowledgedPayload>(serialized,
+                    ["assignmentVersion"], (payload, value) =>
+                    {
+                        if (payload.GetProperty("assignmentVersion").ValueKind != JsonValueKind.Number || value.AssignmentVersion <= 0)
+                            throw InvalidJournal();
+                    }),
                 nameof(CaseEventType.CaseReportCorrected) => Read<CaseReportCorrectedPayload>(serialized,
                     ["report", "reason", "previousReportRevision"], ValidateCorrectionPayload),
                 nameof(CaseEventType.CaseActionRequested) => Read<CaseActionRequestedPayload>(serialized,
@@ -263,6 +269,9 @@ internal static class CaseEventJournalReader
                 envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
                 envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
                 closed.EscalationId, closed.Resolution, closed.Reason),
+            CaseEventType.CaseAssignmentAcknowledged when payload is CaseAssignmentAcknowledgedPayload acknowledgement && acknowledgement.AssignmentVersion < envelope.AggregateVersion =>
+                new CaseAssignmentAcknowledged(envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision,
+                    envelope.CommandId, envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc, acknowledgement.AssignmentVersion),
             _ => throw InvalidJournal()
         };
     }

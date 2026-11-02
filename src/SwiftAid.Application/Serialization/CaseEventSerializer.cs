@@ -21,6 +21,9 @@ public sealed class CaseEventSerializer
             CaseReported reported => SerializeReported(reported),
             CaseAssigned assignment => Serialize(assignment, CaseEventType.CaseAssigned,
                 new CaseAssignedPayload(assignment.AccountableOwnerId)),
+            CaseAssignmentAcknowledged acknowledgement when acknowledgement.AssignmentVersion > 0 && acknowledgement.AssignmentVersion < acknowledgement.AggregateVersion =>
+                Serialize(acknowledgement, CaseEventType.CaseAssignmentAcknowledged,
+                    new CaseAssignmentAcknowledgedPayload(acknowledgement.AssignmentVersion)),
             CaseReportCorrected correction => SerializeCorrection(correction),
             CaseActionRequested request => Serialize(request, CaseEventType.CaseActionRequested,
                 MapRequest(request)),
@@ -53,7 +56,7 @@ public sealed class CaseEventSerializer
         {
             CaseReported { ReportData: CaseReportEventData.HumanV2 or CaseReportEventData.AnimalV2 } => 2,
             CaseReportCorrected { CorrectedReportData: CaseReportEventData.HumanV2 or CaseReportEventData.AnimalV2 } => 2,
-            CaseReported or CaseAssigned or CaseReportCorrected or CaseActionRequested or CaseActionRequestReviewed or CaseResolved or CaseReopened
+            CaseReported or CaseAssigned or CaseAssignmentAcknowledged or CaseReportCorrected or CaseActionRequested or CaseActionRequestReviewed or CaseResolved or CaseReopened
             or CaseObservationRecorded or CaseFollowUpScheduled or CaseFollowUpOutcomeRecorded
             or CaseEscalationRaised or CaseEscalationAcknowledged or CaseEscalationClosed => 1,
             _ => throw new NotSupportedException($"Event type {@event.GetType().Name} is not supported by the case-event wire contract.")
