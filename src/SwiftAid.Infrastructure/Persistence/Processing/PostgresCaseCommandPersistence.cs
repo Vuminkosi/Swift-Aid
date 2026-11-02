@@ -358,7 +358,7 @@ public sealed class PostgresCaseCommandPersistence : ICaseCommandPersistence
             cancellationToken.ThrowIfCancellationRequested();
             if (@event is not (CaseAssigned or CaseReportCorrected or CaseActionRequested or CaseActionRequestReviewed or CaseResolved or CaseReopened
                 or CaseObservationRecorded or CaseFollowUpScheduled or CaseFollowUpOutcomeRecorded
-                or CaseEscalationRaised or CaseEscalationAcknowledged or CaseEscalationClosed))
+                or CaseEscalationRaised or CaseEscalationAcknowledged or CaseEscalationClosed or CaseAssignmentAcknowledged))
             {
                 // Non-creation command processing must not create a first-report event.
                 throw InvalidJournal();

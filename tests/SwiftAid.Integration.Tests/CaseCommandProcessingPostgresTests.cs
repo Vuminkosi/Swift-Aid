@@ -23,6 +23,70 @@ namespace SwiftAid.Integration.Tests;
 public sealed class CaseCommandProcessingPostgresTests
 {
     [CaseAuthorityPostgresFact]
+    public async Task Assignment_acknowledgement_persists_and_replays_after_context_restart()
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync();
+        await using var cleanup = new CaseCommandProcessingCleanup(fixture);
+        await AddOperationAsync(fixture, CaseOperation.AcknowledgeAssignment);
+        await SetInitialWorkflowVersionAsync(fixture);
+        using var keyRing = SyntheticPayloadKeyRing.Create();
+        using var provider = ProtectedPayloadDataProtectionProviderFactory.Create(
+            keyRing.CreateOptions(), new TestHostEnvironment(Environments.Production));
+        await SeedInitialJournalAsync(fixture, keyRing.CreateOptions(), provider);
+        var command = new AcknowledgeAssignmentCommand(Guid.NewGuid(), 2, 2, null, DateTimeOffset.UnixEpoch);
+
+        async Task<CaseCommandProcessingResult> ProcessAsync(CaseCommand input)
+        {
+            await using var context = fixture.CreateDbContext();
+            var unitOfWork = new PostgresCaseCommandUnitOfWork(context);
+            var store = new PostgresProtectedCaseEventPayloadStore(context, unitOfWork, keyRing.CreateOptions(), provider);
+            var persistence = new PostgresCaseCommandPersistence(context, unitOfWork, store, new CaseEventSerializer());
+            var policy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(context, unitOfWork),
+                new PostgresCaseAccessDescriptorStore(context, unitOfWork));
+            return await new CaseCommandProcessor(unitOfWork, policy, persistence)
+                .ProcessAsync(fixture.CreateActor(), fixture.CaseId, 1, input, CancellationToken.None);
+        }
+
+        var accepted = await ProcessAsync(command);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, accepted.Status);
+        Assert.Equal(3, accepted.AggregateVersion);
+        var replayed = await ProcessAsync(command);
+        Assert.Equal(CaseCommandProcessingStatus.Replayed, replayed.Status);
+        Assert.Equal(accepted.EventIds.ToArray(), replayed.EventIds.ToArray());
+
+        var duplicate = await ProcessAsync(command with { CommandId = Guid.NewGuid(), ExpectedVersion = 3 });
+        Assert.Equal(CaseCommandProcessingStatus.Conflict, duplicate.Status);
+
+        await using (var revokeContext = fixture.CreateDbContext())
+        {
+            await revokeContext.AccessGrantOperations
+                .Where(item => item.GrantGroupId == fixture.GrantGroupId && item.Operation == CaseOperation.AcknowledgeAssignment)
+                .ExecuteDeleteAsync();
+        }
+
+        var deniedReplay = await ProcessAsync(command);
+        Assert.Equal(CaseCommandProcessingStatus.Denied, deniedReplay.Status);
+
+        await using var verification = fixture.CreateDbContext();
+        var row = await verification.CaseEvents.AsNoTracking().SingleAsync(item => item.CommandId == command.CommandId);
+        Assert.Equal("CaseAssignmentAcknowledged", row.EventType);
+        Assert.True(row.RecordedAtUtc > command.RecordedAtUtc);
+        Assert.Single(await verification.CommandReceipts.Where(item => item.CommandId == command.CommandId).ToArrayAsync());
+        Assert.Single(await verification.DomainOutbox.Where(item => item.EventId == row.EventId).ToArrayAsync());
+        var projection = await verification.ManagedCases.AsNoTracking().SingleAsync(item => item.CaseId == fixture.CaseId);
+        Assert.Equal(3, projection.AggregateVersion);
+        Assert.Equal(fixture.ActorId, projection.AccountableOwnerActorId);
+
+        var replayUnit = new PostgresCaseCommandUnitOfWork(verification);
+        var replayStore = new PostgresProtectedCaseEventPayloadStore(verification, replayUnit, keyRing.CreateOptions(), provider);
+        var replayPersistence = new PostgresCaseCommandPersistence(verification, replayUnit, replayStore, new CaseEventSerializer());
+        await using var lease = await replayUnit.BeginCaseAsync(fixture.CreateActor(), fixture.CaseId, [], CaseLeaseMode.Read, CancellationToken.None);
+        var aggregate = await replayPersistence.ReplayCaseAsync(lease, CancellationToken.None);
+        Assert.Equal(2, aggregate.AssignmentVersion);
+        Assert.Equal(row.RecordedAtUtc, aggregate.AssignmentAcknowledgedAtUtc);
+    }
+
+    [CaseAuthorityPostgresFact]
     public async Task Accepted_command_atomically_updates_projection_journal_receipt_audit_and_outbox()
     {
         await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync().ConfigureAwait(false);
