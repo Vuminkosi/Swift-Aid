@@ -1,14 +1,11 @@
+using SwiftAid.Application.Ellai;
 using System.Net;
 using System.Text;
 using System.Text.Json;
 
 namespace SwiftAid.Infrastructure.Memory;
 
-/// <summary>Derived, nonsemantic reference. Source version and access must be checked in PostgreSQL.</summary>
-public sealed record EllaiExactMemoryReference(string Id, string SessionId, string ScopeEpoch,
-    string TopicId, string SourceVersion, DateTimeOffset ExpiresAtUtc);
-
-public sealed partial class EllaiMemoryIndex
+public sealed partial class EllaiMemoryIndex : IEllaiExactReferenceIndex
 {
     // Separate collection prevents changing the schema of a future verified vector index.
     private string ExactUrl => endpoint.TrimEnd('/') + "/collections/" + collection + "-exact";

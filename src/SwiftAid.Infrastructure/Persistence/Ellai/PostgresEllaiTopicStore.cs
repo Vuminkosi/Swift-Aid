@@ -75,6 +75,13 @@ public sealed class PostgresEllaiTopicStore(SwiftAidDbContext dbContext) : IElla
         return entities.Select(ToEntry).ToList();
     }
 
+    public async Task<EllaiTopicEntry?> GetAsync(string sessionId, string topicId, CancellationToken ct)
+    {
+        var row = await _dbContext.Set<EllaiTopicEntity>().AsNoTracking()
+            .SingleOrDefaultAsync(topic => topic.SessionId == sessionId && topic.TopicId == topicId, ct).ConfigureAwait(false);
+        return row is null ? null : ToEntry(row);
+    }
+
     private static EllaiTopicEntry ToEntry(EllaiTopicEntity entity) => new(
         entity.TopicId, entity.SessionId, entity.Title,
         JsonSerializer.Deserialize<List<string>>(entity.AliasesJson) ?? new List<string>(),

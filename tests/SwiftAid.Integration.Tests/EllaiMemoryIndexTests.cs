@@ -1,4 +1,5 @@
 using SwiftAid.Infrastructure.Memory;
+using SwiftAid.Application.Ellai;
 
 namespace SwiftAid.Integration.Tests;
 

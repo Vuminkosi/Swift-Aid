@@ -203,6 +203,7 @@ public sealed class EllaiToolBroker
     private readonly ICaseQueueQuery? _queue;
     private readonly IEllaiApprovalStore? _receipts;
     private readonly EllaiTopicService? _topics;
+    private readonly IEllaiExactReferenceIndex? _referenceIndex;
     private readonly EllaiUiAuthorityResolver _uiAuthority;
     private readonly EllaiUiRegistry? _uiRegistry;
     private readonly IEllaiUiDiscoveryService? _uiDiscovery;
@@ -233,7 +234,7 @@ public sealed class EllaiToolBroker
         ICaseImportStore? imports = null, ICaseImportWorkspaceReader? importWorkspaces = null,
         SwiftAid.Application.Classification.ICaseClassificationQuery? classification = null,
         SwiftAid.Application.Surveillance.ISignalReviewService? signals = null,
-        EllaiUiAuthorityResolver? uiAuthority = null)
+        EllaiUiAuthorityResolver? uiAuthority = null, IEllaiExactReferenceIndex? referenceIndex = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _consent = consent ?? throw new ArgumentNullException(nameof(consent));
@@ -241,6 +242,7 @@ public sealed class EllaiToolBroker
         _queue = queue;
         _receipts = receipts;
         _topics = topics;
+        _referenceIndex = referenceIndex;
         _uiAuthority = uiAuthority ?? new EllaiUiAuthorityResolver();
         _uiRegistry = uiRegistry;
         _uiDiscovery = uiDiscovery;
@@ -586,7 +588,7 @@ public sealed class EllaiToolBroker
         {
             try
             {
-                await new EllaiCaseResultMemory(_topics, _queue).RememberAsync(context, items, ct).ConfigureAwait(false);
+                await new EllaiCaseResultMemory(_topics, _queue, _referenceIndex).RememberAsync(context, items, ct).ConfigureAwait(false);
                 recallNotice = " Result references retained for this session; recall with ellai_topic(ref=case-results).";
             }
             catch (Exception error) when (error is not OperationCanceledException)
@@ -718,7 +720,7 @@ public sealed class EllaiToolBroker
             if (_queue is null) return Deny(request.ToolName, "Case recall is unavailable.", EllaiToolReasonCodes.Unavailable);
             try
             {
-                return await new EllaiCaseResultMemory(_topics, _queue).RecallAsync(context, ct).ConfigureAwait(false);
+                return await new EllaiCaseResultMemory(_topics, _queue, _referenceIndex).RecallAsync(context, ct).ConfigureAwait(false);
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {

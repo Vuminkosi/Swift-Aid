@@ -30,6 +30,9 @@ public interface IEllaiTopicStore
         DateTimeOffset now, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<EllaiTopicEntry>> ListAsync(string sessionId, CancellationToken cancellationToken);
+
+    async Task<EllaiTopicEntry?> GetAsync(string sessionId, string topicId, CancellationToken ct) =>
+        (await ListAsync(sessionId, ct).ConfigureAwait(false)).SingleOrDefault(topic => topic.TopicId == topicId);
 }
 
 /// <summary>Thread-safe in-memory topic store with the same semantics as the

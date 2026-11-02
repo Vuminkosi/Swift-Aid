@@ -8,7 +8,7 @@ namespace SwiftAid.Application.Ellai;
 
 /// <summary>Session-local result references. PostgreSQL topics hold no case narratives;
 /// every recall uses the ordinary owner-filtered, per-case authorized query.</summary>
-public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQuery queue)
+public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQuery queue, IEllaiExactReferenceIndex? index = null)
 {
     public const string Reference = "case-results";
     public const string TopicTitle = "Ellai latest case result references";
@@ -29,8 +29,29 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
     public async Task<EllaiToolResult> RecallAsync(EllaiToolContext context, CancellationToken ct)
     {
         if (context.Actor is null) return Unavailable();
-        var (matches, _) = await topics.ResolveAsync(context.SessionId, Reference, ct).ConfigureAwait(false);
-        var topic = matches.SingleOrDefault(item => item.Title == TopicTitle);
+        EllaiTopicEntry? indexedTopic = null;
+        if (index is not null)
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromMilliseconds(500));
+            try
+            {
+                var hit = await index.FindExactAsync(Reference, context.SessionId, context.ScopeEpoch, timeout.Token).ConfigureAwait(false);
+                if (hit is not null && hit.Id == Reference && hit.SessionId == context.SessionId &&
+                    hit.ScopeEpoch == context.ScopeEpoch && hit.ExpiresAtUtc > DateTimeOffset.UtcNow)
+                {
+                    var candidate = await topics.GetAsync(context.SessionId, hit.TopicId, ct).ConfigureAwait(false);
+                    if (candidate?.Title == TopicTitle && candidate.EntityRef is { } source &&
+                        SourceVersion(source) == hit.SourceVersion) indexedTopic = candidate;
+                }
+            }
+            catch (Exception) when (!ct.IsCancellationRequested) { /* Derived cache cannot block authoritative recall. */ }
+        }
+        var topic = indexedTopic is not null
+            ? new EllaiTopic(indexedTopic.TopicId, indexedTopic.Title, indexedTopic.Aliases, indexedTopic.EntityRef,
+                indexedTopic.EntityVersion, indexedTopic.CoverageState, indexedTopic.CheckpointId)
+            : (await topics.ResolveAsync(context.SessionId, Reference, ct).ConfigureAwait(false)).Matches
+                .SingleOrDefault(item => item.Title == TopicTitle);
         Snapshot? snapshot;
         try
         {
@@ -58,6 +79,9 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
                 $"v{pair.row.AggregateVersion}" + (pair.old.Version != pair.row.AggregateVersion ? " (changed since retrieval)" : "")));
         return new(EllaiToolNames.Topic, true, null, evidence, text, rows.Length, false);
     }
+
+    public static string SourceVersion(string snapshot) => Convert.ToHexString(
+        System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(snapshot)));
 
     private static EllaiToolResult Unavailable() => new(EllaiToolNames.Topic, false,
         "No current, permitted case result set is available to recall. Run the case search again.", [], "", 0, false,

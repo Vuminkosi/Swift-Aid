@@ -45,6 +45,17 @@ public sealed class EllaiLiveQueueReadTests
         public int? LastLimit { get; private set; }
     }
 
+    private sealed class FakeIndex(EllaiExactMemoryReference? hit, bool fail = false) : IEllaiExactReferenceIndex
+    {
+        public int Reads { get; private set; }
+        public Task<EllaiExactMemoryReference?> FindExactAsync(string id, string session, string epoch, CancellationToken ct)
+        {
+            Reads++;
+            if (fail) throw new InvalidOperationException("cache offline");
+            return Task.FromResult(hit);
+        }
+    }
+
     private static ActorContext TestActor() => ActorContext.FromValidatedPrincipal(
         new ClaimsPrincipal(new ClaimsIdentity(new[]
         {
@@ -203,6 +214,27 @@ public sealed class EllaiLiveQueueReadTests
         Assert.False(recalled.Allowed);
         Assert.Equal(EllaiToolReasonCodes.Unavailable, recalled.ReasonCode);
         Assert.Empty(recalled.Evidence);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task DerivedIndexNeverOverridesAuthoritativeResultReferences(bool stale, bool outage)
+    {
+        var store = new InMemoryEllaiTopicStore();
+        var topics = new EllaiTopicService(store);
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [Row("01", 7)]) };
+        var context = Context with { Actor = TestActor() };
+        await new EllaiCaseResultMemory(topics, queue).RememberAsync(context, queue.Result.Items, CancellationToken.None);
+        var entry = Assert.Single(await store.ListAsync(context.SessionId, CancellationToken.None));
+        var index = new FakeIndex(new("case-results", context.SessionId, context.ScopeEpoch, entry.TopicId,
+            stale ? "obsolete" : EllaiCaseResultMemory.SourceVersion(entry.EntityRef!), DateTimeOffset.UtcNow.AddHours(1)), outage);
+        var recalled = await new EllaiCaseResultMemory(topics, queue, index).RecallAsync(context, CancellationToken.None);
+        Assert.True(recalled.Allowed);
+        Assert.Equal(1, index.Reads);
+        Assert.Equal(Row("01", 7).CaseId.ToString("D"), Assert.Single(recalled.Evidence).ResourceId);
+        Assert.NotNull(queue.LastFilter?.CaseIds);
     }
 
     [Fact]

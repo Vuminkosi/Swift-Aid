@@ -94,6 +94,9 @@ public sealed class EllaiTopicService
         return (matches, matches.Count > 1);
     }
 
+    public Task<EllaiTopicEntry?> GetAsync(string sessionId, string topicId, CancellationToken ct) =>
+        _topicStore.GetAsync(sessionId, topicId, ct);
+
     private static bool TitleOrAliasMatches(EllaiTopic topic, string reference) =>
         topic.Title.Contains(reference, StringComparison.OrdinalIgnoreCase)
         || topic.Aliases.Any(a => a.Contains(reference, StringComparison.OrdinalIgnoreCase));
