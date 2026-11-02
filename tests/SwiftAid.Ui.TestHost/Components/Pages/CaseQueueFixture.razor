@@ -1,0 +1,27 @@
+@page "/case-queue-fixture"
+@using SwiftAid.UI.Components.Surfaces.Operations
+@using SwiftAid.UI.Components.Theme
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<output id="fixture-ready">@_ready</output>
+
+<OperationsCaseQueue Title="Synthetic case queue" State="OperationsSurfaceState.Populated"
+                    Query="_query" FilterOptions="Options" Items="Rows" TotalCount="1" OnQueryChanged="ChangeQuery" />
+<output id="selected-sector">@(_query.Sector?.ToString() ?? "All")</output>
+
+@code {
+    private bool _ready;
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { _ready = true; StateHasChanged(); }
+    }
+    private OperationsCaseQueue.FilterRequestView _query = new(1, 25, null, null, null, null, null, null, null, null, null, true);
+    private void ChangeQuery(OperationsCaseQueue.FilterRequestView query) => _query = query;
+    private static readonly OperationsCaseQueue.FilterOptionsView Options = new(
+        [new("Human", "Human"), new("Animal", "Animal"), new("Unknown", "Unknown")],
+        [], [], [], [], [new("Recorded", "Recorded")], true, true, false, false, false, false, true, false);
+    private static readonly OperationsCaseQueue.QueueViewRow[] Rows =
+    [new(Guid.Parse("abcd1234-0000-0000-0000-000000000001"), "Case abcd1234", "Reported", "Eswatini",
+        OperationsCaseQueue.SectorKind.Human, null, "Assigned to you", "Recorded", DateTimeOffset.UtcNow)];
+}
