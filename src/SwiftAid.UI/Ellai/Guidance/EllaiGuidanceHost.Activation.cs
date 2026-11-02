@@ -47,11 +47,11 @@ public partial class EllaiGuidanceHost
         finally { _advancingValidatedInput = false; }
     }
 
-    private async Task RevisitGuidanceStepAsync()
+    private async Task MoveGuidanceStepAsync(string command)
     {
         if (_advancingValidatedInput || _generatedTour?.Status is not (BonboardingTourStatus.Running or BonboardingTourStatus.Waiting)) return;
         _advancingValidatedInput = true;
-        try { await ControlGeneratedTourAsync("back"); }
+        try { await ControlGeneratedTourAsync(command); }
         finally { _advancingValidatedInput = false; }
     }
 
@@ -61,7 +61,7 @@ public partial class EllaiGuidanceHost
         if (tour is null || _controlGeneratedTour is null) return;
         if (!await _controlGeneratedTour(command)) return;
         if (!ReferenceEquals(tour, _generatedTour)) return;
-        if (command == "back")
+        if (command is "back" or "skip")
         {
             await CancelGeneratedGuidanceAsync();
             await StartProposedGuidanceAsync();
@@ -175,9 +175,9 @@ public partial class EllaiGuidanceHost
                     return;
                 }
                 OfferSavedGuidance(fresh.Session);
-                if (command is "resume" or "next" or "back")
+                if (command is "resume" or "next" or "back" or "skip")
                 {
-                    if (command is "next" or "back" && saved.Status != "Ready")
+                    if (command is "next" or "back" or "skip" && saved.Status != "Ready")
                     {
                         _guidanceNotice = "Resume the guidance before changing steps.";
                         return;
@@ -186,9 +186,9 @@ public partial class EllaiGuidanceHost
                     if (command == "next" && controlId == _lastGuidanceControlProposalId &&
                         _sessionView?.SessionId == session.SessionId)
                         await AdvanceGuidanceStepAsync(_uiObservationLifetime.Token);
-                    else if (command == "back" && controlId == _lastGuidanceControlProposalId &&
+                    else if (command is "back" or "skip" && controlId == _lastGuidanceControlProposalId &&
                         _sessionView?.SessionId == session.SessionId)
-                        await RevisitGuidanceStepAsync();
+                        await MoveGuidanceStepAsync(command);
                 }
                 else
                 {
@@ -206,7 +206,7 @@ public partial class EllaiGuidanceHost
                 return;
             }
             if (command == "next") await AdvanceGuidanceStepAsync(_uiObservationLifetime.Token);
-            else if (command == "back") await RevisitGuidanceStepAsync();
+            else if (command is "back" or "skip") await MoveGuidanceStepAsync(command);
             else await ControlGeneratedTourAsync(command);
         }
         catch (OperationCanceledException) { }
@@ -335,9 +335,9 @@ public partial class EllaiGuidanceHost
                 try
                 {
                     if (!IsCurrent()) return false;
-                    if (command is "resume" or "back") await ReportCurrentUiAsync(_uiObservationLifetime.Token);
-                    var target = command switch { "pause" => "Paused", "resume" or "back" => "Ready", _ => "Cancelled" };
-                    if (command != "back" && durableStatus == target) return true;
+                    if (command is "resume" or "back" or "skip") await ReportCurrentUiAsync(_uiObservationLifetime.Token);
+                    var target = command switch { "pause" => "Paused", "resume" or "back" or "skip" => "Ready", _ => "Cancelled" };
+                    if (command is not ("back" or "skip") && durableStatus == target) return true;
                     var update = await ReviewClient.ControlGuidanceAsync(session.SessionId,
                         new(proposalId, plan.PlanId, progressVersion, command), _uiObservationLifetime.Token);
                     if (IsCurrent() && command == "back" && update?.Status == "AtStart")
@@ -345,7 +345,12 @@ public partial class EllaiGuidanceHost
                         _guidanceNotice = "You are already at the first step.";
                         return false;
                     }
-                    if (!IsCurrent() || update?.Status != target)
+                    if (IsCurrent() && command == "skip" && update?.Status == "SkipNotAllowed")
+                    {
+                        _guidanceNotice = "This step needs to be completed before continuing.";
+                        return false;
+                    }
+                    if (!IsCurrent() || (update?.Status != target && !(command == "skip" && update?.Status == "Completed")))
                     {
                         _guidanceNotice = "Guidance could not be saved. Try again.";
                         return false;
@@ -353,6 +358,13 @@ public partial class EllaiGuidanceHost
                     progressVersion = update.Version;
                     durableStatus = update.Status;
                     _guidanceNotice = null;
+                    if (command == "skip" && update.Status == "Completed")
+                    {
+                        _guidanceProposalId = null;
+                        _guidanceFeatureId = null;
+                        _guidanceProposalIsAccepted = false;
+                        _guidanceNotice = "Guidance finished. Skipped steps were not completed.";
+                    }
                     return true;
                 }
                 finally { progressGate.Release(); }

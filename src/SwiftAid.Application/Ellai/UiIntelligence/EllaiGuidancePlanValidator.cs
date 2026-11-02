@@ -16,7 +16,7 @@ public sealed class EllaiGuidancePlanValidator(EllaiUiRegistry registry)
         EllaiGuidancePlanDraft draft, UiRegistryQuery query, IReadOnlySet<string> entitledFeatures,
         IReadOnlySet<string> entitledCapabilities, IReadOnlyList<UiControlObservation> observations,
         string viewInstanceId, string contextStamp, DateTimeOffset now, string planId,
-        string? currentStepId = null, IReadOnlySet<string>? completedStepIds = null, IReadOnlySet<string>? validatedControlIds = null)
+        string? currentStepId = null, IReadOnlySet<string>? completedStepIds = null, IReadOnlySet<string>? validatedControlIds = null, IReadOnlySet<string>? skippedStepIds = null)
     {
         var accepted = Validate(draft, query, entitledFeatures, entitledCapabilities, planId, 1, 0, 0);
         if (accepted.Plan is null) return accepted;
@@ -25,14 +25,22 @@ public sealed class EllaiGuidancePlanValidator(EllaiUiRegistry registry)
         var ordered = EllaiGuidanceSequence.Order(draft.Steps);
         var activeIndex = currentStepId is null ? 0 : ordered.ToList().FindIndex(step => step.StepKey == currentStepId);
         completedStepIds ??= new HashSet<string>();
-        if (activeIndex < 0 || completedStepIds.Count != activeIndex ||
-            ordered.Take(Math.Max(0, activeIndex)).Any(step => !completedStepIds.Contains(step.StepKey)))
+        skippedStepIds ??= new HashSet<string>();
+        var visited = completedStepIds.Concat(skippedStepIds).ToHashSet(StringComparer.Ordinal);
+        if (completedStepIds.Overlaps(skippedStepIds) || activeIndex < 0 || visited.Count != activeIndex ||
+            ordered.Take(Math.Max(0, activeIndex)).Any(step => !visited.Contains(step.StepKey)))
             return (null, ["Guidance progress must follow the accepted sequence."]);
         var precedingControls = new HashSet<string>(StringComparer.Ordinal);
         for (var index = 0; index < ordered.Count; index++)
         {
             var step = ordered[index];
             var descriptor = snapshot.Descriptors.Single(d => d.ControlId == step.ControlId);
+            if (skippedStepIds.Contains(step.StepKey) &&
+                (step.Behavior != PlanStepBehavior.Explain || descriptor.RiskClass != UiRiskClass.R0 ||
+                 descriptor.HumanConfirmationRequired || descriptor.ProofPolicyId != "proof-ui-observed" ||
+                 ordered.Any(other => other.StepKey != step.StepKey && snapshot.Descriptors.Any(control =>
+                     control.ControlId == other.ControlId && control.PrerequisiteIds.Contains(step.ControlId)))))
+                errors.Add("Skipped progress cannot bypass required interaction or prerequisites.");
             var matches = observations.Where(o => o.ControlId == step.ControlId).ToArray();
             var futureWizardTarget = index > activeIndex && descriptor.FeatureId == EllaiReportUiManifest.FeatureId &&
                 !descriptor.HumanConfirmationRequired && descriptor.RiskClass is UiRiskClass.R0 or UiRiskClass.R1 &&
@@ -54,7 +62,7 @@ public sealed class EllaiGuidancePlanValidator(EllaiUiRegistry registry)
                     !(descriptor.FeatureId == EllaiNavigationManifest.FeatureId &&
                       EllaiNavigationManifest.ResolveStepDestination(step) is not null)))
                 errors.Add("Guidance metadata is not grounded in its registered control.");
-            precedingControls.Add(step.ControlId);
+            if (!skippedStepIds.Contains(step.StepKey)) precedingControls.Add(step.ControlId);
         }
         return errors.Count == 0 ? accepted : (null, errors);
     }

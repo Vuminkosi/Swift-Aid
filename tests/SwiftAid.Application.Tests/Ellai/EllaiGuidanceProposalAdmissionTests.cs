@@ -342,6 +342,60 @@ public sealed class EllaiGuidanceProposalAdmissionTests
         Assert.Equal("Stale", (await service.CompleteStepAsync("session", request, authority, default)).Status);
     }
 
+    [Theory]
+    [InlineData(PlanStepBehavior.Explain, false, "Completed")]
+    [InlineData(PlanStepBehavior.GuideHuman, false, "SkipNotAllowed")]
+    [InlineData(PlanStepBehavior.Explain, true, "SkipNotAllowed")]
+    public async Task SkipNeverCreatesCompletionEvidence(PlanStepBehavior behavior, bool mandatory, string expected)
+    {
+        var (service, store, observations, id) = await Fixture();
+        var checkpoint = await SeedProgress(store, observations, id, behavior);
+        if (mandatory)
+        {
+            checkpoint = checkpoint with { Plan = checkpoint.Plan! with
+                { RemainingMandatoryObjectiveIds = [checkpoint.Plan.Steps[0].ObjectiveId] } };
+            var current = (await store.GetAsync("session", default))!;
+            await store.TryUpdateAsync(current with { SessionVersion = current.SessionVersion + 1,
+                GuidanceJson = EllaiGuidanceCheckpoint.Serialize(checkpoint) }, current.SessionVersion, default);
+        }
+        var authority = new EllaiUiEntitlements("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>());
+        var result = await service.ControlAsync("session", new(id, checkpoint.Plan!.PlanId, checkpoint.Version, "skip"), authority, default);
+        Assert.Equal(expected, result.Status);
+        Assert.Empty(result.CompletedStepIds!);
+        var saved = EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("session", default))!.GuidanceJson)!;
+        Assert.Empty(saved.CompletedStepIds);
+        if (expected == "Completed")
+        {
+            Assert.Equal("step-1", Assert.Single(result.SkippedStepIds!));
+            Assert.Equal("step-1", Assert.Single(saved.SkippedStepIds));
+            Assert.Null(saved.CurrentStepId);
+        }
+        else Assert.Empty(saved.SkippedStepIds);
+    }
+
+    [Fact]
+    public async Task BackAfterSkipRevisitsWithoutConvertingSkippedStepToCompleted()
+    {
+        var (service, store, observations, id) = await Fixture();
+        var checkpoint = await SeedProgress(store, observations, id);
+        var first = checkpoint.Plan!.Steps[0] with { NextStepKey = "second" };
+        checkpoint = checkpoint with { Plan = checkpoint.Plan with { Steps = [first, first with { StepKey = "second", NextStepKey = null }] } };
+        var current = (await store.GetAsync("session", default))!;
+        await store.TryUpdateAsync(current with { SessionVersion = current.SessionVersion + 1,
+            GuidanceJson = EllaiGuidanceCheckpoint.Serialize(checkpoint) }, current.SessionVersion, default);
+        var authority = new EllaiUiEntitlements("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>());
+        var request = new EllaiGuidanceControlRequest(id, checkpoint.Plan.PlanId, checkpoint.Version, "skip");
+        var skipped = await service.ControlAsync("session", request, authority, default);
+        Assert.Equal("Ready", skipped.Status);
+        Assert.Equal("second", skipped.CurrentStepId);
+        Assert.Empty(skipped.CompletedStepIds!);
+        Assert.Equal("Conflict", (await service.ControlAsync("session", request, authority, default)).Status);
+        var back = await service.ControlAsync("session", request with { Command = "back", ExpectedVersion = skipped.Version }, authority, default);
+        Assert.Equal("step-1", back.CurrentStepId);
+        Assert.Empty(back.CompletedStepIds!);
+        Assert.Empty(back.SkippedStepIds!);
+    }
+
     [Fact]
     public async Task BackRewindsDurablePositionAndRejectsDuplicateVersion()
     {

@@ -57,10 +57,12 @@ public sealed class EllaiGuidanceAdmissionHttpTests
         finally { await app.StopAsync(); }
     }
     [Theory]
-    [InlineData("report", "report.entry", false)]
-    [InlineData("navigation", "navigation.dashboard", false)]
-    [InlineData("navigation", "navigation.dashboard", true)]
-    public async Task PlanningPostGeneratesOnceAndReturnsDurableOwnedPlan(string feature, string control, bool navigate)
+    [InlineData("report", "report.entry", false, false)]
+    [InlineData("report", "report.entry", false, true)]
+    [InlineData("navigation", "navigation.dashboard", false, false)]
+    [InlineData("navigation", "navigation.dashboard", true, false)]
+    [InlineData("navigation", "navigation.dashboard", true, true)]
+    public async Task PlanningPostGeneratesOnceAndReturnsDurableOwnedPlan(string feature, string control, bool navigate, bool skip)
     {
         var store = new InMemoryEllaiSessionStore();
         var session = new EllaiSessionRecord("owned", EllaiMode.GuideMe, "Active", 1, 1, 1, 1, 0, 12,
@@ -180,6 +182,22 @@ public sealed class EllaiGuidanceAdmissionHttpTests
                 await observations.RecordAsync(new("owned", "destination-view", "destination-context", "web", [control],
                     DateTimeOffset.UtcNow, [new(control, UiObservationState.Ready)], "nav-dashboard"), default);
                 stepRequest = stepRequest with { ContextStamp = "destination-context" };
+            }
+            if (skip)
+            {
+                using var skippedResponse = await client.PostAsJsonAsync("/sessions/owned/guidance/control",
+                    controlRequest with { ExpectedVersion = restored.ProgressVersion, Command = "skip" });
+                var skipped = (await skippedResponse.Content.ReadFromJsonAsync<EllaiGuidanceProgressDto>())!;
+                Assert.Equal(navigate ? "SkipNotAllowed" : "Completed", skipped.Status);
+                Assert.Empty(skipped.CompletedStepIds!);
+                if (!navigate)
+                {
+                    Assert.Equal("entry", Assert.Single(skipped.SkippedStepIds!));
+                    var persisted = EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("owned", default))!.GuidanceJson)!;
+                    Assert.Empty(persisted.CompletedStepIds);
+                    Assert.Equal("entry", Assert.Single(persisted.SkippedStepIds));
+                    return;
+                }
             }
             for (var attempt = 0; attempt < 2; attempt++)
             {

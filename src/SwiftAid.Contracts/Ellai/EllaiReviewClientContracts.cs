@@ -338,12 +338,12 @@ public sealed record EllaiGuidanceAdmissionDto(string Status, string? Objective,
 
 public sealed record EllaiGuidancePlanRequest(string ProposalId);
 public sealed record EllaiGuidancePlanDto(string Status, ValidatedGuidancePlan? Plan = null, string? ContextStamp = null, string? NavigationId = null,
-    long ProgressVersion = 0, string? CurrentStepId = null, IReadOnlyList<string>? CompletedStepIds = null);
+    long ProgressVersion = 0, string? CurrentStepId = null, IReadOnlyList<string>? CompletedStepIds = null, IReadOnlyList<string>? SkippedStepIds = null);
 
 public sealed record EllaiGuidanceStepRequest(string ProposalId, string PlanId, long ExpectedVersion,
     string StepId, string ContextStamp);
 public sealed record EllaiGuidanceProgressDto(string Status, long Version = 0, string? CurrentStepId = null,
-    IReadOnlyList<string>? CompletedStepIds = null);
+    IReadOnlyList<string>? CompletedStepIds = null, IReadOnlyList<string>? SkippedStepIds = null);
 
 /// <summary>Lifecycle only; never authorization to submit a form or mark steps completed.</summary>
 public sealed record EllaiGuidanceControlRequest(string ProposalId, string PlanId, long ExpectedVersion, string Command);

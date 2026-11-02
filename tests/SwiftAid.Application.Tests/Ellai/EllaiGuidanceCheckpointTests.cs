@@ -27,6 +27,14 @@ public sealed class EllaiGuidanceCheckpointTests
         Assert.Throws<ArgumentException>(() => EllaiGuidanceCheckpoint.Serialize(Sample() with { ContextStamp = new string('x', 100_000) }));
     }
 
+    [Fact]
+    public void SkippedEvidenceCannotOverlapCompletedOrReferenceUnknownSteps()
+    {
+        Assert.Throws<ArgumentException>(() => EllaiGuidanceCheckpoint.Serialize(Sample() with { SkippedStepIds = ["missing"] }));
+        Assert.Throws<ArgumentException>(() => EllaiGuidanceCheckpoint.Serialize(Sample() with { SkippedStepIds = ["step-1"], CompletedStepIds = ["step-1"] }));
+        Assert.Throws<ArgumentException>(() => EllaiGuidanceCheckpoint.Serialize(Sample() with { SkippedStepIds = ["step-1", "step-1"] }));
+    }
+
     [Theory]
     [InlineData("cycle")]
     [InlineData("unknown")]

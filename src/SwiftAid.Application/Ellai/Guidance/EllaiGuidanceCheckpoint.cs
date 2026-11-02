@@ -24,6 +24,7 @@ public sealed record EllaiGuidanceCheckpoint(
     string? NavigationId)
 {
     public string? FeatureId { get; init; }
+    public IReadOnlyList<string> SkippedStepIds { get; init; } = [];
 
     public int SchemaVersion { get; init; } = 1;
     public int GenerationAttempt { get; init; } = 1;
@@ -63,6 +64,10 @@ public sealed record EllaiGuidanceCheckpoint(
             || !Bounded(GenerationId, 120)
             || Status is not ("Generating" or "Ready" or "Paused" or "Completed" or "Cancelled" or "Failed")
             || CompletedStepIds is null || CompletedStepIds.Count > 40
+            || SkippedStepIds is null || SkippedStepIds.Count > 40
+            || SkippedStepIds.Any(id => !Bounded(id, 120))
+            || SkippedStepIds.Distinct(StringComparer.Ordinal).Count() != SkippedStepIds.Count
+            || SkippedStepIds.Intersect(CompletedStepIds).Any()
             || PendingActionIds is null || PendingActionIds.Count > 20
             || CompletedStepIds.Any(id => !Bounded(id, 120))
             || PendingActionIds.Any(id => !Bounded(id, 200))
@@ -73,7 +78,7 @@ public sealed record EllaiGuidanceCheckpoint(
 
         if (Plan is null)
         {
-            if (Status is "Ready" or "Paused" or "Completed" || CurrentStepId is not null || CompletedStepIds.Count != 0)
+            if (Status is "Ready" or "Paused" or "Completed" || CurrentStepId is not null || CompletedStepIds.Count != 0 || SkippedStepIds.Count != 0)
                 throw new ArgumentException("Guidance progress requires an accepted plan.");
             return;
         }
@@ -85,7 +90,7 @@ public sealed record EllaiGuidanceCheckpoint(
             throw new ArgumentException("Invalid guidance plan checkpoint.");
         var keys = EllaiGuidanceSequence.Order(Plan.Steps).Select(step => step.StepKey).ToHashSet(StringComparer.Ordinal);
         if (keys.Count != Plan.Steps.Count || (CurrentStepId is not null && !keys.Contains(CurrentStepId))
-            || CompletedStepIds.Any(id => !keys.Contains(id)))
+            || CompletedStepIds.Concat(SkippedStepIds).Any(id => !keys.Contains(id)))
             throw new ArgumentException("Guidance progress must reference accepted plan steps.");
     }
 

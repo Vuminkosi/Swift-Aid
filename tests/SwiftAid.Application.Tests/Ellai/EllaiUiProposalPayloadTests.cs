@@ -11,6 +11,7 @@ public sealed class EllaiUiProposalPayloadTests
     [InlineData("cancel", true)]
     [InlineData("stop-speech", true)]
     [InlineData("back", true)]
+    [InlineData("skip", true)]
     [InlineData("next", true)]
     [InlineData("approve", false)]
     [InlineData("complete", false)]

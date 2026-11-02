@@ -7,6 +7,6 @@ public static class EllaiGuidanceControlProposal
         proposal is { Kind: UiIntentKind.ControlGuidance, FeatureId: "ellai.guidance", ResourceId: null, ControlId: null }
         && proposal.Arguments is { Count: 1 }
         && proposal.Arguments.TryGetValue("command", out var command)
-        && command is "pause" or "resume" or "cancel" or "stop-speech" or "next" or "back"
+        && command is "pause" or "resume" or "cancel" or "stop-speech" or "next" or "back" or "skip"
             ? command : null;
 }

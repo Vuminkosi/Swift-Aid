@@ -60,7 +60,7 @@ public static class EllaiGuidanceProposalEndpoint
         if (generated.Plan is not null && checkpoint?.Plan?.PlanId != generated.Plan.PlanId)
             return new("Stale");
         return new(generated.Status, generated.Plan, checkpoint?.ContextStamp, checkpoint?.NavigationId,
-            checkpoint?.Version ?? 0, checkpoint?.CurrentStepId, checkpoint?.CompletedStepIds);
+            checkpoint?.Version ?? 0, checkpoint?.CurrentStepId, checkpoint?.CompletedStepIds, checkpoint?.SkippedStepIds);
     }
 
     public static async Task<IResult> ControlAsync(HttpContext http, string sessionId,

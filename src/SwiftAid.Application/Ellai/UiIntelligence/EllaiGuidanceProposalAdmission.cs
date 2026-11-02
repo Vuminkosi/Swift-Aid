@@ -51,7 +51,7 @@ public sealed class EllaiGuidanceProposalAdmission(
             var accepted = validator.ValidateObserved(draft, new(admitted.Catalogue.Descriptors[0].FeatureId, [], 20),
                 authority.Features, authority.Capabilities, observed, admitted.Observation.ViewInstanceId,
                 admitted.Observation.ContextStamp, now, existing.PlanId, previous.CurrentStepId,
-                previous.CompletedStepIds.ToHashSet(StringComparer.Ordinal), admitted.Observation.CompletedControlIds?.ToHashSet(StringComparer.Ordinal));
+                previous.CompletedStepIds.ToHashSet(StringComparer.Ordinal), admitted.Observation.CompletedControlIds?.ToHashSet(StringComparer.Ordinal), previous.SkippedStepIds.ToHashSet(StringComparer.Ordinal));
             if (accepted.Plan is not null && existing.CatalogueVersion == admitted.Catalogue.CatalogueVersion
                 && existing.UiContractVersion == admitted.Catalogue.UiContractVersion)
             {
@@ -169,7 +169,7 @@ public sealed class EllaiGuidanceProposalAdmission(
     {
         if (request is null || string.IsNullOrWhiteSpace(request.ProposalId) || request.ProposalId.Length > 512 ||
             string.IsNullOrWhiteSpace(request.PlanId) || request.PlanId.Length > 120 || request.ExpectedVersion < 1 ||
-            request.Command is not ("pause" or "resume" or "cancel" or "back")) return new("InvalidRequest");
+            request.Command is not ("pause" or "resume" or "cancel" or "back" or "skip")) return new("InvalidRequest");
         var session = await sessions.GetAsync(sessionId, ct).ConfigureAwait(false);
         if (session is null || session.OwnerActorId != authority.OwnerActorId || session.ScopeEpoch != authority.ScopeEpoch)
             return new("Denied");
@@ -178,20 +178,52 @@ public sealed class EllaiGuidanceProposalAdmission(
             checkpoint.ProposalId != request.ProposalId || checkpoint.ScopeEpoch != authority.ScopeEpoch ||
             checkpoint.InteractionEpoch > session.InteractionEpoch) return new("Stale");
         var target = request.Command switch { "pause" => "Paused", "resume" => "Ready", _ => "Cancelled" };
-        if (request.Command != "back" && checkpoint.Status == target)
-            return new(checkpoint.Status, checkpoint.Version, checkpoint.CurrentStepId, checkpoint.CompletedStepIds);
+        if (request.Command is not ("back" or "skip") && checkpoint.Status == target)
+            return new(checkpoint.Status, checkpoint.Version, checkpoint.CurrentStepId, checkpoint.CompletedStepIds, checkpoint.SkippedStepIds);
         if (checkpoint.Version != request.ExpectedVersion)
-            return new("Conflict", checkpoint.Version, checkpoint.CurrentStepId, checkpoint.CompletedStepIds);
+            return new("Conflict", checkpoint.Version, checkpoint.CurrentStepId, checkpoint.CompletedStepIds, checkpoint.SkippedStepIds);
         if (checkpoint.Status is not ("Ready" or "Paused")) return new("Stale");
+        if (request.Command == "skip")
+        {
+            if (checkpoint.Status != "Ready") return new("Paused", checkpoint.Version, checkpoint.CurrentStepId, checkpoint.CompletedStepIds, checkpoint.SkippedStepIds);
+            var admission = await AdmitAsync(sessionId, request.ProposalId, authority, ct).ConfigureAwait(false);
+            if (admission.Status != "Ready" || admission.Catalogue is null) return new(admission.Status);
+            var step = checkpoint.Plan.Steps.SingleOrDefault(item => item.StepKey == checkpoint.CurrentStepId);
+            var descriptor = admission.Catalogue.Descriptors.SingleOrDefault(item => item.ControlId == step?.ControlId);
+            // Only optional presentation can be skipped. A model cannot label
+            // input, approval, navigation or an application operation complete.
+            if (step is null || descriptor is null || step.Behavior != PlanStepBehavior.Explain ||
+                descriptor.RiskClass != UiRiskClass.R0 || descriptor.HumanConfirmationRequired ||
+                descriptor.ProofPolicyId != "proof-ui-observed" ||
+                checkpoint.Plan.RemainingMandatoryObjectiveIds.Contains(step.ObjectiveId) ||
+                checkpoint.Plan.Steps.Any(other => other.StepKey != step.StepKey &&
+                    admission.Catalogue.Descriptors.Any(item => item.ControlId == other.ControlId && item.PrerequisiteIds.Contains(step.ControlId))))
+                return new("SkipNotAllowed", checkpoint.Version, checkpoint.CurrentStepId, checkpoint.CompletedStepIds, checkpoint.SkippedStepIds);
+            var skipped = checkpoint with
+            {
+                Version = checkpoint.Version + 1,
+                InteractionEpoch = session.InteractionEpoch,
+                CurrentStepId = step.NextStepKey,
+                SkippedStepIds = [.. checkpoint.SkippedStepIds, step.StepKey],
+                Status = step.NextStepKey is null ? "Completed" : "Ready",
+            };
+            var updatedSkip = await sessions.TryUpdateAsync(session with
+            {
+                SessionVersion = session.SessionVersion + 1,
+                GuidanceJson = EllaiGuidanceCheckpoint.Serialize(skipped),
+                UpdatedAtUtc = (clock ?? TimeProvider.System).GetUtcNow(),
+            }, session.SessionVersion, ct).ConfigureAwait(false);
+            return updatedSkip is null ? new("Conflict") : new(skipped.Status, skipped.Version, skipped.CurrentStepId, skipped.CompletedStepIds, skipped.SkippedStepIds);
+        }
         if (request.Command == "back")
         {
-            if (checkpoint.Status != "Ready") return new("Paused", checkpoint.Version, checkpoint.CurrentStepId, checkpoint.CompletedStepIds);
+            if (checkpoint.Status != "Ready") return new("Paused", checkpoint.Version, checkpoint.CurrentStepId, checkpoint.CompletedStepIds, checkpoint.SkippedStepIds);
             var admission = await AdmitAsync(sessionId, request.ProposalId, authority, ct).ConfigureAwait(false);
             if (admission.Status != "Ready") return new(admission.Status);
             var ordered = EllaiGuidanceSequence.Order(checkpoint.Plan.Steps).Select(step => step.StepKey).ToArray();
             var index = Array.IndexOf(ordered, checkpoint.CurrentStepId);
-            if (index < 0 || !checkpoint.CompletedStepIds.SequenceEqual(ordered.Take(index))) return new("Stale");
-            if (index == 0) return new("AtStart", checkpoint.Version, checkpoint.CurrentStepId, checkpoint.CompletedStepIds);
+            if (index < 0 || !checkpoint.CompletedStepIds.Concat(checkpoint.SkippedStepIds).ToHashSet(StringComparer.Ordinal).SetEquals(ordered.Take(index))) return new("Stale");
+            if (index == 0) return new("AtStart", checkpoint.Version, checkpoint.CurrentStepId, checkpoint.CompletedStepIds, checkpoint.SkippedStepIds);
             // Revisit presentation only. Discard later progress so continuing must
             // prove completion again; no application action or receipt is replayed.
             var previous = checkpoint with
@@ -199,7 +231,8 @@ public sealed class EllaiGuidanceProposalAdmission(
                 Version = checkpoint.Version + 1,
                 InteractionEpoch = session.InteractionEpoch,
                 CurrentStepId = ordered[index - 1],
-                CompletedStepIds = ordered.Take(index - 1).ToArray(),
+                CompletedStepIds = checkpoint.CompletedStepIds.Where(id => ordered.Take(index - 1).Contains(id)).ToArray(),
+                SkippedStepIds = checkpoint.SkippedStepIds.Where(id => ordered.Take(index - 1).Contains(id)).ToArray(),
             };
             var rewound = await sessions.TryUpdateAsync(session with
             {
@@ -207,7 +240,7 @@ public sealed class EllaiGuidanceProposalAdmission(
                 GuidanceJson = EllaiGuidanceCheckpoint.Serialize(previous),
                 UpdatedAtUtc = (clock ?? TimeProvider.System).GetUtcNow(),
             }, session.SessionVersion, ct).ConfigureAwait(false);
-            return rewound is null ? new("Conflict") : new(previous.Status, previous.Version, previous.CurrentStepId, previous.CompletedStepIds);
+            return rewound is null ? new("Conflict") : new(previous.Status, previous.Version, previous.CurrentStepId, previous.CompletedStepIds, previous.SkippedStepIds);
         }
         if (request.Command == "resume")
         {
@@ -222,7 +255,7 @@ public sealed class EllaiGuidanceProposalAdmission(
             GuidanceJson = EllaiGuidanceCheckpoint.Serialize(next),
             UpdatedAtUtc = (clock ?? TimeProvider.System).GetUtcNow(),
         }, session.SessionVersion, ct).ConfigureAwait(false);
-        return updated is null ? new("Conflict") : new(next.Status, next.Version, next.CurrentStepId, next.CompletedStepIds);
+        return updated is null ? new("Conflict") : new(next.Status, next.Version, next.CurrentStepId, next.CompletedStepIds, next.SkippedStepIds);
     }
 
     /// <summary>Commits only evidence-supported progress in the existing session transaction.
@@ -260,16 +293,16 @@ public sealed class EllaiGuidanceProposalAdmission(
             (navigation is null && !validatedInput && saved.ContextStamp != request.ContextStamp) || admitted.Observation.ContextStamp != request.ContextStamp ||
             saved.Status is not ("Ready" or "Paused" or "Completed")) return new("Stale");
         if (saved.CompletedStepIds.Contains(request.StepId))
-            return new(saved.Status, saved.Version, saved.CurrentStepId, saved.CompletedStepIds);
+            return new(saved.Status, saved.Version, saved.CurrentStepId, saved.CompletedStepIds, saved.SkippedStepIds);
         if (saved.Version != request.ExpectedVersion || saved.CurrentStepId != request.StepId || saved.Status != "Ready")
-            return new("Conflict", saved.Version, saved.CurrentStepId, saved.CompletedStepIds);
+            return new("Conflict", saved.Version, saved.CurrentStepId, saved.CompletedStepIds, saved.SkippedStepIds);
         if (step is null || descriptor is null || (step.Behavior != PlanStepBehavior.Explain && navigation is null && !validatedInput) ||
             (navigation is not null && (descriptor.FeatureId != EllaiNavigationManifest.FeatureId ||
                 admitted.Observation.CurrentNavigationId != navigation.NavigationId)) ||
             descriptor.HumanConfirmationRequired ||
             (!validatedInput && (!admitted.Observation.MountedControlIds.Contains(step.ControlId) ||
                 admitted.Observation.ControlStates?.Count(item => item.ControlId == step.ControlId && item.State == UiObservationState.Ready) != 1)))
-            return new("EvidenceRequired", saved.Version, saved.CurrentStepId, saved.CompletedStepIds);
+            return new("EvidenceRequired", saved.Version, saved.CurrentStepId, saved.CompletedStepIds, saved.SkippedStepIds);
         var nextStep = step.NextStepKey;
         var next = saved with
         {
@@ -287,7 +320,7 @@ public sealed class EllaiGuidanceProposalAdmission(
             GuidanceJson = EllaiGuidanceCheckpoint.Serialize(next),
             UpdatedAtUtc = (clock ?? TimeProvider.System).GetUtcNow(),
         }, session.SessionVersion, ct).ConfigureAwait(false);
-        return updated is null ? new("Conflict") : new(next.Status, next.Version, next.CurrentStepId, next.CompletedStepIds);
+        return updated is null ? new("Conflict") : new(next.Status, next.Version, next.CurrentStepId, next.CompletedStepIds, next.SkippedStepIds);
     }
 
     public async Task<EllaiGuidanceAdmission> AdmitAsync(string sessionId, string proposalId,

@@ -47,6 +47,24 @@ public sealed class EllaiObservedGuidanceTests
     }
 
     [Fact]
+    public void RestoredOptionalSkipIsSeparateFromCompletionAndCannotBeCountedTwice()
+    {
+        var (registry, _, _) = Create();
+        var descriptor = EllaiReportUiManifest.All.Single(control => control.ControlId == "report.entry");
+        var first = new GuidancePlanStep("first", descriptor.ControlId, descriptor.ObjectiveId!, PlanStepBehavior.Explain,
+            null, null, [], [], "Explain the form.", "second");
+        var draft = new EllaiGuidancePlanDraft(1, GuidancePlanStatus.Ready, "Explore reporting", GuidanceMode.Navigation,
+            [first, first with { StepKey = "second", NextStepKey = null }], [], null);
+        var now = DateTimeOffset.UtcNow;
+        UiControlObservation[] observed = [new(descriptor.ControlId, 1, "view", "context", UiObservationState.Ready, "web", now, null)];
+        var validator = new EllaiGuidancePlanValidator(registry);
+        Assert.NotNull(validator.ValidateObserved(draft, new("report", [], 20), new HashSet<string> { "report" }, new HashSet<string>(),
+            observed, "view", "context", now, "plan", "second", new HashSet<string>(), null, new HashSet<string> { "first" }).Plan);
+        Assert.Null(validator.ValidateObserved(draft, new("report", [], 20), new HashSet<string> { "report" }, new HashSet<string>(),
+            observed, "view", "context", now, "plan", "second", new HashSet<string> { "first" }, null, new HashSet<string> { "first" }).Plan);
+    }
+
+    [Fact]
     public void LegacyMountedOnlyReportsDoNotProveReadiness()
     {
         var (registry, _, _) = Create();
