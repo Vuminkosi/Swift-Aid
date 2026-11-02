@@ -61,6 +61,26 @@ The C# publisher contract and Python envelope validator both use schema v1, the 
 
 Worker execution/result schema, producer-to-broker runtime, ACK/retry lifecycle and all other SW-01-004 surfaces remain open.
 
+## Worker job subject and execution registry - 3 November 2026
+
+`JobType` currently has seven values. The .NET `JetStreamPublisher.GetSubject` switch and Python `JOB_SUBJECT_SUFFIXES` agree on these canonical subjects. The implementation plan in `implementation.md` §10.1 names durable consumers for Report, CaseSummary, OpsContinuity, Surveillance, Knowledge and Reminder; §10.1a separately adds MemoryIndex. This is a registry/intent crosswalk, not evidence those consumers are running.
+
+| Job type | Subject / intended durable | .NET publisher behavior | Worker and authoritative state found in source |
+|---|---|---|---|
+| Report | `swiftaid.jobs.report` / `report-worker-v1` | Subject mapping exists | No general job consumer or result store wired; `workers/src/swiftaid_workers/jobs/consumer.py` only validates the envelope. |
+| CaseSummary | `swiftaid.jobs.case-summary` / `summary-worker-v1` | Subject mapping exists | No general job consumer or result store wired; only envelope validation exists. |
+| OpsContinuity | `swiftaid.jobs.ops-continuity` / `ops-continuity-worker-v1` | Subject mapping exists | No general job consumer or result store wired; only envelope validation exists. |
+| Surveillance | `swiftaid.jobs.surveillance` / `surveillance-worker-v1` (approval-gated in plan) | Explicitly rejected as disabled before publish | Persistence capability gate and result/dead-letter paths also reject this type; no consumer found. |
+| Knowledge | `swiftaid.jobs.knowledge` / `knowledge-worker-v1` | Subject mapping exists | No general job consumer or result store wired; only envelope validation exists. |
+| Reminder | `swiftaid.jobs.reminder` / `reminder-worker-v1` | Subject mapping exists | No general job consumer or result store wired; only envelope validation exists. |
+| MemoryIndex | `swiftaid.jobs.memory-index` / `memory-index-v1` (§10.1a) | Subject mapping exists | No general job consumer or result store wired; only envelope validation exists. |
+
+Publisher tests establish explicit subject selection, expected stream and message ID, minimized receipt handling and disabled-type behavior; they use a fake transport and do not prove a live JetStream job consumer. PASS `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter FullyQualifiedName~JobPublisherContractTests --logger 'console;verbosity=minimal'` - 7 passed. Envelope validation remains PASS C# 12/12 and Python 51/51 as recorded above.
+
+The repository contains `JobEntity`, `IntegrationOutboxEntity`, `WorkerInboxEntity`, result/dead-letter entities and transition logic under `src/SwiftAid.Infrastructure/Persistence/Jobs/`, but `SwiftAidDbContext` has no corresponding `DbSet`/mapping and the migration chain has no job-table migrations. Therefore those types and state transitions are not evidence of durable PostgreSQL job state. The `classification/consumer.py` path is a separate ingestion-notice worker and does not consume `SWIFTAID_JOBS`.
+
+**Gap:** the implementation plan requires gateway-owned durable job state, claim/lease/fencing, worker-scoped reads, result schema validation, commit-before-ACK, retry/DLQ and recovery. The generic job path currently has a versioned envelope, publisher mapping and source-level state-machine components, but no connected durable storage or general consumer execution. This gap requires implementation work under the worker/job tasks; it is not closed by envelope parity.
+
 ## Segmented audio frame bounds - 3 November 2026
 
 `EllaiSpeechEvent.Validate` previously checked `SamplePosition + pcmSamples > MaximumPosition`. With unchecked `long` arithmetic, a malicious `long.MaxValue` position plus an audio sample could wrap negative and pass validation. The check now compares `SamplePosition > MaximumPosition - pcmSamples`, rejecting overflow before encoding or gateway decoding.
