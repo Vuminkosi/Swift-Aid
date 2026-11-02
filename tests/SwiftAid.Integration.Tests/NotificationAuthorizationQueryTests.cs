@@ -182,6 +182,27 @@ public sealed class NotificationAuthorizationQueryTests
         await fixture.CompleteFollowUpAsync(followUpId).ConfigureAwait(false);
         Assert.Equal(0, (await fixture.ReadPageAsync().ConfigureAwait(false)).TotalCount);
     }
+
+    [CaseAuthorityPostgresFact]
+    public async Task Reading_or_dismissing_a_reminder_does_not_complete_the_follow_up()
+    {
+        await using var fixture = await NotificationPostgresFixture.CreateAsync().ConfigureAwait(false);
+        var (followUpId, _) = await fixture.AddDueFollowUpAsync().ConfigureAwait(false);
+
+        Assert.Equal(1, await fixture.DispatchDueFollowUpsAsync().ConfigureAwait(false));
+        var notificationId = await fixture.GetFollowUpNotificationIdAsync(followUpId).ConfigureAwait(false);
+
+        Assert.True(await fixture.MarkReadAsync(notificationId).ConfigureAwait(false));
+        Assert.Equal(FollowUpStatus.Scheduled, await fixture.GetFollowUpStatusAsync(followUpId).ConfigureAwait(false));
+        var readPage = await fixture.ReadPageAsync().ConfigureAwait(false);
+        Assert.Equal(1, readPage.TotalCount);
+        Assert.Equal(0, readPage.UnreadCount);
+
+        Assert.True(await fixture.DismissAsync(notificationId).ConfigureAwait(false));
+        Assert.Equal(FollowUpStatus.Scheduled, await fixture.GetFollowUpStatusAsync(followUpId).ConfigureAwait(false));
+        Assert.Equal(0, (await fixture.ReadPageAsync().ConfigureAwait(false)).TotalCount);
+        Assert.Equal(1, await fixture.CountFollowUpNotificationsAsync(followUpId).ConfigureAwait(false));
+    }
 }
 
 /// <summary>
@@ -406,6 +427,47 @@ internal sealed class NotificationPostgresFixture : IAsyncDisposable
         await db.ManagedCaseFollowUps.Where(item => item.FollowUpId == followUpId)
             .ExecuteUpdateAsync(update => update.SetProperty(item => item.Status, FollowUpStatus.Completed))
             .ConfigureAwait(false);
+    }
+
+    public async Task<Guid> GetFollowUpNotificationIdAsync(Guid followUpId)
+    {
+        await using var db = Authority.CreateDbContext();
+        return await db.NotificationItems.AsNoTracking()
+            .Where(item => item.RelatedResourceId == followUpId)
+            .Select(item => item.NotificationId)
+            .SingleAsync()
+            .ConfigureAwait(false);
+    }
+
+    public async Task<FollowUpStatus> GetFollowUpStatusAsync(Guid followUpId)
+    {
+        await using var db = Authority.CreateDbContext();
+        return await db.ManagedCaseFollowUps.AsNoTracking()
+            .Where(item => item.FollowUpId == followUpId)
+            .Select(item => item.Status)
+            .SingleAsync()
+            .ConfigureAwait(false);
+    }
+
+    public async Task<bool> MarkReadAsync(Guid notificationId) =>
+        await MutateNotificationAsync(notificationId, dismiss: false).ConfigureAwait(false);
+
+    public async Task<bool> DismissAsync(Guid notificationId) =>
+        await MutateNotificationAsync(notificationId, dismiss: true).ConfigureAwait(false);
+
+    private async Task<bool> MutateNotificationAsync(Guid notificationId, bool dismiss)
+    {
+        await using var db = Authority.CreateDbContext();
+        var unitOfWork = new PostgresCaseCommandUnitOfWork(db);
+        var policy = new CaseAccessPolicy(
+            new PostgresCurrentAccessGrantStore(db, unitOfWork),
+            new PostgresCaseAccessDescriptorStore(db, unitOfWork));
+        var store = new PostgresNotificationStore(db, new NotificationResourceAuthorizer(db, policy, unitOfWork));
+        return dismiss
+            ? await store.DismissAsync(Authority.CreateActor(), notificationId, DateTimeOffset.UtcNow, CancellationToken.None)
+                .ConfigureAwait(false)
+            : await store.MarkReadAsync(Authority.CreateActor(), notificationId, DateTimeOffset.UtcNow, CancellationToken.None)
+                .ConfigureAwait(false);
     }
 
     public async Task<int> CountFollowUpNotificationsAsync(Guid followUpId)
