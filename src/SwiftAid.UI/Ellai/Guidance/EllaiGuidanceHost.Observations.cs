@@ -8,6 +8,7 @@ public partial class EllaiGuidanceHost
     private readonly CancellationTokenSource _uiObservationLifetime = new();
     private readonly SemaphoreSlim _uiObservationGate = new(1, 1);
     private IJSObjectReference? _uiObservationModule;
+    private UiObservationReport? _latestGuidanceObservation;
 
     private async Task MonitorUiObservationsAsync()
     {
@@ -35,6 +36,7 @@ public partial class EllaiGuidanceHost
 
     private async Task ReportCurrentUiAsync(CancellationToken token)
     {
+        _latestGuidanceObservation = null;
         if (_sessionView is not { Status: "Active" } session) return;
         await _uiObservationGate.WaitAsync(token);
         try
@@ -45,7 +47,10 @@ public partial class EllaiGuidanceHost
             if (report is null) return;
             report = report with { Platform = OperatingSystem.IsAndroid() ? "android" : OperatingSystem.IsIOS() ? "ios" : "web" };
             if (report.IsValid() && _sessionView?.SessionId == session.SessionId)
+            {
                 await ReviewClient.ReportUiObservationAsync(session.SessionId, report, token);
+                if (_sessionView?.SessionId == session.SessionId) _latestGuidanceObservation = report;
+            }
         }
         catch (JSException) { /* Missing observations prevent guidance admission; text submission remains available. */ }
         catch (JSDisconnectedException) { }

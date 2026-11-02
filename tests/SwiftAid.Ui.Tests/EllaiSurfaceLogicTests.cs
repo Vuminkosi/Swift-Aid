@@ -21,6 +21,59 @@ namespace SwiftAid.Ui.Tests;
 [Trait("Task", "ELL-T13")]
 public sealed class EllaiSurfaceLogicTests
 {
+    private static EllaiConversationTurnDto GuidanceTurn() => new("guide-turn", 1, "Show the report form", "Let me show you.", "Completed", 1, DateTimeOffset.UtcNow)
+    {
+        UiProposals = [new("proposal-1", new(UiIntentKind.StartGuidance, "ellai.guidance", null, null,
+            new Dictionary<string, string> { ["feature"] = "report", ["objective"] = "Open report form" }))]
+    };
+
+    [Fact]
+    public async Task RestoredGuidanceOffersActionWithoutAutomaticallyDispatching()
+    {
+        var client = new FakeReviewClient();
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        await InvokeAsync(host, "ObserveGuidanceProposal", GuidanceTurn(), false);
+        Assert.Equal("proposal-1", GetField<string?>(host, "_guidanceProposalId"));
+        Assert.Equal(0, client.GuidancePlanCalls);
+    }
+
+    [Fact]
+    public async Task DuplicateGuidanceEventsDoNotStartConcurrentPlanning()
+    {
+        var pending = new TaskCompletionSource<EllaiGuidancePlanDto?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var client = new FakeReviewClient { GuidancePlanHandler = () => pending.Task };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        await InvokeAsync(host, "ObserveGuidanceProposal", GuidanceTurn(), true);
+        await InvokeAsync(host, "ObserveGuidanceProposal", GuidanceTurn(), true);
+        await InvokeAsync(host, "StartProposedGuidanceAsync");
+        Assert.Equal(1, client.GuidancePlanCalls);
+        pending.SetResult(new("NeedsObservation"));
+        await host.Dispatcher.InvokeAsync(() => Task.CompletedTask);
+    }
+
+    [Fact]
+    public async Task ObservedPendingTurnStartsGuidanceEvenAfterResponseTextSettlesThinking()
+    {
+        var client = new FakeReviewClient();
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        await InvokeAsync(host, "ObserveGuidanceProposal", GuidanceTurn() with { Outcome = "Processing" }, false);
+        await InvokeAsync(host, "ObserveGuidanceProposal", GuidanceTurn(), false);
+        Assert.Equal(1, client.GuidancePlanCalls);
+    }
+
+    [Fact]
+    public async Task NewerTurnInvalidatesPendingGuidanceProposal()
+    {
+        var client = new FakeReviewClient();
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        await InvokeAsync(host, "ObserveGuidanceProposal", GuidanceTurn(), false);
+        await InvokeAsync(host, "ObserveGuidanceProposal",
+            new EllaiConversationTurnDto("next-turn", 2, "Something else", null, "Queued", 0, null), false);
+        Assert.Null(GetField<string?>(host, "_guidanceProposalId"));
+        await InvokeAsync(host, "StartProposedGuidanceAsync");
+        Assert.Equal(0, client.GuidancePlanCalls);
+    }
+
     [Theory]
     [InlineData("Completed", "Saved answer")]
     [InlineData("TerminalFailure", "This request couldn't be completed.")]
@@ -1793,6 +1846,14 @@ public sealed class EllaiSurfaceLogicTests
     private sealed class FakeReviewClient(params EllaiUtteranceSubmitResult[] submitResults)
         : IEllaiReviewClient
     {
+        public int GuidancePlanCalls { get; private set; }
+        public Func<Task<EllaiGuidancePlanDto?>>? GuidancePlanHandler { get; init; }
+        public Task<EllaiGuidancePlanDto?> PrepareGuidancePlanAsync(string sessionId, string proposalId, CancellationToken cancellationToken)
+        {
+            GuidancePlanCalls++;
+            return GuidancePlanHandler?.Invoke() ?? Task.FromResult<EllaiGuidancePlanDto?>(new("NeedsObservation"));
+        }
+
         public IReadOnlyList<EllaiConversationTurnDto>? SavedConversation { get; init; }
         public string? HistorySessionId { get; private set; }
         public Task<EllaiSessionResponsePageDto?> PollResponsesAsync(string sessionId, long cursor, CancellationToken cancellationToken)

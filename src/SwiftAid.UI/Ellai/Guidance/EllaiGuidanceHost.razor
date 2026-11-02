@@ -17,6 +17,16 @@
 
 <div class="ellai-host">
     <BonboardingRoot />
+    @if (_guidanceProposalId is not null && _generatedTour is null)
+    {
+        <MudButton Variant="Variant.Text" Disabled="@_preparingGuidance" OnClick="StartProposedGuidanceAsync">
+            @(_preparingGuidance ? "Preparing guidance?" : "Start guidance")
+        </MudButton>
+        @if (_guidanceNotice is not null)
+        {
+            <MudText Typo="Typo.caption" role="status">@_guidanceNotice</MudText>
+        }
+    }
     @if (_showStartFailure)
     {
         <MudAlert Severity="@(_startOutcomeUnknown ? Severity.Warning : Severity.Info)"
@@ -1744,7 +1754,9 @@
             if (_thinkingUtteranceId is not null && latest.ClientUtteranceId != _thinkingUtteranceId
                 && !conversation.Any(turn => turn.ClientUtteranceId == _thinkingUtteranceId
                     && turn.Sequence < latest.Sequence)) return;
+            var wasAwaitingThisTurn = _thinkingUtteranceId == latest.ClientUtteranceId;
             _lastDurableTurn = latest;
+            ObserveGuidanceProposal(latest, wasAwaitingThisTurn);
             ShowLatestUserMessage(latest.ClientUtteranceId, latest.UserText);
             if (latest.Outcome is "Queued" or "Processing" or "RetryableFailure")
             {
@@ -2642,6 +2654,11 @@
 
     private void CancelPriorSession()
     {
+        _guidanceProposalId = null;
+        _guidanceProposalTurn = null;
+        _pendingGuidanceTurn = null;
+        _guidanceNotice = null;
+        _ = CancelGeneratedGuidanceAsync();
         _toolActivityText = null;
         _silencedProgressTurnId = null;
         _lastDurableTurn = null;
@@ -2996,6 +3013,7 @@
     public void Dispose()
     {
         _uiObservationLifetime.Cancel();
+        _ = CancelGeneratedGuidanceAsync();
         if (_sessionContinuity is not null) _ = _sessionContinuity.DisposeAsync();
         _otherNativeBargeInDetector?.Dispose();
         if (_sileroFactory is not null) _sileroFactory.SpeechConfirmed -= OnNativeSileroSpeech;
