@@ -542,3 +542,7 @@ Focused command dotnet test tests/SwiftAid.Client.Tests/SwiftAid.Client.Tests.cs
 ## SW-04-008 guest receipt verification - 2 November 2026
 
 Focused GuestIntakeTests command PASS 16/16, exit 0. The in-process suite covers anonymous bounded routes, expiring capability/proof-bound receipt behavior and ReceivedUnverified/routing statuses; it uses fakes, not live PostgreSQL persistence. SW-04-008 remains partial pending durable deployment receipt proof; EV-049, [audit](SW-04-008-GUEST-RECEIPT-AUDIT.md).
+
+## SW-04-009 intake routing/promotion verification - 2 November 2026
+
+Focused IntakePromotionProcessorTests PASS 19/19, exit 0. Source distinguishes explicit eligible catchments from ambiguous/no coverage and promotion uses stable IDs/workspace resolution; tests use stubs. Live catchments, authorized PostgreSQL atomic evidence linkage and competing reviewer behavior remain NOT VERIFIED. EV-050, [audit](SW-04-009-INTAKE-ROUTING-PROMOTION-AUDIT.md).
