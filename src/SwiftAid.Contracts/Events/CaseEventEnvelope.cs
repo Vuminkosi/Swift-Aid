@@ -19,10 +19,21 @@ public enum CaseEventType
     CaseEscalationClosed,
     CaseAssignmentAcknowledged,
     CaseCollaboratorGranted,
-    CaseCollaboratorRevoked
+    CaseCollaboratorRevoked,
+AssistanceRequested,
+AssistanceAccepted,
+AssistanceProgressRecorded,
+AssistanceProvided,
+AssistanceReceiptConfirmed,
+AssistanceUnfulfilled,
+AssistanceCancelled
 }
 
 public abstract record CaseEventPayload;
+
+public sealed record AssistanceRequestedPayload(Guid AssistanceId, string Need, string ResponsibleActorId, DateTimeOffset? DueAtUtc) : CaseEventPayload;
+public sealed record AssistanceActivityPayload(Guid AssistanceId, string Note) : CaseEventPayload;
+public sealed record AssistanceReceiptPayload(Guid AssistanceId, string Note, string ReceiptMethod, string ReceiptContext) : CaseEventPayload;
 
 public sealed record CaseReportPayload(
     CaseKind Kind,

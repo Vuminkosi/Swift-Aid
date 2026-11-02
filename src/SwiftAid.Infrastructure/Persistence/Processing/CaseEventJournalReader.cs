@@ -59,6 +59,32 @@ internal static class CaseEventJournalReader
                 }
                 : eventType switch
             {
+                nameof(CaseEventType.AssistanceRequested) => Read<AssistanceRequestedPayload>(serialized,
+                    ["assistanceId", "need", "responsibleActorId", "dueAtUtc"], (payload, value) =>
+                    {
+                        ValidateAssistanceIdentity(payload, value.AssistanceId);
+                        RequireText(value.Need);
+                        RequireIdentifier(value.ResponsibleActorId);
+                        if (value.DueAtUtc is { Offset: var offset } && offset != TimeSpan.Zero) throw InvalidJournal();
+                    }),
+                nameof(CaseEventType.AssistanceReceiptConfirmed) => Read<AssistanceReceiptPayload>(serialized,
+                    ["assistanceId", "note", "receiptMethod", "receiptContext"], (payload, value) =>
+                    {
+                        ValidateAssistanceIdentity(payload, value.AssistanceId);
+                        RequireText(value.Note);
+                        RequireText(value.ReceiptMethod);
+                        RequireText(value.ReceiptContext);
+                    }),
+                nameof(CaseEventType.AssistanceAccepted) => Read<AssistanceActivityPayload>(serialized,
+                    ["assistanceId", "note"], (payload, value) => { ValidateAssistanceIdentity(payload, value.AssistanceId); RequireText(value.Note); }),
+                nameof(CaseEventType.AssistanceProgressRecorded) => Read<AssistanceActivityPayload>(serialized,
+                    ["assistanceId", "note"], (payload, value) => { ValidateAssistanceIdentity(payload, value.AssistanceId); RequireText(value.Note); }),
+                nameof(CaseEventType.AssistanceProvided) => Read<AssistanceActivityPayload>(serialized,
+                    ["assistanceId", "note"], (payload, value) => { ValidateAssistanceIdentity(payload, value.AssistanceId); RequireText(value.Note); }),
+                nameof(CaseEventType.AssistanceUnfulfilled) => Read<AssistanceActivityPayload>(serialized,
+                    ["assistanceId", "note"], (payload, value) => { ValidateAssistanceIdentity(payload, value.AssistanceId); RequireText(value.Note); }),
+                nameof(CaseEventType.AssistanceCancelled) => Read<AssistanceActivityPayload>(serialized,
+                    ["assistanceId", "note"], (payload, value) => { ValidateAssistanceIdentity(payload, value.AssistanceId); RequireText(value.Note); }),
                 nameof(CaseEventType.CaseReported) => Read<CaseReportedPayload>(serialized,
                     ["workspaceId", "report"], ValidateReportPayload),
                 nameof(CaseEventType.CaseAssigned) => Read<CaseAssignedPayload>(serialized,
@@ -278,6 +304,29 @@ internal static class CaseEventJournalReader
                 envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
                 envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
                 closed.EscalationId, closed.Resolution, closed.Reason),
+            CaseEventType.AssistanceRequested when payload is AssistanceRequestedPayload requested =>
+                new AssistanceRequested(envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision,
+                    envelope.CommandId, envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
+                    requested.AssistanceId, requested.Need, requested.ResponsibleActorId, requested.DueAtUtc),
+            CaseEventType.AssistanceReceiptConfirmed when payload is AssistanceReceiptPayload receipt =>
+                new AssistanceReceiptConfirmed(envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision,
+                    envelope.CommandId, envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
+                    receipt.AssistanceId, receipt.Note, receipt.ReceiptMethod, receipt.ReceiptContext),
+            CaseEventType.AssistanceAccepted when payload is AssistanceActivityPayload activity =>
+                new AssistanceAccepted(envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision,
+                    envelope.CommandId, envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc, activity.AssistanceId, activity.Note),
+            CaseEventType.AssistanceProgressRecorded when payload is AssistanceActivityPayload activity =>
+                new AssistanceProgressRecorded(envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision,
+                    envelope.CommandId, envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc, activity.AssistanceId, activity.Note),
+            CaseEventType.AssistanceProvided when payload is AssistanceActivityPayload activity =>
+                new AssistanceProvided(envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision,
+                    envelope.CommandId, envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc, activity.AssistanceId, activity.Note),
+            CaseEventType.AssistanceUnfulfilled when payload is AssistanceActivityPayload activity =>
+                new AssistanceUnfulfilled(envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision,
+                    envelope.CommandId, envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc, activity.AssistanceId, activity.Note),
+            CaseEventType.AssistanceCancelled when payload is AssistanceActivityPayload activity =>
+                new AssistanceCancelled(envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision,
+                    envelope.CommandId, envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc, activity.AssistanceId, activity.Note),
             CaseEventType.CaseCollaboratorGranted when payload is CaseCollaboratorGrantedPayload grant && grant.ExpiresAtUtc > envelope.RecordedAtUtc =>
                 new CaseCollaboratorGranted(envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision,
                     envelope.CommandId, envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
@@ -290,6 +339,12 @@ internal static class CaseEventJournalReader
                     envelope.CommandId, envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc, acknowledgement.AssignmentVersion),
             _ => throw InvalidJournal()
         };
+    }
+
+    private static void ValidateAssistanceIdentity(JsonElement payload, Guid id)
+    {
+        RequireCanonicalGuid(payload, "assistanceId");
+        if (id == Guid.Empty) throw InvalidJournal();
     }
 
     private static void ValidateCollaboratorGranted(JsonElement payload, CaseCollaboratorGrantedPayload value)

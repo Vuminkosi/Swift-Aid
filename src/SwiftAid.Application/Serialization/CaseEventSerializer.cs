@@ -18,6 +18,9 @@ public sealed class CaseEventSerializer
 
         return @event switch
         {
+            AssistanceRequested requested => Serialize(requested, CaseEventType.AssistanceRequested,
+                new AssistanceRequestedPayload(requested.AssistanceId, requested.Need, requested.ResponsibleActorId, requested.DueAtUtc)),
+            AssistanceActivityRecorded activity => SerializeAssistanceActivity(activity),
             CaseReported reported => SerializeReported(reported),
             CaseAssigned assignment => Serialize(assignment, CaseEventType.CaseAssigned,
                 new CaseAssignedPayload(assignment.AccountableOwnerId)),
@@ -63,9 +66,32 @@ public sealed class CaseEventSerializer
             CaseReported or CaseAssigned or CaseAssignmentAcknowledged or CaseReportCorrected or CaseActionRequested or CaseActionRequestReviewed or CaseResolved or CaseReopened
             or CaseObservationRecorded or CaseFollowUpScheduled or CaseFollowUpOutcomeRecorded
             or CaseEscalationRaised or CaseEscalationAcknowledged or CaseEscalationClosed
-            or CaseCollaboratorGranted or CaseCollaboratorRevoked => 1,
+            or CaseCollaboratorGranted or CaseCollaboratorRevoked or AssistanceRequested or AssistanceActivityRecorded => 1,
             _ => throw new NotSupportedException($"Event type {@event.GetType().Name} is not supported by the case-event wire contract.")
         };
+    }
+
+    private static byte[] SerializeAssistanceActivity(AssistanceActivityRecorded activity)
+    {
+        var type = activity switch
+        {
+            AssistanceAccepted when activity.Status == AssistanceStatus.Accepted => CaseEventType.AssistanceAccepted,
+            AssistanceProgressRecorded when activity.Status == AssistanceStatus.InProgress => CaseEventType.AssistanceProgressRecorded,
+            AssistanceProvided when activity.Status == AssistanceStatus.Provided => CaseEventType.AssistanceProvided,
+            AssistanceReceiptConfirmed when activity.Status == AssistanceStatus.ReceiptConfirmed => CaseEventType.AssistanceReceiptConfirmed,
+            AssistanceUnfulfilled when activity.Status == AssistanceStatus.Unfulfilled => CaseEventType.AssistanceUnfulfilled,
+            AssistanceCancelled when activity.Status == AssistanceStatus.Cancelled => CaseEventType.AssistanceCancelled,
+            _ => throw new InvalidDataException("Assistance event type and status do not match.")
+        };
+        if (activity is AssistanceReceiptConfirmed receipt)
+        {
+            if (string.IsNullOrWhiteSpace(receipt.ReceiptMethod) || string.IsNullOrWhiteSpace(receipt.ReceiptContext))
+                throw new InvalidDataException("Receipt provenance is required.");
+            return Serialize(receipt, type, new AssistanceReceiptPayload(receipt.AssistanceId, receipt.Note, receipt.ReceiptMethod, receipt.ReceiptContext));
+        }
+        if (activity.ReceiptMethod is not null || activity.ReceiptContext is not null)
+            throw new InvalidDataException("Receipt provenance cannot be recorded as other assistance activity.");
+        return Serialize(activity, type, new AssistanceActivityPayload(activity.AssistanceId, activity.Note));
     }
 
     private static byte[] SerializeReported(CaseReported reported) => reported.ReportData switch

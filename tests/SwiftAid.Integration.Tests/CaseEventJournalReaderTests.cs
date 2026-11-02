@@ -9,6 +9,59 @@ namespace SwiftAid.Integration.Tests;
 
 public sealed class CaseEventJournalReaderTests
 {
+    [Theory]
+    [InlineData(AssistanceStatus.ReceiptConfirmed)]
+    [InlineData(AssistanceStatus.Unfulfilled)]
+    [InlineData(AssistanceStatus.Cancelled)]
+    public void Assistance_round_trip_replays_actors_and_preserves_receipt_provenance(AssistanceStatus terminal)
+    {
+        var initial = CaseAggregate.CreateManagedCase(Guid.NewGuid(), Guid.NewGuid(), "workspace-1", CreateHumanReport(),
+            null, RecordedAtUtc, new ActorCapabilities("worker-1", CaseCapability.AcceptReport));
+        var aggregate = CaseAggregate.Replay(initial);
+        var id = Guid.NewGuid();
+        aggregate.Apply(RoundTrip(Assert.Single(aggregate.Decide(new RequestAssistanceCommand(Guid.NewGuid(), 2, id,
+            "Synthetic transport", "responsible-worker", RecordedAtUtc.AddDays(1), null, RecordedAtUtc), new("requester", CaseCapability.ManageAssistance)))));
+        var statuses = terminal == AssistanceStatus.ReceiptConfirmed
+            ? new[] { AssistanceStatus.Accepted, AssistanceStatus.InProgress, AssistanceStatus.Provided, terminal }
+            : [AssistanceStatus.Accepted, AssistanceStatus.InProgress, terminal];
+        foreach (var status in statuses)
+        {
+            var command = new UpdateAssistanceCommand(Guid.NewGuid(), aggregate.AggregateVersion, id, status,
+                "Synthetic reason/activity", status == AssistanceStatus.ReceiptConfirmed ? "Recorded recipient statement" : null,
+                status == AssistanceStatus.ReceiptConfirmed ? "Synthetic phone report, not independent verification" : null, null, RecordedAtUtc);
+            aggregate.Apply(RoundTrip(Assert.Single(aggregate.Decide(command, new(status.ToString(), CaseCapability.ManageAssistance)))));
+        }
+        var state = Assert.Single(CaseAggregate.Replay(aggregate.Events).Assistance);
+        Assert.Equal(terminal, state.Status);
+        Assert.Equal("requester", state.RequestedByActorId);
+        Assert.Equal("responsible-worker", state.ResponsibleActorId);
+        Assert.Equal("Accepted", state.AcceptedByActorId);
+        if (terminal == AssistanceStatus.ReceiptConfirmed)
+        {
+            Assert.Equal("Provided", state.ProvidedByActorId);
+            Assert.Equal("ReceiptConfirmed", state.ReceiptRecordedByActorId);
+            Assert.Contains("not independent verification", state.ReceiptContext!);
+        }
+        else Assert.Null(state.ReceiptRecordedByActorId);
+    }
+
+    [Theory]
+    [InlineData("receiptMethod", "null")]
+    [InlineData("receiptContext", "\" \"")]
+    [InlineData("assistanceId", "\"00000000-0000-0000-0000-000000000000\"")]
+    [InlineData("note", "null")]
+    [InlineData("unexpected", "true")]
+    public void Assistance_receipt_rejects_missing_or_extra_provenance(string field, string json)
+    {
+        var receipt = new AssistanceReceiptConfirmed(Guid.NewGuid(), 7, 1, Guid.NewGuid(), "reporter", null,
+            RecordedAtUtc, Guid.NewGuid(), "Synthetic receipt", "Recipient statement", "Reported by a worker");
+        var document = System.Text.Json.Nodes.JsonNode.Parse(Serializer.SerializeToUtf8Bytes(receipt))!;
+        document["payload"]![field] = System.Text.Json.Nodes.JsonNode.Parse(json);
+        Assert.Throws<InvalidDataException>(() => CaseEventJournalReader.Read(ToRow(receipt),
+            System.Text.Encoding.UTF8.GetBytes(document.ToJsonString())));
+        Assert.Throws<InvalidDataException>(() => Serializer.SerializeToUtf8Bytes(receipt with { Status = AssistanceStatus.Provided }));
+    }
+
     [Fact]
     public void CollaboratorGrantAndRevocationRoundTripAndReplay()
     {
