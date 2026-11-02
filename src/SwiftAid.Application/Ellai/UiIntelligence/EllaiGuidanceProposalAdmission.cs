@@ -159,6 +159,41 @@ public sealed class EllaiGuidanceProposalAdmission(
         return validation.Plan is null ? new("InvalidPlan") : new("Ready", validation.Plan);
     }
 
+    public async Task<EllaiGuidanceProgressDto> ControlAsync(string sessionId,
+        EllaiGuidanceControlRequest request, EllaiUiEntitlements authority, CancellationToken ct)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.ProposalId) || request.ProposalId.Length > 512 ||
+            string.IsNullOrWhiteSpace(request.PlanId) || request.PlanId.Length > 120 || request.ExpectedVersion < 1 ||
+            request.Command is not ("pause" or "resume" or "cancel")) return new("InvalidRequest");
+        var session = await sessions.GetAsync(sessionId, ct).ConfigureAwait(false);
+        if (session is null || session.OwnerActorId != authority.OwnerActorId || session.ScopeEpoch != authority.ScopeEpoch)
+            return new("Denied");
+        var checkpoint = EllaiGuidanceCheckpoint.Deserialize(session.GuidanceJson);
+        if (session.Status != "Active" || checkpoint?.Plan?.PlanId != request.PlanId ||
+            checkpoint.ProposalId != request.ProposalId || checkpoint.ScopeEpoch != authority.ScopeEpoch ||
+            checkpoint.InteractionEpoch != session.InteractionEpoch) return new("Stale");
+        var target = request.Command switch { "pause" => "Paused", "resume" => "Ready", _ => "Cancelled" };
+        if (checkpoint.Status == target)
+            return new(checkpoint.Status, checkpoint.Version, checkpoint.CurrentStepId, checkpoint.CompletedStepIds);
+        if (checkpoint.Version != request.ExpectedVersion)
+            return new("Conflict", checkpoint.Version, checkpoint.CurrentStepId, checkpoint.CompletedStepIds);
+        if (checkpoint.Status is not ("Ready" or "Paused")) return new("Stale");
+        if (request.Command == "resume")
+        {
+            var admission = await AdmitAsync(sessionId, request.ProposalId, authority, ct).ConfigureAwait(false);
+            if (admission.Status != "Ready" || admission.Observation?.ContextStamp != checkpoint.ContextStamp)
+                return new("NeedsObservation");
+        }
+        var next = checkpoint with { Status = target, Version = checkpoint.Version + 1 };
+        var updated = await sessions.TryUpdateAsync(session with
+        {
+            SessionVersion = session.SessionVersion + 1,
+            GuidanceJson = EllaiGuidanceCheckpoint.Serialize(next),
+            UpdatedAtUtc = (clock ?? TimeProvider.System).GetUtcNow(),
+        }, session.SessionVersion, ct).ConfigureAwait(false);
+        return updated is null ? new("Conflict") : new(next.Status, next.Version, next.CurrentStepId, next.CompletedStepIds);
+    }
+
     /// <summary>Commits only evidence-supported progress in the existing session transaction.
     /// Replay never executes an action; client claims cannot prove edits or intake submission.</summary>
     public async Task<EllaiGuidanceProgressDto> CompleteStepAsync(string sessionId,

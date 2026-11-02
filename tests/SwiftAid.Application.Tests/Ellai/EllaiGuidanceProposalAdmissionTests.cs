@@ -205,6 +205,58 @@ public sealed class EllaiGuidanceProposalAdmissionTests
         Assert.Equal("Stale", (await service.CompleteStepAsync("session", request, authority, default)).Status);
     }
 
+    [Fact]
+    public async Task PauseResumeAndCancelAreDurableIdempotentAndCannotReopenTerminalPlan()
+    {
+        var (service, store, observations, id) = await Fixture();
+        var checkpoint = await SeedProgress(store, observations, id);
+        var authority = new EllaiUiEntitlements("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>());
+        var pause = new EllaiGuidanceControlRequest(id, checkpoint.Plan!.PlanId, 1, "pause");
+        var paused = await service.ControlAsync("session", pause, authority, default);
+        Assert.Equal("Paused", paused.Status);
+        Assert.Equal(2, paused.Version);
+        Assert.Equal(2, (await service.ControlAsync("session", pause, authority, default)).Version);
+        Assert.Equal("Conflict", (await service.CompleteStepAsync("session", new(id, checkpoint.Plan.PlanId, 2, "step-1", "context"), authority, default)).Status);
+        var resumed = await service.ControlAsync("session", pause with { ExpectedVersion = 2, Command = "resume" }, authority, default);
+        Assert.Equal("Ready", resumed.Status);
+        Assert.Equal(3, resumed.Version);
+        var cancelled = await service.ControlAsync("session", pause with { ExpectedVersion = 3, Command = "cancel" }, authority, default);
+        Assert.Equal("Cancelled", cancelled.Status);
+        Assert.Equal(4, cancelled.Version);
+        Assert.Equal("Stale", (await service.ControlAsync("session", pause with { ExpectedVersion = 4, Command = "resume" }, authority, default)).Status);
+        var restored = EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("session", default))!.GuidanceJson)!;
+        Assert.Equal("Cancelled", restored.Status);
+        Assert.Empty(restored.CompletedStepIds);
+        Assert.Equal("Active", (await store.GetAsync("session", default))!.Status);
+    }
+
+    [Fact]
+    public async Task CancelNeedsNoVisibleTargetButResumeRequiresFreshObservation()
+    {
+        var (service, store, observations, id) = await Fixture();
+        var checkpoint = await SeedProgress(store, observations, id);
+        var authority = new EllaiUiEntitlements("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>());
+        var request = new EllaiGuidanceControlRequest(id, checkpoint.Plan!.PlanId, 1, "pause");
+        Assert.Equal("Paused", (await service.ControlAsync("session", request, authority, default)).Status);
+        await observations.RecordAsync(new("session", "view", "context", "web", [], DateTimeOffset.UtcNow, []), default);
+        Assert.Equal("NeedsObservation", (await service.ControlAsync("session", request with { Command = "resume", ExpectedVersion = 2 }, authority, default)).Status);
+        Assert.Equal("Cancelled", (await service.ControlAsync("session", request with { Command = "cancel", ExpectedVersion = 2 }, authority, default)).Status);
+    }
+
+    [Theory]
+    [InlineData("other", "cancel", 1, "Denied")]
+    [InlineData("owner", "complete", 1, "InvalidRequest")]
+    [InlineData("owner", "cancel", 7, "Conflict")]
+    public async Task LifecycleCannotBypassOwnerVersionOrCompletionEvidence(string owner, string command, long version, string expected)
+    {
+        var (service, store, observations, id) = await Fixture();
+        var checkpoint = await SeedProgress(store, observations, id);
+        var result = await service.ControlAsync("session", new(id, checkpoint.Plan!.PlanId, version, command),
+            new(owner, "scope", new HashSet<string> { "report" }, new HashSet<string>()), default);
+        Assert.Equal(expected, result.Status);
+        Assert.Equal("Ready", EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("session", default))!.GuidanceJson)!.Status);
+    }
+
     private static async Task<EllaiGuidanceCheckpoint> SeedProgress(InMemoryEllaiSessionStore store,
         InMemoryEllaiUiObservationStore observations, string proposalId, PlanStepBehavior behavior = PlanStepBehavior.Explain)
     {

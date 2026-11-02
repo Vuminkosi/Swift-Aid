@@ -59,6 +59,24 @@ public static class EllaiGuidanceProposalEndpoint
             checkpoint?.Version ?? 0, checkpoint?.CurrentStepId, checkpoint?.CompletedStepIds);
     }
 
+    public static async Task<IResult> ControlAsync(HttpContext http, string sessionId,
+        EllaiGuidanceControlRequest request, [FromServices] IServiceProvider services, CancellationToken ct)
+    {
+        http.Response.Headers.CacheControl = "no-store, private";
+        var actor = ActorContext.FromValidatedPrincipal(http.User);
+        var result = await ControlOwnedAsync(actor.ActorId, sessionId, request, services, ct).ConfigureAwait(false);
+        return result is null ? Results.NotFound() : Results.Json(result);
+    }
+
+    internal static async Task<EllaiGuidanceProgressDto?> ControlOwnedAsync(string actorId, string sessionId,
+        EllaiGuidanceControlRequest request, IServiceProvider services, CancellationToken ct)
+    {
+        var session = await services.GetRequiredService<IEllaiSessionStore>().GetAsync(sessionId, ct).ConfigureAwait(false);
+        if (session is null || session.OwnerActorId != actorId) return null;
+        return await services.GetRequiredService<EllaiGuidanceProposalAdmission>().ControlAsync(
+            sessionId, request, PublicReportAuthority(actorId, session.ScopeEpoch), ct).ConfigureAwait(false);
+    }
+
     public static async Task<IResult> CompleteStepAsync(HttpContext http, string sessionId,
         EllaiGuidanceStepRequest request, [FromServices] IServiceProvider services, CancellationToken ct)
     {

@@ -101,6 +101,8 @@ public sealed class EllaiGuidanceAdmissionHttpTests
         app.MapPost("/sessions/{sessionId}/guidance/plan", handler);
         Delegate progressHandler = (Func<HttpContext, string, EllaiGuidanceStepRequest, IServiceProvider, CancellationToken, Task<IResult>>)EllaiGuidanceProposalEndpoint.CompleteStepAsync;
         app.MapPost("/sessions/{sessionId}/guidance/steps/complete", progressHandler);
+        Delegate controlHandler = (Func<HttpContext, string, EllaiGuidanceControlRequest, IServiceProvider, CancellationToken, Task<IResult>>)EllaiGuidanceProposalEndpoint.ControlAsync;
+        app.MapPost("/sessions/{sessionId}/guidance/control", controlHandler);
         await app.StartAsync();
         try
         {
@@ -128,6 +130,16 @@ public sealed class EllaiGuidanceAdmissionHttpTests
             Assert.Equal("entry", restored.CurrentStepId);
             Assert.Equal(checkpoint.Version + 1, restored.ProgressVersion);
             Assert.Equal(1, completion.Calls);
+            var controlRequest = new EllaiGuidanceControlRequest(proposal.ProposalId, restored.Plan.PlanId, restored.ProgressVersion, "pause");
+            using var pausedResponse = await client.PostAsJsonAsync("/sessions/owned/guidance/control", controlRequest);
+            var paused = (await pausedResponse.Content.ReadFromJsonAsync<EllaiGuidanceProgressDto>())!;
+            Assert.Equal("Paused", paused.Status);
+            using var resumedResponse = await client.PostAsJsonAsync("/sessions/owned/guidance/control", controlRequest with { ExpectedVersion = paused.Version, Command = "resume" });
+            var resumed = (await resumedResponse.Content.ReadFromJsonAsync<EllaiGuidanceProgressDto>())!;
+            Assert.Equal("Ready", resumed.Status);
+            restored = restored with { ProgressVersion = resumed.Version };
+            using var deniedControl = await client.PostAsJsonAsync("/sessions/foreign/guidance/control", controlRequest);
+            Assert.Equal(HttpStatusCode.NotFound, deniedControl.StatusCode);
             var stepRequest = new EllaiGuidanceStepRequest(proposal.ProposalId, restored.Plan.PlanId,
                 restored.ProgressVersion, "entry", "refreshed-context");
             for (var attempt = 0; attempt < 2; attempt++)

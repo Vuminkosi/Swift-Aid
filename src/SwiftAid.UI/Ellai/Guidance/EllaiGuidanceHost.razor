@@ -27,6 +27,24 @@
             <MudText Typo="Typo.caption" role="status">@_guidanceNotice</MudText>
         }
     }
+    @if (_generatedTour is not null)
+    {
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            @if (_generatedTour.Status == BonboardingTourStatus.Paused)
+            {
+                <MudButton OnClick='@(() => ControlGeneratedTourAsync("resume"))'>Resume guidance</MudButton>
+            }
+            else
+            {
+                <MudButton OnClick='@(() => ControlGeneratedTourAsync("pause"))'>Pause guidance</MudButton>
+            }
+            <MudButton OnClick='@(() => ControlGeneratedTourAsync("cancel"))'>Cancel guidance</MudButton>
+            @if (_guidanceNotice is not null)
+            {
+                <MudText Typo="Typo.caption" role="status">@_guidanceNotice</MudText>
+            }
+        </MudStack>
+    }
     @if (_showStartFailure)
     {
         <MudAlert Severity="@(_startOutcomeUnknown ? Severity.Warning : Severity.Info)"

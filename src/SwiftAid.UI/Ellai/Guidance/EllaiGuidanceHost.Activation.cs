@@ -11,6 +11,19 @@ public partial class EllaiGuidanceHost
     private string? _guidanceNotice;
     private bool _preparingGuidance;
     private IBonboardingTourSession? _generatedTour;
+    private EventHandler<BonboardingTourSessionChangedEventArgs>? _generatedTourChanged;
+    private Func<string, Task<bool>>? _controlGeneratedTour;
+
+    private async Task ControlGeneratedTourAsync(string command)
+    {
+        var tour = _generatedTour;
+        if (tour is null || _controlGeneratedTour is null) return;
+        if (!await _controlGeneratedTour(command)) return;
+        if (!ReferenceEquals(tour, _generatedTour)) return;
+        if (command == "pause") await tour.PauseAsync(CancellationToken.None);
+        else if (command == "resume") await tour.ResumeAsync(CancellationToken.None);
+        else await tour.CancelAsync(CancellationToken.None);
+    }
 
     private void ObserveGuidanceProposal(EllaiConversationTurnDto turn, bool newlyCompleted)
     {
@@ -36,7 +49,10 @@ public partial class EllaiGuidanceHost
     {
         var tour = _generatedTour;
         _generatedTour = null;
+        _controlGeneratedTour = null;
         if (tour is null) return;
+        if (_generatedTourChanged is not null) tour.Changed -= _generatedTourChanged;
+        _generatedTourChanged = null;
         try { await tour.CancelAsync(CancellationToken.None); }
         catch (OperationCanceledException) { }
         catch (Microsoft.JSInterop.JSDisconnectedException) { }
@@ -75,6 +91,12 @@ public partial class EllaiGuidanceHost
                 result = await ReviewClient.PrepareGuidancePlanAsync(session.SessionId, proposalId, token);
             }
             if (!IsCurrent()) return;
+            if (result?.Status is "Cancelled" or "Completed")
+            {
+                _guidanceProposalId = null;
+                _guidanceNotice = null;
+                return;
+            }
             await ReportCurrentUiAsync(token);
             if (!IsCurrent() || result?.Plan is not { } plan || result.Status is not ("Ready" or "Paused") ||
                 _latestGuidanceObservation?.ContextStamp != result.ContextStamp)
@@ -89,6 +111,32 @@ public partial class EllaiGuidanceHost
                 return;
             }
             var progressVersion = result.ProgressVersion;
+            var durableStatus = result.Status;
+            var progressGate = new SemaphoreSlim(1, 1);
+            async Task<bool> PersistControl(string command)
+            {
+                await progressGate.WaitAsync(_uiObservationLifetime.Token);
+                try
+                {
+                    if (!IsCurrent()) return false;
+                    if (command == "resume") await ReportCurrentUiAsync(_uiObservationLifetime.Token);
+                    var target = command switch { "pause" => "Paused", "resume" => "Ready", _ => "Cancelled" };
+                    if (durableStatus == target) return true;
+                    var update = await ReviewClient.ControlGuidanceAsync(session.SessionId,
+                        new(proposalId, plan.PlanId, progressVersion, command), _uiObservationLifetime.Token);
+                    if (!IsCurrent() || update?.Status != target)
+                    {
+                        _guidanceNotice = "Guidance could not be saved. Try again.";
+                        return false;
+                    }
+                    progressVersion = update.Version;
+                    durableStatus = update.Status;
+                    _guidanceNotice = null;
+                    return true;
+                }
+                finally { progressGate.Release(); }
+            }
+            if (result.Status == "Paused" && !await PersistControl("resume")) return;
             var definition = new EllaiBonboardingCompiler().Compile(plan, anchors, async (stepId, ct) =>
             {
                 if (!IsCurrent()) return false;
@@ -101,16 +149,54 @@ public partial class EllaiGuidanceHost
                     _latestGuidanceObservation?.ContextStamp != result.ContextStamp ||
                     _latestGuidanceObservation?.ControlStates?.Any(state => state.ControlId == step.ControlId &&
                         state.State == UiObservationState.Ready) != true) return false;
-                var progress = await ReviewClient.CompleteGuidanceStepAsync(session.SessionId,
-                    new(proposalId, plan.PlanId, progressVersion, stepId, result.ContextStamp!), ct);
-                if (!IsCurrent() || progress?.Status is not ("Ready" or "Completed") ||
-                    progress.CompletedStepIds?.Contains(stepId) != true) return false;
-                progressVersion = progress.Version;
-                return true;
+                await progressGate.WaitAsync(ct);
+                try
+                {
+                    var progress = await ReviewClient.CompleteGuidanceStepAsync(session.SessionId,
+                        new(proposalId, plan.PlanId, progressVersion, stepId, result.ContextStamp!), ct);
+                    if (!IsCurrent() || progress?.Status is not ("Ready" or "Completed") ||
+                        progress.CompletedStepIds?.Contains(stepId) != true) return false;
+                    progressVersion = progress.Version;
+                    durableStatus = progress.Status;
+                    return true;
+                }
+                finally { progressGate.Release(); }
             });
             var started = await Bonboarding.StartAsync(definition, new BonboardingStartOptions { Resume = false, StartAtStepId = result.CurrentStepId }, token);
             if (!IsCurrent()) await started.CancelAsync(CancellationToken.None);
-            else _generatedTour = started;
+            else
+            {
+                _generatedTour = started;
+                _controlGeneratedTour = PersistControl;
+                _generatedTourChanged = (_, _) => _ = InvokeAsync(async () =>
+                {
+                    if (!IsCurrent() || !ReferenceEquals(started, _generatedTour)) return;
+                    try
+                    {
+                        var command = started.Status switch
+                        {
+                            BonboardingTourStatus.Paused => "pause",
+                            BonboardingTourStatus.Cancelled or BonboardingTourStatus.Dismissed or BonboardingTourStatus.Skipped => "cancel",
+                            BonboardingTourStatus.Running when durableStatus == "Paused" => "resume",
+                            _ => null,
+                        };
+                        if (command is not null) await PersistControl(command);
+                        if (!IsCurrent() || !ReferenceEquals(started, _generatedTour)) return;
+                        if (durableStatus is "Completed" or "Cancelled")
+                        {
+                            started.Changed -= _generatedTourChanged;
+                            _generatedTourChanged = null;
+                            _generatedTour = null;
+                            _controlGeneratedTour = null;
+                            _guidanceProposalId = null;
+                        }
+                    }
+                    catch (OperationCanceledException) { }
+                    catch (HttpRequestException) { _guidanceNotice = "Guidance could not be saved. Try again."; }
+                    StateHasChanged();
+                });
+                started.Changed += _generatedTourChanged;
+            }
         }
         catch (OperationCanceledException) { if (IsCurrent()) _guidanceNotice = "Guidance took too long. Try again."; }
         catch (Exception exception) when (exception is HttpRequestException or InvalidOperationException or Microsoft.JSInterop.JSException)

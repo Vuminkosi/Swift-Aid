@@ -727,6 +727,23 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
         }
     }
 
+    public async Task<EllaiGuidanceProgressDto?> ControlGuidanceAsync(
+        string sessionId, EllaiGuidanceControlRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        try
+        {
+            using var response = await PostAsJsonAsync($"{SessionRoute(sessionId)}/guidance/control",
+                request, cancellationToken).ConfigureAwait(false);
+            return response.IsSuccessStatusCode
+                ? await response.Content.ReadFromJsonAsync<EllaiGuidanceProgressDto>(Json, cancellationToken).ConfigureAwait(false)
+                : null;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (HttpRequestException) { return null; }
+        catch (JsonException) { return null; }
+    }
+
     public async Task<EllaiGuidanceProgressDto?> CompleteGuidanceStepAsync(
         string sessionId, EllaiGuidanceStepRequest request, CancellationToken cancellationToken)
     {
