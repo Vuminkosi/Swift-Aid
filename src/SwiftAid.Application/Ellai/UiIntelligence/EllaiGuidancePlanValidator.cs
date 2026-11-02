@@ -131,10 +131,17 @@ public sealed class EllaiGuidancePlanValidator(EllaiUiRegistry registry)
             return (null, errors);
         }
 
+        // A model may describe reading a heading as "GuideHuman". Its trusted
+        // proof is still observation, not a nonexistent input-change event.
+        // Never normalize controls requiring validation, consent or a receipt.
+        var steps = draft.Steps.Select(step => step.Behavior == PlanStepBehavior.GuideHuman &&
+            byId[step.ControlId] is { RiskClass: UiRiskClass.R0 or UiRiskClass.R1, HumanConfirmationRequired: false,
+                ProofPolicyId: "proof-ui-observed", ElementKind: "Heading" or "Panel" }
+                ? step with { Behavior = PlanStepBehavior.Explain } : step).ToList();
         var plan = new ValidatedGuidancePlan(
             planId, revision, null, "Initial acceptance",
             draft.Steps.Select(s => s.StepKey).ToList(),
-            Array.Empty<string>(), Array.Empty<string>(), draft.Steps.ToList(),
+            Array.Empty<string>(), Array.Empty<string>(), steps,
             Array.Empty<string>(),
             UiRegistrySnapshotCatalogue(snapshot), snapshot.UiContractVersion);
         return (plan, errors);

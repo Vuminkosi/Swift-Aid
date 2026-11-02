@@ -55,10 +55,11 @@ public sealed partial class EllaiGuidanceProposalAdmission(
             if (accepted.Plan is not null && existing.CatalogueVersion == admitted.Catalogue.CatalogueVersion
                 && existing.UiContractVersion == admitted.Catalogue.UiContractVersion)
             {
-                if (!sameContext)
+                var normalized = existing with { Steps = accepted.Plan.Steps };
+                if (!sameContext || !existing.Steps.SequenceEqual(normalized.Steps))
                 {
                     var rebound = previous with { ContextStamp = admitted.Observation.ContextStamp,
-                        InteractionEpoch = admitted.InteractionEpoch, Version = previous.Version + 1 };
+                        InteractionEpoch = admitted.InteractionEpoch, Version = previous.Version + 1, Plan = normalized };
                     var restored = await sessions.TryUpdateAsync(session with
                     {
                         SessionVersion = session.SessionVersion + 1,
@@ -67,7 +68,7 @@ public sealed partial class EllaiGuidanceProposalAdmission(
                     }, session.SessionVersion, ct).ConfigureAwait(false);
                     if (restored is null) return new("Conflict");
                 }
-                return new(previous.Status, existing);
+                return new(previous.Status, normalized);
             }
         }
         var attempt = sameProposal ? previous!.GenerationAttempt + 1 : 1;

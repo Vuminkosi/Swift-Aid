@@ -4405,3 +4405,9 @@ The real create-and-submit request reached `/report` but failed target-state val
 - Single-condition results use a compact count summary instead of a large mostly empty chart. Multi-condition charts retain count scales and now use defined MudBlazor palette colours and culture-invariant CSS percentages. Privacy-suppressed values remain suppressed.
 - Dashboard panels no longer stretch the condition card to match map height. Compact maps omit the redundant selected-country detail card; the full surveillance detail view is unchanged.
 - PASS: TestHost build and `node tests/SwiftAid.Ui.Tests/dashboard-presentation.browser.cjs` at 1280px light/390px dark. Verified compact height, visible category bars, map link and no horizontal page overflow. Screenshots visually reviewed in `.codex/dashboard-{summary,chart}-{1280,390}.png`. These are synthetic presentation checks, not live surveillance-data validation; basemap tile delivery and physical-device rendering NOT VERIFIED.
+
+### Ground generated presentation behavior in registered proof — 2 November 2026
+
+- A real Muse plan marked every report step GuideHuman, including the entry heading and review panel. It passed planning but could never advance at the heading because there is no input-completion event for a heading.
+- The validator now normalizes GuideHuman to Explain only for registered Heading/Panel presentation with R0/R1 risk, proof-ui-observed, and no human confirmation requirement. Input validation, consent, submission and receipt proof are unchanged. Restored plans persist this normalized representation without another model call or replaying an action.
+- FAIL before correction: HumanGuidanceForReadOnlyHeadingsUsesObservedPresentationWithoutWeakeningWrites. PASS after correction: 83 application observed-guidance/admission tests via dotnet test with their FullyQualifiedName filters. Live revalidation after deployment remains pending.

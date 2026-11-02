@@ -6,6 +6,23 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiObservedGuidanceTests
 {
     [Fact]
+    public void HumanGuidanceForReadOnlyHeadingsUsesObservedPresentationWithoutWeakeningWrites()
+    {
+        var (registry, _, _) = Create();
+        var ids = new[] { "report.entry", "report.subject", "report.narrative", "report.time-location", "report.review", "report.confirmations", "report.submit", "report.receipt" };
+        var descriptors = ids.Select(id => EllaiReportUiManifest.All.Single(control => control.ControlId == id)).ToArray();
+        var steps = descriptors.Select((control, index) => new GuidancePlanStep("s" + index, control.ControlId,
+            control.ObjectiveId!, PlanStepBehavior.GuideHuman, null, null, [], [], "Use the report workflow.",
+            index + 1 < ids.Length ? "s" + (index + 1) : null)).ToArray();
+        var draft = new EllaiGuidancePlanDraft(1, GuidancePlanStatus.Ready, "Submit report", GuidanceMode.Navigation, steps, [], null);
+        var result = new EllaiGuidancePlanValidator(registry).Validate(draft, new("report", [], 20),
+            new HashSet<string> { "report" }, new HashSet<string>(), "plan", 1, 0, 0);
+        Assert.NotNull(result.Plan);
+        foreach (var step in result.Plan.Steps)
+            Assert.Equal(step.ControlId is "report.entry" or "report.review" ? PlanStepBehavior.Explain : PlanStepBehavior.GuideHuman, step.Behavior);
+    }
+
+    [Fact]
     public void DraftSaveCanBePlannedAfterSubjectButCannotStartDisabled()
     {
         var (registry, _, _) = Create();
