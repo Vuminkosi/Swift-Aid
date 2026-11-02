@@ -1,0 +1,42 @@
+@page "/case-assistance-fixture"
+@using SwiftAid.UI.Components.Surfaces.Operations
+@using SwiftAid.UI.Components.Surfaces.Operations.CaseDetail
+@using SwiftAid.UI.Components.Surfaces.Operations.WorkManagement
+@using SwiftAid.UI.Components.Theme
+@using static SwiftAid.UI.Components.Surfaces.Operations.WorkManagement.OperationsWorkManagementSurface
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<output id="fixture-ready">@_ready</output>
+<output id="request-result">@_requestResult</output>
+<OperationsCaseDetailSurface CaseId="CaseId" WorkVersion="7" WorkState="OperationsSurfaceState.Populated"
+                             WorkItems="_items" OnWorkAction="RecordRequest" />
+
+@code {
+    private static readonly Guid CaseId = Guid.Parse("b2210000-2222-4222-8222-222222222222");
+    private bool _ready;
+    private string _requestResult = "Pending";
+    private IReadOnlyList<OperationsWorkItem> _items = Array.Empty<OperationsWorkItem>();
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { _ready = true; StateHasChanged(); }
+    }
+
+    private void RecordRequest(OperationsWorkActionRequest request)
+    {
+        if (request.CaseId != CaseId || request.ExpectedVersion != 7 ||
+            request.Action != OperationsWorkAction.RequestAssistance || request.AssistanceNeed is null ||
+            string.IsNullOrWhiteSpace(request.Details) || request.CommandId is null ||
+            request.WorkKey != $"assistance:new:{request.CommandId:D}")
+        {
+            throw new InvalidOperationException("Unexpected synthetic assistance request.");
+        }
+
+        _requestResult = "Accepted";
+        _items = [new OperationsWorkItem(CaseId, $"ast:{request.CommandId:D}", 8, "SYNTHETIC-CASE",
+            OperationsWorkKind.Assistance, OperationsWorkStatus.Requested, OperationsAssignmentStatus.AssignedToYou,
+            $"{request.AssistanceNeed}: {request.Details}", DateTimeOffset.UtcNow, null,
+            [OperationsWorkAction.AcceptAssistance], [], null)];
+    }
+}
