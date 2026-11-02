@@ -5,6 +5,48 @@ namespace SwiftAid.Client.Tests;
 
 public sealed class CommandBackedWorkManagementClientTests
 {
+    [Fact]
+    public async Task Assignment_query_and_post_action_refresh_do_not_depend_on_monitoring()
+    {
+        var header = Header() with { AssignmentVersion = 2, AssignmentRecordedAtUtc = DateTimeOffset.UtcNow,
+            CanAcknowledgeAssignment = true };
+        var commands = new StubCommandClient();
+        var monitoring = new UnavailableMonitoringClient();
+        var client = new CommandBackedWorkManagementClient(commands, monitoring,
+            new StubTimelineClient(timeline: new CaseTimeline(header, [])));
+        var query = new WorkManagementQuery(new PageRequest(1, 25), WorkManagementKind.Assignment);
+        var result = await client.GetAsync(CaseId, query);
+        Assert.Equal(UiCapabilityResultCode.Success, result.Code);
+        var item = Assert.Single(result.Value!.Items.Items);
+        Assert.Contains(WorkManagementAction.AcknowledgeAssignment, item.AvailableActions);
+        var accepted = await client.ExecuteAsync(new WorkManagementCommand(CaseId, item.WorkKey,
+            WorkManagementAction.AcknowledgeAssignment, 7), query);
+        Assert.Equal(UiCapabilityResultCode.Success, accepted.Code);
+        Assert.Single(commands.Sent);
+        Assert.Equal(0, monitoring.Calls);
+
+        var filtered = await client.GetAsync(CaseId, query with { Status = WorkManagementStatus.Acknowledged });
+        Assert.Empty(filtered.Value!.Items.Items);
+        var secondPage = await client.GetAsync(CaseId, query with { Page = new PageRequest(2, 25) });
+        Assert.Empty(secondPage.Value!.Items.Items);
+        Assert.Equal(1, secondPage.Value.Items.TotalCount);
+    }
+
+    private sealed class UnavailableMonitoringClient : IMonitoringQueueClient
+    {
+        public int Calls { get; private set; }
+        public Task<MonitoringQueueResult> GetAssignedAsync(int? limit, CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            throw new HttpRequestException("Synthetic monitoring outage.");
+        }
+        public Task<MonitoringQueueResult> GetOpenAsync(int? limit, CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            throw new HttpRequestException("Synthetic monitoring outage.");
+        }
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]
@@ -171,10 +213,20 @@ public sealed class CommandBackedWorkManagementClientTests
             Task.FromResult(new CaseTimelineResult(access, access == CaseTimelineAccess.Found ? _timeline : null));
     }
 
-    private sealed class StubMonitoringClient : IMonitoringQueueClient
+    [Fact]
+    public async Task Mixed_work_does_not_display_items_from_a_denied_queue_response()
+    {
+        var client = new CommandBackedWorkManagementClient(new StubCommandClient(),
+            new StubMonitoringClient(denyAssigned: true), new StubTimelineClient());
+        var result = await client.GetAsync(CaseId, new WorkManagementQuery(new PageRequest(1, 25)));
+        Assert.Equal(UiCapabilityResultCode.Success, result.Code);
+        Assert.Equal(WorkManagementKind.Escalation, Assert.Single(result.Value!.Items.Items).Kind);
+    }
+
+    private sealed class StubMonitoringClient(bool denyAssigned = false) : IMonitoringQueueClient
     {
         public Task<MonitoringQueueResult> GetAssignedAsync(int? limit, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new MonitoringQueueResult(CaseQueueAccess.Allowed, [FollowUpItem()]));
+            Task.FromResult(new MonitoringQueueResult(denyAssigned ? CaseQueueAccess.Denied : CaseQueueAccess.Allowed, [FollowUpItem()]));
 
         public Task<MonitoringQueueResult> GetOpenAsync(int? limit, CancellationToken cancellationToken = default) =>
             Task.FromResult(new MonitoringQueueResult(CaseQueueAccess.Allowed, [EscalationItem()]));

@@ -46,6 +46,11 @@ public sealed class CommandBackedWorkManagementClient(
             return Unavailable<WorkManagementSnapshot>("The case work could not be confirmed.");
         }
 
+        if (query.Kind == WorkManagementKind.Assignment)
+        {
+            return CreateSnapshot(header, MapAssignment(header), query);
+        }
+
         MonitoringQueueResult assigned;
         MonitoringQueueResult open;
         try
@@ -75,17 +80,23 @@ public sealed class CommandBackedWorkManagementClient(
             return Unavailable<WorkManagementSnapshot>("Coordination work is temporarily unavailable.");
         }
 
-        var items = assigned.Items.Concat(open.Items)
+        var items = (assigned.Access == CaseQueueAccess.Allowed ? assigned.Items : [])
+            .Concat(open.Access == CaseQueueAccess.Allowed ? open.Items : [])
             .Where(item => item.CaseId == caseId)
             .GroupBy(item => (item.Kind, item.WorkItemId))
             .Select(group => group.First())
             .Select(item => TryMapItem(item))
             .Where(mapped => mapped is not null)
             .Select(mapped => mapped!)
-            .Concat(MapAssignment(header))
-            .Where(item => MatchesQuery(item, query))
-            .ToArray();
+            .Concat(MapAssignment(header));
 
+        return CreateSnapshot(header, items, query);
+    }
+
+    private static UiCapabilityResult<WorkManagementSnapshot> CreateSnapshot(
+        CaseTimelineHeader header, IEnumerable<WorkManagementItem> source, WorkManagementQuery query)
+    {
+        var items = source.Where(item => MatchesQuery(item, query)).ToArray();
         var totalCount = items.Length;
         var pageItems = items
             .Skip((query.Page.PageNumber - 1) * query.Page.PageSize)
@@ -93,7 +104,7 @@ public sealed class CommandBackedWorkManagementClient(
             .ToArray();
 
         return Success(new WorkManagementSnapshot(
-            caseId,
+            header.CaseId,
             header.AggregateVersion,
             new Page<WorkManagementItem>(
                 pageItems,
