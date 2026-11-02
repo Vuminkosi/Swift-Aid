@@ -7,6 +7,7 @@ otherwise enable any job consumer.
 from __future__ import annotations
 
 import json
+import unicodedata
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Literal
@@ -100,8 +101,14 @@ class JobEnvelope(BaseModel):
     @field_validator("organization_id")
     @classmethod
     def validate_organization_id(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("organizationId must be a non-empty opaque identifier")
+        utf16_length = len(value.encode("utf-16-le")) // 2
+        if (
+            not value.strip()
+            or value != value.strip()
+            or utf16_length > 200
+            or any(unicodedata.category(character) == "Cc" for character in value)
+        ):
+            raise ValueError("organizationId must be a canonical opaque identifier of at most 200 characters")
         return value
 
     @field_validator("created_at_utc")

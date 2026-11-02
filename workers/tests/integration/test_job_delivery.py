@@ -51,6 +51,23 @@ def test_job_envelope_accepts_documented_v1_sample_without_reinterpreting_opaque
     assert parsed.created_at_utc.utcoffset() == timedelta(0)
 
 
+def test_job_envelope_accepts_organization_id_at_200_utf16_units() -> None:
+    message = _valid_envelope()
+    message["organizationId"] = "x" * 200
+
+    parsed = JobEnvelope.from_bytes(_encode(message))
+
+    assert parsed.organization_id == "x" * 200
+
+
+def test_job_envelope_rejects_organization_id_over_200_utf16_units() -> None:
+    message = _valid_envelope()
+    message["organizationId"] = "x" * 199 + "😀"
+
+    with pytest.raises(ValidationError):
+        JobEnvelope.from_bytes(_encode(message))
+
+
 @pytest.mark.parametrize(
     "timestamp",
     ["2026-10-25T07:00:00Z", "2026-10-25T07:00:00+00:00"],
@@ -130,6 +147,10 @@ def test_job_envelope_rejects_python_field_names_even_when_wire_alias_is_present
         ("jobType", "case-summary"),
         ("jobType", "UnknownJob"),
         ("organizationId", "  "),
+        ("organizationId", " demo-zw"),
+        ("organizationId", "demo-zw "),
+        ("organizationId", "x" * 201),
+        ("organizationId", "demo\x1fzw"),
         ("createdAtUtc", "2026-10-25T07:00:00"),
         ("createdAtUtc", "2026-10-25T09:00:00+02:00"),
         ("createdAtUtc", "not-a-timestamp"),

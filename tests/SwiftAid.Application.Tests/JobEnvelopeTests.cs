@@ -107,6 +107,31 @@ public sealed class JobEnvelopeTests
         Assert.Throws<ArgumentException>(() => envelope.SerializeToUtf8());
     }
 
+    [Fact]
+    public void OrganizationIdentifierValidationMatchesWorkerLimits()
+    {
+        var invalidValues = new[]
+        {
+            " ",
+            " demo-zw",
+            "demo-zw ",
+            "demo\u001fzw",
+            new string('x', 201),
+            new string('x', 199) + "😀"
+        };
+
+        foreach (var organizationId in invalidValues)
+        {
+            Assert.Throws<ArgumentException>(() => (CreateEnvelope() with { OrganizationId = organizationId }).SerializeToUtf8());
+        }
+
+        var maximumLength = CreateEnvelope() with { OrganizationId = new string('x', 200) };
+        Assert.Equal(new string('x', 200), JobEnvelope.DeserializeFromUtf8(maximumLength.SerializeToUtf8()).OrganizationId);
+        var supplementaryId = string.Concat(Enumerable.Repeat("😀", 100));
+        var supplementaryCharacters = CreateEnvelope() with { OrganizationId = supplementaryId };
+        Assert.Equal(supplementaryId, JobEnvelope.DeserializeFromUtf8(supplementaryCharacters.SerializeToUtf8()).OrganizationId);
+    }
+
     private static JobEnvelope CreateEnvelope() => new(
         JobEnvelope.CurrentSchemaVersion,
         Guid.Parse("9160e07e-1385-4b30-995b-eae5fd2651db"),
