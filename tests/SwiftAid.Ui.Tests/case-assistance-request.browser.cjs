@@ -42,7 +42,32 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `horizontal overflow at ${width}px`);
             assert.deepEqual(errors, [], `browser errors at ${width}px`);
         }
-        console.log('PASS synthetic assistance request and validation at 390px and 1280px');
+        for (const width of [390, 1280]) {
+            await page.setViewportSize({ width, height: 900 });
+            await page.goto(`${base}/case-assistance-receipt-fixture?Receipt=true`);
+            await page.waitForFunction(() => document.querySelector('#fixture-ready')?.textContent === 'True');
+            await page.getByRole('tab', { name: 'Assistance', exact: true }).click();
+            await page.getByLabel('Choose an available action', { exact: true }).click();
+            await page.getByRole('option', { name: 'Confirm assistance received', exact: true }).click();
+            await page.getByLabel('Describe the receipt confirmation', { exact: true }).fill('Recipient confirmed the support arrived');
+            await page.getByRole('button', { name: 'Review action', exact: true }).click();
+            await page.getByRole('alert').getByText('Confirm that the assistance was received.', { exact: true }).waitFor();
+            assert.equal(await page.locator('#request-result').innerText(), 'Provided', 'receipt must remain unconfirmed');
+
+            await page.getByLabel('I confirm the assistance was received', { exact: true }).check();
+            await page.getByRole('button', { name: 'Review action', exact: true }).click();
+            await page.getByRole('alert').getByText('Record how receipt was confirmed and the context of that confirmation.', { exact: true }).waitFor();
+            await page.getByLabel('How was receipt confirmed?', { exact: true }).fill('Direct confirmation');
+            await page.getByLabel('Receipt confirmation context', { exact: true }).fill('Synthetic follow-up conversation');
+            await page.getByRole('button', { name: 'Review action', exact: true }).click();
+            await page.getByRole('button', { name: 'Confirm action', exact: true }).click();
+            await page.getByText('ReceiptConfirmed', { exact: true }).waitFor();
+            assert.equal(await page.locator('#request-result').innerText(), 'ReceiptConfirmed');
+            assert(await page.getByLabel('Selected work details').getByText('Receipt confirmed', { exact: true }).isVisible());
+            assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `receipt horizontal overflow at ${width}px`);
+            assert.deepEqual(errors, [], `receipt browser errors at ${width}px`);
+        }
+        console.log('PASS synthetic assistance request and receipt workflows at 390px and 1280px');
     } finally {
         await browser?.close();
         host.kill();

@@ -1,4 +1,5 @@
 @page "/case-assistance-fixture"
+@page "/case-assistance-receipt-fixture"
 @using SwiftAid.UI.Components.Surfaces.Operations
 @using SwiftAid.UI.Components.Surfaces.Operations.CaseDetail
 @using SwiftAid.UI.Components.Surfaces.Operations.WorkManagement
@@ -14,9 +15,23 @@
 
 @code {
     private static readonly Guid CaseId = Guid.Parse("b2210000-2222-4222-8222-222222222222");
+    private static readonly Guid ReceiptAssistanceId = Guid.Parse("a3310000-3333-4333-8333-333333333333");
+    [SupplyParameterFromQuery(Name = "Receipt")] public bool ReceiptMode { get; set; }
     private bool _ready;
     private string _requestResult = "Pending";
     private IReadOnlyList<OperationsWorkItem> _items = Array.Empty<OperationsWorkItem>();
+
+    protected override void OnParametersSet()
+    {
+        if (ReceiptMode && _items.Count == 0)
+        {
+            _requestResult = "Provided";
+            _items = [new OperationsWorkItem(CaseId, $"ast:{ReceiptAssistanceId:D}", 9, "SYNTHETIC-CASE",
+                OperationsWorkKind.Assistance, OperationsWorkStatus.Provided, OperationsAssignmentStatus.AssignedToYou,
+                "Transport: Synthetic transport arranged", DateTimeOffset.UtcNow, null,
+                [OperationsWorkAction.ConfirmAssistanceReceived], [], null)];
+        }
+    }
 
     protected override void OnAfterRender(bool firstRender)
     {
@@ -25,6 +40,23 @@
 
     private void RecordRequest(OperationsWorkActionRequest request)
     {
+        if (ReceiptMode)
+        {
+            if (request.CaseId != CaseId || request.WorkKey != $"ast:{ReceiptAssistanceId:D}" ||
+                request.ExpectedVersion != 9 || request.Action != OperationsWorkAction.ConfirmAssistanceReceived ||
+                !request.AssistanceReceiptConfirmed || string.IsNullOrWhiteSpace(request.AssistanceReceiptMethod) ||
+                string.IsNullOrWhiteSpace(request.AssistanceReceiptContext) || string.IsNullOrWhiteSpace(request.Details))
+            {
+                throw new InvalidOperationException("Receipt confirmation requires explicit proof and provenance.");
+            }
+
+            _requestResult = "ReceiptConfirmed";
+            _items = [new OperationsWorkItem(CaseId, $"ast:{ReceiptAssistanceId:D}", 10, "SYNTHETIC-CASE",
+                OperationsWorkKind.Assistance, OperationsWorkStatus.ReceiptConfirmed, OperationsAssignmentStatus.AssignedToYou,
+                "Transport: Synthetic transport arranged", DateTimeOffset.UtcNow, null, [], [], null)];
+            return;
+        }
+
         if (request.CaseId != CaseId || request.ExpectedVersion != 7 ||
             request.Action != OperationsWorkAction.RequestAssistance || request.AssistanceNeed is null ||
             string.IsNullOrWhiteSpace(request.Details) || request.CommandId is null ||
