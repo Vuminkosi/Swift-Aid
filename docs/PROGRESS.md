@@ -514,3 +514,7 @@ LocationContext distinguishes reporter/device/geocoder and exact/approximate/unk
 ## SW-03-007 location selector reuse audit - 2 November 2026
 
 Corrected source inventory in [SW-03-007 reuse audit](SW-03-007-LOCATION-REUSE-AUDIT.md): direct shared SwiftAidLocationPicker usage is found only in GuidedReportStepper. Mobile guest report implements separate geo lookup/mapping; Gateway report/surveillance and organizations/sessions/filters/analytics shared-selector reuse was not found. SW-03-007 remains partial; EV-041.
+
+## SW-03-008 geographic edge-test audit - 2 November 2026
+
+Source/test-matrix review in [SW-03-008 edge audit](SW-03-008-GEOGRAPHIC-EDGE-TEST-AUDIT.md) maps existing suite coverage for same-name ancestry, country scope, unknown parents and import recovery; that suite passed 7/7 under EV-037. Alternative spellings, offline/unknown draft, hierarchy-change and cross-scope authorization cases remain missing/unverified; no tests run for this review. EV-042.

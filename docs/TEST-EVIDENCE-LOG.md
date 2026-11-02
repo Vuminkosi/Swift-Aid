@@ -51,6 +51,7 @@ The master orchestrator owns checklist status, evidence linking and regression c
 | EV-039 | Read-only SW-03-004 fallback/verification audit | PARTIAL: generic cascade and manual provisional callback found; country-specific behavior and authorized registry verification flow NOT VERIFIED/found. No tests run. | SW-03-004, [fallback audit](SW-03-004-LOCATION-FALLBACK-AUDIT.md) |
 | EV-040 | Read-only SW-03-005/006 coordinate semantics audit | SW-03-005 PARTIAL: source and precision are modeled but coordinate kind is not explicit. SW-03-006 PASS at source level: missing/manual coordinates stay null and no GPS permission API was found in client/UI code. No device/test run. | SW-03-005/006, [coordinate audit](SW-03-005-006-COORDINATE-PRECISION-AUDIT.md) |
 | EV-041 | Read-only SW-03-007 selector reuse inventory | PARTIAL: direct shared picker use found only in guided report stepper; Mobile guest report has separate lookup code; reuse in organizations/facilities, sessions, filters, surveillance and analytics not found. No UI tests run. | SW-03-007, [reuse audit](SW-03-007-LOCATION-REUSE-AUDIT.md) |
+| EV-042 | Read-only SW-03-008 geographic test-matrix review | PARTIAL: 7/7 focused in-memory registry tests already passed under EV-037; no dedicated alternate-spelling, offline/unknown draft, hierarchy-change or cross-scope authorization test found in reviewed files. | SW-03-008, [edge-test audit](SW-03-008-GEOGRAPHIC-EDGE-TEST-AUDIT.md) |
 
 ## Active regression and blocker ownership
 
