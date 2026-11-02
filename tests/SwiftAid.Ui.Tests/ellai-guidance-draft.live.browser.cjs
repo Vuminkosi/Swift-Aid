@@ -57,4 +57,3 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE);
  throw Error('No terminal outcome');
  } catch(error) { await page.screenshot({path:'.codex/ellai-guidance-interaction-failure.png',fullPage:true}); throw error; } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1});
-
