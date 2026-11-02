@@ -61,7 +61,7 @@ public static class EllaiReportUiManifest
     private static string Purpose(string controlId) => controlId switch
     {
         "report.entry" => "Open the public report form.",
-        "report.subject" => "Choose whether the observation concerns a person or an animal.",
+        "report.subject" => "Choose whether the observation concerns a person or an animal, then use Continue to details to confirm this form step.",
         "report.narrative" => "Record original observations without diagnosing or inventing missing facts.",
         "report.time-location" => "Select the country and location where the event occurred.",
         "report.voice-note" => "Optionally attach an original voice note as evidence.",
@@ -190,11 +190,11 @@ public static class EllaiReportUiManifest
             UiRiskClass.R1,
             ["save-report-draft", "save-draft", "offline-report"],
             ["public-intake-no-account"],
-            ["report.entry"],
+            ["report.subject"],
             [],
             "save-report-draft",
             "proof-ui-validated",
-            false),
+            false) with { DescriptorVersion = 2, AllowDeferredEnablement = true },
     ];
 
     /// <summary>Shared by rendered components and the trusted tour compiler's anchor map.</summary>

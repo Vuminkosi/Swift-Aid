@@ -48,7 +48,9 @@ public sealed class EllaiGuidancePlanValidator(EllaiUiRegistry registry)
                 (step.Behavior == PlanStepBehavior.GuideHuman ||
                     (step.Behavior == PlanStepBehavior.Explain && !descriptor.HumanConfirmationRequired)) &&
                 descriptor.PrerequisiteIds.Count > 0 && descriptor.PrerequisiteIds.All(precedingControls.Contains) &&
-                matches.Length == 1 && matches[0].State == UiObservationState.Unmounted;
+                matches.Length == 1 && (matches[0].State == UiObservationState.Unmounted ||
+                    (matches[0].State == UiObservationState.Disabled && descriptor.AllowDeferredEnablement &&
+                        step.Behavior == PlanStepBehavior.GuideHuman));
             var validatedCurrentInput = index == activeIndex && step.Behavior == PlanStepBehavior.GuideHuman &&
                 descriptor.ProofPolicyId == "proof-ui-validated" && !descriptor.HumanConfirmationRequired &&
                 validatedControlIds?.Contains(step.ControlId) == true && matches.Length == 1 &&

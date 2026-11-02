@@ -70,6 +70,11 @@ public sealed record UiControlDescriptor(
 {
     /// <summary>Application-authored semantics, never current field values or model instructions.</summary>
     public EllaiUiSemantics? Semantics { get; init; }
+
+    /// <summary>Trusted planning metadata only: a later human step may be
+    /// disabled until its declared prerequisites are completed. Never permits
+    /// activation or completion while the control is disabled.</summary>
+    public bool AllowDeferredEnablement { get; init; }
 }
 
 /// <summary>Client-posted mounted-control report: the live UI observation

@@ -6,6 +6,30 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiObservedGuidanceTests
 {
     [Fact]
+    public void DraftSaveCanBePlannedAfterSubjectButCannotStartDisabled()
+    {
+        var (registry, _, _) = Create();
+        var descriptors = new[] { "report.subject", "report.save" }
+            .Select(id => EllaiReportUiManifest.All.Single(control => control.ControlId == id)).ToArray();
+        var steps = descriptors.Select((control, index) => new GuidancePlanStep("s" + index,
+            control.ControlId, control.ObjectiveId!, PlanStepBehavior.GuideHuman,
+            null, null, [], [], "Use the form control.", index == 0 ? "s1" : null)).ToArray();
+        var now = DateTimeOffset.UtcNow;
+        var observations = descriptors.Select((control, index) => new UiControlObservation(control.ControlId,
+            control.DescriptorVersion, "view", "context", index == 0 ? UiObservationState.Ready : UiObservationState.Disabled,
+            "web", now, null)).ToArray();
+        var draft = new EllaiGuidancePlanDraft(1, GuidancePlanStatus.Ready, "Save draft", GuidanceMode.Navigation, steps, [], null);
+        var validator = new EllaiGuidancePlanValidator(registry);
+        Assert.NotNull(validator.ValidateObserved(draft, new("report", [], 20), new HashSet<string> { "report" },
+            new HashSet<string>(), observations, "view", "context", now, "plan").Plan);
+        Assert.Null(validator.ValidateObserved(draft, new("report", [], 20), new HashSet<string> { "report" },
+            new HashSet<string>(), observations, "view", "context", now, "plan", "s1", new HashSet<string> { "s0" }).Plan);
+        observations[1] = observations[1] with { State = UiObservationState.Ready };
+        Assert.NotNull(validator.ValidateObserved(draft, new("report", [], 20), new HashSet<string> { "report" },
+            new HashSet<string>(), observations, "view", "context", now, "plan", "s1", new HashSet<string> { "s0" }).Plan);
+    }
+
+    [Fact]
     public void LaterWizardTargetsCanBePlannedAfterTheirRegisteredPrerequisites()
     {
         var (registry, _, _) = Create();
