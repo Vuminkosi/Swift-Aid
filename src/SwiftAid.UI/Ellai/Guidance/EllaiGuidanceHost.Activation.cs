@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Components;
 using Bit.Bonboarding;
 using SwiftAid.Contracts.Ellai;
 
@@ -11,6 +12,7 @@ public partial class EllaiGuidanceHost
     private string? _guidanceProposalTurn;
     private string? _pendingGuidanceTurn;
     private string? _lastGuidanceControlProposalId;
+    private string? _lastTabSelectionProposalId;
     private string? _guidanceNotice;
     private bool _preparingGuidance;
     private IBonboardingTourSession? _generatedTour;
@@ -70,6 +72,17 @@ public partial class EllaiGuidanceHost
         if (turn.Outcome != "Completed") return;
         newlyCompleted |= _pendingGuidanceTurn == turn.ClientUtteranceId;
         _pendingGuidanceTurn = null;
+        var tabProposals = turn.UiProposals.Where(item => item.Proposal.Kind == UiIntentKind.SelectTab).Take(2).ToArray();
+        if (tabProposals.Length > 0)
+        {
+            if (tabProposals.Length == 1 && newlyCompleted && tabProposals[0].ProposalId != _lastTabSelectionProposalId &&
+                EllaiCaseDetailUiManifest.ReadTab(tabProposals[0].Proposal) is { } tab)
+            {
+                _lastTabSelectionProposalId = tabProposals[0].ProposalId;
+                _ = SelectCurrentCaseTabAsync(turn.ClientUtteranceId, tabProposals[0].ProposalId, tab);
+            }
+            return;
+        }
         var controls = turn.UiProposals.Where(p => p.Proposal.Kind == UiIntentKind.ControlGuidance).Take(2).ToArray();
         if (controls.Length > 1) return;
         var control = controls.SingleOrDefault();
@@ -93,6 +106,34 @@ public partial class EllaiGuidanceHost
         _guidanceFeatureId = proposal.Proposal.Arguments.GetValueOrDefault("feature");
         // Conversation restoration offers an explicit action; only the currently awaited turn auto-starts.
         if (newlyCompleted) _ = StartProposedGuidanceAsync();
+    }
+
+    private async Task SelectCurrentCaseTabAsync(string turnId, string proposalId, string tab)
+    {
+        if (!EllaiCaseDetailUiManifest.Tabs.Contains(tab) || _sessionView is not { Status: "Active" } session) return;
+        var originalUri = Navigation.Uri;
+        var path = Navigation.ToBaseRelativePath(originalUri).Split('?', '#')[0].TrimEnd('/');
+        var segments = path.Split('/');
+        if (segments.Length != 2 || segments[0] != "case" || !Guid.TryParseExact(segments[1], "D", out var caseId) || caseId == Guid.Empty) return;
+        bool IsCurrent() => !_uiObservationLifetime.IsCancellationRequested && Navigation.Uri == originalUri &&
+            _sessionView?.SessionId == session.SessionId && _sessionView.Status == "Active" &&
+            _lastDurableTurn is { Outcome: "Completed" } current && current.ClientUtteranceId == turnId &&
+            _lastTabSelectionProposalId == proposalId;
+        try
+        {
+            if (!IsCurrent()) return;
+            await ReportUiForFeatureAsync(EllaiCaseDetailUiManifest.FeatureId, _uiObservationLifetime.Token);
+            if (!IsCurrent() || _latestGuidanceObservation?.ControlStates?.Count(state =>
+                state.ControlId == "case-detail.tabs" && state.State == UiObservationState.Ready) != 1) return;
+            // Only the existing component's registered tab query changes. Record identity
+            // and all application data/action authorization remain with the current page.
+            Navigation.NavigateTo(Navigation.GetUriWithQueryParameter("tab", tab));
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception) when (exception is HttpRequestException or Microsoft.JSInterop.JSException)
+        {
+            _guidanceNotice = "The tab could not be opened. Try again.";
+        }
     }
 
     private void OfferSavedGuidance(EllaiSessionView session)

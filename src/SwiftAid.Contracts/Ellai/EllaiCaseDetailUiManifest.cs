@@ -3,6 +3,14 @@ namespace SwiftAid.Contracts.Ellai;
 /// <summary>Safe case-detail presentation descriptions, never record contents or authorization evidence.</summary>
 public static class EllaiCaseDetailUiManifest
 {
+    public static IReadOnlyList<string> Tabs { get; } = Array.AsReadOnly(new[]
+        { "overview", "history", "follow-ups", "assistance", "discussion", "attachments", "observations" });
+
+    public static string? ReadTab(UiIntentProposal? proposal) =>
+        proposal is { Kind: UiIntentKind.SelectTab, FeatureId: FeatureId, ControlId: "case-detail.tabs", ResourceId: null } &&
+        proposal.Arguments is { Count: 1 } && proposal.Arguments.TryGetValue("tab", out var tab) && Tabs.Contains(tab)
+            ? tab : null;
+
     public const string FeatureId = "case-detail";
     public const string NavigationId = "case-detail-current";
     public static IReadOnlyList<UiControlDescriptor> Controls { get; } = Array.AsReadOnly(new[]
@@ -24,7 +32,7 @@ public static class EllaiCaseDetailUiManifest
     private static UiControlDescriptor Control(string key, string label, string purpose, string kind) =>
         new("case-detail." + key, FeatureId, 1, "ellai-uicontract/1.0", "OperationsCaseDetailSurface", kind,
             label, purpose, [label], ["case-detail", key], [], NavigationId, "ellai-case-detail-" + key,
-            ["HighlightControl"], UiRiskClass.R0, [GuidanceMode.SystemTour, GuidanceMode.Navigation], [], [],
+            key == "tabs" ? ["HighlightControl", "SelectTab"] : ["HighlightControl"], UiRiskClass.R0, [GuidanceMode.SystemTour, GuidanceMode.Navigation], [], [],
             "explain-" + key, "proof-ui-observed", [EllaiNavigationManifest.Capability], "application-metadata", false)
         { Semantics = new(purpose, null, [], ["proof-ui-observed"]) };
 }

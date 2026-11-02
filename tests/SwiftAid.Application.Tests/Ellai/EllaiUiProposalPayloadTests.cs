@@ -26,6 +26,23 @@ public sealed class EllaiUiProposalPayloadTests
         }]));
     }
 
+    [Theory]
+    [InlineData("overview", true)]
+    [InlineData("attachments", true)]
+    [InlineData("observations", true)]
+    [InlineData("../admin", false)]
+    [InlineData("delete", false)]
+    public void TabSelectionIsRestrictedToRegisteredPresentationTargets(string tab, bool valid)
+    {
+        var proposal = new UiIntentProposal(UiIntentKind.SelectTab, "case-detail", null, "case-detail.tabs",
+            new Dictionary<string, string> { ["tab"] = tab });
+        if (valid) Assert.NotNull(EllaiUiProposalPayload.Serialize([proposal]));
+        else Assert.Throws<ArgumentException>(() => EllaiUiProposalPayload.Serialize([proposal]));
+        Assert.Throws<ArgumentException>(() => EllaiUiProposalPayload.Serialize([proposal with { ResourceId = "another-record" }]));
+        Assert.Throws<ArgumentException>(() => EllaiUiProposalPayload.Serialize([proposal with { FeatureId = "admin" }]));
+        Assert.Throws<ArgumentException>(() => EllaiUiProposalPayload.Serialize([proposal, proposal]));
+    }
+
     [Fact]
     public void BoundedProposalsRoundTripWithoutBecomingReceipts()
     {

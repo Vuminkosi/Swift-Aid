@@ -57,7 +57,9 @@ public partial class EllaiGuidanceHost
         }
     }
 
-    private async Task ReportCurrentUiAsync(CancellationToken token)
+    private Task ReportCurrentUiAsync(CancellationToken token) => ReportUiForFeatureAsync(_guidanceFeatureId, token);
+
+    private async Task ReportUiForFeatureAsync(string? featureId, CancellationToken token)
     {
         _latestGuidanceObservation = null;
         if (_sessionView is not { Status: "Active" } session) return;
@@ -66,7 +68,7 @@ public partial class EllaiGuidanceHost
         {
             _uiObservationModule ??= await JS.InvokeAsync<IJSObjectReference>("import", token,
                 "./_content/SwiftAid.UI/js/ellai-ui-observations.js");
-            var requestedControls = _guidanceFeatureId switch
+            var requestedControls = featureId switch
             {
                 EllaiNavigationManifest.FeatureId => EllaiNavigationManifest.Controls.Select(control => control.ControlId).ToArray(),
                 EllaiReportUiManifest.FeatureId => EllaiReportUiManifest.All.Select(control => control.ControlId).ToArray(),

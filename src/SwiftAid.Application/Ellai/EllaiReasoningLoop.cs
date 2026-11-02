@@ -162,6 +162,10 @@ public sealed class EllaiReasoningLoop(
                 "For stop speaking while keeping guidance, use command=stop-speech; never cancel the tour for a speech-only interruption. " +
                 "For an explicit request to advance the current guidance step, use command=next. This requests evidence-checked advancement, " +
                 "never completion of a field, submission, or approval. Do not claim advancement until application evidence confirms it. " +
+                "For an explicit request to select a tab in the currently open case detail, discover case-detail first, then propose SelectTab " +
+                "with featureId=case-detail, controlId=case-detail.tabs, resourceId=null and exactly one argument tab=" +
+                "overview, history, follow-ups, assistance, discussion, attachments or observations. This does not open another record, " +
+                "authorize a write or prove data loading. Do not combine tab selection with guidance controls. " +
                 "Emit at most one guidance intent per turn. These are requested controls, not evidence that the client executed them.";
         }
         var thread = new List<EllaiChatMessage>(request.Conversation ?? []);

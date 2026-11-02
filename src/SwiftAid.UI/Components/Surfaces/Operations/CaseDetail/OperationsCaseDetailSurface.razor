@@ -306,7 +306,7 @@
     private IReadOnlyCollection<string> _observationEvidence = Array.Empty<string>();
     private Guid _boundCaseId;
 
-    private static readonly string[] TabKeys = ["overview", "history", "follow-ups", "assistance", "discussion", "attachments", "observations"];
+    private static readonly string[] TabKeys = EllaiCaseDetailUiManifest.Tabs.ToArray();
 
     protected override void OnInitialized()
     {

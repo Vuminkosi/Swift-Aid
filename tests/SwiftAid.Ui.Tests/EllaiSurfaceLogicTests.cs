@@ -59,6 +59,57 @@ public sealed class EllaiSurfaceLogicTests
         Assert.Equal(2, calls);
     }
 
+    [Theory]
+    [InlineData(true, true, true, 1)]
+    [InlineData(false, true, true, 0)]
+    [InlineData(true, false, true, 0)]
+    [InlineData(true, true, false, 0)]
+    public async Task CurrentCaseTabSelectionRequiresFreshAcceptedObservationAndNeverReplays(bool fresh, bool accepted, bool casePage, int moves)
+    {
+        var client = new FakeReviewClient { ObservationHandler = () => Task.FromResult(accepted) };
+        using var host = await CreateHost(client, CreateSession(1), "unsent draft");
+        var navigation = new TabNavigationManager(casePage ? "case/6d8cbf50-47f6-4b39-9ad8-7c2324401679?keep=value" : "dashboard");
+        SetProperty(host, "Navigation", navigation);
+        SetField(host, "_uiObservationModule", new ObservationJsModule { ControlId = "case-detail.tabs" });
+        var turn = new EllaiConversationTurnDto("tab-turn", 2, "Show attachments", "Opening attachments", "Completed", 1, DateTimeOffset.UtcNow)
+        {
+            UiProposals = [new("tab-proposal", new(UiIntentKind.SelectTab, "case-detail", null, "case-detail.tabs",
+                new Dictionary<string, string> { ["tab"] = "attachments" }))],
+        };
+        SetField(host, "_lastDurableTurn", turn);
+        await InvokeAsync(host, "ObserveGuidanceProposal", turn, fresh);
+        await InvokeAsync(host, "ObserveGuidanceProposal", turn, fresh);
+        Assert.Equal(moves, navigation.Moves);
+        if (moves == 1)
+        {
+            Assert.Contains("/case/6d8cbf50-47f6-4b39-9ad8-7c2324401679?", navigation.Uri);
+            Assert.Contains("keep=value", navigation.Uri);
+            Assert.Contains("tab=attachments", navigation.Uri);
+        }
+        Assert.Equal("unsent draft", GetField<string>(host, "InputText"));
+    }
+
+    [Fact]
+    public async Task NewerConversationTurnFencesPendingTabSelection()
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var client = new FakeReviewClient { ObservationHandler = () => { started.SetResult(); return release.Task; } };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        var navigation = new TabNavigationManager("case/6d8cbf50-47f6-4b39-9ad8-7c2324401679");
+        SetProperty(host, "Navigation", navigation);
+        SetField(host, "_uiObservationModule", new ObservationJsModule { ControlId = "case-detail.tabs" });
+        var turn = new EllaiConversationTurnDto("old-turn", 1, "Show attachments", "Requested", "Completed", 1, DateTimeOffset.UtcNow);
+        SetField(host, "_lastDurableTurn", turn);
+        SetField(host, "_lastTabSelectionProposalId", "proposal");
+        var pending = InvokeAsync(host, "SelectCurrentCaseTabAsync", "old-turn", "proposal", "attachments");
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        SetField(host, "_lastDurableTurn", turn with { ClientUtteranceId = "new-turn", Sequence = 2 });
+        release.SetResult(true);
+        await pending;
+        Assert.Equal(0, navigation.Moves);
+    }
+
     [Fact]
     public async Task SavedGuidanceIsOfferedWithoutExecutionAndSurvivesRestoredConversationHistory()
     {
@@ -1934,11 +1985,12 @@ public sealed class EllaiSurfaceLogicTests
 
     private sealed class ObservationJsModule : IJSObjectReference
     {
+        public string ControlId { get; init; } = "report.entry";
         public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
             InvokeAsync<TValue>(identifier, CancellationToken.None, args);
         public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args) =>
-            ValueTask.FromResult((TValue)(object)new UiObservationReport("view", "context", "web", ["report.entry"],
-                [new("report.entry", UiObservationState.Ready)]));
+            ValueTask.FromResult((TValue)(object)new UiObservationReport("view", "context", "web", [ControlId],
+                [new(ControlId, UiObservationState.Ready)]));
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
@@ -2013,6 +2065,14 @@ public sealed class EllaiSurfaceLogicTests
         public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args) =>
             InvokeAsync<TValue>(identifier, args);
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class TabNavigationManager : NavigationManager
+    {
+        public TabNavigationManager(string path) => Initialize("http://localhost/", "http://localhost/" + path);
+        public int Moves { get; private set; }
+        protected override void NavigateToCore(string uri, bool forceLoad) { Moves++; Uri = ToAbsoluteUri(uri).AbsoluteUri; }
+        protected override void NavigateToCore(string uri, NavigationOptions options) => NavigateToCore(uri, options.ForceLoad);
     }
 
     private sealed class TestNavigationManager : NavigationManager
