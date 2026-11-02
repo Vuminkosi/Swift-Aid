@@ -450,3 +450,7 @@ Following owner direction, compared the current authority pair (spec.md v1.5, im
 ## SW-01-009 observability and abuse-control audit - 2 November 2026
 
 Source audit in [SW-01-009 observability audit](SW-01-009-OBSERVABILITY-AUDIT.md) found bounded voice/inference metrics, ingestion traces/counters, job correlation IDs, request-size limits, an Ellai session token budget and Redis-backed Facebook login limiter. General telemetry exporter/correlation, broad rate-limit/quota policies, complete structured-log redaction and provider budget reconciliation remain NOT VERIFIED. No tests run; EV-025, BL-011.
+
+## SW-01-010 transport, storage and recovery audit - 2 November 2026
+
+Source audit in [SW-01-010 transport/storage audit](SW-01-010-TRANSPORT-STORAGE-AUDIT.md) found local loopback-published ports, authenticated NATS/Qdrant/Redis configuration and persistent named volumes. Compose explicitly runs Gateway in Development and MinIO HTTP; production TLS/internal-auth deployment, encryption-at-rest, backup retention and a verified restore drill are NOT VERIFIED. No secrets, database or restore paths were inspected/executed. Evidence EV-026, BL-012.
