@@ -433,7 +433,7 @@ public static class EllaiGuestEndpoints
         long sequence,
         HttpContext http,
         EllaiSessionResponseStore responses,
-        EllaiPreparedResponseAudio preparedAudio,
+        [FromServices] EllaiPreparedResponseAudio preparedAudio,
         EllaiResponseSpeechCoordinator speechCoordinator,
         EllaiVoiceTurnCoordinator turnCoordinator,
         Guid? playbackId = null)
