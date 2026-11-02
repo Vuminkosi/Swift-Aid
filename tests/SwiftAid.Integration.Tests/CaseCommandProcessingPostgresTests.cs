@@ -24,7 +24,7 @@ using SwiftAid.Infrastructure.Persistence.Transactions;
 namespace SwiftAid.Integration.Tests;
 
 [Collection(CaseAuthorityPostgresCollection.Name)]
-public sealed class CaseCommandProcessingPostgresTests
+public sealed partial class CaseCommandProcessingPostgresTests
 {
     [CaseAuthorityPostgresFact]
     public async Task Collaborator_grant_and_revocation_persist_bounded_access_and_epochs_atomically()

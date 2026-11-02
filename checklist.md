@@ -374,7 +374,7 @@ The lines below are **source-anchored verification tasks**, retaining identifier
 - [ ] **SA-ASG-01** [P0] — Establish one initial owner on case acceptance and show that owner in worker/officer workspaces.
 - [ ] **SA-ASG-02** [P0] — Permit an authorized officer to reassign with a reason and an eligible assignee; validate authority at acceptance time.
 - [ ] **SA-ASG-03** [P0] — Preserve old/new assignment history, transfer time and acknowledgement. Show a pending acknowledgement explicitly.
-- [ ] **SA-ASG-04** [P0] — Allow explicit collaborator grants with bounded case/sector/action scope; do not make all workers in a region collaborators.
+- [ ] **SA-ASG-04** [P0] — Allow explicit collaborator grants with bounded case/sector/action scope; do not make all workers in a region collaborators. PARTIAL: combined command/timeline HTTP-to-PostgreSQL flow verifies explicit grant/revoke, recipient eligibility, epoch changes and access denial with synthetic authentication; user-facing controls and device revocation remain unverified. See docs/SW-05-005-OWNERSHIP-VERIFICATION.md.
 - [ ] **SA-ASG-05** [P0] — Reassignment must update authorized read/sync/media scope. A newly assigned older case must appear even if its earlier update predates the client's sync checkpoint.
 - [ ] **SA-ASG-06** [P0] — Revoked assignment must remove future server access and trigger safe client reconciliation on reconnection.
 - [ ] **SA-ASG-07** [P0] — Transfer of case ownership must not silently mark assistance or follow-ups completed. Existing action owners remain visible until explicitly changed.
