@@ -220,8 +220,15 @@ public sealed class EllaiGuidanceProposalAdmission(
         var step = saved?.Plan?.Steps.SingleOrDefault(item => item.StepKey == request.StepId);
         var navigation = step is null ? null : EllaiNavigationManifest.ResolveStepDestination(step);
         var descriptor = admitted.Catalogue.Descriptors.SingleOrDefault(item => item.ControlId == step?.ControlId);
+        var inputStates = admitted.Observation.ControlStates?.Where(state => state.ControlId == step?.ControlId).ToArray() ?? [];
+        // A wizard may unmount an accepted input when moving to its next page. A
+        // still-mounted hidden/disabled/ambiguous input is not equivalent evidence.
+        var consistentInputState = inputStates.Length == 0
+            ? step is not null && !admitted.Observation.MountedControlIds.Contains(step.ControlId)
+            : inputStates.Length == 1 && inputStates[0].State is UiObservationState.Ready or UiObservationState.Unmounted;
         var validatedInput = step?.Behavior == PlanStepBehavior.GuideHuman && descriptor?.ProofPolicyId == "proof-ui-validated" &&
-            !descriptor.HumanConfirmationRequired && admitted.Observation.CompletedControlIds?.Contains(step.ControlId) == true;
+            !descriptor.HumanConfirmationRequired && consistentInputState &&
+            admitted.Observation.CompletedControlIds?.Contains(step.ControlId) == true;
         if (saved?.Plan is not { } plan || saved.ProposalId != request.ProposalId || plan.PlanId != request.PlanId ||
             saved.ScopeEpoch != authority.ScopeEpoch || saved.InteractionEpoch > admitted.InteractionEpoch ||
             (navigation is null && !validatedInput && saved.ContextStamp != request.ContextStamp) || admitted.Observation.ContextStamp != request.ContextStamp ||

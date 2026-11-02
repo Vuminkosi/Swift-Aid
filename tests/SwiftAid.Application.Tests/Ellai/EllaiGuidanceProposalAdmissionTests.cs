@@ -93,6 +93,32 @@ public sealed class EllaiGuidanceProposalAdmissionTests
     }
 
     [Theory]
+    [InlineData(UiObservationState.Ready, "Completed")]
+    [InlineData(UiObservationState.Hidden, "EvidenceRequired")]
+    [InlineData(UiObservationState.Disabled, "EvidenceRequired")]
+    [InlineData(UiObservationState.Ambiguous, "EvidenceRequired")]
+    [InlineData(UiObservationState.Stale, "EvidenceRequired")]
+    [InlineData(UiObservationState.Unknown, "EvidenceRequired")]
+    public async Task AcceptedValidationCannotOverrideContradictoryLiveControlState(UiObservationState state, string expected)
+    {
+        var (service, store, observations, id) = await Fixture();
+        var checkpoint = await SeedProgress(store, observations, id, PlanStepBehavior.GuideHuman);
+        var descriptor = EllaiReportUiManifest.All.Single(control => control.ControlId == "report.subject");
+        checkpoint = checkpoint with { Plan = checkpoint.Plan! with { Steps =
+            [checkpoint.Plan.Steps[0] with { ControlId = descriptor.ControlId, ObjectiveId = descriptor.ObjectiveId! }] } };
+        var session = (await store.GetAsync("session", default))!;
+        await store.TryUpdateAsync(session with { SessionVersion = session.SessionVersion + 1,
+            GuidanceJson = EllaiGuidanceCheckpoint.Serialize(checkpoint) }, session.SessionVersion, default);
+        await observations.RecordAsync(new("session", "view", "context", "web", ["report.entry", "report.subject"], DateTimeOffset.UtcNow,
+            [new("report.entry", UiObservationState.Ready), new("report.subject", state)], CompletedControlIds: ["report.subject"]), default);
+        var authority = new EllaiUiEntitlements("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>());
+        var result = await service.CompleteStepAsync("session", new(id, checkpoint.Plan.PlanId, checkpoint.Version, "step-1", "context"), authority, default);
+        Assert.Equal(expected, result.Status);
+        var restored = EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("session", default))!.GuidanceJson)!;
+        Assert.Equal(expected == "Completed" ? 1 : 0, restored.CompletedStepIds.Count);
+    }
+
+    [Theory]
     [InlineData("owner", "scope", true, "NeedsObservation")]
     [InlineData("other", "scope", true, "Denied")]
     [InlineData("owner", "old-scope", true, "Denied")]
