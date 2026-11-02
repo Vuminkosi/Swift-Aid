@@ -262,6 +262,14 @@ public sealed partial class PostgresCaseCommandPersistence : ICaseCommandPersist
         CancellationToken cancellationToken) =>
         IsEligibleTargetAsync(lease, targetActorId, [nameof(CaseOperation.ReadCase)], caseHeader, cancellationToken);
 
+    public ValueTask<bool> IsEligibleFollowUpAssigneeAsync(
+        ICaseCommandLease lease,
+        string targetActorId,
+        CaseCommandCaseHeader caseHeader,
+        CancellationToken cancellationToken) =>
+        IsEligibleTargetAsync(lease, targetActorId,
+            [nameof(CaseOperation.ReadCase), nameof(CaseOperation.ManageFollowUp)], caseHeader, cancellationToken);
+
     public ValueTask<bool> IsEligibleCollaboratorAsync(
         ICaseCommandLease lease,
         string targetActorId,

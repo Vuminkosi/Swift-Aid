@@ -8,7 +8,7 @@ namespace SwiftAid.Gateway.Cases;
 
 public sealed class CaseCollaboratorCandidatesGatewayClient(AuthenticationStateProvider authentication, IServiceProvider services) : ICaseCollaboratorCandidatesClient
 {
-    public async Task<CaseCollaboratorCandidatePage?> GetAsync(Guid caseId, string? search, string? after, CancellationToken cancellationToken = default)
+    public async Task<CaseCollaboratorCandidatePage?> GetAsync(Guid caseId, string? search, string? after, CancellationToken cancellationToken = default, bool followUpAssignees = false)
     {
         var principal = (await authentication.GetAuthenticationStateAsync().ConfigureAwait(false)).User;
         if (principal.Identity?.IsAuthenticated != true) return null;
@@ -17,6 +17,6 @@ public sealed class CaseCollaboratorCandidatesGatewayClient(AuthenticationStateP
         catch (UnauthorizedAccessException) { return null; }
         await using var scope = services.CreateAsyncScope();
         var query = scope.ServiceProvider.GetService<ICaseCollaboratorCandidatesQuery>();
-        return query is null ? null : await query.GetAsync(actor, caseId, search, after, 25, cancellationToken).ConfigureAwait(false);
+        return query is null ? null : await query.GetAsync(actor, caseId, search, after, 25, cancellationToken, followUpAssignees).ConfigureAwait(false);
     }
 }

@@ -88,7 +88,7 @@ public sealed class CaseMonitoringPostgresTests
 
         var followUpId = Guid.NewGuid();
         var schedule = new ScheduleFollowUpCommand(
-            Guid.NewGuid(), 2, followUpId, "revisit holding", "worker-1",
+            Guid.NewGuid(), 2, followUpId, "revisit holding", "officer-1",
             FirstDueAtUtc, "routine check", null, DateTimeOffset.UtcNow);
         var scheduled = await ProcessCommandAsync(db, actor, caseId, schedule, keyRing.CreateOptions(), provider);
 
@@ -108,7 +108,7 @@ public sealed class CaseMonitoringPostgresTests
             .SingleAsync(item => item.FollowUpId == followUpId);
         Assert.Equal(caseId, row.CaseId);
         Assert.Equal("revisit holding", row.Purpose);
-        Assert.Equal("worker-1", row.AssigneeActorId);
+        Assert.Equal("officer-1", row.AssigneeActorId);
         Assert.Equal(FirstDueAtUtc, row.DueAtUtc);
         Assert.Equal(FollowUpStatus.Completed, row.Status);
         Assert.Equal(3, row.ScheduledVersion);
@@ -137,7 +137,7 @@ public sealed class CaseMonitoringPostgresTests
 
         var followUpId = Guid.NewGuid();
         var scheduled = await ProcessCommandAsync(db, actor, caseId,
-            new ScheduleFollowUpCommand(Guid.NewGuid(), 2, followUpId, "revisit holding", "worker-1",
+            new ScheduleFollowUpCommand(Guid.NewGuid(), 2, followUpId, "revisit holding", "officer-1",
                 FirstDueAtUtc, "routine check", null, DateTimeOffset.UtcNow),
             keyRing.CreateOptions(), provider);
         Assert.Equal(CaseCommandProcessingStatus.Accepted, scheduled.Status);
@@ -216,7 +216,7 @@ public sealed class CaseMonitoringPostgresTests
 
         var followUpId = Guid.NewGuid();
         var scheduled = await ProcessCommandAsync(db, actor, caseId,
-            new ScheduleFollowUpCommand(Guid.NewGuid(), 2, followUpId, "contact reporter", "worker-1",
+            new ScheduleFollowUpCommand(Guid.NewGuid(), 2, followUpId, "contact reporter", "officer-1",
                 FirstDueAtUtc, "callback", null, DateTimeOffset.UtcNow),
             keyRing.CreateOptions(), provider);
         Assert.Equal(CaseCommandProcessingStatus.Accepted, scheduled.Status);
@@ -401,7 +401,7 @@ public sealed class CaseMonitoringPostgresTests
         Assert.Equal(3, observed.AggregateVersion);
 
         var stale = await ProcessCommandAsync(db, actor, caseId,
-            new ScheduleFollowUpCommand(Guid.NewGuid(), 2, Guid.NewGuid(), "revisit holding", "worker-1",
+            new ScheduleFollowUpCommand(Guid.NewGuid(), 2, Guid.NewGuid(), "revisit holding", "officer-1",
                 FirstDueAtUtc, "routine check", null, DateTimeOffset.UtcNow),
             keyRing.CreateOptions(), provider);
         Assert.Equal(CaseCommandProcessingStatus.Conflict, stale.Status);
@@ -434,6 +434,46 @@ public sealed class CaseMonitoringPostgresTests
             .CountAsync(item => item.CaseId == caseId));
         Assert.Equal(0, await verify.CaseEvents.AsNoTracking()
             .CountAsync(item => item.CaseId == caseId && item.AggregateVersion > 2));
+    }
+
+    [IntakePostgresFact]
+    public async Task FollowUp_schedule_denies_assignee_without_active_case_scope()
+    {
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var grantGroupId = await SeedMonitoringScopeAsync(db,
+            [CaseOperation.ReadCase, CaseOperation.ManageFollowUp]);
+        using var keyRing = SyntheticMonitoringKeyRing.Create();
+        using var provider = ProtectedPayloadDataProtectionProviderFactory.Create(
+            keyRing.CreateOptions(), new TestHostEnvironment(Environments.Production));
+        var caseId = await SeedMonitoredCaseAsync(db, keyRing.CreateOptions(), provider);
+        await using var cleanup = new CaseMonitoringCleanup(caseId, grantGroupId);
+        var targetActorId = $"follow-up-unscoped-{Guid.NewGuid():N}";
+        await using (var targetSetup = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync())
+        {
+            var now = DateTimeOffset.UtcNow;
+            targetSetup.Actors.Add(new ActorEntity { ActorId = targetActorId, Status = PersistentActorStatus.Active, CreatedAtUtc = now, UpdatedAtUtc = now });
+            targetSetup.ActorAccessStates.Add(new ActorAccessStateEntity { ActorId = targetActorId, AccessEpoch = 1, Version = 1, UpdatedAtUtc = now });
+            await targetSetup.SaveChangesAsync();
+        }
+
+        try
+        {
+            var denied = await ProcessCommandAsync(db, CreateOfficer("officer-1"), caseId,
+                new ScheduleFollowUpCommand(Guid.NewGuid(), 2, Guid.NewGuid(), "synthetic callback", targetActorId,
+                    FirstDueAtUtc, "synthetic scheduling reason", null, DateTimeOffset.UtcNow),
+                keyRing.CreateOptions(), provider);
+
+            Assert.Equal(CaseCommandProcessingStatus.Denied, denied.Status);
+            await using var verify = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+            Assert.Empty(await verify.ManagedCaseFollowUps.AsNoTracking().Where(item => item.CaseId == caseId).ToArrayAsync());
+            Assert.Empty(await verify.CaseEvents.AsNoTracking().Where(item => item.CaseId == caseId && item.AggregateVersion > 2).ToArrayAsync());
+        }
+        finally
+        {
+            await using var targetCleanup = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+            await targetCleanup.ActorAccessStates.Where(item => item.ActorId == targetActorId).ExecuteDeleteAsync();
+            await targetCleanup.Actors.Where(item => item.ActorId == targetActorId).ExecuteDeleteAsync();
+        }
     }
 
     [IntakePostgresFact]

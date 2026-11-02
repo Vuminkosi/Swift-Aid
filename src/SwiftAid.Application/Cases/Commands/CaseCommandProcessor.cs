@@ -249,6 +249,30 @@ public sealed class CaseCommandProcessor : ICaseCommandProcessor
             }
         }
 
+        var followUpAssigneeActorId = eventSnapshot
+            .OfType<CaseFollowUpScheduled>()
+            .Select(item => item.AssigneeActorId)
+            .SingleOrDefault();
+        if (followUpAssigneeActorId is not null)
+        {
+            if (!lease.LockedActorIds.Contains(followUpAssigneeActorId, StringComparer.Ordinal))
+            {
+                throw new CaseLeaseDiscoveryChangedException(caseId, actorHints.Add(followUpAssigneeActorId));
+            }
+
+            if (!await _persistence.IsEligibleFollowUpAssigneeAsync(
+                    lease, followUpAssigneeActorId, header, cancellationToken).ConfigureAwait(false))
+            {
+                return await DenyAndCommitAuditAsync(
+                    lease,
+                    actor,
+                    caseId,
+                    commandId,
+                    AccessDecisionCode.OperationNotGranted,
+                    cancellationToken).ConfigureAwait(false);
+            }
+        }
+
         if (commandForDecision is RequestAssistanceCommand assistanceRequest)
         {
             var responsibleActorId = assistanceRequest.ResponsibleActorId;

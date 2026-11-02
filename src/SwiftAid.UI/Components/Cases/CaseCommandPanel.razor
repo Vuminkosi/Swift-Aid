@@ -1,4 +1,6 @@
 @using SwiftAid.Contracts.Cases
+@using Microsoft.Extensions.DependencyInjection
+@inject IServiceProvider Services
 
 <section class="case-command-panel" aria-label="Case actions">
     <MudCard Outlined="true" Class="case-command-panel__card">
@@ -56,7 +58,7 @@
                     </MudAlert>
                 }
 
-                <MudSelect T="string" Label="Action" @bind-Value="_operation" Class="case-command-panel__field">
+                <MudSelect T="string" Label="Action" Value="_operation" ValueChanged="OperationChangedAsync" Class="case-command-panel__field">
                     <MudSelectItem Value="@("Resolve")">Resolve</MudSelectItem>
                     <MudSelectItem Value="@("RequestReassignment")">Request a new case owner</MudSelectItem>
                     <MudSelectItem Value="@("RequestAssistance")">Request assistance</MudSelectItem>
@@ -111,8 +113,26 @@
                                   @bind-Value="_followUpIdText" Class="case-command-panel__field" />
                     <MudTextField T="string" Label="Purpose" HelperText="What the follow-up is for."
                                   @bind-Value="_purpose" Lines="2" Class="case-command-panel__field" />
-                    <MudTextField T="string" Label="Responsible staff reference" HelperText="Reference for the staff member who will handle the follow-up."
-                                  @bind-Value="_assigneeActorId" Class="case-command-panel__field" />
+                    <MudTextField T="string" Label="Search eligible staff" HelperText="Search staff who can read and manage follow-ups for this case."
+                                  @bind-Value="_assigneeSearch" Immediate="true" Class="case-command-panel__field" />
+                    <MudButton Variant="Variant.Outlined" Disabled="_loadingAssignees" OnClick="LoadAssigneesAsync">Search eligible staff</MudButton>
+                    @if (_loadingAssignees) { <MudText Typo="Typo.caption" role="status">Loading eligible staff…</MudText> }
+                    @if (_assigneeCandidates.Count > 0)
+                    {
+                        <MudSelect T="string" Label="Responsible staff member" @bind-Value="_assigneeActorId" Class="case-command-panel__field">
+                            @foreach (var candidate in _assigneeCandidates)
+                            {
+                                if (candidate.SafeDisplayLabel is not null)
+                                {
+                                    <MudSelectItem Value="@candidate.ActorId">@candidate.SafeDisplayLabel</MudSelectItem>
+                                }
+                            }
+                        </MudSelect>
+                    }
+                    else if (!_loadingAssignees && _assigneeSearchLoaded)
+                    {
+                        <MudText Typo="Typo.caption">No eligible staff were found. Check the search or ask an administrator to review access.</MudText>
+                    }
                     <MudTextField T="string" Label="Due date and time" HelperText="Include the time zone, for example 2 Nov 2026 at 8:00 AM GMT."
                                   @bind-Value="_dueAtUtcText" Class="case-command-panel__field" />
                 }
@@ -187,6 +207,8 @@
 @code {
     [Parameter, EditorRequired] public ICaseCommandClient Client { get; set; } = null!;
 
+    [Parameter] public ICaseCollaboratorCandidatesClient? CandidatesClient { get; set; }
+
     [Parameter, EditorRequired] public Guid CaseId { get; set; }
 
     [Parameter] public EventCallback<CaseCommandResult> OnCommandSucceeded { get; set; }
@@ -202,6 +224,10 @@
     private string? _followUpIdText;
     private string? _purpose;
     private string? _assigneeActorId;
+    private string _assigneeSearch = "";
+    private readonly List<CaseCollaboratorCandidate> _assigneeCandidates = [];
+    private bool _loadingAssignees;
+    private bool _assigneeSearchLoaded;
     private string? _dueAtUtcText;
     private string _followUpOutcome = "Completed";
     private string? _outcomeNotes;
@@ -215,6 +241,35 @@
     private bool _sending;
     private string? _error;
     private CaseCommandResult? _result;
+
+    private async Task OperationChangedAsync(string value)
+    {
+        _operation = value;
+        _assigneeActorId = null;
+        if (_operation == "ScheduleFollowUp") await LoadAssigneesAsync();
+    }
+
+    private async Task LoadAssigneesAsync()
+    {
+        if (_loadingAssignees || CaseId == Guid.Empty) return;
+        _loadingAssignees = true;
+        _error = null;
+        _assigneeSearchLoaded = false;
+        _assigneeCandidates.Clear();
+        try
+        {
+            var client = CandidatesClient ?? Services.GetService<ICaseCollaboratorCandidatesClient>();
+            if (client is null) throw new InvalidOperationException();
+            var page = await client.GetAsync(CaseId, _assigneeSearch, null, followUpAssignees: true);
+            if (page is not null) _assigneeCandidates.AddRange(page.Items.Where(item => item.SafeDisplayLabel is not null));
+            _assigneeSearchLoaded = true;
+        }
+        catch (Exception)
+        {
+            _error = "Eligible staff could not be loaded. Check your connection and try again.";
+        }
+        finally { _loadingAssignees = false; }
+    }
 
     private string OperationLabel => _operation switch
     {
@@ -390,6 +445,9 @@
         _followUpIdText = null;
         _purpose = null;
         _assigneeActorId = null;
+        _assigneeSearch = "";
+        _assigneeCandidates.Clear();
+        _assigneeSearchLoaded = false;
         _dueAtUtcText = null;
         _followUpOutcome = "Completed";
         _outcomeNotes = null;

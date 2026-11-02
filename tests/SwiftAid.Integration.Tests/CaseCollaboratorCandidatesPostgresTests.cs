@@ -1,9 +1,15 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases;
 using SwiftAid.Application.Cases.Commands;
+using SwiftAid.Contracts.Commands;
+using SwiftAid.Domain.Cases;
 using SwiftAid.Infrastructure.Authorization;
+using SwiftAid.Infrastructure.Configuration;
 using SwiftAid.Infrastructure.Persistence;
+using SwiftAid.Infrastructure.Persistence.Processing;
+using SwiftAid.Infrastructure.Persistence.Protection;
 using SwiftAid.Infrastructure.Persistence.Repositories.Cases;
 using SwiftAid.Infrastructure.Persistence.Transactions;
 
@@ -11,6 +17,31 @@ namespace SwiftAid.Integration.Tests;
 
 public sealed partial class CaseCommandProcessingPostgresTests
 {
+    [CaseAuthorityPostgresFact]
+    public async Task Follow_up_schedule_denies_recipient_with_read_only_grant()
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync();
+        await using var cleanup = new CaseCommandProcessingCleanup(fixture);
+        cleanup.TrackTargetGrant(await AddEligibleTargetGrantAsync(fixture));
+        await AddOperationAsync(fixture, CaseOperation.ManageFollowUp);
+        await SetInitialWorkflowVersionAsync(fixture);
+        using var keyRing = SyntheticPayloadKeyRing.Create();
+        using var provider = ProtectedPayloadDataProtectionProviderFactory.Create(
+            keyRing.CreateOptions(), new TestHostEnvironment(Environments.Production));
+        await SeedInitialJournalAsync(fixture, keyRing.CreateOptions(), provider);
+        var command = new ScheduleFollowUpCommand(Guid.NewGuid(), 2, Guid.NewGuid(),
+            "Synthetic follow-up", fixture.NewOwnerActorId, DateTimeOffset.UtcNow.AddDays(1),
+            "Synthetic reason", null, DateTimeOffset.UtcNow);
+
+        var result = await ProcessCommandAsync(fixture, fixture.CreateActor(), command, keyRing.CreateOptions(), provider);
+
+        Assert.Equal(CaseCommandProcessingStatus.Denied, result.Status);
+        await using var verification = fixture.CreateDbContext();
+        Assert.False(await verification.CaseEvents.AnyAsync(item => item.CaseId == fixture.CaseId && item.CommandId == command.CommandId));
+        Assert.False(await verification.ManagedCaseFollowUps.AnyAsync(item => item.FollowUpId == command.FollowUpId));
+        Assert.False(await verification.CommandReceipts.AnyAsync(item => item.CommandId == command.CommandId));
+    }
+
     [CaseAuthorityPostgresFact]
     public async Task Collaborator_candidates_require_management_and_keep_permission_groups_separate_across_pages()
     {
@@ -33,6 +64,16 @@ public sealed partial class CaseCommandProcessingPostgresTests
         Assert.False(await QueryIsAllowed());
         await AddOperationAsync(fixture, CaseOperation.ManageCollaborators);
         Assert.True(await QueryIsAllowed());
+        await AddOperationAsync(fixture, CaseOperation.ManageFollowUp);
+        await using (var followUpDb = fixture.CreateDbContext())
+        {
+            var followUpUnit = new PostgresCaseCommandUnitOfWork(followUpDb);
+            var followUpPolicy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(followUpDb, followUpUnit), new PostgresCaseAccessDescriptorStore(followUpDb, followUpUnit));
+            var followUpQuery = new CaseCollaboratorCandidatesQuery(new PostgresCaseCollaboratorCandidatesStore(followUpDb), followUpPolicy, followUpUnit);
+            var followUpPage = await followUpQuery.GetAsync(fixture.CreateActor(), fixture.CaseId, null, null, 25, CancellationToken.None, followUpAssignees: true);
+            Assert.NotNull(followUpPage);
+            Assert.Empty(followUpPage!.Items); // The recipient has ReadCase only until the eligible grant below is added.
+        }
         await using var context = fixture.CreateDbContext();
         var unitOfWork = new PostgresCaseCommandUnitOfWork(context);
         await using var lease = await unitOfWork.BeginCaseAsync(fixture.CreateActor(), fixture.CaseId,
@@ -57,6 +98,10 @@ public sealed partial class CaseCommandProcessingPostgresTests
         var next = Assert.Single(secondPage.Items);
         Assert.Equal(second.GrantGroupId, next.Key);
         Assert.Equal(["ReadCase", "ManageFollowUp"], next.Operations.ToArray());
+        var followUpCandidates = await store.GetAsync(fixture.CaseId, "", null, 25, CancellationToken.None, followUpAssignees: true);
+        var followUpCandidate = Assert.Single(followUpCandidates.Items);
+        Assert.Equal(second.GrantGroupId, followUpCandidate.Key);
+        Assert.Equal(["ReadCase", "ManageFollowUp"], followUpCandidate.Operations.ToArray());
         Assert.Null(secondPage.NextCursor);
         Assert.Empty((await store.GetAsync(fixture.CaseId, "absent-name", null, 25, CancellationToken.None)).Items);
 

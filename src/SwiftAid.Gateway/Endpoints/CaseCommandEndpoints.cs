@@ -56,14 +56,14 @@ public static class CaseCommandEndpoints
     }
 
     private static async Task<IResult> GetCollaboratorCandidatesAsync(
-        HttpContext context, Guid caseId, string? search, string? after, int? limit, CancellationToken cancellationToken)
+        HttpContext context, Guid caseId, string? search, string? after, int? limit, bool? followUpAssignees, CancellationToken cancellationToken)
     {
         try
         {
             var actor = TryGetActor(context);
             if (actor is null) return Results.Problem(statusCode: 401, title: "Authentication is required.");
             var query = context.RequestServices.GetService<ICaseCollaboratorCandidatesQuery>();
-            var page = query is null ? null : await query.GetAsync(actor, caseId, search, after, limit ?? 25, cancellationToken).ConfigureAwait(false);
+            var page = query is null ? null : await query.GetAsync(actor, caseId, search, after, limit ?? 25, cancellationToken, followUpAssignees == true).ConfigureAwait(false);
             return page is null ? Results.Problem(statusCode: 404, title: "The case was not found.") : Results.Json(page);
         }
         catch (UnauthorizedAccessException) { return Results.Problem(statusCode: 401, title: "Authentication is required."); }

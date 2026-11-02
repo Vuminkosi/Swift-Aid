@@ -37,7 +37,8 @@ public sealed partial class CaseCommandProcessingPostgresTests
     {
         await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync();
         await using var cleanup = new CaseCommandProcessingCleanup(fixture);
-        cleanup.TrackTargetGrant(await AddEligibleTargetGrantAsync(fixture));
+        var recipientGrantGroup = await AddEligibleTargetGrantAsync(fixture);
+        cleanup.TrackTargetGrant(recipientGrantGroup);
         await SetInitialWorkflowVersionAsync(fixture);
         using var keyRing = SyntheticPayloadKeyRing.Create();
         using var protection = ProtectedPayloadDataProtectionProviderFactory.Create(
@@ -137,6 +138,7 @@ public sealed partial class CaseCommandProcessingPostgresTests
             }
         }
         await AssertCandidates(HttpStatusCode.NotFound);
+        await AssertCandidates(HttpStatusCode.NotFound, suffix: "?followUpAssignees=true");
 
         var grant = new CaseCommandApiRequest(1, "GrantCaseCollaborator", Guid.NewGuid(), 2, null,
             "Synthetic private grant reason", null, null, null, null,
@@ -167,6 +169,8 @@ public sealed partial class CaseCommandProcessingPostgresTests
         }
         await AddOperationAsync(fixture, CaseOperation.ManageCollaborators);
         await AssertCandidates(HttpStatusCode.OK, 1);
+        await AddOperationAsync(fixture, CaseOperation.ManageFollowUp);
+        await AssertCandidates(HttpStatusCode.OK, 0, "?followUpAssignees=true");
         await AssertCandidates(HttpStatusCode.BadRequest, suffix: "?limit=51");
         using (var invalid = await Send(grant with { CollaborationActions = (CaseCollaborationActions)64 }))
         {
@@ -175,6 +179,27 @@ public sealed partial class CaseCommandProcessingPostgresTests
         using (var deniedScope = await Send(grant with { CollaborationActions = CaseCollaborationActions.ReadCase | CaseCollaborationActions.ManageFollowUp }))
         {
             Assert.Equal(HttpStatusCode.NotFound, deniedScope.StatusCode);
+        }
+        await using (var grantDb = fixture.CreateDbContext())
+        {
+            grantDb.AccessGrantOperations.Add(new AccessGrantOperationEntity
+            {
+                GrantGroupId = recipientGrantGroup,
+                Operation = CaseOperation.ManageFollowUp
+            });
+            await grantDb.SaveChangesAsync();
+        }
+        using (var followUpRequest = new HttpRequestMessage(HttpMethod.Get,
+                   $"/api/v1/cases/{fixture.CaseId:D}/collaborator-candidates?followUpAssignees=true"))
+        {
+            followUpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "officer");
+            using var followUpResponse = await client.SendAsync(followUpRequest);
+            // The endpoint keeps the caller's authenticated identity and only returns the two follow-up-eligible operations.
+            Assert.Equal(HttpStatusCode.OK, followUpResponse.StatusCode);
+            var page = await followUpResponse.Content.ReadFromJsonAsync<CaseCollaboratorCandidatePage>();
+            var candidate = Assert.Single(page!.Items);
+            Assert.Equal(fixture.NewOwnerActorId, candidate.ActorId);
+            Assert.Equal(["ReadCase", "ManageFollowUp"], candidate.Operations.ToArray());
         }
 
         CaseCommandApiResponse receipt;

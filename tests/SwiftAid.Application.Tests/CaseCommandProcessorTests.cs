@@ -35,6 +35,42 @@ public sealed class CaseCommandProcessorTests
     }
 
     [Fact]
+    public async Task Follow_up_assignee_is_locked_and_must_have_case_and_follow_up_access()
+    {
+        var command = new ScheduleFollowUpCommand(CommandId, 2, Guid.NewGuid(), "Synthetic callback",
+            "follow-up-worker", DatabaseNow.AddDays(1), "Synthetic reason", null, CallerRecordedAt);
+        var scenario = CreateScenario(command);
+        scenario.UnitOfWork.LockAdditionalHints = true;
+        scenario.AccessPolicy.Decisions.Enqueue(Allowed());
+        scenario.AccessPolicy.Decisions.Enqueue(Allowed());
+
+        var result = await scenario.Processor.ProcessAsync(scenario.Actor, CaseId, 1, command, CancellationToken.None);
+
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, result.Status);
+        Assert.Contains("follow-up-worker", scenario.UnitOfWork.BeginHints[1]);
+        Assert.Equal("follow-up-worker", Assert.Single(scenario.Persistence.FollowUpAssigneeChecks));
+    }
+
+    [Fact]
+    public async Task Ineligible_follow_up_assignee_is_audited_without_staging_events()
+    {
+        var command = new ScheduleFollowUpCommand(CommandId, 2, Guid.NewGuid(), "Synthetic callback",
+            "follow-up-worker", DatabaseNow.AddDays(1), "Synthetic reason", null, CallerRecordedAt);
+        var scenario = CreateScenario(command);
+        scenario.UnitOfWork.LockAdditionalHints = true;
+        scenario.Persistence.FollowUpAssigneeEligible = false;
+        scenario.AccessPolicy.Decisions.Enqueue(Allowed());
+        scenario.AccessPolicy.Decisions.Enqueue(Allowed());
+
+        var result = await scenario.Processor.ProcessAsync(scenario.Actor, CaseId, 1, command, CancellationToken.None);
+
+        Assert.Equal(CaseCommandProcessingStatus.Denied, result.Status);
+        Assert.Empty(scenario.Persistence.Appends);
+        Assert.Single(scenario.Persistence.DeniedAudits);
+        Assert.Equal("follow-up-worker", Assert.Single(scenario.Persistence.FollowUpAssigneeChecks));
+    }
+
+    [Fact]
     public async Task Collaborator_revocation_uses_dedicated_permission_and_server_timestamp()
     {
         var aggregate = CreateAggregate();
@@ -648,6 +684,8 @@ public sealed class CaseCommandProcessorTests
         public DateTimeOffset DatabaseNow { get; set; } = CaseCommandProcessorTests.DatabaseNow;
         public bool TargetEligible { get; set; } = true;
         public List<CaseCollaborationActions> CollaboratorChecks { get; } = [];
+        public bool FollowUpAssigneeEligible { get; set; } = true;
+        public List<string> FollowUpAssigneeChecks { get; } = [];
 
         public ValueTask<bool> IsEligibleCollaboratorAsync(ICaseCommandLease lease, string targetActorId,
             CaseCollaborationActions actions, CaseCommandCaseHeader caseHeader, CancellationToken cancellationToken)
@@ -711,6 +749,18 @@ public sealed class CaseCommandProcessorTests
             Calls.Add("target");
             TargetChecks++;
             return ValueTask.FromResult(TargetEligible);
+        }
+
+        public ValueTask<bool> IsEligibleFollowUpAssigneeAsync(
+            ICaseCommandLease lease,
+            string targetActorId,
+            CaseCommandCaseHeader caseHeader,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Assert.Contains(targetActorId, lease.LockedActorIds);
+            FollowUpAssigneeChecks.Add(targetActorId);
+            return ValueTask.FromResult(FollowUpAssigneeEligible);
         }
 
         public ValueTask<CaseCommandAppendOutcome> StageAcceptedCommandAsync(

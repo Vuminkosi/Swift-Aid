@@ -70,7 +70,7 @@ public sealed class CaseCollaboratorCandidatesGatewayClientTests
         public string? After { get; private set; }
         public int Limit { get; private set; }
 
-        public Task<CaseCollaboratorCandidatePage?> GetAsync(ActorContext actor, Guid caseId, string? search, string? after, int limit, CancellationToken cancellationToken)
+        public Task<CaseCollaboratorCandidatePage?> GetAsync(ActorContext actor, Guid caseId, string? search, string? after, int limit, CancellationToken cancellationToken, bool followUpAssignees = false)
         {
             (Actor, CaseId, Search, After, Limit) = (actor, caseId, search, after, limit);
             return Task.FromResult<CaseCollaboratorCandidatePage?>(new([], null));

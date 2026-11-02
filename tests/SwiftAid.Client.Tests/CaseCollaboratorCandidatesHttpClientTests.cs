@@ -25,7 +25,19 @@ public sealed class CaseCollaboratorCandidatesHttpClientTests
         var candidate = Assert.Single(page.Items);
         Assert.Equal("actor-1", candidate.ActorId);
         Assert.Equal(["ReadCase", "ManageFollowUp"], candidate.Operations);
-        Assert.Equal($"/api/v1/cases/{id:D}/collaborator-candidates?limit=25&search=A%26B%20%2B&after=scope%2F1%3Fx%3D2", handler.Path);
+        Assert.Equal($"/api/v1/cases/{id:D}/collaborator-candidates?limit=25&search=A%26B%20%2B&after=scope%2F1%3Fx%3D2&followUpAssignees=false", handler.Path);
+    }
+
+    [Fact]
+    public async Task GetFollowUpAssignees_requests_the_narrow_authorized_mode()
+    {
+        var id = Guid.NewGuid();
+        var handler = new Handler(new(HttpStatusCode.OK) { Content = JsonContent.Create(new CaseCollaboratorCandidatePage([], null)) });
+        using var http = new HttpClient(handler) { BaseAddress = new("https://gateway.test/") };
+
+        await new CaseCollaboratorCandidatesHttpClient(http).GetAsync(id, "staff", null, followUpAssignees: true);
+
+        Assert.EndsWith("&followUpAssignees=true", handler.Path, StringComparison.Ordinal);
     }
 
     [Theory]

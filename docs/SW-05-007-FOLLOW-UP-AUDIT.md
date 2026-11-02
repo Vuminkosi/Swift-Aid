@@ -80,3 +80,17 @@ The acknowledgement slice is implemented. Migration `20261103130000_FollowUpAckn
 - PASS — prior focused disposable PostgreSQL acknowledgement persistence/authorized-queue test: 1/1; monitoring regression: 26/26. These database tests were not repeated in this verification pass.
 
 At the acknowledgement checkpoint, reminder creation/suppression was still open. The durable reminder update below supersedes that part; eligible-assignee proof, unchanged case-fact reuse, factual clarification limited to three questions, chained browser-to-PostgreSQL journey, physical Android interaction and deployed provider behavior remain open. SW-05-007 remains unchecked.
+## Eligible assignee update — 2 November 2026
+
+Scheduling now validates the proposed assignee inside the command lease. The processor adds the assignee to the locked actor set, and persistence checks the current actor, membership, workspace, jurisdiction, sector, sensitivity, grant status and resource version. The recipient must hold ReadCase and ManageFollowUp together in one active grant group. Failure is denied/audited before append. Candidate discovery uses a dedicated mode that requires caller ReadCase and ManageFollowUp, filters candidates to both operations in one grant group, and returns no unrelated operation names. The shared case action panel searches this endpoint and shows safe display labels instead of raw actor references.
+
+- PASS — `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj --no-build --no-restore --filter FullyQualifiedName~CaseCommandProcessorTests`: 22/22; late lock discovery and denied assignee audited without append.
+- PASS — full `SwiftAid.Application.Tests`: 898 passed, 3 skipped.
+- PASS — `CaseMonitoringPostgresTests`: 11/11 against task-owned disposable PostgreSQL; eligible schedule persistence and unscoped assignee denial.
+- PASS — targeted SQLAUTH tests: 3/3 for ReadCase-only recipient denial, filtered candidate pages and HTTP route authorization/narrowed operations.
+- PASS — candidate HTTP client tests 5/5; `SwiftAid.Ui.Tests` 542/542.
+- PASS — UI, Gateway, Infrastructure, Ui.TestHost and Integration.Tests builds with `BuildProjectReferences=false` after dependencies were built.
+- PASS — fresh disposable database migrated through 53 migrations; task-owned container removed after verification.
+- NOT VERIFIED — rendered search/select interaction, browser-to-Gateway-to-PostgreSQL journey, physical Android interaction, routine case-fact reuse and factual clarification limited to three questions.
+
+The master item remains unchecked because those required workflow and context acceptance gaps remain.

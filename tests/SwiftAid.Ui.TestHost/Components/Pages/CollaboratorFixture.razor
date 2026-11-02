@@ -38,7 +38,7 @@
         public string? Terminal { get; set; }
         private long _version = 3;
         private bool _granted;
-        public Task<CaseCollaboratorCandidatePage?> GetAsync(Guid caseId, string? search, string? after, CancellationToken cancellationToken = default) =>
+        public Task<CaseCollaboratorCandidatePage?> GetAsync(Guid caseId, string? search, string? after, CancellationToken cancellationToken = default, bool followUpAssignees = false) =>
             Task.FromResult<CaseCollaboratorCandidatePage?>(new([new("candidate-1", "private-recipient-id", "Synthetic colleague", ["ReadCase", "ManageFollowUp"])], null));
         public Task<CaseTimelineResult> GetAsync(Guid caseId, int? limit, CancellationToken cancellationToken = default, long? beforeAggregateVersion = null) =>
             Task.FromResult(Denied ? new CaseTimelineResult(CaseTimelineAccess.NotFoundOrNotAuthorized, null) : new CaseTimelineResult(CaseTimelineAccess.Found, new CaseTimeline(

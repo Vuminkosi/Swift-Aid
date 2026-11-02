@@ -47,6 +47,13 @@ public interface ICaseCommandPersistence
         CaseCommandCaseHeader caseHeader,
         CancellationToken cancellationToken);
 
+    /// <summary>Checks an assignee against the current case scope and active ReadCase/ManageFollowUp grants.</summary>
+    ValueTask<bool> IsEligibleFollowUpAssigneeAsync(
+        ICaseCommandLease lease,
+        string targetActorId,
+        CaseCommandCaseHeader caseHeader,
+        CancellationToken cancellationToken);
+
     /// <summary>Checks a locked collaborator against the case scope and all requested actions in one active grant group.</summary>
     ValueTask<bool> IsEligibleCollaboratorAsync(
         ICaseCommandLease lease,

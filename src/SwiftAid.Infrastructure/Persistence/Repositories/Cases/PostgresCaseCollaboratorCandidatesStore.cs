@@ -8,7 +8,7 @@ namespace SwiftAid.Infrastructure.Persistence.Repositories.Cases;
 
 public sealed class PostgresCaseCollaboratorCandidatesStore(SwiftAidDbContext db) : ICaseCollaboratorCandidatesStore
 {
-    public async Task<CaseCollaboratorCandidatePage> GetAsync(Guid caseId, string search, string? after, int limit, CancellationToken ct)
+    public async Task<CaseCollaboratorCandidatePage> GetAsync(Guid caseId, string search, string? after, int limit, CancellationToken ct, bool followUpAssignees = false)
     {
         var term = search.ToLowerInvariant();
         var now = await db.Database.SqlQuery<DateTimeOffset>($"SELECT clock_timestamp() AS \"Value\"").SingleAsync(ct).ConfigureAwait(false);
@@ -19,7 +19,8 @@ public sealed class PostgresCaseCollaboratorCandidatesStore(SwiftAidDbContext db
                          join state in db.ActorAccessStates.AsNoTracking() on actor.ActorId equals state.ActorId
                          join profile in db.UserProfiles.AsNoTracking() on actor.ActorId equals profile.UserId into profiles
                          from profile in profiles.DefaultIfEmpty()
-                         where item.CaseId == caseId && item.Workflow != CaseWorkflow.Resolved && item.AccountableOwnerActorId != actor.ActorId
+                         where item.CaseId == caseId && item.Workflow != CaseWorkflow.Resolved
+                             && (followUpAssignees || item.AccountableOwnerActorId != actor.ActorId)
                              && grant.WorkspaceId == item.WorkspaceId && grant.CountryCode == item.CountryCode
                              && grant.Sector == item.Sector && grant.SensitivityCode == item.SensitivityCode
                              && grant.Status == PersistentGrantStatus.Active && grant.ValidFromUtc <= now && grant.ExpiresAtUtc > now
@@ -28,6 +29,7 @@ public sealed class PostgresCaseCollaboratorCandidatesStore(SwiftAidDbContext db
                              && (member.ExpiresAtUtc == null || member.ExpiresAtUtc > now)
                              && actor.Status == PersistentActorStatus.Active && (actor.ExpiresAtUtc == null || actor.ExpiresAtUtc > now)
                              && db.AccessGrantOperations.Any(operation => operation.GrantGroupId == grant.GrantGroupId && operation.Operation == CaseOperation.ReadCase)
+                             && (!followUpAssignees || db.AccessGrantOperations.Any(operation => operation.GrantGroupId == grant.GrantGroupId && operation.Operation == CaseOperation.ManageFollowUp))
                              && !db.CaseShares.Any(share => share.CaseId == caseId && share.ActorId == actor.ActorId && share.IsActive
                                  && (share.ExpiresAtUtc == null || share.ExpiresAtUtc > now))
                              && (term == "" || (profile != null && profile.DisplayName != null && profile.DisplayName.ToLower().Contains(term)))
@@ -36,8 +38,10 @@ public sealed class PostgresCaseCollaboratorCandidatesStore(SwiftAidDbContext db
         var rows = await candidates.OrderBy(item => item.GrantGroupId).Take(limit + 1).ToArrayAsync(ct).ConfigureAwait(false);
         var page = rows.Take(limit).ToArray();
         var keys = page.Select(item => item.GrantGroupId).ToArray();
-        CaseOperation[] supported = [CaseOperation.ReadCase, CaseOperation.ReadAttachment, CaseOperation.Synchronize,
-            CaseOperation.RecordObservation, CaseOperation.ManageFollowUp, CaseOperation.ManageEscalation];
+        CaseOperation[] supported = followUpAssignees
+            ? [CaseOperation.ReadCase, CaseOperation.ManageFollowUp]
+            : [CaseOperation.ReadCase, CaseOperation.ReadAttachment, CaseOperation.Synchronize,
+                CaseOperation.RecordObservation, CaseOperation.ManageFollowUp, CaseOperation.ManageEscalation];
         var operations = await db.AccessGrantOperations.AsNoTracking().Where(item => keys.Contains(item.GrantGroupId) && supported.Contains(item.Operation))
             .ToArrayAsync(ct).ConfigureAwait(false);
         return new CaseCollaboratorCandidatePage(page.Select(item => new CaseCollaboratorCandidate(item.GrantGroupId, item.ActorId, item.DisplayName,

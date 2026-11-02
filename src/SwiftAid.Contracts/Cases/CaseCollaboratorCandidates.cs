@@ -13,5 +13,5 @@ public sealed record CaseCollaboratorCandidatePage(IReadOnlyList<CaseCollaborato
 
 public interface ICaseCollaboratorCandidatesClient
 {
-    Task<CaseCollaboratorCandidatePage?> GetAsync(Guid caseId, string? search, string? after, CancellationToken cancellationToken = default);
+    Task<CaseCollaboratorCandidatePage?> GetAsync(Guid caseId, string? search, string? after, CancellationToken cancellationToken = default, bool followUpAssignees = false);
 }
