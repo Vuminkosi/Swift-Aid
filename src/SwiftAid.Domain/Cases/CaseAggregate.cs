@@ -134,7 +134,7 @@ public enum EscalationStatus
 }
 
 /// <summary>Immutable case state rebuilt from its ordered event stream.</summary>
-public sealed class CaseAggregate
+public sealed partial class CaseAggregate
 {
     private readonly List<CaseEvent> _events = [];
     private readonly List<FollowUpState> _followUps = [];
@@ -250,6 +250,8 @@ public sealed class CaseAggregate
             AcknowledgeEscalationCommand acknowledge => DecideAcknowledgeEscalation(acknowledge, actor, version),
             CloseEscalationCommand close => DecideCloseEscalation(close, actor, version),
             AcknowledgeAssignmentCommand acknowledge => DecideAcknowledgeAssignment(acknowledge, actor, version),
+            GrantCaseCollaboratorCommand grant => DecideGrantCollaborator(grant, actor, version),
+            RevokeCaseCollaboratorCommand revoke => DecideRevokeCollaborator(revoke, actor, version),
             _ => throw new NotSupportedException($"The command type {command.GetType().Name} is not supported by this aggregate.")
         };
     }
@@ -568,6 +570,12 @@ public sealed class CaseAggregate
     {
         switch (@event)
         {
+            case CaseCollaboratorGranted grant:
+                ApplyCollaboratorGrant(grant);
+                break;
+            case CaseCollaboratorRevoked revoke:
+                ApplyCollaboratorRevocation(revoke);
+                break;
             case CaseAssigned assignment when AggregateVersion == 1 && assignment.ReportRevision == ReportRevision && assignment.CommandId == _events[0].CommandId && assignment.ActorId == _events[0].ActorId:
                 RequireText(assignment.AccountableOwnerId, nameof(assignment.AccountableOwnerId));
                 if (!StringComparer.Ordinal.Equals(assignment.AccountableOwnerId, _events[0].ActorId))
@@ -844,6 +852,8 @@ public sealed class CaseAggregate
 
     private static CaseEvent SnapshotEvent(CaseEvent @event) => @event switch
     {
+        CaseCollaboratorGranted grant => grant,
+        CaseCollaboratorRevoked revoke => revoke,
         CaseReported reported => reported with { ReportData = SnapshotReportData(reported.ReportData) },
         CaseAssigned assignment => assignment,
         CaseAssignmentAcknowledged acknowledgement => acknowledgement,

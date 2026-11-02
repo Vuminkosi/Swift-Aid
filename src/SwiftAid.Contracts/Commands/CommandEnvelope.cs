@@ -190,7 +190,8 @@ public enum CaseCapability
     RecordObservation = 128,
     ManageFollowUp = 256,
     ManageEscalation = 512,
-    AcknowledgeAssignment = 1024
+    AcknowledgeAssignment = 1024,
+    ManageCollaborators = 2048
 }
 
 public sealed record ActorCapabilities(string ActorId, CaseCapability Capabilities)
