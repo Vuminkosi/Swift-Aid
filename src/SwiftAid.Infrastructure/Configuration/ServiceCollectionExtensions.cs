@@ -202,6 +202,8 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<PostgresNotificationStore>());
         services.AddScoped<INotificationItemQuery>(provider =>
             provider.GetRequiredService<PostgresNotificationStore>());
+        services.AddScoped<IFollowUpReminderScheduleStore, PostgresFollowUpReminderScheduleStore>();
+        services.AddScoped<FollowUpReminderDispatcher>();
         services.AddScoped<INotificationDeliveryOutbox, PostgresNotificationDeliveryOutbox>();
         if (identityEnabled)
         {

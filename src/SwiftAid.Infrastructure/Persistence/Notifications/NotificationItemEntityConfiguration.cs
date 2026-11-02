@@ -22,7 +22,13 @@ public sealed class NotificationItemEntityConfiguration : IEntityTypeConfigurati
                 "action IN ('OpenCase')");
             table.HasCheckConstraint(
                 "ck_notification_items_recipient_requirement",
-                "recipient_requirement IN ('CurrentAccountableOwner', 'AuthorizedCaseMember')");
+                "recipient_requirement IN ('CurrentAccountableOwner', 'AuthorizedCaseMember', 'CurrentFollowUpAssignee')");
+            table.HasCheckConstraint(
+                "ck_notification_items_related_resource_pair",
+                "(related_resource_id IS NULL) = (related_resource_version IS NULL)");
+            table.HasCheckConstraint(
+                "ck_notification_items_follow_up_reference",
+                "(recipient_requirement = 'CurrentFollowUpAssignee') = (related_resource_id IS NOT NULL)");
             table.HasCheckConstraint(
                 "ck_notification_items_read_after_created",
                 "read_at_utc IS NULL OR read_at_utc >= created_at_utc");
@@ -71,6 +77,12 @@ public sealed class NotificationItemEntityConfiguration : IEntityTypeConfigurati
             .HasColumnName("resource_id")
             .HasColumnType("uuid")
             .IsRequired();
+        builder.Property(item => item.RelatedResourceId)
+            .HasColumnName("related_resource_id")
+            .HasColumnType("uuid");
+        builder.Property(item => item.RelatedResourceVersion)
+            .HasColumnName("related_resource_version")
+            .HasColumnType("bigint");
         builder.Property(item => item.Action)
             .HasColumnName("action")
             .HasConversion<string>()

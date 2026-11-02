@@ -28,7 +28,9 @@ public sealed class PostgresNotificationStore(
         NotificationAction action,
         NotificationRecipientRequirement recipientRequirement,
         DateTimeOffset createdAtUtc,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? relatedResourceId = null,
+        long? relatedResourceVersion = null)
     {
         var item = NotificationItem.Create(
             acceptedEventId,
@@ -39,7 +41,9 @@ public sealed class PostgresNotificationStore(
             resourceId,
             action,
             recipientRequirement,
-            createdAtUtc);
+            createdAtUtc,
+            relatedResourceId,
+            relatedResourceVersion);
 
         var items = dbContext.Set<NotificationItem>();
         var outbox = dbContext.Set<NotificationDeliveryOutboxEntity>();
@@ -92,9 +96,8 @@ public sealed class PostgresNotificationStore(
             query = query.Where(item => item.DismissedAtUtc == null);
         }
 
-        // This SQL predicate mirrors the shared ReadCase policy for the only currently emitted
-        // requirement (CurrentAccountableOwner). Counts and page selection are bounded SQL
-        // operations; every returned page item is still rechecked under the current case lease.
+        // This SQL predicate mirrors the shared case policy for owner and follow-up occurrences.
+        // Every returned item is still rechecked under a current case lease.
         var initialCounts = await CountVisibleItemsAsync(query, cancellationToken).ConfigureAwait(false);
         var totalCount = initialCounts.TotalCount;
         var unreadCount = initialCounts.UnreadCount;
@@ -121,7 +124,9 @@ public sealed class PostgresNotificationStore(
                     item.ResourceId,
                     item.Action,
                     item.RecipientRequirement,
-                    cancellationToken)
+                    cancellationToken,
+                    item.RelatedResourceId,
+                    item.RelatedResourceVersion)
                 .ConfigureAwait(false))
             {
                 authorizedItems.Add(ToView(item));
@@ -167,7 +172,15 @@ public sealed class PostgresNotificationStore(
                 item.RecipientActorId == actorId &&
                 item.ResourceKind == NotificationResourceKind.ManagedCase &&
                 item.Action == NotificationAction.OpenCase &&
-                item.RecipientRequirement == NotificationRecipientRequirement.CurrentAccountableOwner);
+                ((item.RecipientRequirement == NotificationRecipientRequirement.CurrentAccountableOwner) ||
+                 (item.RecipientRequirement == NotificationRecipientRequirement.CurrentFollowUpAssignee &&
+                  item.RelatedResourceId != null && item.RelatedResourceVersion != null &&
+                  dbContext.ManagedCaseFollowUps.Any(followUp =>
+                      followUp.FollowUpId == item.RelatedResourceId && followUp.CaseId == item.ResourceId &&
+                      followUp.CurrentScheduleVersion == item.RelatedResourceVersion &&
+                      followUp.AssigneeActorId == actorId &&
+                      (followUp.Status == SwiftAid.Domain.Cases.FollowUpStatus.Scheduled ||
+                       followUp.Status == SwiftAid.Domain.Cases.FollowUpStatus.Acknowledged)))));
 
         return query.Where(item =>
             dbContext.Actors.Any(actorRow =>
@@ -178,7 +191,8 @@ public sealed class PostgresNotificationStore(
                 state.ActorId == actorId && state.AccessEpoch == accessEpoch) &&
             dbContext.ManagedCases.Any(caseRow =>
                 caseRow.CaseId == item.ResourceId &&
-                caseRow.AccountableOwnerActorId == actorId &&
+                (item.RecipientRequirement == NotificationRecipientRequirement.CurrentFollowUpAssignee ||
+                 caseRow.AccountableOwnerActorId == actorId) &&
                 caseRow.Workflow != SwiftAid.Domain.Cases.CaseWorkflow.Resolved &&
                 // Region coverage is intentionally not part of the page prefilter. Like the
                 // shared access policy, a directly assigned owner bypasses the region check
@@ -211,7 +225,9 @@ public sealed class PostgresNotificationStore(
                         grant.ExpiresAtUtc > utcNow &&
                         dbContext.AccessGrantOperations.Any(operation =>
                             operation.GrantGroupId == grant.GrantGroupId &&
-                            operation.Operation == CaseOperation.ReadCase)))));
+                            operation.Operation == (item.RecipientRequirement == NotificationRecipientRequirement.CurrentFollowUpAssignee
+                                ? CaseOperation.ManageFollowUp
+                                : CaseOperation.ReadCase))))));
     }
 
     private static async ValueTask<NotificationCounts> CountVisibleItemsAsync(
@@ -275,7 +291,9 @@ public sealed class PostgresNotificationStore(
                     item.ResourceId,
                     item.Action,
                     item.RecipientRequirement,
-                    cancellationToken)
+                    cancellationToken,
+                    item.RelatedResourceId,
+                    item.RelatedResourceVersion)
                 .ConfigureAwait(false))
         {
             return false;

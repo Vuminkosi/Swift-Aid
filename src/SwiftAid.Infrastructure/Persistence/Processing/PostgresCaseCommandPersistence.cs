@@ -594,6 +594,8 @@ public sealed partial class PostgresCaseCommandPersistence : ICaseCommandPersist
                         DueAtUtc = scheduled.DueAtUtc,
                         Status = FollowUpStatus.Scheduled,
                         ScheduledVersion = scheduled.AggregateVersion,
+                        CurrentScheduleVersion = scheduled.AggregateVersion,
+                        CurrentScheduleEventId = scheduled.EventId,
                         OutcomeVersion = null
                     });
                     break;
@@ -624,6 +626,11 @@ public sealed partial class PostgresCaseCommandPersistence : ICaseCommandPersist
                         _ => throw InvalidJournal()
                     };
                     followUp.OutcomeVersion = outcome.AggregateVersion;
+                    if (outcome.Outcome == FollowUpOutcome.Rescheduled)
+                    {
+                        followUp.CurrentScheduleVersion = outcome.AggregateVersion;
+                        followUp.CurrentScheduleEventId = outcome.EventId;
+                    }
                     break;
                 case CaseEscalationRaised raised:
                     _dbContext.ManagedCaseEscalations.Add(new ManagedCaseEscalationEntity

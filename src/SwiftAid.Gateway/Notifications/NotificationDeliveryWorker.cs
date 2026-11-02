@@ -119,7 +119,9 @@ public sealed class NotificationDeliveryWorker : BackgroundService
             lease.ResourceId,
             lease.Action,
             lease.RecipientRequirement,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            lease.RelatedResourceId,
+            lease.RelatedResourceVersion).ConfigureAwait(false);
 
         if (authorization == TrustedNotificationAuthorizationStatus.Suppressed)
         {
@@ -199,7 +201,9 @@ public sealed class NotificationDeliveryWorker : BackgroundService
                 lease.ResourceId,
                 lease.Action,
                 lease.RecipientRequirement,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                lease.RelatedResourceId,
+                lease.RelatedResourceVersion).ConfigureAwait(false);
 
             if (authorization == TrustedNotificationAuthorizationStatus.Suppressed)
             {

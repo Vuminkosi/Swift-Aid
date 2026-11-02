@@ -12,5 +12,7 @@ public sealed class ManagedCaseFollowUpEntity
     public DateTimeOffset DueAtUtc { get; set; }
     public FollowUpStatus Status { get; set; }
     public long ScheduledVersion { get; set; }
+    public long CurrentScheduleVersion { get; set; }
+    public Guid CurrentScheduleEventId { get; set; }
     public long? OutcomeVersion { get; set; }
 }

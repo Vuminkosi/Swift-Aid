@@ -32,13 +32,21 @@ public sealed class NotificationResourceAuthorizer : INotificationResourceAuthor
         Guid resourceId,
         NotificationAction action,
         NotificationRecipientRequirement recipientRequirement,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? relatedResourceId = null,
+        long? relatedResourceVersion = null)
     {
         ArgumentNullException.ThrowIfNull(actor);
         if (resourceKind != NotificationResourceKind.ManagedCase ||
             action != NotificationAction.OpenCase ||
             !Enum.IsDefined(recipientRequirement) ||
             resourceId == Guid.Empty)
+        {
+            return false;
+        }
+
+        if ((recipientRequirement == NotificationRecipientRequirement.CurrentFollowUpAssignee) !=
+            (relatedResourceId is not null && relatedResourceVersion is not null))
         {
             return false;
         }
@@ -61,6 +69,25 @@ public sealed class NotificationResourceAuthorizer : INotificationResourceAuthor
 
         await using var _ = lease;
 
+        if (recipientRequirement == NotificationRecipientRequirement.CurrentFollowUpAssignee)
+        {
+            if (relatedResourceId is not Guid followUpId || relatedResourceVersion is not long scheduleVersion)
+            {
+                return false;
+            }
+
+            var followUp = await _dbContext.ManagedCaseFollowUps.AsNoTracking()
+                .Where(item => item.FollowUpId == followUpId && item.CaseId == resourceId &&
+                    item.CurrentScheduleVersion == scheduleVersion && item.AssigneeActorId == actor.ActorId &&
+                    (item.Status == FollowUpStatus.Scheduled || item.Status == FollowUpStatus.Acknowledged))
+                .Select(item => item.FollowUpId)
+                .SingleOrDefaultAsync(cancellationToken).ConfigureAwait(false);
+            if (followUp == Guid.Empty)
+            {
+                return false;
+            }
+        }
+
         var workflow = await _dbContext.ManagedCases
             .AsNoTracking()
             .Where(item => item.CaseId == resourceId)
@@ -78,10 +105,13 @@ public sealed class NotificationResourceAuthorizer : INotificationResourceAuthor
             return false;
         }
 
+        var requiredOperation = recipientRequirement == NotificationRecipientRequirement.CurrentFollowUpAssignee
+            ? CaseOperation.ManageFollowUp
+            : CaseOperation.ReadCase;
         var access = await _caseAccessPolicy.AuthorizeAsync(
             actor,
             resourceId,
-            CaseOperation.ReadCase,
+            requiredOperation,
             cancellationToken).ConfigureAwait(false);
         if (access.IsAllowed)
         {

@@ -234,6 +234,7 @@ builder.Services.AddScoped<INotificationChangeSignal>(serviceProvider =>
         : ActivatorUtilities.CreateInstance<PollingNotificationChangeSignal>(serviceProvider);
 });
 builder.Services.AddHostedService<NotificationDeliveryWorker>();
+builder.Services.AddHostedService<FollowUpReminderWorker>();
 builder.Services.AddHostedService<SwiftAid.Gateway.Ingestion.IngestionOutboxWorker>();
 builder.Services.Configure<SwiftAid.Infrastructure.Classification.ClassificationOptions>(builder.Configuration.GetSection("Classification"));
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.ClassificationRegistry>();

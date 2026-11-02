@@ -27,7 +27,9 @@ public interface INotificationResourceAuthorizer
         Guid resourceId,
         NotificationAction action,
         NotificationRecipientRequirement recipientRequirement,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        Guid? relatedResourceId = null,
+        long? relatedResourceVersion = null);
 }
 
 public enum TrustedNotificationAuthorizationStatus
@@ -50,7 +52,9 @@ public interface ITrustedNotificationRecipientAuthorizer
         Guid resourceId,
         NotificationAction action,
         NotificationRecipientRequirement recipientRequirement,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        Guid? relatedResourceId = null,
+        long? relatedResourceVersion = null);
 }
 
 /// <summary>Trusted server-side writer; do not expose this interface to public intake endpoints.</summary>
@@ -70,7 +74,9 @@ public interface INotificationItemWriter
         NotificationAction action,
         NotificationRecipientRequirement recipientRequirement,
         DateTimeOffset createdAtUtc,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        Guid? relatedResourceId = null,
+        long? relatedResourceVersion = null);
 }
 
 public sealed record NotificationDeliveryLease(
@@ -82,6 +88,8 @@ public sealed record NotificationDeliveryLease(
     Guid ResourceId,
     NotificationAction Action,
     NotificationRecipientRequirement RecipientRequirement,
+    Guid? RelatedResourceId,
+    long? RelatedResourceVersion,
     int AttemptCount,
     Guid LeaseId,
     DateTimeOffset LeaseUntilUtc);

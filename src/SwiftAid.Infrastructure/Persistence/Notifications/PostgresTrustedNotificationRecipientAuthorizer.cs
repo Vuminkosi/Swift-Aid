@@ -37,7 +37,9 @@ public sealed class PostgresTrustedNotificationRecipientAuthorizer : ITrustedNot
         Guid resourceId,
         NotificationAction action,
         NotificationRecipientRequirement recipientRequirement,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? relatedResourceId = null,
+        long? relatedResourceVersion = null)
     {
         if (string.IsNullOrWhiteSpace(recipientActorId) ||
             !string.Equals(recipientActorId, recipientActorId.Trim(), StringComparison.Ordinal) ||
@@ -45,6 +47,8 @@ public sealed class PostgresTrustedNotificationRecipientAuthorizer : ITrustedNot
             resourceKind != NotificationResourceKind.ManagedCase ||
             action != NotificationAction.OpenCase ||
             !Enum.IsDefined(recipientRequirement) ||
+            ((recipientRequirement == NotificationRecipientRequirement.CurrentFollowUpAssignee) !=
+             (relatedResourceId is not null && relatedResourceVersion is not null)) ||
             resourceId == Guid.Empty)
         {
             return TrustedNotificationAuthorizationStatus.Suppressed;
@@ -86,19 +90,30 @@ public sealed class PostgresTrustedNotificationRecipientAuthorizer : ITrustedNot
                 .Select(item => new { item.Workflow, item.AccountableOwnerActorId })
                 .SingleOrDefaultAsync(cancellationToken)
                 .ConfigureAwait(false);
+            var followUpAuthorized = recipientRequirement != NotificationRecipientRequirement.CurrentFollowUpAssignee ||
+                (relatedResourceId is Guid followUpId && relatedResourceVersion is long scheduleVersion &&
+                 await _dbContext.ManagedCaseFollowUps.AsNoTracking().AnyAsync(item =>
+                     item.FollowUpId == followUpId && item.CaseId == resourceId &&
+                     item.CurrentScheduleVersion == scheduleVersion && item.AssigneeActorId == recipientActorId &&
+                     (item.Status == FollowUpStatus.Scheduled || item.Status == FollowUpStatus.Acknowledged),
+                     cancellationToken).ConfigureAwait(false));
             if (resource is null ||
                 resource.Workflow == CaseWorkflow.Resolved ||
                 (recipientRequirement == NotificationRecipientRequirement.CurrentAccountableOwner &&
-                 !string.Equals(resource.AccountableOwnerActorId, recipientActorId, StringComparison.Ordinal)))
+                 !string.Equals(resource.AccountableOwnerActorId, recipientActorId, StringComparison.Ordinal)) ||
+                !followUpAuthorized)
             {
                 await lease.CommitAsync(cancellationToken).ConfigureAwait(false);
                 return TrustedNotificationAuthorizationStatus.Suppressed;
             }
 
+            var requiredOperation = recipientRequirement == NotificationRecipientRequirement.CurrentFollowUpAssignee
+                ? CaseOperation.ManageFollowUp
+                : CaseOperation.ReadCase;
             var decision = await _caseAccessPolicy.AuthorizeAsync(
                     actor,
                     resourceId,
-                    CaseOperation.ReadCase,
+                    requiredOperation,
                     cancellationToken)
                 .ConfigureAwait(false);
 

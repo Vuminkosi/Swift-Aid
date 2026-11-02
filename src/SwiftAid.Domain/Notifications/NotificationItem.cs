@@ -20,6 +20,8 @@ public sealed class NotificationItem
         NotificationKind kind,
         NotificationResourceKind resourceKind,
         Guid resourceId,
+        Guid? relatedResourceId,
+        long? relatedResourceVersion,
         NotificationAction action,
         NotificationRecipientRequirement recipientRequirement,
         DateTimeOffset createdAtUtc)
@@ -31,6 +33,8 @@ public sealed class NotificationItem
         Kind = kind;
         ResourceKind = resourceKind;
         ResourceId = resourceId;
+        RelatedResourceId = relatedResourceId;
+        RelatedResourceVersion = relatedResourceVersion;
         Action = action;
         RecipientRequirement = recipientRequirement;
         CreatedAtUtc = createdAtUtc;
@@ -53,6 +57,12 @@ public sealed class NotificationItem
     /// <summary>An opaque resource identifier; it grants no access by itself.</summary>
     public Guid ResourceId { get; private set; }
 
+    /// <summary>Opaque child resource used to recheck a scheduled action, never exposed to clients.</summary>
+    public Guid? RelatedResourceId { get; private set; }
+
+    /// <summary>Version of the related scheduled action that created this occurrence.</summary>
+    public long? RelatedResourceVersion { get; private set; }
+
     public NotificationAction Action { get; private set; }
 
     /// <summary>Internal recipient constraint, never included in a client projection.</summary>
@@ -73,7 +83,9 @@ public sealed class NotificationItem
         Guid resourceId,
         NotificationAction action,
         NotificationRecipientRequirement recipientRequirement,
-        DateTimeOffset createdAtUtc)
+        DateTimeOffset createdAtUtc,
+        Guid? relatedResourceId = null,
+        long? relatedResourceVersion = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(occurrenceKey);
         ArgumentException.ThrowIfNullOrWhiteSpace(recipientActorId);
@@ -93,7 +105,14 @@ public sealed class NotificationItem
             !Enum.IsDefined(resourceKind) ||
             !Enum.IsDefined(action) ||
             !Enum.IsDefined(recipientRequirement) ||
-            resourceId == Guid.Empty)
+            resourceId == Guid.Empty ||
+            (relatedResourceId is Guid relatedId && relatedId == Guid.Empty) ||
+            ((relatedResourceId is null) != (relatedResourceVersion is null)) ||
+            relatedResourceVersion is <= 0 ||
+            (recipientRequirement == NotificationRecipientRequirement.CurrentFollowUpAssignee &&
+             (relatedResourceId is null || relatedResourceVersion is null)) ||
+            (recipientRequirement != NotificationRecipientRequirement.CurrentFollowUpAssignee &&
+             relatedResourceId is not null))
         {
             throw new ArgumentException("The notification kind, resource, and action must be valid.");
         }
@@ -106,6 +125,8 @@ public sealed class NotificationItem
             kind,
             resourceKind,
             resourceId,
+            relatedResourceId,
+            relatedResourceVersion,
             action,
             recipientRequirement,
             createdAtUtc.ToUniversalTime());
@@ -141,5 +162,6 @@ public enum NotificationAction
 public enum NotificationRecipientRequirement
 {
     CurrentAccountableOwner = 1,
-    AuthorizedCaseMember = 2
+    AuthorizedCaseMember = 2,
+    CurrentFollowUpAssignee = 3
 }

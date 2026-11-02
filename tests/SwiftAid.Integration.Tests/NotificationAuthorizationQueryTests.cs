@@ -9,7 +9,9 @@ using SwiftAid.Domain.Cases;
 using SwiftAid.Domain.Notifications;
 using SwiftAid.Infrastructure.Authorization;
 using SwiftAid.Infrastructure.Persistence;
+using SwiftAid.Infrastructure.Persistence.Entities.Cases;
 using SwiftAid.Infrastructure.Persistence.Notifications;
+using SwiftAid.Infrastructure.Persistence.Repositories.Cases;
 using SwiftAid.Infrastructure.Persistence.Transactions;
 
 namespace SwiftAid.Integration.Tests;
@@ -158,6 +160,28 @@ public sealed class NotificationAuthorizationQueryTests
         Assert.Equal(0, page.UnreadCount);
         Assert.Empty(page.Items);
     }
+
+    [CaseAuthorityPostgresFact]
+    public async Task Follow_up_reminders_are_idempotent_and_stale_occurrences_are_suppressed()
+    {
+        await using var fixture = await NotificationPostgresFixture.CreateAsync().ConfigureAwait(false);
+        var (followUpId, _) = await fixture.AddDueFollowUpAsync().ConfigureAwait(false);
+
+        Assert.Equal(1, await fixture.DispatchDueFollowUpsAsync().ConfigureAwait(false));
+        Assert.Equal(1, await fixture.DispatchDueFollowUpsAsync().ConfigureAwait(false));
+        Assert.Equal(1, await fixture.CountFollowUpNotificationsAsync(followUpId).ConfigureAwait(false));
+        Assert.Equal(1, (await fixture.ReadPageAsync().ConfigureAwait(false)).TotalCount);
+
+        await fixture.RescheduleFollowUpAsync(followUpId, 10002).ConfigureAwait(false);
+        Assert.Equal(0, (await fixture.ReadPageAsync().ConfigureAwait(false)).TotalCount);
+
+        Assert.Equal(1, await fixture.DispatchDueFollowUpsAsync().ConfigureAwait(false));
+        Assert.Equal(2, await fixture.CountFollowUpNotificationsAsync(followUpId).ConfigureAwait(false));
+        Assert.Equal(1, (await fixture.ReadPageAsync().ConfigureAwait(false)).TotalCount);
+
+        await fixture.CompleteFollowUpAsync(followUpId).ConfigureAwait(false);
+        Assert.Equal(0, (await fixture.ReadPageAsync().ConfigureAwait(false)).TotalCount);
+    }
 }
 
 /// <summary>
@@ -170,6 +194,7 @@ internal sealed class NotificationPostgresFixture : IAsyncDisposable
     private readonly List<Guid> _payloadIds = [];
     private readonly List<Guid> _receiptIds = [];
     private readonly List<Guid> _notificationIds = [];
+    private readonly List<Guid> _followUpIds = [];
     private readonly ChangeOwnerAfterNotificationPageRead? _queryInterceptor;
 
     private NotificationPostgresFixture(
@@ -274,6 +299,120 @@ internal sealed class NotificationPostgresFixture : IAsyncDisposable
         }
 
         return notificationId;
+    }
+
+    public async Task<(Guid FollowUpId, Guid ScheduleEventId)> AddDueFollowUpAsync()
+    {
+        var followUpId = Guid.NewGuid();
+        var eventId = Guid.NewGuid();
+        var commandId = Guid.NewGuid();
+        var payloadId = Guid.NewGuid();
+        var receiptId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        _followUpIds.Add(followUpId);
+        _eventIds.Add(eventId);
+        _payloadIds.Add(payloadId);
+        _receiptIds.Add(receiptId);
+        await using var db = Authority.CreateDbContext();
+        db.CommandReceipts.Add(new CommandReceiptEntity
+        {
+            ReceiptId = receiptId, ActorId = Authority.ActorId, CommandId = commandId,
+            CaseId = Authority.CaseId, CommandType = "CaseFollowUp", SchemaVersion = 1,
+            CanonicalPayloadHash = new byte[32], FirstAggregateVersion = 10001, LastAggregateVersion = 10001,
+            ReportRevision = 1, AcceptedAtUtc = now
+        });
+        db.ProtectedEventPayloads.Add(new ProtectedEventPayloadEntity
+        {
+            PayloadId = payloadId, ProtectedBytes = [0x01],
+            ProtectionPurposeVersion = "follow-up-reminder-test-v1", CreatedAtUtc = now
+        });
+        db.CaseEvents.Add(new CaseEventEntity
+        {
+            EventId = eventId, CaseId = Authority.CaseId, AggregateVersion = 10001,
+            ReportRevision = 1, CommandId = commandId, ActorId = Authority.ActorId,
+            EventType = "CaseFollowUpScheduled", SchemaVersion = 1, RecordedAtUtc = now, PayloadId = payloadId
+        });
+        db.ManagedCaseFollowUps.Add(new ManagedCaseFollowUpEntity
+        {
+            FollowUpId = followUpId, CaseId = Authority.CaseId, Purpose = "synthetic follow-up",
+            AssigneeActorId = Authority.ActorId, DueAtUtc = now.AddMinutes(-1), Status = FollowUpStatus.Scheduled,
+            ScheduledVersion = 10001, CurrentScheduleVersion = 10001, CurrentScheduleEventId = eventId
+        });
+        db.AccessGrantOperations.Add(new AccessGrantOperationEntity
+        {
+            GrantGroupId = Authority.GrantGroupId, Operation = CaseOperation.ManageFollowUp
+        });
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        return (followUpId, eventId);
+    }
+
+    public async Task<int> DispatchDueFollowUpsAsync()
+    {
+        await using var db = Authority.CreateDbContext();
+        var unitOfWork = new PostgresCaseCommandUnitOfWork(db);
+        var policy = new CaseAccessPolicy(
+            new PostgresCurrentAccessGrantStore(db, unitOfWork),
+            new PostgresCaseAccessDescriptorStore(db, unitOfWork));
+        var writer = new PostgresNotificationStore(db, new NotificationResourceAuthorizer(db, policy, unitOfWork));
+        var dispatcher = new FollowUpReminderDispatcher(
+            new PostgresFollowUpReminderScheduleStore(db), writer);
+        return await dispatcher.DispatchAsync(DateTimeOffset.UtcNow, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    public async Task<Guid> RescheduleFollowUpAsync(Guid followUpId, long version)
+    {
+        var eventId = Guid.NewGuid();
+        var commandId = Guid.NewGuid();
+        var payloadId = Guid.NewGuid();
+        var receiptId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        _eventIds.Add(eventId);
+        _payloadIds.Add(payloadId);
+        _receiptIds.Add(receiptId);
+        await using var db = Authority.CreateDbContext();
+        db.CommandReceipts.Add(new CommandReceiptEntity
+        {
+            ReceiptId = receiptId, ActorId = Authority.ActorId, CommandId = commandId,
+            CaseId = Authority.CaseId, CommandType = "CaseFollowUpOutcome", SchemaVersion = 1,
+            CanonicalPayloadHash = new byte[32], FirstAggregateVersion = version, LastAggregateVersion = version,
+            ReportRevision = 1, AcceptedAtUtc = now
+        });
+        db.ProtectedEventPayloads.Add(new ProtectedEventPayloadEntity
+        {
+            PayloadId = payloadId, ProtectedBytes = [0x01],
+            ProtectionPurposeVersion = "follow-up-reminder-test-v1", CreatedAtUtc = now
+        });
+        db.CaseEvents.Add(new CaseEventEntity
+        {
+            EventId = eventId, CaseId = Authority.CaseId, AggregateVersion = version,
+            ReportRevision = 1, CommandId = commandId, ActorId = Authority.ActorId,
+            EventType = "CaseFollowUpOutcomeRecorded", SchemaVersion = 1, RecordedAtUtc = now, PayloadId = payloadId
+        });
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        await db.ManagedCaseFollowUps.Where(item => item.FollowUpId == followUpId)
+            .ExecuteUpdateAsync(update => update
+                .SetProperty(item => item.CurrentScheduleVersion, version)
+                .SetProperty(item => item.CurrentScheduleEventId, eventId)
+                .SetProperty(item => item.OutcomeVersion, (long?)version)
+                .SetProperty(item => item.DueAtUtc, now.AddMinutes(-1)))
+            .ConfigureAwait(false);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        return eventId;
+    }
+
+    public async Task CompleteFollowUpAsync(Guid followUpId)
+    {
+        await using var db = Authority.CreateDbContext();
+        await db.ManagedCaseFollowUps.Where(item => item.FollowUpId == followUpId)
+            .ExecuteUpdateAsync(update => update.SetProperty(item => item.Status, FollowUpStatus.Completed))
+            .ConfigureAwait(false);
+    }
+
+    public async Task<int> CountFollowUpNotificationsAsync(Guid followUpId)
+    {
+        await using var db = Authority.CreateDbContext();
+        return await db.NotificationItems.CountAsync(item => item.RelatedResourceId == followUpId)
+            .ConfigureAwait(false);
     }
 
     public async Task<bool> AuthorizeAsync(
@@ -493,15 +632,24 @@ internal sealed class NotificationPostgresFixture : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        if (_notificationIds.Count > 0 || _eventIds.Count > 0 || _receiptIds.Count > 0 || _payloadIds.Count > 0)
+        if (_notificationIds.Count > 0 || _eventIds.Count > 0 || _receiptIds.Count > 0 || _payloadIds.Count > 0 || _followUpIds.Count > 0)
         {
             await using var dbContext = Authority.CreateDbContext();
             await using var transaction = await dbContext.Database.BeginTransactionAsync().ConfigureAwait(false);
+            var reminderNotificationIds = _followUpIds.Count == 0
+                ? Array.Empty<Guid>()
+                : await dbContext.NotificationItems.AsNoTracking()
+                    .Where(item => item.RelatedResourceId != null && _followUpIds.Contains(item.RelatedResourceId.Value))
+                    .Select(item => item.NotificationId)
+                    .ToArrayAsync().ConfigureAwait(false);
+            var notificationIds = _notificationIds.Concat(reminderNotificationIds).Distinct().ToArray();
             await dbContext.NotificationDeliveryOutbox
-                .Where(item => _notificationIds.Contains(item.NotificationId))
+                .Where(item => notificationIds.Contains(item.NotificationId))
                 .ExecuteDeleteAsync().ConfigureAwait(false);
             await dbContext.NotificationItems
-                .Where(item => _notificationIds.Contains(item.NotificationId))
+                .Where(item => notificationIds.Contains(item.NotificationId))
+                .ExecuteDeleteAsync().ConfigureAwait(false);
+            await dbContext.ManagedCaseFollowUps.Where(item => _followUpIds.Contains(item.FollowUpId))
                 .ExecuteDeleteAsync().ConfigureAwait(false);
             await dbContext.CaseEvents.Where(item => _eventIds.Contains(item.EventId))
                 .ExecuteDeleteAsync().ConfigureAwait(false);

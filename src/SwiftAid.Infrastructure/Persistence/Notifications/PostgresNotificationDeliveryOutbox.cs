@@ -99,6 +99,8 @@ public sealed class PostgresNotificationDeliveryOutbox(SwiftAidDbContext dbConte
                     notification.ResourceId,
                     notification.Action,
                     notification.RecipientRequirement,
+                    notification.RelatedResourceId,
+                    notification.RelatedResourceVersion,
                     row.AttemptCount,
                     leaseId,
                     leaseExpiry);

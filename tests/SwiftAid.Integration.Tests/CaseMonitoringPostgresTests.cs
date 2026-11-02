@@ -141,6 +141,7 @@ public sealed class CaseMonitoringPostgresTests
                 FirstDueAtUtc, "routine check", null, DateTimeOffset.UtcNow),
             keyRing.CreateOptions(), provider);
         Assert.Equal(CaseCommandProcessingStatus.Accepted, scheduled.Status);
+        var scheduleEventId = Assert.Single(scheduled.EventIds);
 
         var missed = await ProcessCommandAsync(db, actor, caseId,
             new RecordFollowUpOutcomeCommand(Guid.NewGuid(), 3, followUpId, FollowUpOutcome.Missed,
@@ -156,6 +157,8 @@ public sealed class CaseMonitoringPostgresTests
             Assert.Equal(FollowUpStatus.Missed, row.Status);
             Assert.Equal(FirstDueAtUtc, row.DueAtUtc);
             Assert.Equal(4, row.OutcomeVersion);
+            Assert.Equal(3, row.CurrentScheduleVersion);
+            Assert.Equal(scheduleEventId, row.CurrentScheduleEventId);
         }
 
         var openAfterMiss = await QuerySummaryAsync(db, actor, caseId);
@@ -170,6 +173,7 @@ public sealed class CaseMonitoringPostgresTests
             keyRing.CreateOptions(), provider);
         Assert.Equal(CaseCommandProcessingStatus.Accepted, rescheduled.Status);
         Assert.Equal(5, rescheduled.AggregateVersion);
+        var rescheduledEventId = Assert.Single(rescheduled.EventIds);
 
         await using (var verify = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync())
         {
@@ -179,6 +183,8 @@ public sealed class CaseMonitoringPostgresTests
             Assert.Equal(SecondDueAtUtc, row.DueAtUtc);
             Assert.Equal(3, row.ScheduledVersion);
             Assert.Equal(5, row.OutcomeVersion);
+            Assert.Equal(5, row.CurrentScheduleVersion);
+            Assert.Equal(rescheduledEventId, row.CurrentScheduleEventId);
 
             var outcomeEvents = await verify.CaseEvents.AsNoTracking()
                 .Where(item => item.CaseId == caseId && item.EventType == "CaseFollowUpOutcomeRecorded")
