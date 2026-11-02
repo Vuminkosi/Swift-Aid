@@ -216,17 +216,20 @@ public sealed class EllaiGuidanceProposalAdmission(
             session.ScopeEpoch != authority.ScopeEpoch || session.InteractionEpoch != admitted.InteractionEpoch)
             return new("Stale");
         var saved = EllaiGuidanceCheckpoint.Deserialize(session.GuidanceJson);
+        var step = saved?.Plan?.Steps.SingleOrDefault(item => item.StepKey == request.StepId);
+        var navigation = step is null ? null : EllaiNavigationManifest.ResolveStepDestination(step);
         if (saved?.Plan is not { } plan || saved.ProposalId != request.ProposalId || plan.PlanId != request.PlanId ||
             saved.ScopeEpoch != authority.ScopeEpoch || saved.InteractionEpoch > admitted.InteractionEpoch ||
-            saved.ContextStamp != request.ContextStamp || admitted.Observation.ContextStamp != request.ContextStamp ||
+            (navigation is null && saved.ContextStamp != request.ContextStamp) || admitted.Observation.ContextStamp != request.ContextStamp ||
             saved.Status is not ("Ready" or "Paused" or "Completed")) return new("Stale");
         if (saved.CompletedStepIds.Contains(request.StepId))
             return new(saved.Status, saved.Version, saved.CurrentStepId, saved.CompletedStepIds);
         if (saved.Version != request.ExpectedVersion || saved.CurrentStepId != request.StepId || saved.Status != "Ready")
             return new("Conflict", saved.Version, saved.CurrentStepId, saved.CompletedStepIds);
-        var step = plan.Steps.SingleOrDefault(item => item.StepKey == request.StepId);
         var descriptor = admitted.Catalogue.Descriptors.SingleOrDefault(item => item.ControlId == step?.ControlId);
-        if (step is null || descriptor is null || step.Behavior != PlanStepBehavior.Explain ||
+        if (step is null || descriptor is null || (step.Behavior != PlanStepBehavior.Explain && navigation is null) ||
+            (navigation is not null && (descriptor.FeatureId != EllaiNavigationManifest.FeatureId ||
+                admitted.Observation.CurrentNavigationId != navigation.NavigationId)) ||
             descriptor.HumanConfirmationRequired ||
             !admitted.Observation.MountedControlIds.Contains(step.ControlId) ||
             admitted.Observation.ControlStates?.Count(item => item.ControlId == step.ControlId && item.State == UiObservationState.Ready) != 1)
@@ -238,6 +241,8 @@ public sealed class EllaiGuidanceProposalAdmission(
             Version = saved.Version + 1,
             InteractionEpoch = admitted.InteractionEpoch,
             CurrentStepId = nextStep,
+            ContextStamp = request.ContextStamp,
+            NavigationId = navigation?.NavigationId ?? saved.NavigationId,
             CompletedStepIds = [.. saved.CompletedStepIds, step.StepKey],
             Status = nextStep is null ? "Completed" : "Ready",
         };

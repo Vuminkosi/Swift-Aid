@@ -5,6 +5,18 @@ namespace SwiftAid.Application.Tests.Ellai;
 
 public sealed class EllaiNavigationManifestTests
 {
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("nav-cases", true)]
+    [InlineData("nav-report", true)]
+    [InlineData("https://example.com", false)]
+    [InlineData("/my-cases", false)]
+    [InlineData("nav-admin", false)]
+    public void RouteEvidenceIsOptionalAndRestrictedToRegisteredDestinations(string? navigationId, bool valid)
+    {
+        Assert.Equal(valid, new UiObservationReport("view", "context", "web", [], [], navigationId).IsValid());
+    }
+
     [Fact]
     public void NavigationRequiresBothFeatureAndCapability()
     {

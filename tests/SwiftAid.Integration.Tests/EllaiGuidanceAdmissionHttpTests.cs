@@ -57,9 +57,10 @@ public sealed class EllaiGuidanceAdmissionHttpTests
         finally { await app.StopAsync(); }
     }
     [Theory]
-    [InlineData("report", "report.entry")]
-    [InlineData("navigation", "navigation.dashboard")]
-    public async Task PlanningPostGeneratesOnceAndReturnsDurableOwnedPlan(string feature, string control)
+    [InlineData("report", "report.entry", false)]
+    [InlineData("navigation", "navigation.dashboard", false)]
+    [InlineData("navigation", "navigation.dashboard", true)]
+    public async Task PlanningPostGeneratesOnceAndReturnsDurableOwnedPlan(string feature, string control, bool navigate)
     {
         var store = new InMemoryEllaiSessionStore();
         var session = new EllaiSessionRecord("owned", EllaiMode.GuideMe, "Active", 1, 1, 1, 1, 0, 12,
@@ -80,7 +81,7 @@ public sealed class EllaiGuidanceAdmissionHttpTests
         var observations = new InMemoryEllaiUiObservationStore();
         await observations.RecordAsync(new("owned", "view", "context", "web", [control], DateTimeOffset.UtcNow,
             [new(control, UiObservationState.Ready)]), default);
-        var completion = new SyntheticPlan(feature, control);
+        var completion = new SyntheticPlan(feature, control, navigate);
         var scopes = new CurrentScopes();
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
@@ -158,6 +159,21 @@ public sealed class EllaiGuidanceAdmissionHttpTests
             Assert.Equal(HttpStatusCode.NotFound, deniedControl.StatusCode);
             var stepRequest = new EllaiGuidanceStepRequest(proposal.ProposalId, restored.Plan.PlanId,
                 restored.ProgressVersion, "entry", "refreshed-context");
+            if (navigate)
+            {
+                // A mounted menu link alone must not satisfy navigation completion.
+                foreach (var destination in new string?[] { null, "nav-account" })
+                {
+                    await observations.RecordAsync(new("owned", "destination-view", "destination-context", "web", [control],
+                        DateTimeOffset.UtcNow, [new(control, UiObservationState.Ready)], destination), default);
+                    using var rejected = await client.PostAsJsonAsync("/sessions/owned/guidance/steps/complete",
+                        stepRequest with { ContextStamp = "destination-context" });
+                    Assert.Equal("EvidenceRequired", (await rejected.Content.ReadFromJsonAsync<EllaiGuidanceProgressDto>())!.Status);
+                }
+                await observations.RecordAsync(new("owned", "destination-view", "destination-context", "web", [control],
+                    DateTimeOffset.UtcNow, [new(control, UiObservationState.Ready)], "nav-dashboard"), default);
+                stepRequest = stepRequest with { ContextStamp = "destination-context" };
+            }
             for (var attempt = 0; attempt < 2; attempt++)
             {
                 using var progressResponse = await client.PostAsJsonAsync("/sessions/owned/guidance/steps/complete", stepRequest);
@@ -186,7 +202,7 @@ public sealed class EllaiGuidanceAdmissionHttpTests
         }
     }
 
-    private sealed class SyntheticPlan(string feature, string control) : IEllaiTurnCompletionClient
+    private sealed class SyntheticPlan(string feature, string control, bool navigate) : IEllaiTurnCompletionClient
     {
         public int Calls { get; private set; }
         public Task<EllaiTurnCompletion> CompleteAsync(IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct)
@@ -198,6 +214,8 @@ public sealed class EllaiGuidanceAdmissionHttpTests
                  "uiIntentBindingId":null,"resourceBindingKey":null,"factIds":["public-intake-no-account"],"evidenceIds":[],
                  "explanation":"This is the report form.","nextStepKey":null}],"questions":[],"stopReason":null}
                 """.Replace("report.entry", control, StringComparison.Ordinal)
+                    .Replace("\"behavior\":\"Explain\"", navigate ? "\"behavior\":\"RequestUiIntent\"" : "\"behavior\":\"Explain\"", StringComparison.Ordinal)
+                    .Replace("\"uiIntentBindingId\":null", navigate ? "\"uiIntentBindingId\":\"NavigateFeature\"" : "\"uiIntentBindingId\":null", StringComparison.Ordinal)
                     .Replace("open-report-form", feature == "navigation" ? "open-dashboard" : "open-report-form", StringComparison.Ordinal)
                     .Replace("[\"public-intake-no-account\"]", "[]", StringComparison.Ordinal), 10, 5));
         }

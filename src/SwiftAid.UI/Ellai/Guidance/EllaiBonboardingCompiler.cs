@@ -23,7 +23,7 @@ public sealed class EllaiBonboardingCompiler
             Id = $"ellai-generated-{plan.PlanId}-r{plan.Revision}",
             Title = "Ellai guidance",
             Steps = plan.Steps.Select(s => ToStep(
-                s.StepKey, s.Explanation, ResolveTarget(s.ControlId, anchorByControlId), verifyCompletion)).ToList()
+                s.StepKey, s.Explanation, ResolveTarget(s.ControlId, anchorByControlId), verifyCompletion, ResolveRoute(s))).ToList()
         };
     }
 
@@ -44,12 +44,13 @@ public sealed class EllaiBonboardingCompiler
     }
 
     private static BonboardingStepDefinition ToStep(string id, string text, BonboardingStepTarget target,
-        Func<string, CancellationToken, ValueTask<bool>>? verifyCompletion) =>
+        Func<string, CancellationToken, ValueTask<bool>>? verifyCompletion, string? route = null) =>
         new()
         {
             Id = id,
             Title = text,
             Target = target,
+            Route = route,
             MissingTarget = BonboardingMissingTargetBehavior.Wait,
             WaitTimeout = TimeSpan.FromSeconds(30),
             WaitTimeoutBehavior = BonboardingMissingTargetBehavior.Fail,
@@ -58,6 +59,13 @@ public sealed class EllaiBonboardingCompiler
                 : verifyCompletion(id, context.CancellationToken),
             ValidationMessage = "Complete this step before continuing."
         };
+
+    private static string? ResolveRoute(GuidancePlanStep step)
+    {
+        if (step.Behavior != PlanStepBehavior.RequestUiIntent) return null;
+        return EllaiNavigationManifest.ResolveStepDestination(step)?.Route
+            ?? throw new InvalidOperationException("The guidance navigation is not registered.");
+    }
 
     private static BonboardingStepTarget ResolveTarget(
         string? controlId, IReadOnlyDictionary<string, string> anchorByControlId)

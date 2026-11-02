@@ -134,15 +134,18 @@ public sealed class EllaiEventPollerTests
 
         public string? LastMethod { get; private set; }
 
-        protected override Task<HttpResponseMessage> SendAsync(
+        public string? LastBody { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
         {
             LastPath = request.RequestUri?.PathAndQuery;
             LastMethod = request.Method.Method;
-            return Task.FromResult(new HttpResponseMessage(_status)
+            LastBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
+            return new HttpResponseMessage(_status)
             {
                 Content = new StringContent(_json, Encoding.UTF8, "application/json"),
-            });
+            };
         }
     }
 
@@ -467,12 +470,13 @@ public sealed class EllaiEventPollerTests
 
         var reported = await client.ReportUiObservationAsync(
             "s-9",
-            new UiObservationReport("view-9", "ctx-9", "web", new[] { "cases.queue" }),
+            new UiObservationReport("view-9", "ctx-9", "web", new[] { "cases.queue" }, CurrentNavigationId: "nav-cases"),
             CancellationToken.None);
 
         Assert.True(reported);
         Assert.Equal("POST", handler.LastMethod);
         Assert.Contains("api/v1/ellai/sessions/s-9/ui-observations", handler.LastPath, StringComparison.Ordinal);
+        Assert.Contains("\"currentNavigationId\":\"nav-cases\"", handler.LastBody);
     }
 
     [Fact]

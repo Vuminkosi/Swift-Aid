@@ -206,19 +206,24 @@ public partial class EllaiGuidanceHost
                 var admission = await ReviewClient.ReadGuidanceAdmissionAsync(session.SessionId, proposalId, ct);
                 if (admission?.Status != "Ready") return false;
                 var step = plan.Steps.SingleOrDefault(s => s.StepKey == stepId);
-                // Observation can prove an explanation target exists, never a form edit or submission.
-                if (!IsCurrent() || step?.Behavior != PlanStepBehavior.Explain ||
-                    _latestGuidanceObservation?.ContextStamp != result.ContextStamp ||
+                var navigation = step is null ? null : EllaiNavigationManifest.ResolveStepDestination(step);
+                var observedContext = _latestGuidanceObservation?.ContextStamp;
+                // Route evidence proves navigation only, never a record read, edit or submission.
+                if (!IsCurrent() || step is null ||
+                    (step.Behavior != PlanStepBehavior.Explain && navigation is null) ||
+                    (navigation is null && observedContext != result.ContextStamp) ||
+                    (navigation is not null && _latestGuidanceObservation?.CurrentNavigationId != navigation.NavigationId) ||
                     _latestGuidanceObservation?.ControlStates?.Any(state => state.ControlId == step.ControlId &&
                         state.State == UiObservationState.Ready) != true) return false;
                 await progressGate.WaitAsync(ct);
                 try
                 {
                     var progress = await ReviewClient.CompleteGuidanceStepAsync(session.SessionId,
-                        new(proposalId, plan.PlanId, progressVersion, stepId, result.ContextStamp!), ct);
+                        new(proposalId, plan.PlanId, progressVersion, stepId, observedContext!), ct);
                     if (!IsCurrent() || progress?.Status is not ("Ready" or "Completed") ||
                         progress.CompletedStepIds?.Contains(stepId) != true) return false;
                     progressVersion = progress.Version;
+                    result = result with { ContextStamp = observedContext };
                     durableStatus = progress.Status;
                     return true;
                 }

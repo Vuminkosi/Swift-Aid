@@ -52,6 +52,9 @@ public partial class EllaiGuidanceHost
             var report = await _uiObservationModule.InvokeAsync<UiObservationReport>("collect", token,
                 new object?[] { requestedControls });
             if (report is null) return;
+            var path = "/" + Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].TrimEnd('/');
+            report = report with { CurrentNavigationId = path == "/report" ? EllaiReportUiManifest.NavigationId :
+                EllaiNavigationManifest.ResolveNavigationId(path) };
             report = report with { Platform = OperatingSystem.IsAndroid() ? "android" : OperatingSystem.IsIOS() ? "ios" : "web" };
             if (report.IsValid() && _sessionView?.SessionId == session.SessionId)
             {

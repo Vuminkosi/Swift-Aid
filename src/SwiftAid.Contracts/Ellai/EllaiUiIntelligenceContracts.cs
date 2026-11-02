@@ -80,9 +80,12 @@ public sealed record UiObservationReport(
     string ContextStamp,
     string Platform,
     IReadOnlyList<string> MountedControlIds,
-    IReadOnlyList<UiControlState>? ControlStates = null)
+    IReadOnlyList<UiControlState>? ControlStates = null,
+    string? CurrentNavigationId = null)
 {
     public bool IsValid() =>
+        (CurrentNavigationId is null || CurrentNavigationId == EllaiReportUiManifest.NavigationId ||
+            EllaiNavigationManifest.ResolveRoute(CurrentNavigationId) is not null) &&
         !string.IsNullOrWhiteSpace(ViewInstanceId) && ViewInstanceId.Length <= 120 &&
         !string.IsNullOrWhiteSpace(ContextStamp) && ContextStamp.Length <= 120 &&
         !string.IsNullOrWhiteSpace(Platform) && Platform.Length <= 40 &&

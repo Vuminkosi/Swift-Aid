@@ -11,7 +11,8 @@ public sealed record StoredUiObservationReport(
     string Platform,
     IReadOnlyList<string> MountedControlIds,
     DateTimeOffset ReceivedAtUtc,
-    IReadOnlyList<UiControlState>? ControlStates = null);
+    IReadOnlyList<UiControlState>? ControlStates = null,
+    string? CurrentNavigationId = null);
 
 public interface IEllaiUiObservationStore
 {
@@ -38,7 +39,7 @@ public sealed class InMemoryEllaiUiObservationStore : IEllaiUiObservationStore
         ArgumentException.ThrowIfNullOrWhiteSpace(report.SessionId);
         ct.ThrowIfCancellationRequested();
         if (!new UiObservationReport(report.ViewInstanceId, report.ContextStamp, report.Platform,
-                report.MountedControlIds, report.ControlStates).IsValid())
+                report.MountedControlIds, report.ControlStates, report.CurrentNavigationId).IsValid())
             throw new ArgumentException("Invalid UI observation report.", nameof(report));
         var cleaned = report.MountedControlIds
             .Where(id => !string.IsNullOrWhiteSpace(id))

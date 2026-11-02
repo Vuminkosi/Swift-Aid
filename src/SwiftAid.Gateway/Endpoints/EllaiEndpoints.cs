@@ -630,7 +630,7 @@ public static class EllaiEndpoints
         if (request is null
             || !string.Equals(request.SessionId, sessionId, StringComparison.Ordinal)
             || !new UiObservationReport(request.ViewInstanceId, request.ContextStamp,
-                request.Platform, request.MountedControlIds, request.ControlStates).IsValid())
+                request.Platform, request.MountedControlIds, request.ControlStates, request.CurrentNavigationId).IsValid())
         {
             return Task.FromResult(Results.Problem(
                 statusCode: StatusCodes.Status400BadRequest,
@@ -650,7 +650,7 @@ public static class EllaiEndpoints
                 .Where(id => !string.IsNullOrWhiteSpace(id))
                 .Select(id => id.Trim())
                 .ToList(),
-            DateTimeOffset.UtcNow, request.ControlStates), cancellationToken);
+            DateTimeOffset.UtcNow, request.ControlStates, request.CurrentNavigationId), cancellationToken);
         return Results.Json(true, statusCode: StatusCodes.Status200OK);
     }
 
@@ -836,7 +836,8 @@ public sealed record ReportUiObservationApiRequest(
     string ContextStamp,
     string Platform,
     IReadOnlyList<string> MountedControlIds,
-    IReadOnlyList<UiControlState>? ControlStates = null);
+    IReadOnlyList<UiControlState>? ControlStates = null,
+    string? CurrentNavigationId = null);
 
 /// <summary>Review registration for a validated pending plan: binds the
 /// dialog instance to one server-tracked review (duplicate ids focus it).

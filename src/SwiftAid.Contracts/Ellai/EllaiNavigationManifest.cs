@@ -46,4 +46,13 @@ public static class EllaiNavigationManifest
 
     public static string? ResolveRoute(string navigationId) =>
         Destinations.SingleOrDefault(item => item.NavigationId == navigationId)?.Route;
+
+    public static string? ResolveNavigationId(string route) =>
+        Destinations.SingleOrDefault(item => item.Route == route)?.NavigationId;
+
+    public static EllaiNavigationDestination? ResolveStepDestination(GuidancePlanStep step) =>
+        step.Behavior == PlanStepBehavior.RequestUiIntent && step.UiIntentBindingId == "NavigateFeature" &&
+        step.ResourceBindingKey is null
+            ? Destinations.SingleOrDefault(item => item.ControlId == step.ControlId && step.ObjectiveId == "open-" + item.Id)
+            : null;
 }

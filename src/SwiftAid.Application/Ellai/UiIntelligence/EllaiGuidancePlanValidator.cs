@@ -31,7 +31,10 @@ public sealed class EllaiGuidancePlanValidator(EllaiUiRegistry registry)
                 errors.Add("Guidance requires a fresh, visible and enabled target in the current view.");
             if (!descriptor.SupportedModes.Contains(draft.Mode) || step.ObjectiveId != descriptor.ObjectiveId ||
                 step.FactIds.Any(f => !descriptor.ProductFactIds.Contains(f)) || step.EvidenceIds.Any(e => e != step.ControlId) ||
-                step.ResourceBindingKey is not null || step.Behavior is not (PlanStepBehavior.Explain or PlanStepBehavior.GuideHuman))
+                step.ResourceBindingKey is not null ||
+                (step.Behavior is not (PlanStepBehavior.Explain or PlanStepBehavior.GuideHuman) &&
+                    !(descriptor.FeatureId == EllaiNavigationManifest.FeatureId &&
+                      EllaiNavigationManifest.ResolveStepDestination(step) is not null)))
                 errors.Add("Guidance metadata is not grounded in its registered control.");
         }
         return errors.Count == 0 ? accepted : (null, errors);

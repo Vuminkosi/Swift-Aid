@@ -22,6 +22,28 @@ public sealed class EllaiCompilerInteropTests
         Array.Empty<string>(), "ellai-catalogue/1.0", "ellai-uicontract/1.0");
 
     [Fact]
+    public void NavigationUsesRegisteredBonboardingRouteRatherThanModelUrls()
+    {
+        var step = new GuidancePlanStep("navigate", "navigation.cases", "open-cases", PlanStepBehavior.RequestUiIntent,
+            "NavigateFeature", null, [], [], "Open cases.", null);
+        var plan = Plan() with { Steps = [step] };
+        var compiler = new EllaiBonboardingCompiler();
+        var definition = compiler.Compile(plan, new Dictionary<string, string> { ["navigation.cases"] = "ellai-navigation-cases" });
+        Assert.Equal("/my-cases", Assert.Single(definition.Steps).Route);
+        Assert.True(definition.Steps[0].Target.IsDynamic);
+        Assert.NotNull(definition.Steps[0].CanAdvance);
+        foreach (var invalid in new[]
+        {
+            step with { ControlId = "https://example.com" },
+            step with { ResourceBindingKey = "another-owner-case" },
+            step with { UiIntentBindingId = "ExecuteAction" },
+            step with { ObjectiveId = "open-admin" },
+        })
+            Assert.Throws<InvalidOperationException>(() => compiler.Compile(plan with { Steps = [invalid] }, new Dictionary<string, string>()));
+        Assert.All(compiler.Compile(Plan(), new Dictionary<string, string>()).Steps, item => Assert.Null(item.Route));
+    }
+
+    [Fact]
     public void AcceptedPlanCompilesToRealTourDefinition()
     {
         var compiler = new EllaiBonboardingCompiler();
