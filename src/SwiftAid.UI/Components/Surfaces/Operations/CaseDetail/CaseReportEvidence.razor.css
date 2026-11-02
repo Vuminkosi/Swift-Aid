@@ -1,9 +1,26 @@
-.case-report-evidence { padding: 1rem 0; border-top: 1px solid var(--sa-border); min-width: 0; overflow-wrap: anywhere; }
-.case-report-evidence h2 { font-size: 1rem; margin: 0 0 .75rem; }
-.case-report-evidence h3 { font-size: .85rem; }
-.case-report-evidence p, .case-report-evidence li { font-size: .8rem; line-height: 1.6; }
-.case-report-evidence__text { white-space: pre-wrap; overflow-wrap: anywhere; }
-.case-report-evidence small { display: block; color: var(--sa-text-secondary); }
-.case-report-evidence dl { margin: .5rem 0; font-size: .85rem; }
-.case-report-evidence dt { font-weight: 600; margin-top: .5rem; }
-.case-report-evidence dd { margin: .125rem 0; }
+﻿.case-report-evidence { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 1rem; padding-block: 1rem; min-width: 0; overflow-wrap: anywhere; }
+.case-report-evidence__panel { min-width: 0; padding: 1.125rem; border: 1px solid var(--sa-border); border-radius: .75rem; background: var(--sa-surface); }
+.case-report-evidence__header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
+.case-report-evidence h2 { font-size: .95rem; font-weight: 650; margin: 0; }
+.case-report-evidence__badge { font-size: .68rem; color: var(--mud-palette-text-secondary); padding: .2rem .5rem; border: 1px solid var(--sa-border); border-radius: 1rem; white-space: nowrap; }
+.case-report-evidence__eyebrow { margin: 0 0 .4rem; font-size: .7rem; color: var(--mud-palette-text-secondary); font-weight: 600; }
+.case-report-evidence__narrative { margin: 0; font-size: .9rem; line-height: 1.65; white-space: pre-wrap; }
+.case-report-evidence__observations { display: flex; flex-wrap: wrap; gap: .4rem; list-style: none; padding: 0; margin: 1rem 0; }
+.case-report-evidence__observations li { border-radius: .4rem; padding: .4rem .6rem; border: 1px solid var(--sa-border); background: var(--mud-palette-background-grey); font-size: .75rem; line-height: 1.4; max-width: 100%; white-space: pre-wrap; }
+.case-report-evidence__facilities { display: grid; gap: .65rem; }
+.case-report-evidence__facility { display: flex; align-items: center; gap: .7rem; padding: .75rem; border: 1px solid var(--sa-border); border-radius: .5rem; }
+.case-report-evidence__facility-icon { flex-shrink: 0; display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: .5rem; background: var(--mud-palette-primary-hover); color: var(--mud-palette-primary); }
+.case-report-evidence__facility-name { min-width: 0; flex: 1; }
+.case-report-evidence h3 { font-size: .68rem; font-weight: 500; color: var(--mud-palette-text-secondary); margin: 0 0 .2rem; }
+.case-report-evidence__facility a { font-size: .8rem; font-weight: 600; color: var(--mud-palette-primary); text-decoration: none; line-height: 1.45; }
+.case-report-evidence__facility a:hover { text-decoration: underline; }
+.case-report-evidence__facility a:focus-visible { outline: 2px solid var(--mud-palette-primary); outline-offset: 3px; border-radius: 2px; }
+.case-report-evidence__distance { flex-shrink: 0; display: flex; align-items: baseline; gap: .2rem; font-variant-numeric: tabular-nums; }
+.case-report-evidence__distance strong { font-size: 1.15rem; font-weight: 650; }
+.case-report-evidence__distance span { font-size: .7rem; color: var(--mud-palette-text-secondary); }
+.case-report-evidence__distance-context { margin-top: .85rem; border-top: 1px solid var(--sa-border); padding-top: .7rem; }
+.case-report-evidence__distance-context p { margin: .2rem 0; font-size: .73rem; line-height: 1.5; }
+.case-report-evidence .case-report-evidence__note { color: var(--mud-palette-text-secondary); font-size: .7rem; line-height: 1.5; margin: .3rem 0; }
+.case-report-evidence__sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 760px) { .case-report-evidence { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 380px) { .case-report-evidence__panel { padding: .8rem; } .case-report-evidence__facility-icon { display: none; } }

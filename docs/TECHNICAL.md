@@ -533,3 +533,11 @@ Each speech segment closes its individual Muse transcription request, not the pa
 Freeze verification: 37 focused integration tests, 16 client tests, 21 coordinator tests and nine JavaScript tests passed. Gateway image build and recreation passed; Gateway and classification worker reported healthy, and the served asset contains the 16,800-sample threshold. Android embedded build passed with zero warnings/errors; installation and activity launch succeeded after an explicitly authorized emulator data wipe. No interactive mobile test was performed.
 
 Earlier real-provider browser runs passed two turns on one microphone capture, 62 seconds of silence with zero PCM upload, and injected WebSocket disconnect/replay with two completed turns. Those runs used the earlier 1.5-second threshold: equivalent end-to-end results at 704 ms remain NOT VERIFIED. Acoustic echo rejection, physical-device barge-in, iOS runtime, real process-restart replay and spoken tool acknowledgement remain NOT VERIFIED live. Existing deterministic tool acknowledgement is retained unchanged. Further voice behavior changes are frozen pending explicit authorization.
+
+### Shared case evidence and composer status presentation
+
+Case evidence uses responsive paired panels for original observations and nearby mapped facilities. Facility distances retain their locality-centre estimate, straight-line distance and unverified-service qualifications; presentation does not change facility categorization or referral suitability.
+
+Every Ellai status uses a decorative three-bar animation, including unknown/fallback labels. Connecting/reconnecting use a quicker wave; Thinking retains purple text and bold animated dots; other states use a gentle pulse. Reduced-motion preferences disable both animations. The shared component covers web and MAUI without changing voice lifecycle behavior.
+
+Verification: `case-evidence-status.browser.cjs` passed in Chromium at 1280px/light and 390px/dark with ten status labels, map link attributes, responsive panels, no horizontal overflow, reduced motion and no page errors. `ellai-microphone-toggle.browser.cjs` passed at 1280, 390 and 320px. These are synthetic shared-component browser checks, not physical-mobile or live case-data validation.

@@ -1,70 +1,85 @@
-@using SwiftAid.Contracts.Cases
+﻿@using SwiftAid.Contracts.Cases
 
 <section class="case-report-evidence" aria-label="Original report and observations">
-    <h2>Reported observations</h2>
     @if (Report is not null)
     {
-        @if (!string.IsNullOrWhiteSpace(Report.Narrative))
-        {
-            <h3>Report narrative</h3>
-            <p class="case-report-evidence__text">@Report.Narrative</p>
-        }
-        @if (Report.Observations.Count == 0)
-        {
-            <p>No separate observations were recorded.</p>
-        }
-        else
-        {
-            <ul>
-                @foreach (var observation in Report.Observations)
-                {
-                    <li class="case-report-evidence__text">@observation</li>
-                }
-            </ul>
-        }
-        <small>Recorded evidence · report revision @Report.ReportRevision</small>
-        <section aria-label="Nearby medical facilities">
-            <h3>Nearest clinic and hospital</h3>
+        <article class="case-report-evidence__panel">
+            <header class="case-report-evidence__header">
+                <h2>Reported observations</h2>
+                <span class="case-report-evidence__badge">Revision @Report.ReportRevision</span>
+            </header>
+            @if (!string.IsNullOrWhiteSpace(Report.Narrative))
+            {
+                <p class="case-report-evidence__eyebrow">Original report</p>
+                <p class="case-report-evidence__narrative">@Report.Narrative</p>
+            }
+            @if (Report.Observations.Count > 0)
+            {
+                <ul class="case-report-evidence__observations" aria-label="Recorded observations">
+                    @foreach (var observation in Report.Observations) { <li>@observation</li> }
+                </ul>
+            }
+            else { <p class="case-report-evidence__note">No separate observations were recorded.</p> }
+            <p class="case-report-evidence__note">As recorded in the report</p>
+        </article>
+        <section class="case-report-evidence__panel" aria-label="Nearby medical facilities">
+            <header class="case-report-evidence__header">
+                <h2>Nearby facilities</h2>
+                <span class="case-report-evidence__badge">Nearest mapped</span>
+            </header>
             @if (Report.NearbyFacilities is { } nearby)
             {
-                <dl>
+                <div class="case-report-evidence__facilities">
                     @foreach (var entry in new[] { (Label: "Clinic", Facility: nearby.Clinic), (Label: "Hospital", Facility: nearby.Hospital) })
                     {
-                        <dt>@entry.Label</dt>
-                        <dd>
-                            @if (entry.Facility is { } facility)
+                        <article class="case-report-evidence__facility" aria-label="@($"Nearest mapped {entry.Label.ToLowerInvariant()}")">
+                            <span class="case-report-evidence__facility-icon" aria-hidden="true">
+                                <MudIcon Icon="@(entry.Label == "Clinic" ? Icons.Material.Outlined.MedicalServices : Icons.Material.Outlined.LocalHospital)" Size="Size.Small" />
+                            </span>
+                            <div class="case-report-evidence__facility-name">
+                                <h3>@entry.Label</h3>
+                                @if (entry.Facility is { } facility)
+                                {
+                                    <a href="@facility.MapUrl" target="_blank" rel="noopener noreferrer">@facility.Name <span aria-hidden="true">↗</span><span class="case-report-evidence__sr-only"> (opens map in a new tab)</span></a>
+                                }
+                                else { <p class="case-report-evidence__note">No facility mapped in this country.</p> }
+                            </div>
+                            @if (entry.Facility is { } distance)
                             {
-                                <a href="@facility.MapUrl" target="_blank" rel="noopener noreferrer">@facility.Name ↗</a>
-                                <span> · @facility.DistanceKilometres.ToString("N1") km away</span>
+                                <div class="case-report-evidence__distance" aria-label="@($"{distance.DistanceKilometres:N1} kilometres, straight-line distance")">
+                                    <strong>@distance.DistanceKilometres.ToString("N1")</strong><span>km</span>
+                                </div>
                             }
-                            else { <span>No mapped @entry.Label.ToLowerInvariant() available in this country.</span> }
-                        </dd>
+                        </article>
                     }
-                </dl>
-                @if (nearby.LocalityCentre is { } locality)
-                {
-                    <small>Approximate straight-line distances from the mapped centre of @locality, not the exact report location or road distances.</small>
-                }
-                else
-                {
-                    <small>Straight-line distances from the @(nearby.ApproximateLocation ? "approximate " : "")reported location, not road distances.</small>
-                }
-                <small>Nearest among mapped facilities; services are not verified.</small>
-                @if (nearby.LocationAccuracyMetres is { } accuracy)
-                {
-                    <small>Reported location accuracy: @accuracy.ToString("N0") m.</small>
-                }
+                </div>
+                <div class="case-report-evidence__distance-context">
+                    @if (nearby.LocalityCentre is { } locality)
+                    {
+                        <p>Estimated from <strong>@locality centre</strong></p>
+                        <p class="case-report-evidence__note">Approximate straight-line distances, not the exact report location or road distances.</p>
+                    }
+                    else
+                    {
+                        <p class="case-report-evidence__note">Straight-line distances from the @(nearby.ApproximateLocation ? "approximate " : "")reported location, not road distances.</p>
+                    }
+                    <p class="case-report-evidence__note">Mapped facilities only · Services not verified.</p>
+                    @if (nearby.LocationAccuracyMetres is { } accuracy)
+                    {
+                        <p class="case-report-evidence__note">Reported location accuracy: @accuracy.ToString("N0") m.</p>
+                    }
+                </div>
             }
-            else
-            {
-                <p>Distances unavailable: no usable report coordinates or uniquely matched locality centre.</p>
-            }
+            else { <p class="case-report-evidence__note">Nearby distances are unavailable. A report location or matched locality is needed.</p> }
         </section>
     }
     else
     {
-        <p role="status">@(Loading ? "Loading reported observations…" : "Reported observations could not be loaded.")</p>
-        @if (!Loading) { <MudButton OnClick="OnRetry" Size="Size.Small">Try again</MudButton> }
+        <div class="case-report-evidence__panel">
+            <h2>Reported observations</h2>
+            <p role="status">@(Loading ? "Loading reported observations…" : "Reported observations could not be loaded.")</p>
+            @if (!Loading) { <MudButton OnClick="OnRetry" Size="Size.Small">Try again</MudButton> }
+        </div>
     }
 </section>
 

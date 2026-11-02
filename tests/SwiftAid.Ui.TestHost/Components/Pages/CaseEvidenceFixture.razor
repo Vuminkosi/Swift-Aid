@@ -1,0 +1,32 @@
+@page "/case-evidence-fixture"
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.UI.Components.Surfaces.Operations.CaseDetail
+@using SwiftAid.UI.Components.Theme
+@using SwiftAid.UI.Ellai.Components
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<main style="max-width:1100px;margin:1rem auto;padding:1rem" data-fixture-ready="@_ready.ToString().ToLowerInvariant()">
+    <h1>Case report presentation</h1>
+    <CaseReportEvidence Report="_report" />
+    <section aria-label="Composer status examples" style="display:grid;gap:1rem;margin-top:1rem">
+        @foreach (var status in new[] { "Ready", "Connecting..", "Reconnecting..", "Thinking…", "Listening", "Speaking", "Checking records", "Waiting for approval", "Cancelled", "Unable to connect" })
+        {
+            <EllaiStatusLine StatusText="@status" />
+        }
+    </section>
+</main>
+
+@code {
+    private bool _ready;
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { _ready = true; StateHasChanged(); }
+    }
+    private readonly CaseReportDetails _report = new(Guid.NewGuid(), 1,
+        "Family requests neonatal care guidance and clinic referral.",
+        ["Transport barrier reported", "Newborn feeding concerns reported", "Missed scheduled clinic visit"],
+        new("SZ", "Lubombo", null, "Siphofaneni", null, null, null),
+        new(new("National Psychiatric Referral Hospital", "https://www.openstreetmap.org/node/11291933229", 37.2),
+            new("National TB Hospital", "https://www.openstreetmap.org/way/258778176", 34.8), true, null, "Siphofaneni"));
+}

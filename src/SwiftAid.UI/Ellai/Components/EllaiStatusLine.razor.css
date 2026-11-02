@@ -3,6 +3,17 @@
     gap: 0.125rem;
 }
 
+.ellai-status__line { display: flex; align-items: center; gap: .4rem; min-width: 0; }
+.ellai-status__motion { display: inline-flex; align-items: center; justify-content: center; gap: 2px; width: 14px; height: 14px; flex: 0 0 14px; color: var(--mud-palette-primary); }
+.ellai-status__motion i { display: block; width: 3px; height: 7px; border-radius: 2px; background: currentColor; animation: ellai-status-breathe 2.8s ease-in-out infinite; }
+.ellai-status__motion i:nth-child(2) { animation-delay: .16s; }
+.ellai-status__motion i:nth-child(3) { animation-delay: .32s; }
+.ellai-status__motion--thinking { color: var(--ais-chart-3, #7C3AED); }
+.ellai-status__motion--thinking i { animation-name: ellai-status-wave; animation-duration: 1.2s; }
+.ellai-status__motion--connecting i { animation-name: ellai-status-wave; animation-duration: .9s; }
+@keyframes ellai-status-breathe { 0%, 100% { opacity: .55; transform: scaleY(.65); } 50% { opacity: 1; transform: scaleY(1); } }
+@keyframes ellai-status-wave { 0%, 100% { transform: scaleY(.35); opacity: .5; } 50% { transform: scaleY(1.5); opacity: 1; } }
+
 .ellai-status__thinking {
     color: var(--ais-chart-3, #7C3AED);
 }
@@ -22,7 +33,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .ellai-status__dot { animation: none; }
+    .ellai-status__dot, .ellai-status__motion i { animation: none; }
 }
 
 .ellai-status__text--clamped {
