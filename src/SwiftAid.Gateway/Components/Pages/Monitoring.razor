@@ -12,14 +12,14 @@
                          HeadingId="monitoring-heading" />
     <MudGrid Spacing="3" Class="mt-2 monitoring-page__queues">
         <MudItem xs="12" lg="6" Class="monitoring-page__queue-item">
-            <OperationsMonitoringQueue Title="Assigned to me"
+            <OperationsMonitoringQueue Title="Assigned to me" Scope="MonitoringQueueScope.Assigned"
                                         Description="Follow-ups and escalations assigned to you."
                                         State="_assignedState"
                                         Items="_assignedItems"
                                         OnRetry="LoadAssignedAsync" />
         </MudItem>
         <MudItem xs="12" lg="6" Class="monitoring-page__queue-item">
-            <OperationsMonitoringQueue Title="All open work"
+            <OperationsMonitoringQueue Title="All open work" Scope="MonitoringQueueScope.Open"
                                         Description="Open work you have permission to view."
                                         State="_openState"
                                         Items="_openItems"

@@ -26,6 +26,7 @@ public sealed class EllaiUiAuthorityResolver(IScopeService? scopes = null, TimeP
                     features.Add(EllaiCaseDetailUiManifest.FeatureId);
                     features.Add(EllaiSurveillanceUiManifest.FeatureId);
                     features.Add(EllaiInvestigationUiManifest.FeatureId);
+                    features.Add(EllaiMonitoringUiManifest.FeatureId);
                     capabilities.Add(EllaiNavigationManifest.Capability);
                 }
             }

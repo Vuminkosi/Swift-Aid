@@ -1,6 +1,9 @@
+@using SwiftAid.Contracts.Ellai
+@implements IEllaiUiContextProvider
+<SwiftAid.UI.Ellai.Guidance.EllaiSemanticContext Provider="this" />
 @using SwiftAid.Contracts.Cases
 
-<section class="monitoring-queue" aria-label="Monitoring queue">
+<section data-ellai-control="@ControlId("overview")" data-bonboarding-anchor="@Anchor("overview")" class="monitoring-queue" aria-label="Monitoring queue">
     @if (_loading)
     {
         <div class="monitoring-queue__state" role="status" aria-live="polite">
@@ -18,7 +21,7 @@
     {
         <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" role="alert">
             @_error
-            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Color="Color.Error" OnClick="RefreshAsync" aria-label="Retry loading monitoring queue">Retry</MudButton>
+            <MudButton data-ellai-control="@ControlId("refresh")" data-bonboarding-anchor="@Anchor("refresh")" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Color="Color.Error" OnClick="RefreshAsync" aria-label="Retry loading monitoring queue">Retry</MudButton>
         </MudAlert>
     }
     else if (_items.Count == 0)
@@ -29,7 +32,7 @@
     }
     else
     {
-        <MudTable Items="_items" Hover="true" Dense="true" aria-label="Open monitoring work">
+        <MudTable data-ellai-control="@ControlId("table")" data-bonboarding-anchor="@Anchor("table")" Items="_items" Hover="true" Dense="true" aria-label="Open monitoring work">
             <HeaderContent>
                 <MudTh>Work</MudTh>
                 <MudTh>Summary</MudTh>
@@ -71,6 +74,20 @@
 </section>
 
 @code {
+    public string ComponentId => Describe().ComponentId;
+    public EllaiUiManifest Describe() => EllaiMonitoringUiManifest.Describe(Scope);
+    private string ControlId(string key) => EllaiMonitoringUiManifest.Id(Scope, key);
+    private string Anchor(string key) => EllaiMonitoringUiManifest.Anchor(Scope, key);
+    public EllaiUiState GetState() => new(ComponentId, _loading, _error is not null,
+        Describe().Controls.Select(control => new UiControlState(control.ControlId, ControlState(control.ControlId.Split('.').Last()))).ToArray());
+    private UiObservationState ControlState(string key) => key switch
+    {
+        "overview" => UiObservationState.Ready,
+        "table" => !_loading && !_denied && _error is null && _items.Count > 0 ? UiObservationState.Ready : UiObservationState.Unmounted,
+        "refresh" => !_loading && !_denied && _error is not null ? UiObservationState.Ready : UiObservationState.Unmounted,
+        _ => UiObservationState.Unmounted,
+    };
+
     [Parameter, EditorRequired] public IMonitoringQueueClient Client { get; set; } = null!;
 
     [Parameter] public MonitoringQueueScope Scope { get; set; } = MonitoringQueueScope.Assigned;

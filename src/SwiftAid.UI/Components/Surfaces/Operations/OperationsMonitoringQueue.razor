@@ -1,37 +1,40 @@
+@using SwiftAid.Contracts.Ellai
+@implements IEllaiUiContextProvider
+<SwiftAid.UI.Ellai.Guidance.EllaiSemanticContext Provider="this" />
 @using SwiftAid.Contracts.Cases
 @using SwiftAid.UI.Components.Theme
 
-<section class="operations-monitoring-queue" aria-labelledby="monitoring-queue-title">
+<section class="operations-monitoring-queue" aria-labelledby="@Anchor("title")">
     <div class="operations-monitoring-queue__header">
         <div>
             <MudText Typo="Typo.overline" Color="Color.Secondary">Operations workspace</MudText>
-            <MudText Typo="Typo.h4" HtmlTag="h1" id="monitoring-queue-title">@Title</MudText>
+            <MudText Typo="Typo.h4" HtmlTag="h1" id="@Anchor("title")" data-ellai-control="@ControlId("overview")" data-bonboarding-anchor="@Anchor("overview")">@Title</MudText>
             <MudText Typo="Typo.body2" Color="Color.Secondary">@Description</MudText>
         </div>
         @if (OnRetry.HasDelegate)
         {
-            <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Primary" OnClick="OnRetry" aria-label="Refresh work list" />
+            <MudIconButton data-ellai-control="@ControlId("refresh")" data-bonboarding-anchor="@Anchor("refresh")" Icon="@Icons.Material.Filled.Refresh" Color="Color.Primary" OnClick="OnRetry" aria-label="Refresh work list" />
         }
     </div>
 
     <div class="operations-monitoring-queue__filters" role="group" aria-label="Filter open work">
-        <MudTextField @bind-Value="_searchText" Immediate="true" Label="Search summary or status" Variant="Variant.Outlined" Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Clearable="true" />
-        <MudSelect T="string" @bind-Value="_kind" Label="Work type" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+        <MudTextField data-ellai-control="@ControlId("search")" data-bonboarding-anchor="@Anchor("search")" @bind-Value="_searchText" Immediate="true" Label="Search summary or status" Variant="Variant.Outlined" Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Clearable="true" />
+        <MudSelect data-ellai-control="@ControlId("kind")" data-bonboarding-anchor="@Anchor("kind")" T="string" @bind-Value="_kind" Label="Work type" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
             <MudSelectItem Value="@FollowUpFilter">Follow-up</MudSelectItem>
             <MudSelectItem Value="@EscalationFilter">Escalation</MudSelectItem>
         </MudSelect>
-        <MudSelect T="string" @bind-Value="_status" Label="Status" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+        <MudSelect data-ellai-control="@ControlId("status")" data-bonboarding-anchor="@Anchor("status")" T="string" @bind-Value="_status" Label="Status" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
             @foreach (var value in Statuses)
             {
                 <MudSelectItem Value="@value">@StatusLabel(value)</MudSelectItem>
             }
         </MudSelect>
-        <MudSelect T="string" @bind-Value="_assignment" Label="Assignment" Variant="Variant.Outlined" Margin="Margin.Dense">
+        <MudSelect data-ellai-control="@ControlId("assignment")" data-bonboarding-anchor="@Anchor("assignment")" T="string" @bind-Value="_assignment" Label="Assignment" Variant="Variant.Outlined" Margin="Margin.Dense">
             <MudSelectItem Value="@AllAssignments">All assignments</MudSelectItem>
             <MudSelectItem Value="@Assigned">Assigned</MudSelectItem>
             <MudSelectItem Value="@Unassigned">Unassigned</MudSelectItem>
         </MudSelect>
-        <MudSelect T="string" @bind-Value="_dueFilter" Label="Due time" Variant="Variant.Outlined" Margin="Margin.Dense">
+        <MudSelect data-ellai-control="@ControlId("due")" data-bonboarding-anchor="@Anchor("due")" T="string" @bind-Value="_dueFilter" Label="Due time" Variant="Variant.Outlined" Margin="Margin.Dense">
             <MudSelectItem Value="@AllDueDates">Any due date</MudSelectItem>
             <MudSelectItem Value="@OverdueFilter">Overdue</MudSelectItem>
             <MudSelectItem Value="@ScheduledFilter">Scheduled or no date</MudSelectItem>
@@ -49,7 +52,7 @@
     else
     {
         <MudHidden Breakpoint="Breakpoint.MdAndDown">
-            <MudTable Class="operations-monitoring-queue__table" Items="FilteredItems" Hover="true" Dense="true" RowsPerPage="10" aria-label="Follow-ups and escalations">
+            <MudTable data-ellai-control="@ControlId("table")" data-bonboarding-anchor="@Anchor("table")" Class="operations-monitoring-queue__table" Items="FilteredItems" Hover="true" Dense="true" RowsPerPage="10" aria-label="Follow-ups and escalations">
                 <HeaderContent><MudTh>Work</MudTh><MudTh>Case and summary</MudTh><MudTh>Assignment</MudTh><MudTh>Due</MudTh><MudTh>Status</MudTh></HeaderContent>
                 <RowTemplate>
                     <MudTd DataLabel="Work"><MudChip T="string" Color="@KindColor(context.Kind)" Size="Size.Small">@KindLabel(context.Kind)</MudChip></MudTd>
@@ -69,7 +72,7 @@
             </MudTable>
         </MudHidden>
         <MudHidden Breakpoint="Breakpoint.MdAndDown" Invert="true">
-            <MudStack Spacing="2" aria-label="Follow-ups and escalations">
+            <MudStack data-ellai-control="@ControlId("cards")" data-bonboarding-anchor="@Anchor("cards")" Spacing="2" aria-label="Follow-ups and escalations">
                 @foreach (var item in MobilePageItems)
                 {
                     var openCaseLabel = $"Open case: {item.Summary}, {KindLabel(item.Kind)}, {StatusLabel(item.Status)}";
@@ -96,6 +99,19 @@
 </section>
 
 @code {
+    public string ComponentId => Describe().ComponentId;
+    public EllaiUiManifest Describe() => EllaiMonitoringUiManifest.Describe(Scope);
+    private string ControlId(string key) => EllaiMonitoringUiManifest.Id(Scope, key);
+    private string Anchor(string key) => EllaiMonitoringUiManifest.Anchor(Scope, key);
+    public EllaiUiState GetState() => new(ComponentId, State == OperationsSurfaceState.Loading, State == OperationsSurfaceState.Error,
+        Describe().Controls.Select(control => new UiControlState(control.ControlId, ControlState(control.ControlId.Split('.').Last()))).ToArray());
+    private UiObservationState ControlState(string key) => key switch
+    {
+        "table" or "cards" => State == OperationsSurfaceState.Populated && FilteredItems.Count > 0 ? UiObservationState.Ready : UiObservationState.Unmounted,
+        "refresh" => OnRetry.HasDelegate ? UiObservationState.Ready : UiObservationState.Unmounted,
+        _ => UiObservationState.Ready,
+    };
+
     private const int MobilePageSize = 10;
     private const string FollowUpFilter = "follow-up";
     private const string EscalationFilter = "escalation";
@@ -111,6 +127,8 @@
     private string _assignment = AllAssignments;
     private string _dueFilter = AllDueDates;
     private int _mobilePage = 1;
+
+    [Parameter] public MonitoringQueueScope Scope { get; set; } = MonitoringQueueScope.Open;
 
     [Parameter] public string Title { get; set; } = "Open work";
     [Parameter] public string Description { get; set; } = "Follow-ups and escalations available to your account.";
