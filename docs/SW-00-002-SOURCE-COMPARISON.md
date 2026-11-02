@@ -17,7 +17,7 @@ The owner identified repository `spec.md`, `implementation.md` and `designs/` as
 | `designs/Surveillance-and-Outbreak-intelligence/` | `requirements.md` |
 | `designs/themes/` | `agentic-ui-agent-contract.md`, `agentic-ui-dark.md`, `agentic-ui-light.md`, `README.md` |
 
-This inventory does not match the checklist's claim that it consolidates 16 source documents. No 16-item manifest or separate original attachment set was located. The comparison is therefore partial, not a claim that 16 unnamed documents were each individually reconciled.
+The owner confirmed that `spec.md`, `implementation.md` and the Markdown files in `designs/` are the intended source set. This supersedes the checklist's historical count of 16; no separate 16-item manifest is required. The comparison remains at authority/conflict level and does not yet establish exhaustive requirement-by-requirement reconciliation.
 
 ## Authority and conflict reconciliation
 
@@ -33,4 +33,4 @@ The repository search scope covered `designs/`, `docs/`, `fixtures/`, `resources
 
 ## Status
 
-SW-00-002 remains partial until the owner confirms whether the 25-file repository source set is the intended complete set or supplies the exact 16-item manifest. SW-00-008 remains blocked/partial until actual recording-consent and asset/source-rights evidence is recorded. No product or rights decision was inferred from file presence.
+SW-00-002 source location is resolved by the owner's clarification. Exhaustive requirement-by-requirement reconciliation remains partial. SW-00-008 remains blocked/partial until actual recording-consent and asset/source-rights evidence is recorded. No product or rights decision was inferred from file presence.
