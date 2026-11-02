@@ -3,8 +3,8 @@ namespace SwiftAid.Contracts.Ellai;
 /// <summary>Production UI descriptors for the public report journey behind
 /// route <c>/report</c> (<c>PublicReportSurface</c> rendering
 /// <c>GuidedReportStepper</c>, plus <c>PublicReportReceipt</c>).
-/// Anchor binding keys reference stable element IDs rendered by those
-/// stepper; the trusted presentation adapter resolves them, the model
+/// Anchor binding keys reference stable Bonboarding anchors rendered by these
+/// components; the trusted presentation adapter resolves them, the model
 /// never receives selectors. Submit stays human-owned (R3) so generated
 /// plans can explain it but only the reporter's ordinary confirmation
 /// performs it. Guest intake needs no capability beyond the <c>report</c>
@@ -147,7 +147,7 @@ public static class EllaiReportUiManifest
             false),
         Describe(
             "report.confirmations",
-            "report-review-title",
+            "report-processing-confirmation",
             "Input",
             UiRiskClass.R2,
             ["submit-report"],
@@ -182,6 +182,10 @@ public static class EllaiReportUiManifest
             "intake-receipt-accepted",
             false),
     ];
+
+    /// <summary>Shared by rendered components and the trusted tour compiler's anchor map.</summary>
+    public static string AnchorFor(string controlId) =>
+        All.Single(control => control.ControlId == controlId).AnchorBindingKey;
 
     public static EllaiUiManifest Definition { get; } = new(
         "report.form", NavigationId, null,
