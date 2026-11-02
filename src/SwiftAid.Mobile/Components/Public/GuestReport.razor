@@ -478,15 +478,21 @@
 
     private async Task SaveDraftAsync(PublicReportSaveRequest request)
     {
+        var sourceDraft = _reportDraft;
+        var sourceSnapshot = DraftSnapshot();
+        var sourceDraftId = _activeDraftId;
         var saved = request.PreviousDraftId is { } previousDraftId
             ? await SubmissionStore.CreateRevisionAsync(previousDraftId, request.Submission)
             : await SubmissionStore.CreateDraftAsync(request.Submission);
 
-        _activeDraftId = saved.ClientSubmissionId;
-        _activeSubmission = request.Submission with { ClientSubmissionId = saved.ClientSubmissionId };
-        _reportDraft = PublicReportDraft.FromSubmission(_activeSubmission);
-        RememberDraftSnapshot();
-        _pageMessage = "Your draft is saved on this device. It has not been sent.";
+        request.ConfirmPersisted(saved.ClientSubmissionId);
+        if (ReferenceEquals(_reportDraft, sourceDraft) && _activeDraftId == sourceDraftId)
+        {
+            _activeDraftId = saved.ClientSubmissionId;
+            _activeSubmission = request.Submission with { ClientSubmissionId = saved.ClientSubmissionId };
+            _savedDraftSnapshot = sourceSnapshot;
+            _pageMessage = "Your draft was saved on this device. Save again to include any newer edits. It has not been sent.";
+        }
         await ReloadSavedReportsAsync();
     }
 

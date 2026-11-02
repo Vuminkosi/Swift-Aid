@@ -706,7 +706,7 @@ The source plan separates two paths: Datasync downloads authorized flat read mod
 | ID | Priority | Requirement |
 |---|---|---|
 | SA-OFF-01 | P0 | Persist drafts, original media and immutable queued commands in device-local storage that survives restart. |
-| SA-OFF-02 | P0 | Distinguish draft, queued, server-accepted, media-pending, synchronized, and needs-review states on the affected item. |
+| SA-OFF-02 | P0 | Distinguish draft, queued, server-accepted, media-pending, synchronized, and needs-review states on the affected item. Draft-save completion belongs to the persisted revision and captured form values; newer edits stay unsaved, and a pending save must not replace edits or transfer its status to another report. |
 | SA-OFF-03 | P0 | Trigger synchronization on resume, manual request, and debounced reconnection; do not promise continuous Android background execution. |
 | SA-OFF-04 | P0 | Refresh identity/scope before normal sync and protected server-origin media playback; network connectivity alone is not proof of server reachability. |
 | SA-OFF-05 | P0 | Use stable command identity for retries. A timeout after commit must not produce a duplicate case, event, task, assistance action or reminder. |

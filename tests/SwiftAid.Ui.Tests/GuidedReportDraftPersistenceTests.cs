@@ -7,7 +7,7 @@ using SwiftAid.UI.Components.Public.GuidedReportStepper;
 
 namespace SwiftAid.Ui.Tests;
 
-public sealed class GuidedReportDraftPersistenceTests
+public sealed partial class GuidedReportDraftPersistenceTests
 {
     [Theory]
     [InlineData(0, true, false)]
@@ -114,6 +114,7 @@ public sealed class GuidedReportDraftPersistenceTests
             request =>
             {
                 savedSubmission = request.Submission;
+                request.ConfirmPersisted(savedId);
                 return Task.CompletedTask;
             });
 

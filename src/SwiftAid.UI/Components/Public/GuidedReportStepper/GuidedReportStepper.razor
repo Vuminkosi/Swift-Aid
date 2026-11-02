@@ -443,6 +443,11 @@
     private string? _submitError;
     private bool _saving;
     private Guid? _savingDraftId;
+    private Guid? _observedDraftId;
+    private PublicReportSaveRequest? _activeSaveRequest;
+    private PublicReportDraft? _savingSnapshot;
+    private PublicReportDraft? _savingSourceSnapshot;
+    private PublicReportDraft? _savingSourceDraft;
     private PendingDraftRefresh? _pendingDraftRefresh;
     private bool _submitting;
     private bool _submitComplete;
@@ -450,7 +455,8 @@
     private ReportSubjectCategory? _subjectCategory;
 
     private sealed record ObservationGroup(string Heading, IReadOnlyList<string> Choices);
-    private sealed record PendingDraftRefresh(Guid? SourceDraftId, PublicReportDraft SavedDraft, int Step);
+    private sealed record PendingDraftRefresh(Guid? SourceDraftId, PublicReportDraft SavedDraft, PublicReportDraft SourceDraft,
+        PublicReportDraft EditableDraft, int Step);
 
     private static readonly ObservationGroup[] HumanObservationGroups =
     [
@@ -633,7 +639,7 @@
     protected override void OnParametersSet()
     {
         ArgumentNullException.ThrowIfNull(Draft);
-        if (ReferenceEquals(Draft, _observedDraft))
+        if (ReferenceEquals(Draft, _observedDraft) && CurrentDraftId == _observedDraftId)
         {
             if (Draft.SubjectScope is not null)
             {
@@ -643,12 +649,16 @@
             return;
         }
 
-        var preserveCurrentStepForSaveRefresh = _saving && IsSaveRefreshIdentity(_savingDraftId, CurrentDraftId);
+        var preserveCurrentStepForSaveRefresh = _saving && _savingSnapshot is not null
+            && (ReferenceEquals(Draft, _savingSourceDraft) || DraftMatches(Draft, _savingSnapshot)
+                || _savingSourceSnapshot is not null && DraftMatches(Draft, _savingSourceSnapshot))
+            && IsSaveRefreshIdentity(_activeSaveRequest?.PersistedDraftId ?? _savingDraftId, CurrentDraftId);
         if (_pendingDraftRefresh is { } pendingRefresh)
         {
             var matchesSavedDraft =
                 IsSaveRefreshIdentity(pendingRefresh.SourceDraftId, CurrentDraftId) &&
-                DraftMatches(Draft, pendingRefresh.SavedDraft);
+                (ReferenceEquals(Draft, pendingRefresh.EditableDraft)
+                    || DraftMatches(Draft, pendingRefresh.SavedDraft) || DraftMatches(Draft, pendingRefresh.SourceDraft));
             if (matchesSavedDraft)
             {
                 _step = pendingRefresh.Step;
@@ -658,23 +668,18 @@
             _pendingDraftRefresh = null;
         }
 
-        if (_editContext is not null)
+        if (!ReferenceEquals(Draft, _observedDraft) || CurrentDraftId != _observedDraftId)
         {
-            if (!ReferenceEquals(Draft, _observedDraft))
-            {
-                _editContext.OnFieldChanged -= HandleFieldChanged;
-            }
-        }
-
-        if (!ReferenceEquals(Draft, _observedDraft))
-        {
+            if (_editContext is not null) _editContext.OnFieldChanged -= HandleFieldChanged;
             _observedDraft = Draft;
+            _observedDraftId = CurrentDraftId;
             _editContext = new EditContext(Draft);
             _messageStore = new ValidationMessageStore(_editContext);
             _editContext.OnFieldChanged += HandleFieldChanged;
             if (!preserveCurrentStepForSaveRefresh)
             {
                 _step = 0;
+                _saveState = DraftSaveState.Unsaved;
             }
             _subjectCategory = GetSubjectCategory(Draft.SubjectScope);
             _stepError = null;
@@ -1257,6 +1262,11 @@
         _savingDraftId = CurrentDraftId;
         _pendingDraftRefresh = null;
         _saveState = DraftSaveState.Saving;
+        var sourceDraft = Draft;
+        _savingSourceDraft = sourceDraft;
+        var sourceSnapshot = Draft.Copy();
+        _savingSourceSnapshot = sourceSnapshot;
+        var savedStep = _step;
         try
         {
             var submission = Draft.ToSubmission(
@@ -1265,26 +1275,42 @@
                 ProcessingPolicyVersion,
                 Countries,
                 CountryCatalogueIsCurrent);
-            await OnSaveDraft.InvokeAsync(new PublicReportSaveRequest(CurrentDraftId, submission));
-            _saveState = DraftSaveState.Saved;
-            _pendingDraftRefresh = new PendingDraftRefresh(
-                _savingDraftId,
-                PublicReportDraft.FromSubmission(submission),
-                _step);
+            _savingSnapshot = PublicReportDraft.FromSubmission(submission);
+            _activeSaveRequest = new PublicReportSaveRequest(CurrentDraftId, submission);
+            await OnSaveDraft.InvokeAsync(_activeSaveRequest);
+            var savedId = _activeSaveRequest.PersistedDraftId ?? _savingDraftId;
+            var sameReport = ReferenceEquals(Draft, sourceDraft) && (CurrentDraftId == _savingDraftId || CurrentDraftId == savedId)
+                || IsSaveRefreshIdentity(savedId, CurrentDraftId) && DraftMatches(Draft, _savingSnapshot);
+            var unchanged = ReferenceEquals(Draft, sourceDraft)
+                ? DraftMatches(Draft, sourceSnapshot) : DraftMatches(Draft, _savingSnapshot);
+            if (sameReport)
+                _pendingDraftRefresh = new PendingDraftRefresh(savedId, _savingSnapshot, sourceSnapshot, sourceDraft, savedStep);
+            if (sameReport && unchanged)
+            {
+                _saveState = DraftSaveState.Saved;
+            }
+            else
+            {
+                _saveState = DraftSaveState.Unsaved;
+            }
         }
         catch
         {
-            _saveState = DraftSaveState.Failed;
+            _saveState = ReferenceEquals(Draft, sourceDraft) ? DraftSaveState.Failed : DraftSaveState.Unsaved;
         }
         finally
         {
             _saving = false;
             _savingDraftId = null;
+            _activeSaveRequest = null;
+            _savingSnapshot = null;
+            _savingSourceSnapshot = null;
+            _savingSourceDraft = null;
         }
     }
 
     private static bool IsSaveRefreshIdentity(Guid? sourceDraftId, Guid? updatedDraftId) =>
-        sourceDraftId == updatedDraftId || sourceDraftId is null && updatedDraftId is not null;
+        sourceDraftId == updatedDraftId;
 
     private static bool DraftMatches(PublicReportDraft actual, PublicReportDraft expected) =>
         actual.SubjectScope == expected.SubjectScope &&

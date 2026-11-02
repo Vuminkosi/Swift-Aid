@@ -7,6 +7,8 @@ namespace SwiftAid.UI.Components.Public;
 /// <summary>Temporary in-memory form values; this type does not represent saved or submitted work.</summary>
 public sealed class PublicReportDraft : IValidatableObject
 {
+    public PublicReportDraft Copy() => (PublicReportDraft)MemberwiseClone();
+
     [Required(ErrorMessage = "Choose whether this concern is about a person or an animal.")]
     public IntakeSubjectScope? SubjectScope { get; set; }
 
@@ -348,4 +350,14 @@ public sealed class PublicReportDraft : IValidatableObject
 
 public sealed record PublicCountryOption(string Code, string Name);
 
-public sealed record PublicReportSaveRequest(Guid? PreviousDraftId, IntakeSubmission Submission);
+public sealed record PublicReportSaveRequest(Guid? PreviousDraftId, IntakeSubmission Submission)
+{
+    // Set by the storage callback only after persistence succeeds, never by Ellai.
+    public Guid? PersistedDraftId { get; private set; }
+
+    public void ConfirmPersisted(Guid draftId)
+    {
+        if (draftId == Guid.Empty) throw new ArgumentException("A persisted draft identity is required.", nameof(draftId));
+        PersistedDraftId = draftId;
+    }
+}

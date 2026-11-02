@@ -4319,3 +4319,11 @@ User explicitly adjusted the frozen speech pace from 0.92 to 0.95 and requested 
 
 - Added an explicit Gateway-to-Kokoro node and connection, native MMS language labels, and accessible diagram description. Replaced development-status copy with community reporting, early-warning intelligence and coordinated follow-through benefits; retained human review and clinical boundaries.
 - PASS: shared UI/TestHost builds; Chromium landing fixture at 1280px light and 390px dark, new connection, pause interaction, SVG label fit and horizontal containment. Fixed aria-pressed serialization found by the browser test. Screenshots retained in .codex/landing-kokoro-1280.png and .codex/landing-kokoro-390.png. Deployed homepage refresh remains pending.
+
+### Guided report draft completion and edit preservation (2 November 2026)
+
+- Local save callbacks now identify the persisted revision through `PublicReportSaveRequest.ConfirmPersisted`. This is application storage evidence, not a server submission receipt or model-generated claim.
+- The shared stepper correlates save completion to report identity and the captured form snapshot. Edits made while storage is pending remain unsaved; another report cannot inherit success/failure. Revision identity updates preserve the current step and validation ownership.
+- Browser and MAUI save handlers retain the editable form rather than replacing it with an older saved snapshot. Mobile dirty-state tracking records the saved snapshot, preserving navigation protection for newer edits.
+- Verification: four original race regressions reproduced before correction; 17 focused `GuidedReportDraftPersistenceTests` now PASS. Browser build PASS. `ellai-report.browser.cjs` PASS at 1280/390 pixels for real shared form validation and redacted semantic observations with synthetic receipt callback. Real durable-save browser journey, Muse tour, Gateway submission and physical-device acceptance remain NOT VERIFIED by this slice.
+- Android embedded-assembly build PASS with zero warnings/errors after the final shared component changes. No device interaction or Gateway recreation performed for this slice; `designs/ellai/ui-tour-nav.md` was updated locally and remains excluded by the existing Git ignore policy.

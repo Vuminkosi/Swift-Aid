@@ -339,15 +339,20 @@ else
         }
 
         _busy = true;
+        var sourceDraft = _draft;
+        var sourceDraftId = _activeDraftId;
         try
         {
             var result = request.PreviousDraftId is { } previous
                 ? await SubmissionStore.CreateRevisionAsync(previous, request.Submission)
                 : await SubmissionStore.CreateDraftAsync(request.Submission);
-            _activeDraftId = result.ClientSubmissionId;
-            _draft = PublicReportDraft.FromSubmission(request.Submission with { ClientSubmissionId = result.ClientSubmissionId });
-            _feedback = "Your draft is saved on this device. It has not been sent.";
-            _feedbackIsError = false;
+            request.ConfirmPersisted(result.ClientSubmissionId);
+            if (ReferenceEquals(_draft, sourceDraft) && _activeDraftId == sourceDraftId)
+            {
+                _activeDraftId = result.ClientSubmissionId;
+                _feedback = "Your draft was saved on this device. Save again to include any newer edits. It has not been sent.";
+                _feedbackIsError = false;
+            }
             await ReloadHistoryAsync();
         }
         catch (Exception)
