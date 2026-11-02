@@ -17,7 +17,7 @@ The owner identified repository `spec.md`, `implementation.md` and `designs/` as
 | `designs/Surveillance-and-Outbreak-intelligence/` | `requirements.md` |
 | `designs/themes/` | `agentic-ui-agent-contract.md`, `agentic-ui-dark.md`, `agentic-ui-light.md`, `README.md` |
 
-The owner confirmed that `spec.md`, `implementation.md` and the Markdown files in `designs/` are the intended source set. This supersedes the checklist's historical count of 16; no separate 16-item manifest is required. The comparison remains at authority/conflict level and does not yet establish exhaustive requirement-by-requirement reconciliation.
+The owner confirmed that `spec.md`, `implementation.md` and the Markdown files in `designs/` are the intended source set. This supersedes the checklist's historical count of 16; no separate 16-item manifest is required. Stable identifiers are now set-matched, but detailed design-local identifiers still need an applicability/canonical crosswalk before semantic reconciliation is exhaustive.
 
 ## Authority and conflict reconciliation
 
@@ -33,4 +33,21 @@ The repository search scope covered `designs/`, `docs/`, `fixtures/`, `resources
 
 ## Status
 
-SW-00-002 source location is resolved by the owner's clarification. Exhaustive requirement-by-requirement reconciliation remains partial. SW-00-008 remains blocked/partial until actual recording-consent and asset/source-rights evidence is recorded. No product or rights decision was inferred from file presence.
+## Requirement and task identifier reconciliation — 2 November 2026
+
+Automated read-only comparison of the current source files and master checklist found:
+
+| Identifier set | Source count | Checklist/crosswalk count | Result |
+|---|---:|---:|---|
+| Stable `SA-*` product requirements across `spec.md`, `implementation.md`, and all 25 design Markdown files | 379 unique | 379 unique in `checklist.md` | Exact set match; no missing or checklist-only IDs. |
+| `AT-*` acceptance scenarios | 86 unique | 86 unique in `checklist.md` | Exact set match. |
+| Implementation task IDs `P*` | 45 implementation headings | 45 rows in `spec.md` §29 | Exact set match; each task row supplies its SA/AT scope. These IDs are not copied verbatim into the master checklist; traceability is through shared SA/AT identifiers. |
+| `SW-*` execution checks | 171 unique in `designs/checklist.md` | 171 unique in root `checklist.md` | Exact set match. |
+
+Root `checklist.md` and `designs/checklist.md` have the same phase count and the same SW, SA and AT identifier sets. Their content differs: the root file carries current execution evidence, statuses, audit links and later clarifications, while the design copy remains the original unchecked source checklist.
+
+Two detailed design sources also define 73 local screen/flow/failure identifiers outside the canonical SA/AT/task namespaces: community sessions (`CM-01..15`, `CD-01..22`, `CW-01..09`) and onboarding (`M-*`/`W-*` screen IDs). These identify screens, flows and failure scenarios, not a separate approved product requirement namespace. They are not individually cross-referenced to SA/AT rows in the root checklist today. Applicability, supersession and canonical coverage still need an explicit crosswalk; SW-00-002 remains partial despite the exact stable-ID set matches. External-library `BB-*` citations and `PUB-*` fragments of canonical `SA-PUB-*` IDs are excluded from this local-design count.
+
+PC-01 through PC-08 remain proposed and RD-01 through RD-04 remain unanswered. NLLB/commercial-use and surveillance gates remain subject to their rights and approval records. No product decision is inferred from source presence.
+
+SW-00-002 source location is resolved. Stable requirement/scenario/task identifiers are set-matched, but detailed design-local crosswalk and exhaustive semantic reconciliation remain open. SW-00-008 remains blocked/partial until actual recording-consent and asset/source-rights evidence is recorded.

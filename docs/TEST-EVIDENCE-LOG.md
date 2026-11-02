@@ -88,3 +88,7 @@ Source inspection recorded in [case detail audit](SW-05-003-CASE-DETAIL-AUDIT.md
 ## EV-057 — SW-00-004 refreshed baseline — 2 November 2026
 
 Post-acknowledgement baseline on `interactive-ellai` at `8b4a07d`: Android-scoped full .NET suite 2,556 passed / 242 skipped / 0 failed; worker Python 59 passed / 3 skipped; guest-storage browser 6 checks passed; synthetic assistance/follow-up Chromium passed at 390px and 1280px; Android Release build 0 warnings/errors; Compose configuration validation passed. Unrestricted solution test still fails on missing local iOS GoogleDataTransport files (MSB3030); Compose restart was not retried and its prior failure remains tracked as BL-009. Detailed commands/results: `docs/BASELINE-AUDIT.md`.
+
+## EV-058 — SW-00-002 source identifier reconciliation — 2 November 2026
+
+Read-only script comparison of the owner-confirmed repository source set and root checklist: 379/379 unique SA IDs and 86/86 AT IDs match; all 45 implementation task headings have matching `spec.md` §29 crosswalk rows; all 171 SW IDs match the source checklist in `designs/checklist.md`. The two detailed design sources define 73 additional local screen/flow/failure IDs (community session and onboarding); semantic applicability and mapping to SA/AT are still open. PC-01..08 remain proposed; RD-01..04 unanswered. No implementation or owner decision inferred. See `docs/SW-00-002-SOURCE-COMPARISON.md`.
