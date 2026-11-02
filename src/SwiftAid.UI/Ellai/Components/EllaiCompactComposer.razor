@@ -101,6 +101,18 @@
                            aria-label="@(IsListeningEnabled ? "Turn off Ellai voice" : "Listen to Ellai")"
                            title="@(IsListeningEnabled ? "Stop reading replies aloud" : "Read this and new replies aloud")" />
             <span>@(IsListeningEnabled ? "Voice on" : "Listen to Ellai")</span>
+            @if (IsListeningEnabled)
+            {
+                <MudIconButton Icon="@(MicrophoneActive ? Icons.Material.Filled.Mic : Icons.Material.Filled.MicOff)"
+                               Color="@(MicrophoneActive ? Color.Primary : Color.Default)" Size="Size.Small"
+                               OnClick="@(MicrophoneActive ? OnStopVoice : OnStartRealtimeVoice)"
+                               Disabled="@(MicrophoneActive ? !OnStopVoice.HasDelegate : !CanUseRealtimeMicrophone || !OnStartRealtimeVoice.HasDelegate)"
+                               data-ellai-microphone-toggle="true" data-ellai-audio-unlock="true"
+                               aria-pressed="@(MicrophoneActive ? "true" : "false")"
+                               aria-label="@(MicrophoneActive ? "Turn off microphone" : "Turn on microphone")"
+                               title="@(MicrophoneActive ? "Stop listening; keep reading replies aloud" : "Start listening for your next question")" />
+                <span>@(MicrophoneActive ? "Mic on" : "Mic off")</span>
+            }
         </div>
     }
     </div>
@@ -108,6 +120,7 @@
 
 @code {
     private const double MoveStep = 24;
+    private bool MicrophoneActive => IsLiveSpeaking || IsRecordingAudio;
 
     private ElementReference _rootElement;
     private IJSObjectReference? _dragModule;

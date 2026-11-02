@@ -1841,6 +1841,24 @@ public sealed partial class EllaiSurfaceLogicTests
         });
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task ComposerOffersIndependentMicrophoneToggleWhenVoiceIsEnabled(bool voiceOn, bool microphoneOn)
+    {
+        var callback = EventCallback.Factory.Create(new object(), () => { });
+        var html = await RenderComposerAsync(isListeningEnabled: voiceOn, isLiveSpeaking: microphoneOn,
+            onStartRealtimeVoice: callback, onStopVoice: callback);
+        Assert.Equal(voiceOn, html.Contains("data-ellai-microphone-toggle", StringComparison.Ordinal));
+        if (voiceOn)
+        {
+            Assert.Contains(microphoneOn ? "Turn off microphone" : "Turn on microphone", html);
+            Assert.Contains(microphoneOn ? "Mic on" : "Mic off", html);
+            Assert.Contains("Turn off Ellai voice", html);
+        }
+    }
+
     private static async Task<string> RenderComposerAsync(
         string? inputText = "test question",
         string? responseText = null,
@@ -1852,7 +1870,8 @@ public sealed partial class EllaiSurfaceLogicTests
         EventCallback onOpenSettings = default,
         bool isLiveSpeaking = true,
         bool isListeningEnabled = false,
-        string? sentMessage = null)
+        string? sentMessage = null,
+        EventCallback onStopVoice = default)
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -1883,6 +1902,7 @@ public sealed partial class EllaiSurfaceLogicTests
                     [nameof(EllaiCompactComposer.IsLiveSpeaking)] = isLiveSpeaking,
                     [nameof(EllaiCompactComposer.OnStartVoice)] = onStartVoice,
                     [nameof(EllaiCompactComposer.OnStartRealtimeVoice)] = onStartRealtimeVoice,
+                    [nameof(EllaiCompactComposer.OnStopVoice)] = onStopVoice,
                     [nameof(EllaiCompactComposer.OnOpenSettings)] = onOpenSettings,
                 }));
 
