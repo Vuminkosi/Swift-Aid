@@ -203,6 +203,21 @@ public sealed class NotificationAuthorizationQueryTests
         Assert.Equal(0, (await fixture.ReadPageAsync().ConfigureAwait(false)).TotalCount);
         Assert.Equal(1, await fixture.CountFollowUpNotificationsAsync(followUpId).ConfigureAwait(false));
     }
+
+    [CaseAuthorityPostgresFact]
+    public async Task Follow_up_reminder_text_is_generic_and_contains_no_case_or_identity_details()
+    {
+        await using var fixture = await NotificationPostgresFixture.CreateAsync().ConfigureAwait(false);
+        var (followUpId, _) = await fixture.AddDueFollowUpAsync().ConfigureAwait(false);
+
+        Assert.Equal(1, await fixture.DispatchDueFollowUpsAsync().ConfigureAwait(false));
+        var notification = Assert.Single((await fixture.ReadPageAsync().ConfigureAwait(false)).Items);
+
+        Assert.Equal("A case needs your attention.", notification.DisplayText);
+        Assert.DoesNotContain(followUpId.ToString("D"), notification.DisplayText, StringComparison.Ordinal);
+        Assert.DoesNotContain(fixture.Authority.ActorId, notification.DisplayText, StringComparison.Ordinal);
+        Assert.DoesNotContain("synthetic follow-up", notification.DisplayText, StringComparison.Ordinal);
+    }
 }
 
 /// <summary>
