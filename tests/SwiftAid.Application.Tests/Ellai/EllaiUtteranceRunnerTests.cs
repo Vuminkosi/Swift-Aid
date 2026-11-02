@@ -9,6 +9,20 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiUtteranceRunnerTests
 {
     [Fact]
+    public async Task StructuredUiProposalSurvivesTheUtteranceBoundary()
+    {
+        var response = DecisionTurn.Replace("\"kind\":\"Answer\"", "\"kind\":\"ProposeUi\"")
+            .Replace("\"uiIntents\":[]", "\"uiIntents\":[{\"kind\":\"StartGuidance\",\"featureId\":\"report\",\"resourceId\":null,\"controlId\":null,\"arguments\":{\"objective\":\"Create a report\"}}]");
+        var (consent, loop) = Services(new ScriptedCompletions(response), grant: true);
+        var outcome = await EllaiUtteranceRunner.RunOneAsync(Work(), new(loop, null, null, consent), 256, default);
+        Assert.True(outcome.Completed);
+        Assert.NotNull(outcome.Decision);
+        var intent = Assert.Single(outcome.Decision.UiIntents);
+        Assert.Equal(UiIntentKind.StartGuidance, intent.Kind);
+        Assert.Equal("report", intent.FeatureId);
+    }
+
+    [Fact]
     public async Task ReasoningReceivesCurrentServerTimeAndSafePageContext()
     {
         var completions = new ScriptedCompletions(DecisionTurn);
@@ -56,6 +70,7 @@ public sealed class EllaiUtteranceRunnerTests
         Assert.False(outcome.Completed);
         Assert.Null(outcome.DisplayText);
         Assert.Equal("TranslationUnavailable", outcome.FailureCode);
+        Assert.Null(outcome.Decision);
         Assert.Single(completions.Threads);
     }
 

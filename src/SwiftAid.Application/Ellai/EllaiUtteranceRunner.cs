@@ -6,7 +6,12 @@ namespace SwiftAid.Application.Ellai;
 /// is false only when the run was refused before any model call; the refusals journal a blocked activity event
 /// so the composer never goes silently dead.</summary>
 public sealed record EllaiUtteranceOutcome(
-    bool Started, bool Completed, string? StopReason, string? DisplayText = null, string? FailureCode = null);
+    bool Started, bool Completed, string? StopReason, string? DisplayText = null, string? FailureCode = null)
+{
+    /// <summary>The structurally validated reasoning result, retained for authorized downstream
+    /// planning. UI proposals are not execution authority and require scope/route validation.</summary>
+    public EllaiDecision? Decision { get; init; }
+}
 
 /// <summary>Dependencies for one background run, resolved per scope by the
 /// hosting worker. Null activity/journal degrades to local-only progress.</summary>
@@ -170,7 +175,10 @@ public static class EllaiUtteranceRunner
             outcome.Completed,
             outcome.StopReason,
             answer,
-            outcome.FailureCode);
+            outcome.FailureCode)
+        {
+            Decision = outcome.Completed ? outcome.Decision : null
+        };
     }
 
     private static EllaiRoleOverlay ForMode(EllaiMode mode) => mode switch
