@@ -99,6 +99,8 @@ public sealed class EllaiGuidanceAdmissionHttpTests
         });
         Delegate handler = (Func<HttpContext, string, EllaiGuidancePlanRequest, IServiceProvider, CancellationToken, Task<IResult>>)EllaiGuidanceProposalEndpoint.PrepareAsync;
         app.MapPost("/sessions/{sessionId}/guidance/plan", handler);
+        Delegate progressHandler = (Func<HttpContext, string, EllaiGuidanceStepRequest, IServiceProvider, CancellationToken, Task<IResult>>)EllaiGuidanceProposalEndpoint.CompleteStepAsync;
+        app.MapPost("/sessions/{sessionId}/guidance/steps/complete", progressHandler);
         await app.StartAsync();
         try
         {
@@ -117,7 +119,29 @@ public sealed class EllaiGuidanceAdmissionHttpTests
             using var foreign = await client.PostAsJsonAsync("/sessions/foreign/guidance/plan", new EllaiGuidancePlanRequest(proposal.ProposalId));
             Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
             Assert.Equal(1, completion.Calls);
-            Assert.NotNull(EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("owned", default))!.GuidanceJson)!.Plan);
+            var checkpoint = EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("owned", default))!.GuidanceJson)!;
+            await observations.RecordAsync(new("owned", "refreshed-view", "refreshed-context", "web", ["report.entry"], DateTimeOffset.UtcNow,
+                [new("report.entry", UiObservationState.Ready)]), default);
+            using var restoredResponse = await client.PostAsJsonAsync("/sessions/owned/guidance/plan", new EllaiGuidancePlanRequest(proposal.ProposalId));
+            var restored = (await restoredResponse.Content.ReadFromJsonAsync<EllaiGuidancePlanDto>())!;
+            Assert.Equal(checkpoint.Plan!.PlanId, restored.Plan!.PlanId);
+            Assert.Equal("entry", restored.CurrentStepId);
+            Assert.Equal(checkpoint.Version + 1, restored.ProgressVersion);
+            Assert.Equal(1, completion.Calls);
+            var stepRequest = new EllaiGuidanceStepRequest(proposal.ProposalId, restored.Plan.PlanId,
+                restored.ProgressVersion, "entry", "refreshed-context");
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                using var progressResponse = await client.PostAsJsonAsync("/sessions/owned/guidance/steps/complete", stepRequest);
+                Assert.Equal(HttpStatusCode.OK, progressResponse.StatusCode);
+                var progress = (await progressResponse.Content.ReadFromJsonAsync<EllaiGuidanceProgressDto>())!;
+                Assert.Equal("Completed", progress.Status);
+                Assert.Equal(restored.ProgressVersion + 1, progress.Version);
+                Assert.Equal("entry", Assert.Single(progress.CompletedStepIds!));
+                Assert.True(progressResponse.Headers.CacheControl?.NoStore);
+            }
+            using var deniedProgress = await client.PostAsJsonAsync("/sessions/foreign/guidance/steps/complete", stepRequest);
+            Assert.Equal(HttpStatusCode.NotFound, deniedProgress.StatusCode);
         }
         finally { await app.StopAsync(); }
     }

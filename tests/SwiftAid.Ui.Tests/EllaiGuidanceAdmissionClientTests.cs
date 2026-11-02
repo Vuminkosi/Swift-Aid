@@ -53,6 +53,28 @@ public sealed class EllaiGuidanceAdmissionClientTests
         Assert.Equal("Generating", result!.Status);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ProgressUsesOwnedRouteAndPreservesVersionFence(bool guest)
+    {
+        using var http = new HttpClient(new Handler(request =>
+        {
+            if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath.EndsWith("/antiforgery", StringComparison.Ordinal))
+                return new(HttpStatusCode.OK) { Content = JsonContent.Create(new { requestToken = "synthetic-token" }) };
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal($"/api/v1/ellai/{(guest ? "guest/" : "")}sessions/session/guidance/steps/complete", request.RequestUri!.AbsolutePath);
+            if (guest) Assert.True(request.Headers.Contains("X-CSRF-TOKEN"));
+            var payload = request.Content!.ReadFromJsonAsync<EllaiGuidanceStepRequest>().GetAwaiter().GetResult();
+            Assert.Equal(new EllaiGuidanceStepRequest("proposal", "plan", 4, "step", "context"), payload);
+            return new(HttpStatusCode.OK) { Content = JsonContent.Create(new EllaiGuidanceProgressDto("Completed", 5, null, ["step"])) };
+        })) { BaseAddress = new Uri("https://localhost/") };
+        var result = await new EllaiReviewHttpClient(http, guest).CompleteGuidanceStepAsync("session",
+            new("proposal", "plan", 4, "step", "context"), default);
+        Assert.Equal("Completed", result!.Status);
+        Assert.Equal(5, result.Version);
+    }
+
     private sealed class Handler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>

@@ -55,7 +55,27 @@ public static class EllaiGuidanceProposalEndpoint
         var checkpoint = EllaiGuidanceCheckpoint.Deserialize(current.GuidanceJson);
         if (generated.Plan is not null && checkpoint?.Plan?.PlanId != generated.Plan.PlanId)
             return new("Stale");
-        return new(generated.Status, generated.Plan, checkpoint?.ContextStamp, checkpoint?.NavigationId);
+        return new(generated.Status, generated.Plan, checkpoint?.ContextStamp, checkpoint?.NavigationId,
+            checkpoint?.Version ?? 0, checkpoint?.CurrentStepId, checkpoint?.CompletedStepIds);
+    }
+
+    public static async Task<IResult> CompleteStepAsync(HttpContext http, string sessionId,
+        EllaiGuidanceStepRequest request, [FromServices] IServiceProvider services, CancellationToken ct)
+    {
+        http.Response.Headers.CacheControl = "no-store, private";
+        var actor = ActorContext.FromValidatedPrincipal(http.User);
+        var result = await CompleteStepOwnedAsync(actor.ActorId, sessionId, request, services, ct).ConfigureAwait(false);
+        return result is null ? Results.NotFound() : Results.Json(result);
+    }
+
+    internal static async Task<EllaiGuidanceProgressDto?> CompleteStepOwnedAsync(string actorId, string sessionId,
+        EllaiGuidanceStepRequest request, IServiceProvider services, CancellationToken ct)
+    {
+        var sessions = services.GetRequiredService<IEllaiSessionStore>();
+        var session = await sessions.GetAsync(sessionId, ct).ConfigureAwait(false);
+        if (session is null || session.OwnerActorId != actorId) return null;
+        return await services.GetRequiredService<EllaiGuidanceProposalAdmission>().CompleteStepAsync(
+            sessionId, request, PublicReportAuthority(actorId, session.ScopeEpoch), ct).ConfigureAwait(false);
     }
 
     private static EllaiUiEntitlements PublicReportAuthority(string actorId, string scopeEpoch) =>

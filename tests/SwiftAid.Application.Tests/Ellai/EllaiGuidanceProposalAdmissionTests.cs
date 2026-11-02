@@ -155,6 +155,69 @@ public sealed class EllaiGuidanceProposalAdmissionTests
         }
     }
 
+    [Fact]
+    public async Task ExplainedStepCommitsOnceAndRestoresFromSessionStorage()
+    {
+        var (service, store, observations, id) = await Fixture();
+        var checkpoint = await SeedProgress(store, observations, id);
+        var authority = new EllaiUiEntitlements("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>());
+        var request = new EllaiGuidanceStepRequest(id, checkpoint.Plan!.PlanId, checkpoint.Version, "step-1", "context");
+        var first = await service.CompleteStepAsync("session", request, authority, default);
+        Assert.Equal("Completed", first.Status);
+        Assert.Equal(2, first.Version);
+        var replay = await service.CompleteStepAsync("session", request, authority, default);
+        Assert.Equal(first.Version, replay.Version);
+        var restored = EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("session", default))!.GuidanceJson)!;
+        Assert.Null(restored.CurrentStepId);
+        Assert.Equal("step-1", Assert.Single(restored.CompletedStepIds));
+        Assert.Equal("Completed", restored.Status);
+    }
+
+    [Theory]
+    [InlineData("other", "context", 1, PlanStepBehavior.Explain, "Denied")]
+    [InlineData("owner", "old-context", 1, PlanStepBehavior.Explain, "Stale")]
+    [InlineData("owner", "context", 9, PlanStepBehavior.Explain, "Conflict")]
+    [InlineData("owner", "context", 1, PlanStepBehavior.GuideHuman, "EvidenceRequired")]
+    public async Task ProgressRejectsForeignStaleAndUnprovenCompletion(string owner, string context, long version,
+        PlanStepBehavior behavior, string expected)
+    {
+        var (service, store, observations, id) = await Fixture();
+        var checkpoint = await SeedProgress(store, observations, id, behavior);
+        var result = await service.CompleteStepAsync("session", new(id, checkpoint.Plan!.PlanId, version, "step-1", context),
+            new(owner, "scope", new HashSet<string> { "report" }, new HashSet<string>()), default);
+        Assert.Equal(expected, result.Status);
+        Assert.Empty(EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("session", default))!.GuidanceJson)!.CompletedStepIds);
+    }
+
+    [Fact]
+    public async Task HiddenTargetCannotCompleteAndNewTurnCannotReplayProgress()
+    {
+        var (service, store, observations, id) = await Fixture();
+        var checkpoint = await SeedProgress(store, observations, id);
+        var request = new EllaiGuidanceStepRequest(id, checkpoint.Plan!.PlanId, 1, "step-1", "context");
+        var authority = new EllaiUiEntitlements("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>());
+        await observations.RecordAsync(new("session", "view", "context", "web", ["report.entry"], DateTimeOffset.UtcNow,
+            [new("report.entry", UiObservationState.Hidden)]), default);
+        Assert.Equal("WaitingForControl", (await service.CompleteStepAsync("session", request, authority, default)).Status);
+        var current = (await store.GetAsync("session", default))!;
+        await store.TryAcceptUtteranceAsync(current with { SessionVersion = current.SessionVersion + 1 },
+            current.SessionVersion, "newer-turn", default, "{}");
+        Assert.Equal("Stale", (await service.CompleteStepAsync("session", request, authority, default)).Status);
+    }
+
+    private static async Task<EllaiGuidanceCheckpoint> SeedProgress(InMemoryEllaiSessionStore store,
+        InMemoryEllaiUiObservationStore observations, string proposalId, PlanStepBehavior behavior = PlanStepBehavior.Explain)
+    {
+        var current = (await store.GetAsync("session", default))!;
+        var checkpoint = EllaiGuidanceCheckpointTests.Sample() with { ProposalId = proposalId, InteractionEpoch = current.InteractionEpoch };
+        checkpoint = checkpoint with { Plan = checkpoint.Plan! with { Steps = [checkpoint.Plan.Steps[0] with { Behavior = behavior }] } };
+        await store.TryUpdateAsync(current with { SessionVersion = current.SessionVersion + 1,
+            GuidanceJson = EllaiGuidanceCheckpoint.Serialize(checkpoint) }, current.SessionVersion, default);
+        await observations.RecordAsync(new("session", "view", "context", "web", ["report.entry"], DateTimeOffset.UtcNow,
+            [new("report.entry", UiObservationState.Ready)]), default);
+        return checkpoint;
+    }
+
     private static async Task<(EllaiGuidanceProposalAdmission Service, InMemoryEllaiSessionStore Store,
         InMemoryEllaiUiObservationStore Observations, string ProposalId)> Fixture()
     {

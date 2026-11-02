@@ -37,9 +37,9 @@ public sealed class EllaiGuidanceProposalAdmission(
         var now = (clock ?? TimeProvider.System).GetUtcNow();
         if (sameContext && previous!.Status == "Generating" && previous.LeaseExpiresAtUtc > now)
             return new("Generating");
-        if (sameContext && previous!.Status is "Cancelled" or "Completed")
+        if (sameProposal && previous!.Status is "Cancelled" or "Completed")
             return new(previous.Status);
-        if (sameContext && previous!.Status is "Ready" or "Paused" && previous.Plan is { } existing)
+        if (sameProposal && previous!.Status is "Ready" or "Paused" && previous.Plan is { } existing)
         {
             var observed = discovery.Observe(admitted.Catalogue,
                 admitted.Observation.MountedControlIds.ToHashSet(StringComparer.Ordinal),
@@ -52,7 +52,20 @@ public sealed class EllaiGuidanceProposalAdmission(
                 admitted.Observation.ContextStamp, now, existing.PlanId);
             if (accepted.Plan is not null && existing.CatalogueVersion == admitted.Catalogue.CatalogueVersion
                 && existing.UiContractVersion == admitted.Catalogue.UiContractVersion)
+            {
+                if (!sameContext)
+                {
+                    var rebound = previous with { ContextStamp = admitted.Observation.ContextStamp, Version = previous.Version + 1 };
+                    var restored = await sessions.TryUpdateAsync(session with
+                    {
+                        SessionVersion = session.SessionVersion + 1,
+                        GuidanceJson = EllaiGuidanceCheckpoint.Serialize(rebound),
+                        UpdatedAtUtc = now,
+                    }, session.SessionVersion, ct).ConfigureAwait(false);
+                    if (restored is null) return new("Conflict");
+                }
                 return new(previous.Status, existing);
+            }
         }
         var attempt = sameProposal ? previous!.GenerationAttempt + 1 : 1;
         if (attempt > EllaiGuidancePlanValidator.MaxReplanDispatches) return new("ReplanLimit");
@@ -144,6 +157,57 @@ public sealed class EllaiGuidanceProposalAdmission(
             authority.Capabilities, observed, admitted.Observation.ViewInstanceId, admitted.Observation.ContextStamp,
             (clock ?? TimeProvider.System).GetUtcNow(), planId);
         return validation.Plan is null ? new("InvalidPlan") : new("Ready", validation.Plan);
+    }
+
+    /// <summary>Commits only evidence-supported progress in the existing session transaction.
+    /// Replay never executes an action; client claims cannot prove edits or intake submission.</summary>
+    public async Task<EllaiGuidanceProgressDto> CompleteStepAsync(string sessionId,
+        EllaiGuidanceStepRequest request, EllaiUiEntitlements authority, CancellationToken ct)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.ProposalId) || request.ProposalId.Length > 512 ||
+            string.IsNullOrWhiteSpace(request.PlanId) || request.PlanId.Length > 120 || request.ExpectedVersion < 1 ||
+            string.IsNullOrWhiteSpace(request.StepId) || request.StepId.Length > 120 ||
+            string.IsNullOrWhiteSpace(request.ContextStamp) || request.ContextStamp.Length > 512)
+            return new("InvalidRequest");
+        var admitted = await AdmitAsync(sessionId, request.ProposalId, authority, ct).ConfigureAwait(false);
+        if (admitted.Status != "Ready" || admitted.Observation is null || admitted.Catalogue is null)
+            return new(admitted.Status);
+        var session = await sessions.GetAsync(sessionId, ct).ConfigureAwait(false);
+        if (session is null || session.Status != "Active" || session.OwnerActorId != authority.OwnerActorId ||
+            session.ScopeEpoch != authority.ScopeEpoch || session.InteractionEpoch != admitted.InteractionEpoch)
+            return new("Stale");
+        var saved = EllaiGuidanceCheckpoint.Deserialize(session.GuidanceJson);
+        if (saved?.Plan is not { } plan || saved.ProposalId != request.ProposalId || plan.PlanId != request.PlanId ||
+            saved.ScopeEpoch != authority.ScopeEpoch || saved.InteractionEpoch != admitted.InteractionEpoch ||
+            saved.ContextStamp != request.ContextStamp || admitted.Observation.ContextStamp != request.ContextStamp ||
+            saved.Status is not ("Ready" or "Paused" or "Completed")) return new("Stale");
+        if (saved.CompletedStepIds.Contains(request.StepId))
+            return new(saved.Status, saved.Version, saved.CurrentStepId, saved.CompletedStepIds);
+        if (saved.Version != request.ExpectedVersion || saved.CurrentStepId != request.StepId || saved.Status != "Ready")
+            return new("Conflict", saved.Version, saved.CurrentStepId, saved.CompletedStepIds);
+        var step = plan.Steps.SingleOrDefault(item => item.StepKey == request.StepId);
+        var descriptor = admitted.Catalogue.Descriptors.SingleOrDefault(item => item.ControlId == step?.ControlId);
+        if (step is null || descriptor is null || step.Behavior != PlanStepBehavior.Explain ||
+            descriptor.HumanConfirmationRequired ||
+            !admitted.Observation.MountedControlIds.Contains(step.ControlId) ||
+            admitted.Observation.ControlStates?.Count(item => item.ControlId == step.ControlId && item.State == UiObservationState.Ready) != 1)
+            return new("EvidenceRequired", saved.Version, saved.CurrentStepId, saved.CompletedStepIds);
+        var index = plan.Steps.ToList().FindIndex(item => item.StepKey == step.StepKey);
+        var nextStep = index + 1 < plan.Steps.Count ? plan.Steps[index + 1].StepKey : null;
+        var next = saved with
+        {
+            Version = saved.Version + 1,
+            CurrentStepId = nextStep,
+            CompletedStepIds = [.. saved.CompletedStepIds, step.StepKey],
+            Status = nextStep is null ? "Completed" : "Ready",
+        };
+        var updated = await sessions.TryUpdateAsync(session with
+        {
+            SessionVersion = session.SessionVersion + 1,
+            GuidanceJson = EllaiGuidanceCheckpoint.Serialize(next),
+            UpdatedAtUtc = (clock ?? TimeProvider.System).GetUtcNow(),
+        }, session.SessionVersion, ct).ConfigureAwait(false);
+        return updated is null ? new("Conflict") : new(next.Status, next.Version, next.CurrentStepId, next.CompletedStepIds);
     }
 
     public async Task<EllaiGuidanceAdmission> AdmitAsync(string sessionId, string proposalId,

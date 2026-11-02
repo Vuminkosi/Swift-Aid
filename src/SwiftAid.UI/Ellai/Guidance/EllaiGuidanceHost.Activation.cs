@@ -88,6 +88,7 @@ public partial class EllaiGuidanceHost
                 _guidanceNotice = "This guidance is not available on the current page.";
                 return;
             }
+            var progressVersion = result.ProgressVersion;
             var definition = new EllaiBonboardingCompiler().Compile(plan, anchors, async (stepId, ct) =>
             {
                 if (!IsCurrent()) return false;
@@ -96,12 +97,18 @@ public partial class EllaiGuidanceHost
                 if (admission?.Status != "Ready") return false;
                 var step = plan.Steps.SingleOrDefault(s => s.StepKey == stepId);
                 // Observation can prove an explanation target exists, never a form edit or submission.
-                return IsCurrent() && step?.Behavior == PlanStepBehavior.Explain &&
-                    _latestGuidanceObservation?.ContextStamp == result.ContextStamp &&
+                if (!IsCurrent() || step?.Behavior != PlanStepBehavior.Explain ||
+                    _latestGuidanceObservation?.ContextStamp != result.ContextStamp ||
                     _latestGuidanceObservation?.ControlStates?.Any(state => state.ControlId == step.ControlId &&
-                        state.State == UiObservationState.Ready) == true;
+                        state.State == UiObservationState.Ready) != true) return false;
+                var progress = await ReviewClient.CompleteGuidanceStepAsync(session.SessionId,
+                    new(proposalId, plan.PlanId, progressVersion, stepId, result.ContextStamp!), ct);
+                if (!IsCurrent() || progress?.Status is not ("Ready" or "Completed") ||
+                    progress.CompletedStepIds?.Contains(stepId) != true) return false;
+                progressVersion = progress.Version;
+                return true;
             });
-            var started = await Bonboarding.StartAsync(definition, new BonboardingStartOptions { Resume = false }, token);
+            var started = await Bonboarding.StartAsync(definition, new BonboardingStartOptions { Resume = false, StartAtStepId = result.CurrentStepId }, token);
             if (!IsCurrent()) await started.CancelAsync(CancellationToken.None);
             else _generatedTour = started;
         }
