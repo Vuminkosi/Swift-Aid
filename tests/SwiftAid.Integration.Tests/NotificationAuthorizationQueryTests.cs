@@ -218,6 +218,24 @@ public sealed class NotificationAuthorizationQueryTests
         Assert.DoesNotContain(fixture.Authority.ActorId, notification.DisplayText, StringComparison.Ordinal);
         Assert.DoesNotContain("synthetic follow-up", notification.DisplayText, StringComparison.Ordinal);
     }
+
+    [CaseAuthorityPostgresFact]
+    public async Task Reassigned_follow_up_suppresses_the_stale_assignee_reminder()
+    {
+        await using var fixture = await NotificationPostgresFixture.CreateAsync().ConfigureAwait(false);
+        var (followUpId, _) = await fixture.AddDueFollowUpAsync().ConfigureAwait(false);
+
+        Assert.Equal(1, await fixture.DispatchDueFollowUpsAsync().ConfigureAwait(false));
+        Assert.Equal(1, (await fixture.ReadPageAsync().ConfigureAwait(false)).TotalCount);
+
+        await fixture.ReassignFollowUpAsync(followUpId, fixture.Authority.NewOwnerActorId).ConfigureAwait(false);
+
+        var page = await fixture.ReadPageAsync().ConfigureAwait(false);
+        Assert.Equal(0, page.TotalCount);
+        Assert.Equal(0, page.UnreadCount);
+        Assert.Empty(page.Items);
+        Assert.Equal(1, await fixture.CountFollowUpNotificationsAsync(followUpId).ConfigureAwait(false));
+    }
 }
 
 /// <summary>
@@ -462,6 +480,15 @@ internal sealed class NotificationPostgresFixture : IAsyncDisposable
             .Select(item => item.Status)
             .SingleAsync()
             .ConfigureAwait(false);
+    }
+
+    public async Task ReassignFollowUpAsync(Guid followUpId, string assigneeActorId)
+    {
+        await using var db = Authority.CreateDbContext();
+        var followUp = await db.ManagedCaseFollowUps.SingleAsync(item => item.FollowUpId == followUpId)
+            .ConfigureAwait(false);
+        followUp.AssigneeActorId = assigneeActorId;
+        await db.SaveChangesAsync().ConfigureAwait(false);
     }
 
     public async Task<bool> MarkReadAsync(Guid notificationId) =>
