@@ -8,6 +8,46 @@ namespace SwiftAid.Application.Tests;
 
 public sealed class AuthorizationPolicyTests
 {
+    [Fact]
+    public async Task Bounded_share_does_not_inherit_broader_operations_or_combine_scopes()
+    {
+        var actor = CreateActor("worker-opaque-1");
+        var allowedActions = new List<CaseOperation> { CaseOperation.ReadCase };
+        var limits = new Dictionary<Guid, IEnumerable<CaseOperation>> { [CaseId] = allowedActions };
+        var group = CreateScopedGrant("bounded", sharedCaseIds: [CaseId],
+            operations: [CaseOperation.ReadCase, CaseOperation.ReadAttachment, CaseOperation.ManageFollowUp],
+            sharedCaseOperations: limits);
+        allowedActions.Add(CaseOperation.ReadAttachment);
+        limits.Clear();
+        var grant = CreateGrant(actor.ActorId, grants: [group]);
+        var policy = CreatePolicy(new TestGrantStore(_ => grant));
+        Assert.True((await policy.AuthorizeAsync(actor, CaseId, CaseOperation.ReadCase, CancellationToken.None)).IsAllowed);
+        Assert.False((await policy.AuthorizeAsync(actor, CaseId, CaseOperation.ReadAttachment, CancellationToken.None)).IsAllowed);
+        Assert.False((await policy.AuthorizeAllAsync(actor, CaseId,
+            [CaseOperation.ReadCase, CaseOperation.ManageFollowUp], CancellationToken.None)).IsAllowed);
+
+        var scope = await new ScopeService(new TestGrantStore(_ => grant), new FixedTimeProvider(Now))
+            .GetAsync(actor, CancellationToken.None);
+        var shared = Assert.Single(scope.Grants, item => item.CaseIds.Contains(CaseId));
+        Assert.Equal([nameof(CaseOperation.ReadCase)], shared.Operations);
+        Assert.False(shared.CanAccessJurisdictionalCases);
+        Assert.DoesNotContain(scope.Grants, item => item.CaseIds.Contains(CaseId) && item.Operations.Contains(nameof(CaseOperation.ReadAttachment)));
+    }
+
+    [Fact]
+    public async Task Empty_share_actions_deny_but_independent_assignment_retains_its_permissions()
+    {
+        var actor = CreateActor("worker-opaque-1");
+        var limits = new Dictionary<Guid, IEnumerable<CaseOperation>> { [CaseId] = [] };
+        foreach (var assigned in new[] { false, true })
+        {
+            var group = CreateScopedGrant("bounded", sharedCaseIds: [CaseId], assignedCaseIds: assigned ? [CaseId] : [],
+                sharedCaseOperations: limits);
+            var policy = CreatePolicy(new TestGrantStore(_ => CreateGrant(actor.ActorId, grants: [group])));
+            Assert.Equal(assigned, (await policy.AuthorizeAsync(actor, CaseId, CaseOperation.ReadCase, CancellationToken.None)).IsAllowed);
+        }
+    }
+
     private static readonly DateTimeOffset Now = new(2026, 10, 26, 12, 0, 0, TimeSpan.Zero);
     private static readonly Guid CaseId = Guid.Parse("d69f2928-f7c5-4c8d-9f15-b9cc8e54e034");
 
@@ -647,7 +687,8 @@ public sealed class AuthorizationPolicyTests
         IEnumerable<string>? regionIds = null,
         IEnumerable<Sector>? sectors = null,
         IEnumerable<string>? sensitivityCodes = null,
-        IEnumerable<CaseOperation>? operations = null) => new(
+        IEnumerable<CaseOperation>? operations = null,
+        IReadOnlyDictionary<Guid, IEnumerable<CaseOperation>>? sharedCaseOperations = null) => new(
         groupId,
         validFromUtc ?? Now.AddDays(-1),
         expiresAtUtc ?? Now.AddHours(1),
@@ -660,7 +701,7 @@ public sealed class AuthorizationPolicyTests
         regionIds ?? ["ZW-MW"],
         sectors ?? [Sector.AnimalHealth],
         sensitivityCodes ?? ["STANDARD"],
-        operations ?? [CaseOperation.ReadCase]);
+        operations ?? [CaseOperation.ReadCase], sharedCaseOperations);
 
     private sealed class TestGrantStore(Func<ActorContext, CurrentAccessGrant?> getGrant) : ICurrentAccessGrantStore
     {

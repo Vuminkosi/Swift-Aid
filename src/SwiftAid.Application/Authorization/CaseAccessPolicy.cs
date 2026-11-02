@@ -206,8 +206,10 @@ public sealed class CaseAccessPolicy : ICaseAccessPolicy
         }
 
         matched++;
-        var explicitlyAssignedOrShared =
-            group.AssignedCaseIds.Contains(resource.CaseId) || group.SharedCaseIds.Contains(resource.CaseId);
+        var shareAllowsOperations = group.SharedCaseIds.Contains(resource.CaseId) &&
+            (!group.SharedCaseOperations.TryGetValue(resource.CaseId, out var sharedOperations) ||
+                operations.All(sharedOperations.Contains));
+        var explicitlyAssignedOrShared = group.AssignedCaseIds.Contains(resource.CaseId) || shareAllowsOperations;
 
         if (explicitlyAssignedOrShared)
         {

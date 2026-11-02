@@ -81,19 +81,7 @@ public sealed class ScopeService : IScopeService
         var validGroups = grant.Grants
             .Where(group => group.ValidFromUtc <= now && now < group.ExpiresAtUtc)
             .OrderBy(group => group.GroupId, StringComparer.Ordinal)
-            .Select(group => new ScopeGrantManifest(
-                group.GroupId,
-                group.ValidFromUtc,
-                group.ExpiresAtUtc < grant.ExpiresAtUtc ? group.ExpiresAtUtc : grant.ExpiresAtUtc,
-                group.OrganizationIds,
-                group.WorkspaceIds,
-                group.AssignedCaseIds.Concat(group.SharedCaseIds),
-                group.CountryCodes,
-                group.RegionIds,
-                group.SensitivityCodes,
-                group.Sectors.Select(sector => sector.ToString()),
-                group.Operations.Select(operation => operation.ToString()),
-                group.CanAccessJurisdictionalCases))
+            .SelectMany(group => ProjectGroup(group, grant.ExpiresAtUtc))
             .ToArray();
 
         if (validGroups.Length == 0)
@@ -104,5 +92,24 @@ public sealed class ScopeService : IScopeService
         }
 
         return new ScopeManifest(validGroups, grant.AccessEpoch, grant.ExpiresAtUtc);
+    }
+
+    private static IEnumerable<ScopeGrantManifest> ProjectGroup(ScopedAccessGrant group, DateTimeOffset topExpiry)
+    {
+        ScopeGrantManifest Create(string id, IEnumerable<Guid> cases, IEnumerable<CaseOperation> operations, bool jurisdiction) => new(
+            id, group.ValidFromUtc, group.ExpiresAtUtc < topExpiry ? group.ExpiresAtUtc : topExpiry,
+            group.OrganizationIds, group.WorkspaceIds, cases, group.CountryCodes, group.RegionIds,
+            group.SensitivityCodes, group.Sectors.Select(sector => sector.ToString()),
+            operations.Select(operation => operation.ToString()), jurisdiction);
+
+        yield return Create(group.GroupId,
+            group.AssignedCaseIds.Concat(group.SharedCaseIds.Where(id => !group.SharedCaseOperations.ContainsKey(id))),
+            group.Operations, group.CanAccessJurisdictionalCases);
+        foreach (var share in group.SharedCaseOperations.OrderBy(pair => pair.Key))
+        {
+            // Separate manifest entries keep a collaborator's case and actions correlated.
+            yield return Create($"{group.GroupId}:share:{share.Key:D}", [share.Key],
+                group.Operations.Intersect(share.Value), false);
+        }
     }
 }

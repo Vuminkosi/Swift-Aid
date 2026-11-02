@@ -22,7 +22,8 @@ public sealed class ScopedAccessGrant
         IEnumerable<string> regionIds,
         IEnumerable<Sector> sectors,
         IEnumerable<string> sensitivityCodes,
-        IEnumerable<CaseOperation> operations)
+        IEnumerable<CaseOperation> operations,
+        IReadOnlyDictionary<Guid, IEnumerable<CaseOperation>>? sharedCaseOperations = null)
     {
         GroupId = RequireIdentifier(groupId, nameof(groupId));
         if (validFromUtc.Offset != TimeSpan.Zero || expiresAtUtc.Offset != TimeSpan.Zero || expiresAtUtc <= validFromUtc)
@@ -42,6 +43,13 @@ public sealed class ScopedAccessGrant
         Sectors = Freeze(sectors, nameof(sectors));
         SensitivityCodes = FreezeIdentifiers(sensitivityCodes, nameof(sensitivityCodes));
         Operations = Freeze(operations, nameof(operations));
+        SharedCaseOperations = (sharedCaseOperations ?? new Dictionary<Guid, IEnumerable<CaseOperation>>())
+            .ToFrozenDictionary(pair => pair.Key, pair => Freeze(pair.Value, nameof(sharedCaseOperations)));
+        if (SharedCaseOperations.Any(pair => !SharedCaseIds.Contains(pair.Key) ||
+            pair.Value.Any(operation => !Enum.IsDefined(operation))))
+        {
+            throw new ArgumentException("Shared action limits must reference an explicit shared case and known operations.", nameof(sharedCaseOperations));
+        }
 
         if (Sectors.Any(sector => !Enum.IsDefined(sector)))
         {
@@ -63,6 +71,9 @@ public sealed class ScopedAccessGrant
     public IReadOnlySet<Guid> AssignedCaseIds { get; }
 
     public IReadOnlySet<Guid> SharedCaseIds { get; }
+
+    /// <summary>Per-case action limits for bounded shares. Absent entries retain legacy share behavior.</summary>
+    public IReadOnlyDictionary<Guid, IReadOnlySet<CaseOperation>> SharedCaseOperations { get; }
 
     public bool CanAccessJurisdictionalCases { get; }
 
