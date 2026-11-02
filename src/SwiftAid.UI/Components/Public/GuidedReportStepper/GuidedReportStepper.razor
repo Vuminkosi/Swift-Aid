@@ -1122,7 +1122,10 @@
         _observationChoiceMessage = null;
         _submitError = null;
         _saveState = DraftSaveState.Unsaved;
-        if (args.FieldIdentifier.FieldName != nameof(PublicReportDraft.ReportReviewConfirmed))
+        // Acknowledging the country or processing terms does not change report evidence.
+        // Preserve review in any checkbox order; actual report edits still invalidate it.
+        if (args.FieldIdentifier.FieldName is not (nameof(PublicReportDraft.ReportReviewConfirmed)
+            or nameof(PublicReportDraft.CountryConfirmed) or nameof(PublicReportDraft.ProcessingConfirmed)))
         {
             Draft.ReportReviewConfirmed = false;
             _messageStore.Clear(new FieldIdentifier(Draft, nameof(PublicReportDraft.ReportReviewConfirmed)));

@@ -4496,3 +4496,10 @@ PASS: 11 WebGuestIntakeServiceTests including fresh/disposed dependencies per su
 Removed the guided report stepper callback-completed banner and unused completion state. Returning normally from a callback is not server acceptance: parent handlers also return after handled failures. PublicReportSurface retains actual parent feedback and server receipts without a contradictory finished message. Shared web/mobile validation is unchanged.
 
 PASS: 20 focused GuidedReportDraftPersistenceTests and EllaiReportAnchorTests; command: dotnet test tests/SwiftAid.Ui.Tests/SwiftAid.Ui.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter "FullyQualifiedName~GuidedReportDraftPersistenceTests|FullyQualifiedName~EllaiReportAnchorTests" --verbosity quiet. Evidence: .codex/ellai-report-outcome-ui-tests.log. Live submission and authenticated draft recovery remain NOT VERIFIED. No migration.
+
+
+### Report confirmation order and metadata bindings (2026-11-02)
+
+Live signed-in Chromium reproduced Send report remaining disabled when the three confirmations were checked in display order. HandleFieldChanged cleared report review on country/processing acknowledgement. These acknowledgements now preserve review; edits to narrative or country still invalidate it. Report.razor now passes actual catalogue/privacy string values rather than literal field names. No policy or server validation bypass.
+
+Regression before fix: 2 failed, 3 passed. After fix: 25 focused UI tests passed (GuidedReportDraftPersistenceTests and EllaiReportAnchorTests). Evidence: .codex/ellai-confirmation-before.log and .codex/ellai-confirmation-after.log. Live retest pending deployment.

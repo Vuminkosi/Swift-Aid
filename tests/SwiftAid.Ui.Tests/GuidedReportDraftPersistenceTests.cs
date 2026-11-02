@@ -10,6 +10,22 @@ namespace SwiftAid.Ui.Tests;
 public sealed partial class GuidedReportDraftPersistenceTests
 {
     [Theory]
+    [InlineData(nameof(PublicReportDraft.CountryConfirmed), true)]
+    [InlineData(nameof(PublicReportDraft.ProcessingConfirmed), true)]
+    [InlineData(nameof(PublicReportDraft.ReportReviewConfirmed), true)]
+    [InlineData(nameof(PublicReportDraft.Narrative), false)]
+    [InlineData(nameof(PublicReportDraft.CountryCode), false)]
+    public void ConfirmationsPreserveReviewButReportEditsRequireAnotherReview(string field, bool remainsReviewed)
+    {
+        var component = CreateStepper(CreateDraft(), _ => Task.CompletedTask);
+        component.Draft.ReportReviewConfirmed = true;
+        typeof(GuidedReportStepper).GetMethod("HandleFieldChanged", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(component, [null, new Microsoft.AspNetCore.Components.Forms.FieldChangedEventArgs(
+                new Microsoft.AspNetCore.Components.Forms.FieldIdentifier(component.Draft, field))]);
+        Assert.Equal(remainsReviewed, component.Draft.ReportReviewConfirmed);
+    }
+
+    [Theory]
     [InlineData(0, true, false)]
     [InlineData(1, true, false)]
     [InlineData(3, true, false)]
