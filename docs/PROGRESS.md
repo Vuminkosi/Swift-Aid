@@ -474,3 +474,7 @@ Source review in [SW-02-004 identity security audit](SW-02-004-IDENTITY-SECURITY
 ## SW-02-005 membership provisioning audit - 2 November 2026
 
 Source audit in [SW-02-005 membership audit](SW-02-005-MEMBERSHIP-PROVISIONING-AUDIT.md) found organization/workspace membership records separate from pending join requests, with validity and expiry fields. Existing seeded service-test sources were reviewed but not run. Creator visibility and full sector/jurisdiction/sensitivity intersection across protected surfaces remain NOT VERIFIED; EV-031.
+
+## SW-02-006 authorization surface audit - 2 November 2026
+
+Source inventory in [SW-02-006 authorization audit](SW-02-006-AUTHORIZATION-SURFACE-AUDIT.md) found a shared case access policy/current-grant stores and resource-specific Gateway authorizers. Full route-to-policy intersection across API, sync, counts, media, search, tools, caches, exports, maps and deep links remains NOT VERIFIED. No tests/security scans run; EV-032.
