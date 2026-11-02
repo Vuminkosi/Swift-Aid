@@ -7,8 +7,10 @@
 <MudPopoverProvider />
 <main>
     <h1>Case tab navigation synthetic fixture</h1>
-    <button disabled="@(!_interactiveReady)" @onclick='() => Select("attachments")'>Select attachments through route</button>
-    <button disabled="@(!_interactiveReady)" @onclick='() => Select("observations")'>Select observations through route</button>
+    @foreach (var tab in new[] { "overview", "history", "follow-ups", "assistance", "discussion", "attachments", "observations" })
+    {
+        <button disabled="@(!_interactiveReady)" @onclick="() => Select(tab)">Select @tab through route</button>
+    }
     <OperationsCaseDetailSurface CaseId="CaseId" OverviewData="_overview" />
 </main>
 
