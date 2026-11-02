@@ -15,6 +15,7 @@
 | SW-00-008 | Blocked / partial | [Rights review](docs/RIGHTS-REVIEW-2026-11-02.md) records model-card restrictions and synthetic-fixture evidence; recording consent and multiple asset/source rights remain unresolved. |
 | SW-00-009 | Passed | [Test evidence log](docs/TEST-EVIDENCE-LOG.md) indexes baseline commands/results and assigns stable blocker IDs; regression coordination and active code-path ownership boundaries are stated. |
 | SW-00-010 | Passed | [Change control](docs/CHANGE-CONTROL.md) records the active canonical branch/worktree and shared-path ownership, no-push, and non-destructive rules; per-path owners still require live handoff confirmation. |
+| SW-01-001 | Passed | [Topology audit](docs/TOPOLOGY-AUDIT.md) maps MAUI, Gateway/web, .NET layers, PostgreSQL/PostGIS, retained services and the optional Python classification-worker profile; runtime health remains separate. |
 | SW-01-004 | In progress | Corrected one Gateway audio endpoint service-binding defect; focused authorization integration suite passes. Broader command/event/audio contract inventory remains. |
 
 ## Usage and release accounting
@@ -47,7 +48,7 @@
 
 **Exit gate:** Evidence for all applicable checks below; blockers and conditional gates explicitly accounted for.
 
-- [ ] **SW-01-001** — Confirm .NET MAUI Blazor Hybrid Android, responsive Blazor/Gateway, .NET domain/application, Python worker and retained service topology.
+- [x] **SW-01-001** — Confirm .NET MAUI Blazor Hybrid Android, responsive Blazor/Gateway, .NET domain/application, Python worker and retained service topology. Evidence: [topology audit](docs/TOPOLOGY-AUDIT.md); source mapping only, service health and runtime journeys remain NOT VERIFIED.
 - [ ] **SW-01-002** — Validate actual PostgreSQL/PostGIS, MinIO/S3, NATS JetStream, Qdrant, Gateway, Muse/provider and worker connections, health/readiness and restart behavior.
 - [ ] **SW-01-003** — Pin compatible SDK/package/model versions, license/digests, container images and lockfiles; do not assume inherited candidate versions are installed.
 - [ ] **SW-01-004** — Map versioned commands, cases, events, outbox, worker jobs, AI tools, audio sessions, UI registry and public projection schemas.
