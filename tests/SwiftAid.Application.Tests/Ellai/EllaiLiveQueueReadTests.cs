@@ -80,6 +80,9 @@ public sealed class EllaiLiveQueueReadTests
         Assert.False(result.Truncated);
         Assert.Contains("v7", result.ResultSummary, StringComparison.Ordinal);
         Assert.Contains("v9", result.ResultSummary, StringComparison.Ordinal);
+        Assert.Contains("country US", result.ResultSummary, StringComparison.Ordinal);
+        Assert.Contains("Owned cases only", result.ResultSummary, StringComparison.Ordinal);
+        Assert.Contains("review status is not supplied", result.ResultSummary, StringComparison.Ordinal);
         Assert.Equal("actor-1", queue.LastActor?.ActorId);
         Assert.Equal(
             new[] { "7", "9" },

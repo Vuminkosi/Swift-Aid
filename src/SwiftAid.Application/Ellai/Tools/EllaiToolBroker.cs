@@ -165,7 +165,7 @@ public sealed class EllaiToolBroker
     /// consent applies only to explicitly consent-scoped processing lanes.</summary>
     private static readonly string[] ToolDescriptions =
     {
-        $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, ref?) — permitted feature or live work queue.",
+        $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, ref?) — permitted feature or owned-case queue; no country/review filter. Workflow is not classification review status.",
         $"{EllaiToolNames.Evidence}(ref, field?) — versioned source items with provenance.",
         $"{EllaiToolNames.Topic}(ref) — session topic candidates with checkpoints.",
         $"{EllaiToolNames.Capabilities}(feature?) — capability readiness, no credentials.",
@@ -566,12 +566,13 @@ public sealed class EllaiToolBroker
 
         var items = result.Items.Take(limit).ToList();
         var lines = items.Select(item =>
-            $"case {item.CaseId:D} · {item.Workflow} · v{item.AggregateVersion} · updated {item.UpdatedAtUtc:O}");
+            $"case {item.CaseId:D} · workflow {item.Workflow}; country {item.CountryCode} · v{item.AggregateVersion} · updated {item.UpdatedAtUtc:O}");
         var evidence = items.Select(item => new EvidenceRef(
             "CaseQueue", item.CaseId.ToString("D"), item.AggregateVersion.ToString(System.Globalization.CultureInfo.InvariantCulture), null,
             item.CaseId.ToString("D"))).ToList();
         return new EllaiToolResult(request.ToolName, true, null, evidence,
-            items.Count == 0 ? "The permitted work queue is empty." : string.Join("\n", lines),
+            "Owned cases only; review status is not supplied. " +
+            (items.Count == 0 ? "The permitted work queue is empty." : string.Join("\n", lines)),
             items.Count, items.Count >= limit, EllaiToolReasonCodes.Ok);
     }
 
