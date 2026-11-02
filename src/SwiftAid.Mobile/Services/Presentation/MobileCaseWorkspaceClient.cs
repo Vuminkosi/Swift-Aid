@@ -127,22 +127,25 @@ public sealed class MobileCaseWorkspaceClient(ICaseQueueClient caseQueueClient) 
             return false;
         if (string.IsNullOrWhiteSpace(query.Search))
             return true;
-        return item.Workflow.Contains(query.Search.Trim(), StringComparison.OrdinalIgnoreCase) ||
+        return CaseReference(item.CaseId).Contains(query.Search.Trim(), StringComparison.OrdinalIgnoreCase) ||
+            item.Workflow.Contains(query.Search.Trim(), StringComparison.OrdinalIgnoreCase) ||
             item.CountryCode.Contains(query.Search.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
     private static CaseWorkspaceRow ToRow(CaseQueueItem item) => new(
         item.CaseId,
-        PublicReference: null,
+        PublicReference: CaseReference(item.CaseId),
         item.Workflow,
         CountryLabel: item.CountryCode,
         ToSector(item.Sector),
         RegionLabel: null,
-        AssigneeLabel: null,
+        AssigneeLabel: "Assigned to you",
         ReportedCategoryLabel: item.Classification,
         item.UpdatedAtUtc,
         item.AggregateVersion,
         [CaseWorkspaceAction.Open]);
+
+    private static string CaseReference(Guid caseId) => "Case " + caseId.ToString("N")[..8];
 
     private static CaseWorkspaceSector ToSector(string? sector) => sector switch
     {

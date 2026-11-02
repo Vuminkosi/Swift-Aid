@@ -7,6 +7,29 @@ namespace SwiftAid.Client.Tests;
 public sealed class MobileCaseWorkspaceTests
 {
     [Theory]
+    [InlineData("Case abcd1234")]
+    [InlineData("  ABCD1234  ")]
+    public async Task DisplayedCaseReferenceCanBeSearchedWithoutExposingOwnerIdentifier(string search)
+    {
+        var target = Row("HumanHealth", "Recorded") with
+        {
+            CaseId = Guid.Parse("abcd1234-0000-0000-0000-000000000001"),
+            AccountableOwnerActorId = "private-owner-identifier"
+        };
+        var other = target with { CaseId = Guid.Parse("ffff1234-0000-0000-0000-000000000002") };
+        var client = new MobileCaseWorkspaceClient(new Queue(CaseQueueAccess.Allowed, [other, target]));
+        var result = await client.ListAsync(new(new PageRequest(), Search: search));
+        Assert.True(result.Succeeded);
+        var row = Assert.Single(result.Value!.Items);
+        Assert.Equal(target.CaseId, row.CaseId);
+        Assert.Equal("Case abcd1234", row.PublicReference);
+        Assert.Equal("Assigned to you", row.AssigneeLabel);
+        Assert.DoesNotContain(target.AccountableOwnerActorId, System.Text.Json.JsonSerializer.Serialize(row));
+        var missing = await client.ListAsync(new(new PageRequest(), Search: "Case 99999999"));
+        Assert.Empty(missing.Value!.Items);
+    }
+
+    [Theory]
     [InlineData(CaseWorkspaceSort.UpdatedNewestFirst)]
     [InlineData(CaseWorkspaceSort.UpdatedOldestFirst)]
     public async Task EqualTimestampsKeepStablePageMembershipAcrossQueueReordering(CaseWorkspaceSort sort)

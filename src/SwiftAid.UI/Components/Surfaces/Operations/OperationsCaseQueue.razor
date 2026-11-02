@@ -200,6 +200,7 @@
                                 <MudIcon Icon="@Icons.Material.Filled.Place" aria-hidden="true" />
                                 @if (item.LocationHref is not null) { <MudLink Href="@item.LocationHref">@item.RegionLabel</MudLink> } else { <MudText Typo="Typo.caption">@LocationLabel(item)</MudText> }
                             </div>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Owner: @(item.AssigneeLabel ?? "Not recorded")</MudText>
                         </div>
                         <p class="operations-case-queue__mobile-observations">@(item.ObservationPreview ?? "Observations unavailable")</p>
                         <div class="operations-case-queue__row-status">
