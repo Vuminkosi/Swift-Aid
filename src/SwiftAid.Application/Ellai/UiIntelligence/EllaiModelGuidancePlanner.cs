@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Schema;
+using System.Text.Json.Serialization.Metadata;
 using SwiftAid.Contracts.Ellai;
 
 namespace SwiftAid.Application.Ellai;
@@ -12,8 +14,11 @@ public sealed class EllaiModelGuidancePlanner(IEllaiTurnCompletionClient complet
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
         Converters = { new JsonStringEnumConverter(allowIntegerValues: false) }
     };
+    private static readonly string PlanSchema = JsonSchemaExporter
+        .GetJsonSchemaAsNode(Json, typeof(EllaiGuidancePlanDraft)).ToJsonString();
 
     public async Task<(EllaiGuidancePlanDraft? Draft, EllaiTurnCompletion Usage, IReadOnlyList<string> Errors)> ComposeAsync(
         string objective, GuidanceMode mode, UiRegistrySnapshot snapshot,
@@ -44,7 +49,8 @@ public sealed class EllaiModelGuidancePlanner(IEllaiTurnCompletionClient complet
                 "Do not include report.submit or ask for another submission; guide receipt review and remaining read-only steps. " +
                 "Do not invent observed state or completion evidence. Never submit, approve, or modify a report. " +
                 "Questions have questionId, text, choiceIds. If context is insufficient, return NeedsInput with no steps. " +
-                "Keep each explanation under 1000 characters. Preserve the requested objective and mode."),
+                "Keep each explanation under 1000 characters. Preserve the requested objective and mode exactly. " +
+                "Return bare JSON, without Markdown fences or an outer wrapper.\n## Required JSON schema\n" + PlanSchema),
             new("user", JsonSerializer.Serialize(new { objective, mode, reportAlreadyReceived, snapshot.CatalogueVersion, snapshot.UiContractVersion,
                 controls = snapshot.Descriptors.Select(d => new { d.ControlId, d.DescriptorVersion, d.ElementKind,
                     d.Semantics, d.ProofPolicyId, d.HumanConfirmationRequired, d.AllowDeferredEnablement, d.AllowedIntentBindings, d.NavigationId, d.GoalTags, d.ProductFactIds, d.ObjectiveId, d.RiskClass, d.SupportedModes, d.PrerequisiteIds, d.SuccessorIds }),

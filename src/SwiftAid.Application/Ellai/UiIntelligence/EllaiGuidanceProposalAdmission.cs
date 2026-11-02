@@ -160,7 +160,9 @@ public sealed partial class EllaiGuidanceProposalAdmission(
             current.Observation?.ContextStamp != admitted.Observation.ContextStamp) return new("Stale");
         if (generated.Draft is null) return new("InvalidPlan")
         {
-            DiagnosticCode = generated.Usage.FinishReason == "length" ? "output-limit" : "model-contract"
+            DiagnosticCode = generated.Usage.FinishReason == "length" ? "output-limit" :
+                generated.Errors.Contains("The model returned an invalid guidance payload.") ? "model-json" :
+                generated.Errors.Contains("The model changed the admitted guidance objective or mode.") ? "model-objective-mode" : "model-draft"
         };
         if (generated.Draft.Status != GuidancePlanStatus.Ready) return new(generated.Draft.Status.ToString());
         if (reportAlreadyReceived && generated.Draft.Steps.Any(step => step.ControlId == "report.submit"))
