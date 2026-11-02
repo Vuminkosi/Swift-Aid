@@ -174,8 +174,8 @@ public sealed class EllaiToolBroker
         $"{EllaiToolNames.Now}() — current server UTC time.",
         $"{EllaiToolNames.DocsSearch}(q, limit?) — approved technical reference search.",
         $"{EllaiToolNames.DocsGet}(section) — one approved section excerpt.",
-        $"{EllaiToolNames.UiCatalogue}(goal?, limit?) — entitled control descriptors.",
-        $"{EllaiToolNames.UiObserve}(controls, view, context?) — live mounted-control facts.",
+        $"{EllaiToolNames.UiCatalogue}(feature?, goal?, limit?) — entitled control descriptors.",
+        $"{EllaiToolNames.UiObserve}(controls, view=current, context?, feature?) — live mounted-control facts.",
         $"{EllaiToolNames.IngestionSchema}() — canonical case CSV fields, capture requirements and authority boundaries; no submission.",
         $"{EllaiToolNames.ValidateObservations}(observations_json) — validate a bounded JSON array of original reported strings; no inference or submission.",
         $"{EllaiToolNames.Locations}(q, country?, limit?) — search the public geographic registry; present matches for user selection, never guess a location.",
@@ -701,6 +701,14 @@ public sealed class EllaiToolBroker
             summary, matches.Count, false, EllaiToolReasonCodes.Ok);
     }
 
+    // Public reporting is available without a workspace grant. A model-provided
+    // feature may narrow this boundary, never expand it to private casework.
+    private static string? ResolveUiFeature(EllaiToolContext context, EllaiToolRequest request)
+    {
+        var permitted = context.FeatureId == "public.product-help" ? EllaiReportUiManifest.FeatureId : context.FeatureId;
+        return !request.Arguments.TryGetValue("feature", out var requested) || requested == permitted ? permitted : null;
+    }
+
     /// <summary>Live <c>ellai_ui_catalogue</c> slice from the registered
     /// semantic registry: only descriptors the session feature is entitled
     /// to, bounded, without resolved URLs/selectors. Entitlement is the
@@ -709,6 +717,9 @@ public sealed class EllaiToolBroker
     /// (fail-closed). An empty registry reads as an authorized empty.</summary>
     private EllaiToolResult ReadUiCatalogue(EllaiToolContext context, EllaiToolRequest request)
     {
+        var feature = ResolveUiFeature(context, request);
+        if (feature is null || request.Arguments.Keys.Any(key => key is not ("feature" or "goal" or "limit")))
+            return Deny(request.ToolName, "The requested UI feature or argument is not available in this scope.", EllaiToolReasonCodes.InvalidArguments);
         if (_uiRegistry is null)
         {
             return Deny(request.ToolName,
@@ -729,8 +740,8 @@ public sealed class EllaiToolBroker
             ? new[] { goal.Trim() }
             : Array.Empty<string>();
         var snapshot = _uiRegistry.GetSnapshot(
-            new UiRegistryQuery(context.FeatureId, goalTags, limit),
-            new HashSet<string>(StringComparer.Ordinal) { context.FeatureId },
+            new UiRegistryQuery(feature, goalTags, limit),
+            new HashSet<string>(StringComparer.Ordinal) { feature },
             new HashSet<string>(StringComparer.Ordinal));
         var items = snapshot.Descriptors.Take(limit).ToList();
         if (items.Count == 0)
@@ -740,7 +751,9 @@ public sealed class EllaiToolBroker
 
         var lines = items.Select(d =>
             $"control {d.ControlId} · {d.ElementKind} · v{d.DescriptorVersion} · risk {d.RiskClass}" +
-            (d.ObjectiveId is null ? string.Empty : $" · objective {d.ObjectiveId}"));
+            (d.ObjectiveId is null ? string.Empty : $" · objective {d.ObjectiveId}") +
+            $"; feature {d.FeatureId}; navigation {d.NavigationId}; purpose {d.Semantics?.Purpose}" +
+            $"; human confirmation {d.HumanConfirmationRequired}");
         var evidence = items.Select(d => new EvidenceRef(
             "UiCatalogue", d.ControlId, d.DescriptorVersion.ToString(
                 System.Globalization.CultureInfo.InvariantCulture), null, d.ControlId)).ToList();
@@ -759,6 +772,9 @@ public sealed class EllaiToolBroker
     private async Task<EllaiToolResult> ReadUiObserveAsync(
         EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
     {
+        var feature = ResolveUiFeature(context, request);
+        if (feature is null || request.Arguments.Keys.Any(key => key is not ("feature" or "controls" or "view" or "context")))
+            return Deny(request.ToolName, "The requested UI feature or argument is not available in this scope.", EllaiToolReasonCodes.InvalidArguments);
         if (_uiRegistry is null || _uiDiscovery is null || _uiObservations is null)
         {
             return Deny(request.ToolName,
@@ -801,13 +817,15 @@ public sealed class EllaiToolBroker
                 "No client UI observation has been reported for this session.", 0, false);
         }
 
+        if (view == "current") view = report.ViewInstanceId;
+
         var goalTags = request.Arguments.TryGetValue("context", out var goalContext)
             && !string.IsNullOrWhiteSpace(goalContext)
             ? goalContext.Split(',').Select(t => t.Trim()).Where(t => t.Length > 0).ToList()
             : new List<string>();
         var snapshot = _uiRegistry.GetSnapshot(
-            new UiRegistryQuery(context.FeatureId, goalTags, MaxItems),
-            new HashSet<string>(StringComparer.Ordinal) { context.FeatureId },
+            new UiRegistryQuery(feature, goalTags, MaxItems),
+            new HashSet<string>(StringComparer.Ordinal) { feature },
             new HashSet<string>(StringComparer.Ordinal));
         var eligible = snapshot.Descriptors.ToDictionary(d => d.ControlId, StringComparer.Ordinal);
         var unknown = requested.Where(id => !eligible.ContainsKey(id)).ToList();

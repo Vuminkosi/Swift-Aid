@@ -55,7 +55,7 @@ public sealed class EllaiUtteranceSubmissionServiceTests
         Assert.NotNull(item);
         var envelope = EllaiUtteranceWorkEnvelope.Deserialize(item!.PayloadJson);
         Assert.Equal(text, envelope.Utterance);
-        Assert.Equal(new[] { EllaiToolNames.ProductFacts, EllaiToolNames.IngestionSchema, EllaiToolNames.ValidateObservations, EllaiToolNames.Locations }.Order(), envelope.AllowedTools!.Order());
+        Assert.Equal(new[] { EllaiToolNames.ProductFacts, EllaiToolNames.IngestionSchema, EllaiToolNames.ValidateObservations, EllaiToolNames.Locations, EllaiToolNames.UiCatalogue, EllaiToolNames.UiObserve }.Order(), envelope.AllowedTools!.Order());
     }
 
     [Fact]
@@ -126,7 +126,7 @@ public sealed class EllaiUtteranceSubmissionServiceTests
             CancellationToken.None);
         Assert.NotNull(item);
         var envelope = EllaiUtteranceWorkEnvelope.Deserialize(item!.PayloadJson);
-        Assert.Equal(new[] { EllaiToolNames.ProductFacts, EllaiToolNames.IngestionSchema, EllaiToolNames.ValidateObservations, EllaiToolNames.Locations }.Order(), envelope.AllowedTools!.Order());
+        Assert.Equal(new[] { EllaiToolNames.ProductFacts, EllaiToolNames.IngestionSchema, EllaiToolNames.ValidateObservations, EllaiToolNames.Locations, EllaiToolNames.UiCatalogue, EllaiToolNames.UiObserve }.Order(), envelope.AllowedTools!.Order());
     }
 
     [Fact]
@@ -154,7 +154,7 @@ public sealed class EllaiUtteranceSubmissionServiceTests
         var envelope = EllaiUtteranceWorkEnvelope.Deserialize(item!.PayloadJson);
         Assert.Equal(originalText, envelope.Utterance);
         Assert.Equal(EllaiConsentPurposes.PublicProductHelp, envelope.ConsentPurpose);
-        Assert.Equal(new[] { EllaiToolNames.ProductFacts, EllaiToolNames.IngestionSchema, EllaiToolNames.ValidateObservations, EllaiToolNames.Locations }.Order(), envelope.AllowedTools!.Order());
+        Assert.Equal(new[] { EllaiToolNames.ProductFacts, EllaiToolNames.IngestionSchema, EllaiToolNames.ValidateObservations, EllaiToolNames.Locations, EllaiToolNames.UiCatalogue, EllaiToolNames.UiObserve }.Order(), envelope.AllowedTools!.Order());
         Assert.Equal(EllaiProcessingClassification.UserProvidedNonSensitive, envelope.DataClassification);
     }
 

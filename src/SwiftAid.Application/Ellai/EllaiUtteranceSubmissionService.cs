@@ -15,7 +15,8 @@ public sealed class EllaiUtteranceSubmissionService(
     private const int MaximumUtteranceLength = 8_000;
     private static readonly IReadOnlySet<string> PublicHelpTools =
         new HashSet<string>(StringComparer.Ordinal)
-        { EllaiToolNames.ProductFacts, EllaiToolNames.IngestionSchema, EllaiToolNames.ValidateObservations, EllaiToolNames.Locations };
+        { EllaiToolNames.ProductFacts, EllaiToolNames.IngestionSchema, EllaiToolNames.ValidateObservations, EllaiToolNames.Locations,
+          EllaiToolNames.UiCatalogue, EllaiToolNames.UiObserve };
 
     public async Task<EllaiUtteranceSubmitResult> SubmitAsync(
         string routeSessionId,

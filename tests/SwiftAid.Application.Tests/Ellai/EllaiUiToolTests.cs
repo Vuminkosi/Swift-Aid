@@ -23,6 +23,48 @@ public sealed class EllaiUiToolTests
         Assert.Contains(expected, result.ResultSummary, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task OrdinaryConversationDiscoversPublicReportButCannotSelectPrivateFeatures()
+    {
+        var registry = SeededRegistry();
+        EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        var broker = GrantedBroker(registry);
+        var context = Context with { FeatureId = "public.product-help", ResourceId = null,
+            ConsentPurpose = EllaiConsentService.PublicProductHelpPurpose,
+            DataClassification = EllaiProcessingClassification.UserProvidedNonSensitive,
+            AllowedTools = new HashSet<string> { EllaiToolNames.UiCatalogue, EllaiToolNames.UiObserve } };
+        var result = await broker.InvokeAsync(context, new(EllaiToolNames.UiCatalogue, Args()), default);
+        Assert.True(result.Allowed);
+        Assert.Contains("report.entry", result.ResultSummary);
+        Assert.Contains("feature report", result.ResultSummary);
+        Assert.Contains("purpose Open the public report form.", result.ResultSummary);
+        Assert.DoesNotContain("cases.queue", result.ResultSummary);
+        Assert.DoesNotContain("guided-report-title", result.ResultSummary);
+        var denied = await broker.InvokeAsync(context, new(EllaiToolNames.UiCatalogue, Args(("feature", "cases"))), default);
+        Assert.False(denied.Allowed);
+    }
+
+    [Theory]
+    [InlineData(0, "Ready")]
+    [InlineData(60, "Stale")]
+    public async Task CurrentViewUsesStoredIdentityWithoutDiscardingFreshnessChecks(int age, string expected)
+    {
+        var registry = SeededRegistry();
+        EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        var observations = new InMemoryEllaiUiObservationStore();
+        await observations.RecordAsync(new("session-1", "actual-view", "context", "web", ["report.entry"],
+            DateTimeOffset.UtcNow.AddSeconds(-age), [new("report.entry", UiObservationState.Ready)]), default);
+        var context = Context with { FeatureId = "public.product-help", ResourceId = null };
+        var result = await GrantedBroker(registry, observations).InvokeAsync(context,
+            new(EllaiToolNames.UiObserve, Args(("controls", "report.entry"), ("view", "current"))), default);
+        Assert.True(result.Allowed);
+        Assert.Contains(expected, result.ResultSummary);
+        Assert.Contains("actual-view", result.ResultSummary);
+        var denied = await GrantedBroker(registry, observations).InvokeAsync(context,
+            new(EllaiToolNames.UiObserve, Args(("controls", "cases.queue"), ("view", "current"))), default);
+        Assert.False(denied.Allowed);
+    }
+
     private static readonly EllaiToolContext Context = new(
         "session-1", "epoch-1", "cases", "case-1", 4, true, "consent/1", EllaiProcessingClassification.SyntheticDemo);
 

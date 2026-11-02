@@ -52,6 +52,36 @@ public sealed class EllaiReasoningLoopTests
          "topicRefs":[],"resumeSuggestion":null,"stopReason":null}}
         """;
 
+    [Fact]
+    public async Task OrdinaryConversationDiscoversReportAndProducesGuidanceProposalThroughExistingLoop()
+    {
+        var registry = new EllaiUiRegistry();
+        EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService(), uiRegistry: registry);
+        var completions = new ScriptedCompletions(
+            """{"tool_calls":[{"id":"discover","name":"ellai_ui_catalogue","args":{"feature":"report","goal":"report-help"}}]}""",
+            """
+            {"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Let me show you the report form.",
+             "spokenText":"Let me show you the report form.","claims":[],"questions":[],
+             "uiIntents":[{"kind":"StartGuidance","featureId":"ellai.guidance","resourceId":null,"controlId":null,
+               "arguments":{"feature":"report","objective":"Open the report form"}}],
+             "planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}
+            """);
+        var loop = new EllaiReasoningLoop(new EllaiCycleRunner(broker), new EllaiPromptBuilder("Policy text.", "v-test"), completions);
+        var context = Context with
+        {
+            FeatureId = "public.product-help", ResourceId = null,
+            ConsentPurpose = EllaiConsentService.PublicProductHelpPurpose,
+            DataClassification = EllaiProcessingClassification.UserProvidedNonSensitive,
+            AllowedTools = new HashSet<string> { EllaiToolNames.UiCatalogue, EllaiToolNames.UiObserve },
+        };
+        var result = await loop.RunAsync(Request(context) with { Utterance = "Show me how to report a concern" }, default);
+        Assert.True(result.Completed);
+        Assert.Equal(UiIntentKind.StartGuidance, Assert.Single(result.Decision!.UiIntents).Kind);
+        Assert.Contains(completions.Threads[1], message => message.Role == "tool" && message.Content.Contains("report.entry"));
+        Assert.Contains("resourceId=null, controlId=null", completions.Threads[0][0].Content);
+    }
+
     [Theory]
     [InlineData("typed", "typed message")]
     [InlineData("live-voice", "Live Speak")]

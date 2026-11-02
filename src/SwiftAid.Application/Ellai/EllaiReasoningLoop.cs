@@ -143,6 +143,16 @@ public sealed class EllaiReasoningLoop(
             "\nThe schema describes data shape, not permission. Claims must cite exact evidence objects returned by permitted tools. " +
             "Do not invent evidence references, UI bindings or action authority. Use empty arrays/null for nonapplicable fields." +
             "\n## Tool catalogue\n" + EllaiToolBroker.DescribeCatalogue(request.Context.AllowedTools);
+        if (request.Context.AllowedTools is null || request.Context.AllowedTools.Contains(EllaiToolNames.UiCatalogue))
+        {
+            system += "\n## Interactive guidance\nFor requests to show, explain, or guide through application controls, " +
+                "discover the relevant feature using ellai_ui_catalogue before proposing guidance. " +
+                "Use ellai_ui_observe with view=current to inspect the latest client-reported state; unavailable controls are not proof of unavailable routes. " +
+                "For a discovered supported feature, propose a StartGuidance UI intent with featureId=ellai.guidance, " +
+                "resourceId=null, controlId=null and arguments containing only feature (the discovered feature ID) and objective (the user's goal). " +
+                "The application validates and prepares the plan. Do not invent routes, anchors, completed actions or say the tour has started before application confirmation. " +
+                "If discovery returns no eligible feature, explain the limitation without pretending to navigate.";
+        }
         var thread = new List<EllaiChatMessage>(request.Conversation ?? []);
         thread.Add(new("user", request.Utterance));
         var provisionalAnswerRejected = false;
