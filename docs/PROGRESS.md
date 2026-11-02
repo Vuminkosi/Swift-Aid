@@ -506,3 +506,7 @@ Source audit in [SW-03-003 picker audit](SW-03-003-LOCATION-PICKER-AUDIT.md) fou
 ## SW-03-004 location fallback audit - 2 November 2026
 
 Source audit in [SW-03-004 fallback audit](SW-03-004-LOCATION-FALLBACK-AUDIT.md) found a generic country/region-or-province/locality cascade and manual provisional callback in the report wizard. Country-specific hierarchy behavior and authorized registry verification workflow were not established; offline/unknown scenarios remain unverified. No tests run; EV-039.
+
+## SW-03-005/006 coordinate semantics and GPS audit - 2 November 2026
+
+LocationContext distinguishes reporter/device/geocoder and exact/approximate/unknown. However the catalogue does not identify coordinate kind (place reference vs verified occurrence point), so SW-03-005 is partial. SW-03-006 passes at source level: manual/unknown report mappings keep coordinates null, validator rejects invalid device/exact coordinate claims, and no Mobile/UI/client geolocation permission API was found. Device behavior NOT VERIFIED; EV-040.
