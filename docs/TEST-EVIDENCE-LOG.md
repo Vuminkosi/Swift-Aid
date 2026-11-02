@@ -42,6 +42,7 @@ The master orchestrator owns checklist status, evidence linking and regression c
 | EV-030 | Read-only SW-02-004 identity security source audit | PARTIAL: OpenIddict PKCE requirement, provider/issuer/subject mapping, Duende OIDC client, MAUI SecureStorage and callback URI checks found; real callback and device storage NOT VERIFIED. | SW-02-004, [identity security audit](SW-02-004-IDENTITY-SECURITY-AUDIT.md) |
 | EV-031 | Read-only SW-02-005 membership/provisioning audit | PARTIAL: organization/workspace membership and pending request states are distinct; service test sources exist; full jurisdiction/sector/sensitivity enforcement and end-to-end provisioning NOT VERIFIED. No tests run. | SW-02-005, [membership audit](SW-02-005-MEMBERSHIP-PROVISIONING-AUDIT.md) |
 | EV-032 | Read-only SW-02-006 authorization surface audit | PARTIAL: shared case policy/current-grant stores and specialized route authorizers found; complete cross-surface route/scope matrix and tenant-isolation proof NOT VERIFIED. No tests run. | SW-02-006, [authorization audit](SW-02-006-AUTHORIZATION-SURFACE-AUDIT.md) |
+| EV-033 | Read-only SW-02-007 creator-scope test review | PARTIAL: PostgreSQL-gated creator backfill/workspace isolation test source exists; no fresh disposable DB run and no full cross-surface escalation test. | SW-02-007, [creator scope audit](SW-02-007-CREATOR-SCOPE-AUDIT.md) |
 
 ## Active regression and blocker ownership
 

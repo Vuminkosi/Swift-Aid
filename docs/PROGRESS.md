@@ -478,3 +478,7 @@ Source audit in [SW-02-005 membership audit](SW-02-005-MEMBERSHIP-PROVISIONING-A
 ## SW-02-006 authorization surface audit - 2 November 2026
 
 Source inventory in [SW-02-006 authorization audit](SW-02-006-AUTHORIZATION-SURFACE-AUDIT.md) found a shared case access policy/current-grant stores and resource-specific Gateway authorizers. Full route-to-policy intersection across API, sync, counts, media, search, tools, caches, exports, maps and deep links remains NOT VERIFIED. No tests/security scans run; EV-032.
+
+## SW-02-007 creator scope audit - 2 November 2026
+
+Source/test review in [SW-02-007 creator scope audit](SW-02-007-CREATOR-SCOPE-AUDIT.md) found creator-access backfill and PostgreSQL-gated workspace membership/destination isolation assertions. No fresh disposable database run or complete cross-surface escalation test was performed; EV-033. No membership/database changes.
