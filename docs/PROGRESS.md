@@ -438,3 +438,7 @@ Read-only inventory in [durability audit](SW-01-006-DURABILITY-AUDIT.md) found s
 ## SW-01-007 status separation audit - 2 November 2026
 
 Source map in [SW-01-007 status audit](SW-01-007-STATUS-SEPARATION.md) distinguishes local transport/outbox, command acceptance, projection freshness, media upload, AI processing and notification delivery states. Contract/state examples exist, but full UI/API transition mapping and browser/device journeys are NOT VERIFIED. No tests run; EV-022.
+
+## SW-01-008 recovery coverage audit - 2 November 2026
+
+Existing-test inventory in [SW-01-008 recovery audit](SW-01-008-RECOVERY-COVERAGE.md) found selected case replay/event ordering/job schema/outbox test sources and a live NATS redelivery scenario. No tests were run for this inventory. The Gateway Compose restart failed under BL-009; lane-wide fault matrix and live recovery remain NOT VERIFIED. Evidence EV-023.

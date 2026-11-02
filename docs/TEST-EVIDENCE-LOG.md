@@ -32,6 +32,7 @@ The master orchestrator owns checklist status, evidence linking and regression c
 | EV-020 | Read-only source/configuration trace for SW-01-005 | PARTIAL: Gateway case command path and restricted-role SQL scripts found; Compose reuses DB variables for Gateway/migration runner; classification worker has explicit NATS credentials and no explicit DB/Qdrant settings. Effective runtime credentials/grants and optional env file NOT VERIFIED. | SW-01-005, [write-path audit](SW-01-005-AUTHORITATIVE-WRITES.md) |
 | EV-021 | Read-only source trace for SW-01-006 | PARTIAL: managed case command receipts/version checks, purpose-specific outboxes and worker leases exist; universal durable inbox, ACK ordering, dead-letter and reconciliation evidence NOT VERIFIED. No tests run for this audit. | SW-01-006, [durability audit](SW-01-006-DURABILITY-AUDIT.md) |
 | EV-022 | Read-only source trace for SW-01-007 | PARTIAL: separate outbox, command receipt, projection, media, AI and notification states mapped; complete UI/API transition semantics and browser/device journeys NOT VERIFIED. | SW-01-007, [status audit](SW-01-007-STATUS-SEPARATION.md) |
+| EV-023 | Read-only existing-test inventory for SW-01-008 | PARTIAL: selected command replay, event ordering, job schema and outbox/restart test sources exist; no tests run for this inventory, no general live broker recovery proven; Gateway Compose restart failure remains BL-009. | SW-01-008, [recovery coverage audit](SW-01-008-RECOVERY-COVERAGE.md) |
 
 ## Active regression and blocker ownership
 
