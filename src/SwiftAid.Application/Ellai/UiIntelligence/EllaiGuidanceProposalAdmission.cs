@@ -170,8 +170,15 @@ public sealed partial class EllaiGuidanceProposalAdmission(
         var feature = admitted.Catalogue.Descriptors[0].FeatureId;
         var planId = "plan-" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
             System.Text.Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(new[] { sessionId, proposalId, admitted.Observation.ContextStamp })))).ToLowerInvariant();
+        // Inference may outlive the observation freshness window. Re-admission above
+        // fences page/context changes; validate against its newly received state,
+        // never retimestamp the snapshot used to prompt the model.
+        var currentObserved = discovery.Observe(current.Catalogue!,
+            current.Observation!.MountedControlIds.ToHashSet(StringComparer.Ordinal),
+            current.Observation.ViewInstanceId, current.Observation.ContextStamp,
+            current.Observation.Platform, current.Observation.ReceivedAtUtc, current.Observation.ControlStates);
         var validation = validator.ValidateObserved(generated.Draft, new(feature, [], 20), authority.Features,
-            authority.Capabilities, observed, admitted.Observation.ViewInstanceId, admitted.Observation.ContextStamp,
+            authority.Capabilities, currentObserved, current.Observation.ViewInstanceId, current.Observation.ContextStamp,
             (clock ?? TimeProvider.System).GetUtcNow(), planId);
         return validation.Plan is null ? new("InvalidPlan")
         {

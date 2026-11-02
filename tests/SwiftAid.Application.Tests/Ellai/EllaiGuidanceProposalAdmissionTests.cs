@@ -213,6 +213,39 @@ public sealed class EllaiGuidanceProposalAdmissionTests
     }
 
     [Theory]
+    [InlineData("refresh", "Ready")]
+    [InlineData("none", "Stale")]
+    [InlineData("changed", "Stale")]
+    [InlineData("disabled", "Stale")]
+    public async Task SlowPlanningUsesFreshUnchangedObservationWithoutRevivingStaleTargets(string update, string expected)
+    {
+        var (_, store, observations, id) = await Fixture();
+        var clock = new PlanningClock(DateTimeOffset.UtcNow);
+        var registry = new EllaiUiRegistry();
+        EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        var service = new EllaiGuidanceProposalAdmission(store, store, registry, observations, clock);
+        await observations.RecordAsync(new("session", "view", "context", "web", ["report.entry"], clock.Now,
+            [new("report.entry", UiObservationState.Ready)]), default);
+        var planner = new EllaiModelGuidancePlanner(new PlannerCompletion(async () =>
+        {
+            clock.Now = clock.Now.AddMinutes(1);
+            if (update != "none")
+                await observations.RecordAsync(new("session", "view", update == "changed" ? "new-context" : "context", "web",
+                    ["report.entry"], clock.Now, [new("report.entry", update == "disabled" ? UiObservationState.Disabled : UiObservationState.Ready)]), default);
+        }));
+        var result = await service.PlanAsync("session", id,
+            new("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>()), planner,
+            new EllaiUiDiscoveryService(), new EllaiGuidancePlanValidator(registry), new EllaiUsageLedger(), new InMemoryEllaiUsageStore(), default);
+        Assert.Equal(expected, result.Status);
+    }
+
+    private sealed class PlanningClock(DateTimeOffset now) : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = now;
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task ReplanningPreservesVerifiedReceiptBindingForTheSameProposal(bool providerFails)
