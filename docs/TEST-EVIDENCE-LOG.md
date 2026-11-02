@@ -54,6 +54,7 @@ The master orchestrator owns checklist status, evidence linking and regression c
 | EV-042 | Read-only SW-03-008 geographic test-matrix review | PARTIAL: 7/7 focused in-memory registry tests already passed under EV-037; no dedicated alternate-spelling, offline/unknown draft, hierarchy-change or cross-scope authorization test found in reviewed files. | SW-03-008, [edge-test audit](SW-03-008-GEOGRAPHIC-EDGE-TEST-AUDIT.md) |
 | EV-043 | Read-only SW-04-001 report wizard source audit | PASS at source level: Gateway and Mobile share the public report surface/stepper; staff managed registration remains a separate authorized path. No runtime journey run. | SW-04-001, [wizard audit](SW-04-001-REPORT-WIZARD-AUDIT.md) |
 | EV-044 | Read-only SW-04-002 offline report source audit | PARTIAL: encrypted local guest store and separate authorized staff command outbox found; local-only Mobile transport and no fresh-install Android report/reconnect evidence. No device test run. | SW-04-002, [offline report audit](SW-04-002-OFFLINE-REPORT-AUDIT.md) |
+| EV-045 | Read-only SW-04-003/004 report schema audit | PARTIAL: narrative/observations/audio references and unknown/time fields exist; guest schema does not show structured species/count source/precision fields. No tests run. | SW-04-003/004, [report schema audit](SW-04-003-004-REPORT-SCHEMA-AUDIT.md) |
 
 ## Active regression and blocker ownership
 

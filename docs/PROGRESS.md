@@ -526,3 +526,7 @@ Source review in [SW-04-001 wizard audit](SW-04-001-REPORT-WIZARD-AUDIT.md) conf
 ## SW-04-002 offline report source audit - 2 November 2026
 
 Source audit in [SW-04-002 offline report audit](SW-04-002-OFFLINE-REPORT-AUDIT.md) found encrypted local guest submission/audio storage and a separate authorized staff command outbox. Mobile guest transport remains local-only; previous Android fresh-install evidence covered welcome only, not offline report/reboot/reconnect acceptance. No device test run; EV-044.
+
+## SW-04-003/004 report capture/schema audit - 2 November 2026
+
+Source audit in [SW-04-003/004 schema audit](SW-04-003-004-REPORT-SCHEMA-AUDIT.md) found optional narrative/observations/original-audio references, separate captured/occurrence times and unknown presence semantics. Guest contract distinguishes human/individual/herd/flock/group, but structured species/count source/precision fields were not found. Mobile audio remains local-only; no tests run. EV-045.
