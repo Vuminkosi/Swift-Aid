@@ -254,7 +254,7 @@ public partial class EllaiGuidanceHost
                 _guidanceNotice = "Guidance is not ready yet. Try again when the page has loaded.";
                 return;
             }
-            var anchors = EllaiReportUiManifest.All.Concat(EllaiNavigationManifest.Controls).Concat(EllaiDashboardUiManifest.Controls).Concat(EllaiCaseListUiManifest.Controls)
+            var anchors = EllaiReportUiManifest.All.Concat(EllaiNavigationManifest.Controls).Concat(EllaiDashboardUiManifest.Controls).Concat(EllaiCaseListUiManifest.Controls).Concat(EllaiCaseDetailUiManifest.Controls)
                 .ToDictionary(c => c.ControlId, c => c.AnchorBindingKey);
             if (plan.Steps.Any(step => step.ControlId is null || !anchors.ContainsKey(step.ControlId)))
             {

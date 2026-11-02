@@ -1,3 +1,6 @@
+@using SwiftAid.Contracts.Ellai
+@implements IEllaiUiContextProvider
+<SwiftAid.UI.Ellai.Guidance.EllaiSemanticContext Provider="this" />
 @using SwiftAid.Contracts.Cases
 @using SwiftAid.UI.Components.Cases
 @using SwiftAid.UI.Components.Surfaces.Operations
@@ -12,14 +15,14 @@
         @if (OverviewData?.Summary is { } summary)
         {
             <div class="case-detail__title-row">
-                <MudText id="case-detail-title" Typo="Typo.h5" HtmlTag="h1">Case #@summary.PublicReference</MudText>
+                <MudText id="case-detail-title" data-ellai-control="case-detail.heading" data-bonboarding-anchor="ellai-case-detail-heading" Typo="Typo.h5" HtmlTag="h1">Case #@summary.PublicReference</MudText>
                 <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">@WorkflowDisplayLabel(summary.Workflow)</MudChip>
             </div>
             <MudText Typo="Typo.body2" Color="Color.Secondary">@summary.ClassificationLabel · @(LocationLabelOverride ?? summary.LocationLabel)</MudText>
         }
         else
         {
-            <MudText id="case-detail-title" Typo="Typo.h5" HtmlTag="h1">Case details</MudText>
+            <MudText id="case-detail-title" data-ellai-control="case-detail.heading" data-bonboarding-anchor="ellai-case-detail-heading" Typo="Typo.h5" HtmlTag="h1">Case details</MudText>
         }
         <nav class="case-detail__quick-actions" aria-label="Case quick actions">
             <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.Event" OnClick="@(() => SelectTab(2))">Add follow-up</MudButton>
@@ -28,13 +31,13 @@
         </nav>
     </header>
 
-    <MudTabs @ref="_tabs" @bind-ActivePanelIndex="_activePanelIndex" @bind-ActivePanelIndex:after="SyncActiveTabToUriAsync" Rounded="false" ApplyEffectsToContainer="false" Class="case-detail__tabs">
-        <MudTabPanel Text="Overview" Icon="@Icons.Material.Outlined.FolderOpen">
+    <MudTabs data-ellai-control="case-detail.tabs" data-bonboarding-anchor="ellai-case-detail-tabs" @ref="_tabs" @bind-ActivePanelIndex="_activePanelIndex" @bind-ActivePanelIndex:after="SyncActiveTabToUriAsync" Rounded="false" ApplyEffectsToContainer="false" Class="case-detail__tabs">
+        <MudTabPanel Text="Overview" data-ellai-control="case-detail.overview" data-bonboarding-anchor="ellai-case-detail-overview" Icon="@Icons.Material.Outlined.FolderOpen">
             @ReportContent
             @if (OverviewData is { State: CaseDetailPanelState.Populated, Summary: { } overview })
             {
                 <section class="case-detail__section" aria-labelledby="summary-heading">
-                    <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="summary-heading">Case summary</MudText>
+                    <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="summary-heading" data-ellai-control="case-detail.summary" data-bonboarding-anchor="ellai-case-detail-summary">Case summary</MudText>
                     <p>@overview.Summary</p>
                     <dl class="case-detail__facts">
                         <div><dt>Type</dt><dd>@SubjectTypeLabel(overview.SubjectType)</dd></div>
@@ -131,20 +134,20 @@
                 </div>
             </section>
         </MudTabPanel>
-        <MudTabPanel Text="History" Icon="@Icons.Material.Outlined.History">
+        <MudTabPanel Text="History" data-ellai-control="case-detail.history" data-bonboarding-anchor="ellai-case-detail-history" Icon="@Icons.Material.Outlined.History">
             @if (TimelineClient is not null && CaseId != Guid.Empty)
             {
                 <CaseTimelineView @ref="_timelineView" Client="TimelineClient" CaseId="CaseId" />
             }
             else { <CaseDetailUnavailable Title="History unavailable" Description="Case history is not available here." /> }
         </MudTabPanel>
-        <MudTabPanel Text="Follow-ups" Icon="@Icons.Material.Outlined.EventNote">
+        <MudTabPanel Text="Follow-ups" data-ellai-control="case-detail.follow-ups" data-bonboarding-anchor="ellai-case-detail-follow-ups" Icon="@Icons.Material.Outlined.EventNote">
             <OperationsWorkManagementSurface Title="Follow-ups" Description="Schedule visits, manage deadlines, and record completion outcomes." State="WorkState" Items="FollowUpItems" IsBusy="WorkIsBusy" StatusMessage="@WorkStatusMessage" StatusIsError="WorkStatusIsError" OnAction="HandleWorkActionAsync" OnRetry="OnWorkRetry" />
         </MudTabPanel>
-        <MudTabPanel Text="Assistance" Icon="@Icons.Material.Outlined.VolunteerActivism">
+        <MudTabPanel Text="Assistance" data-ellai-control="case-detail.assistance" data-bonboarding-anchor="ellai-case-detail-assistance" Icon="@Icons.Material.Outlined.VolunteerActivism">
             <OperationsWorkManagementSurface Title="Assistance" Description="Track referrals, resource requests, and receipt confirmation." State="WorkState" Items="AssistanceItems" IsBusy="WorkIsBusy" StatusMessage="@WorkStatusMessage" StatusIsError="WorkStatusIsError" OnAction="HandleWorkActionAsync" OnRetry="OnWorkRetry" />
         </MudTabPanel>
-        <MudTabPanel Text="Discussion" Icon="@Icons.Material.Outlined.Forum">
+        <MudTabPanel Text="Discussion" data-ellai-control="case-detail.discussion" data-bonboarding-anchor="ellai-case-detail-discussion" Icon="@Icons.Material.Outlined.Forum">
             <section class="case-detail__section" aria-label="Internal case discussion">
                 @if (DiscussionData is { State: CaseDetailPanelState.Populated } discussion)
                 {
@@ -188,7 +191,7 @@
                 else { <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.AddComment" Color="Color.Primary" OnClick="ShowDiscussionForm">Add internal note</MudButton> }
             </section>
         </MudTabPanel>
-        <MudTabPanel Text="Attachments" Icon="@Icons.Material.Outlined.AttachFile">
+        <MudTabPanel Text="Attachments" data-ellai-control="case-detail.attachments" data-bonboarding-anchor="ellai-case-detail-attachments" Icon="@Icons.Material.Outlined.AttachFile">
             <section class="case-detail__section" aria-labelledby="attachments-heading">
                 <div class="case-detail__section-heading"><MudText Typo="Typo.subtitle1" HtmlTag="h2" id="attachments-heading">Case attachments</MudText><label class="case-detail__upload-label">Upload<InputFile OnChange="UploadEvidenceAsync" accept=".jpg,.jpeg,.png,.pdf,.txt" /></label></div>
                 @if (EvidenceData is { State: CaseDetailPanelState.Populated } evidence)
@@ -205,7 +208,7 @@
                 @if (!string.IsNullOrWhiteSpace(_uploadMessage)) { <MudAlert Severity="@(_uploadFailed ? Severity.Error : Severity.Info)" Variant="Variant.Text" role="status">@_uploadMessage</MudAlert> }
             </section>
         </MudTabPanel>
-        <MudTabPanel Text="Observations" Icon="@Icons.Material.Outlined.Visibility">
+        <MudTabPanel Text="Observations" data-ellai-control="case-detail.observations" data-bonboarding-anchor="ellai-case-detail-observations" Icon="@Icons.Material.Outlined.Visibility">
             <section class="case-detail__section" aria-label="Case observations">
                 @ReportContent
                 <div class="case-detail__section-heading"><MudText Typo="Typo.subtitle1" HtmlTag="h2">Recorded observations</MudText><MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.Add" Color="Color.Primary" OnClick="OpenObservation">Add observation</MudButton></div>
@@ -235,6 +238,27 @@
 </section>
 
 @code {
+    public string ComponentId => EllaiCaseDetailUiManifest.Definition.ComponentId;
+    public EllaiUiManifest Describe() => EllaiCaseDetailUiManifest.Definition;
+    public EllaiUiState GetState() => new(ComponentId, OverviewData?.State == CaseDetailPanelState.Loading,
+        OverviewData?.State == CaseDetailPanelState.Error,
+        EllaiCaseDetailUiManifest.Controls.Select(control => new UiControlState(control.ControlId, SemanticControlState(control.ControlId))).ToArray());
+
+    private UiObservationState SemanticControlState(string id)
+    {
+        if (id is "case-detail.heading" or "case-detail.tabs") return UiObservationState.Ready;
+        if (id == "case-detail.summary") return _activePanelIndex == 0 &&
+            OverviewData is { State: CaseDetailPanelState.Populated, Summary: not null }
+                ? UiObservationState.Ready : UiObservationState.Unmounted;
+        var panel = id switch
+        {
+            "case-detail.overview" => 0, "case-detail.history" => 1, "case-detail.follow-ups" => 2,
+            "case-detail.assistance" => 3, "case-detail.discussion" => 4, "case-detail.attachments" => 5,
+            "case-detail.observations" => 6, _ => -1,
+        };
+        return panel == _activePanelIndex ? UiObservationState.Ready : UiObservationState.Unmounted;
+    }
+
     [Parameter, EditorRequired] public Guid CaseId { get; set; }
     [Parameter] public ICaseTimelineClient? TimelineClient { get; set; }
     [Parameter] public string? LocationLabelOverride { get; set; }
