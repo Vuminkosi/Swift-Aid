@@ -610,7 +610,8 @@
         summary.CaseId, summary.PublicReference,
         summary.SubjectType switch { CaseWorkspaceSector.Human => CaseDetailSubjectType.Human, CaseWorkspaceSector.Animal => CaseDetailSubjectType.Animal, _ => CaseDetailSubjectType.Unknown },
         summary.Summary, summary.ClassificationLabel, summary.Workflow, summary.PriorityLabel, summary.CountryLabel,
-        summary.LocationLabel, summary.OwnerDisplayLabel, summary.OpenedAtUtc, summary.UpdatedAtUtc);
+        summary.LocationLabel, summary.OwnerDisplayLabel, summary.OpenedAtUtc, summary.UpdatedAtUtc,
+        summary.LaboratoryLabel, summary.OutcomeStateLabel);
 
     private static CaseDetailCommandOutcome OperationOutcome(UiCapabilityResultCode code) => new(code switch
     {

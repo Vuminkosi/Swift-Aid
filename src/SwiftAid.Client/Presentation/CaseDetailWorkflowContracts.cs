@@ -19,7 +19,9 @@ public sealed record CaseDetailSummary(
     string LocationLabel,
     string? OwnerDisplayLabel,
     DateTimeOffset OpenedAtUtc,
-    DateTimeOffset UpdatedAtUtc)
+    DateTimeOffset UpdatedAtUtc,
+    string LaboratoryLabel = "Unavailable",
+    string OutcomeStateLabel = "Unavailable")
 {
     public bool IsValid =>
         CaseId != Guid.Empty &&
@@ -29,6 +31,8 @@ public sealed record CaseDetailSummary(
         IsBounded(ClassificationLabel, 1, 120) &&
         IsBounded(Workflow, 1, 80) &&
         IsBounded(PriorityLabel, 1, 40) &&
+        IsBounded(LaboratoryLabel, 1, 80) &&
+        IsBounded(OutcomeStateLabel, 1, 80) &&
         IsBounded(CountryLabel, 1, 120) &&
         IsBounded(LocationLabel, 1, 160) &&
         (OwnerDisplayLabel is null || IsBounded(OwnerDisplayLabel, 1, 120)) &&

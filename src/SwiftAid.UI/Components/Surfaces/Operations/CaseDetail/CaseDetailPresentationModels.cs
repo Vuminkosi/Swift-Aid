@@ -7,7 +7,8 @@ public enum CaseDetailOperationStatus { Accepted, Replayed, Conflict, Denied, Of
 public sealed record CaseDetailSummary(
     Guid CaseId, string PublicReference, CaseDetailSubjectType SubjectType, string Summary,
     string ClassificationLabel, string Workflow, string PriorityLabel, string CountryLabel,
-    string LocationLabel, string? OwnerDisplayLabel, DateTimeOffset OpenedAtUtc, DateTimeOffset UpdatedAtUtc);
+    string LocationLabel, string? OwnerDisplayLabel, DateTimeOffset OpenedAtUtc, DateTimeOffset UpdatedAtUtc,
+    string LaboratoryLabel = "Unavailable", string OutcomeStateLabel = "Unavailable");
 
 public sealed record CaseDetailMentionTarget(string Reference, string DisplayLabel);
 public sealed record CaseDetailCommandOutcome(CaseDetailOperationStatus Status, long AggregateVersion = 0);

@@ -27,6 +27,8 @@ public sealed class PostgresCaseSummaryStore(SwiftAidDbContext dbContext) : ICas
                 item.Kind,
                 item.Sector,
                 item.Classification,
+                item.Laboratory,
+                item.OutcomeState,
                 item.Workflow,
                 item.CountryCode,
                 item.AccountableOwnerActorId,
@@ -60,6 +62,8 @@ public sealed class PostgresCaseSummaryStore(SwiftAidDbContext dbContext) : ICas
             row.AccountableOwnerActorId,
             displayName,
             row.CreatedAtUtc,
-            row.UpdatedAtUtc);
+            row.UpdatedAtUtc,
+            row.Laboratory,
+            row.OutcomeState);
     }
 }

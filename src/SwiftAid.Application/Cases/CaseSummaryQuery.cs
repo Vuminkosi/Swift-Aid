@@ -17,7 +17,9 @@ public sealed record CaseSummaryData(
     string OwnerActorId,
     string? OwnerDisplayName,
     DateTimeOffset CreatedAtUtc,
-    DateTimeOffset UpdatedAtUtc);
+    DateTimeOffset UpdatedAtUtc,
+    LaboratoryState? Laboratory = null,
+    ReportedValueState? OutcomeState = null);
 
 /// <summary>Persistence port for the case summary read.</summary>
 public interface ICaseSummaryStore

@@ -39,7 +39,7 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
                 assert(new URL(page.url()).searchParams.get('keep') === 'value');
                 assert(new URL(page.url()).searchParams.get('tab') === key);
                 if (key === 'overview') {
-                    for (const label of ['Clinical classification', 'Administrative workflow', 'Operational priority']) {
+                    for (const label of ['Clinical classification', 'Laboratory status', 'Outcome availability', 'Administrative workflow', 'Operational priority']) {
                         await page.locator('dt').filter({ hasText: label }).waitFor();
                     }
                 }

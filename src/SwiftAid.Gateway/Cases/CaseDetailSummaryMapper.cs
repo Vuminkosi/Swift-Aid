@@ -1,6 +1,7 @@
 using SwiftAid.Application.Cases;
 using SwiftAid.Client.Presentation;
 using SwiftAid.Contracts.Commands;
+using SwiftAid.Domain.Cases;
 
 namespace SwiftAid.Gateway.Cases;
 
@@ -70,7 +71,25 @@ public static class CaseDetailSummaryMapper
             location,
             owner,
             data.CreatedAtUtc,
-            data.UpdatedAtUtc);
+            data.UpdatedAtUtc,
+            data.Laboratory switch
+            {
+                LaboratoryState.NotRecorded => "Not recorded",
+                LaboratoryState.Requested => "Requested",
+                LaboratoryState.Collected => "Collected",
+                LaboratoryState.Pending => "Pending",
+                LaboratoryState.ResultRecorded => "Result recorded",
+                _ => "Unavailable"
+            },
+            data.OutcomeState switch
+            {
+                ReportedValueState.Unknown => "Unknown",
+                ReportedValueState.NotRecorded => "Not recorded",
+                ReportedValueState.NotApplicable => "Not applicable",
+                ReportedValueState.Absent => "Absent",
+                ReportedValueState.Known => "Recorded",
+                _ => "Unavailable"
+            });
         return view.IsValid ? view : null;
     }
 }
