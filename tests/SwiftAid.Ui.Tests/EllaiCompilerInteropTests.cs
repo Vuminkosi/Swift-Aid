@@ -31,16 +31,48 @@ public sealed class EllaiCompilerInteropTests
         Assert.StartsWith("ellai-generated-plan-1-r1", definition.Id, StringComparison.Ordinal);
         Assert.Equal(2, definition.Steps.Count);
         Assert.False(definition.Steps[0].Target.IsNone);
-        Assert.True(definition.Steps[0].Target.IsDynamic is false);
+        Assert.True(definition.Steps[0].Target.IsDynamic);
     }
 
     [Fact]
-    public void UnmappedControlFallsBackToNone()
+    public async Task TargetsResolveAtActivationAndMissingBindingsFailClosed()
     {
-        var compiler = new EllaiBonboardingCompiler();
-        var definition = compiler.Compile(Plan(), new Dictionary<string, string>());
+        var anchors = new Dictionary<string, string>();
+        var definition = new EllaiBonboardingCompiler().Compile(Plan(), anchors);
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await definition.Steps[0].Target.ResolveAsync(null!));
+        anchors["cases.queue"] = "late-queue";
+        var target = await definition.Steps[0].Target.ResolveAsync(null!);
+        Assert.False(target.IsNone);
+        Assert.False(target.IsDynamic);
+        Assert.Equal(BonboardingMissingTargetBehavior.Fail, definition.Steps[0].WaitTimeoutBehavior);
+    }
 
-        Assert.All(definition.Steps, step => Assert.True(step.Target.IsNone));
+    [Fact]
+    public async Task DisplayingAStepDoesNotProveCompletion()
+    {
+        var definition = new EllaiBonboardingCompiler().Compile(Plan(), new Dictionary<string, string>());
+        Assert.NotNull(definition.Steps[0].CanAdvance);
+        Assert.False(await definition.Steps[0].CanAdvance!(null!));
+    }
+
+    [Fact]
+    public async Task CompletionIsRecheckedForTheCurrentStepAndCancellationToken()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var completed = false;
+        var definition = new EllaiBonboardingCompiler().Compile(Plan(), new Dictionary<string, string>(),
+            (stepId, token) =>
+            {
+                Assert.Equal("s1", stepId);
+                Assert.Equal(cancellation.Token, token);
+                return ValueTask.FromResult(completed);
+            });
+        var step = definition.Steps[0];
+        var context = new BonboardingStepContext(null!, step, 0, null!, cancellation.Token);
+        Assert.False(await step.CanAdvance!(context));
+        completed = true;
+        Assert.True(await step.CanAdvance!(context));
     }
 
     [Fact]
