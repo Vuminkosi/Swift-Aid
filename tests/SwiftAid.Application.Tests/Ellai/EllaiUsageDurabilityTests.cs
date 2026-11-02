@@ -63,13 +63,13 @@ public sealed class EllaiUsageDurabilityTests
             new StoredUsageSample("session-1", 1000, 500, 0.02m, DateTimeOffset.UtcNow),
             CancellationToken.None);
 
-        var ledger = new EllaiUsageLedger(prices: prices);
+        var ledger = new EllaiUsageLedger(sessionTokenBudget: 2_000, prices: prices);
         await ledger.HydrateAsync("session-1", store, CancellationToken.None);
 
         Assert.Equal(1500, ledger.TotalsFor("session-1").TotalTokens);
         Assert.Equal(0.02m, ledger.SpendFor("session-1"));
         Assert.Equal(0.02m, ledger.TotalSpend);
-        Assert.False(ledger.TryReserve("session-1", 200_000));
+        Assert.False(ledger.TryReserve("session-1", 501));
     }
 
     [Fact]
