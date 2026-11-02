@@ -118,6 +118,7 @@ builder.Services.AddSingleton(_ =>
     return registry;
 });
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiGuidancePlanValidator>();
+builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiGuidanceProposalAdmission>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.IEllaiUiDiscoveryService, SwiftAid.Application.Ellai.EllaiUiDiscoveryService>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.IEllaiGuidancePlanner, SwiftAid.Application.Ellai.EllaiGuidancePlanner>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiGuidanceSessionCoordinator>();

@@ -316,3 +316,6 @@ public interface IEllaiReviewClient
     Task<bool> RejectReviewAsync(
         string sessionId, string requestId, CancellationToken cancellationToken);
 }
+
+/// <summary>Readiness for a persisted proposal; never permission to execute an application action.</summary>
+public sealed record EllaiGuidanceAdmissionDto(string Status, string? Objective, long InteractionEpoch);

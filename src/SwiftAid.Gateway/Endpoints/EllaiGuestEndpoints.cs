@@ -115,6 +115,8 @@ public static class EllaiGuestEndpoints
             return await next(context).ConfigureAwait(false);
         });
 
+        group.MapGet("/sessions/{sessionId}/guidance/admission", EllaiGuidanceProposalEndpoint.ReadAsync);
+
         group.MapPost("/sessions/{sessionId}/ui-observations", EllaiEndpoints.ReportUiObservationAsync)
             .WithMetadata(new RequestSizeLimitAttribute(8 * 1024));
 
