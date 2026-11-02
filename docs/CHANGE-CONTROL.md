@@ -18,4 +18,12 @@
 
 ## Ownership boundary
 
-The master orchestrator retains checklist, contract and integration coordination. Per-path implementation owners remain unassigned unless current handoffs say otherwise. This process confirmation does not release `BL-005`; SW-01-004 or later shared code work must refresh exact path ownership before editing.
+The master orchestrator retains checklist, contract and integration coordination. Per-path implementation owners remain unassigned unless current handoffs say otherwise. This process confirmation does not release `BL-005`; shared code work must refresh exact path ownership before editing.
+
+## Active handoff — P6.3 follow-up reminder slice
+
+- Task owner: primary coordinator / Codex in this session; no competing active handoff or dirty worktree was present at assignment time.
+- Objective: implement durable due-time internal reminders for case follow-ups and suppress pending occurrences after terminal status, rescheduling, current-assignee change, or loss of `ManageFollowUp` authorization. Use the staff-selected due instant; do not invent lead time or clinical timing.
+- Initial owned paths: `src/SwiftAid.Domain/Notifications/NotificationItem.cs`; `src/SwiftAid.Application/Notifications/NotificationContracts.cs`; `src/SwiftAid.Infrastructure/Persistence/Notifications/`; `src/SwiftAid.Infrastructure/Persistence/Entities/Cases/ManagedCaseFollowUpEntity.cs`; `src/SwiftAid.Infrastructure/Persistence/Processing/PostgresCaseCommandPersistence.cs`; `src/SwiftAid.Infrastructure/Authorization/NotificationResourceAuthorizer.cs`; `src/SwiftAid.Infrastructure/Persistence/Notifications/PostgresTrustedNotificationRecipientAuthorizer.cs`; `src/SwiftAid.Gateway/Notifications/NotificationDeliveryWorker.cs`; Gateway DI/hosted service registration; required EF migration/snapshot; focused tests and evidence docs.
+- Shared contract and migration ownership is serialized under this handoff. No package lock, external provider, or deployment change is authorized or planned.
+- Acceptance: durable due schedules; occurrence-key idempotency across dispatcher instances/restart; exact current follow-up, recipient, status and permission recheck before dispatch; generic notification text; completion/reschedule/cancel/revoke suppression; tests against disposable PostgreSQL where supported.
