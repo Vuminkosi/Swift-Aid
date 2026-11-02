@@ -522,3 +522,7 @@ Source/test-matrix review in [SW-03-008 edge audit](SW-03-008-GEOGRAPHIC-EDGE-TE
 ## SW-04-001 report wizard source audit - 2 November 2026
 
 Source review in [SW-04-001 wizard audit](SW-04-001-REPORT-WIZARD-AUDIT.md) confirms Gateway and Mobile host the same PublicReportSurface/GuidedReportStepper, while staff managed registration remains a separate authorized form. SW-04-001 passes at source level; live submission, browser and Android journeys remain separate/unverified. EV-043.
+
+## SW-04-002 offline report source audit - 2 November 2026
+
+Source audit in [SW-04-002 offline report audit](SW-04-002-OFFLINE-REPORT-AUDIT.md) found encrypted local guest submission/audio storage and a separate authorized staff command outbox. Mobile guest transport remains local-only; previous Android fresh-install evidence covered welcome only, not offline report/reboot/reconnect acceptance. No device test run; EV-044.
