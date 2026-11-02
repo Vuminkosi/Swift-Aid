@@ -542,6 +542,29 @@ public sealed partial class EllaiSurfaceLogicTests
     }
 
     [Fact]
+    public async Task SentencesArrivingDuringPlaybackAreAllReadOnceWithoutOverlap()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(version: 1), string.Empty);
+        var speech = new BlockingNarrationJsModule();
+        SetField(host, "_speechModule", speech);
+        SetField(host, "_readResponsesAloud", true);
+        for (var index = 1; index <= 3; index++)
+            await InvokeAsync(host, "OnResponseReceived", new EllaiSessionResponseDto(index,
+                "session-1", $"Sentence {index}.", DateTimeOffset.UtcNow, "multi", IsFinal: false));
+        await InvokeAsync(host, "OnResponseReceived", new EllaiSessionResponseDto(4, "session-1",
+            "Sentence 1. Sentence 2. Sentence 3.", DateTimeOffset.UtcNow, "multi",
+            IsReconciliation: true, Outcome: "Completed"));
+        Assert.Equal(1, speech.Starts);
+        speech.FinishFirstPlayback();
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(3);
+        while (GetField<bool>(host, "_responseAudioQueueRunning") && DateTimeOffset.UtcNow < deadline)
+            await Task.Delay(10);
+        Assert.Equal(3, speech.Starts);
+        Assert.Equal(1, speech.MaximumConcurrent);
+        Assert.False(speech.StopRequested);
+    }
+
+    [Fact]
     public async Task VoiceEntryWaitsForAnActiveSessionAndRecoversAfterStartup()
     {
         using var host = await CreateHost(new FakeReviewClient(), CreateSession(version: 1), string.Empty);
@@ -2104,6 +2127,7 @@ public sealed partial class EllaiSurfaceLogicTests
     private sealed class BlockingNarrationJsModule : IJSObjectReference
     {
         private readonly TaskCompletionSource _ackStopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public void FinishFirstPlayback() => _ackStopped.TrySetResult();
         public TaskCompletionSource StopCompleted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public int Starts { get; private set; }
         public int MaximumConcurrent { get; private set; }

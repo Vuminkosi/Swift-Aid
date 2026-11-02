@@ -39,6 +39,10 @@ internal static class EllaiSpeechResponseContract
 /// credentials are never sent to clients or written to logs.</summary>
 public sealed class EllaiSpeechSynthesisClient : IEllaiSpeechSynthesisClient
 {
+    // Typed HttpClient instances are transient, but the configured local engine has
+    // one inference owner. Hold only through response headers: PCM delivery and
+    // playback can continue while the next sentence is synthesized.
+    private static readonly SemaphoreSlim InferenceGate = new(1, 1);
     private readonly HttpClient _httpClient;
     private readonly string _internalKey;
 
@@ -88,7 +92,7 @@ public sealed class EllaiSpeechSynthesisClient : IEllaiSpeechSynthesisClient
         CancellationToken cancellationToken) =>
         SynthesizeAsync(requestId, text, "eng", null, cancellationToken);
 
-    public Task<HttpResponseMessage> SynthesizeAsync(
+    public async Task<HttpResponseMessage> SynthesizeAsync(
         string requestId, string text, string language, string? voiceId,
         CancellationToken cancellationToken)
     {
@@ -105,17 +109,42 @@ public sealed class EllaiSpeechSynthesisClient : IEllaiSpeechSynthesisClient
             throw new InvalidOperationException("Gateway speech synthesis is not configured.");
         }
 
-        var request = new HttpRequestMessage(HttpMethod.Post, "v1/synthesize")
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(90));
+        var acquired = false;
+        try
         {
-            Content = JsonContent.Create(
-                new EllaiSpeechSynthesisRequest(requestId, text, language, voiceId ?? "default"),
-                options: new JsonSerializerOptions(JsonSerializerDefaults.Web)),
-        };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _internalKey);
-        return _httpClient.SendAsync(
-            request,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken);
+            await InferenceGate.WaitAsync(timeout.Token).ConfigureAwait(false);
+            acquired = true;
+            for (var attempt = 0; ; attempt++)
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post, "v1/synthesize")
+                {
+                    Content = JsonContent.Create(
+                        new EllaiSpeechSynthesisRequest(requestId, text, language, voiceId ?? "default"),
+                        options: new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+                };
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _internalKey);
+                var response = await _httpClient.SendAsync(request,
+                    HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
+                // A busy rejection has produced no PCM; retrying it cannot repeat
+                // delivered speech. Never retry after a successful audio stream starts.
+                if (response.StatusCode != System.Net.HttpStatusCode.TooManyRequests || attempt >= 2)
+                    return response;
+                var delay = TimeSpan.FromMilliseconds(Math.Clamp(
+                    response.Headers.RetryAfter?.Delta?.TotalMilliseconds ?? 1000, 100, 2000));
+                response.Dispose();
+                await Task.Delay(delay, timeout.Token).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException error) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new HttpRequestException("Speech synthesis timed out.", error);
+        }
+        finally
+        {
+            if (acquired) InferenceGate.Release();
+        }
     }
 
     private sealed record EllaiSpeechSynthesisRequest(string RequestId, string Text, string Language, string VoiceId);

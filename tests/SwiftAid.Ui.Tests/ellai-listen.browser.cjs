@@ -1,11 +1,12 @@
 const assert = require("node:assert/strict");
-const { chromium } = require("playwright");
+const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || "playwright");
 
 // Opt-in, synthetic text through the real Gateway and MMS-TTS. Observes native
 // Web Audio playback; it does not establish loudspeaker quality or echo rejection.
 async function main() {
     assert.equal(process.env.SWIFTAID_RUN_LIVE_ELLAI, "1", "Live test opt-in required.");
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({ headless: true,
+        executablePath: process.env.SWIFTAID_CHROMIUM_PATH || undefined });
     const page = await browser.newPage();
     const errors = [];
     const audio = [];
