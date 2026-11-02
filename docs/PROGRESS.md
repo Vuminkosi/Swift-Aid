@@ -538,3 +538,7 @@ Source audit in [SW-04-005/006 audit](SW-04-005-006-TIME-REVIEW-AUDIT.md) found 
 ## SW-04-007 guest queue verification - 2 November 2026
 
 Focused command dotnet test tests/SwiftAid.Client.Tests/SwiftAid.Client.Tests.csproj --no-restore -m:1 -nr:false --filter FullyQualifiedName~GuestSubmissionJourneyTests --verbosity minimal PASS 9/9; EncryptedGuestAudioPersistenceTests PASS 12/12. These cover local queue/retry/receipt and encrypted audio persistence/hash. Android force-stop/reboot and live ambiguous server response replay remain NOT VERIFIED. Details EV-047/048, [audit](SW-04-007-GUEST-QUEUE-AUDIT.md).
+
+## SW-04-008 guest receipt verification - 2 November 2026
+
+Focused GuestIntakeTests command PASS 16/16, exit 0. The in-process suite covers anonymous bounded routes, expiring capability/proof-bound receipt behavior and ReceivedUnverified/routing statuses; it uses fakes, not live PostgreSQL persistence. SW-04-008 remains partial pending durable deployment receipt proof; EV-049, [audit](SW-04-008-GUEST-RECEIPT-AUDIT.md).

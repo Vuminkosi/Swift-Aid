@@ -58,6 +58,7 @@ The master orchestrator owns checklist status, evidence linking and regression c
 | EV-046 | Read-only SW-04-005/006 time and review audit | PARTIAL: capture/occurrence precision fields and required review/processing acknowledgements with review invalidation source exist; relative-time/upload chain and rendered interaction NOT VERIFIED. No tests run. | SW-04-005/006, [time/review audit](SW-04-005-006-TIME-REVIEW-AUDIT.md) |
 | EV-047 | `dotnet test tests/SwiftAid.Client.Tests/SwiftAid.Client.Tests.csproj --no-restore -m:1 -nr:false --filter FullyQualifiedName~GuestSubmissionJourneyTests --verbosity minimal` | PASS: 9 passed, 0 failed/skipped; local client queue/retry/receipt scope. | SW-04-007, [queue audit](SW-04-007-GUEST-QUEUE-AUDIT.md) |
 | EV-048 | `dotnet test tests/SwiftAid.Client.Tests/SwiftAid.Client.Tests.csproj --no-restore -m:1 -nr:false --filter FullyQualifiedName~EncryptedGuestAudioPersistenceTests --verbosity minimal` | PASS: 12 passed, 0 failed/skipped; local encrypted audio persistence/hash scope, not Android process-death. | SW-04-007, [queue audit](SW-04-007-GUEST-QUEUE-AUDIT.md) |
+| EV-049 | `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false --filter FullyQualifiedName~GuestIntakeTests --verbosity minimal` | PASS: 16 passed, 0 failed/skipped; in-process guest intake endpoint/capability/receipt behavior, no live database. | SW-04-008, [receipt audit](SW-04-008-GUEST-RECEIPT-AUDIT.md) |
 
 ## Active regression and blocker ownership
 
