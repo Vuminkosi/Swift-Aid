@@ -261,10 +261,12 @@ public partial class EllaiGuidanceHost
                 _guidanceFeatureId == EllaiCaseListUiManifest.FeatureId && result?.NavigationId == EllaiCaseListUiManifest.NavigationId
                     ? EllaiNavigationManifest.ResolveRoute(EllaiCaseListUiManifest.NavigationId) :
                 _guidanceFeatureId == EllaiCommunityUiManifest.FeatureId && result?.NavigationId == EllaiCommunityUiManifest.NavigationId
-                    ? EllaiNavigationManifest.ResolveRoute(EllaiCommunityUiManifest.NavigationId) : null;
+                    ? EllaiNavigationManifest.ResolveRoute(EllaiCommunityUiManifest.NavigationId) :
+                _guidanceFeatureId == EllaiSurveillanceUiManifest.FeatureId && result?.NavigationId == EllaiSurveillanceUiManifest.NavigationId
+                    ? EllaiNavigationManifest.ResolveRoute(EllaiSurveillanceUiManifest.NavigationId) : null;
             if (result?.Status == "NeedsNavigation" && destination is not null)
             {
-                // This is a registered public destination, never a model-supplied URL.
+                // This is a registered destination, never a model-supplied URL.
                 Navigation.NavigateTo(destination);
                 for (var attempt = 0; attempt < 40 && IsCurrent(); attempt++)
                 {
@@ -275,6 +277,7 @@ public partial class EllaiGuidanceHost
                         EllaiDashboardUiManifest.FeatureId => "dashboard.overview",
                         EllaiCaseListUiManifest.FeatureId => "case-list.overview",
                         EllaiCommunityUiManifest.FeatureId => "community-sessions.browse",
+                        EllaiSurveillanceUiManifest.FeatureId => "surveillance-map.overview",
                         _ => "report.entry",
                     };
                     if (_latestGuidanceObservation?.MountedControlIds.Contains(entry) == true) break;
@@ -298,7 +301,7 @@ public partial class EllaiGuidanceHost
                 _guidanceNotice = "Guidance is not ready yet. Try again when the page has loaded.";
                 return;
             }
-            var anchors = EllaiReportUiManifest.All.Concat(EllaiNavigationManifest.Controls).Concat(EllaiDashboardUiManifest.Controls).Concat(EllaiCaseListUiManifest.Controls).Concat(EllaiCaseDetailUiManifest.Controls).Concat(EllaiCommunityUiManifest.Controls)
+            var anchors = EllaiReportUiManifest.All.Concat(EllaiNavigationManifest.Controls).Concat(EllaiDashboardUiManifest.Controls).Concat(EllaiCaseListUiManifest.Controls).Concat(EllaiCaseDetailUiManifest.Controls).Concat(EllaiCommunityUiManifest.Controls).Concat(EllaiSurveillanceUiManifest.Controls)
                 .ToDictionary(c => c.ControlId, c => c.AnchorBindingKey);
             if (plan.Steps.Any(step => step.ControlId is null || !anchors.ContainsKey(step.ControlId)))
             {

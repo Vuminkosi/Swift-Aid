@@ -1,16 +1,19 @@
+@using SwiftAid.Contracts.Ellai
+@implements IEllaiUiContextProvider
+<SwiftAid.UI.Ellai.Guidance.EllaiSemanticContext Provider="this" />
 @using SwiftAid.Contracts.Surveillance
 @inject IJSRuntime JavaScript
 @inject IDialogService Dialogs
 @implements IAsyncDisposable
 
 <div class="street-map">
-    <div class="street-map__canvas" @ref="_element" role="region" aria-label="Interactive surveillance map. Scroll or pinch to zoom; drag or use arrow keys to pan." tabindex="0"></div>
-    <div class="street-map__reset"><span>@(_zoom * 100)&#37;</span><MudButton Size="Size.Small" OnClick="ResetAsync">Reset view</MudButton></div>
+    <div class="street-map__canvas" data-ellai-control="surveillance-map.canvas" data-bonboarding-anchor="ellai-map-canvas" @ref="_element" role="region" aria-label="Interactive surveillance map. Scroll or pinch to zoom; drag or use arrow keys to pan." tabindex="0"></div>
+    <div class="street-map__reset"><span>@(_zoom * 100)&#37;</span><MudButton Size="Size.Small" OnClick="ResetAsync" data-ellai-control="surveillance-map.reset" data-bonboarding-anchor="ellai-map-reset">Reset view</MudButton></div>
     <div class="street-map__legend" role="group" aria-label="Map layers">
-        <button type="button" aria-pressed="@(ShowHuman ? "true" : "false")" @onclick="ToggleHumanAsync"><i class="human" aria-hidden="true"></i>Human</button>
-        <button type="button" aria-pressed="@(ShowAnimal ? "true" : "false")" @onclick="ToggleAnimalAsync"><i class="animal" aria-hidden="true"></i>Animal</button>
-        <button type="button" aria-pressed="@(ShowHuman && ShowAnimal ? "true" : "false")" @onclick="ToggleBothAsync"><i class="mixed" aria-hidden="true"></i>Both</button>
-        <button type="button" aria-pressed="@(_showMedicalCenters ? "true" : "false")" @onclick="ToggleMedicalCenters"><i class="medical" aria-hidden="true">H</i>Medical centers &amp; clinics</button>
+        <button type="button" aria-pressed="@(ShowHuman ? "true" : "false")" @onclick="ToggleHumanAsync" data-ellai-control="surveillance-map.human" data-bonboarding-anchor="ellai-map-human"><i class="human" aria-hidden="true"></i>Human</button>
+        <button type="button" aria-pressed="@(ShowAnimal ? "true" : "false")" @onclick="ToggleAnimalAsync" data-ellai-control="surveillance-map.animal" data-bonboarding-anchor="ellai-map-animal"><i class="animal" aria-hidden="true"></i>Animal</button>
+        <button type="button" aria-pressed="@(ShowHuman && ShowAnimal ? "true" : "false")" @onclick="ToggleBothAsync" data-ellai-control="surveillance-map.both" data-bonboarding-anchor="ellai-map-both"><i class="mixed" aria-hidden="true"></i>Both</button>
+        <button type="button" aria-pressed="@(_showMedicalCenters ? "true" : "false")" @onclick="ToggleMedicalCenters" data-ellai-control="surveillance-map.facilities" data-bonboarding-anchor="ellai-map-facilities"><i class="medical" aria-hidden="true">H</i>Medical centers &amp; clinics</button>
         <small>Report groups, not risk levels</small>
     </div>
     @if (_showMedicalCenters)
@@ -30,6 +33,13 @@
 </div>
 
 @code {
+    private bool _mapReady;
+    public string ComponentId => EllaiSurveillanceUiManifest.Map.ComponentId;
+    public EllaiUiManifest Describe() => EllaiSurveillanceUiManifest.Map;
+    public EllaiUiState GetState() => new(ComponentId, !_mapReady && !_unavailable, _unavailable,
+        EllaiSurveillanceUiManifest.MapControls.Select(control => new UiControlState(control.ControlId,
+            _unavailable ? UiObservationState.Disabled : _mapReady ? UiObservationState.Ready : UiObservationState.Unknown)).ToArray());
+
     [Parameter] public string Country { get; set; } = "SZ";
     [Parameter] public IReadOnlyList<SurveillanceMapPoint> Points { get; set; } = [];
     [Parameter] public bool ShowHuman { get; set; } = true;
@@ -77,6 +87,7 @@
                 await _module.InvokeVoidAsync("initialize", _element, _reference);
             }
             await _module.InvokeVoidAsync("update", _element, Country, Points, ShowHuman, ShowAnimal, Focus, _showMedicalCenters);
+            if (!_mapReady) { _mapReady = true; StateHasChanged(); }
         }
         catch (JSDisconnectedException) { }
         catch (JSException) { _unavailable = true; await InvokeAsync(StateHasChanged); }

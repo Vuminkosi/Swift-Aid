@@ -4166,3 +4166,10 @@ Community browsing metadata is available to guests alongside public reporting. I
 PASS: 64 Application authority/admission/plan tests, 50 UI guidance/compiler/community-state tests, 4 Kestrel HTTP guidance regressions, and Gateway build with zero warnings/errors. New tests cover guest discovery without staff authority, loading/error filter state and exclusion of private fixture strings. Commands: dotnet test --no-restore -m:1 -nr:false --filter for EllaiUiAuthorityResolverTests|EllaiGuidanceProposalAdmissionTests|EllaiObservedGuidanceTests; UI EllaiCommunitySemanticsTests|Guidance|EllaiCompilerInteropTests; Integration EllaiGuidanceAdmissionHttpTests; add -p:WasmBuildNative=false for UI/Integration. git diff --check passed. Logs retained under ignored .codex/ellai-community-*.log.
 
 NOT VERIFIED: rendered community guidance, provider planning, device interaction or deployment. Staff session-editor assistance, remaining surfaces, record navigation, receipt proof and full conversation acceptance remain outstanding. Frozen voice processing is unchanged.
+
+
+### Ellai surveillance map discovery ? 2026-11-02
+
+Shared map surfaces now expose nine registered, read-only guidance controls. Canvas and layer controls remain unknown until JavaScript initialization succeeds and become disabled on failure. Compact previews omit absent heading and refresh controls. Discovery requires fresh authenticated scope and does not expose coordinates, counts or case values. Existing map transport and data authorization are unchanged.
+
+PASS: Gateway build (`dotnet build ... --no-restore -m:1 -nr:false -p:WasmBuildNative=false`), zero warnings/errors; EllaiMapSemanticsTests 6; authority/observed-guidance/admission application tests 65; EllaiGuidanceAdmissionHttpTests 4. These are component and deterministic HTTP checks, not live provider acceptance. NOT VERIFIED: live map tour, mobile interaction, deployed migrations and final conversation-test-cases.md scenarios. Full interactive Ellai implementation remains partial. Build evidence: .codex/ellai-map-semantics-build.log.

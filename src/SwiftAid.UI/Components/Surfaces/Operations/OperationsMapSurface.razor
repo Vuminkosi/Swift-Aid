@@ -1,3 +1,6 @@
+@using SwiftAid.Contracts.Ellai
+@implements IEllaiUiContextProvider
+<SwiftAid.UI.Ellai.Guidance.EllaiSemanticContext Provider="this" />
 @using System.Globalization
 @using SwiftAid.UI.Components.Theme
 @using SwiftAid.Contracts.Surveillance
@@ -10,19 +13,19 @@
     <header class="operations-map__header">
         <div>
             <MudText Typo="Typo.overline" Color="Color.Secondary">@Eyebrow</MudText>
-            <MudText Typo="Typo.h4" HtmlTag="@HeadingTag" id="operations-map-title">@Title</MudText>
+            <MudText Typo="Typo.h4" HtmlTag="@HeadingTag" id="operations-map-title" data-ellai-control="surveillance-map.overview" data-bonboarding-anchor="ellai-map-overview">@Title</MudText>
             <MudText Typo="Typo.body2" Color="Color.Secondary">@Description</MudText>
         </div>
         @if (OnRetry.HasDelegate)
         {
-            <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Primary" OnClick="OnRetry" aria-label="Refresh map totals" />
+            <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Primary" OnClick="OnRetry" aria-label="Refresh map totals" data-ellai-control="surveillance-map.refresh" data-bonboarding-anchor="ellai-map-refresh" />
         }
     </header>
     }
 
     @if (FilterContent is not null)
     {
-        <div class="operations-map__filters" role="group" aria-label="Map filters">@FilterContent</div>
+        <div class="operations-map__filters" data-ellai-control="surveillance-map.filters" data-bonboarding-anchor="ellai-map-filters" role="group" aria-label="Map filters">@FilterContent</div>
     }
 
     @if (State is not (OperationsSurfaceState.Populated or OperationsSurfaceState.Empty))
@@ -185,6 +188,13 @@
 </section>
 
 @code {
+    public string ComponentId => EllaiSurveillanceUiManifest.Surface.ComponentId;
+    public EllaiUiManifest Describe() => EllaiSurveillanceUiManifest.Surface;
+    public EllaiUiState GetState() => new(ComponentId, State == OperationsSurfaceState.Loading, State == OperationsSurfaceState.Error,
+        [new("surveillance-map.overview", CompactPreview ? UiObservationState.Unmounted : UiObservationState.Ready),
+         new("surveillance-map.filters", FilterContent is null ? UiObservationState.Unmounted : UiObservationState.Ready),
+         new("surveillance-map.refresh", !CompactPreview && OnRetry.HasDelegate ? UiObservationState.Ready : UiObservationState.Unmounted)]);
+
     public enum AggregatePrecision
     {
         Country,
