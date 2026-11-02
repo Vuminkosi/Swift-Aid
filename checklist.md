@@ -81,7 +81,7 @@
 
 - [ ] **SW-03-001** — Import/version canonical countries SZ/ZW/ZA, administrative hierarchy and distinct settlements with source, precision, aliases and verification state. Partial: seed1 contains 264 source/verification-tagged locations, but explicitly only selected settlements; [audit](docs/SW-03-001-GEOGRAPHIC-SEED-AUDIT.md).
 - [x] **SW-03-002** — Use an idempotent reconciler; do not invent coordinates, parents, completeness, source authority or official prevalence. PASS for the bounded seed importer: focused in-memory SQLite suite passed 7/7, including idempotent repeat, provenance refresh, repair and preserving 153 missing coordinates; live PostgreSQL migration not covered. [Evidence](docs/SW-03-001-GEOGRAPHIC-SEED-AUDIT.md).
-- [ ] **SW-03-003** — Provide indexed debounced search-first SwiftAidLocationPicker with disambiguated administrative context and stable IDs.
+- [ ] **SW-03-003** — Provide indexed debounced search-first SwiftAidLocationPicker with disambiguated administrative context and stable IDs. Partial source evidence: reusable MudAutocomplete picker has 250 ms debounce, stable IDs/ancestry and retry/browse states; rendered accessibility, race behavior and all-surface reuse NOT VERIFIED; [audit](docs/SW-03-003-LOCATION-PICKER-AUDIT.md).
 - [ ] **SW-03-004** — Provide country-specific cascade fallback, manual unknown/provisional location and authorized verification workflow.
 - [ ] **SW-03-005** — Distinguish verified point, locality centroid, administrative representative point, user pin and consented device GPS.
 - [ ] **SW-03-006** — Never require GPS permission or fabricate latitude/longitude for a missing location.

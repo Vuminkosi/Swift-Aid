@@ -498,3 +498,7 @@ UX/source inventory in [SW-02-010 audit](SW-02-010-ONBOARDING-UX-AUDIT.md) found
 ## SW-03-001/002 geographic seed and reconciler audit - 2 November 2026
 
 The seed contains 264 SZ/ZW/ZA locations with source/verification metadata; it explicitly covers selected settlements only, with 153 rows lacking coordinates. Focused command dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false --filter FullyQualifiedName~GeographicRegistryTests --verbosity minimal PASS 7/7 using in-memory SQLite. SW-03-002 passes for this bounded seed importer; SW-03-001 remains partial on coverage/precision. Live PostgreSQL import not verified. See [audit](SW-03-001-GEOGRAPHIC-SEED-AUDIT.md), EV-037.
+
+## SW-03-003 shared location picker audit - 2 November 2026
+
+Source audit in [SW-03-003 picker audit](SW-03-003-LOCATION-PICKER-AUDIT.md) found a reusable search-first MudAutocomplete with 250 ms debounce, ancestry, retry and browse/provisional states, backed by country-scoped bounded search. Focused tests were not run here; rendered accessibility/race states and reuse across every required surface remain NOT VERIFIED. EV-038.
