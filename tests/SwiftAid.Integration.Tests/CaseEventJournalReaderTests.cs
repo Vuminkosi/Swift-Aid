@@ -4,11 +4,35 @@ using SwiftAid.Contracts.Geography;
 using SwiftAid.Domain.Cases;
 using SwiftAid.Infrastructure.Persistence;
 using SwiftAid.Infrastructure.Persistence.Processing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
+using OpenIddict.EntityFrameworkCore;
 
 namespace SwiftAid.Integration.Tests;
 
 public sealed class CaseEventJournalReaderTests
 {
+    [Fact]
+    public void CaseEventDatabaseConstraintMatchesV1SchemaVocabulary()
+    {
+        var options = new DbContextOptionsBuilder<SwiftAidDbContext>()
+            .UseNpgsql("Host=localhost;Database=contract;Username=contract;Password=contract")
+            .UseOpenIddict()
+            .Options;
+        using var db = new SwiftAidDbContext(options);
+        var eventEntity = db.GetService<IDesignTimeModel>().Model.GetEntityTypes().Single(entity => entity.GetTableName() == "case_events");
+        var constraintSql = eventEntity.GetCheckConstraints().Single(constraint => constraint.Name == "ck_case_events_type").Sql;
+        var databaseEventTypes = System.Text.RegularExpressions.Regex.Matches(constraintSql, "'(?<event>[^']+)'")
+            .Select(match => match.Groups["event"].Value).OrderBy(value => value, StringComparer.Ordinal).ToArray();
+        var schemaPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../contracts/events/case-event.v1.schema.json"));
+        using var schema = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(schemaPath));
+        var schemaEventTypes = schema.RootElement.GetProperty("properties").GetProperty("eventType")
+            .GetProperty("enum").EnumerateArray().Select(value => value.GetString()).OrderBy(value => value, StringComparer.Ordinal).ToArray();
+
+        Assert.Equal(schemaEventTypes, databaseEventTypes);
+    }
+
     [Theory]
     [InlineData(AssistanceStatus.ReceiptConfirmed)]
     [InlineData(AssistanceStatus.Unfulfilled)]

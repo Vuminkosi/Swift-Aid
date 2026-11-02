@@ -34,10 +34,10 @@ The contract enum, serializer, strict journal reader and `contracts/events/case-
 
 - PASS - `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj --no-restore -m:1 -nr:false --filter FullyQualifiedName~CaseEventSerializationTests --logger 'console;verbosity=minimal'` - 37 passed, 0 failed, 0 skipped.
 - PASS - full Application.Tests - 909 passed, 3 skipped, 0 failed; skipped cases are live provider probes.
-- PASS - `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter FullyQualifiedName~CaseEventJournalReaderTests --logger 'console;verbosity=minimal'` - 34 passed, 0 failed, 0 skipped.
+- PASS - `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter FullyQualifiedName~CaseEventJournalReaderTests --logger 'console;verbosity=minimal'` - 35 passed, 0 failed, 0 skipped. The suite also compares the EF design-time `ck_case_events_type` check constraint vocabulary with the schema.
 - FAIL then PASS - the first integration test invocation attempted a WebAssembly native link and failed because `emcc` was not on PATH; the scoped rerun with `WasmBuildNative=false` passed.
 
-This closes the schema vocabulary/mapping gap only. It does not establish persistence/readback for every event, DB constraint alignment, all producer/consumer coverage, or compatibility for every public contract; SW-01-004 remains partial.
+This closes the schema vocabulary/mapping and EF-model constraint vocabulary gaps. It does not establish the applied database constraint or persistence/readback for every event, all producer/consumer coverage, or compatibility for every public contract; SW-01-004 remains partial.
 
 ## Gaps and follow-up
 
