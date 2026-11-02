@@ -166,6 +166,8 @@ public sealed class EllaiSurfaceLogicTests
     [InlineData("report.subject", PlanStepBehavior.GuideHuman, BonboardingTourStatus.Running, false, false)]
     [InlineData("report.subject", PlanStepBehavior.Explain, BonboardingTourStatus.Running, true, false)]
     [InlineData("report.submit", PlanStepBehavior.GuideHuman, BonboardingTourStatus.Running, true, false)]
+    [InlineData("report.confirmations", PlanStepBehavior.GuideHuman, BonboardingTourStatus.Running, true, true)]
+    [InlineData("report.confirmations", PlanStepBehavior.GuideHuman, BonboardingTourStatus.Running, false, false)]
     public async Task AcceptedInputAdvancesThroughBonboardingWithoutSkippingItsProofCallback(
         string controlId, PlanStepBehavior behavior, BonboardingTourStatus status, bool accepted, bool advances)
     {

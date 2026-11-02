@@ -9,6 +9,34 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed class GuidedReportDraftPersistenceTests
 {
+    [Theory]
+    [InlineData(0, true, false)]
+    [InlineData(1, true, false)]
+    [InlineData(3, true, false)]
+    [InlineData(7, true, true)]
+    [InlineData(7, false, false)]
+    public void ConfirmationProgressRequiresAllRealFormAcknowledgementsAndCurrentPolicy(int confirmations, bool currentPolicy, bool accepted)
+    {
+        var component = CreateStepper(CreateDraft(), _ => Task.CompletedTask);
+        component.Countries = [new("SZ", "Eswatini")];
+        component.CountryCatalogueVersion = "test-v1";
+        component.CountryCatalogueIsCurrent = true;
+        component.PrivacyNoticeReference = "/privacy";
+        component.PrivacyNoticeIsCurrent = true;
+        component.ProcessingPolicyReference = "/policy";
+        component.ProcessingPolicyVersion = currentPolicy ? "test-v1" : null;
+        var submitted = false;
+        component.OnSubmit = EventCallback.Factory.Create<IntakeSubmission>(this, _ => submitted = true);
+        component.Draft.CountryCode = "SZ";
+        component.Draft.CountryConfirmed = (confirmations & 1) != 0;
+        component.Draft.ReportReviewConfirmed = (confirmations & 2) != 0;
+        component.Draft.ProcessingConfirmed = (confirmations & 4) != 0;
+        SetField(component, "_step", 2);
+        Assert.Equal(accepted, component.GetState().Controls.Single(control => control.ControlId == "report.confirmations").CompletionAccepted);
+        Assert.False(component.GetState().Controls.Single(control => control.ControlId == "report.submit").CompletionAccepted);
+        Assert.False(submitted);
+    }
+
     [Fact]
     public async Task SemanticCompletionComesFromAcceptedValidationAndNeverIncludesEnteredValues()
     {

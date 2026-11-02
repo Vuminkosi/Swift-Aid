@@ -15,7 +15,8 @@ public partial class GuidedReportStepper
          new("report.narrative", _step == 1 ? UiObservationState.Ready : UiObservationState.Unmounted, _step == 2),
          new("report.time-location", _step != 1 ? UiObservationState.Unmounted :
              HasCountryCatalogue ? UiObservationState.Ready : UiObservationState.Disabled, _step == 2),
-         new("report.confirmations", _step == 2 && HasProcessingPolicy ? UiObservationState.Ready : UiObservationState.Unmounted),
+         new("report.confirmations", _step == 2 && HasProcessingPolicy ? UiObservationState.Ready : UiObservationState.Unmounted,
+             _step == 2 && CanSubmit && !_submitting),
          new("report.review", _step == 2 ? UiObservationState.Ready : UiObservationState.Unmounted),
          new("report.submit", _step != 2 ? UiObservationState.Unmounted :
              CanSubmit && !_submitting ? UiObservationState.Ready : UiObservationState.Disabled)]);

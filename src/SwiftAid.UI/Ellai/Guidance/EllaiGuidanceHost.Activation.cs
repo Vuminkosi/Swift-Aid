@@ -34,7 +34,8 @@ public partial class EllaiGuidanceHost
             return;
         }
         if (step?.Behavior != PlanStepBehavior.GuideHuman ||
-            !EllaiReportUiManifest.All.Any(control => control.ControlId == step.ControlId && control.ProofPolicyId == "proof-ui-validated") ||
+            !EllaiReportUiManifest.All.Any(control => control.ControlId == step.ControlId &&
+                        (control.ProofPolicyId == "proof-ui-validated" || control.ControlId == "report.confirmations")) ||
             _latestGuidanceObservation?.CompletedControlIds?.Contains(step.ControlId) != true) return;
         await AdvanceGuidanceStepAsync(ct);
     }
@@ -402,7 +403,8 @@ public partial class EllaiGuidanceHost
                 }
                 var navigation = step is null ? null : EllaiNavigationManifest.ResolveStepDestination(step);
                 var validatedInput = step?.Behavior == PlanStepBehavior.GuideHuman &&
-                    EllaiReportUiManifest.All.Any(control => control.ControlId == step.ControlId && control.ProofPolicyId == "proof-ui-validated") &&
+                    EllaiReportUiManifest.All.Any(control => control.ControlId == step.ControlId &&
+                        (control.ProofPolicyId == "proof-ui-validated" || control.ControlId == "report.confirmations")) &&
                     _latestGuidanceObservation?.CompletedControlIds?.Contains(step.ControlId) == true;
                 var observedContext = _latestGuidanceObservation?.ContextStamp;
                 // Route evidence proves navigation only, never a record read, edit or submission.

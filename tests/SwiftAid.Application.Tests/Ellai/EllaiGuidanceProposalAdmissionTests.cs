@@ -353,6 +353,31 @@ public sealed class EllaiGuidanceProposalAdmissionTests
         public Task<IntakeCapability?> ResolveCapabilityAsync(string opaqueCapability, Guid sessionId, ReadOnlyMemory<byte> proof, CancellationToken ct) => throw new NotSupportedException();
     }
 
+    [Theory]
+    [InlineData(true, UiObservationState.Ready, "Completed")]
+    [InlineData(false, UiObservationState.Ready, "EvidenceRequired")]
+    [InlineData(true, UiObservationState.Hidden, "EvidenceRequired")]
+    [InlineData(true, UiObservationState.Disabled, "EvidenceRequired")]
+    [InlineData(true, UiObservationState.Unmounted, "EvidenceRequired")]
+    public async Task ReportConfirmationOnlyAdvancesFromCurrentAcceptedFormState(bool accepted, UiObservationState state, string expected)
+    {
+        var (service, store, observations, id) = await Fixture();
+        var checkpoint = await SeedProgress(store, observations, id);
+        var descriptor = EllaiReportUiManifest.All.Single(control => control.ControlId == "report.confirmations");
+        checkpoint = checkpoint with { Plan = checkpoint.Plan! with { Steps =
+            [checkpoint.Plan.Steps[0] with { ControlId = descriptor.ControlId, ObjectiveId = descriptor.ObjectiveId!, Behavior = PlanStepBehavior.GuideHuman }] } };
+        var session = (await store.GetAsync("session", default))!;
+        await store.TryUpdateAsync(session with { SessionVersion = session.SessionVersion + 1,
+            GuidanceJson = EllaiGuidanceCheckpoint.Serialize(checkpoint) }, session.SessionVersion, default);
+        await observations.RecordAsync(new("session", "view", "context", "web", ["report.entry", "report.confirmations"], DateTimeOffset.UtcNow,
+            [new("report.entry", UiObservationState.Ready), new("report.confirmations", state)],
+            CompletedControlIds: accepted ? ["report.confirmations"] : []), default);
+        var result = await service.CompleteStepAsync("session", new(id, checkpoint.Plan.PlanId, checkpoint.Version, "step-1", "context"),
+            new("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>()), default);
+        Assert.Equal(expected, result.Status);
+        Assert.Null(EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("session", default))!.GuidanceJson)!.IntakeEvidence);
+    }
+
     [Fact]
     public async Task VisibleReceiptCannotStandInForServerSubmissionEvidence()
     {

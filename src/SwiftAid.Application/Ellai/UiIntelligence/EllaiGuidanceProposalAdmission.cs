@@ -285,7 +285,15 @@ public sealed partial class EllaiGuidanceProposalAdmission(
         var consistentInputState = inputStates.Length == 0
             ? step is not null && !admitted.Observation.MountedControlIds.Contains(step.ControlId)
             : inputStates.Length == 1 && inputStates[0].State is UiObservationState.Ready or UiObservationState.Unmounted;
-        var validatedInput = step?.Behavior == PlanStepBehavior.GuideHuman && descriptor?.ProofPolicyId == "proof-ui-validated" &&
+        // This is presentation progress for the real report checkbox only. It
+        // grants no tool approval and does not establish report persistence.
+        var formConfirmation = step?.Behavior == PlanStepBehavior.GuideHuman &&
+            descriptor is { ControlId: "report.confirmations", FeatureId: EllaiReportUiManifest.FeatureId,
+                ProofPolicyId: "proof-human-acknowledged", HumanConfirmationRequired: true, RiskClass: UiRiskClass.R2 } &&
+            inputStates.Length == 1 && inputStates[0].State == UiObservationState.Ready &&
+            admitted.Observation.MountedControlIds.Contains("report.confirmations") &&
+            admitted.Observation.CompletedControlIds?.Contains("report.confirmations") == true;
+        var validatedInput = formConfirmation || step?.Behavior == PlanStepBehavior.GuideHuman && descriptor?.ProofPolicyId == "proof-ui-validated" &&
             !descriptor.HumanConfirmationRequired && consistentInputState &&
             admitted.Observation.CompletedControlIds?.Contains(step.ControlId) == true;
         if (saved?.Plan is not { } plan || saved.ProposalId != request.ProposalId || plan.PlanId != request.PlanId ||
@@ -299,7 +307,7 @@ public sealed partial class EllaiGuidanceProposalAdmission(
         if (step is null || descriptor is null || (step.Behavior != PlanStepBehavior.Explain && navigation is null && !validatedInput) ||
             (navigation is not null && (descriptor.FeatureId != EllaiNavigationManifest.FeatureId ||
                 admitted.Observation.CurrentNavigationId != navigation.NavigationId)) ||
-            descriptor.HumanConfirmationRequired ||
+            (descriptor.HumanConfirmationRequired && !formConfirmation) ||
             (navigation is null && !validatedInput && descriptor.ProofPolicyId != "proof-ui-observed") ||
             (!validatedInput && (!admitted.Observation.MountedControlIds.Contains(step.ControlId) ||
                 admitted.Observation.ControlStates?.Count(item => item.ControlId == step.ControlId && item.State == UiObservationState.Ready) != 1)))
