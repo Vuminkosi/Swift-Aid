@@ -4,7 +4,8 @@ namespace SwiftAid.Contracts.Cases;
 public enum MonitoringQueueKind
 {
     FollowUp,
-    Escalation
+    Escalation,
+    Assistance
 }
 
 /// <summary>

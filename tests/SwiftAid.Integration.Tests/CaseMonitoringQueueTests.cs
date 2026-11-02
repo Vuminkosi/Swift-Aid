@@ -120,6 +120,67 @@ public sealed class CaseMonitoringQueueTests
     }
 
     [IntakePostgresFact]
+    public async Task AssistanceLifecycle_PersistsProjection_ListsAssignedOpenWork_AndClosesOnReceipt()
+    {
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var grantGroupId = await SeedQueueScopeAsync(db,
+            [CaseOperation.ReadCase, CaseOperation.ManageAssistance]);
+        using var keyRing = SyntheticQueueKeyRing.Create();
+        using var provider = ProtectedPayloadDataProtectionProviderFactory.Create(
+            keyRing.CreateOptions(), new TestHostEnvironment(Environments.Production));
+        var caseId = await SeedQueueCaseAsync(db, keyRing.CreateOptions(), provider);
+        await using var cleanup = new QueueCleanup(caseId, grantGroupId);
+        var actor = CreateOfficer("officer-1");
+        var assistanceId = Guid.NewGuid();
+
+        var requested = await ProcessCommandAsync(db, actor, caseId,
+            new RequestAssistanceCommand(Guid.NewGuid(), 2, assistanceId, "Transport", "officer-1",
+                FutureDueAtUtc, null, DateTimeOffset.UtcNow), keyRing.CreateOptions(), provider);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, requested.Status);
+        var accepted = await ProcessCommandAsync(db, actor, caseId,
+            new UpdateAssistanceCommand(Guid.NewGuid(), 3, assistanceId, AssistanceStatus.Accepted,
+                "Request accepted", null, null, null, DateTimeOffset.UtcNow), keyRing.CreateOptions(), provider);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, accepted.Status);
+        var progressing = await ProcessCommandAsync(db, actor, caseId,
+            new UpdateAssistanceCommand(Guid.NewGuid(), 4, assistanceId, AssistanceStatus.InProgress,
+                "Coordination underway", null, null, null, DateTimeOffset.UtcNow), keyRing.CreateOptions(), provider);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, progressing.Status);
+        var provided = await ProcessCommandAsync(db, actor, caseId,
+            new UpdateAssistanceCommand(Guid.NewGuid(), 5, assistanceId, AssistanceStatus.Provided,
+                "Transport arranged", null, null, null, DateTimeOffset.UtcNow), keyRing.CreateOptions(), provider);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, provided.Status);
+
+        var projection = await db.ManagedCaseAssistance.AsNoTracking().SingleAsync(item => item.AssistanceId == assistanceId);
+        Assert.Equal(AssistanceStatus.Provided, projection.Status);
+        Assert.Equal("officer-1", projection.ResponsibleActorId);
+        Assert.Equal("officer-1", projection.ProvidedByActorId);
+        Assert.Null(projection.ReceiptRecordedByActorId);
+        Assert.Null(projection.ReceiptMethod);
+        Assert.Null(projection.ReceiptContext);
+
+        var open = await CreateQuery(db).GetAssignedAsync(actor, null, QueryNowUtc, CancellationToken.None);
+        var item = Assert.Single(open.Items);
+        Assert.Equal(MonitoringQueueKind.Assistance, item.Kind);
+        Assert.Equal(assistanceId, item.WorkItemId);
+        Assert.Equal("Provided", item.Status);
+        Assert.False(item.IsOverdue);
+
+        var receipt = await ProcessCommandAsync(db, actor, caseId,
+            new UpdateAssistanceCommand(Guid.NewGuid(), 6, assistanceId, AssistanceStatus.ReceiptConfirmed,
+                "Recipient reports receiving transport", "In person", "At service point", null, DateTimeOffset.UtcNow),
+            keyRing.CreateOptions(), provider);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, receipt.Status);
+        db.ChangeTracker.Clear();
+        var confirmed = await db.ManagedCaseAssistance.AsNoTracking().SingleAsync(item => item.AssistanceId == assistanceId);
+        Assert.Equal(AssistanceStatus.ReceiptConfirmed, confirmed.Status);
+        Assert.Equal("officer-1", confirmed.ReceiptRecordedByActorId);
+        Assert.Equal("In person", confirmed.ReceiptMethod);
+        Assert.Equal("At service point", confirmed.ReceiptContext);
+        var closed = await CreateQuery(db).GetAssignedAsync(actor, null, QueryNowUtc, CancellationToken.None);
+        Assert.Empty(closed.Items);
+    }
+
+    [IntakePostgresFact]
     public async Task UnreadableCase_SkippedNeverListed()
     {
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
@@ -485,6 +546,8 @@ public sealed class CaseMonitoringQueueTests
             await context.ManagedCaseFollowUps.Where(item => item.CaseId == caseId)
                 .ExecuteDeleteAsync();
             await context.ManagedCaseEscalations.Where(item => item.CaseId == caseId)
+                .ExecuteDeleteAsync();
+            await context.ManagedCaseAssistance.Where(item => item.CaseId == caseId)
                 .ExecuteDeleteAsync();
             await context.CaseEvents.Where(item => item.CaseId == caseId)
                 .ExecuteDeleteAsync();

@@ -58,6 +58,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
     public DbSet<ManagedCaseObservationEntity> ManagedCaseObservations => Set<ManagedCaseObservationEntity>();
     public DbSet<GeographicLocationEntity> GeographicLocations => Set<GeographicLocationEntity>();
     public DbSet<ManagedCaseFollowUpEntity> ManagedCaseFollowUps => Set<ManagedCaseFollowUpEntity>();
+    public DbSet<ManagedCaseAssistanceEntity> ManagedCaseAssistance => Set<ManagedCaseAssistanceEntity>();
     public DbSet<ManagedCaseEscalationEntity> ManagedCaseEscalations => Set<ManagedCaseEscalationEntity>();
     public DbSet<CommunitySessionEntity> CommunitySessions => Set<CommunitySessionEntity>();
     public DbSet<CommunitySessionRevisionEntity> CommunitySessionRevisions => Set<CommunitySessionRevisionEntity>();
@@ -128,6 +129,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         modelBuilder.ApplyConfiguration(new GeographicLocationEntityConfiguration());
         modelBuilder.ApplyConfiguration(new ManagedCaseObservationEntityConfiguration());
         modelBuilder.ApplyConfiguration(new ManagedCaseFollowUpEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new ManagedCaseAssistanceEntityConfiguration());
         modelBuilder.ApplyConfiguration(new ManagedCaseEscalationEntityConfiguration());
         modelBuilder.ApplyConfiguration(new CommunitySessionEntityConfiguration());
         modelBuilder.ApplyConfiguration(new CommunitySessionRevisionEntityConfiguration());

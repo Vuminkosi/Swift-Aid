@@ -115,6 +115,17 @@ public static class CaseCommandEndpoints
                 request.CommandId, request.ExpectedVersion,
                 request.GrantId ?? throw new ArgumentException("A grant identifier is required."),
                 RequireReason(request), request.OccurredAtUtc, recordedAt),
+            "RequestAssistance" => new RequestAssistanceCommand(
+                request.CommandId, request.ExpectedVersion,
+                request.AssistanceId ?? throw new ArgumentException("An assistance identifier is required."),
+                RequireAssistanceNeed(request), RequireResponsibleActorId(request),
+                request.DueAtUtc, request.OccurredAtUtc, recordedAt),
+            "UpdateAssistance" => new UpdateAssistanceCommand(
+                request.CommandId, request.ExpectedVersion,
+                request.AssistanceId ?? throw new ArgumentException("An assistance identifier is required."),
+                request.AssistanceStatus ?? throw new ArgumentException("An assistance status is required."),
+                RequireAssistanceNote(request), RequireReceiptMethod(request), RequireReceiptContext(request),
+                request.OccurredAtUtc, recordedAt),
             "AcknowledgeAssignment" => new AcknowledgeAssignmentCommand(
                 request.CommandId,
                 request.ExpectedVersion,
@@ -493,6 +504,23 @@ public static class CaseCommandEndpoints
         return request.AssigneeActorId;
     }
 
+    private static string RequireAssistanceNeed(CaseCommandApiRequest request) =>
+        string.IsNullOrWhiteSpace(request.AssistanceNeed) ? throw new ArgumentException("An assistance need is required.") : request.AssistanceNeed;
+
+    private static string RequireResponsibleActorId(CaseCommandApiRequest request) =>
+        string.IsNullOrWhiteSpace(request.ResponsibleActorId) ? throw new ArgumentException("A responsible actor is required.") : request.ResponsibleActorId;
+
+    private static string RequireAssistanceNote(CaseCommandApiRequest request) =>
+        string.IsNullOrWhiteSpace(request.AssistanceNote) ? throw new ArgumentException("An assistance activity note is required.") : request.AssistanceNote;
+
+    private static string? RequireReceiptMethod(CaseCommandApiRequest request) =>
+        request.AssistanceStatus == AssistanceStatus.ReceiptConfirmed && string.IsNullOrWhiteSpace(request.ReceiptMethod)
+            ? throw new ArgumentException("A receipt method is required.") : request.ReceiptMethod;
+
+    private static string? RequireReceiptContext(CaseCommandApiRequest request) =>
+        request.AssistanceStatus == AssistanceStatus.ReceiptConfirmed && string.IsNullOrWhiteSpace(request.ReceiptContext)
+            ? throw new ArgumentException("Receipt context is required.") : request.ReceiptContext;
+
     private static DateTimeOffset RequireDueAtUtc(CaseCommandApiRequest request)
     {
         if (request.DueAtUtc is null)
@@ -702,7 +730,14 @@ public sealed record CaseCommandApiRequest(
     Guid? GrantId = null,
     string? CollaboratorActorId = null,
     CaseCollaborationActions? CollaborationActions = null,
-    DateTimeOffset? ExpiresAtUtc = null);
+    DateTimeOffset? ExpiresAtUtc = null,
+    Guid? AssistanceId = null,
+    string? AssistanceNeed = null,
+    string? ResponsibleActorId = null,
+    AssistanceStatus? AssistanceStatus = null,
+    string? AssistanceNote = null,
+    string? ReceiptMethod = null,
+    string? ReceiptContext = null);
 
 /// <summary>Accepted or replayed case-command receipt.</summary>
 public sealed record CaseCommandApiResponse(

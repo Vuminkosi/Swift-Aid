@@ -249,6 +249,22 @@ public sealed class CaseCommandProcessor : ICaseCommandProcessor
             }
         }
 
+        if (commandForDecision is RequestAssistanceCommand assistanceRequest)
+        {
+            var responsibleActorId = assistanceRequest.ResponsibleActorId;
+            if (!lease.LockedActorIds.Contains(responsibleActorId, StringComparer.Ordinal))
+            {
+                throw new CaseLeaseDiscoveryChangedException(caseId, actorHints.Add(responsibleActorId));
+            }
+
+            if (!await _persistence.IsEligibleAssignmentTargetAsync(
+                    lease, responsibleActorId, header, cancellationToken).ConfigureAwait(false))
+            {
+                return await DenyAndCommitAuditAsync(lease, actor, caseId, commandId,
+                    AccessDecisionCode.OperationNotGranted, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
         var collaboratorActorId = commandForDecision switch
         {
             GrantCaseCollaboratorCommand grant => grant.CollaboratorActorId,
@@ -390,6 +406,7 @@ public sealed class CaseCommandProcessor : ICaseCommandProcessor
     {
         AcknowledgeAssignmentCommand => CaseOperation.AcknowledgeAssignment,
         GrantCaseCollaboratorCommand or RevokeCaseCollaboratorCommand => CaseOperation.ManageCollaborators,
+        RequestAssistanceCommand or UpdateAssistanceCommand => CaseOperation.ManageAssistance,
         CorrectReportCommand => CaseOperation.CorrectReport,
         RequestCaseActionCommand => CaseOperation.RequestProtectedAction,
         ReviewCaseActionRequestCommand => CaseOperation.ReviewProtectedAction,
@@ -421,6 +438,8 @@ public sealed class CaseCommandProcessor : ICaseCommandProcessor
         AcknowledgeAssignmentCommand acknowledgement => acknowledgement with { RecordedAtUtc = databaseNow },
         GrantCaseCollaboratorCommand grant => grant with { RecordedAtUtc = databaseNow },
         RevokeCaseCollaboratorCommand revoke => revoke with { RecordedAtUtc = databaseNow },
+        RequestAssistanceCommand request => request with { RecordedAtUtc = databaseNow },
+        UpdateAssistanceCommand update => update with { RecordedAtUtc = databaseNow },
         CorrectReportCommand correction => correction with { RecordedAtUtc = databaseNow },
         RequestCaseActionCommand request => request with { RecordedAtUtc = databaseNow },
         ReviewCaseActionRequestCommand review => review with { RecordedAtUtc = databaseNow },

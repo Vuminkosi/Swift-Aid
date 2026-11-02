@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases.Commands;
 using SwiftAid.Contracts.Cases;
+using SwiftAid.Contracts.Commands;
 using SwiftAid.Domain.Cases;
 
 namespace SwiftAid.Application.Cases;
@@ -28,6 +29,12 @@ public interface ICaseMonitoringQueueStore
         int take, CancellationToken ct);
 
     Task<IReadOnlyList<MonitoringQueueCandidate>> GetRaisedEscalationsAsync(
+        int take, CancellationToken ct);
+
+    Task<IReadOnlyList<MonitoringQueueCandidate>> GetAssignedAssistanceAsync(
+        string actorId, int take, CancellationToken ct);
+
+    Task<IReadOnlyList<MonitoringQueueCandidate>> GetOpenAssistanceAsync(
         int take, CancellationToken ct);
 }
 
@@ -67,7 +74,10 @@ public sealed class CaseMonitoringQueueQuery(
         IReadOnlyList<MonitoringQueueCandidate> candidates;
         try
         {
-            candidates = await _store.GetAssignedFollowUpsAsync(actor.ActorId, take, ct).ConfigureAwait(false);
+            var followUps = await _store.GetAssignedFollowUpsAsync(actor.ActorId, take, ct).ConfigureAwait(false);
+            var assistance = await _store.GetAssignedAssistanceAsync(actor.ActorId, take, ct).ConfigureAwait(false);
+            candidates = followUps.Concat(assistance).OrderBy(candidate => candidate.DueAtUtc ?? DateTimeOffset.MaxValue)
+                .ThenBy(candidate => candidate.RecordedAtUtc).Take(take).ToArray();
         }
         catch (Exception)
         {
@@ -84,17 +94,21 @@ public sealed class CaseMonitoringQueueQuery(
         var take = Take(limit);
         IReadOnlyList<MonitoringQueueCandidate> followUps;
         IReadOnlyList<MonitoringQueueCandidate> escalations;
+        IReadOnlyList<MonitoringQueueCandidate> assistance;
         try
         {
             followUps = await _store.GetOpenFollowUpsAsync(take, ct).ConfigureAwait(false);
             escalations = await _store.GetRaisedEscalationsAsync(take, ct).ConfigureAwait(false);
+            assistance = await _store.GetOpenAssistanceAsync(take, ct).ConfigureAwait(false);
         }
         catch (Exception)
         {
             return new MonitoringQueueResult(CaseQueueAccess.Unavailable, []);
         }
 
-        var combined = followUps.Concat(escalations).Take(take).ToArray();
+        var combined = followUps.Concat(escalations).Concat(assistance)
+            .OrderBy(candidate => candidate.DueAtUtc ?? DateTimeOffset.MaxValue)
+            .ThenBy(candidate => candidate.RecordedAtUtc).Take(take).ToArray();
         return await FilterReadableAsync(actor, combined, utcNow, ct).ConfigureAwait(false);
     }
 
@@ -141,6 +155,9 @@ public sealed class CaseMonitoringQueueQuery(
                     string.Equals(candidate.Status, nameof(FollowUpStatus.Scheduled), StringComparison.Ordinal) &&
                     candidate.DueAtUtc.HasValue &&
                     candidate.DueAtUtc.Value < utcNow;
+                overdue |= kind == MonitoringQueueKind.Assistance &&
+                    (candidate.Status is nameof(AssistanceStatus.Requested) or nameof(AssistanceStatus.Accepted) or nameof(AssistanceStatus.InProgress)) &&
+                    candidate.DueAtUtc.HasValue && candidate.DueAtUtc.Value < utcNow;
                 items.Add(new MonitoringQueueItem(
                     candidate.CaseId,
                     kind,

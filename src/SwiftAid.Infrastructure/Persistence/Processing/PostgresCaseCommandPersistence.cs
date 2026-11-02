@@ -400,7 +400,8 @@ public sealed partial class PostgresCaseCommandPersistence : ICaseCommandPersist
             if (@event is not (CaseAssigned or CaseReportCorrected or CaseActionRequested or CaseActionRequestReviewed or CaseResolved or CaseReopened
                 or CaseObservationRecorded or CaseFollowUpScheduled or CaseFollowUpOutcomeRecorded
                 or CaseEscalationRaised or CaseEscalationAcknowledged or CaseEscalationClosed or CaseAssignmentAcknowledged
-                or CaseCollaboratorGranted or CaseCollaboratorRevoked))
+                or CaseCollaboratorGranted or CaseCollaboratorRevoked
+                or AssistanceRequested or AssistanceActivityRecorded))
             {
                 // Non-creation command processing must not create a first-report event.
                 throw InvalidJournal();
@@ -639,6 +640,39 @@ public sealed partial class PostgresCaseCommandPersistence : ICaseCommandPersist
                         ?? throw InvalidJournal();
                     toClose.Status = EscalationStatus.Closed;
                     toClose.ClosedVersion = closed.AggregateVersion;
+                    break;
+                case AssistanceRequested requested:
+                    _dbContext.ManagedCaseAssistance.Add(new ManagedCaseAssistanceEntity
+                    {
+                        AssistanceId = requested.AssistanceId,
+                        CaseId = requested.CaseId,
+                        Need = requested.Need,
+                        ResponsibleActorId = requested.ResponsibleActorId,
+                        RequestedByActorId = requested.ActorId,
+                        RequestedAtUtc = requested.RecordedAtUtc,
+                        DueAtUtc = requested.DueAtUtc,
+                        Status = AssistanceStatus.Requested,
+                        LastNote = requested.Need,
+                        LastEventVersion = requested.AggregateVersion
+                    });
+                    break;
+                case AssistanceActivityRecorded activity:
+                    var assistance = await _dbContext.ManagedCaseAssistance
+                        .SingleOrDefaultAsync(item => item.AssistanceId == activity.AssistanceId, cancellationToken)
+                        .ConfigureAwait(false) ?? throw InvalidJournal();
+                    assistance.Status = activity.Status;
+                    assistance.LastNote = activity.Note;
+                    assistance.LastEventVersion = activity.AggregateVersion;
+                    if (activity.Status == AssistanceStatus.Accepted)
+                        assistance.AcceptedByActorId = activity.ActorId;
+                    if (activity.Status == AssistanceStatus.Provided)
+                        assistance.ProvidedByActorId = activity.ActorId;
+                    if (activity.Status == AssistanceStatus.ReceiptConfirmed)
+                    {
+                        assistance.ReceiptRecordedByActorId = activity.ActorId;
+                        assistance.ReceiptMethod = activity.ReceiptMethod;
+                        assistance.ReceiptContext = activity.ReceiptContext;
+                    }
                     break;
                 default:
                     break;

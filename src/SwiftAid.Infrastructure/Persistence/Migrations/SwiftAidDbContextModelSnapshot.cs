@@ -2171,6 +2171,92 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Cases.ManagedCaseAssistanceEntity", b =>
+                {
+                    b.Property<Guid>("AssistanceId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("assistance_id");
+
+                    b.Property<string>("AcceptedByActorId")
+                        .HasColumnType("text")
+                        .HasColumnName("accepted_by_actor_id");
+
+                    b.Property<Guid>("CaseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("case_id");
+
+                    b.Property<DateTimeOffset?>("DueAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("due_at_utc");
+
+                    b.Property<long>("LastEventVersion")
+                        .HasColumnType("bigint")
+                        .HasColumnName("last_event_version");
+
+                    b.Property<string>("LastNote")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("last_note");
+
+                    b.Property<string>("Need")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("need");
+
+                    b.Property<string>("ProvidedByActorId")
+                        .HasColumnType("text")
+                        .HasColumnName("provided_by_actor_id");
+
+                    b.Property<string>("ReceiptContext")
+                        .HasColumnType("text")
+                        .HasColumnName("receipt_context");
+
+                    b.Property<string>("ReceiptMethod")
+                        .HasColumnType("text")
+                        .HasColumnName("receipt_method");
+
+                    b.Property<string>("ReceiptRecordedByActorId")
+                        .HasColumnType("text")
+                        .HasColumnName("receipt_recorded_by_actor_id");
+
+                    b.Property<DateTimeOffset>("RequestedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("requested_at_utc");
+
+                    b.Property<string>("RequestedByActorId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("requested_by_actor_id");
+
+                    b.Property<string>("ResponsibleActorId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("responsible_actor_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.HasKey("AssistanceId")
+                        .HasName("pk_managed_case_assistance");
+
+                    b.HasIndex("CaseId")
+                        .HasDatabaseName("ix_managed_case_assistance_case");
+
+                    b.ToTable("managed_case_assistance", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_managed_case_assistance_receipt", "(status = 'ReceiptConfirmed' AND receipt_recorded_by_actor_id IS NOT NULL AND receipt_method IS NOT NULL AND receipt_context IS NOT NULL) OR (status <> 'ReceiptConfirmed' AND receipt_recorded_by_actor_id IS NULL AND receipt_method IS NULL AND receipt_context IS NULL)");
+
+                            t.HasCheckConstraint("ck_managed_case_assistance_status", "status IN ('Requested', 'Accepted', 'InProgress', 'Provided', 'ReceiptConfirmed', 'Unfulfilled', 'Cancelled')");
+
+                            t.HasCheckConstraint("ck_managed_case_assistance_values", "length(btrim(need)) > 0 AND length(btrim(responsible_actor_id)) > 0 AND length(btrim(requested_by_actor_id)) > 0 AND length(btrim(last_note)) > 0");
+
+                            t.HasCheckConstraint("ck_managed_case_assistance_versions", "last_event_version > 0");
+                        });
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Cases.ManagedCaseEscalationEntity", b =>
                 {
                     b.Property<Guid>("EscalationId")
@@ -4883,6 +4969,16 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_email_verifications_user");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Cases.ManagedCaseAssistanceEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.ManagedCaseEntity", null)
+                        .WithMany()
+                        .HasForeignKey("CaseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_managed_case_assistance_case");
                 });
 
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Entities.Cases.ManagedCaseEscalationEntity", b =>

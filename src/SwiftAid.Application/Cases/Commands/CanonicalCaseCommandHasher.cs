@@ -92,7 +92,7 @@ public static class CanonicalCaseCommandHasher
         if (command is not (CorrectReportCommand or RequestCaseActionCommand or ReviewCaseActionRequestCommand or ResolveCaseCommand or ReopenCaseCommand
             or RecordObservationCommand or ScheduleFollowUpCommand or RecordFollowUpOutcomeCommand
             or RaiseEscalationCommand or AcknowledgeEscalationCommand or CloseEscalationCommand or AcknowledgeAssignmentCommand
-            or GrantCaseCollaboratorCommand or RevokeCaseCollaboratorCommand))
+            or GrantCaseCollaboratorCommand or RevokeCaseCollaboratorCommand or RequestAssistanceCommand or UpdateAssistanceCommand))
         {
             throw new NotSupportedException($"Command type {command.GetType().Name} is not supported by canonical hash protocol v1.");
         }
@@ -103,6 +103,32 @@ public static class CanonicalCaseCommandHasher
     {
         switch (command)
         {
+            case RequestAssistanceCommand request:
+                RequireIdentifier(request.AssistanceId, nameof(request.AssistanceId));
+                RequireText(request.Need, nameof(request.Need));
+                RequireText(request.ResponsibleActorId, nameof(request.ResponsibleActorId));
+                if (request.DueAtUtc is { Offset: var offset } && offset != TimeSpan.Zero) throw new ArgumentException("Assistance due time must use UTC.");
+                var assistanceSnapshot = request with { OccurredAtUtc = Normalize(request.OccurredAtUtc) };
+                return (assistanceSnapshot, "RequestAssistance", assistanceSnapshot.Need, writer =>
+                {
+                    writer.WriteStartObject(); writer.WriteString("assistanceId", assistanceSnapshot.AssistanceId);
+                    writer.WriteString("responsibleActorId", assistanceSnapshot.ResponsibleActorId);
+                    if (assistanceSnapshot.DueAtUtc is { } due) writer.WriteString("dueAtUtc", due);
+                    else writer.WriteNull("dueAtUtc");
+                    writer.WriteEndObject();
+                });
+            case UpdateAssistanceCommand update:
+                RequireIdentifier(update.AssistanceId, nameof(update.AssistanceId));
+                if (!Enum.IsDefined(update.Status)) throw new ArgumentOutOfRangeException(nameof(update.Status));
+                RequireText(update.Note, nameof(update.Note));
+                var updateSnapshot = update with { OccurredAtUtc = Normalize(update.OccurredAtUtc) };
+                return (updateSnapshot, "UpdateAssistance", updateSnapshot.Note, writer =>
+                {
+                    writer.WriteStartObject(); writer.WriteString("assistanceId", updateSnapshot.AssistanceId);
+                    writer.WriteString("status", updateSnapshot.Status.ToString());
+                    writer.WriteString("receiptMethod", updateSnapshot.ReceiptMethod);
+                    writer.WriteString("receiptContext", updateSnapshot.ReceiptContext); writer.WriteEndObject();
+                });
             case GrantCaseCollaboratorCommand grant:
                 RequireIdentifier(grant.GrantId, nameof(grant.GrantId));
                 RequireText(grant.CollaboratorActorId, nameof(grant.CollaboratorActorId));

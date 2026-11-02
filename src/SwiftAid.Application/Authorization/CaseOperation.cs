@@ -39,5 +39,7 @@ public enum CaseOperation
     /// <summary>Records the accountable owner's acknowledgement of the current assignment.</summary>
     AcknowledgeAssignment = 19,
     /// <summary>Creates and revokes explicit, bounded collaborator grants.</summary>
-    ManageCollaborators = 20
+    ManageCollaborators = 20,
+    /// <summary>Creates, updates, and closes case assistance requests.</summary>
+    ManageAssistance = 21
 }

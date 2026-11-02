@@ -80,6 +80,43 @@ public sealed class CaseCommandEndpointTests
         Assert.Equal(1, host.Processor.Calls);
     }
 
+    [Fact]
+    public async Task Assistance_request_maps_responsible_actor_and_due_time()
+    {
+        await using var host = await TestCommandHost.StartAsync();
+        var request = new CaseCommandApiRequest(1, "RequestAssistance", Guid.NewGuid(), 3, null, null, null, null, null, null,
+            AssistanceId: Guid.NewGuid(), AssistanceNeed: "Transport", ResponsibleActorId: "recipient");
+        using var response = await host.SendBearerAsync(CreateRequest(FixedCaseId, request));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var command = Assert.IsType<RequestAssistanceCommand>(host.Processor.LastCommand);
+        Assert.Equal(request.AssistanceId, command.AssistanceId);
+        Assert.Equal("Transport", command.Need);
+        Assert.Equal("recipient", command.ResponsibleActorId);
+
+        var missing = request with { AssistanceNeed = null };
+        using var invalid = await host.SendBearerAsync(CreateRequest(FixedCaseId, missing));
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+    }
+
+    [Fact]
+    public async Task Assistance_update_maps_receipt_provenance_fields()
+    {
+        await using var host = await TestCommandHost.StartAsync();
+        var request = new CaseCommandApiRequest(1, "UpdateAssistance", Guid.NewGuid(), 3, null, null, null, null, null, null,
+            AssistanceId: Guid.NewGuid(), AssistanceStatus: AssistanceStatus.ReceiptConfirmed,
+            AssistanceNote: "Recipient reports receipt", ReceiptMethod: "In person", ReceiptContext: "At service point");
+        using var response = await host.SendBearerAsync(CreateRequest(FixedCaseId, request));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var command = Assert.IsType<UpdateAssistanceCommand>(host.Processor.LastCommand);
+        Assert.Equal(AssistanceStatus.ReceiptConfirmed, command.Status);
+        Assert.Equal("In person", command.ReceiptMethod);
+        Assert.Equal("At service point", command.ReceiptContext);
+
+        var missing = request with { ReceiptContext = null };
+        using var invalid = await host.SendBearerAsync(CreateRequest(FixedCaseId, missing));
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+    }
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly Guid FixedCaseId = Guid.Parse("c0de0001-1111-4c22-9dd9-123456789abc");
 
