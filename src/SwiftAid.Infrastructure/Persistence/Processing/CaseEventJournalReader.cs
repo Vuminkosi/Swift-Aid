@@ -291,9 +291,6 @@ internal static class CaseEventJournalReader
             CaseEventType.CaseFollowUpAcknowledged when payload is CaseFollowUpAcknowledgedPayload acknowledgement => new CaseFollowUpAcknowledged(
                 envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
                 envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc, acknowledgement.FollowUpId),
-            CaseEventType.CaseFollowUpAcknowledged when payload is CaseFollowUpAcknowledgedPayload acknowledgement => new CaseFollowUpAcknowledged(
-                envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
-                envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc, acknowledgement.FollowUpId),
             CaseEventType.CaseFollowUpOutcomeRecorded when payload is CaseFollowUpOutcomeRecordedPayload outcome => new CaseFollowUpOutcomeRecorded(
                 envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
                 envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,

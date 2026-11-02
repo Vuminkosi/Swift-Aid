@@ -20,12 +20,12 @@ public enum CaseEventType
     CaseAssignmentAcknowledged,
     CaseCollaboratorGranted,
     CaseCollaboratorRevoked,
-AssistanceRequested,
-AssistanceAccepted,
-AssistanceProgressRecorded,
-AssistanceProvided,
-AssistanceReceiptConfirmed,
-AssistanceUnfulfilled,
+    AssistanceRequested,
+    AssistanceAccepted,
+    AssistanceProgressRecorded,
+    AssistanceProvided,
+    AssistanceReceiptConfirmed,
+    AssistanceUnfulfilled,
     AssistanceCancelled,
     CaseFollowUpAcknowledged
 }
