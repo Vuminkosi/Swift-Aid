@@ -49,10 +49,16 @@ public sealed class CaseReportDisplayTests
         });
         Assert.Contains("Example clinic", html);
         Assert.Contains("Example hospital", html);
-        Assert.Contains("km away", html);
+        Assert.Contains("km</span>", html);
+        Assert.Contains("kilometres, straight-line distance", html);
         Assert.Contains("approximate", html, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("road distances", html);
-        if (localityCentre is not null) Assert.Contains("mapped centre of Test locality", html);
+        if (localityCentre is not null)
+        {
+            Assert.Contains("Estimated from", html);
+            Assert.Contains("Test locality", html);
+            Assert.Contains("centre", html);
+        }
         Assert.Contains("noopener noreferrer", html);
         Assert.Contains("https://www.openstreetmap.org/node/1", html);
     }
@@ -74,7 +80,7 @@ public sealed class CaseReportDisplayTests
         Assert.Contains("Reported fever", html);
         Assert.Contains("&lt;script&gt;", html);
         Assert.DoesNotContain("<script>", html);
-        Assert.Contains("revision 2", html);
-        Assert.Contains("Distances unavailable", html);
+        Assert.Contains("Revision 2", html);
+        Assert.Contains("Nearby distances are unavailable", html);
     }
 }

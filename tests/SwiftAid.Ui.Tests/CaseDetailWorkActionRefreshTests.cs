@@ -393,7 +393,23 @@ public sealed class CaseDetailWorkActionRefreshTests
             string identifier,
             CancellationToken cancellationToken,
             object?[]? args) =>
+            ValueTask.FromResult(typeof(TValue) == typeof(IJSObjectReference)
+                ? (TValue)(object)new NoOpJsObjectReference()
+                : default!);
+    }
+
+    private sealed class NoOpJsObjectReference : IJSObjectReference
+    {
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
+            InvokeAsync<TValue>(identifier, CancellationToken.None, args);
+
+        public ValueTask<TValue> InvokeAsync<TValue>(
+            string identifier,
+            CancellationToken cancellationToken,
+            object?[]? args) =>
             ValueTask.FromResult(default(TValue)!);
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     private sealed class TestNavigationManager : NavigationManager
