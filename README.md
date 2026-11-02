@@ -76,8 +76,8 @@ Silero ONNX detects acoustic activity at Gateway; it is a separate component, **
 
 ## Architecture
 
-```mermaid
-flowchart LR
+```mermaid 
+flowchart TB
     Web[Blazor web] --> Gateway[ASP.NET Core Gateway]
     Mobile[MAUI mobile] --> Gateway
     Mobile <--> Local[Local drafts / SQLite]
@@ -94,6 +94,196 @@ flowchart LR
     App --> Derived[Qdrant index / Redis cache]
     App --> NATS[NATS events and jobs]
     NATS --> Workers[Python workers]
+
+    %% Missing services - original flow unchanged
+    Local -. sync .-> Gateway
+    Ellai --> Sessions[Persistent multi-turn sessions]
+    Ellai --> Tools[Agentic tool orchestration]
+    Ellai --> Guidance[Dynamic UI Intelligence / Bit.Bonboarding]
+    Tools --> App
+
+    Workers --> NLLB[NLLB Translation]
+    Workers --> BART[BART Large MNLI]
+    Workers --> Surveillance[Spatial / Temporal / Cluster Analysis]
+    Surveillance --> Risk[Risk Signals / Human Review]
+
+    Media --> MinIO[(MinIO)]
+    Derived --> Qdrant[(Qdrant)]
+    Derived --> Redis[(Redis)]
+
+```
+
+## Detailed architecture — how all components connect
+
+```
+SWIFTAID PLATFORM
+│
+├── 1. CLIENT / PRESENTATION LAYER
+│   │
+│   ├── Offline-First Web Application (PWA)
+│   │   ├── Authentication / Registration
+│   │   ├── Dashboard / Intelligence Overview
+│   │   ├── Case Reporting / Case Detail
+│   │   ├── Community Sessions
+│   │   ├── Surveillance / Geographic Maps
+│   │   ├── Outbreak Alerts / Investigations
+│   │   └── Administration
+│   │
+│   ├── Offline Data Layer
+│   │   ├── IndexedDB / Local Case Queue
+│   │   ├── Cached Reference Data
+│   │   ├── Offline Attachments
+│   │   └── Background / Reconnection Sync
+│   │
+│   ├── ELLAI USER INTERFACE
+│   │   ├── Chat Interface
+│   │   ├── Persistent Conversation Display
+│   │   ├── Living Activator / Thinking States
+│   │   └── Context-Aware Assistant Actions
+│   │
+│   ├── MUSE LIVE SPEAK
+│   │   ├── Microphone Capture
+│   │   ├── Speech Recognition
+│   │   ├── Voice Activity / Turn Detection
+│   │   ├── Interruption / Barge-In
+│   │   └── Speech Playback
+│   │
+│   └── BIT.BONBOARDING
+│       ├── UI Element Highlighting
+│       ├── Popovers / Guided Actions
+│       ├── Cross-Page Navigation
+│       └── Completion Verification
+│
+│                     │ HTTPS / Streaming
+│                     ▼
+│
+├── 2. API GATEWAY / APPLICATION ENTRY
+│   │
+│   ├── Identity / Authorization
+│   │   ├── Native Authentication
+│   │   ├── Google / Facebook Federation
+│   │   ├── Role-Based Access Control
+│   │   └── Country / Organization Scope
+│   │
+│   ├── REST / Application APIs
+│   ├── Realtime / Streaming Endpoints
+│   ├── Offline Synchronization
+│   ├── Durable Job Admission
+│   ├── Request Validation / Rate Limiting
+│   └── Transactional Outbox
+│
+│                     │
+│           ┌─────────┴──────────┐
+│           ▼                    ▼
+│
+├── 3. BUSINESS DOMAIN       4. ELLAI AI CORE
+│   │                        │
+│   ├── Case Management      ├── Conversation Manager
+│   │   ├── Reports          │   ├── Persistent Sessions
+│   │   ├── Evidence         │   ├── Multi-Turn Context
+│   │   ├── Locations        │   ├── Memory / Retrieval
+│   │   └── Case History     │   └── Turn Lifecycle
+│   │                        │
+│   ├── Community Sessions   ├── Reasoning Orchestrator
+│   ├── User Management      │   ├── LLM Inference
+│   ├── Organization Mgmt    │   ├── Tool Calling
+│   ├── Investigation Mgmt   │   ├── Validation / Retry
+│   ├── Alert Management     │   └── Workflow Execution
+│   └── Notifications        │
+│                            ├── Dynamic UI Intelligence
+│                            │   ├── UI Registry
+│                            │   ├── UI Discovery
+│                            │   ├── Guidance Planner
+│                            │   ├── Tour Compiler
+│                            │   └── Session Coordinator
+│                            │
+│                            └── Multilingual Voice Lane
+│                                ├── Muse STT
+│                                ├── NLLB Translation
+│                                ├── MMS-TTS / Local TTS
+│                                └── Response Streaming
+│
+│           │                    │
+│           └──────────┬─────────┘
+│                      ▼
+│
+├── 5. DURABLE PROCESSING / EVENT BACKBONE
+│   │
+│   ├── Database Transaction + Outbox
+│   │              │
+│   │              ▼
+│   ├── Outbox Publisher
+│   │              │
+│   │              ▼
+│   ├── NATS JetStream
+│   │   ├── Case Submitted / Updated
+│   │   ├── Translation Requested / Completed
+│   │   ├── Classification Requested / Completed
+│   │   ├── Surveillance Analysis Requested
+│   │   ├── Risk Signal Created
+│   │   ├── Alert Created / Updated
+│   │   └── Investigation Events
+│   │
+│   └── Durable Consumers / Worker Services
+│       ├── Translation Worker (NLLB)
+│       ├── Classification Worker (BART MNLI)
+│       ├── Case Enrichment Worker
+│       ├── Geospatial Intelligence Worker
+│       ├── Temporal Analysis Worker
+│       ├── Cluster Detection Worker
+│       └── Notification Worker
+│                      │
+│                      ▼
+│
+├── 6. SURVEILLANCE INTELLIGENCE
+│   │
+│   ├── Case Normalization / Feature Extraction
+│   ├── Persisted Translation / Classification
+│   ├── Geographic + Temporal Aggregation
+│   ├── Symptom / Syndrome Pattern Detection
+│   ├── Potential Cluster Detection
+│   ├── Baseline / Anomaly Detection
+│   ├── Risk Assessment / Signal Generation
+│   ├── Explainable Evidence / Provenance
+│   └── Human Review / Investigation
+│                      │
+│                      ▼
+│
+├── 7. INTELLIGENCE CONSUMPTION
+│   │
+│   ├── Surveillance Dashboard
+│   ├── Maps / Hotspots / Geographic Layers
+│   ├── Disease / Syndrome Trends
+│   ├── Cluster Detail / Supporting Cases
+│   ├── Investigation Workspaces
+│   ├── Alert Queues / Notifications
+│   └── Ellai Natural-Language Queries
+│
+└── 8. SHARED INFRASTRUCTURE
+    │
+    ├── PostgreSQL
+    │   ├── Operational Data
+    │   ├── Conversations / Messages
+    │   ├── Outbox / Job State
+    │   ├── Model-Versioned Results
+    │   └── Audit / Evidence References
+    │
+    ├── PostGIS (Spatial Queries)
+    │
+    ├── MinIO (S3-Compatible)
+    │   ├── Audio / Images / Attachments
+    │   ├── Original Evidence
+    │   └── Generated Artifacts
+    │
+    ├── NATS JetStream (Event Durability)
+    │
+    ├── AI Inference Runtime
+    │   ├── LLM
+    │   ├── NLLB
+    │   ├── BART Large MNLI
+    │   └── Speech Models
+    │
+    └── Monitoring / Logging / Tracing
 ```
 
 - **PostgreSQL/PostGIS is authoritative** for records, permissions, messages, outcomes and provenance. Ellai uses a PostgreSQL outbox, not a JetStream replacement.
