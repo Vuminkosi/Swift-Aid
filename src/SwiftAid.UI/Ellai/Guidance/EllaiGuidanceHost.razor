@@ -20,7 +20,7 @@
     @if (_guidanceProposalId is not null && _generatedTour is null)
     {
         <MudButton Variant="Variant.Text" Disabled="@_preparingGuidance" OnClick="StartProposedGuidanceAsync">
-            @(_preparingGuidance ? "Preparing guidance?" : "Start guidance")
+            @(_preparingGuidance ? "Preparing guidance…" : "Start guidance")
         </MudButton>
         @if (_guidanceNotice is not null)
         {
@@ -109,7 +109,9 @@
 
     private string? GetComposerStatusText()
     {
-        if (_liveVoiceReconnectRequired)
+        if (_liveVoiceReconnectRequired ||
+            (_lastDurableTurn?.Outcome == "RetryableFailure" &&
+             _lastDurableTurn.ClientUtteranceId == _thinkingUtteranceId))
         {
             return "Reconnecting…";
         }
@@ -121,7 +123,7 @@
 
         if (!string.IsNullOrWhiteSpace(_toolActivityText)) return _toolActivityText;
 
-        if (_submittingUtterance || _thinkingUtteranceId is not null)
+        if (_submittingUtterance || _thinkingUtteranceId is not null || _preparingGuidance)
         {
             return "Thinking…";
         }
@@ -1747,7 +1749,7 @@
         "Completed" => text,
         "TerminalFailure" => "I couldn't complete that request. Please try again.",
         "Cancelled" => "Request cancelled.",
-        "RetryableFailure" => "Reconnecting..",
+        "RetryableFailure" => null,
         "LegacyUnknown" => "This earlier response is unavailable.",
         _ => null,
     };

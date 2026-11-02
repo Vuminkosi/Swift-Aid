@@ -769,6 +769,24 @@ public sealed partial class EllaiSurfaceLogicTests
     }
 
     [Fact]
+    public async Task RetryUsesOnlyTheAnimatedStatusAndReturnsToThinkingOnWorkerPickup()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(version: 1), string.Empty);
+        var testHost = Assert.IsType<TestComponentHost<EllaiGuidanceHost>>(host);
+        var status = typeof(EllaiGuidanceHost).GetMethod("GetComposerStatusText", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        foreach (var outcome in new[] { "RetryableFailure", "Processing" })
+        {
+            await InvokeAsync(host, "OnConversationUpdated", (object)new EllaiConversationTurnDto[]
+            {
+                new("retry-turn", 1, "Synthetic question", null, outcome, 1, DateTimeOffset.UtcNow),
+            });
+            Assert.Null(GetField<string?>(host, "_latestResponseText"));
+            Assert.Equal(outcome == "RetryableFailure" ? "Reconnecting…" : "Thinking…",
+                await testHost.Dispatcher.InvokeAsync(() => (string?)status.Invoke(testHost.Component, null)));
+        }
+    }
+
+    [Fact]
     public async Task ConfirmedGatewaySpeechStopsNativeResponsePlayback()
     {
         var client = new FakeReviewClient
