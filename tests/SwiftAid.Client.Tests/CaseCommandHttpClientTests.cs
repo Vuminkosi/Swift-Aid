@@ -8,6 +8,17 @@ namespace SwiftAid.Client.Tests;
 
 public sealed class CaseCommandHttpClientTests
 {
+    [Fact]
+    public async Task Assignment_acknowledgement_transmits_the_observed_assignment_version()
+    {
+        var handler = new ScriptedHandler([JsonResponse(HttpStatusCode.Conflict, new { })]);
+        await Create(handler).SendAsync(Guid.NewGuid(),
+            new CaseCommandInput("AcknowledgeAssignment", null, null, null, null, null, 5, AssignmentVersion: 2));
+        using var body = JsonDocument.Parse(await handler.Requests[0].Content!.ReadAsStringAsync());
+        Assert.Equal(2, body.RootElement.GetProperty("assignmentVersion").GetInt64());
+        Assert.Equal(5, body.RootElement.GetProperty("expectedVersion").GetInt64());
+    }
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     [Fact]

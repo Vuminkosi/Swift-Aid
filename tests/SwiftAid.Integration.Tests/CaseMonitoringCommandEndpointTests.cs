@@ -13,6 +13,32 @@ namespace SwiftAid.Integration.Tests;
 /// </summary>
 public sealed class CaseMonitoringCommandEndpointTests
 {
+    [Theory]
+    [InlineData(null)]
+    [InlineData(0L)]
+    [InlineData(-1L)]
+    [InlineData(2L)]
+    public async Task Assignment_acknowledgement_requires_an_explicit_positive_assignment_version(long? assignmentVersion)
+    {
+        await using var host = await TestCommandHost.StartAsync();
+        var commandId = Guid.NewGuid();
+        using var request = CreateRequest(FixedCaseId, new CaseCommandApiRequest(
+            1, "AcknowledgeAssignment", commandId, 3, null, null, null, null, null, null,
+            AssignmentVersion: assignmentVersion));
+        using var response = await host.SendBearerAsync(request);
+        Assert.Equal(assignmentVersion > 0 ? HttpStatusCode.OK : HttpStatusCode.BadRequest, response.StatusCode);
+        if (assignmentVersion > 0)
+        {
+            var command = Assert.IsType<AcknowledgeAssignmentCommand>(host.Processor.LastCommand);
+            Assert.Equal(assignmentVersion, command.AssignmentVersion);
+            Assert.Equal(commandId, command.CommandId);
+        }
+        else
+        {
+            Assert.Equal(0, host.Processor.Calls);
+        }
+    }
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly Guid FixedCaseId = Guid.Parse("c0de0001-1111-4c22-9dd9-123456789abc");
 

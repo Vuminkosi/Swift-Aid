@@ -75,6 +75,7 @@ public sealed class CaseCommandOutboxTransport(HttpClient httpClient) : ICaseCom
                     resolution = intent.Resolution,
                     actionSummary = intent.ActionSummary,
                     evidenceEventIds = intent.EvidenceEventIds,
+                    assignmentVersion = intent.AssignmentVersion,
                 },
                 JsonOptions,
                 cancellationToken).ConfigureAwait(false);

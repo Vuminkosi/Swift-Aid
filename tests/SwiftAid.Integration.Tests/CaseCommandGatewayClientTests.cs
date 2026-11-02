@@ -13,6 +13,25 @@ namespace SwiftAid.Integration.Tests;
 
 public sealed class CaseCommandGatewayClientTests
 {
+    [Fact]
+    public async Task Assignment_acknowledgement_preserves_assignment_and_retry_versions()
+    {
+        var processor = new TestCaseCommandProcessor();
+        using var services = CreateServices(processor, new TestCaseTimelineQuery(FixedCaseId));
+        var client = new CaseCommandGatewayClient(new TestAuthenticationStateProvider(), services);
+        var input = new CaseCommandInput("AcknowledgeAssignment", null, null, null, null, null, 2,
+            CommandId: Guid.NewGuid(), AssignmentVersion: 2);
+        var result = await client.SendAsync(FixedCaseId, input);
+        Assert.Equal(CaseCommandStatus.Accepted, result.Status);
+        var command = Assert.IsType<AcknowledgeAssignmentCommand>(processor.LastCommand);
+        Assert.Equal(input.CommandId, command.CommandId);
+        Assert.Equal(2, command.ExpectedVersion);
+        Assert.Equal(2, command.AssignmentVersion);
+        var invalid = await client.SendAsync(FixedCaseId, input with { AssignmentVersion = null });
+        Assert.Equal(CaseCommandStatus.Invalid, invalid.Status);
+        Assert.Equal(1, processor.Calls);
+    }
+
     private static readonly Guid FixedCaseId = Guid.Parse("c0de0001-1111-4c22-9dd9-123456789abc");
 
     [Fact]

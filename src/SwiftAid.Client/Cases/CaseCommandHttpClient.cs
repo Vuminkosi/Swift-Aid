@@ -93,7 +93,8 @@ public sealed class CaseCommandHttpClient(HttpClient httpClient) : ICaseCommandC
                     input.RecipientRoute,
                     input.Resolution,
                     input.ActionSummary,
-                    input.EvidenceEventIds),
+                    input.EvidenceEventIds,
+                    input.AssignmentVersion),
                 JsonOptions,
                 cancellationToken).ConfigureAwait(false);
 
@@ -213,7 +214,8 @@ public sealed class CaseCommandHttpClient(HttpClient httpClient) : ICaseCommandC
         string? RecipientRoute,
         string? Resolution,
         string? ActionSummary,
-        IReadOnlyList<string>? EvidenceEventIds);
+        IReadOnlyList<string>? EvidenceEventIds,
+        long? AssignmentVersion);
 
     /// <summary>Accepted case-command receipt as returned by the endpoint.</summary>
     private sealed record CaseCommandWireResponse(

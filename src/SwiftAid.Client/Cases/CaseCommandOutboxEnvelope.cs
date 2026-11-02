@@ -30,7 +30,8 @@ public sealed record CaseCommandIntent(
     string? RecipientRoute = null,
     string? Resolution = null,
     string? ActionSummary = null,
-    IReadOnlyList<string>? EvidenceEventIds = null);
+    IReadOnlyList<string>? EvidenceEventIds = null,
+    long? AssignmentVersion = null);
 
 /// <summary>Version-one JSON codec for <see cref="CaseCommandIntent"/> outbox payloads.</summary>
 public static class CaseCommandIntentCodec
@@ -63,7 +64,8 @@ public static class CaseCommandIntentCodec
             input.RecipientRoute,
             input.Resolution,
             input.ActionSummary,
-            input.EvidenceEventIds);
+            input.EvidenceEventIds,
+            input.AssignmentVersion);
     }
 
     public static byte[] Encode(CaseCommandIntent intent)
@@ -96,7 +98,8 @@ public static class CaseCommandIntentCodec
             intent.RecipientRoute,
             intent.Resolution,
             intent.ActionSummary,
-            intent.EvidenceEventIds), JsonOptions);
+            intent.EvidenceEventIds,
+            intent.AssignmentVersion), JsonOptions);
     }
 
     public static CaseCommandIntent Decode(byte[] payload)
@@ -132,7 +135,8 @@ public static class CaseCommandIntentCodec
                 envelope.RecipientRoute,
                 envelope.Resolution,
                 envelope.ActionSummary,
-                envelope.EvidenceEventIds);
+                envelope.EvidenceEventIds,
+                envelope.AssignmentVersion);
         }
         catch (JsonException ex)
         {
@@ -162,5 +166,7 @@ public static class CaseCommandIntentCodec
         string? RecipientRoute,
         string? Resolution,
         string? ActionSummary,
-        IReadOnlyList<string>? EvidenceEventIds);
+        IReadOnlyList<string>? EvidenceEventIds,
+        [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        long? AssignmentVersion);
 }

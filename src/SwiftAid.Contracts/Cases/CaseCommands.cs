@@ -7,7 +7,7 @@ namespace SwiftAid.Contracts.Cases;
 /// </summary>
 /// <param name="CommandType">One of CorrectReport, RequestProtectedAction, ReviewProtectedAction, Resolve, Reopen, RecordObservation, ScheduleFollowUp, RecordFollowUpOutcome, RaiseEscalation, AcknowledgeEscalation, CloseEscalation.</param>
 /// <param name="Action">Protected-action name (for example Reassign); required by RequestProtectedAction.</param>
-/// <param name="Reason">Operator reason; required by every command type.</param>
+/// <param name="Reason">Operator reason; required except for AcknowledgeAssignment.</param>
 /// <param name="ProposedOwnerId">Reassignment target, reopened-case owner, or accepted owner.</param>
 /// <param name="RequestId">Protected-action request key.</param>
 /// <param name="Outcome">Review outcome name (Pending, Denied, Approved); required by ReviewProtectedAction.</param>
@@ -28,6 +28,7 @@ namespace SwiftAid.Contracts.Cases;
 /// <param name="Resolution">Escalation resolution; required by CloseEscalation.</param>
 /// <param name="ActionSummary">Optional action summary recorded with an acknowledgement.</param>
 /// <param name="EvidenceEventIds">Escalation evidence references for RaiseEscalation.</param>
+/// <param name="AssignmentVersion">Observed assignment event version; required by AcknowledgeAssignment and preserved on retry.</param>
 public sealed record CaseCommandInput(
     string CommandType,
     string? Action,
@@ -51,7 +52,8 @@ public sealed record CaseCommandInput(
     string? Resolution = null,
     string? ActionSummary = null,
     IReadOnlyList<string>? EvidenceEventIds = null,
-    Guid? CommandId = null);
+    Guid? CommandId = null,
+    long? AssignmentVersion = null);
 
 /// <summary>Staff case-command outcome. Denial and absence share one value for privacy.</summary>
 public enum CaseCommandStatus

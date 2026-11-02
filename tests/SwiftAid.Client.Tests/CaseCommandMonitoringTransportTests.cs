@@ -14,6 +14,20 @@ namespace SwiftAid.Client.Tests;
 /// </summary>
 public sealed class CaseCommandMonitoringTransportTests
 {
+    [Fact]
+    public void Assignment_version_roundtrips_without_adding_a_field_to_older_intents()
+    {
+        var input = new CaseCommandInput("AcknowledgeAssignment", null, null, null, null, null, 5, AssignmentVersion: 2);
+        var bytes = CaseCommandIntentCodec.Encode(CaseCommandIntentCodec.FromInput(input));
+        var decoded = CaseCommandIntentCodec.Decode(bytes);
+        Assert.Equal(2, decoded.AssignmentVersion);
+        Assert.Equal(bytes, CaseCommandIntentCodec.Encode(decoded));
+        var legacy = CaseCommandIntentCodec.Encode(CaseCommandIntentCodec.FromInput(input with { CommandType = "Resolve", AssignmentVersion = null }));
+        using var json = JsonDocument.Parse(legacy);
+        Assert.False(json.RootElement.TryGetProperty("assignmentVersion", out _));
+        Assert.Null(CaseCommandIntentCodec.Decode(legacy).AssignmentVersion);
+    }
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     [Fact]

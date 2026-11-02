@@ -85,6 +85,13 @@ public static class CaseCommandEndpoints
 
         return request.CommandType switch
         {
+            "AcknowledgeAssignment" => new AcknowledgeAssignmentCommand(
+                request.CommandId,
+                request.ExpectedVersion,
+                request.AssignmentVersion is > 0 ? request.AssignmentVersion.Value
+                    : throw new ArgumentException("An assignment version is required."),
+                request.OccurredAtUtc,
+                recordedAt),
             "CorrectReport" => new CorrectReportCommand(
                 request.CommandId,
                 request.ExpectedVersion,
@@ -634,6 +641,7 @@ public static class CaseCommandEndpoints
 /// <param name="Resolution">Escalation resolution; required by CloseEscalation.</param>
 /// <param name="ActionSummary">Optional action summary recorded with an acknowledgement.</param>
 /// <param name="EvidenceEventIds">Escalation evidence references for RaiseEscalation.</param>
+/// <param name="AssignmentVersion">Observed assignment event version; required by AcknowledgeAssignment.</param>
 public sealed record CaseCommandApiRequest(
     int SchemaVersion,
     string? CommandType,
@@ -659,7 +667,8 @@ public sealed record CaseCommandApiRequest(
     string? RecipientRoute = null,
     string? Resolution = null,
     string? ActionSummary = null,
-    IReadOnlyList<string>? EvidenceEventIds = null);
+    IReadOnlyList<string>? EvidenceEventIds = null,
+    long? AssignmentVersion = null);
 
 /// <summary>Accepted or replayed case-command receipt.</summary>
 public sealed record CaseCommandApiResponse(

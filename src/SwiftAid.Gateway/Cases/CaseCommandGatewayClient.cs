@@ -69,7 +69,7 @@ public sealed class CaseCommandGatewayClient(
 
         CaseCommand command;
         var commandId = input.CommandId ?? Guid.NewGuid();
-        var expectedVersion = input.CommandType == "CorrectReport" && input.ExpectedVersion.HasValue
+        var expectedVersion = input.CommandType is ("CorrectReport" or "AcknowledgeAssignment") && input.ExpectedVersion.HasValue
             ? input.ExpectedVersion.Value
             : timelineResult.Timeline.Header.AggregateVersion;
         try
@@ -109,6 +109,13 @@ public sealed class CaseCommandGatewayClient(
 
         return input.CommandType switch
         {
+            "AcknowledgeAssignment" => new AcknowledgeAssignmentCommand(
+                commandId,
+                expectedVersion,
+                input.AssignmentVersion is > 0 ? input.AssignmentVersion.Value
+                    : throw new ArgumentException("An assignment version is required."),
+                null,
+                recordedAt),
             "CorrectReport" => new CorrectReportCommand(
                 commandId,
                 expectedVersion,

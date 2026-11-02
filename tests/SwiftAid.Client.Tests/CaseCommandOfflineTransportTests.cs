@@ -18,12 +18,14 @@ public sealed class CaseCommandOfflineTransportTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    [Fact]
-    public async Task Send_WhenOffline_QueuesIntentAndReplaysWithSameCommandIdOnReconnect()
+    [Theory]
+    [InlineData("Resolve", null)]
+    [InlineData("AcknowledgeAssignment", 2L)]
+    public async Task Send_WhenOffline_QueuesIntentAndReplaysWithSameCommandIdOnReconnect(string commandType, long? assignmentVersion)
     {
         await using var fixture = new OfflineFixture();
         var caseId = Guid.NewGuid();
-        var input = new CaseCommandInput("Resolve", null, "Resolved offline.", null, null, null, 5);
+        var input = new CaseCommandInput(commandType, null, "Recorded offline.", null, null, null, 5, AssignmentVersion: assignmentVersion);
 
         fixture.Gateway.EnqueueThrow(new HttpRequestException("No network."));
         fixture.Gateway.EnqueueFunc(request =>
@@ -58,12 +60,17 @@ public sealed class CaseCommandOfflineTransportTests
         Assert.Equal(2, posts.Count);
         using var first = ReadBody(posts[0]);
         using var second = ReadBody(posts[1]);
+        if (assignmentVersion.HasValue)
+        {
+            Assert.Equal(assignmentVersion.Value, first.RootElement.GetProperty("assignmentVersion").GetInt64());
+            Assert.Equal(assignmentVersion.Value, second.RootElement.GetProperty("assignmentVersion").GetInt64());
+        }
         Assert.Equal(offline.CommandId, first.RootElement.GetProperty("commandId").GetGuid());
         Assert.Equal(offline.CommandId, second.RootElement.GetProperty("commandId").GetGuid());
         Assert.Equal(5, first.RootElement.GetProperty("expectedVersion").GetInt64());
         Assert.Equal(5, second.RootElement.GetProperty("expectedVersion").GetInt64());
         Assert.Equal(1, first.RootElement.GetProperty("schemaVersion").GetInt32());
-        Assert.Equal("Resolve", first.RootElement.GetProperty("commandType").GetString());
+        Assert.Equal(commandType, first.RootElement.GetProperty("commandType").GetString());
         Assert.Equal(
             first.RootElement.GetProperty("reason").GetString(),
             second.RootElement.GetProperty("reason").GetString());
