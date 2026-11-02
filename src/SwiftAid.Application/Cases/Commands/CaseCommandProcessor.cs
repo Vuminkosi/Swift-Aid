@@ -249,13 +249,19 @@ public sealed class CaseCommandProcessor : ICaseCommandProcessor
             }
         }
 
+        var collaboratorActorId = commandForDecision switch
+        {
+            GrantCaseCollaboratorCommand grant => grant.CollaboratorActorId,
+            RevokeCaseCollaboratorCommand revoke => aggregate.Collaborators.Single(item => item.GrantId == revoke.GrantId).ActorId,
+            _ => null
+        };
+        if (collaboratorActorId is not null && !lease.LockedActorIds.Contains(collaboratorActorId, StringComparer.Ordinal))
+        {
+            throw new CaseLeaseDiscoveryChangedException(caseId, actorHints.Add(collaboratorActorId));
+        }
+
         if (commandForDecision is GrantCaseCollaboratorCommand collaborator)
         {
-            if (!lease.LockedActorIds.Contains(collaborator.CollaboratorActorId, StringComparer.Ordinal))
-            {
-                throw new CaseLeaseDiscoveryChangedException(caseId, actorHints.Add(collaborator.CollaboratorActorId));
-            }
-
             if (!await _persistence.IsEligibleCollaboratorAsync(lease, collaborator.CollaboratorActorId,
                     collaborator.Actions, header, cancellationToken).ConfigureAwait(false))
             {

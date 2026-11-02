@@ -43,6 +43,7 @@ public sealed class CaseCommandProcessorTests
             grantId, "worker", CaseCollaborationActions.ReadCase, DatabaseNow.AddHours(1), "Synthetic grant"));
         var command = new RevokeCaseCollaboratorCommand(CommandId, 3, grantId, "Synthetic revoke", null, CallerRecordedAt);
         var scenario = CreateScenario(command, 3, aggregate);
+        scenario.UnitOfWork.LockAdditionalHints = true;
         scenario.AccessPolicy.Decisions.Enqueue(Allowed());
         scenario.AccessPolicy.Decisions.Enqueue(Allowed());
         var result = await scenario.Processor.ProcessAsync(scenario.Actor, CaseId, 1, command, CancellationToken.None);

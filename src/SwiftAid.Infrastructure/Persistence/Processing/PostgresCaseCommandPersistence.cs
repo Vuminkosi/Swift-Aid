@@ -18,7 +18,7 @@ using SwiftAid.Infrastructure.Persistence.Transactions;
 namespace SwiftAid.Infrastructure.Persistence.Processing;
 
 /// <summary>Persists managed-case command journals and projections inside a case-bound transaction.</summary>
-public sealed class PostgresCaseCommandPersistence : ICaseCommandPersistence
+public sealed partial class PostgresCaseCommandPersistence : ICaseCommandPersistence
 {
     private const string AllowedOperationsSql = """
         NOT EXISTS (
@@ -399,7 +399,8 @@ public sealed class PostgresCaseCommandPersistence : ICaseCommandPersistence
             cancellationToken.ThrowIfCancellationRequested();
             if (@event is not (CaseAssigned or CaseReportCorrected or CaseActionRequested or CaseActionRequestReviewed or CaseResolved or CaseReopened
                 or CaseObservationRecorded or CaseFollowUpScheduled or CaseFollowUpOutcomeRecorded
-                or CaseEscalationRaised or CaseEscalationAcknowledged or CaseEscalationClosed or CaseAssignmentAcknowledged))
+                or CaseEscalationRaised or CaseEscalationAcknowledged or CaseEscalationClosed or CaseAssignmentAcknowledged
+                or CaseCollaboratorGranted or CaseCollaboratorRevoked))
             {
                 // Non-creation command processing must not create a first-report event.
                 throw InvalidJournal();
@@ -454,6 +455,12 @@ public sealed class PostgresCaseCommandPersistence : ICaseCommandPersistence
         if (updateResult == ProjectionUpdateResult.AssignmentTargetDenied)
         {
             return new CaseCommandAppendOutcome(CaseCommandAppendStatus.AssignmentTargetDenied,
+                ImmutableArray<Guid>.Empty, request.ExpectedAggregateVersion, request.ExpectedReportRevision);
+        }
+
+        if (!await MaintainCollaboratorProjectionAsync(current, request, replayed, cancellationToken).ConfigureAwait(false))
+        {
+            return new CaseCommandAppendOutcome(CaseCommandAppendStatus.AuthorizationChanged,
                 ImmutableArray<Guid>.Empty, request.ExpectedAggregateVersion, request.ExpectedReportRevision);
         }
 

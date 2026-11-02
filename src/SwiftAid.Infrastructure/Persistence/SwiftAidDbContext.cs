@@ -481,7 +481,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         var grantOperation = modelBuilder.Entity<AccessGrantOperationEntity>();
         grantOperation.ToTable("access_grant_group_operations", table =>
         {
-            table.HasCheckConstraint("ck_grant_group_operations_value", "operation IN ('ReadCase', 'ReadAttachment', 'Synchronize', 'Search', 'Export', 'Count', 'RequestProtectedAction', 'ExecuteProtectedAction', 'ReadLinkedSignalEvidence', 'CorrectReport', 'ReviewProtectedAction', 'AssignCase', 'ResolveCase', 'ReopenCase', 'ReviewIntake', 'CoordinateIntake', 'RecordObservation', 'ManageFollowUp', 'ManageEscalation', 'AcknowledgeAssignment')");
+            table.HasCheckConstraint("ck_grant_group_operations_value", "operation IN ('ReadCase', 'ReadAttachment', 'Synchronize', 'Search', 'Export', 'Count', 'RequestProtectedAction', 'ExecuteProtectedAction', 'ReadLinkedSignalEvidence', 'CorrectReport', 'ReviewProtectedAction', 'AssignCase', 'ResolveCase', 'ReopenCase', 'ReviewIntake', 'CoordinateIntake', 'RecordObservation', 'ManageFollowUp', 'ManageEscalation', 'AcknowledgeAssignment', 'ManageCollaborators')");
             table.HasCheckConstraint("ck_access_grant_group_operations_lock_token_zero", "lock_token = 0");
         });
         ConfigureLockToken(grantOperation);
@@ -575,6 +575,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         share.HasIndex(entity => new { entity.ActorId, entity.IsActive, entity.ExpiresAtUtc })
             .HasDatabaseName("ix_case_shares_actor_status_expiry");
         share.Property(entity => entity.CaseId).HasColumnName("case_id");
+        share.Property(entity => entity.GrantId).HasColumnName("grant_id");
         share.Property(entity => entity.AllowedOperations).HasColumnName("allowed_operations").HasColumnType("text[]");
         share.Property(entity => entity.ActorId).HasColumnName("actor_id").HasColumnType("text");
         share.Property(entity => entity.Version).HasColumnName("version").IsConcurrencyToken();
@@ -640,7 +641,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         caseEvent.ToTable("case_events", table =>
         {
             table.HasCheckConstraint("ck_case_events_versions", "aggregate_version > 0 AND report_revision > 0 AND schema_version > 0");
-            table.HasCheckConstraint("ck_case_events_type", "event_type IN ('CaseReported', 'CaseAssigned', 'CaseReportCorrected', 'CaseActionRequested', 'CaseActionRequestReviewed', 'CaseResolved', 'CaseReopened', 'CaseObservationRecorded', 'CaseFollowUpScheduled', 'CaseFollowUpOutcomeRecorded', 'CaseEscalationRaised', 'CaseEscalationAcknowledged', 'CaseEscalationClosed', 'CaseAssignmentAcknowledged')");
+            table.HasCheckConstraint("ck_case_events_type", "event_type IN ('CaseReported', 'CaseAssigned', 'CaseReportCorrected', 'CaseActionRequested', 'CaseActionRequestReviewed', 'CaseResolved', 'CaseReopened', 'CaseObservationRecorded', 'CaseFollowUpScheduled', 'CaseFollowUpOutcomeRecorded', 'CaseEscalationRaised', 'CaseEscalationAcknowledged', 'CaseEscalationClosed', 'CaseAssignmentAcknowledged', 'CaseCollaboratorGranted', 'CaseCollaboratorRevoked')");
             table.HasCheckConstraint("ck_case_events_actor", "length(btrim(actor_id)) > 0");
         });
         caseEvent.HasKey(entity => entity.EventId).HasName("pk_case_events");

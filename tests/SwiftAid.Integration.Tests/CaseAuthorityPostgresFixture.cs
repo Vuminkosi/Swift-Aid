@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Npgsql;
+using OpenIddict.EntityFrameworkCore;
 using SwiftAid.Contracts.Commands;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Domain.Cases;
@@ -120,7 +121,7 @@ internal sealed class CaseAuthorityPostgresFixture : IAsyncDisposable
 
     public SwiftAidDbContext CreateDbContext(DbCommandInterceptor? interceptor = null)
     {
-        var optionsBuilder = new DbContextOptionsBuilder<SwiftAidDbContext>().UseNpgsql(ConnectionString);
+        var optionsBuilder = new DbContextOptionsBuilder<SwiftAidDbContext>().UseNpgsql(ConnectionString).UseOpenIddict();
         if (interceptor is not null)
         {
             optionsBuilder.AddInterceptors(interceptor);

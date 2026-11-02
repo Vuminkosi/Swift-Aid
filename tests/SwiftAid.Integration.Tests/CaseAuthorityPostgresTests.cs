@@ -34,11 +34,19 @@ public sealed class CaseAuthorityPostgresTests
             Assert.Equal(PostgresErrorCodes.CheckViolation, invalid.SqlState);
             Assert.Equal("ck_case_shares_operations", invalid.ConstraintName);
 
-            var rollback = await Assert.ThrowsAsync<PostgresException>(() => setup.GetService<IMigrator>()
-                .MigrateAsync("20261102174651_AssignmentAcknowledgement"));
-            Assert.Equal(PostgresErrorCodes.RaiseException, rollback.SqlState);
-            Assert.Contains("Cannot remove bounded share operations", rollback.MessageText);
-            Assert.Contains("20261102181615_BoundedCaseShareOperations", await setup.Database.GetAppliedMigrationsAsync());
+            try
+            {
+                var rollback = await Assert.ThrowsAsync<PostgresException>(() => setup.GetService<IMigrator>()
+                    .MigrateAsync("20261102174651_AssignmentAcknowledgement"));
+                Assert.Equal(PostgresErrorCodes.RaiseException, rollback.SqlState);
+                Assert.Contains("Cannot remove bounded share operations", rollback.MessageText);
+                Assert.Contains("20261102181615_BoundedCaseShareOperations", await setup.Database.GetAppliedMigrationsAsync());
+            }
+            finally
+            {
+                // EF can commit newer Down migrations before this older migration refuses rollback.
+                await setup.GetService<IMigrator>().MigrateAsync();
+            }
         }
 
         await using var db = fixture.CreateDbContext();

@@ -2,6 +2,8 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Npgsql;
@@ -24,6 +26,108 @@ namespace SwiftAid.Integration.Tests;
 [Collection(CaseAuthorityPostgresCollection.Name)]
 public sealed class CaseCommandProcessingPostgresTests
 {
+    [CaseAuthorityPostgresFact]
+    public async Task Collaborator_grant_and_revocation_persist_bounded_access_and_epochs_atomically()
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync();
+        await using var cleanup = new CaseCommandProcessingCleanup(fixture);
+        await AddOperationAsync(fixture, CaseOperation.ManageCollaborators);
+        var recipientGroup = await AddEligibleTargetGrantAsync(fixture);
+        cleanup.TrackTargetGrant(recipientGroup);
+        await SetInitialWorkflowVersionAsync(fixture);
+        using var keyRing = SyntheticPayloadKeyRing.Create();
+        using var provider = ProtectedPayloadDataProtectionProviderFactory.Create(
+            keyRing.CreateOptions(), new TestHostEnvironment(Environments.Production));
+        await SeedInitialJournalAsync(fixture, keyRing.CreateOptions(), provider);
+        var grant = new GrantCaseCollaboratorCommand(Guid.NewGuid(), 2, Guid.NewGuid(), fixture.NewOwnerActorId,
+            CaseCollaborationActions.ReadCase, DateTimeOffset.UtcNow.AddHours(1), "Synthetic protected grant reason",
+            null, DateTimeOffset.UnixEpoch);
+        async Task<CaseCommandProcessingResult> Process(CaseCommand command) =>
+            await ProcessCommandAsync(fixture, fixture.CreateActor(), command, keyRing.CreateOptions(), provider);
+        async Task<bool> CanRead(long epoch)
+        {
+            var recipient = ActorContext.FromValidatedPrincipal(new System.Security.Claims.ClaimsPrincipal(
+                new System.Security.Claims.ClaimsIdentity([
+                    new System.Security.Claims.Claim("sub", fixture.NewOwnerActorId),
+                    new System.Security.Claims.Claim(ActorContext.AccessEpochClaimType, epoch.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                ], "fixture-authenticated")));
+            await using var db = fixture.CreateDbContext();
+            var unit = new PostgresCaseCommandUnitOfWork(db);
+            await using var lease = await unit.BeginCaseAsync(recipient, fixture.CaseId, [], CaseLeaseMode.Read, CancellationToken.None);
+            var policy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(db, unit), new PostgresCaseAccessDescriptorStore(db, unit));
+            return (await policy.AuthorizeAsync(recipient, fixture.CaseId, CaseOperation.ReadCase, CancellationToken.None)).IsAllowed;
+        }
+
+        Assert.False(await CanRead(fixture.AccessEpoch));
+        await using (var context = fixture.CreateDbContext())
+        {
+            var unit = new PostgresCaseCommandUnitOfWork(context);
+            var payloads = new RecordingProtectedPayloadStore(
+                new PostgresProtectedCaseEventPayloadStore(context, unit, keyRing.CreateOptions(), provider),
+                async cancellationToken =>
+                {
+                    // Transaction-local fault injection proves the post-preparation eligibility check and rollback.
+                    await context.AccessGrantOperations.Where(item => item.GrantGroupId == recipientGroup)
+                        .ExecuteDeleteAsync(cancellationToken);
+                });
+            var persistence = new PostgresCaseCommandPersistence(context, unit, payloads, new CaseEventSerializer());
+            var policy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(context, unit), new PostgresCaseAccessDescriptorStore(context, unit));
+            var denied = await new CaseCommandProcessor(unit, policy, persistence)
+                .ProcessAsync(fixture.CreateActor(), fixture.CaseId, 1, grant, CancellationToken.None);
+            Assert.Equal(CaseCommandProcessingStatus.Denied, denied.Status);
+            Assert.True(payloads.StageCompleted);
+            await using var check = fixture.CreateDbContext();
+            Assert.False(await check.CaseShares.AnyAsync(item => item.CaseId == fixture.CaseId));
+            Assert.False(await check.CaseEvents.AnyAsync(item => item.CommandId == grant.CommandId));
+            Assert.False(await check.CommandReceipts.AnyAsync(item => item.CommandId == grant.CommandId));
+            Assert.False(await check.ProtectedEventPayloads.AnyAsync(item => payloads.PayloadIds.Contains(item.PayloadId)));
+            Assert.Equal(2, (await check.ManagedCases.SingleAsync(item => item.CaseId == fixture.CaseId)).AggregateVersion);
+            Assert.Equal(fixture.AccessEpoch, (await check.ActorAccessStates.SingleAsync(item => item.ActorId == fixture.NewOwnerActorId)).AccessEpoch);
+        }
+
+        var accepted = await Process(grant);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, accepted.Status);
+        Assert.Equal(CaseCommandProcessingStatus.Replayed, (await Process(grant)).Status);
+        Assert.False(await CanRead(fixture.AccessEpoch));
+        Assert.True(await CanRead(fixture.AccessEpoch + 1));
+        await using (var check = fixture.CreateDbContext())
+        {
+            var share = await check.CaseShares.SingleAsync(item => item.CaseId == fixture.CaseId && item.ActorId == fixture.NewOwnerActorId);
+            Assert.Equal(grant.GrantId, share.GrantId);
+            Assert.True(share.IsActive);
+            Assert.Equal([nameof(CaseOperation.ReadCase)], share.AllowedOperations!);
+            Assert.Null(share.ChangeReason);
+            Assert.Equal(fixture.AccessEpoch + 1, (await check.ActorAccessStates.SingleAsync(item => item.ActorId == fixture.NewOwnerActorId)).AccessEpoch);
+            var rollback = await Assert.ThrowsAsync<PostgresException>(() => check.GetService<IMigrator>()
+                .MigrateAsync("20261102181615_BoundedCaseShareOperations"));
+            Assert.Equal(PostgresErrorCodes.RaiseException, rollback.SqlState);
+            Assert.Contains("Cannot remove collaborator grant identity", rollback.MessageText);
+        }
+
+        var revoke = new RevokeCaseCollaboratorCommand(Guid.NewGuid(), 3, grant.GrantId, "Synthetic protected revoke reason", null, DateTimeOffset.UnixEpoch);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, (await Process(revoke)).Status);
+        Assert.Equal(CaseCommandProcessingStatus.Replayed, (await Process(revoke)).Status);
+        Assert.False(await CanRead(fixture.AccessEpoch + 1));
+        Assert.False(await CanRead(fixture.AccessEpoch + 2));
+        await using var verification = fixture.CreateDbContext();
+        var revoked = await verification.CaseShares.SingleAsync(item => item.CaseId == fixture.CaseId && item.ActorId == fixture.NewOwnerActorId);
+        Assert.False(revoked.IsActive);
+        Assert.Equal(2, revoked.Version);
+        Assert.Equal(fixture.ActorId, revoked.RevokedByActorId);
+        Assert.Null(revoked.ChangeReason);
+        Assert.Equal(fixture.AccessEpoch + 2, (await verification.ActorAccessStates.SingleAsync(item => item.ActorId == fixture.NewOwnerActorId)).AccessEpoch);
+        var projection = await verification.ManagedCases.SingleAsync(item => item.CaseId == fixture.CaseId);
+        Assert.Equal(4, projection.AggregateVersion);
+        Assert.Equal(fixture.ActorId, projection.AccountableOwnerActorId);
+        var events = await verification.CaseEvents.Where(item => item.CommandId == grant.CommandId || item.CommandId == revoke.CommandId).ToArrayAsync();
+        Assert.Equal(2, events.Length);
+        var eventIds = events.Select(item => item.EventId).ToArray();
+        Assert.Equal(2, await verification.DomainOutbox.CountAsync(item => eventIds.Contains(item.EventId)));
+        Assert.Equal(2, await verification.CommandReceipts.CountAsync(item => item.CommandId == grant.CommandId || item.CommandId == revoke.CommandId));
+        var aggregate = await ReadAggregateAsync(fixture, fixture.CreateActor(), keyRing.CreateOptions(), provider);
+        Assert.NotNull(Assert.Single(aggregate.Collaborators).RevokedAtUtc);
+    }
+
     [CaseAuthorityPostgresFact]
     public async Task Collaborator_eligibility_requires_locked_current_scope_and_all_actions()
     {
