@@ -39,6 +39,18 @@ The contract enum, serializer, strict journal reader and `contracts/events/case-
 
 This closes the schema vocabulary/mapping and EF-model constraint vocabulary gaps. It does not establish the applied database constraint or persistence/readback for every event, all producer/consumer coverage, or compatibility for every public contract; SW-01-004 remains partial.
 
+## Forward migration for the case-event type constraint - 3 November 2026
+
+Read-only inspection of the active local `swiftaid_dev` PostgreSQL 17 database found `ck_case_events_type` allowed only the original 13 event names, while the current contract, schema and EF model expose 24. This is a concrete runtime persistence incompatibility for the 11 later event types. No live database was changed. Added migration `20261103153000_CaseEventTypeConstraint` to replace the stale allowlist with all 24 canonical `CaseEventType` values. Its Down path restores the 13-name prior constraint; PostgreSQL will reject that rollback if any newly supported event rows exist, preserving data and the active constraint.
+
+Added opt-in `CaseEventTypeConstraintPostgresTests` which applies the complete migration chain on a disposable PostgreSQL 17/PostGIS 3.6 instance, confirms all enum names appear in the applied constraint, and confirms an unknown event insert fails specifically with `ck_case_events_type`.
+
+- PASS - `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter FullyQualifiedName~CaseEventTypeConstraintPostgresTests --logger 'console;verbosity=minimal'` with `SWIFTAID_RUN_INTAKE_POSTGRES_FIXTURES=1` and a task-owned disposable loopback database - 1 passed, 0 skipped.
+- PASS - full migration chain applied from empty database through `20261103153000_CaseEventTypeConstraint`; test verified all 24 values and unknown-type rejection.
+- NOT VERIFIED - migration has not been applied to the shared local `swiftaid_dev` database; runtime writes using later event types may still fail there until an authorized deployment/migration.
+
+The v1 schema, EF model, forward migration, and fresh applied PostgreSQL constraint now share the 24-value event vocabulary. End-to-end persistence for every event family and the remaining SW-01-004 surfaces remain open.
+
 ## Worker job envelope cross-language alignment - 3 November 2026
 
 The C# publisher contract and Python envelope validator both use schema v1, the same eight exact camelCase fields, the same seven job-type names, the 64 KiB envelope bound, and UTC-only creation timestamps. Review found the Python validator accepted organization IDs with leading/trailing whitespace, more than 200 UTF-16 code units, and control characters that `JobEnvelope.Validate()` rejects. The Python validator now applies equivalent rules, including .NET-compatible UTF-16 length counting. This is envelope validation only; `workers/src/swiftaid_workers/jobs/consumer.py` does not execute, claim or ACK work.
