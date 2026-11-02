@@ -293,6 +293,25 @@ public sealed class EllaiGuidanceProposalAdmissionTests
     }
 
     [Fact]
+    public async Task VisibleReceiptCannotStandInForServerSubmissionEvidence()
+    {
+        var (service, store, observations, id) = await Fixture();
+        var checkpoint = await SeedProgress(store, observations, id);
+        var receipt = EllaiReportUiManifest.All.Single(control => control.ControlId == "report.receipt");
+        checkpoint = checkpoint with { Plan = checkpoint.Plan! with { Steps =
+            [checkpoint.Plan.Steps[0] with { ControlId = receipt.ControlId, ObjectiveId = receipt.ObjectiveId! }] } };
+        var session = (await store.GetAsync("session", default))!;
+        await store.TryUpdateAsync(session with { SessionVersion = session.SessionVersion + 1,
+            GuidanceJson = EllaiGuidanceCheckpoint.Serialize(checkpoint) }, session.SessionVersion, default);
+        await observations.RecordAsync(new("session", "view", "context", "web", ["report.entry", "report.receipt"], DateTimeOffset.UtcNow,
+            [new("report.entry", UiObservationState.Ready), new("report.receipt", UiObservationState.Ready)]), default);
+        var authority = new EllaiUiEntitlements("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>());
+        var result = await service.CompleteStepAsync("session", new(id, checkpoint.Plan.PlanId, checkpoint.Version, "step-1", "context"), authority, default);
+        Assert.Equal("EvidenceRequired", result.Status);
+        Assert.Empty(EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("session", default))!.GuidanceJson)!.CompletedStepIds);
+    }
+
+    [Fact]
     public async Task ExplainedStepCommitsOnceAndRestoresFromSessionStorage()
     {
         var (service, store, observations, id) = await Fixture();

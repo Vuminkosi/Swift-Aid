@@ -1,5 +1,7 @@
 @using SwiftAid.Contracts.Ellai
 @using SwiftAid.Contracts.Intake
+@implements IEllaiUiContextProvider
+<SwiftAid.UI.Ellai.Guidance.EllaiSemanticContext Provider="this" />
 
 @if (Receipt is not null)
 {
@@ -29,6 +31,14 @@
 }
 
 @code {
+    public string ComponentId => "public.report-receipt";
+    public EllaiUiManifest Describe() => new(ComponentId, EllaiReportUiManifest.NavigationId,
+        EllaiReportUiManifest.Definition.ComponentId,
+        "Display a private intake receipt; receipt visibility alone does not prove persistence or grant case access.",
+        EllaiReportUiManifest.All.Where(control => control.ControlId == "report.receipt").ToArray());
+    public EllaiUiState GetState() => new(ComponentId, false, false,
+        [new("report.receipt", Receipt is null ? UiObservationState.Unmounted : UiObservationState.Ready)]);
+
     [Parameter, EditorRequired] public IntakeReceipt Receipt { get; set; } = default!;
 
     private string StatusLabel => Receipt.Status switch

@@ -300,6 +300,7 @@ public sealed class EllaiGuidanceProposalAdmission(
             (navigation is not null && (descriptor.FeatureId != EllaiNavigationManifest.FeatureId ||
                 admitted.Observation.CurrentNavigationId != navigation.NavigationId)) ||
             descriptor.HumanConfirmationRequired ||
+            (navigation is null && !validatedInput && descriptor.ProofPolicyId != "proof-ui-observed") ||
             (!validatedInput && (!admitted.Observation.MountedControlIds.Contains(step.ControlId) ||
                 admitted.Observation.ControlStates?.Count(item => item.ControlId == step.ControlId && item.State == UiObservationState.Ready) != 1)))
             return new("EvidenceRequired", saved.Version, saved.CurrentStepId, saved.CompletedStepIds, saved.SkippedStepIds);

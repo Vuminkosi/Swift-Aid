@@ -385,6 +385,8 @@ public partial class EllaiGuidanceHost
                 // Route evidence proves navigation only, never a record read, edit or submission.
                 if (!IsCurrent() || step is null ||
                     (step.Behavior != PlanStepBehavior.Explain && navigation is null && !validatedInput) ||
+                    (navigation is null && !validatedInput && EllaiReportUiManifest.All.Any(control =>
+                        control.ControlId == step.ControlId && control.ProofPolicyId != "proof-ui-observed")) ||
                     (navigation is null && !validatedInput && observedContext != result.ContextStamp) ||
                     (navigation is not null && _latestGuidanceObservation?.CurrentNavigationId != navigation.NavigationId) ||
                     (!validatedInput && _latestGuidanceObservation?.ControlStates?.Any(state => state.ControlId == step.ControlId &&

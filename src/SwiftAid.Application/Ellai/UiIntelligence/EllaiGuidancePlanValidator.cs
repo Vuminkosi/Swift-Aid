@@ -43,7 +43,10 @@ public sealed class EllaiGuidancePlanValidator(EllaiUiRegistry registry)
                 errors.Add("Skipped progress cannot bypass required interaction or prerequisites.");
             var matches = observations.Where(o => o.ControlId == step.ControlId).ToArray();
             var futureWizardTarget = index > activeIndex && descriptor.FeatureId == EllaiReportUiManifest.FeatureId &&
-                !descriptor.HumanConfirmationRequired && descriptor.RiskClass is UiRiskClass.R0 or UiRiskClass.R1 &&
+                // Planning a later human-owned control does not execute it or
+                // satisfy its completion proof. Consequential controls remain GuideHuman.
+                (step.Behavior == PlanStepBehavior.GuideHuman ||
+                    (step.Behavior == PlanStepBehavior.Explain && !descriptor.HumanConfirmationRequired)) &&
                 descriptor.PrerequisiteIds.Count > 0 && descriptor.PrerequisiteIds.All(precedingControls.Contains) &&
                 matches.Length == 1 && matches[0].State == UiObservationState.Unmounted;
             var validatedCurrentInput = index == activeIndex && step.Behavior == PlanStepBehavior.GuideHuman &&

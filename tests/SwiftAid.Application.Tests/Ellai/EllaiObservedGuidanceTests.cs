@@ -47,6 +47,28 @@ public sealed class EllaiObservedGuidanceTests
     }
 
     [Fact]
+    public void FullReportPlanCanGuideHumanThroughConditionalConfirmationSubmissionAndReceipt()
+    {
+        var (registry, _, _) = Create();
+        var ids = new[] { "report.subject", "report.narrative", "report.time-location", "report.review", "report.confirmations", "report.submit", "report.receipt" };
+        var descriptors = ids.Select(id => EllaiReportUiManifest.All.Single(control => control.ControlId == id)).ToArray();
+        var steps = descriptors.Select((control, index) => new GuidancePlanStep("s" + index, control.ControlId, control.ObjectiveId!,
+            control.HumanConfirmationRequired || control.ProofPolicyId == "proof-ui-validated" ? PlanStepBehavior.GuideHuman : PlanStepBehavior.Explain,
+            null, null, [], [], "Use the existing report workflow.", index + 1 < ids.Length ? "s" + (index + 1) : null)).ToArray();
+        var now = DateTimeOffset.UtcNow;
+        var observed = descriptors.Select((control, index) => new UiControlObservation(control.ControlId, 1, "view", "context",
+            index == 0 ? UiObservationState.Ready : UiObservationState.Unmounted, "web", now, null)).ToArray();
+        var draft = new EllaiGuidancePlanDraft(1, GuidancePlanStatus.Ready, "Submit a report", GuidanceMode.Navigation, steps, [], null);
+        var validator = new EllaiGuidancePlanValidator(registry);
+        Assert.NotNull(validator.ValidateObserved(draft, new("report", [], 20), new HashSet<string> { "report" },
+            new HashSet<string>(), observed, "view", "context", now, "plan").Plan);
+        var unsafeSteps = steps.ToArray();
+        unsafeSteps[5] = unsafeSteps[5] with { Behavior = PlanStepBehavior.RequestUiIntent, UiIntentBindingId = "Submit" };
+        Assert.Null(validator.ValidateObserved(draft with { Steps = unsafeSteps }, new("report", [], 20), new HashSet<string> { "report" },
+            new HashSet<string>(), observed, "view", "context", now, "plan").Plan);
+    }
+
+    [Fact]
     public void RestoredOptionalSkipIsSeparateFromCompletionAndCannotBeCountedTwice()
     {
         var (registry, _, _) = Create();
