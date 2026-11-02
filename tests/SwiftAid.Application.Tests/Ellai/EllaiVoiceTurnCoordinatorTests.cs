@@ -290,6 +290,20 @@ public sealed class EllaiVoiceTurnCoordinatorTests
     }
 
     [Fact]
+    public void SameCaptureSpanHasStableTurnIdentityAfterCoordinatorRestart()
+    {
+        Guid Complete(EllaiVoiceTurnCoordinator coordinator, string capture)
+        {
+            using var stream = coordinator.BeginStream("session-restart", CancellationToken.None, capture);
+            CompleteTurnWithAudioSpan(coordinator, stream, "provider-first", "Synthetic request", 24_000);
+            return Assert.Single(coordinator.GetCompletedTurns("session-restart")).TurnId;
+        }
+        var first = Complete(new EllaiVoiceTurnCoordinator(), "capture-a");
+        Assert.Equal(first, Complete(new EllaiVoiceTurnCoordinator(), "capture-a"));
+        Assert.NotEqual(first, Complete(new EllaiVoiceTurnCoordinator(), "capture-b"));
+    }
+
+    [Fact]
     public void ReplayedAudioSpanAfterReconnectDoesNotPublishTheSameTurnAgain()
     {
         var coordinator = new EllaiVoiceTurnCoordinator();

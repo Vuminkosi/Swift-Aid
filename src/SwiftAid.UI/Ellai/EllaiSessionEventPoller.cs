@@ -8,7 +8,7 @@ namespace SwiftAid.UI.Ellai;
 /// long-poll, active-review fetch, approve-selected and reject. Relative
 /// URLs: the host app supplies the authorized HttpClient. Non-success
 /// responses read as unavailable so the caller keeps polling.</summary>
-public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes = false, bool useLiveVoiceWebSocket = false) : IEllaiReviewClient
+public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes = false, IEllaiClientSpeechDetectorFactory? speechDetectorFactory = null) : IEllaiReviewClient
 {
     private const int MaximumPcmBytes = 3_840_000;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -245,7 +245,7 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
             return null;
         }
 
-        var route = $"{SessionRoute(sessionId)}/voice/{mode.ToString().ToLowerInvariant()}?serverSubmission=true";
+        var route = $"{SessionRoute(sessionId)}/voice/{(mode == EllaiVoiceCaptureMode.Live ? "recover" : "recorded")}?serverSubmission=true";
         if (!string.IsNullOrWhiteSpace(voiceCaptureId) || voiceCaptureOffsetSamples > 0)
         {
             var query = new List<string>();
@@ -288,62 +288,10 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
             return null;
         }
 
-        if (useLiveVoiceWebSocket)
-        {
-            if (_http.BaseAddress is null || string.IsNullOrWhiteSpace(voiceCaptureId)) return null;
-            var uri = CreateLiveVoiceWebSocketUri(_http.BaseAddress, sessionId, voiceCaptureId, voiceCaptureOffsetSamples);
-            await EllaiLiveVoiceWebSocketClient.SendAsync(_http, uri, audio, cancellationToken).ConfigureAwait(false);
-            // Completed transcripts and admission receipts use the existing ordered status feed.
-            return new EllaiVoiceTranscriptionResult(string.Empty, ServerSubmission: true);
-        }
-
-        var content = new StreamContent(audio, 8_192);
-        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
-        var route = $"{SessionRoute(sessionId)}/voice/live";
-        var query = new List<string> { "serverSubmission=true" };
-        if (!string.IsNullOrWhiteSpace(voiceCaptureId))
-        {
-            query.Add($"voiceCaptureId={Uri.EscapeDataString(voiceCaptureId)}");
-        }
-        if (voiceCaptureOffsetSamples > 0)
-        {
-            query.Add($"voiceCaptureOffsetSamples={voiceCaptureOffsetSamples}");
-        }
-        if (query.Count > 0)
-        {
-            route += $"?{string.Join('&', query)}";
-        }
-        using (content)
-        using (var request = new HttpRequestMessage(HttpMethod.Post, route) { Content = content })
-        {
-            if (_useGuestRoutes)
-            {
-                var token = await GetGuestAntiforgeryTokenAsync(cancellationToken).ConfigureAwait(false);
-                if (string.IsNullOrWhiteSpace(token))
-                {
-                    return null;
-                }
-                request.Headers.TryAddWithoutValidation("X-CSRF-TOKEN", token);
-            }
-
-            try
-            {
-                using var response = await _http.SendAsync(request,
-                    HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-                return response.IsSuccessStatusCode
-                    ? await response.Content.ReadFromJsonAsync<EllaiVoiceTranscriptionResult>(Json, cancellationToken)
-                        .ConfigureAwait(false)
-                    : null;
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception)
-            {
-                return null;
-            }
-        }
+        if (_http.BaseAddress is null || string.IsNullOrWhiteSpace(voiceCaptureId)) return null;
+        var uri = CreateLiveVoiceWebSocketUri(_http.BaseAddress, sessionId, voiceCaptureId, voiceCaptureOffsetSamples);
+        await EllaiLiveVoiceWebSocketClient.SendAsync(_http, uri, audio, cancellationToken, speechDetectorFactory, voiceCaptureId, voiceCaptureOffsetSamples).ConfigureAwait(false);
+        return new EllaiVoiceTranscriptionResult(string.Empty, ServerSubmission: true);
     }
 
     public async Task<EllaiVoiceTurnStatusDto?> GetVoiceTurnStatusAsync(

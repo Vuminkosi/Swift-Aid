@@ -147,7 +147,7 @@ public static class EllaiGuestEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
-        group.MapPost("/sessions/{sessionId}/voice/{mode}", TranscribeVoiceAsync)
+        group.MapPost("/sessions/{sessionId}/voice/{mode:regex(^(recorded|recover)$)}", TranscribeVoiceAsync)
             .WithMetadata(new RequestSizeLimitAttribute(EllaiVoiceTranscriptionService.MaximumAudioBytes))
             .WithName("TranscribeEllaiGuestVoiceCapture")
             .Accepts<byte[]>("audio/wav", "application/octet-stream")
@@ -346,12 +346,9 @@ public static class EllaiGuestEndpoints
         EllaiVoiceTranscriptionService transcription,
         CancellationToken cancellationToken)
     {
-        if (!Enum.TryParse<EllaiVoiceCaptureMode>(mode, true, out var captureMode)
-            || !Enum.IsDefined(captureMode)
-            || (captureMode == EllaiVoiceCaptureMode.Recorded
-                && !string.Equals(request.ContentType, "audio/wav", StringComparison.OrdinalIgnoreCase))
-            || (captureMode == EllaiVoiceCaptureMode.Live
-                && !string.Equals(request.ContentType, "application/octet-stream", StringComparison.OrdinalIgnoreCase)))
+        var captureMode = mode == "recover" ? EllaiVoiceCaptureMode.Live : EllaiVoiceCaptureMode.Recorded;
+        if (request.ContentLength is not (> 0 and <= EllaiVoiceTranscriptionService.MaximumAudioBytes)
+            || !string.Equals(request.ContentType, captureMode == EllaiVoiceCaptureMode.Recorded ? "audio/wav" : "application/octet-stream", StringComparison.OrdinalIgnoreCase))
         {
             return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "The voice capture format is invalid.");
         }

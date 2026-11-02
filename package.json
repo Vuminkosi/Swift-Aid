@@ -23,6 +23,11 @@
   },
   "homepage": "https://github.com/Vuminkosi/Swift-Aid#readme",
   "dependencies": {
-    "interactjs": "1.10.28"
+    "@ricky0123/vad-web": "0.0.31",
+    "interactjs": "1.10.28",
+    "onnxruntime-web": "1.22.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
   }
 }

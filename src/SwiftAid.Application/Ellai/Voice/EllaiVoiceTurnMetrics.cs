@@ -29,6 +29,10 @@ internal static class EllaiVoiceTurnMetrics
         "swiftaid.ellai.voice.turn.recovery", "{turn}",
         "Live voice turns that entered recovery without an accepted final transcript.");
 
+    private static readonly Counter<long> DuplicateTurns = Meter.CreateCounter<long>(
+        "swiftaid.ellai.voice.turn.duplicate", "{turn}", "Replayed completed acoustic spans rejected before admission.");
+    public static void DuplicateTurn() { try { DuplicateTurns.Add(1); } catch { } }
+
     public static void SpeechStartConfirmed(TimeSpan delay) => SafeRecord(SpeechStartDelay, delay.TotalMilliseconds);
 
     public static void EndpointCandidateReached(TimeSpan silence) =>

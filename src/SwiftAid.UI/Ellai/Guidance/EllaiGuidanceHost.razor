@@ -67,7 +67,6 @@
 </div>
 
 @code {
-    private const int LiveVoiceEndOfTurnSilenceBytes = 22 * 512 * 3;
     private CancellationTokenSource? _cts;
     private bool ShowComposer;
     private bool IsActive;
@@ -136,7 +135,10 @@
     private Microsoft.JSInterop.IJSObjectReference? _captureModule;
     private Microsoft.JSInterop.IJSObjectReference? _connectivitySubscription;
     private IEllaiNativeVoiceCapture? _nativeVoiceCapture;
-    private EllaiClientBargeInDetector? _clientBargeInDetector;
+    private long _lastNativeGlowTimestamp;
+    private double _nativeGlowLevel;
+    private IEllaiClientSpeechDetectorFactory? _sileroFactory;
+    private EllaiClientBargeInDetector? _otherNativeBargeInDetector;
     private Microsoft.JSInterop.DotNetObjectReference<EllaiGuidanceHost>? _captureDotnetReference;
     private readonly object _capturedPcmGate = new();
     private readonly SemaphoreSlim _liveVoiceReplayGate = new(1, 1);
@@ -245,6 +247,8 @@
             _speechModule = null;
         }
 
+        _sileroFactory = Services.GetService<IEllaiClientSpeechDetectorFactory>();
+        if (_sileroFactory is not null) _sileroFactory.SpeechConfirmed += OnNativeSileroSpeech;
         _nativeVoiceCapture = Services.GetService<IEllaiNativeVoiceCapture>();
         if (_nativeVoiceCapture is not null)
         {
@@ -339,7 +343,7 @@
         var useNativeLiveCapture = mode == EllaiVoiceCaptureMode.Live
             && _nativeVoiceCapture?.IsAvailable == true;
         var useBrowserLiveVoiceWebSocket = mode == EllaiVoiceCaptureMode.Live
-            && !useNativeLiveCapture && ReviewClient is EllaiReviewHttpClient;
+            && !useNativeLiveCapture && !ReviewClient.UsesGatewayPcmAudioDownload;
         if ((!useNativeLiveCapture && !_microphoneCaptureAvailable)
             || (!useNativeLiveCapture && _captureModule is null)
             || session is null || !string.Equals(session.Status, "Active", StringComparison.Ordinal)
@@ -390,11 +394,9 @@
         _captureMode = mode;
         _liveVoiceCaptureId = Guid.NewGuid().ToString("N");
         _captureEchoCancellationEnabled = false;
-        if (mode == EllaiVoiceCaptureMode.Live)
-        {
-            _clientBargeInDetector?.Dispose();
-            _clientBargeInDetector = new EllaiClientBargeInDetector();
-        }
+        _otherNativeBargeInDetector?.Dispose();
+        // Preserve existing iOS behaviour; this milestone replaces the detector on web/Android only.
+        _otherNativeBargeInDetector = useNativeLiveCapture && _sileroFactory is null ? new EllaiClientBargeInDetector() : null;
         if (!string.Equals(_voiceTurnCursorSessionId, session.SessionId, StringComparison.Ordinal))
         {
             _voiceTurnCursorSessionId = session.SessionId;
@@ -470,8 +472,8 @@
             {
                 _ = await _captureModule!.InvokeAsync<string>(
                     "startCapture", _captureDotnetReference, mode == EllaiVoiceCaptureMode.Live, session.SessionId,
-                    useBrowserLiveVoiceWebSocket && ReviewClient is EllaiReviewHttpClient browserClient
-                        ? browserClient.CreateLiveVoiceWebSocketUri(
+                    useBrowserLiveVoiceWebSocket
+                        ? ReviewClient.CreateLiveVoiceWebSocketUri(
                             new Uri(Navigation.BaseUri), session.SessionId, _liveVoiceCaptureId!).ToString()
                         : string.Empty);
             }
@@ -679,7 +681,7 @@
                 var replay = SnapshotCapturedAudio();
                 try
                 {
-                    var socketUrl = ((EllaiReviewHttpClient)ReviewClient).CreateLiveVoiceWebSocketUri(
+                    var socketUrl = ReviewClient.CreateLiveVoiceWebSocketUri(
                         new Uri(Navigation.BaseUri), sessionId, _liveVoiceCaptureId!, 0).ToString();
                     var connected = await _captureModule!.InvokeAsync<bool>(
                         "reconnectVoiceStream", socketUrl, replay).ConfigureAwait(false);
@@ -788,36 +790,6 @@
         catch
         {
             return false;
-        }
-    }
-
-    private async Task AppendLiveVoiceEndOfTurnSilenceAsync()
-    {
-        if (_liveVoiceReconnectRequired || _liveVoiceChunks is null
-            || _liveVoiceTranscriptionTask?.IsCompleted != false)
-        {
-            return;
-        }
-
-        var silence = new byte[LiveVoiceEndOfTurnSilenceBytes];
-        try
-        {
-            for (var offset = 0; offset < silence.Length;)
-            {
-                var count = Math.Min(8_192, silence.Length - offset);
-                var chunk = silence.AsSpan(offset, count).ToArray();
-                if (!await WriteLiveVoiceChunkAsync(
-                        chunk, _liveVoiceCts?.Token ?? CancellationToken.None).ConfigureAwait(false))
-                {
-                    return;
-                }
-
-                offset += count;
-            }
-        }
-        finally
-        {
-            Array.Clear(silence);
         }
     }
 
@@ -941,9 +913,16 @@
         finally
         {
             await ReleaseLiveVoiceStreamAsync();
-            _clientBargeInDetector?.Dispose();
-            _clientBargeInDetector = null;
+            _otherNativeBargeInDetector?.Dispose();
+            _otherNativeBargeInDetector = null;
             _captureEchoCancellationEnabled = false;
+            _nativeGlowLevel = 0;
+            if (_captureModule is not null)
+            {
+                try { await _captureModule.InvokeVoidAsync("setNativeVoiceLevel", 0); }
+                catch (Microsoft.JSInterop.JSException) { }
+                catch (Microsoft.JSInterop.JSDisconnectedException) { }
+            }
         }
     }
 
@@ -1239,7 +1218,6 @@
             return;
         }
 
-        ObserveLocalBargeIn(bytes);
 
         if (_captureMode == EllaiVoiceCaptureMode.Live && _liveVoiceChunks is not null)
         {
@@ -1268,13 +1246,14 @@
         }
 
         var bytes = pcm.ToArray();
+        ObserveOtherNativeBargeIn(bytes);
+        await UpdateNativeVoiceGlowAsync(bytes);
         if (!TryAppendCapturedAudio(bytes, out var offset))
         {
             Array.Clear(bytes);
             _ = InvokeAsync(StopVoiceCaptureAsync);
             return;
         }
-        ObserveLocalBargeIn(bytes);
         if (_liveVoiceChunks is null)
         {
             Array.Clear(bytes);
@@ -1476,7 +1455,6 @@
             var usedLiveVoiceUploadRecovery = false;
             if (mode == EllaiVoiceCaptureMode.Live)
             {
-                await AppendLiveVoiceEndOfTurnSilenceAsync().ConfigureAwait(false);
                 _liveVoiceChunks?.Writer.TryComplete();
                 try
                 {
@@ -1501,7 +1479,7 @@
                 {
                     var pendingAudio = GetUncompletedLiveVoiceAudio(capturedAudio, finalStatus);
                     if (pendingAudio.Audio.Length > 0
-                        && (result is null || _liveVoiceReconnectRequired))
+                        && _liveVoiceReconnectRequired)
                     {
                         usedLiveVoiceUploadRecovery = true;
                         StatusText = "Reconnecting…";
@@ -1536,7 +1514,7 @@
                 await ReleaseLiveVoiceStreamAsync();
                 result = null;
 
-                if (_lastCompletedVoiceTurnSequence == 0 && !_submittingUtterance
+                if (finalStatus is not null && _lastCompletedVoiceTurnSequence == 0 && !_submittingUtterance
                     && !_isPlayingResponse)
                 {
                     StatusText = usedLiveVoiceUploadRecovery
@@ -1682,13 +1660,6 @@
             }
             _capturedVoiceBytes = 0;
         }
-    }
-
-    private void DisposeClientBargeInDetector()
-    {
-        _clientBargeInDetector?.Dispose();
-        _clientBargeInDetector = null;
-        _captureEchoCancellationEnabled = false;
     }
 
     /// <summary>Binds trusted runtime progress to the composer status line.
@@ -2010,7 +1981,6 @@
         _activeResponsePlaybackId = playbackId;
         _isPlayingResponse = true;
         Interlocked.Exchange(ref _localBargeInPending, 0);
-        _clientBargeInDetector?.ResetSpeechConfirmation();
         StatusText = "Preparing Ellai speech…";
         await InvokeAsync(StateHasChanged);
         try
@@ -2555,16 +2525,39 @@
         StatusText = status;
     }
 
-    private void ObserveLocalBargeIn(ReadOnlySpan<byte> pcm)
+    private async ValueTask UpdateNativeVoiceGlowAsync(byte[] pcm)
     {
-        if (!_isRecordingAudio || _captureMode != EllaiVoiceCaptureMode.Live
-            || !_isPlayingResponse || !_captureEchoCancellationEnabled
-            || _clientBargeInDetector is null
-            || !_clientBargeInDetector.ObservePcm24Khz(pcm)
-            || Interlocked.CompareExchange(ref _localBargeInPending, 1, 0) != 0)
+        if (_captureModule is null || System.Diagnostics.Stopwatch.GetElapsedTime(_lastNativeGlowTimestamp).TotalMilliseconds < 60) return;
+        _lastNativeGlowTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
+        double squared = 0;
+        for (var offset = 0; offset + 1 < pcm.Length; offset += 2)
         {
-            return;
+            var sample = System.Buffers.Binary.BinaryPrimitives.ReadInt16LittleEndian(pcm.AsSpan(offset, 2)) / 32768d;
+            squared += sample * sample;
         }
+        // Visualization only. Silero alone determines speech activity.
+        var level = Math.Clamp((Math.Sqrt(squared / Math.Max(1, pcm.Length / 2)) - 0.008) / 0.16, 0, 1);
+        _nativeGlowLevel = _nativeGlowLevel * 0.58 + level * 0.42;
+        try { await _captureModule.InvokeVoidAsync("setNativeVoiceLevel", _nativeGlowLevel); }
+        catch (Microsoft.JSInterop.JSException) { }
+        catch (Microsoft.JSInterop.JSDisconnectedException) { }
+    }
+
+    private void ObserveOtherNativeBargeIn(ReadOnlySpan<byte> pcm)
+    {
+        if (_nativeVoiceCaptureActive && _isPlayingResponse && _captureEchoCancellationEnabled
+            && _otherNativeBargeInDetector?.ObservePcm24Khz(pcm) == true && _liveVoiceCaptureId is { } captureId)
+            _ = OnClientSileroSpeech(captureId);
+    }
+
+    private void OnNativeSileroSpeech(string captureId) => _ = OnClientSileroSpeech(captureId);
+
+    [JSInvokable]
+    public Task OnClientSileroSpeech(string captureId)
+    {
+        if (captureId != _liveVoiceCaptureId || !_isRecordingAudio || _captureMode != EllaiVoiceCaptureMode.Live
+            || !_isPlayingResponse || !_captureEchoCancellationEnabled
+            || Interlocked.CompareExchange(ref _localBargeInPending, 1, 0) != 0) return Task.CompletedTask;
 
         var interruptionTurnId = Guid.NewGuid().ToString("N");
         var streamEpoch = _lastVoiceTurnStatusEpoch;
@@ -2581,6 +2574,7 @@
             Phase = EllaiStatusPhases.Active;
             StateHasChanged();
         });
+        return Task.CompletedTask;
     }
 
     private void StopResponseAudio(string? interruptionTurnId = null, long streamEpoch = 0)
@@ -3003,6 +2997,8 @@
     {
         _uiObservationLifetime.Cancel();
         if (_sessionContinuity is not null) _ = _sessionContinuity.DisposeAsync();
+        _otherNativeBargeInDetector?.Dispose();
+        if (_sileroFactory is not null) _sileroFactory.SpeechConfirmed -= OnNativeSileroSpeech;
         if (_nativeVoiceCapture is not null)
         {
             _nativeVoiceCapture.Interrupted -= OnNativeVoiceCaptureInterrupted;

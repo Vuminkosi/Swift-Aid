@@ -111,6 +111,25 @@ public sealed class SileroVoiceActivityAudioStream : IDisposable
         }
     }
 
+    // An intentional idle gap resets model context but preserves the coordinator's
+    // pending endpoint/final transcript and monotonically ordered acoustic events.
+    public async ValueTask AdvanceToAsync(long position, CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var expected = _removedSourceSamples + _resampleBuffer.Count;
+            if (position == expected) return;
+            if (position < expected) throw new InvalidDataException("Audio positions moved backwards.");
+            var sequence = _sequence;
+            ResetCore();
+            _sequence = sequence;
+            _removedSourceSamples = position;
+            _stateResetPending = false;
+        }
+        finally { _gate.Release(); }
+    }
+
     public async ValueTask ResetAsync(CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);

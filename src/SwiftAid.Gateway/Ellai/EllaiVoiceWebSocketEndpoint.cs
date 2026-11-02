@@ -13,7 +13,8 @@ public static class EllaiVoiceWebSocketEndpoint
         [FromServices] EllaiSessionService sessions,
         CancellationToken cancellationToken)
     {
-        if (!http.WebSockets.IsWebSocketRequest || !IsSameOrigin(http))
+        if (!http.WebSockets.IsWebSocketRequest || !IsSameOrigin(http)
+            || !http.WebSockets.WebSocketRequestedProtocols.Contains(SwiftAid.Contracts.Ellai.EllaiSpeechEvent.Protocol))
         {
             return Results.BadRequest();
         }
@@ -30,15 +31,16 @@ public static class EllaiVoiceWebSocketEndpoint
         var captureId = http.Request.Query["voiceCaptureId"].FirstOrDefault();
         if (string.IsNullOrWhiteSpace(captureId) || captureId.Length > 64
             || !long.TryParse(http.Request.Query["voiceCaptureOffsetSamples"].FirstOrDefault(), out var offset)
-                && http.Request.Query.ContainsKey("voiceCaptureOffsetSamples"))
+                && http.Request.Query.ContainsKey("voiceCaptureOffsetSamples")
+            || offset is < 0 or > SwiftAid.Contracts.Ellai.EllaiSpeechEvent.MaximumPosition)
         {
             return Results.BadRequest();
         }
 
-        using var socket = await http.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
+        using var socket = await http.WebSockets.AcceptWebSocketAsync(SwiftAid.Contracts.Ellai.EllaiSpeechEvent.Protocol).ConfigureAwait(false);
         var logger = http.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("SwiftAid.Ellai.VoiceTransport");
         var started = System.Diagnostics.Stopwatch.StartNew();
-        await using var audio = new EllaiVoiceWebSocketStream(socket);
+        await using var audio = new EllaiVoiceWebSocketStream(socket, Math.Max(0, offset));
         logger.LogInformation("Voice connected: session={SessionId} capture={CaptureId} transport=WebSocket offsetSamples={OffsetSamples}.",
             sessionId, captureId, Math.Max(0, offset));
         try
@@ -80,8 +82,9 @@ public static class EllaiVoiceWebSocketEndpoint
         }
         finally
         {
-            logger.LogInformation("Voice disconnected: session={SessionId} capture={CaptureId} bytes={AudioBytes} elapsedMs={ElapsedMs} close={CloseStatus}.",
-                sessionId, captureId, audio.ReceivedBytes, started.ElapsedMilliseconds, socket.CloseStatus);
+            SegmentedAudioMetrics.Record(audio.ReceivedBytes, audio.SuppressedSamples, audio.DuplicateEvents, audio.MissingEvents);
+            logger.LogInformation("Voice disconnected: session={SessionId} capture={CaptureId} bytes={AudioBytes} elapsedMs={ElapsedMs} close={CloseStatus} suppressedSamples={SuppressedSamples} duplicates={Duplicates} missing={Missing}.",
+                sessionId, captureId, audio.ReceivedBytes, started.ElapsedMilliseconds, socket.CloseStatus, audio.SuppressedSamples, audio.DuplicateEvents, audio.MissingEvents);
         }
 
         return Results.Empty;

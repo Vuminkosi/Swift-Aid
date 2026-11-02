@@ -163,7 +163,7 @@ public sealed class EllaiGuestReviewHttpClientTests
     }
 
     [Fact]
-    public async Task BufferedLiveVoiceRecoveryUsesExistingLiveRouteAndRawPcmContentType()
+    public async Task BufferedVoiceRecoveryUsesFiniteRecoveryRoute()
     {
         var handler = new TranscriptionHandler();
         using var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost/") };
@@ -173,31 +173,10 @@ public sealed class EllaiGuestReviewHttpClientTests
             "guest-session", [1, 2, 3, 4], EllaiVoiceCaptureMode.Live, CancellationToken.None);
 
         Assert.Equal("heard words", transcript?.Transcript);
-        Assert.Equal("/api/v1/ellai/guest/sessions/guest-session/voice/live?serverSubmission=true", handler.PostPath);
+        Assert.Equal("/api/v1/ellai/guest/sessions/guest-session/voice/recover?serverSubmission=true", handler.PostPath);
         Assert.Equal("application/octet-stream", handler.ContentType);
         Assert.Equal(new byte[] { 1, 2, 3, 4 }, handler.AudioBytes);
         Assert.Equal("csrf-test", handler.CsrfToken);
-    }
-
-    [Fact]
-    public async Task LiveVoiceUsesStreamingGuestRequestOnExistingSessionRoute()
-    {
-        var handler = new LiveTranscriptionHandler();
-        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost/") };
-        var client = new EllaiReviewHttpClient(http, useGuestRoutes: true);
-        using var audio = new NonSeekableStream([1, 2, 3, 4, 5, 6]);
-
-        var result = await client.TranscribeLiveVoiceStreamAsync(
-            "guest-session", audio, CancellationToken.None, "voice-capture-1", 4_800);
-
-        Assert.Equal("streamed words", result?.Transcript);
-        Assert.Equal(
-            "/api/v1/ellai/guest/sessions/guest-session/voice/live?serverSubmission=true&voiceCaptureId=voice-capture-1&voiceCaptureOffsetSamples=4800",
-            handler.Path);
-        Assert.Equal("application/octet-stream", handler.ContentType);
-        Assert.Null(handler.ContentLength);
-        Assert.Equal("csrf-test", handler.CsrfToken);
-        Assert.Equal(new byte[] { 1, 2, 3, 4, 5, 6 }, handler.AudioBytes);
     }
 
     [Theory]

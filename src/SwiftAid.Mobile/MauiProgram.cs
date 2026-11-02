@@ -303,9 +303,10 @@ public static class MauiProgram
             gatewayBaseAddress is null
                 ? null
                 : sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.Ellai.Guest"),
-            sp.GetRequiredService<IMobileAuthenticationSession>()));
+            sp.GetRequiredService<IMobileAuthenticationSession>(), sp.GetService<IEllaiClientSpeechDetectorFactory>()));
         builder.Services.AddSingleton<IEllaiMicrophonePermission, MobileEllaiMicrophonePermission>();
 #if ANDROID
+        builder.Services.AddSingleton<IEllaiClientSpeechDetectorFactory, SwiftAid.Mobile.Platforms.Android.AndroidSileroSpeechDetectorFactory>();
         builder.Services.AddSingleton<IEllaiPcmAudioPlayer, AndroidEllaiPcmAudioPlayer>();
         builder.Services.AddSingleton<AndroidEllaiNativeVoiceCapture>();
         builder.Services.AddSingleton<IEllaiNativeVoiceCapture>(services =>

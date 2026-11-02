@@ -38,13 +38,13 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
     public MobileEllaiReviewClient(
         HttpClient? authenticatedHttp,
         HttpClient? guestHttp,
-        IMobileAuthenticationSession authentication)
+        IMobileAuthenticationSession authentication, IEllaiClientSpeechDetectorFactory? speechDetectorFactory = null)
     {
         _authentication = authentication ?? throw new ArgumentNullException(nameof(authentication));
         if (authenticatedHttp is not null && guestHttp is not null)
         {
-            _authenticated = new EllaiReviewHttpClient(authenticatedHttp, useLiveVoiceWebSocket: true);
-            _guest = new EllaiReviewHttpClient(guestHttp, useGuestRoutes: true, useLiveVoiceWebSocket: true);
+            _authenticated = new EllaiReviewHttpClient(authenticatedHttp, speechDetectorFactory: speechDetectorFactory);
+            _guest = new EllaiReviewHttpClient(guestHttp, useGuestRoutes: true, speechDetectorFactory: speechDetectorFactory);
         }
     }
 

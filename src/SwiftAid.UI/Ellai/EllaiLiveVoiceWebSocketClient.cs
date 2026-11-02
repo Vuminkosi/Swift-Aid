@@ -1,11 +1,13 @@
 using System.Net.WebSockets;
+using SwiftAid.Contracts.Ellai;
 
 namespace SwiftAid.UI.Ellai;
 
 /// <summary>Native PCM transport through the same endpoint as the browser. Capture owns the input stream.</summary>
 public static class EllaiLiveVoiceWebSocketClient
 {
-    public static async Task SendAsync(HttpClient http, Uri destination, Stream audio, CancellationToken cancellationToken)
+    public static async Task SendAsync(HttpClient http, Uri destination, Stream audio, CancellationToken cancellationToken, IEllaiClientSpeechDetectorFactory? detectorFactory = null,
+        string captureId = "", long sourceOffset = 0)
     {
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(audio);
@@ -17,6 +19,7 @@ public static class EllaiLiveVoiceWebSocketClient
 
         using var socket = new ClientWebSocket();
         socket.Options.SetRequestHeader("Origin", origin.GetLeftPart(UriPartial.Authority));
+        socket.Options.AddSubProtocol(EllaiSpeechEvent.Protocol);
         socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(20);
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         using var handshake = new HttpMessageInvoker(new GatewayHandshakeHandler(http));
@@ -27,29 +30,44 @@ public static class EllaiLiveVoiceWebSocketClient
             await socket.ConnectAsync(destination, handshake, connect.Token).ConfigureAwait(false);
         }
 
+        if (socket.SubProtocol != EllaiSpeechEvent.Protocol) throw new WebSocketException("Unsupported voice protocol.");
+        using var detector = detectorFactory?.Create();
+        using var gate = new EllaiSilenceGate(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), sourceOffset);
+        gate.SpeechConfirmed += () => detectorFactory?.NotifySpeechConfirmed(captureId);
         var inputEnded = false;
         async Task SendAudioAsync()
         {
-            var buffer = new byte[8192];
-            var carry = 0;
+            var buffer = new byte[1536]; // One 32 ms Silero frame at transport sample rate.
+            var filled = 0;
+            var lastHeartbeat = System.Diagnostics.Stopwatch.GetTimestamp();
+            async Task SendPacketAsync(byte[] packet)
+            {
+                using var send = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+                send.CancelAfter(TimeSpan.FromSeconds(5));
+                try { await socket.SendAsync(packet.AsMemory(), WebSocketMessageType.Binary, true, send.Token).ConfigureAwait(false); }
+                finally { Array.Clear(packet); }
+            }
             try
             {
                 while (true)
                 {
-                    var read = await audio.ReadAsync(buffer.AsMemory(carry), lifetime.Token).ConfigureAwait(false);
+                    var read = await audio.ReadAsync(buffer.AsMemory(filled), lifetime.Token).ConfigureAwait(false);
                     if (read == 0) break;
-                    var available = carry + read;
-                    var count = available & ~1;
-                    if (count > 0)
+                    filled += read;
+                    if (filled != buffer.Length) continue;
+                    var probability = detector?.AnalyzeFrame(buffer) ?? 1f;
+                    foreach (var packet in gate.Push(buffer, probability)) await SendPacketAsync(packet).ConfigureAwait(false);
+                    filled = 0;
+                    if (System.Diagnostics.Stopwatch.GetElapsedTime(lastHeartbeat) >= TimeSpan.FromSeconds(5))
                     {
-                        using var send = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
-                        send.CancelAfter(TimeSpan.FromSeconds(5));
-                        await socket.SendAsync(buffer.AsMemory(0, count), WebSocketMessageType.Binary, true, send.Token).ConfigureAwait(false);
+                        await SendPacketAsync(gate.Heartbeat()).ConfigureAwait(false);
+                        lastHeartbeat = System.Diagnostics.Stopwatch.GetTimestamp();
                     }
-                    carry = available - count;
-                    if (carry != 0) buffer[0] = buffer[count];
                 }
-                if (carry != 0) throw new InvalidDataException("PCM capture ended with an incomplete sample.");
+                if ((filled & 1) != 0) throw new InvalidDataException("PCM capture ended with an incomplete sample.");
+                if (filled > 0)
+                    foreach (var packet in gate.Push(buffer.AsSpan(0, filled), detector is null ? 1f : 0f))
+                        await SendPacketAsync(packet).ConfigureAwait(false);
                 inputEnded = true;
                 lifetime.CancelAfter(TimeSpan.FromSeconds(15));
                 await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "Capture stopped", lifetime.Token).ConfigureAwait(false);

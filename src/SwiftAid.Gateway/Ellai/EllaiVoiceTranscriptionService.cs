@@ -87,9 +87,24 @@ public sealed class EllaiVoiceTranscriptionService(
             using var durationCts = new CancellationTokenSource(
                 TimeSpan.FromMilliseconds(turnOptions.MaximumTurnDurationMs));
             using var liveCancellation = CancellationTokenSource.CreateLinkedTokenSource(
-                turn?.CancellationToken ?? cancellationToken, durationCts.Token);
+                turn.CancellationToken, durationCts.Token);
             try
             {
+                if (audio is EllaiVoiceWebSocketStream segmented)
+                {
+                    using var captureVad = new SileroVoiceActivityAudioStream(services.GetRequiredService<IVoiceActivityDetector>());
+                    captureVad.SetSourceSampleOffset(voiceCaptureOffsetSamples);
+                    var requestSequence = 0;
+                    EllaiVoiceTranscriptionResult? latest = null;
+                    while (await segmented.WaitForSegmentAsync(liveCancellation.Token).ConfigureAwait(false))
+                    {
+                        turnCoordinator.BeginTranscriptionRequest(turn);
+                        latest = await TranscribeLiveStreamAsync(segmented, turn, segmented.SegmentStartPosition,
+                            true, liveCancellation.Token, admission, $"segment-{++requestSequence}:", captureVad).ConfigureAwait(false);
+                        if (!segmented.SegmentEnded && !segmented.SocketClosed) return null;
+                    }
+                    return latest ?? new EllaiVoiceTranscriptionResult(string.Empty, ServerSubmission: admission is not null);
+                }
                 return await TranscribeLiveStreamAsync(
                     audio, turn, voiceCaptureOffsetSamples, contentLength.HasValue || audio.CanSeek,
                     liveCancellation.Token, admission)
@@ -97,7 +112,7 @@ public sealed class EllaiVoiceTranscriptionService(
             }
             catch (OperationCanceledException) when (durationCts.IsCancellationRequested
                 && !cancellationToken.IsCancellationRequested
-                && turn?.CancellationToken.IsCancellationRequested != true)
+                && !turn.CancellationToken.IsCancellationRequested)
             {
                 turn?.MarkRecovering();
                 logger?.LogInformation("Ellai live voice turn reached its configured duration limit.");
@@ -168,7 +183,7 @@ public sealed class EllaiVoiceTranscriptionService(
         long voiceCaptureOffsetSamples,
         bool finiteInput,
         CancellationToken cancellationToken,
-        EllaiVoiceTurnAdmission? admission)
+        EllaiVoiceTurnAdmission? admission, string providerRequestPrefix = "", SileroVoiceActivityAudioStream? captureVad = null)
     {
         using var capturedPcm = new MemoryStream();
         using var boundedAudio = new CapturingLimitReadStream(audio, capturedPcm, MaximumAudioBytes);
@@ -182,13 +197,13 @@ public sealed class EllaiVoiceTranscriptionService(
                     turn?.SessionId, turn?.VoiceCaptureId, options.AsrMode, finiteInput);
                 var finalizedTurns = new List<(string ProviderTurnId, string Text)>();
                 var unscopedTurnSequence = 0L;
-                var vadStream = services.GetService<SileroVoiceActivityAudioStream>();
-                vadStream?.SetSourceSampleOffset(voiceCaptureOffsetSamples);
-                Channel<byte[]>? vadChunks = null;
+                var vadStream = captureVad ?? services.GetService<SileroVoiceActivityAudioStream>();
+                if (captureVad is null) vadStream?.SetSourceSampleOffset(voiceCaptureOffsetSamples);
+                Channel<VadChunk>? vadChunks = null;
                 Task? vadWorker = null;
                 if (vadStream is not null)
                 {
-                    vadChunks = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(8)
+                    vadChunks = Channel.CreateBounded<VadChunk>(new BoundedChannelOptions(8)
                     {
                         FullMode = BoundedChannelFullMode.Wait,
                         SingleReader = true,
@@ -205,11 +220,11 @@ public sealed class EllaiVoiceTranscriptionService(
                         cancellationToken,
                         vadChunks is null
                             ? null
-                            : (chunk, ct) => vadChunks.Writer.WriteAsync(chunk.ToArray(), ct),
+                            : (chunk, ct) => vadChunks.Writer.WriteAsync(new VadChunk(chunk.ToArray(), (audio as EllaiVoiceWebSocketStream)?.LastReadSamplePosition), ct),
                         (partial, _) =>
                         {
-                            var providerTurnId = partial.TurnId?.ToString(
-                                System.Globalization.CultureInfo.InvariantCulture) ?? "unscoped";
+                            var providerTurnId = providerRequestPrefix + (partial.TurnId?.ToString(
+                                System.Globalization.CultureInfo.InvariantCulture) ?? "unscoped");
                             turn?.ObservePartialTranscript(providerTurnId, partial.Text);
                             return ValueTask.CompletedTask;
                         },
@@ -217,9 +232,9 @@ public sealed class EllaiVoiceTranscriptionService(
                         {
                             logger?.LogInformation("Voice provider final: session={SessionId} capture={CaptureId} providerTurn={ProviderTurnId} characters={Characters}.",
                                 turn?.SessionId, turn?.VoiceCaptureId, finalTurn.TurnId, finalTurn.Text.Length);
-                            var providerTurnId = finalTurn.TurnId?.ToString(
+                            var providerTurnId = providerRequestPrefix + (finalTurn.TurnId?.ToString(
                                 System.Globalization.CultureInfo.InvariantCulture)
-                                ?? $"unscoped:{Interlocked.Increment(ref unscopedTurnSequence)}";
+                                ?? $"unscoped:{Interlocked.Increment(ref unscopedTurnSequence)}");
                             var accepted = turn?.AcceptFinalTranscript(providerTurnId, finalTurn.Text);
                             if (turn is null || accepted is not null)
                             {
@@ -239,7 +254,7 @@ public sealed class EllaiVoiceTranscriptionService(
                     logger?.LogWarning(
                         "Ellai realtime transcription failed: session={SessionId} capture={CaptureId} failure={FailureType}; checking upload fallback.",
                         turn?.SessionId, turn?.VoiceCaptureId, ex.GetType().Name);
-                    if (!finiteInput && !boundedAudio.InputCompleted)
+                    if ((!finiteInput || audio is EllaiVoiceWebSocketStream) && !boundedAudio.InputCompleted)
                     {
                         // The client owns the still-running microphone and its recovery copy.
                         // Waiting for EOF here hides provider failure for the entire conversation.
@@ -254,7 +269,7 @@ public sealed class EllaiVoiceTranscriptionService(
                     {
                         await vadWorker.ConfigureAwait(false);
                     }
-                    vadStream?.Dispose();
+                    if (captureVad is null) vadStream?.Dispose();
                     if (admission is not null) await admission.SubmitCompletedAsync().ConfigureAwait(false);
                 }
             }
@@ -360,8 +375,10 @@ public sealed class EllaiVoiceTranscriptionService(
         }
     }
 
+    private sealed record VadChunk(byte[] Pcm, long? Position);
+
     private async Task ProcessVadChunksAsync(
-        ChannelReader<byte[]> chunks,
+        ChannelReader<VadChunk> chunks,
         SileroVoiceActivityAudioStream vadStream,
         EllaiVoiceTurnCoordinator.VoiceStreamLease? turn,
         CancellationToken cancellationToken,
@@ -379,7 +396,8 @@ public sealed class EllaiVoiceTranscriptionService(
                 {
                     if (vadEnabled)
                     {
-                        var activities = await vadStream.AppendPcm16Async(chunk, 24_000, cancellationToken)
+                        if (chunk.Position is { } position) await vadStream.AdvanceToAsync(position, cancellationToken).ConfigureAwait(false);
+                        var activities = await vadStream.AppendPcm16Async(chunk.Pcm, 24_000, cancellationToken)
                             .ConfigureAwait(false);
                         if (turn is not null && turnCoordinator is not null)
                         {
@@ -420,7 +438,7 @@ public sealed class EllaiVoiceTranscriptionService(
                 }
                 finally
                 {
-                    Array.Clear(chunk);
+                    Array.Clear(chunk.Pcm);
                 }
                 if (admission is not null) await admission.SubmitCompletedAsync().ConfigureAwait(false);
             }

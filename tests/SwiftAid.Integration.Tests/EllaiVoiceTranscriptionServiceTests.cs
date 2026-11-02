@@ -122,6 +122,59 @@ public sealed class EllaiVoiceTranscriptionServiceTests
     }
 
     [Fact]
+    public async Task SegmentsFinalizeIndependentProviderRequestsWithoutClosingCaptureOrWaitingForClient()
+    {
+        await using var server = await AudioForwardingWebSocketServer.CreateAsync(); // Final only after endStream.
+        var options = new EllaiOptions { Enabled = true, ApiKey = "synthetic", AsrModel = "muse-voice-transcribe-1.0",
+            AsrWebSocketUrl = server.WebSocketUrl, AsrMode = "DIARIZATION" };
+        const string sessionId = "segmented-admission";
+        var principal = new ClaimsPrincipal(new ClaimsIdentity([
+            new Claim(ClaimTypes.NameIdentifier, "voice-owner"), new Claim(ActorContext.AccessEpochClaimType, "1")], "test"));
+        var store = new InMemoryEllaiSessionStore();
+        await store.CreateAsync(new(sessionId, EllaiMode.Ask, "Active", 1, 1, 1, 1, 0, 12,
+            "voice-owner", "ellai-help-identity-epoch-1", null, null, DateTimeOffset.UtcNow), CancellationToken.None);
+        var turns = new EllaiVoiceTurnCoordinator();
+        var consent = new EllaiConsentService();
+        using var provider = new ServiceCollection().AddSingleton(turns).AddSingleton(consent)
+            .AddSingleton<IEllaiSessionStore>(store).AddScoped<EllaiUtteranceSubmissionService>()
+            .AddSingleton(new MetaAsrRealtimeAdapter(options)).AddSingleton<IVoiceActivityDetector, SpeechThenSilenceDetector>()
+            .BuildServiceProvider();
+        var service = new EllaiVoiceTranscriptionService(consent, new InMemoryEllaiConsentStore(), options, provider);
+        await service.GrantVoiceConsentAsync(sessionId, CancellationToken.None);
+        var events = new List<EllaiSpeechEvent>();
+        long sequence = 0;
+        for (var segment = 0; segment < 2; segment++)
+        {
+            var start = segment * 240_000L;
+            events.Add(new(EllaiSpeechEventKind.SpeechStarted, ++sequence, start, 1));
+            for (var frame = 0; frame < 40; frame++) events.Add(new(EllaiSpeechEventKind.Audio, ++sequence, start + frame * 768, 1));
+            events.Add(new(EllaiSpeechEventKind.SpeechEnded, ++sequence, start + 40 * 768, 1));
+        }
+        using var socket = new EllaiSegmentedAudioTests.PacketSocket(events, holdOpen: true);
+        await using var audio = new EllaiVoiceWebSocketStream(socket);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        var running = service.TranscribeAsync(sessionId, EllaiVoiceCaptureMode.Live, audio, null, deadline.Token,
+            "capture-segments", submissionPrincipal: principal);
+        try
+        {
+            IReadOnlyList<EllaiConversationTurn> conversation = [];
+            var inspectUntil = DateTimeOffset.UtcNow.AddSeconds(3);
+            while (DateTimeOffset.UtcNow < inspectUntil)
+            {
+                conversation = await store.ReadConversationAsync(sessionId, "voice-owner", deadline.Token);
+                if (conversation.Count == 2 || running.IsCompleted) break;
+                await Task.Delay(20, deadline.Token);
+            }
+            Assert.False(running.IsCompleted);
+            Assert.True(conversation.Count == 2, $"durable={conversation.Count}; completed={turns.GetCompletedTurns(sessionId).Count}; state={turns.GetSnapshot(sessionId).State}");
+            Assert.All(conversation, turn => Assert.Equal("Queued", turn.Outcome));
+            Assert.All(turns.GetCompletedTurns(sessionId), turn => Assert.Equal(1, turn.StreamEpoch));
+            Assert.Equal(2, turns.GetCompletedTurns(sessionId).Select(turn => turn.ProviderTurnId).Distinct().Count());
+        }
+        finally { socket.Complete(); await running; }
+    }
+
+    [Fact]
     public async Task ProviderReceiverFailureDoesNotWaitForMicrophoneEof()
     {
         await using var server = await AudioForwardingWebSocketServer.CreateAsync(failAfterHandshake: true);
@@ -762,7 +815,7 @@ public sealed class EllaiVoiceTranscriptionServiceTests
             {
                 var sequence = _sequence++;
                 return ValueTask.FromResult(new VoiceActivityResult(
-                    sequence, sequence < 4 ? 0.95f : 0f, sequence < 4, false));
+                    frame.Sequence, sequence < 4 ? 0.95f : 0f, sequence < 4, false));
             }
 
             public void Reset() => _sequence = 0;

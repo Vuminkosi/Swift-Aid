@@ -308,6 +308,20 @@ public sealed class EllaiVoiceTurnCoordinator
         }
     }
 
+    /// <summary>Starts an individual provider request inside the same capture lease.
+    /// Unconfirmed finals from an ended request must never attach to later speech.</summary>
+    public void BeginTranscriptionRequest(VoiceStreamLease lease)
+    {
+        lock (_gate)
+        {
+            if (!IsCurrent(lease) || lease.CancellationToken.IsCancellationRequested) return;
+            lease.Session.PendingFinalTranscripts.Clear();
+            lease.Session.PartialProviderTurnId = null;
+            lease.Session.PartialTranscript = null;
+            ResetAcousticState(lease.Session);
+        }
+    }
+
     public EllaiAcceptedFinalTranscript? AcceptFinalTranscript(
         VoiceStreamLease lease, string providerTurnId, string text)
     {
@@ -632,6 +646,7 @@ public sealed class EllaiVoiceTurnCoordinator
             if (hasAudioSpan && state.CompletedAudioSpans.TryGetValue(audioSpan, out var priorEpoch)
                 && priorEpoch < transcript.Epoch)
             {
+                EllaiVoiceTurnMetrics.DuplicateTurn();
                 state.State = EllaiVoiceTurnState.TurnCompleted;
                 continue;
             }
@@ -659,7 +674,12 @@ public sealed class EllaiVoiceTurnCoordinator
                 state.Submissions.Remove(state.CompletedTurns.Dequeue().TurnId);
             }
 
-            var turnId = state.ConfirmedInterruptionTurnId ?? Guid.NewGuid();
+            // Replay after a process restart must reach the same durable outbox key.
+            // Capture positions are authoritative Gateway VAD spans, never client turn claims.
+            var turnId = hasAudioSpan
+                ? new Guid(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+                    FormattableString.Invariant($"ellai-voice-v1:{state.SessionId}:{audioSpan.Item1}:{audioSpan.Item2}:{audioSpan.Item3}"))).AsSpan(0, 16))
+                : state.ConfirmedInterruptionTurnId ?? Guid.NewGuid();
             state.ConfirmedInterruptionTurnId = null;
             if (state.EndpointCandidateTimestamp is { } endpointTimestamp)
             {

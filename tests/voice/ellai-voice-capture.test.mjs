@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { afterEach, test } from "node:test";
+import { after, afterEach, test } from "node:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -8,7 +8,12 @@ import { pathToFileURL } from "node:url";
 const sourceUrl = new URL("../../src/SwiftAid.UI/wwwroot/js/ellai-voice-capture.js", import.meta.url);
 const temporaryModuleDirectory = await mkdtemp(join(tmpdir(), "ellai-voice-capture-"));
 const temporaryModulePath = join(temporaryModuleDirectory, "ellai-voice-capture.mjs");
+const gateSource = await readFile(new URL("../../src/SwiftAid.UI/wwwroot/js/ellai-segmented-audio.js", import.meta.url), "utf8");
+await writeFile(join(temporaryModuleDirectory, "gate.mjs"), gateSource);
 const moduleSource = (await readFile(sourceUrl, "utf8"))
+    .replace('import { stopResponse } from "./ellai-audio-playback.js";', 'const stopResponse = () => {};')
+    .replace('import { SilenceGate, protocol, createSilero } from "./ellai-segmented-audio.js";',
+        'import { SilenceGate, protocol } from "./gate.mjs"; const createSilero = async () => ({ analyze: async () => 0.9, destroy: async () => {} });')
     .replaceAll("import.meta.url", JSON.stringify(sourceUrl.href));
 await writeFile(temporaryModulePath, moduleSource);
 const { startCapture, stopCapture, reconnectVoiceStream } = await import(pathToFileURL(temporaryModulePath).href);
@@ -52,7 +57,8 @@ class FakeWebSocket {
     onclose;
     onerror;
 
-    constructor(url) {
+    constructor(url, protocol) {
+        this.protocol = protocol;
         this.url = url;
         voiceSockets.push(this);
         queueMicrotask(() => {
@@ -115,10 +121,10 @@ afterEach(async () => {
     else globalThis.WebSocket = originalWebSocket;
     globalThis.setTimeout = originalSetTimeout;
     globalThis.clearTimeout = originalClearTimeout;
-    await rm(temporaryModuleDirectory, { recursive: true, force: true });
+
 });
 
-test("live browser capture streams PCM over same-origin WebSocket and flushes endpoint silence", async () => {
+test("live browser capture sends framed PCM without fabricating trailing silence", async () => {
     installBrowser({ echoCancellation: true, noiseSuppression: true, autoGainControl: true });
     const callbacks = [];
     const dotnet = { invokeMethodAsync: async method => callbacks.push(method) };
@@ -126,16 +132,16 @@ test("live browser capture streams PCM over same-origin WebSocket and flushes en
     await startCapture(dotnet, true, "session-1", "ws://localhost:8080/api/v1/ellai/guest/sessions/session-1/voice/live-stream?voiceCaptureId=capture-1");
     assert.equal(voiceSockets.length, 1);
     assert.equal(voiceSockets[0].url, "ws://localhost:8080/api/v1/ellai/guest/sessions/session-1/voice/live-stream?voiceCaptureId=capture-1");
-    const samples = new Float32Array(960);
+    const samples = new Float32Array(768);
     samples[0] = -1;
     samples[1] = 1;
     FakeAudioWorkletNode.last.port.onmessage({ data: samples });
 
     await stopCapture();
 
-    assert.equal(voiceSockets[0].sent.length, 23);
-    assert.deepEqual([...new Uint8Array(voiceSockets[0].sent[0]).slice(0, 4)], [0, 128, 255, 127]);
-    assert.equal(voiceSockets[0].sent.slice(1).reduce((total, frame) => total + frame.byteLength, 0), 33_792);
+    assert.equal(voiceSockets[0].sent.length, 3); // start, real PCM, heartbeat
+    assert.deepEqual([...voiceSockets[0].sent[1].slice(32, 36)], [0, 128, 255, 127]);
+    assert.equal(voiceSockets[0].sent[1].byteLength, 1568);
     assert.equal(voiceSockets[0].readyState, FakeWebSocket.CLOSED);
     assert.ok(callbacks.includes("OnVoiceWebSocketClosed"));
 });
@@ -188,20 +194,20 @@ test("socket backpressure preserves capture and replays ordered frames without d
     } };
     await startCapture(dotnet, true, "session-1", "ws://localhost/voice");
     voiceSockets[0].bufferedAmount = 100000;
-    FakeAudioWorkletNode.last.port.onmessage({ data: new Float32Array(960).fill(0.25) });
-    FakeAudioWorkletNode.last.port.onmessage({ data: new Float32Array(960).fill(0.5) });
+    FakeAudioWorkletNode.last.port.onmessage({ data: new Float32Array(768).fill(0.25) });
+    FakeAudioWorkletNode.last.port.onmessage({ data: new Float32Array(768).fill(0.5) });
     await new Promise(resolve => originalSetTimeout(resolve, 0));
     assert.equal(capturedTracks[0].stopped, false);
-    assert.equal(mirrored.length, 1920);
+    assert.equal(mirrored.length, 1536);
     assert.equal(callbacks.filter(method => method === "OnVoiceCaptureBackpressure").length, 1);
-    const replay = new Uint8Array(1920);
+    const replay = new Uint8Array(1536);
     const view = new DataView(replay.buffer);
-    for (let index = 0; index < 960; index++) view.setInt16(index * 2, mirrored[index], true);
+    for (let index = 0; index < 768; index++) view.setInt16(index * 2, mirrored[index], true);
     assert.equal(await reconnectVoiceStream("ws://localhost/voice", replay), true);
-    const received = new Uint8Array(voiceSockets[1].sent.flatMap(frame => [...new Uint8Array(frame.buffer ?? frame)]));
-    assert.equal(received.length, 3840);
+    const received = new Uint8Array(voiceSockets[1].sent.filter(frame => new DataView(frame.buffer).getInt32(4, true) === 1).flatMap(frame => [...frame.slice(32)]));
+    assert.equal(received.length, 3072);
     assert.equal(new DataView(received.buffer).getInt16(0, true), 8192);
-    assert.equal(new DataView(received.buffer).getInt16(1920, true), 16384);
+    assert.equal(new DataView(received.buffer).getInt16(1536, true), 16384);
     assert.equal(capturedTracks.length, 1);
 });
 
@@ -230,3 +236,5 @@ test("unreported browser echo cancellation remains unknown", async () => {
     assert.match(status, /echo cancellation not reported/);
     assert.equal(reported.echoCancellationEnabled, null);
 });
+
+after(() => rm(temporaryModuleDirectory, { recursive: true, force: true }));

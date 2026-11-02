@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SwiftAid.UI.Ellai;
+using SwiftAid.Contracts.Ellai;
 
 namespace SwiftAid.Integration.Tests;
 
@@ -21,13 +22,13 @@ public sealed class EllaiNativeWebSocketTransportTests
     {
         await using var server = await Server.StartAsync(false);
         using var http = new HttpClient(new AuthenticationHandler()) { BaseAddress = server.Address, Timeout = TimeSpan.FromSeconds(1) };
-        var client = new EllaiReviewHttpClient(http, guest, useLiveVoiceWebSocket: true);
+        var client = new EllaiReviewHttpClient(http, guest);
         var pipe = new Pipe();
         await using var input = pipe.Reader.AsStream(leaveOpen: true);
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
         var sending = client.TranscribeLiveVoiceStreamAsync("owned-session", input, deadline.Token, "same-capture", 240);
         await pipe.Writer.WriteAsync(new byte[] { 1, 2, 3 }, deadline.Token);
-        await pipe.Writer.WriteAsync(new byte[] { 4, 0, 0 }, deadline.Token);
+        await pipe.Writer.WriteAsync(new byte[1533], deadline.Token);
         var first = await Task.WhenAny(server.FirstFrame.Task, sending).WaitAsync(deadline.Token);
         if (first == sending) await sending;
         await server.FirstFrame.Task.WaitAsync(deadline.Token);
@@ -38,7 +39,7 @@ public sealed class EllaiNativeWebSocketTransportTests
         var result = await sending;
         Assert.True(result!.ServerSubmission);
         Assert.True(input.CanRead);
-        Assert.Equal(new byte[] { 1, 2, 3, 4, 0, 0 }, server.Pcm.ToArray());
+        Assert.Equal(new byte[] { 1, 2, 3 }.Concat(new byte[1533]), server.Pcm.ToArray());
         Assert.Equal("test-session=synthetic", server.Cookie);
         Assert.Equal(server.Address.GetLeftPart(UriPartial.Authority), server.Origin);
         Assert.Equal(guest ? "/api/v1/ellai/guest/sessions/owned-session/voice/live-stream" :
@@ -53,12 +54,12 @@ public sealed class EllaiNativeWebSocketTransportTests
     {
         await using var server = await Server.StartAsync(true);
         using var http = new HttpClient(new AuthenticationHandler()) { BaseAddress = server.Address };
-        var client = new EllaiReviewHttpClient(http, true, useLiveVoiceWebSocket: true);
+        var client = new EllaiReviewHttpClient(http, true);
         var pipe = new Pipe();
         await using var input = pipe.Reader.AsStream(leaveOpen: true);
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var sending = client.TranscribeLiveVoiceStreamAsync("owned-session", input, deadline.Token, "capture");
-        await pipe.Writer.WriteAsync(new byte[] { 1, 2 }, deadline.Token);
+        await pipe.Writer.WriteAsync(new byte[1536], deadline.Token);
         await Assert.ThrowsAsync<WebSocketException>(() => sending);
         Assert.True(server.FirstFrame.Task.IsCompletedSuccessfully);
         Assert.False(deadline.IsCancellationRequested);
@@ -75,9 +76,9 @@ public sealed class EllaiNativeWebSocketTransportTests
         var pipe = new Pipe();
         await using var input = pipe.Reader.AsStream(leaveOpen: true);
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var client = new EllaiReviewHttpClient(http, true, useLiveVoiceWebSocket: true);
+        var client = new EllaiReviewHttpClient(http, true);
         var sending = client.TranscribeLiveVoiceStreamAsync("owned-session", input, cancellation.Token, "capture");
-        await pipe.Writer.WriteAsync(new byte[] { 1, 2 }, cancellation.Token);
+        await pipe.Writer.WriteAsync(new byte[1536], cancellation.Token);
         await server.FirstFrame.Task.WaitAsync(cancellation.Token);
         await cancellation.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => sending);
@@ -131,8 +132,8 @@ public sealed class EllaiNativeWebSocketTransportTests
             Origin = context.Request.Headers.Origin;
             Path = context.Request.Path;
             Query = context.Request.QueryString.Value;
-            using var socket = await context.WebSockets.AcceptWebSocketAsync();
-            var buffer = new byte[8192];
+            using var socket = await context.WebSockets.AcceptWebSocketAsync(EllaiSpeechEvent.Protocol);
+            var buffer = new byte[8224];
             while (true)
             {
                 var frame = await socket.ReceiveAsync(buffer.AsMemory(), context.RequestAborted);
@@ -141,7 +142,9 @@ public sealed class EllaiNativeWebSocketTransportTests
                     await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "Completed", context.RequestAborted);
                     break;
                 }
-                Pcm.Write(buffer, 0, frame.Count);
+                var header = EllaiSpeechEvent.Decode(buffer.AsSpan(0, frame.Count));
+                if (header.Kind != EllaiSpeechEventKind.Audio) continue;
+                Pcm.Write(buffer, EllaiSpeechEvent.HeaderBytes, frame.Count - EllaiSpeechEvent.HeaderBytes);
                 FirstFrame.TrySetResult();
                 if (fail)
                 {

@@ -12,18 +12,22 @@ async function main() {
     const page = await context.newPage();
     const errors = [];
     let frames = 0;
+    let audioBytes = 0;
+    let socketsOpened = 0, socketsClosed = 0;
+    const audioTimeline = [];
     let lastVoice;
     let conversation = [];
-    let submitted = 0;
+    let submitted = 0, uploadRecoveries = 0;
     let sessionId;
     let firstCompletedAt;
     let responseAudioRequests = 0;
     let blockedVoicePolls = 0;
     const voiceStates = [];
     const expectedTurns = Number(process.env.SWIFTAID_EXPECTED_VOICE_TURNS ?? 5);
-    assert.ok(Number.isInteger(expectedTurns) && expectedTurns > 0);
+    assert.ok(Number.isInteger(expectedTurns) && expectedTurns >= 0);
     page.on("pageerror", error => errors.push(error.message));
     page.on("request", request => {
+        if (new URL(request.url()).pathname.endsWith("/voice/live") && request.method() === "POST") uploadRecoveries++;
         if (new URL(request.url()).pathname.endsWith("/utterances") && request.method() === "POST") submitted++;
     });
     // Voice status is a UI notification, never a prerequisite for admission.
@@ -35,7 +39,18 @@ async function main() {
         });
     }
     page.on("websocket", socket => {
-        if (socket.url().includes("/voice/live-stream")) socket.on("framesent", () => frames++);
+        if (socket.url().includes("/voice/live-stream")) {
+            socketsOpened++;
+            socket.on("close", () => socketsClosed++);
+            socket.on("framesent", ({ payload }) => {
+                frames++;
+                const bytes = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
+                if (bytes.length >= 32 && bytes.toString("ascii", 0, 4) === "ESV1" && bytes.readInt32LE(4) === 1) {
+                    audioBytes += bytes.length - 32;
+                    audioTimeline.push({ at: Date.now(), sample: Number(bytes.readBigInt64LE(16)), bytes: bytes.length - 32 });
+                }
+            });
+        }
     });
     page.on("response", async response => {
         try {
@@ -57,7 +72,20 @@ async function main() {
         }
         } catch { /* A closed page may discard response bodies; outcome assertions still apply. */ }
     });
-    await page.addInitScript(() => {
+    await page.addInitScript(({ disconnectMs }) => {
+        if (disconnectMs) {
+            const OriginalSocket = window.WebSocket;
+            let injected = false;
+            window.WebSocket = class extends OriginalSocket {
+                constructor(url, protocols) {
+                    super(url, protocols);
+                    if (!injected && String(url).includes("/voice/live-stream")) {
+                        injected = true;
+                        this.addEventListener("open", () => setTimeout(() => this.close(4000, "Synthetic reconnect test"), disconnectMs), { once: true });
+                    }
+                }
+            };
+        }
         window.ellaiTestCaptures = [];
         const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
         navigator.mediaDevices.getUserMedia = async constraints => {
@@ -65,7 +93,7 @@ async function main() {
             window.ellaiTestCaptures.push(stream);
             return stream;
         };
-    });
+    }, { disconnectMs: Number(process.env.SWIFTAID_FORCE_DISCONNECT_MS ?? 0) });
     try {
         await page.goto(process.env.SWIFTAID_GATEWAY_URL ?? "http://localhost:8080");
         await page.getByRole("button", { name: "Continue with essential cookies", exact: true }).click();
@@ -74,7 +102,7 @@ async function main() {
         await page.getByRole("button", { name: "Start live voice question", exact: true }).click();
         const started = Date.now();
         const deadline = started + Number(process.env.SWIFTAID_VOICE_TEST_MS ?? 140000);
-        while (Date.now() < deadline && conversation.filter(turn => turn.outcome === "Completed").length < expectedTurns) {
+        while (Date.now() < deadline && (Date.now() - started < Number(process.env.SWIFTAID_MIN_VOICE_TEST_MS ?? 0) || conversation.filter(turn => turn.outcome === "Completed").length < expectedTurns)) {
             await page.waitForTimeout(1000);
         }
         const capture = await page.evaluate(() => ({
@@ -84,7 +112,8 @@ async function main() {
             }))),
         }));
         const report = {
-            sessionId, elapsedMs: Date.now() - started, frames, submitted, blockedVoicePolls,
+            sessionId, elapsedMs: Date.now() - started, frames, audioBytes, socketsOpened, socketsClosed, submitted, blockedVoicePolls,
+            lastAudioMs: audioTimeline.length ? audioTimeline.at(-1).at - started : null,
             firstCompletedMs: firstCompletedAt ? firstCompletedAt - started : null,
             responseAudioRequests,
             voiceState: lastVoice?.state, voiceEpoch: lastVoice?.epoch, voiceStates,
@@ -98,6 +127,11 @@ async function main() {
             })), pageErrors: errors,
         };
         console.log(JSON.stringify(report));
+        if (process.env.SWIFTAID_EXPECT_SILENCE === "1") assert.equal(audioBytes, 0, "Silent capture must upload no PCM");
+        if (process.env.SWIFTAID_EXPECT_IDLE_TAIL === "1") assert.ok(Date.now() - audioTimeline.at(-1).at >= 10000, "Idle tail must suppress PCM");
+                const injectedReconnect = process.env.SWIFTAID_FORCE_DISCONNECT_MS ? 1 : 0;
+        assert.equal(socketsOpened, 1 + injectedReconnect, "Only the injected failure may recreate transport");
+        assert.equal(socketsClosed, injectedReconnect, "The current capture socket must remain open");
         assert.equal(report.captureStarts, 1);
         assert.equal(submitted, 0, "Confirmed voice turns must enter the outbox without client resubmission.");
         assert.ok(report.trackStates.every(state => state === "live"));
@@ -109,6 +143,7 @@ async function main() {
         assert.deepEqual(errors, []);
         await page.getByRole("button", { name: "Stop the live microphone session", exact: true }).click();
         await page.getByRole("button", { name: "End Ellai session", exact: true }).click();
+        assert.equal(uploadRecoveries, 0, "Unavailable UI status must not replay an already delivered capture on Stop");
     } finally {
         await context.close();
         await browser.close();

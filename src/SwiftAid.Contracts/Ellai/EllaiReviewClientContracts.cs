@@ -198,6 +198,12 @@ public interface IEllaiReviewClient
 {
     bool UsesGatewayPcmAudioDownload => false;
 
+    Uri CreateLiveVoiceWebSocketUri(Uri baseUri, string sessionId, string voiceCaptureId, long voiceCaptureOffsetSamples = 0)
+    {
+        var uri = new Uri(baseUri, $"api/v1/ellai/sessions/{Uri.EscapeDataString(sessionId)}/voice/live-stream?voiceCaptureId={Uri.EscapeDataString(voiceCaptureId)}&serverSubmission=true&voiceCaptureOffsetSamples={voiceCaptureOffsetSamples}");
+        return new UriBuilder(uri) { Scheme = uri.Scheme == "https" ? "wss" : "ws" }.Uri;
+    }
+
     /// <summary>Starts a durable session for the requested mode. A missing
     /// view is classified so confirmed denials are not presented as ambiguous
     /// remote outcomes; callers never invent a session id.</summary>
