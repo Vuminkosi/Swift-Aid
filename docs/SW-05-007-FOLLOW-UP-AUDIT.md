@@ -106,3 +106,6 @@ PASS: fresh disposable PostgreSQL candidate/HTTP/recipient-denial tests 3/3 afte
 ## Rendered assignee selection update - 2 November 2026
 
 Synthetic Chromium coverage now exercises the mounted Follow-ups form at 390px and 1280px. It verifies safe-label candidate selection, required purpose, missing-recipient and missing-date validation, and no overflow/page errors. The fixture uses a synthetic candidate client and does not submit through Gateway or PostgreSQL. Browser date selection/submission, live chained persistence, Android, case-fact reuse, and bounded factual clarification remain NOT VERIFIED. The master item remains unchecked.
+## Outcome form correction - 2 November 2026
+
+Commit `3bf577e` closes a client/UI gap in SA-FUP-02/04/05 behavior: outcome rescheduling collects a staff-selected replacement due time, and Unreachable is recorded as Unreachable. Unsupported referral is no longer offered. Focused and full client tests pass (3 regression cases; 331 total), the UI project builds, and the existing synthetic Chromium journey passes at 390px/1280px. Browser date selection for outcome rescheduling, persistent full lifecycle, Android and live deployment remain unverified; SW-05-007 remains partial.
