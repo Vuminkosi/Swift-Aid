@@ -9,7 +9,8 @@
 | Check | Status | Evidence |
 |---|---|---|
 | SW-00-001 | Passed | [Baseline inventory](docs/BASELINE-AUDIT.md), captured on branch `interactive-ellai` at baseline `865964dbe9664a557fd0f0e303af03e115f22839`. |
-| SW-00-002 | Blocked | The attachment directory contains only the two execution directives; the 16 source documents referenced by the checklist are not present as separate files. Several current docs still cite v1.4/v2.4 and remain under reconciliation. |
+| SW-00-002 | Blocked | The attachment directory contains only the two execution directives; the 16 source documents referenced by the checklist are not present as separate files. Historical v1.4/v2.4 references remain under reconciliation. |
+| SW-00-003 | Passed | [Reuse matrix](docs/REUSE-MATRIX.md) maps the module implementations, Gateway handlers, and located tests; absent or blocked boundaries are called out. |
 | SW-00-004 | Failed / partial baseline | Source, Python worker, Android Release and Compose checks ran. The UI suite has 7 failures; full solution run also reported missing iOS NuGet assets. See [baseline audit](docs/BASELINE-AUDIT.md). |
 | SW-01-004 | In progress | Corrected one Gateway audio endpoint service-binding defect; focused authorization integration suite passes. Broader command/event/audio contract inventory remains. |
 
@@ -30,7 +31,7 @@
 
 - [x] **SW-00-001** — Inventory actual branch, commit, running build, active worktrees, migrations, routes, services, versions and task ownership before any edits. Evidence: [docs/BASELINE-AUDIT.md](docs/BASELINE-AUDIT.md).
 - [ ] **SW-00-002** — Read AGENTS.md, current repository spec/implementation, progress, traceability, acceptance, capability ledger and decisions; compare all 16 supplied documents against current approved versions.
-- [ ] **SW-00-003** — Produce REUSE / EXTEND / NEW / BLOCKED matrix for each module; map every existing canonical handler and test to actual files.
+- [x] **SW-00-003** — Produce REUSE / EXTEND / NEW / BLOCKED matrix for each module; map every existing canonical handler and test to actual files. Evidence: [docs/REUSE-MATRIX.md](docs/REUSE-MATRIX.md).
 - [ ] **SW-00-004** — Run baseline .NET, Python, web, Android Release and Compose checks available in environment; capture precise pass/fail/skip counts.
 - [ ] **SW-00-005** — Record doc conflicts, source hashes, owner decisions PC-01–PC-08 and all P0/P1/P2/Gate requirements without assuming proposed defaults are approved.
 - [ ] **SW-00-006** — Confirm safety policy: no AI diagnosis, clinical advice, symptom-derived priority/triage, automatic outbreak confirmation, unapproved social publication or clinical education generation.
