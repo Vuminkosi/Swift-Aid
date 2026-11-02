@@ -92,7 +92,7 @@
 
 **Exit gate:** Evidence for all applicable checks below; blockers and conditional gates explicitly accounted for.
 
-- [ ] **SW-04-001** — Preserve existing manual Add Case/Report Concern wizard; extend in place, not a parallel workflow.
+- [x] **SW-04-001** — Preserve existing manual Add Case/Report Concern wizard; extend in place, not a parallel workflow. PASS at source level: Gateway and Mobile share `PublicReportSurface` → `GuidedReportStepper`; staff managed registration remains a separate authorized form. Browser/device and live submission acceptance remain separate; [audit](docs/SW-04-001-REPORT-WIZARD-AUDIT.md).
 - [ ] **SW-04-002** — Implement guest Human/Animal offline draft on fresh Android; staff drafts use verified workspace bootstrap and separate authorized outbox.
 - [ ] **SW-04-003** — Capture typed narrative, observations and original voice without diagnosis requirement; preserve unknown/absent/zero distinctions.
 - [ ] **SW-04-004** — Use human and animal-specific field schemas: individuals vs herd/flock/group, species, at-risk/affected/dead counts and source/precision.

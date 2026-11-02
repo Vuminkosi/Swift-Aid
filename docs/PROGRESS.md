@@ -518,3 +518,7 @@ Corrected source inventory in [SW-03-007 reuse audit](SW-03-007-LOCATION-REUSE-A
 ## SW-03-008 geographic edge-test audit - 2 November 2026
 
 Source/test-matrix review in [SW-03-008 edge audit](SW-03-008-GEOGRAPHIC-EDGE-TEST-AUDIT.md) maps existing suite coverage for same-name ancestry, country scope, unknown parents and import recovery; that suite passed 7/7 under EV-037. Alternative spellings, offline/unknown draft, hierarchy-change and cross-scope authorization cases remain missing/unverified; no tests run for this review. EV-042.
+
+## SW-04-001 report wizard source audit - 2 November 2026
+
+Source review in [SW-04-001 wizard audit](SW-04-001-REPORT-WIZARD-AUDIT.md) confirms Gateway and Mobile host the same PublicReportSurface/GuidedReportStepper, while staff managed registration remains a separate authorized form. SW-04-001 passes at source level; live submission, browser and Android journeys remain separate/unverified. EV-043.
