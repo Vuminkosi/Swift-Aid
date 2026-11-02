@@ -402,6 +402,8 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("ck_notification_items_dismissed_after_created", "dismissed_at_utc IS NULL OR dismissed_at_utc >= created_at_utc");
 
+                            t.HasCheckConstraint("ck_notification_items_follow_up_reference", "(recipient_requirement = 'CurrentFollowUpAssignee') = (related_resource_id IS NOT NULL)");
+
                             t.HasCheckConstraint("ck_notification_items_kind", "kind IN ('CaseNeedsAttention')");
 
                             t.HasCheckConstraint("ck_notification_items_occurrence_key_nonempty", "length(btrim(occurrence_key)) > 0");
@@ -411,7 +413,6 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_notification_items_recipient_requirement", "recipient_requirement IN ('CurrentAccountableOwner', 'AuthorizedCaseMember', 'CurrentFollowUpAssignee')");
 
                             t.HasCheckConstraint("ck_notification_items_related_resource_pair", "(related_resource_id IS NULL) = (related_resource_version IS NULL)");
-                            t.HasCheckConstraint("ck_notification_items_follow_up_reference", "(recipient_requirement = 'CurrentFollowUpAssignee') = (related_resource_id IS NOT NULL)");
 
                             t.HasCheckConstraint("ck_notification_items_resource_kind", "resource_kind IN ('ManagedCase')");
                         });
@@ -4082,6 +4083,57 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Sessions.CommunitySessionSubscriptionEntity", b =>
+                {
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.Property<string>("AccountId")
+                        .HasMaxLength(200)
+                        .HasColumnType("text")
+                        .HasColumnName("account_id");
+
+                    b.Property<string>("Channel")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("channel");
+
+                    b.Property<string>("ConsentReference")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("consent_reference");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("version");
+
+                    b.HasKey("SessionId", "AccountId")
+                        .HasName("pk_community_session_subscriptions");
+
+                    b.HasIndex("AccountId", "Status")
+                        .HasDatabaseName("ix_community_session_subscriptions_account_status");
+
+                    b.ToTable("community_session_subscriptions", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_community_session_subscriptions_channel", "channel IN ('Email', 'MobilePush')");
+
+                            t.HasCheckConstraint("ck_community_session_subscriptions_status", "status IN ('Active', 'Unsubscribed')");
+
+                            t.HasCheckConstraint("ck_community_session_subscriptions_values", "length(btrim(account_id)) > 0 AND length(btrim(channel)) > 0 AND length(btrim(consent_reference)) > 0 AND version > 0");
+                        });
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Sessions.SessionReminderOccurrenceEntity", b =>
                 {
                     b.Property<Guid>("OccurrenceId")
@@ -5293,6 +5345,16 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_community_session_revisions_session");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Sessions.CommunitySessionSubscriptionEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.Sessions.CommunitySessionEntity", null)
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_community_session_subscriptions_session");
                 });
 
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Sessions.SessionReminderOccurrenceEntity", b =>

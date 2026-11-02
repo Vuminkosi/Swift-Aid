@@ -293,6 +293,124 @@ public sealed class SessionSchedulingTests
         }
     }
 
+    [IntakePostgresFact]
+    public async Task Event_subscription_is_idempotent_and_unsubscribe_suppresses_dispatch()
+    {
+        var sessionId = Guid.NewGuid();
+        const string accountId = "subscription-owner-1";
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var sessionStore = new PostgresCommunitySessionStore(db);
+        var sessions = new CommunitySessionService(sessionStore);
+        var service = new EventSubscriptionService(new PostgresEventSubscriptionStore(db), sessions, TimeProvider.System);
+        var setup = CreateService(db);
+        try
+        {
+            await CreateActiveActorAsync(db, accountId);
+            await PublishAsync(setup, sessionId, SessionVisibility.Public);
+            var options = await service.GetOptionsAsync(sessionId, accountId, CancellationToken.None);
+            Assert.NotNull(options);
+            Assert.Contains("Email", options.AvailableChannels);
+
+            var subscribed = await service.SubscribeAsync(sessionId, accountId, options.SessionVersion,
+                options.ConsentReference, "Email", CancellationToken.None);
+            var repeated = await service.SubscribeAsync(sessionId, accountId, options.SessionVersion,
+                options.ConsentReference, "Email", CancellationToken.None);
+            Assert.Equal(1, subscribed.Version);
+            Assert.Equal(subscribed.Version, repeated.Version);
+            Assert.True(await service.CanDispatchReminderAsync(sessionId, accountId, options.SessionVersion,
+                options.ConsentReference, "Email", CancellationToken.None));
+
+            var changed = await service.SubscribeAsync(sessionId, accountId, options.SessionVersion,
+                options.ConsentReference, "MobilePush", CancellationToken.None);
+            Assert.Equal(2, changed.Version);
+            var actor = await db.Actors.SingleAsync(item => item.ActorId == accountId);
+            actor.Status = SwiftAid.Infrastructure.Persistence.PersistentActorStatus.Suspended;
+            await db.SaveChangesAsync();
+            Assert.False(await service.CanDispatchReminderAsync(sessionId, accountId, options.SessionVersion,
+                options.ConsentReference, "MobilePush", CancellationToken.None));
+            actor.Status = SwiftAid.Infrastructure.Persistence.PersistentActorStatus.Active;
+            await db.SaveChangesAsync();
+            Assert.True(await service.CanDispatchReminderAsync(sessionId, accountId, options.SessionVersion,
+                options.ConsentReference, "MobilePush", CancellationToken.None));
+
+            var unsubscribed = await service.UnsubscribeAsync(sessionId, accountId, changed.Version, CancellationToken.None);
+            Assert.Equal(EventSubscriptionStatus.Unsubscribed, unsubscribed.Status);
+            Assert.Equal(3, unsubscribed.Version);
+            Assert.False(await service.CanDispatchReminderAsync(sessionId, accountId, options.SessionVersion,
+                options.ConsentReference, "MobilePush", CancellationToken.None));
+        }
+        finally
+        {
+            await CleanupAsync(sessionId);
+            await CleanupActorAsync(accountId);
+        }
+    }
+
+    [IntakePostgresFact]
+    public async Task Event_subscription_dispatch_is_suppressed_when_session_is_cancelled()
+    {
+        var sessionId = Guid.NewGuid();
+        const string accountId = "subscription-owner-cancel";
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var sessionStore = new PostgresCommunitySessionStore(db);
+        var sessions = new CommunitySessionService(sessionStore);
+        var service = new EventSubscriptionService(new PostgresEventSubscriptionStore(db), sessions, TimeProvider.System);
+        var setup = CreateService(db);
+        try
+        {
+            await CreateActiveActorAsync(db, accountId);
+            await PublishAsync(setup, sessionId, SessionVisibility.Public);
+            var options = Assert.IsType<EventSubscriptionOptions>(
+                await service.GetOptionsAsync(sessionId, accountId, CancellationToken.None));
+            await service.SubscribeAsync(sessionId, accountId, options.SessionVersion,
+                options.ConsentReference, "Email", CancellationToken.None);
+            Assert.True(await service.CanDispatchReminderAsync(sessionId, accountId, options.SessionVersion,
+                options.ConsentReference, "Email", CancellationToken.None));
+
+            await setup.ExecuteAsync(new CancelSessionCommand(sessionId, options.SessionVersion,
+                "Venue unavailable", "cancel for integration test", DateTimeOffset.UtcNow),
+                "officer-1", CancellationToken.None);
+
+            Assert.False(await service.CanDispatchReminderAsync(sessionId, accountId, options.SessionVersion,
+                options.ConsentReference, "Email", CancellationToken.None));
+        }
+        finally
+        {
+            await CleanupAsync(sessionId);
+            await CleanupActorAsync(accountId);
+        }
+    }
+
+    private static async Task CreateActiveActorAsync(SwiftAid.Infrastructure.Persistence.SwiftAidDbContext db, string actorId)
+    {
+        var now = DateTimeOffset.UtcNow;
+        db.Actors.Add(new SwiftAid.Infrastructure.Persistence.ActorEntity
+        {
+            ActorId = actorId,
+            Status = SwiftAid.Infrastructure.Persistence.PersistentActorStatus.Active,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+        });
+        db.ActorAccessStates.Add(new SwiftAid.Infrastructure.Persistence.ActorAccessStateEntity
+        {
+            ActorId = actorId,
+            AccessEpoch = 0,
+            Version = 1,
+            UpdatedAtUtc = now,
+        });
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task CleanupActorAsync(string actorId)
+    {
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var accessState = await db.ActorAccessStates.SingleOrDefaultAsync(item => item.ActorId == actorId);
+        if (accessState is not null) db.ActorAccessStates.Remove(accessState);
+        var actor = await db.Actors.SingleOrDefaultAsync(item => item.ActorId == actorId);
+        if (actor is not null) db.Actors.Remove(actor);
+        await db.SaveChangesAsync();
+    }
+
     private static TestCommunitySessionService CreateService(SwiftAid.Infrastructure.Persistence.SwiftAidDbContext db)
     {
         var store = new PostgresCommunitySessionStore(db);
@@ -383,6 +501,9 @@ public sealed class SessionSchedulingTests
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
         foreach (var sessionId in sessionIds)
         {
+            var subscriptions = await db.CommunitySessionSubscriptions
+                .Where(item => item.SessionId == sessionId).ToListAsync();
+            db.CommunitySessionSubscriptions.RemoveRange(subscriptions);
             var occurrences = await db.SessionReminderOccurrences
                 .Where(item => item.SessionId == sessionId).ToListAsync();
             db.SessionReminderOccurrences.RemoveRange(occurrences);

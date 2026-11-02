@@ -2,15 +2,15 @@
 @using SwiftAid.Client.Presentation
 @using SwiftAid.Client.Presentation.PublicWorkflows
 @using SwiftAid.Contracts.Sessions
-@using SwiftAid.Mobile.Services.Authentication
 @using SwiftAid.UI.Components.Surfaces.Public
 @inject IPublicCommunitySessionClient SessionClient
 @inject ISubscriptionClient SubscriptionClient
-@inject IMobileAuthenticationSession AuthenticationSession
+@inject NavigationManager Navigation
 
 <PageTitle>Community sessions | SwiftAid</PageTitle>
 
 <PublicSessionsSurface Sessions="_sessions"
+                       InitialSessionId="RequestedSessionId"
                        Loading="_loading"
                        ErrorMessage="@_listError"
                        OnRetry="LoadAsync"
@@ -21,6 +21,9 @@
                        OnRequestSignIn="RequestSignInAsync" />
 
 @code {
+    [SupplyParameterFromQuery(Name = "sessionId")]
+    private Guid? RequestedSessionId { get; set; }
+
     private IReadOnlyList<PublicSessionView> _sessions = Array.Empty<PublicSessionView>();
     private bool _loading = true;
     private string? _listError;
@@ -159,16 +162,11 @@
         }
     }
 
-    private async Task RequestSignInAsync(Guid _)
+    private Task RequestSignInAsync(Guid sessionId)
     {
-        try
-        {
-            await AuthenticationSession.SignInAsync();
-        }
-        catch (Exception)
-        {
-            // The shared session surface retains its current state and offers retry/sign-in again.
-        }
+        var returnUrl = $"/sessions?sessionId={sessionId:D}";
+        Navigation.NavigateTo($"/sign-in?returnUrl={Uri.EscapeDataString(returnUrl)}");
+        return Task.CompletedTask;
     }
 
     private static PublicSessionsSurface.SessionSubscriptionOptions ToSurfaceOptions(SubscriptionOptions options) => new(

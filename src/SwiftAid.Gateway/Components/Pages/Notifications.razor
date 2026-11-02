@@ -3,21 +3,27 @@
 @using SwiftAid.Gateway.Presentation
 @using SwiftAid.Infrastructure.Identity
 @using SwiftAid.UI.Components.Surfaces.Account
+@using SwiftAid.Client.Presentation.PublicWorkflows
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.AspNetCore.Identity
 @inject IServiceProvider ServiceProvider
+@inject ISubscriptionClient SubscriptionClient
+@inject IPublicCommunitySessionClient SessionClient
 
 <PageTitle>Notifications | SwiftAid</PageTitle>
 
 <AccountSettingsLayout>
 
 <NotificationsSurface Snapshot="_snapshot" OnRefresh="RefreshAsync" OnSave="SaveAsync"
-                        SessionsHref="/sessions" />
+                        SessionsHref="/sessions" Subscriptions="_subscriptions"
+                        SubscriptionMessage="_subscriptionMessage" OnUnsubscribe="UnsubscribeAsync" />
 
 </AccountSettingsLayout>
 
 @code {
     private NotificationsSnapshot _snapshot = NotificationsSnapshot.Loading;
+    private IReadOnlyList<SessionSubscriptionSummary>? _subscriptions;
+    private string? _subscriptionMessage;
 
     private INotificationPreferenceClient PreferenceClient =>
         (INotificationPreferenceClient?)ServiceProvider.GetService(typeof(INotificationPreferenceClient))
@@ -38,9 +44,81 @@
 
     private async Task RefreshAsync()
     {
+        await Task.WhenAll(RefreshPreferencesAsync(), RefreshSubscriptionsAsync());
+    }
+
+    private async Task RefreshPreferencesAsync()
+    {
         var result = await PreferenceClient.GetAsync();
         _snapshot = Map(result, result.Value);
     }
+
+    private async Task RefreshSubscriptionsAsync()
+    {
+        _subscriptions = null;
+        _subscriptionMessage = null;
+        try
+        {
+            var subscriptionsTask = SubscriptionClient.ListMineAsync();
+            var sessionsTask = SessionClient.ListPublicAsync();
+            await Task.WhenAll(subscriptionsTask, sessionsTask);
+            var subscriptions = await subscriptionsTask;
+            var sessions = await sessionsTask;
+            if (subscriptions.Succeeded && subscriptions.Value is { } values)
+            {
+                var sessionsById = sessions.Succeeded && sessions.Value is { } publicSessions
+                    ? publicSessions.ToDictionary(item => item.SessionId)
+                    : new Dictionary<Guid, SwiftAid.Contracts.Sessions.PublicSessionView>();
+                _subscriptions = values
+                    .Where(item => item.Status == SubscriptionStatus.Active)
+                    .Select(item =>
+                    {
+                        sessionsById.TryGetValue(item.SessionId, out var session);
+                        return new SessionSubscriptionSummary(
+                            item.SessionId,
+                            item.Version,
+                            session?.Title,
+                            session?.StartUtc,
+                            session?.TimeZoneId,
+                            ChannelLabel(item.Channel));
+                    })
+                    .ToArray();
+            }
+            else
+            {
+                _subscriptionMessage = subscriptions.Message ?? subscriptions.Metadata.Notice ??
+                    "Your session subscriptions are temporarily unavailable.";
+            }
+        }
+        catch (Exception)
+        {
+            _subscriptions = null;
+            _subscriptionMessage = "Your session subscriptions are temporarily unavailable. Retry to check again.";
+        }
+    }
+
+    private async Task UnsubscribeAsync(SessionSubscriptionSummary subscription)
+    {
+        var result = await SubscriptionClient.UnsubscribeAsync(subscription.SessionId, subscription.Version);
+        if (result.Succeeded)
+        {
+            _subscriptions = _subscriptions?.Where(item => item.SessionId != subscription.SessionId).ToArray();
+            _subscriptionMessage = "You are unsubscribed from this session.";
+            return;
+        }
+
+        var message = result.Message ?? result.Metadata.Notice ??
+            "We could not update this subscription. Refresh and try again.";
+        await RefreshSubscriptionsAsync();
+        _subscriptionMessage = message;
+    }
+
+    private static string? ChannelLabel(SubscriptionChannel? channel) => channel switch
+    {
+        SubscriptionChannel.Email => "Email reminders",
+        SubscriptionChannel.MobilePush => "Mobile notifications",
+        _ => null
+    };
 
     private async Task SaveAsync(NotificationPreferenceChange change)
     {

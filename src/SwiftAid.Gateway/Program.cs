@@ -62,7 +62,7 @@ builder.Services.AddRateLimiter(options =>
 
 builder.Services.AddScoped<IPublicIntakeProcessingPolicyClient, GatewayPublicIntakeProcessingPolicyClient>();
 builder.Services.AddScoped<IEducationClient, StaticEducationClient>();
-builder.Services.AddScoped<ISubscriptionClient, UnavailableSubscriptionClient>();
+builder.Services.AddScoped<ISubscriptionClient, GatewaySubscriptionClient>();
 builder.Services.AddScoped<IAnalyticsClient, AnalyticsGatewayClient>();
 builder.Services.AddScoped<IDashboardOverviewClient, DashboardOverviewGatewayClient>();
 builder.Services.AddScoped<ICaseDetailSummaryClient, CaseDetailSummaryGatewayClient>();
@@ -296,6 +296,7 @@ app.MapMonitoringQueueEndpoints();
 app.MapCaseCommandEndpoints();
 app.MapCommunitySessionEndpoints();
 app.MapPublicSessionEndpoints();
+app.MapEventSubscriptionEndpoints();
 app.MapEllaiEndpoints();
 app.MapEllaiGuestEndpoints();
 

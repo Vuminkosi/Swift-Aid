@@ -14,3 +14,12 @@ public sealed record EventSubscription(
     IReadOnlyList<string> Channels,
     string? ConsentReference,
     long Version);
+
+/// <summary>Current version and explicit consent choices for a public scheduled session.</summary>
+public sealed record EventSubscriptionOptions(
+    Guid SessionId,
+    long SessionVersion,
+    string ConsentReference,
+    string ConsentText,
+    IReadOnlyList<string> AvailableChannels,
+    bool IsCurrent);

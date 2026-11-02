@@ -1,4 +1,5 @@
 @using SwiftAid.UI.Components.Surfaces.Account
+@using SwiftAid.Contracts.Sessions
 
 @if (Snapshot.ViewState == NotificationsViewState.Loading)
 {
@@ -49,7 +50,45 @@ else
     </MudPaper>
     <MudPaper Class="pa-4 mb-4" Elevation="0">
         <MudText Typo="Typo.subtitle1">My subscriptions</MudText>
-        <MudText Typo="Typo.body2">Session subscriptions are not available in this service yet. Turn on Session updates above to hear about new sessions.</MudText>
+        @if (Subscriptions is null)
+        {
+            <MudText Typo="Typo.body2" role="status">Your session subscriptions could not be loaded. Retry to check again.</MudText>
+        }
+        else if (Subscriptions.Count == 0)
+        {
+            <MudText Typo="Typo.body2">You have no active session subscriptions.</MudText>
+        }
+        else
+        {
+            <MudList T="SessionSubscriptionSummary" aria-label="My active session subscriptions">
+                @foreach (var subscription in Subscriptions)
+                {
+                    <MudListItem T="SessionSubscriptionSummary" Class="px-0">
+                        <div class="d-flex flex-column flex-sm-row align-center justify-space-between gap-2 w-100">
+                            <div>
+                                <MudText Typo="Typo.body1">@(subscription.Title ?? "Session details unavailable")</MudText>
+                                <MudText Typo="Typo.caption">
+                                    @FormatStart(subscription)
+                                    @if (!string.IsNullOrWhiteSpace(subscription.ChannelLabel))
+                                    {
+                                        <span> · @subscription.ChannelLabel</span>
+                                    }
+                                </MudText>
+                            </div>
+                            <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                                       Disabled="@(_unsubscribingSessionId == subscription.SessionId)"
+                                       OnClick="() => UnsubscribeAsync(subscription)">
+                                @(_unsubscribingSessionId == subscription.SessionId ? "Updating…" : "Unsubscribe")
+                            </MudButton>
+                        </div>
+                    </MudListItem>
+                }
+            </MudList>
+        }
+        @if (!string.IsNullOrWhiteSpace(SubscriptionMessage))
+        {
+            <MudText Typo="Typo.caption" role="status">@SubscriptionMessage</MudText>
+        }
         @if (!string.IsNullOrWhiteSpace(SessionsHref))
         {
             <MudButton Href="@SessionsHref" Variant="Variant.Text" Color="Color.Primary"
@@ -73,9 +112,16 @@ else
     /// </summary>
     [Parameter] public string? SessionsHref { get; set; }
 
+    [Parameter] public IReadOnlyList<SessionSubscriptionSummary>? Subscriptions { get; set; }
+
+    [Parameter] public string? SubscriptionMessage { get; set; }
+
+    [Parameter] public EventCallback<SessionSubscriptionSummary> OnUnsubscribe { get; set; }
+
     private bool _workReminders = true;
     private bool _sessionUpdates = true;
     private string? _loadedFor;
+    private Guid? _unsubscribingSessionId;
 
     protected override void OnParametersSet()
     {
@@ -90,4 +136,43 @@ else
 
     private Task SaveAsync() => OnSave.InvokeAsync(
         new NotificationPreferenceChange(_workReminders, _sessionUpdates));
+
+    private async Task UnsubscribeAsync(SessionSubscriptionSummary subscription)
+    {
+        _unsubscribingSessionId = subscription.SessionId;
+        try
+        {
+            await OnUnsubscribe.InvokeAsync(subscription);
+        }
+        finally
+        {
+            _unsubscribingSessionId = null;
+        }
+    }
+
+    private static string FormatStart(SessionSubscriptionSummary subscription)
+    {
+        if (subscription.StartsAtUtc is not { } startsAt)
+        {
+            return "Session details are currently unavailable.";
+        }
+
+        if (!string.IsNullOrWhiteSpace(subscription.TimeZoneId))
+        {
+            try
+            {
+                var timeZone = TimeZoneInfo.FindSystemTimeZoneById(subscription.TimeZoneId);
+                return $"{TimeZoneInfo.ConvertTime(startsAt, timeZone):f} ({subscription.TimeZoneId})";
+            }
+            catch (TimeZoneNotFoundException)
+            {
+            }
+            catch (InvalidTimeZoneException)
+            {
+            }
+        }
+
+        return $"{startsAt.ToUniversalTime():f} UTC";
+    }
+
 }

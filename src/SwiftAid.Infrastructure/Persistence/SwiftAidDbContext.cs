@@ -63,6 +63,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
     public DbSet<CommunitySessionEntity> CommunitySessions => Set<CommunitySessionEntity>();
     public DbSet<CommunitySessionRevisionEntity> CommunitySessionRevisions => Set<CommunitySessionRevisionEntity>();
     public DbSet<SessionReminderOccurrenceEntity> SessionReminderOccurrences => Set<SessionReminderOccurrenceEntity>();
+    public DbSet<CommunitySessionSubscriptionEntity> CommunitySessionSubscriptions => Set<CommunitySessionSubscriptionEntity>();
     public DbSet<Ellai.EllaiSessionEntity> EllaiSessions => Set<Ellai.EllaiSessionEntity>();
     public DbSet<Ellai.EllaiCheckpointEntity> EllaiCheckpoints => Set<Ellai.EllaiCheckpointEntity>();
     public DbSet<Ellai.EllaiUtteranceEntity> EllaiUtterances => Set<Ellai.EllaiUtteranceEntity>();
@@ -134,6 +135,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         modelBuilder.ApplyConfiguration(new CommunitySessionEntityConfiguration());
         modelBuilder.ApplyConfiguration(new CommunitySessionRevisionEntityConfiguration());
         modelBuilder.ApplyConfiguration(new SessionReminderOccurrenceEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new CommunitySessionSubscriptionEntityConfiguration());
         modelBuilder.ApplyConfiguration(new Ellai.EllaiSessionEntityConfiguration());
         modelBuilder.ApplyConfiguration(new Ellai.EllaiCheckpointEntityConfiguration());
         modelBuilder.ApplyConfiguration(new Ellai.EllaiUtteranceEntityConfiguration());

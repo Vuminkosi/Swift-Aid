@@ -16,6 +16,9 @@ public static class CommunitySessionServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         services.AddScoped<ICommunitySessionStore, PostgresCommunitySessionStore>();
         services.AddScoped<ICommunitySessionService, CommunitySessionService>();
+        services.AddScoped<IEventSubscriptionStore, PostgresEventSubscriptionStore>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddScoped<IEventSubscriptionService, EventSubscriptionService>();
         return services;
     }
 }

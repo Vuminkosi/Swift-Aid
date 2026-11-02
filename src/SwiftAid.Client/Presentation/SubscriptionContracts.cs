@@ -17,7 +17,8 @@ public sealed record SubscriptionView(
     Guid SessionId,
     SubscriptionStatus Status,
     long Version,
-    bool IsSynthetic);
+    bool IsSynthetic,
+    SubscriptionChannel? Channel = null);
 
 public sealed record SubscriptionRequest(
     Guid SessionId,
@@ -35,6 +36,13 @@ public sealed record SubscriptionOptions(
 
 public interface ISubscriptionClient
 {
+    Task<UiCapabilityResult<IReadOnlyList<SubscriptionView>>> ListMineAsync(
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(UiCapabilityResults.Unavailable<IReadOnlyList<SubscriptionView>>("session-subscriptions"));
+    }
+
     Task<UiCapabilityResult<SubscriptionOptions>> GetSubscriptionOptionsAsync(
         Guid sessionId,
         CancellationToken cancellationToken = default)
@@ -60,6 +68,12 @@ public interface ISubscriptionClient
 /// <summary>Fail-closed reminder service until an authorized subscription endpoint exists.</summary>
 public sealed class UnavailableSubscriptionClient : ISubscriptionClient
 {
+    public Task<UiCapabilityResult<IReadOnlyList<SubscriptionView>>> ListMineAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(UiCapabilityResults.Unavailable<IReadOnlyList<SubscriptionView>>("session-subscriptions"));
+    }
+
     public Task<UiCapabilityResult<SubscriptionOptions>> GetSubscriptionOptionsAsync(
         Guid sessionId, CancellationToken cancellationToken = default)
     {

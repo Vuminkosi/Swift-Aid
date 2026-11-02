@@ -100,7 +100,6 @@ public static class MauiProgram
         Uri? gatewayBaseAddress = null;
         builder.Services.AddSingleton<IPublicIntakeProcessingPolicyClient, UnavailablePublicIntakeProcessingPolicyClient>();
         builder.Services.AddSingleton<IEducationClient, StaticEducationClient>();
-        builder.Services.AddSingleton<ISubscriptionClient, UnavailableSubscriptionClient>();
         
         
         
@@ -161,6 +160,7 @@ public static class MauiProgram
             sp.GetRequiredService<TimeProvider>()));
         if (gatewayBaseAddress is not null)
         {
+                builder.Services.AddTransient<ISubscriptionClient, HttpEventSubscriptionClient>();
                 builder.Services.AddSingleton(new NativeSessionHttpOptions(
                     gatewayBaseAddress, allowInsecureTransport: allowHttpForDevelopmentGateway));
                 builder.Services.AddTransient<NativeSessionBearerHandler>();
@@ -216,6 +216,7 @@ public static class MauiProgram
         }
         else
         {
+                builder.Services.AddSingleton<ISubscriptionClient, UnavailableSubscriptionClient>();
                 builder.Services.AddSingleton<IGuestIntakeTransport, UnavailableGuestIntakeTransport>();
                 builder.Services.AddSingleton<IGeoLookupClient, UnavailableGeoLookupClient>();
                 builder.Services.AddSingleton<IGuestSubmissionCoordinator, LocalOnlyGuestSubmissionCoordinator>();

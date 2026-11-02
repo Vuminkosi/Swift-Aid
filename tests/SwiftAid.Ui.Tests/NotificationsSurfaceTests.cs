@@ -34,17 +34,24 @@ public sealed class NotificationsSurfaceTests
     }
 
     [Fact]
-    public async Task NotificationsSurface_ReadyShowsHonestSubscriptionsEntry()
+    public async Task NotificationsSurface_ShowsOwnedSessionSubscriptionAndUnsubscribeAction()
     {
+        var sessionId = Guid.NewGuid();
         var markup = await RenderAsync(
             new NotificationsSnapshot(
                 NotificationsViewState.Ready,
                 WorkReminders: true,
                 SessionUpdates: true,
                 IsSaving: false),
-            sessionsHref: "/sessions");
+            sessionsHref: "/sessions",
+            subscriptions: [new SessionSubscriptionSummary(
+                sessionId, 3, "Community workshop", DateTimeOffset.UtcNow.AddDays(2),
+                "Africa/Mbabane", "Email reminders")]);
 
-        Assert.Contains("not available in this service yet", markup, StringComparison.Ordinal);
+        Assert.Contains("Community workshop", markup, StringComparison.Ordinal);
+        Assert.Contains("Africa/Mbabane", markup, StringComparison.Ordinal);
+        Assert.Contains("Email reminders", markup, StringComparison.Ordinal);
+        Assert.Contains("Unsubscribe", markup, StringComparison.Ordinal);
         Assert.Contains("/sessions", markup, StringComparison.Ordinal);
     }
 
@@ -57,13 +64,17 @@ public sealed class NotificationsSurfaceTests
                 WorkReminders: true,
                 SessionUpdates: true,
                 IsSaving: false),
-            sessionsHref: null);
+            sessionsHref: null,
+            subscriptions: []);
 
-        Assert.Contains("not available in this service yet", markup, StringComparison.Ordinal);
+        Assert.Contains("no active session subscriptions", markup, StringComparison.Ordinal);
         Assert.DoesNotContain("/sessions", markup, StringComparison.Ordinal);
     }
 
-    private static async Task<string> RenderAsync(NotificationsSnapshot snapshot, string? sessionsHref = null)
+    private static async Task<string> RenderAsync(
+        NotificationsSnapshot snapshot,
+        string? sessionsHref = null,
+        IReadOnlyList<SessionSubscriptionSummary>? subscriptions = null)
     {
         await using var services = CreateServices();
         await using var renderer = CreateRenderer(services);
@@ -74,6 +85,9 @@ public sealed class NotificationsSurfaceTests
                 {
                     [nameof(NotificationsSurface.Snapshot)] = snapshot,
                     [nameof(NotificationsSurface.SessionsHref)] = sessionsHref,
+                    [nameof(NotificationsSurface.Subscriptions)] = subscriptions,
+                    [nameof(NotificationsSurface.OnUnsubscribe)] = EventCallback.Factory.Create<SessionSubscriptionSummary>(
+                        new object(), (SessionSubscriptionSummary _) => { }),
                     [nameof(NotificationsSurface.OnRefresh)] = EventCallback.Factory.Create(
                         new object(), () => { }),
                     [nameof(NotificationsSurface.OnSave)] = EventCallback.Factory.Create<NotificationPreferenceChange>(
