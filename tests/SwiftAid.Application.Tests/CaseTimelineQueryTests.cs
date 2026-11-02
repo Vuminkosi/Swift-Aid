@@ -78,6 +78,26 @@ public sealed class CaseTimelineQueryTests
         Assert.Equal("Assignment acknowledged", Assert.Single(result.Timeline.Entries).Label);
     }
 
+    [Theory]
+    [InlineData("AssistanceRequested", "Assistance requested")]
+    [InlineData("AssistanceAccepted", "Assistance responsibility accepted")]
+    [InlineData("AssistanceProgressRecorded", "Assistance progress recorded")]
+    [InlineData("AssistanceProvided", "Assistance provided; receipt unconfirmed")]
+    [InlineData("AssistanceReceiptConfirmed", "Assistance receipt confirmed")]
+    [InlineData("AssistanceUnfulfilled", "Assistance not fulfilled")]
+    [InlineData("AssistanceCancelled", "Assistance request cancelled")]
+    public async Task AssistanceLifecycleEvents_HaveExplicitSafeTimelineLabels(string eventType, string expectedLabel)
+    {
+        var header = new CaseTimelineHeader(Guid.NewGuid(), "org-1", "workspace-1", "SZ", "Active", "officer-1", 2, 1,
+            DateTimeOffset.UtcNow);
+        var query = new CaseTimelineQuery(new StubStore(header, null, [Row(2, eventType)]),
+            new AllowPolicy(), new StubUnitOfWork());
+
+        var result = await query.GetAsync(CreateOfficer(), header.CaseId, 1, CancellationToken.None);
+
+        Assert.Equal(expectedLabel, Assert.Single(result.Timeline!.Entries).Label);
+    }
+
     [Fact]
     public async Task Allowed_ReturnsOrderedEntriesWithDerivedPromotionFirst()
     {

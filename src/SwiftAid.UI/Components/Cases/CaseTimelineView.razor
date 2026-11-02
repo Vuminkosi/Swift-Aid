@@ -467,7 +467,9 @@
             "CaseResolved" or "CaseReopened" => "Case status",
             "CaseObservationRecorded" => "Observation",
             "CaseFollowUpScheduled" or "CaseFollowUpOutcomeRecorded" => "Follow-up",
-            "CaseAssistanceRequested" => "Assistance",
+            "AssistanceRequested" or "AssistanceAccepted" or "AssistanceProgressRecorded" or
+                "AssistanceProvided" or "AssistanceReceiptConfirmed" or "AssistanceUnfulfilled" or
+                "AssistanceCancelled" => "Assistance",
             "CaseActionRequested" or "CaseActionRequestReviewed" => "Action review",
             "CaseEscalationRaised" or "CaseEscalationAcknowledged" or "CaseEscalationClosed" => "Escalation",
             _ => "Case activity"
@@ -491,7 +493,13 @@
             "CaseObservationRecorded" => "Observation recorded",
             "CaseFollowUpScheduled" => "Follow-up scheduled",
             "CaseFollowUpOutcomeRecorded" => "Follow-up updated",
-            "CaseAssistanceRequested" => "Assistance requested",
+            "AssistanceRequested" => "Assistance requested",
+            "AssistanceAccepted" => "Assistance responsibility accepted",
+            "AssistanceProgressRecorded" => "Assistance progress recorded",
+            "AssistanceProvided" => "Assistance provided; receipt unconfirmed",
+            "AssistanceReceiptConfirmed" => "Assistance receipt confirmed",
+            "AssistanceUnfulfilled" => "Assistance not fulfilled",
+            "AssistanceCancelled" => "Assistance request cancelled",
             "CaseActionRequested" => "Action review requested",
             "CaseActionRequestReviewed" => "Action review completed",
             "CaseEscalationRaised" => "Escalation raised",
