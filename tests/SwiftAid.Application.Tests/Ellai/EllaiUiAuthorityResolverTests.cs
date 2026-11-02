@@ -24,6 +24,7 @@ public sealed class EllaiUiAuthorityResolverTests
             ["organization"], ["workspace"], [], ["SZ"], [], [], [], ["ReadCase"], false)], epoch, now.AddSeconds(expiry)));
         var authority = await new EllaiUiAuthorityResolver(scopes).ResolveAsync(Actor, "scope", default);
         Assert.Equal(allowed, authority.Features.Contains(EllaiNavigationManifest.FeatureId));
+        Assert.Equal(allowed, authority.Features.Contains(EllaiDashboardUiManifest.FeatureId));
         Assert.Equal(allowed, authority.Capabilities.Contains(EllaiNavigationManifest.Capability));
         Assert.Contains(EllaiReportUiManifest.FeatureId, authority.Features);
         Assert.Equal("owner", authority.OwnerActorId);
@@ -44,27 +45,29 @@ public sealed class EllaiUiAuthorityResolverTests
         }
     }
 
-    [Fact]
-    public async Task BrokerRechecksRevocationInsteadOfTrustingSessionFeatureOrEarlierCatalogue()
+    [Theory]
+    [InlineData("navigation", 15)]
+    [InlineData("dashboard", 8)]
+    public async Task BrokerRechecksRevocationInsteadOfTrustingSessionFeatureOrEarlierCatalogue(string feature, int count)
     {
         var now = DateTimeOffset.UtcNow;
         var scopes = new MutableScopes(new([new("grant", now.AddMinutes(-1), now.AddMinutes(1),
             ["organization"], ["workspace"], [], ["SZ"], [], [], [], ["ReadCase"], false)], 7, now.AddMinutes(1)));
         var registry = new EllaiUiRegistry();
-        foreach (var control in EllaiNavigationManifest.Controls) registry.Register(control);
+        foreach (var control in EllaiNavigationManifest.Controls.Concat(EllaiDashboardUiManifest.Controls)) registry.Register(control);
         var broker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService(), uiRegistry: registry,
             uiAuthority: new EllaiUiAuthorityResolver(scopes));
         var context = new EllaiToolContext("session", "scope", "public.product-help", null, 4, true,
             DataClassification: EllaiProcessingClassification.UserProvidedNonSensitive, Actor: Actor,
             ConsentPurpose: EllaiConsentService.PublicProductHelpPurpose);
-        var request = new EllaiToolRequest(EllaiToolNames.UiCatalogue, new Dictionary<string, string> { ["feature"] = "navigation" });
+        var request = new EllaiToolRequest(EllaiToolNames.UiCatalogue, new Dictionary<string, string> { ["feature"] = feature });
         var granted = await broker.InvokeAsync(context, request, default);
         Assert.True(granted.Allowed);
-        Assert.Equal(15, granted.ItemCount);
+        Assert.Equal(count, granted.ItemCount);
         Assert.DoesNotContain("/my-cases", granted.ResultSummary);
         scopes.Unavailable = true;
         Assert.False((await broker.InvokeAsync(context, request, default)).Allowed);
-        Assert.False((await broker.InvokeAsync(context with { FeatureId = "navigation" }, request, default)).Allowed);
+        Assert.False((await broker.InvokeAsync(context with { FeatureId = feature }, request, default)).Allowed);
         Assert.Equal(3, scopes.Calls);
     }
 

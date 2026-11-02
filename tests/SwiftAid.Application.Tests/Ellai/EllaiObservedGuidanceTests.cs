@@ -89,6 +89,28 @@ public sealed class EllaiObservedGuidanceTests
         Assert.NotEmpty(EllaiDecisionValidator.ValidateDraft(draft with { Steps = [first with { NextStepKey = null }, second with { NextStepKey = null }] }));
     }
 
+    [Theory]
+    [InlineData(true, UiObservationState.Ready, true)]
+    [InlineData(false, UiObservationState.Ready, false)]
+    [InlineData(true, UiObservationState.Unmounted, false)]
+    public void DashboardTourRequiresAuthorityAndObservedTargets(bool entitled, UiObservationState state, bool accepted)
+    {
+        var registry = new EllaiUiRegistry();
+        foreach (var control in EllaiDashboardUiManifest.Controls) registry.Register(control);
+        var controls = EllaiDashboardUiManifest.Controls;
+        var now = DateTimeOffset.UtcNow;
+        var steps = controls.Select((control, index) => new GuidancePlanStep("s" + index, control.ControlId,
+            control.ObjectiveId!, PlanStepBehavior.Explain, null, null, [], [], control.DescriptionResourceKey,
+            index + 1 < controls.Count ? "s" + (index + 1) : null)).ToArray();
+        var draft = new EllaiGuidancePlanDraft(1, GuidancePlanStatus.Ready, "Explain dashboard filters", GuidanceMode.SystemTour, steps, [], null);
+        var observations = controls.Select(control => new UiControlObservation(control.ControlId, control.DescriptorVersion,
+            "view", "context", state, "web", now, null)).ToArray();
+        var result = new EllaiGuidancePlanValidator(registry).ValidateObserved(draft, new("dashboard", [], 20),
+            new HashSet<string> { "dashboard" }, entitled ? new HashSet<string> { EllaiNavigationManifest.Capability } : new HashSet<string>(),
+            observations, "view", "context", now, "dashboard-plan");
+        Assert.Equal(accepted, result.Plan is not null);
+    }
+
     private static (EllaiUiRegistry, EllaiGuidancePlanDraft, UiControlObservation) Create()
     {
         var registry = new EllaiUiRegistry();

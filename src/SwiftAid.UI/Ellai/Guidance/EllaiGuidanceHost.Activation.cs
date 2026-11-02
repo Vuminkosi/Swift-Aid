@@ -214,15 +214,19 @@ public partial class EllaiGuidanceHost
             if (!IsCurrent()) return;
             var result = await ReviewClient.PrepareGuidancePlanAsync(session.SessionId, proposalId, token);
             if (!IsCurrent()) return;
-            if (result?.Status == "NeedsNavigation" && result.NavigationId == EllaiReportUiManifest.NavigationId)
+            var destination = result?.NavigationId == EllaiReportUiManifest.NavigationId ? "/report" :
+                _guidanceFeatureId == EllaiDashboardUiManifest.FeatureId && result?.NavigationId == EllaiDashboardUiManifest.NavigationId
+                    ? EllaiNavigationManifest.ResolveRoute(EllaiDashboardUiManifest.NavigationId) : null;
+            if (result?.Status == "NeedsNavigation" && destination is not null)
             {
                 // This is a registered public destination, never a model-supplied URL.
-                Navigation.NavigateTo("/report");
+                Navigation.NavigateTo(destination);
                 for (var attempt = 0; attempt < 40 && IsCurrent(); attempt++)
                 {
                     await Task.Delay(250, token);
                     await ReportCurrentUiAsync(token);
-                    if (_latestGuidanceObservation?.MountedControlIds.Contains("report.entry") == true) break;
+                    var entry = _guidanceFeatureId == EllaiDashboardUiManifest.FeatureId ? "dashboard.overview" : "report.entry";
+                    if (_latestGuidanceObservation?.MountedControlIds.Contains(entry) == true) break;
                 }
                 if (!IsCurrent()) return;
                 result = await ReviewClient.PrepareGuidancePlanAsync(session.SessionId, proposalId, token);
@@ -243,7 +247,7 @@ public partial class EllaiGuidanceHost
                 _guidanceNotice = "Guidance is not ready yet. Try again when the page has loaded.";
                 return;
             }
-            var anchors = EllaiReportUiManifest.All.Concat(EllaiNavigationManifest.Controls)
+            var anchors = EllaiReportUiManifest.All.Concat(EllaiNavigationManifest.Controls).Concat(EllaiDashboardUiManifest.Controls)
                 .ToDictionary(c => c.ControlId, c => c.AnchorBindingKey);
             if (plan.Steps.Any(step => step.ControlId is null || !anchors.ContainsKey(step.ControlId)))
             {

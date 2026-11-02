@@ -21,6 +21,7 @@ public sealed class EllaiUiAuthorityResolver(IScopeService? scopes = null, TimeP
                     scope.Grants.Any(grant => grant.ValidFromUtc <= now && grant.ExpiresAtUtc > now))
                 {
                     features.Add(EllaiNavigationManifest.FeatureId);
+                    features.Add(EllaiDashboardUiManifest.FeatureId);
                     capabilities.Add(EllaiNavigationManifest.Capability);
                 }
             }

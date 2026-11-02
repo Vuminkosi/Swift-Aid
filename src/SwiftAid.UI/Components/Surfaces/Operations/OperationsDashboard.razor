@@ -1,21 +1,24 @@
+@using SwiftAid.Contracts.Ellai
+@implements IEllaiUiContextProvider
+<SwiftAid.UI.Ellai.Guidance.EllaiSemanticContext Provider="this" />
 
 @using SwiftAid.UI.Components.Theme
 
 <section class="operations-dashboard" aria-labelledby="operations-dashboard-title">
     <header class="operations-dashboard__header">
         <div>
-            <h1 id="operations-dashboard-title">Dashboard</h1>
+            <h1 id="operations-dashboard-title" data-ellai-control="dashboard.overview" data-bonboarding-anchor="ellai-dashboard-overview">Dashboard</h1>
             <p class="operations-dashboard__scope">@AuthorizedScopeLabel <span aria-hidden="true">·</span> @PeriodLabel</p>
         </div>
         <div class="operations-dashboard__header-actions">
             @Actions
             <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Primary" OnClick="OnRetryAll"
-                           aria-label="Refresh dashboard" title="Refresh dashboard" />
+                           data-ellai-control="dashboard.refresh" data-bonboarding-anchor="ellai-dashboard-refresh" aria-label="Refresh dashboard" title="Refresh dashboard" />
         </div>
     </header>
 
     <div class="operations-dashboard__toolbar">
-        <div class="operations-dashboard__sector-filter" role="group" aria-label="Choose health sector">
+        <div class="operations-dashboard__sector-filter" data-ellai-control="dashboard.sector" data-bonboarding-anchor="ellai-dashboard-sector" role="group" aria-label="Choose health sector">
             @foreach (var sector in SectorOptions)
             {
                 <MudButton Variant="Variant.Text" StartIcon="@SectorIcon(sector.Value)"
@@ -27,12 +30,12 @@
             }
         </div>
         <div class="operations-dashboard__selects">
-            <MudSelect T="DashboardPeriodView" Label="Period" Value="Period" ValueChanged="OnPeriodChanged"
+            <MudSelect T="DashboardPeriodView" Label="Period" data-ellai-control="dashboard.period" data-bonboarding-anchor="ellai-dashboard-period" Value="Period" ValueChanged="OnPeriodChanged"
                        Dense="true" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-dashboard__select">
                 <MudSelectItem Value="@ThirtyDays">Last 30 days</MudSelectItem>
                 <MudSelectItem Value="@NinetyDays">Last 90 days</MudSelectItem>
             </MudSelect>
-            <MudSelect T="string" Label="Country" Value="RegionCode" ValueChanged="OnRegionChanged"
+            <MudSelect T="string" Label="Country" data-ellai-control="dashboard.country" data-bonboarding-anchor="ellai-dashboard-country" Value="RegionCode" ValueChanged="OnRegionChanged"
                        Dense="true" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-dashboard__select">
                 <MudSelectItem Value="@AllRegions">All countries</MudSelectItem>
                 @foreach (var region in RegionOptions)
@@ -56,7 +59,7 @@
     else
     {
         var evaluatedFreshness = EvaluateFreshness();
-        <div class="operations-dashboard__kpis" aria-label="Case and service summary">
+        <div class="operations-dashboard__kpis" data-ellai-control="dashboard.summary" data-bonboarding-anchor="ellai-dashboard-summary" aria-label="Case and service summary">
             @foreach (var kind in KpiOrder)
             {
                 var metric = Overview.Kpis.FirstOrDefault(item => item.Kind == kind);
@@ -82,7 +85,7 @@
             }
         </div>
 
-        <section class="operations-dashboard__panel operations-dashboard__cases" aria-labelledby="dashboard-cases-title">
+        <section class="operations-dashboard__panel operations-dashboard__cases" aria-labelledby="dashboard-cases-title" data-ellai-control="dashboard.recent-cases" data-bonboarding-anchor="ellai-dashboard-recent-cases">
                 <div class="operations-dashboard__panel-heading">
                     <div>
                         <h2 id="dashboard-cases-title">Recent cases</h2>
@@ -285,7 +288,7 @@
                 </div>
             </section>
 
-            <section class="@($"operations-dashboard__panel operations-dashboard__map-panel operations-dashboard__map-panel--{Sector.ToString().ToLowerInvariant()}")" aria-labelledby="dashboard-map-title">
+            <section class="@($"operations-dashboard__panel operations-dashboard__map-panel operations-dashboard__map-panel--{Sector.ToString().ToLowerInvariant()}")" aria-labelledby="dashboard-map-title" data-ellai-control="dashboard.map" data-bonboarding-anchor="ellai-dashboard-map">
                 <div class="operations-dashboard__panel-heading">
                     <div>
                         <h2 id="dashboard-map-title">Map of recent reports</h2>
@@ -343,6 +346,15 @@
 </section>
 
 @code {
+    public string ComponentId => EllaiDashboardUiManifest.Definition.ComponentId;
+    public EllaiUiManifest Describe() => EllaiDashboardUiManifest.Definition;
+    public EllaiUiState GetState() => new(ComponentId, OverviewState == OperationsSurfaceState.Loading, false,
+        EllaiDashboardUiManifest.Controls.Select(control => new UiControlState(control.ControlId,
+            control.ControlId is "dashboard.summary" or "dashboard.recent-cases" or "dashboard.map"
+                ? OverviewState == OperationsSurfaceState.Populated && Overview is not null
+                    ? UiObservationState.Ready : UiObservationState.Unmounted
+                : UiObservationState.Ready)).ToArray());
+
     private static readonly DashboardPeriodView ThirtyDays = DashboardPeriodView.Days30;
     private static readonly DashboardPeriodView NinetyDays = DashboardPeriodView.Days90;
     private static readonly string AllRegions = string.Empty;
