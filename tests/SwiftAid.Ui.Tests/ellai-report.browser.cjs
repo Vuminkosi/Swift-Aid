@@ -33,8 +33,12 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
                 const report = window.fixtureObservations.collect();
                 return report.completedControlIds?.includes(id);
             }, id);
+            const subject = page.locator('[data-ellai-control="report.subject"]');
+            assert.equal(await subject.getByRole('radio').count(), 2, 'Subject guidance must highlight the actual choices, not the heading');
             await page.getByRole('button', { name: 'Continue to details', exact: true }).click();
             await accepted('report.subject');
+            assert.equal(await page.locator('[data-ellai-control="report.narrative"]').getByRole('textbox').count(), 1,
+                'Narrative guidance must highlight its editable control');
             await page.getByRole('button', { name: 'Review report', exact: true }).click();
             await page.getByText('Describe what happened or add an observation.', { exact: true }).first().waitFor();
             assert(!(await collect()).completedControlIds?.includes('report.narrative'));
@@ -63,6 +67,8 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             assert(!(await collect()).completedControlIds?.includes('report.confirmations'));
             await page.getByRole('checkbox', { name: 'I reviewed the original statement and the known or unknown details above.', exact: true }).check();
             await accepted('report.confirmations');
+            assert.equal((await collect()).controlStates.find(c => c.controlId === 'report.confirmations')?.state, 4,
+                'The visible confirmation control must be Ready, not the hidden native checkbox');
             await page.getByRole('checkbox', { name: 'I reviewed the report-handling information.', exact: true }).uncheck();
             await page.waitForFunction(() => !window.fixtureObservations.collect().completedControlIds?.includes('report.confirmations'));
             assert(await send.isDisabled());

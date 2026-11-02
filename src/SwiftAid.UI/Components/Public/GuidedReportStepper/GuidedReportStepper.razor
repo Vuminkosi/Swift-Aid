@@ -60,8 +60,8 @@
         @if (_step == 0)
         {
             <section class="guided-report__panel" aria-labelledby="report-type-title">
-                <h2 id="report-type-title" data-ellai-control="report.subject" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.subject")' class="mud-typography mud-typography-h6 guided-report__step-heading" tabindex="-1" @ref="_stepHeading">Who or what is the concern about?</h2>
-                <div class="guided-report__subject-selector">
+                <h2 id="report-type-title" class="mud-typography mud-typography-h6 guided-report__step-heading" tabindex="-1" @ref="_stepHeading">Who or what is the concern about?</h2>
+                <div class="guided-report__subject-selector" data-ellai-control="report.subject" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.subject")'>
                     <MudRadioGroup T="ReportSubjectCategory?" Value="_subjectCategory" ValueChanged="SubjectCategoryChangedAsync" Class="guided-report__subject-group" aria-label="Report subject">
                         <div class="guided-report__choices">
                             <div class="@GetSubjectChoiceClass(ReportSubjectCategory.HumanHealth)">
@@ -119,10 +119,12 @@
         else if (_step == 1)
         {
             <section class="guided-report__panel" aria-labelledby="report-details-title">
-                <h2 id="report-details-title" data-ellai-control="report.narrative" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.narrative")' class="mud-typography mud-typography-h6 guided-report__step-heading" tabindex="-1" @ref="_stepHeading">What did you notice?</h2>
+                <h2 id="report-details-title" class="mud-typography mud-typography-h6 guided-report__step-heading" tabindex="-1" @ref="_stepHeading">What did you notice?</h2>
                 @DetailsLeadContent
-                <MudTextField T="string" Label="Describe what happened" Variant="Variant.Outlined" Lines="4" MaxLength="6000"
-                              @bind-Value="Draft.Narrative" For="@(() => Draft.Narrative)" />
+                <div data-ellai-control="report.narrative" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.narrative")'>
+                    <MudTextField T="string" Label="Describe what happened" Variant="Variant.Outlined" Lines="4" MaxLength="6000"
+                                  @bind-Value="Draft.Narrative" For="@(() => Draft.Narrative)" />
+                </div>
                 <div class="guided-report__observation-input">
                     <MudText Typo="Typo.subtitle2" id="reported-observations-heading">Reported observations (optional)</MudText>
                     <MudText Typo="Typo.body2" Class="guided-report__observation-guidance">
@@ -218,13 +220,15 @@
                     </div>
                 }
 
-                <MudSelect T="string" id="guided-report-country" data-ellai-control="report.time-location" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.time-location")' Label="Country where the event happened" Variant="Variant.Outlined"
-                           Value="Draft.CountryCode" ValueChanged="CountryChangedAsync" Disabled="@(!HasCountryCatalogue)" Clearable="true">
-                    @foreach (var country in Countries)
-                    {
-                        <MudSelectItem Value="@country.Code">@country.Name</MudSelectItem>
-                    }
-                </MudSelect>
+                <div data-ellai-control="report.time-location" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.time-location")'>
+                    <MudSelect T="string" id="guided-report-country" Label="Country where the event happened" Variant="Variant.Outlined"
+                               Value="Draft.CountryCode" ValueChanged="CountryChangedAsync" Disabled="@(!HasCountryCatalogue)" Clearable="true">
+                        @foreach (var country in Countries)
+                        {
+                            <MudSelectItem Value="@country.Code">@country.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                </div>
                 @if (!HasCountryCatalogue)
                 {
                     <MudText Typo="Typo.body2">Current country choices are unavailable. This report cannot be sent until the list is available.</MudText>
@@ -335,8 +339,10 @@
                     {
                         <MudLink Href="@ProcessingPolicyReference" Target="_blank" rel="noopener noreferrer">Read how this report is handled</MudLink>
                     }
-                    <MudCheckBox T="bool" data-ellai-control="report.confirmations" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.confirmations")' Label="@ProcessingAcknowledgementLabel" @bind-Value="Draft.ProcessingConfirmed"
-                                 Color="Color.Primary" />
+                    <div data-ellai-control="report.confirmations" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.confirmations")'>
+                        <MudCheckBox T="bool" Label="@ProcessingAcknowledgementLabel" @bind-Value="Draft.ProcessingConfirmed"
+                                     Color="Color.Primary" />
+                    </div>
                 }
                 else
                 {
