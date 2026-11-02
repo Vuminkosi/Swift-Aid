@@ -110,8 +110,8 @@
 **Exit gate:** Evidence for all applicable checks below; blockers and conditional gates explicitly accounted for.
 
 - [ ] **SW-05-001** — Verify case event stream, immutable report corrections, append-only comments, projections rebuild, expected-version and idempotent commands. Partial: domain tests PASS 20/20 and application command tests PASS 15/15; atomic PostgreSQL journal/projection/receipt/audit/outbox suite and live rebuild remain NOT VERIFIED; [audit](docs/SW-05-001-CASE-EVENT-AUDIT.md).
-- [ ] **SW-05-002** — Provide authorized case list/search/filter/sort/pagination and accurate activity/owner/next-action information on mobile and web.
-- [ ] **SW-05-003** — Implement detail tabs: Overview, History, Follow-ups, Observations, Assistance, Discussion, Attachments and applicable escalation/action panels.
+- [ ] **SW-05-002** — Provide authorized case list/search/filter/sort/pagination and accurate activity/owner/next-action information on mobile and web. PARTIAL: bounded responsive web list and separate capped Mobile projection; next-action/activity and full owner/filter parity absent or unverified; [audit](docs/SW-05-002-CASE-WORKSPACE-AUDIT.md).
+- [ ] **SW-05-003** — Implement detail tabs: Overview, History, Follow-ups, Observations, Assistance, Discussion, Attachments and applicable escalation/action panels. PARTIAL: source has all seven tabs and case-level work panels; Escalations/other actions and rendered/mobile/device flows remain unverified; [audit](docs/SW-05-003-CASE-DETAIL-AUDIT.md).
 - [ ] **SW-05-004** — Keep clinical classification, lab status, administrative workflow, outcome, operational priority and signal state distinct.
 - [ ] **SW-05-005** — Ensure one accountable owner, bounded collaborators, assignment acknowledgements, reassignment reasons and grant revocation.
 - [ ] **SW-05-006** — Track assistance Requested→Accepted→InProgress→Provided→ReceiptConfirmed or honest Unfulfilled/Cancelled; receipt proof is not assumed.

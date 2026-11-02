@@ -562,3 +562,7 @@ Focused CaseAggregateTests PASS 20/20 and CaseCommandProcessorTests PASS 15/15. 
 ## SW-05-002 authorized case workspace audit - 2 November 2026
 
 Source inspection recorded in [SW-05-002 case workspace audit](SW-05-002-CASE-WORKSPACE-AUDIT.md). Authenticated Gateway queue and responsive desktop/mobile UI exist, but Gateway's 100-row source cap, Mobile's 500-row fail-closed cap, unavailable filters/owner fields, absent next-action/activity contract, and unrun live/browser/device verification keep the task PARTIAL. No new tests run. EV-055.
+
+## SW-05-003 case detail audit - 2 November 2026
+
+The shared case detail surface declares all seven requested tabs, and Gateway/Mobile routes integrate it. Scope authorization/mutations, dedicated escalation panels and rendered/device journeys remain NOT VERIFIED; see [SW-05-003 audit](SW-05-003-CASE-DETAIL-AUDIT.md). No new tests run. EV-056.

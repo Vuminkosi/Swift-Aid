@@ -80,3 +80,7 @@ Historical IDs in `docs/BLOCKERS.md` remain valid where present. New IDs must be
 
 Source inspection recorded in [case workspace audit](SW-05-002-CASE-WORKSPACE-AUDIT.md). No new tests run. Existing UI component tests are not rendered browser/device acceptance. EV-055.
 
+
+## SW-05-003 case detail audit — 2 November 2026
+
+Source inspection recorded in [case detail audit](SW-05-003-CASE-DETAIL-AUDIT.md). All seven named tabs are present in the shared component; live authorized actions, escalation panels and browser/device journeys remain unverified. No new tests run. EV-056.
