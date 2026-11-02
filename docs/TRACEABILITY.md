@@ -275,3 +275,6 @@ SW-05-007 / SA-FUP-01 active surface correction (2 November 2026): Recipient sel
 
 
 SW-05-007 / SA-FUP-01 rendered assignee selection (2 November 2026): `follow-up-scheduling.browser.cjs` exercises the mounted Follow-ups work management surface in synthetic Chromium at 390px and 1280px. It verifies candidate query selection, safe label rendering, required purpose, missing recipient/date rejection, no page errors and no horizontal overflow. This is synthetic UI evidence only; it does not verify the Gateway or database. Evidence: EV-064.
+
+
+SW-00-002 onboarding source traceability (2 November 2026): The 27 local IDs in `designs/onboarding/requirements.md` are each mapped to candidate v1.5 SA families and a current-authority disposition in `docs/SW-00-002-ONBOARDING-CROSSWALK.md`. PowerShell source-to-table set comparison: 27 unique source IDs, 27 unique mapped IDs, zero missing/extra. Mappings do not imply implementation or acceptance; SW-00-002 remains partial pending broader source-conflict review.

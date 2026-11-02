@@ -59,3 +59,9 @@ Onboarding screen-level semantic mapping remains partial; community-local IDs ha
 PC-01 through PC-08 remain proposed and RD-01 through RD-04 remain unanswered. NLLB/commercial-use and surveillance gates remain subject to their rights and approval records. No product decision is inferred from source presence.
 
 SW-00-002 source location is resolved. Stable requirement/scenario/task identifiers are set-matched; community design IDs are mapped at family level, while onboarding screen-level semantic reconciliation and broader source conflict review remain open. SW-00-008 remains blocked/partial until actual recording-consent and asset/source-rights evidence is recorded.
+
+
+
+## Onboarding local-ID crosswalk update - 2 November 2026
+
+The per-screen reconciliation now covers all 27 onboarding local IDs in [SW-00-002-ONBOARDING-CROSSWALK.md](SW-00-002-ONBOARDING-CROSSWALK.md). Automated source-to-table comparison reports 27 unique source IDs, 27 unique crosswalk IDs, zero missing and zero extra IDs. The table provides candidate current SA mappings and explicitly preserves the v1.4/v2.4 design as historical guidance. This closes the local-ID inventory gap; it does not certify current screen implementation or behavioral acceptance. Broader semantic source conflict review remains open.

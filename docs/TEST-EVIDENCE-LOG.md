@@ -114,3 +114,7 @@ PASS: Infrastructure build (0 warnings/errors); Integration.Tests build (0 warni
 ## EV-064 - SW-05-007 rendered assignee selection - 2 November 2026
 
 PASS: `dotnet build tests/SwiftAid.Ui.TestHost/SwiftAid.Ui.TestHost.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false -v:q` (0 warnings/errors); `SWIFTAID_PLAYWRIGHT_PACKAGE=.codex/case-list-browser/node_modules/playwright node tests/SwiftAid.Ui.Tests/follow-up-scheduling.browser.cjs` (exit 0). Chromium at 390px and 1280px verifies rendered follow-up-only candidate loading, safe-label selection, required purpose, missing-recipient rejection, and missing-date rejection; no horizontal overflow or page errors. Synthetic candidate client and UI callback only; no Gateway/PostgreSQL path. Browser does not submit a scheduled date because MudDatePicker is read-only and requires calendar interaction. Host and browser closed in finally; retained Playwright package predates this slice.
+
+## EV-065 - SW-00-002 onboarding identifier crosswalk - 2 November 2026
+
+PASS source inventory verification: PowerShell compared the M/W local screen headings in `designs/onboarding/requirements.md` with the crosswalk table in `docs/SW-00-002-ONBOARDING-CROSSWALK.md`: 27 unique in each, zero missing, zero extra. This verifies identifier coverage only. Mapping is candidate traceability to current SA families, not implementation, visual acceptance or owner approval. SW-00-002 remains partial.

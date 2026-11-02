@@ -682,3 +682,6 @@ SW-05-007 active assignee workflow update (2 November 2026): Corrected the actua
 
 
 SW-05-007 rendered assignee check (2 November 2026): Added a focused synthetic Chromium journey for the mounted `OperationsWorkManagementSurface`. PASS at 390px/1280px for eligible candidate loading, safe-label selection, required purpose, recipient/date validation, no overflow and no page errors. Ui.TestHost build passed with zero warnings/errors. The retained Playwright package was reused; browser and host closed. The test stops before date selection and uses a fake candidate client; live Gateway/PostgreSQL and Android acceptance remain NOT VERIFIED.
+
+
+SW-00-002 onboarding ID audit (2 November 2026): Added `docs/SW-00-002-ONBOARDING-CROSSWALK.md`, mapping each of the 27 local M/W onboarding screen IDs from the historical v1.4/v2.4 design to candidate current SA contracts and recording safety/authority disposition. A source-to-crosswalk script found 27/27 exact coverage, with zero missing or extra IDs. This closes the inventory/crosswalk gap only; no UI behavior is claimed, and broader source-conflict reconciliation remains open.
