@@ -164,6 +164,7 @@ public sealed class CaseTimelineQuery(
     {
         "CaseReported" => "Report accepted",
         "CaseAssigned" => "Accountable owner assigned",
+        "CaseAssignmentAcknowledged" => "Assignment acknowledged",
         "CaseReportCorrected" => "Report corrected",
         "CaseActionRequested" => "Protected action requested",
         "CaseActionRequestReviewed" => "Protected action reviewed",

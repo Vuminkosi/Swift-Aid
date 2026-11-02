@@ -23,6 +23,37 @@ namespace SwiftAid.Integration.Tests;
 public sealed class CaseTimelineTests
 {
     [IntakePostgresFact]
+    public async Task Assignment_header_is_independent_of_page_and_resets_after_reopening()
+    {
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        await CaseRegistrationBackendTests.SeedRegistrationGrantAsync(db);
+        var caseId = await IntakeDecisionStoreTests.SeedManagedCaseAsync(db);
+        await SeedRegionScopeAsync(db, caseId);
+        var now = new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero);
+        await SeedEventAsync(db, caseId, 1, "CaseReported", now);
+        await SeedEventAsync(db, caseId, 2, "CaseAssigned", now.AddMinutes(1));
+        var pending = await CreateQuery(db).GetAsync(CreateOfficer("officer-1"), caseId, 1, CancellationToken.None);
+        Assert.Equal(2, pending.Timeline!.Header.AssignmentVersion);
+        Assert.Null(pending.Timeline.Header.AssignmentAcknowledgedAtUtc);
+
+        await SeedEventAsync(db, caseId, 3, "CaseAssignmentAcknowledged", now.AddMinutes(2));
+        await db.ManagedCases.Where(item => item.CaseId == caseId)
+            .ExecuteUpdateAsync(update => update.SetProperty(item => item.AggregateVersion, 3));
+        var olderPage = await CreateQuery(db).GetAsync(CreateOfficer("officer-1"), caseId, 1, CancellationToken.None, 3);
+        Assert.Equal(2, olderPage.Timeline!.Header.AssignmentVersion);
+        Assert.Equal(now.AddMinutes(2), olderPage.Timeline.Header.AssignmentAcknowledgedAtUtc);
+        Assert.DoesNotContain(olderPage.Timeline.Entries, item => item.EventType == "CaseAssignmentAcknowledged");
+
+        await SeedEventAsync(db, caseId, 4, "CaseResolved", now.AddMinutes(3));
+        await SeedEventAsync(db, caseId, 5, "CaseReopened", now.AddMinutes(4));
+        await db.ManagedCases.Where(item => item.CaseId == caseId)
+            .ExecuteUpdateAsync(update => update.SetProperty(item => item.AggregateVersion, 5));
+        var reopened = await CreateQuery(db).GetAsync(CreateOfficer("officer-1"), caseId, 1, CancellationToken.None);
+        Assert.Equal(5, reopened.Timeline!.Header.AssignmentVersion);
+        Assert.Null(reopened.Timeline.Header.AssignmentAcknowledgedAtUtc);
+    }
+
+    [IntakePostgresFact]
     public async Task Found_WithRealPolicy_ReturnsOrderedHistoryWithDerivedPromotionFirst()
     {
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
@@ -102,7 +133,9 @@ public sealed class CaseTimelineTests
         Assert.NotNull(result.Timeline);
         var entries = result.Timeline!.Entries;
         Assert.Equal(2, entries.Count);
-        Assert.Equal([1, 2], entries.Select(entry => entry.AggregateVersion));
+        Assert.Equal([2, 3], entries.Select(entry => entry.AggregateVersion));
+        Assert.True(result.Timeline.HasOlderEntries);
+        Assert.Equal(2, result.Timeline.OlderThanAggregateVersion);
     }
 
     /// <summary>

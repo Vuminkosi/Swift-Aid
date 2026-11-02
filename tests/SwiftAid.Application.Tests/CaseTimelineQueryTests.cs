@@ -10,6 +10,18 @@ namespace SwiftAid.Application.Tests;
 public sealed class CaseTimelineQueryTests
 {
     [Fact]
+    public async Task Assignment_acknowledgement_has_a_readable_authoritative_label()
+    {
+        var header = new CaseTimelineHeader(Guid.NewGuid(), "org-zw-1", "workspace-1", "ZW", "Active", "officer-1", 3, 1,
+            DateTimeOffset.UtcNow, AssignmentVersion: 2, AssignmentAcknowledgedAtUtc: DateTimeOffset.UtcNow);
+        var query = new CaseTimelineQuery(new StubStore(header, null, [Row(3, "CaseAssignmentAcknowledged")]),
+            new AllowPolicy(), new StubUnitOfWork());
+        var result = await query.GetAsync(CreateOfficer(), header.CaseId, 1, CancellationToken.None);
+        Assert.Equal(header, result.Timeline!.Header);
+        Assert.Equal("Assignment acknowledged", Assert.Single(result.Timeline.Entries).Label);
+    }
+
+    [Fact]
     public async Task Allowed_ReturnsOrderedEntriesWithDerivedPromotionFirst()
     {
         var header = new CaseTimelineHeader(

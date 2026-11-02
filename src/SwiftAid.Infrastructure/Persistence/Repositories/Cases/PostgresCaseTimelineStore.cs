@@ -13,8 +13,9 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
 {
     private readonly SwiftAidDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
 
-    public Task<CaseTimelineHeader?> GetHeaderAsync(Guid caseId, CancellationToken ct) =>
-        _dbContext.ManagedCases.AsNoTracking()
+    public async Task<CaseTimelineHeader?> GetHeaderAsync(Guid caseId, CancellationToken ct)
+    {
+        var header = await _dbContext.ManagedCases.AsNoTracking()
             .Where(item => item.CaseId == caseId)
             .Select(item => new CaseTimelineHeader(
                 item.CaseId,
@@ -26,7 +27,34 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
                 item.AggregateVersion,
                 item.ReportRevision,
                 item.CreatedAtUtc))
-            .SingleOrDefaultAsync(ct);
+            .SingleOrDefaultAsync(ct).ConfigureAwait(false);
+        if (header is null)
+        {
+            return null;
+        }
+
+        // Read independently of the requested history page. A reopened case establishes
+        // a new assignment even when the accountable owner has not changed.
+        var assignmentVersion = await _dbContext.CaseEvents.AsNoTracking()
+            .Where(item => item.CaseId == caseId && item.AggregateVersion <= header.AggregateVersion &&
+                (item.EventType == "CaseAssigned" || item.EventType == "CaseReopened"))
+            .OrderByDescending(item => item.AggregateVersion)
+            .Select(item => (long?)item.AggregateVersion)
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        if (assignmentVersion is null)
+        {
+            return header;
+        }
+
+        var acknowledgedAt = await _dbContext.CaseEvents.AsNoTracking()
+            .Where(item => item.CaseId == caseId && item.EventType == "CaseAssignmentAcknowledged" &&
+                item.AggregateVersion > assignmentVersion.Value && item.AggregateVersion <= header.AggregateVersion &&
+                item.ActorId == header.AccountableOwnerActorId)
+            .OrderByDescending(item => item.AggregateVersion)
+            .Select(item => (DateTimeOffset?)item.RecordedAtUtc)
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        return header with { AssignmentVersion = assignmentVersion, AssignmentAcknowledgedAtUtc = acknowledgedAt };
+    }
 
     public async Task<IReadOnlyList<CaseTimelineRow>> GetEventsAsync(
         Guid caseId,

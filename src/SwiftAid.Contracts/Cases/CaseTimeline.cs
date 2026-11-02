@@ -50,7 +50,9 @@ public sealed record CaseTimelineHeader(
     string AccountableOwnerActorId,
     long AggregateVersion,
     long ReportRevision,
-    DateTimeOffset CreatedAtUtc);
+    DateTimeOffset CreatedAtUtc,
+    long? AssignmentVersion = null,
+    DateTimeOffset? AssignmentAcknowledgedAtUtc = null);
 
 /// <summary>Ordered oldest-first immutable history for one managed case.</summary>
 public sealed record CaseTimeline(
