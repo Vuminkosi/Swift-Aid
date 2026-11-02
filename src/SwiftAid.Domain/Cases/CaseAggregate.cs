@@ -252,6 +252,8 @@ public sealed partial class CaseAggregate
             AcknowledgeAssignmentCommand acknowledge => DecideAcknowledgeAssignment(acknowledge, actor, version),
             GrantCaseCollaboratorCommand grant => DecideGrantCollaborator(grant, actor, version),
             RevokeCaseCollaboratorCommand revoke => DecideRevokeCollaborator(revoke, actor, version),
+            RequestAssistanceCommand request => DecideRequestAssistance(request, actor, version),
+            UpdateAssistanceCommand update => DecideUpdateAssistance(update, actor, version),
             _ => throw new NotSupportedException($"The command type {command.GetType().Name} is not supported by this aggregate.")
         };
     }
@@ -570,6 +572,12 @@ public sealed partial class CaseAggregate
     {
         switch (@event)
         {
+            case AssistanceRequested requested:
+                ApplyAssistanceRequest(requested);
+                break;
+            case AssistanceActivityRecorded activity:
+                ApplyAssistanceActivity(activity);
+                break;
             case CaseCollaboratorGranted grant:
                 ApplyCollaboratorGrant(grant);
                 break;
@@ -852,6 +860,8 @@ public sealed partial class CaseAggregate
 
     private static CaseEvent SnapshotEvent(CaseEvent @event) => @event switch
     {
+        AssistanceRequested requested => requested,
+        AssistanceActivityRecorded activity => activity,
         CaseCollaboratorGranted grant => grant,
         CaseCollaboratorRevoked revoke => revoke,
         CaseReported reported => reported with { ReportData = SnapshotReportData(reported.ReportData) },
