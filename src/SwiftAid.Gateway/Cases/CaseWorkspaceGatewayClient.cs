@@ -56,7 +56,7 @@ public sealed class CaseWorkspaceGatewayClient(
                 : Comparer<DateTimeOffset>.Default)
             .ToArray();
         var pageItems = matching
-            .Skip((query.Page.PageNumber - 1) * query.Page.PageSize)
+            .Skip((int)Math.Min((long)(query.Page.PageNumber - 1) * query.Page.PageSize, matching.Length))
             .Take(query.Page.PageSize)
             .Select(pair => pair.Row)
             .ToArray();
@@ -79,7 +79,7 @@ public sealed class CaseWorkspaceGatewayClient(
             query.Page.PageNumber,
             query.Page.PageSize,
             matching.Length,
-            query.Page.PageNumber * query.Page.PageSize < matching.Length);
+            (long)query.Page.PageNumber * query.Page.PageSize < matching.Length);
 
         return Success(page, queue.Items.Count == MaximumRows
             ? "Showing the most recent 100 cases available to this list."

@@ -6,6 +6,18 @@ namespace SwiftAid.Client.Tests;
 
 public sealed class MobileCaseWorkspaceTests
 {
+    [Fact]
+    public async Task LargePageCannotOverflowBackToFirstRows()
+    {
+        var client = new MobileCaseWorkspaceClient(new Queue(CaseQueueAccess.Allowed,
+            [Row("HumanHealth", "Recorded")]));
+        var result = await client.ListAsync(new(new PageRequest(int.MaxValue, 100)));
+        Assert.True(result.Succeeded);
+        Assert.Empty(result.Value!.Items);
+        Assert.Equal(1, result.Value.TotalCount);
+        Assert.False(result.Value.HasMore);
+    }
+
     [Theory]
     [InlineData("HumanHealth", CaseWorkspaceSector.Human)]
     [InlineData("AnimalHealth", CaseWorkspaceSector.Animal)]

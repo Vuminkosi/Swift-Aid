@@ -40,7 +40,7 @@ public sealed class MobileCaseWorkspaceClient(ICaseQueueClient caseQueueClient) 
                         : Comparer<DateTimeOffset>.Default)
                 .ToArray();
             var rows = matching
-                .Skip((query.Page.PageNumber - 1) * query.Page.PageSize)
+                .Skip((int)Math.Min((long)(query.Page.PageNumber - 1) * query.Page.PageSize, matching.Length))
                 .Take(query.Page.PageSize)
                 .Select(ToRow)
                 .ToArray();
@@ -49,7 +49,7 @@ public sealed class MobileCaseWorkspaceClient(ICaseQueueClient caseQueueClient) 
                 query.Page.PageNumber,
                 query.Page.PageSize,
                 matching.Length,
-                query.Page.PageNumber * query.Page.PageSize < matching.Length);
+                (long)query.Page.PageNumber * query.Page.PageSize < matching.Length);
             return Success(page);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
