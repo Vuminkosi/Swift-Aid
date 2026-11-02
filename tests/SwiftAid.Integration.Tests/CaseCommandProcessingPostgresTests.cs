@@ -25,6 +25,74 @@ namespace SwiftAid.Integration.Tests;
 public sealed class CaseCommandProcessingPostgresTests
 {
     [CaseAuthorityPostgresFact]
+    public async Task Bounded_share_final_write_guard_rolls_back_narrowed_scope_and_accepts_permitted_retry()
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(makeCurrentActorOwner: false, createActiveShare: true);
+        await using var cleanup = new CaseCommandProcessingCleanup(fixture);
+        await AddOperationAsync(fixture, CaseOperation.ManageFollowUp);
+        await SetInitialWorkflowVersionAsync(fixture);
+        using var keyRing = SyntheticPayloadKeyRing.Create();
+        using var provider = ProtectedPayloadDataProtectionProviderFactory.Create(
+            keyRing.CreateOptions(), new TestHostEnvironment(Environments.Production));
+        await SeedInitialJournalAsync(fixture, keyRing.CreateOptions(), provider);
+        await using (var setup = fixture.CreateDbContext())
+        {
+            var share = await setup.CaseShares.SingleAsync(item => item.CaseId == fixture.CaseId && item.ActorId == fixture.ActorId);
+            share.AllowedOperations = [nameof(CaseOperation.ReadCase), nameof(CaseOperation.ManageFollowUp)];
+            await setup.SaveChangesAsync();
+        }
+
+        var command = new ScheduleFollowUpCommand(Guid.NewGuid(), 2, Guid.NewGuid(),
+            "Synthetic shared follow-up", fixture.ActorId, DateTimeOffset.UtcNow.AddDays(1),
+            "Synthetic bounded share", null, DateTimeOffset.UtcNow);
+        await using (var context = fixture.CreateDbContext())
+        {
+            var unit = new PostgresCaseCommandUnitOfWork(context);
+            var payloads = new RecordingProtectedPayloadStore(
+                new PostgresProtectedCaseEventPayloadStore(context, unit, keyRing.CreateOptions(), provider),
+                async cancellationToken =>
+                {
+                    // Fault injection in the lease transaction isolates the final SQL guard from the earlier policy check.
+                    await context.Database.ExecuteSqlInterpolatedAsync(
+                        $"UPDATE case_shares SET allowed_operations = ARRAY['ReadCase']::text[] WHERE case_id = {fixture.CaseId} AND actor_id = {fixture.ActorId}",
+                        cancellationToken);
+                });
+            var persistence = new PostgresCaseCommandPersistence(context, unit, payloads, new CaseEventSerializer());
+            var policy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(context, unit),
+                new PostgresCaseAccessDescriptorStore(context, unit));
+            var result = await new CaseCommandProcessor(unit, policy, persistence)
+                .ProcessAsync(fixture.CreateActor(), fixture.CaseId, 1, command, CancellationToken.None);
+            Assert.Equal(CaseCommandProcessingStatus.Denied, result.Status);
+            Assert.True(payloads.StageCompleted);
+            Assert.Single(payloads.PayloadIds);
+
+            await using var verification = fixture.CreateDbContext();
+            Assert.False(await verification.ProtectedEventPayloads.AnyAsync(item => payloads.PayloadIds.Contains(item.PayloadId)));
+            Assert.False(await verification.CaseEvents.AnyAsync(item => item.CommandId == command.CommandId));
+            Assert.False(await verification.CommandReceipts.AnyAsync(item => item.CommandId == command.CommandId));
+            Assert.False(await verification.ManagedCaseFollowUps.AnyAsync(item => item.CaseId == fixture.CaseId));
+            Assert.False(await verification.SecurityAuditEntries.AnyAsync(item =>
+                item.ResourceId == fixture.CaseId && item.Operation == "CaseCommand.ScheduleFollowUp"));
+            var projection = await verification.ManagedCases.SingleAsync(item => item.CaseId == fixture.CaseId);
+            Assert.Equal(2, projection.AggregateVersion);
+            Assert.Equal(fixture.OwnerActorId, projection.AccountableOwnerActorId);
+            var restoredShare = await verification.CaseShares.SingleAsync(item => item.CaseId == fixture.CaseId && item.ActorId == fixture.ActorId);
+            Assert.Contains(nameof(CaseOperation.ManageFollowUp), restoredShare.AllowedOperations!);
+        }
+
+        var accepted = await ProcessCommandAsync(fixture, fixture.CreateActor(), command, keyRing.CreateOptions(), provider);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, accepted.Status);
+        var replayed = await ProcessCommandAsync(fixture, fixture.CreateActor(), command, keyRing.CreateOptions(), provider);
+        Assert.Equal(CaseCommandProcessingStatus.Replayed, replayed.Status);
+        Assert.Equal(accepted.EventIds.ToArray(), replayed.EventIds.ToArray());
+        await using var final = fixture.CreateDbContext();
+        Assert.Single(await final.ManagedCaseFollowUps.Where(item => item.CaseId == fixture.CaseId).ToArrayAsync());
+        var persistedEvent = Assert.Single(await final.CaseEvents.Where(item => item.CommandId == command.CommandId).ToArrayAsync());
+        Assert.Single(await final.CommandReceipts.Where(item => item.CommandId == command.CommandId).ToArrayAsync());
+        Assert.Single(await final.DomainOutbox.Where(item => item.EventId == persistedEvent.EventId).ToArrayAsync());
+    }
+
+    [CaseAuthorityPostgresFact]
     public async Task Assignment_acknowledgement_persists_and_replays_after_context_restart()
     {
         await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync();
@@ -644,15 +712,17 @@ public sealed class CaseCommandProcessingPostgresTests
             Sector.HumanHealth,
             "synthetic protected report text",
             Array.AsReadOnly<ReportedObservation>([new ReportedObservation("synthetic observation")]));
+        var initialOwner = await dbContext.ManagedCases.Where(item => item.CaseId == fixture.CaseId)
+            .Select(item => item.AccountableOwnerActorId).SingleAsync();
         var initialEvents = CaseAggregate.Create(
             new AcceptCaseCommand(
-                commandId, fixture.CaseId, report, fixture.ActorId, fixture.WorkspaceId, null, recordedAt),
-            new ActorCapabilities(fixture.ActorId, CaseCapability.AcceptReport | CaseCapability.AssignCase));
+                commandId, fixture.CaseId, report, initialOwner, fixture.WorkspaceId, null, recordedAt),
+            new ActorCapabilities(initialOwner, CaseCapability.AcceptReport | CaseCapability.AssignCase));
 
         dbContext.CommandReceipts.Add(new CommandReceiptEntity
         {
             ReceiptId = Guid.NewGuid(),
-            ActorId = fixture.ActorId,
+            ActorId = initialOwner,
             CommandId = commandId,
             CaseId = fixture.CaseId,
             CommandType = "AcceptCase",
