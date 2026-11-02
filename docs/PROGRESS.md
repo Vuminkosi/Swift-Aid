@@ -482,3 +482,7 @@ Source inventory in [SW-02-006 authorization audit](SW-02-006-AUTHORIZATION-SURF
 ## SW-02-007 creator scope audit - 2 November 2026
 
 Source/test review in [SW-02-007 creator scope audit](SW-02-007-CREATOR-SCOPE-AUDIT.md) found creator-access backfill and PostgreSQL-gated workspace membership/destination isolation assertions. No fresh disposable database run or complete cross-surface escalation test was performed; EV-033. No membership/database changes.
+
+## SW-02-008 identity failure-path audit - 2 November 2026
+
+Test-source review in [SW-02-008 failure-path audit](SW-02-008-IDENTITY-FAILURE-AUDIT.md) found disabled/unverified provider, unavailable service and reauthentication proof-mismatch cases. No full pending/invited/SSO-only, consent-denial, callback replay, revocation/suspension, recovery and outage matrix was run across web/Android; EV-034.
