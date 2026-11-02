@@ -426,3 +426,7 @@ Read-only audit recorded in [SW-01-003 pin audit](SW-01-003-PIN-AUDIT.md). Locke
 ## SW-01-004 contract map - 2 November 2026
 
 Read-only contract inventory recorded in [SW-01-004 contract map](SW-01-004-CONTRACT-MAP.md), covering managed commands/events, client and ingestion outboxes, worker job envelopes, AI tools/plans, Ellai audio/session contracts, UI registry and public projections. This is PARTIAL: a complete producer/consumer/version/persistence crosswalk, full event-list reconciliation, worker execution/ACK evidence and runtime compatibility are NOT VERIFIED. No shared contract or migration was changed; current owners remain unresolved under BL-005. Evidence EV-019.
+
+## SW-01-005 authoritative write-path audit - 2 November 2026
+
+Source/configuration review in [SW-01-005 audit](SW-01-005-AUTHORITATIVE-WRITES.md) found managed case command routing through Gateway/application processing and constrained runtime-role grant scripts. Compose supplies the same PostgreSQL variable names to Gateway and migration runner; effective role grants were not queried. Classification worker has explicit dedicated NATS credentials and no explicit DB/Qdrant settings, but optional env file/effective runtime environment were not inspected. Kept SW-01-005 partial; evidence EV-020. No database or deployment changes.
