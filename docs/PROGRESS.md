@@ -486,3 +486,7 @@ Source/test review in [SW-02-007 creator scope audit](SW-02-007-CREATOR-SCOPE-AU
 ## SW-02-008 identity failure-path audit - 2 November 2026
 
 Test-source review in [SW-02-008 failure-path audit](SW-02-008-IDENTITY-FAILURE-AUDIT.md) found disabled/unverified provider, unavailable service and reauthentication proof-mismatch cases. No full pending/invited/SSO-only, consent-denial, callback replay, revocation/suspension, recovery and outage matrix was run across web/Android; EV-034.
+
+## SW-02-009 guest/account isolation audit - 2 November 2026
+
+Source inventory in [SW-02-009 isolation audit](SW-02-009-GUEST-ACCOUNT-ISOLATION-AUDIT.md) found guest encrypted draft/audio stores separated from staff auth/session services. Browser cleanup restart test source exists but cannot run locally because Playwright is absent (BL-003); web/Android account-switch and wrong-account isolation remain NOT VERIFIED. No tests run; EV-035.
