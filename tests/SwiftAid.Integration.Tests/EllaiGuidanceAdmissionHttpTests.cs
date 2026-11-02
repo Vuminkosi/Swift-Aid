@@ -155,6 +155,13 @@ public sealed class EllaiGuidanceAdmissionHttpTests
             var resumed = (await resumedResponse.Content.ReadFromJsonAsync<EllaiGuidanceProgressDto>())!;
             Assert.Equal("Ready", resumed.Status);
             restored = restored with { ProgressVersion = resumed.Version };
+            using var backResponse = await client.PostAsJsonAsync("/sessions/owned/guidance/control",
+                controlRequest with { ExpectedVersion = resumed.Version, Command = "back" });
+            var back = (await backResponse.Content.ReadFromJsonAsync<EllaiGuidanceProgressDto>())!;
+            Assert.Equal("AtStart", back.Status);
+            Assert.Equal(resumed.Version, back.Version);
+            Assert.True(backResponse.Headers.CacheControl?.NoStore);
+
             using var deniedControl = await client.PostAsJsonAsync("/sessions/foreign/guidance/control", controlRequest);
             Assert.Equal(HttpStatusCode.NotFound, deniedControl.StatusCode);
             var stepRequest = new EllaiGuidanceStepRequest(proposal.ProposalId, restored.Plan.PlanId,

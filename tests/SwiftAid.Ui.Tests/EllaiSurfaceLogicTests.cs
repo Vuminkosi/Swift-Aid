@@ -250,6 +250,8 @@ public sealed class EllaiSurfaceLogicTests
     [InlineData("stop-speech", true, true, null)]
     [InlineData("next", true, true, "NextAsync")]
     [InlineData("next", false, true, null)]
+    [InlineData("back", false, true, null)]
+    [InlineData("back", true, false, null)]
     public async Task ConversationalGuidanceControlUsesDurableBoundaryAndNeverReplaysHistory(
         string command, bool fresh, bool persisted, string? expectedMethod)
     {
@@ -274,8 +276,32 @@ public sealed class EllaiSurfaceLogicTests
         await InvokeAsync(host, "ObserveGuidanceProposal", turn, fresh);
         if (expectedMethod is null) Assert.Empty(proxy.Calls);
         else Assert.Equal(expectedMethod, Assert.Single(proxy.Calls));
-        Assert.Equal(fresh && command is "pause" or "resume" or "cancel" ? 1 : 0, commands.Count);
+        Assert.Equal(fresh && command is "pause" or "resume" or "cancel" or "back" ? 1 : 0, commands.Count);
         Assert.Same(tour, GetField<IBonboardingTourSession?>(host, "_generatedTour"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BackOnlyClosesCurrentPresentationAfterDurableAcceptance(bool accepted)
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), string.Empty);
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = BonboardingTourStatus.Running;
+        SetField(host, "_generatedTour", tour);
+        var calls = 0;
+        SetField(host, "_controlGeneratedTour", (Func<string, Task<bool>>)(command =>
+        {
+            Assert.Equal("back", command);
+            Assert.Empty(proxy.Calls);
+            calls++;
+            return Task.FromResult(accepted);
+        }));
+        await InvokeAsync(host, "DispatchConversationalGuidanceControlAsync", "back");
+        Assert.Equal(1, calls);
+        Assert.Equal(accepted ? new[] { "CancelAsync" } : Array.Empty<string>(), proxy.Calls);
+        Assert.Equal(!accepted, ReferenceEquals(tour, GetField<IBonboardingTourSession?>(host, "_generatedTour")));
     }
 
     [Fact]
@@ -299,8 +325,10 @@ public sealed class EllaiSurfaceLogicTests
         finally { release.TrySetResult(); await first; }
     }
 
-    [Fact]
-    public async Task DetachedNextDoesNotResumePausedGuidance()
+    [Theory]
+    [InlineData("next")]
+    [InlineData("back")]
+    public async Task DetachedStepCommandDoesNotResumePausedGuidance(string command)
     {
         var client = new FakeReviewClient
         {
@@ -308,7 +336,7 @@ public sealed class EllaiSurfaceLogicTests
                 CreateSession(1) with { Guidance = new("saved-proposal", "saved-plan", "report", "Paused", 4) })
         };
         using var host = await CreateHost(client, CreateSession(1), string.Empty);
-        await InvokeAsync(host, "DispatchConversationalGuidanceControlAsync", "next");
+        await InvokeAsync(host, "DispatchConversationalGuidanceControlAsync", command);
         Assert.Equal(0, client.GuidancePlanCalls);
         Assert.Empty(client.GuidanceControls);
     }

@@ -343,6 +343,32 @@ public sealed class EllaiGuidanceProposalAdmissionTests
     }
 
     [Fact]
+    public async Task BackRewindsDurablePositionAndRejectsDuplicateVersion()
+    {
+        var (service, store, observations, id) = await Fixture();
+        var checkpoint = await SeedProgress(store, observations, id);
+        var first = checkpoint.Plan!.Steps[0] with { NextStepKey = "step-2" };
+        var second = first with { StepKey = "step-2", NextStepKey = null };
+        checkpoint = checkpoint with { Plan = checkpoint.Plan with { Steps = [first, second] },
+            CurrentStepId = "step-2", CompletedStepIds = [first.StepKey] };
+        var session = (await store.GetAsync("session", default))!;
+        await store.TryUpdateAsync(session with { SessionVersion = session.SessionVersion + 1,
+            GuidanceJson = EllaiGuidanceCheckpoint.Serialize(checkpoint) }, session.SessionVersion, default);
+        var authority = new EllaiUiEntitlements("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>());
+        var request = new EllaiGuidanceControlRequest(id, checkpoint.Plan.PlanId, checkpoint.Version, "back");
+        var result = await service.ControlAsync("session", request, authority, default);
+        Assert.Equal("Ready", result.Status);
+        Assert.Equal("step-1", result.CurrentStepId);
+        Assert.Empty(result.CompletedStepIds!);
+        Assert.Equal(checkpoint.Version + 1, result.Version);
+        Assert.Equal("Conflict", (await service.ControlAsync("session", request, authority, default)).Status);
+        var restored = EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("session", default))!.GuidanceJson)!;
+        Assert.Equal("step-1", restored.CurrentStepId);
+        Assert.Empty(restored.CompletedStepIds);
+        Assert.Equal("AtStart", (await service.ControlAsync("session", request with { ExpectedVersion = result.Version }, authority, default)).Status);
+    }
+
+    [Fact]
     public async Task PauseResumeAndCancelAreDurableIdempotentAndCannotReopenTerminalPlan()
     {
         var (service, store, observations, id) = await Fixture();

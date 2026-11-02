@@ -47,13 +47,26 @@ public partial class EllaiGuidanceHost
         finally { _advancingValidatedInput = false; }
     }
 
+    private async Task RevisitGuidanceStepAsync()
+    {
+        if (_advancingValidatedInput || _generatedTour?.Status is not (BonboardingTourStatus.Running or BonboardingTourStatus.Waiting)) return;
+        _advancingValidatedInput = true;
+        try { await ControlGeneratedTourAsync("back"); }
+        finally { _advancingValidatedInput = false; }
+    }
+
     private async Task ControlGeneratedTourAsync(string command)
     {
         var tour = _generatedTour;
         if (tour is null || _controlGeneratedTour is null) return;
         if (!await _controlGeneratedTour(command)) return;
         if (!ReferenceEquals(tour, _generatedTour)) return;
-        if (command == "pause") await tour.PauseAsync(CancellationToken.None);
+        if (command == "back")
+        {
+            await CancelGeneratedGuidanceAsync();
+            await StartProposedGuidanceAsync();
+        }
+        else if (command == "pause") await tour.PauseAsync(CancellationToken.None);
         else if (command == "resume") await tour.ResumeAsync(CancellationToken.None);
         else await tour.CancelAsync(CancellationToken.None);
     }
@@ -162,17 +175,20 @@ public partial class EllaiGuidanceHost
                     return;
                 }
                 OfferSavedGuidance(fresh.Session);
-                if (command is "resume" or "next")
+                if (command is "resume" or "next" or "back")
                 {
-                    if (command == "next" && saved.Status != "Ready")
+                    if (command is "next" or "back" && saved.Status != "Ready")
                     {
-                        _guidanceNotice = "Resume the guidance before moving to the next step.";
+                        _guidanceNotice = "Resume the guidance before changing steps.";
                         return;
                     }
                     await StartProposedGuidanceAsync();
                     if (command == "next" && controlId == _lastGuidanceControlProposalId &&
                         _sessionView?.SessionId == session.SessionId)
                         await AdvanceGuidanceStepAsync(_uiObservationLifetime.Token);
+                    else if (command == "back" && controlId == _lastGuidanceControlProposalId &&
+                        _sessionView?.SessionId == session.SessionId)
+                        await RevisitGuidanceStepAsync();
                 }
                 else
                 {
@@ -190,6 +206,7 @@ public partial class EllaiGuidanceHost
                 return;
             }
             if (command == "next") await AdvanceGuidanceStepAsync(_uiObservationLifetime.Token);
+            else if (command == "back") await RevisitGuidanceStepAsync();
             else await ControlGeneratedTourAsync(command);
         }
         catch (OperationCanceledException) { }
@@ -318,11 +335,16 @@ public partial class EllaiGuidanceHost
                 try
                 {
                     if (!IsCurrent()) return false;
-                    if (command == "resume") await ReportCurrentUiAsync(_uiObservationLifetime.Token);
-                    var target = command switch { "pause" => "Paused", "resume" => "Ready", _ => "Cancelled" };
-                    if (durableStatus == target) return true;
+                    if (command is "resume" or "back") await ReportCurrentUiAsync(_uiObservationLifetime.Token);
+                    var target = command switch { "pause" => "Paused", "resume" or "back" => "Ready", _ => "Cancelled" };
+                    if (command != "back" && durableStatus == target) return true;
                     var update = await ReviewClient.ControlGuidanceAsync(session.SessionId,
                         new(proposalId, plan.PlanId, progressVersion, command), _uiObservationLifetime.Token);
+                    if (IsCurrent() && command == "back" && update?.Status == "AtStart")
+                    {
+                        _guidanceNotice = "You are already at the first step.";
+                        return false;
+                    }
                     if (!IsCurrent() || update?.Status != target)
                     {
                         _guidanceNotice = "Guidance could not be saved. Try again.";

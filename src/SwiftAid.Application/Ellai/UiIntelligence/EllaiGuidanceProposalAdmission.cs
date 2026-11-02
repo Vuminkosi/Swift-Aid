@@ -169,7 +169,7 @@ public sealed class EllaiGuidanceProposalAdmission(
     {
         if (request is null || string.IsNullOrWhiteSpace(request.ProposalId) || request.ProposalId.Length > 512 ||
             string.IsNullOrWhiteSpace(request.PlanId) || request.PlanId.Length > 120 || request.ExpectedVersion < 1 ||
-            request.Command is not ("pause" or "resume" or "cancel")) return new("InvalidRequest");
+            request.Command is not ("pause" or "resume" or "cancel" or "back")) return new("InvalidRequest");
         var session = await sessions.GetAsync(sessionId, ct).ConfigureAwait(false);
         if (session is null || session.OwnerActorId != authority.OwnerActorId || session.ScopeEpoch != authority.ScopeEpoch)
             return new("Denied");
@@ -178,11 +178,37 @@ public sealed class EllaiGuidanceProposalAdmission(
             checkpoint.ProposalId != request.ProposalId || checkpoint.ScopeEpoch != authority.ScopeEpoch ||
             checkpoint.InteractionEpoch > session.InteractionEpoch) return new("Stale");
         var target = request.Command switch { "pause" => "Paused", "resume" => "Ready", _ => "Cancelled" };
-        if (checkpoint.Status == target)
+        if (request.Command != "back" && checkpoint.Status == target)
             return new(checkpoint.Status, checkpoint.Version, checkpoint.CurrentStepId, checkpoint.CompletedStepIds);
         if (checkpoint.Version != request.ExpectedVersion)
             return new("Conflict", checkpoint.Version, checkpoint.CurrentStepId, checkpoint.CompletedStepIds);
         if (checkpoint.Status is not ("Ready" or "Paused")) return new("Stale");
+        if (request.Command == "back")
+        {
+            if (checkpoint.Status != "Ready") return new("Paused", checkpoint.Version, checkpoint.CurrentStepId, checkpoint.CompletedStepIds);
+            var admission = await AdmitAsync(sessionId, request.ProposalId, authority, ct).ConfigureAwait(false);
+            if (admission.Status != "Ready") return new(admission.Status);
+            var ordered = EllaiGuidanceSequence.Order(checkpoint.Plan.Steps).Select(step => step.StepKey).ToArray();
+            var index = Array.IndexOf(ordered, checkpoint.CurrentStepId);
+            if (index < 0 || !checkpoint.CompletedStepIds.SequenceEqual(ordered.Take(index))) return new("Stale");
+            if (index == 0) return new("AtStart", checkpoint.Version, checkpoint.CurrentStepId, checkpoint.CompletedStepIds);
+            // Revisit presentation only. Discard later progress so continuing must
+            // prove completion again; no application action or receipt is replayed.
+            var previous = checkpoint with
+            {
+                Version = checkpoint.Version + 1,
+                InteractionEpoch = session.InteractionEpoch,
+                CurrentStepId = ordered[index - 1],
+                CompletedStepIds = ordered.Take(index - 1).ToArray(),
+            };
+            var rewound = await sessions.TryUpdateAsync(session with
+            {
+                SessionVersion = session.SessionVersion + 1,
+                GuidanceJson = EllaiGuidanceCheckpoint.Serialize(previous),
+                UpdatedAtUtc = (clock ?? TimeProvider.System).GetUtcNow(),
+            }, session.SessionVersion, ct).ConfigureAwait(false);
+            return rewound is null ? new("Conflict") : new(previous.Status, previous.Version, previous.CurrentStepId, previous.CompletedStepIds);
+        }
         if (request.Command == "resume")
         {
             var admission = await AdmitAsync(sessionId, request.ProposalId, authority, ct).ConfigureAwait(false);
