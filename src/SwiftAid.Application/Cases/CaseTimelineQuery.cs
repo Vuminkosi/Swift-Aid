@@ -30,6 +30,8 @@ public interface ICaseTimelineStore
 
     /// <summary>Guest intake receipt that promoted into this case, if any.</summary>
     Task<Guid?> GetPromotingReceiptAsync(Guid caseId, CancellationToken ct);
+
+    Task<IReadOnlyList<CaseCollaboratorGrantView>> GetCollaboratorsAsync(Guid caseId, CancellationToken ct);
 }
 
 public interface ICaseTimelineQuery
@@ -122,6 +124,15 @@ public sealed class CaseTimelineQuery(
             }
 
             header = header with { CanAcknowledgeAssignment = canAcknowledge };
+            CaseCollaborationView? collaboration = null;
+            var collaborationDecision = await _policy.AuthorizeAllAsync(actor, caseId,
+                [CaseOperation.ReadCase, CaseOperation.ManageCollaborators], ct).ConfigureAwait(false);
+            if (collaborationDecision.IsAllowed)
+            {
+                var grants = await _store.GetCollaboratorsAsync(caseId, ct).ConfigureAwait(false);
+                collaboration = new CaseCollaborationView(header.Workflow != "Resolved", grants);
+            }
+
             var rows = await _store.GetEventsAsync(caseId, take + 1, beforeAggregateVersion, ct).ConfigureAwait(false);
             var hasOlderEntries = rows.Count > take;
             var pageRows = rows
@@ -154,7 +165,7 @@ public sealed class CaseTimelineQuery(
                 : null;
             return new CaseTimelineResult(
                 CaseTimelineAccess.Found,
-                new CaseTimeline(header, entries, hasOlderEntries, olderCursor));
+                new CaseTimeline(header, entries, hasOlderEntries, olderCursor, collaboration));
         }
     }
 
@@ -176,6 +187,8 @@ public sealed class CaseTimelineQuery(
         "CaseReported" => "Report accepted",
         "CaseAssigned" => "Accountable owner assigned",
         "CaseAssignmentAcknowledged" => "Assignment acknowledged",
+        "CaseCollaboratorGranted" => "Collaborator access granted",
+        "CaseCollaboratorRevoked" => "Collaborator access revoked",
         "CaseReportCorrected" => "Report corrected",
         "CaseActionRequested" => "Protected action requested",
         "CaseActionRequestReviewed" => "Protected action reviewed",

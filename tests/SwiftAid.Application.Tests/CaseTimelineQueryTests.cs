@@ -10,6 +10,37 @@ namespace SwiftAid.Application.Tests;
 public sealed class CaseTimelineQueryTests
 {
     [Theory]
+    [InlineData(false, "Active", false)]
+    [InlineData(true, "Active", true)]
+    [InlineData(true, "Resolved", false)]
+    public async Task Collaborator_management_view_requires_permission_and_disables_new_grants_after_resolution(
+        bool permitted, string workflow, bool canGrant)
+    {
+        var header = new CaseTimelineHeader(Guid.NewGuid(), "org", "workspace", "SZ", workflow, "officer-1", 4, 1, DateTimeOffset.UtcNow);
+        var grant = new CaseCollaboratorGrantView(Guid.NewGuid(), "opaque-recipient", "Synthetic recipient",
+            ["ReadCase"], DateTimeOffset.UtcNow.AddHours(1), false);
+        var store = new StubStore(header, null, [Row(3, "CaseCollaboratorGranted"), Row(4, "CaseCollaboratorRevoked")])
+        {
+            Collaborators = [grant]
+        };
+        var query = new CaseTimelineQuery(store, new AssignmentPolicy(permitted), new StubUnitOfWork());
+        var result = await query.GetAsync(CreateOfficer(), header.CaseId, 1, CancellationToken.None);
+        Assert.Equal(permitted, store.CollaboratorsRead);
+        if (permitted)
+        {
+            Assert.Equal(canGrant, result.Timeline!.Collaboration!.CanGrant);
+            Assert.Equal(grant, Assert.Single(result.Timeline.Collaboration.Grants));
+        }
+        else
+        {
+            Assert.Null(result.Timeline!.Collaboration);
+        }
+        Assert.Equal("Collaborator access revoked", Assert.Single(result.Timeline.Entries).Label);
+        Assert.Null((grant with { ActorDisplayLabel = null }).SafeActorDisplayLabel);
+        Assert.Null((grant with { ActorDisplayLabel = "unsafe\nlabel" }).SafeActorDisplayLabel);
+    }
+
+    [Theory]
     [InlineData("officer-1", "Active", false, true, true)]
     [InlineData("officer-1", "Active", false, false, false)]
     [InlineData("other-owner", "Active", false, true, false)]
@@ -223,6 +254,14 @@ public sealed class CaseTimelineQueryTests
         IReadOnlyList<CaseTimelineRow> rows) : ICaseTimelineStore
     {
         public bool HeaderRead { get; private set; }
+        public bool CollaboratorsRead { get; private set; }
+        public IReadOnlyList<CaseCollaboratorGrantView> Collaborators { get; set; } = [];
+
+        public Task<IReadOnlyList<CaseCollaboratorGrantView>> GetCollaboratorsAsync(Guid caseId, CancellationToken ct)
+        {
+            CollaboratorsRead = true;
+            return Task.FromResult(Collaborators);
+        }
 
         public Task<CaseTimelineHeader?> GetHeaderAsync(Guid caseId, CancellationToken ct)
         {

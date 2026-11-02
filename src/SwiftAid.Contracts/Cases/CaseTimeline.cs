@@ -61,7 +61,20 @@ public sealed record CaseTimeline(
     CaseTimelineHeader Header,
     IReadOnlyList<CaseTimelineEntry> Entries,
     bool HasOlderEntries = false,
-    long? OlderThanAggregateVersion = null);
+    long? OlderThanAggregateVersion = null,
+    CaseCollaborationView? Collaboration = null);
+
+/// <summary>Management-only current share projection; reasons remain sealed in the journal.</summary>
+public sealed record CaseCollaborationView(bool CanGrant, IReadOnlyList<CaseCollaboratorGrantView> Grants);
+
+/// <summary>Current grant generation. ActorId is an opaque command target, never a display fallback.</summary>
+public sealed record CaseCollaboratorGrantView(Guid GrantId, string ActorId, string? ActorDisplayLabel,
+    IReadOnlyList<string> Operations, DateTimeOffset ExpiresAtUtc, bool IsRevoked)
+{
+    [JsonIgnore]
+    public string? SafeActorDisplayLabel => ActorDisplayLabel is { Length: > 0 and <= 120 } label && !label.Any(char.IsControl)
+        ? label : null;
+}
 
 /// <summary>Timeline read outcome; denial and absence share one value for privacy.</summary>
 public enum CaseTimelineAccess

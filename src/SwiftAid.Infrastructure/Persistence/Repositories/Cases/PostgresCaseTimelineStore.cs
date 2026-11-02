@@ -13,6 +13,23 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
 {
     private readonly SwiftAidDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
 
+    public async Task<IReadOnlyList<CaseCollaboratorGrantView>> GetCollaboratorsAsync(Guid caseId, CancellationToken ct)
+    {
+        var rows = await (from share in _dbContext.CaseShares.AsNoTracking()
+                          where share.CaseId == caseId && share.GrantId != null
+                          join profile in _dbContext.UserProfiles.AsNoTracking() on share.ActorId equals profile.UserId into profiles
+                          from profile in profiles.DefaultIfEmpty()
+                          orderby share.GrantedAtUtc, share.ActorId
+                          select new
+                          {
+                              share.GrantId, share.ActorId, DisplayName = profile == null ? null : profile.DisplayName,
+                              share.AllowedOperations, share.ExpiresAtUtc, share.IsActive
+                          }).ToArrayAsync(ct).ConfigureAwait(false);
+        return rows.Select(row => new CaseCollaboratorGrantView(row.GrantId!.Value, row.ActorId, row.DisplayName,
+            row.AllowedOperations ?? throw new InvalidDataException("A collaborator grant has no operation scope."),
+            row.ExpiresAtUtc ?? throw new InvalidDataException("A collaborator grant has no expiry."), !row.IsActive)).ToArray();
+    }
+
     public async Task<CaseTimelineHeader?> GetHeaderAsync(Guid caseId, CancellationToken ct)
     {
         var header = await _dbContext.ManagedCases.AsNoTracking()

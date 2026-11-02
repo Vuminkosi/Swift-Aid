@@ -19,6 +19,7 @@ using SwiftAid.Application.Cases;
 using SwiftAid.Application.Cases.Commands;
 using SwiftAid.Application.Serialization;
 using SwiftAid.Contracts.Commands;
+using SwiftAid.Contracts.Cases;
 using SwiftAid.Gateway.Endpoints;
 using SwiftAid.Infrastructure.Authorization;
 using SwiftAid.Infrastructure.Persistence;
@@ -91,6 +92,27 @@ public sealed partial class CaseCommandProcessingPostgresTests
             var body = await response.Content.ReadAsStringAsync();
             Assert.DoesNotContain("Synthetic private", body);
             Assert.DoesNotContain("synthetic protected report text", body);
+            if (expected == HttpStatusCode.OK && token == "recipient")
+            {
+                var timeline = await response.Content.ReadFromJsonAsync<CaseTimeline>();
+                Assert.Null(timeline!.Collaboration);
+            }
+        }
+
+        async Task AssertManagementView(bool revoked)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/cases/{fixture.CaseId:D}/timeline?limit=1");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "officer");
+            using var response = await client.SendAsync(request);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var timeline = Assert.IsType<CaseTimeline>(await response.Content.ReadFromJsonAsync<CaseTimeline>());
+            Assert.True(timeline.Collaboration!.CanGrant);
+            var share = Assert.Single(timeline.Collaboration.Grants);
+            Assert.Equal(fixture.NewOwnerActorId, share.ActorId);
+            Assert.Null(share.SafeActorDisplayLabel);
+            Assert.Equal(["ReadCase"], share.Operations.ToArray());
+            Assert.Equal(revoked, share.IsRevoked);
+            Assert.Equal(revoked ? "Collaborator access revoked" : "Collaborator access granted", Assert.Single(timeline.Entries).Label);
         }
 
         await AssertReadStatus("recipient-old", HttpStatusCode.NotFound);
@@ -148,6 +170,7 @@ public sealed partial class CaseCommandProcessingPostgresTests
         }
         await AssertReadStatus("recipient-old", HttpStatusCode.NotFound);
         await AssertReadStatus("recipient", HttpStatusCode.OK);
+        await AssertManagementView(false);
         using (var changedReplay = await Send(grant with { Reason = "Changed after acceptance" }))
         {
             Assert.Equal(HttpStatusCode.Conflict, changedReplay.StatusCode);
@@ -170,6 +193,7 @@ public sealed partial class CaseCommandProcessingPostgresTests
         }
         await AssertReadStatus("recipient", HttpStatusCode.NotFound);
         await AssertReadStatus("recipient-refreshed", HttpStatusCode.NotFound);
+        await AssertManagementView(true);
         await using var verification = fixture.CreateDbContext();
         var share = await verification.CaseShares.SingleAsync(item => item.CaseId == fixture.CaseId);
         Assert.Equal(grant.GrantId, share.GrantId);
