@@ -91,7 +91,8 @@ public static class CanonicalCaseCommandHasher
 
         if (command is not (CorrectReportCommand or RequestCaseActionCommand or ReviewCaseActionRequestCommand or ResolveCaseCommand or ReopenCaseCommand
             or RecordObservationCommand or ScheduleFollowUpCommand or RecordFollowUpOutcomeCommand
-            or RaiseEscalationCommand or AcknowledgeEscalationCommand or CloseEscalationCommand or AcknowledgeAssignmentCommand))
+            or RaiseEscalationCommand or AcknowledgeEscalationCommand or CloseEscalationCommand or AcknowledgeAssignmentCommand
+            or GrantCaseCollaboratorCommand or RevokeCaseCollaboratorCommand))
         {
             throw new NotSupportedException($"Command type {command.GetType().Name} is not supported by canonical hash protocol v1.");
         }
@@ -102,6 +103,38 @@ public static class CanonicalCaseCommandHasher
     {
         switch (command)
         {
+            case GrantCaseCollaboratorCommand grant:
+                RequireIdentifier(grant.GrantId, nameof(grant.GrantId));
+                RequireText(grant.CollaboratorActorId, nameof(grant.CollaboratorActorId));
+                RequireText(grant.Reason, nameof(grant.Reason));
+                const CaseCollaborationActions allowed = CaseCollaborationActions.ReadCase | CaseCollaborationActions.ReadAttachment |
+                    CaseCollaborationActions.Synchronize | CaseCollaborationActions.RecordObservation |
+                    CaseCollaborationActions.ManageFollowUp | CaseCollaborationActions.ManageEscalation;
+                if ((grant.Actions & ~allowed) != 0 || !grant.Actions.HasFlag(CaseCollaborationActions.ReadCase) ||
+                    grant.ExpiresAtUtc.Offset != TimeSpan.Zero)
+                    throw new ArgumentException("The collaborator action scope or expiry is invalid.");
+                var grantSnapshot = grant with { OccurredAtUtc = Normalize(grant.OccurredAtUtc) };
+                return (grantSnapshot, "GrantCaseCollaborator", grantSnapshot.Reason, writer =>
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("grantId", grantSnapshot.GrantId.ToString("D"));
+                    writer.WriteString("collaboratorActorId", grantSnapshot.CollaboratorActorId);
+                    writer.WriteString("actions", grantSnapshot.Actions.ToString());
+                    WriteNullableTimestamp(writer, "expiresAtUtc", grantSnapshot.ExpiresAtUtc);
+                    writer.WriteEndObject();
+                });
+
+            case RevokeCaseCollaboratorCommand revoke:
+                RequireIdentifier(revoke.GrantId, nameof(revoke.GrantId));
+                RequireText(revoke.Reason, nameof(revoke.Reason));
+                var revokeSnapshot = revoke with { OccurredAtUtc = Normalize(revoke.OccurredAtUtc) };
+                return (revokeSnapshot, "RevokeCaseCollaborator", revokeSnapshot.Reason, writer =>
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("grantId", revokeSnapshot.GrantId.ToString("D"));
+                    writer.WriteEndObject();
+                });
+
             case AcknowledgeAssignmentCommand assignment:
                 ArgumentOutOfRangeException.ThrowIfNegativeOrZero(assignment.AssignmentVersion);
                 var assignmentSnapshot = assignment with { OccurredAtUtc = Normalize(assignment.OccurredAtUtc) };

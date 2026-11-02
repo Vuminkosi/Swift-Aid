@@ -10,6 +10,56 @@ namespace SwiftAid.Application.Tests;
 public sealed class CaseCommandProcessorTests
 {
     [Fact]
+    public async Task Collaborator_revocation_uses_dedicated_permission_and_server_timestamp()
+    {
+        var aggregate = CreateAggregate();
+        var grantId = Guid.NewGuid();
+        aggregate.Apply(new CaseCollaboratorGranted(CaseId, 3, 1, Guid.NewGuid(), "staff-actor", null, DatabaseNow,
+            grantId, "worker", CaseCollaborationActions.ReadCase, DatabaseNow.AddHours(1), "Synthetic grant"));
+        var command = new RevokeCaseCollaboratorCommand(CommandId, 3, grantId, "Synthetic revoke", null, CallerRecordedAt);
+        var scenario = CreateScenario(command, 3, aggregate);
+        scenario.AccessPolicy.Decisions.Enqueue(Allowed());
+        scenario.AccessPolicy.Decisions.Enqueue(Allowed());
+        var result = await scenario.Processor.ProcessAsync(scenario.Actor, CaseId, 1, command, CancellationToken.None);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, result.Status);
+        var revoke = Assert.IsType<CaseCollaboratorRevoked>(Assert.Single(Assert.Single(scenario.Persistence.Appends).Events));
+        Assert.Equal(grantId, revoke.GrantId);
+        Assert.Equal(DatabaseNow, revoke.RecordedAtUtc);
+        Assert.All(scenario.AccessPolicy.Calls, operations =>
+            Assert.Equal([CaseOperation.ReadCase, CaseOperation.ManageCollaborators], operations));
+    }
+
+    [Fact]
+    public async Task Collaborator_grant_requires_permission_before_history_and_uses_database_expiry_clock()
+    {
+        var command = new GrantCaseCollaboratorCommand(CommandId, 2, Guid.NewGuid(), "worker",
+            CaseCollaborationActions.ReadCase, DatabaseNow.AddHours(1), "Synthetic grant", null, CallerRecordedAt);
+        var denied = CreateScenario(command);
+        denied.AccessPolicy.Decisions.Enqueue(Denied(AccessDecisionCode.GrantMissing));
+        Assert.Equal(CaseCommandProcessingStatus.Denied,
+            (await denied.Processor.ProcessAsync(denied.Actor, CaseId, 1, command, CancellationToken.None)).Status);
+        Assert.Equal([CaseOperation.ReadCase, CaseOperation.ManageCollaborators], Assert.Single(denied.AccessPolicy.Calls));
+        Assert.Equal(["denied-audit"], denied.Persistence.Calls);
+
+        var allowed = CreateScenario(command);
+        allowed.AccessPolicy.Decisions.Enqueue(Allowed());
+        allowed.AccessPolicy.Decisions.Enqueue(Allowed());
+        var accepted = await allowed.Processor.ProcessAsync(allowed.Actor, CaseId, 1, command, CancellationToken.None);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, accepted.Status);
+        var grant = Assert.IsType<CaseCollaboratorGranted>(Assert.Single(Assert.Single(allowed.Persistence.Appends).Events));
+        Assert.Equal(DatabaseNow, grant.RecordedAtUtc);
+        Assert.Equal(command.ExpiresAtUtc, grant.ExpiresAtUtc);
+
+        var expiredCommand = command with { ExpiresAtUtc = DatabaseNow.AddMinutes(-1) };
+        var expired = CreateScenario(expiredCommand);
+        expired.AccessPolicy.Decisions.Enqueue(Allowed());
+        expired.AccessPolicy.Decisions.Enqueue(Allowed());
+        Assert.Equal(CaseCommandProcessingStatus.Conflict,
+            (await expired.Processor.ProcessAsync(expired.Actor, CaseId, 1, expiredCommand, CancellationToken.None)).Status);
+        Assert.Empty(expired.Persistence.Appends);
+    }
+
+    [Fact]
     public async Task Assignment_acknowledgement_requires_its_own_permission_before_reading_history()
     {
         var command = new AcknowledgeAssignmentCommand(CommandId, 2, 2, SourceOccurredAt, CallerRecordedAt);

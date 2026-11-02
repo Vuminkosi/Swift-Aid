@@ -10,6 +10,31 @@ namespace SwiftAid.Application.Tests;
 public sealed class CanonicalCaseCommandHasherTests
 {
     [Fact]
+    public void Collaborator_hash_binds_target_scope_expiry_and_grant_identity()
+    {
+        var actor = CreateActor("officer");
+        var grant = new GrantCaseCollaboratorCommand(CommandId, 2, Guid.NewGuid(), "worker",
+            CaseCollaborationActions.ReadCase, Now.AddHours(1), "Synthetic grant", null, Now);
+        var hash = CreateSnapshot(actor, CaseId, grant).CanonicalPayloadHash;
+        Assert.Equal(hash, CreateSnapshot(actor, CaseId, grant with { RecordedAtUtc = Now.AddMinutes(1) }).CanonicalPayloadHash);
+        foreach (var changed in new[]
+        {
+            grant with { CollaboratorActorId = "other" },
+            grant with { Actions = CaseCollaborationActions.ReadCase | CaseCollaborationActions.Synchronize },
+            grant with { ExpiresAtUtc = Now.AddHours(2) },
+            grant with { GrantId = Guid.NewGuid() },
+            grant with { Reason = "Changed scope reason" }
+        })
+            Assert.NotEqual(hash, CreateSnapshot(actor, CaseId, changed).CanonicalPayloadHash);
+        Assert.Throws<ArgumentException>(() => CreateSnapshot(actor, CaseId, grant with { Actions = (CaseCollaborationActions)65 }));
+        Assert.Throws<ArgumentException>(() => CreateSnapshot(actor, CaseId, grant with { GrantId = Guid.Empty }));
+        var revoke = new RevokeCaseCollaboratorCommand(CommandId, 2, grant.GrantId, "Synthetic revoke", null, Now);
+        var revokeHash = CreateSnapshot(actor, CaseId, revoke).CanonicalPayloadHash;
+        Assert.NotEqual(hash, revokeHash);
+        Assert.NotEqual(revokeHash, CreateSnapshot(actor, CaseId, revoke with { GrantId = Guid.NewGuid() }).CanonicalPayloadHash);
+    }
+
+    [Fact]
     public void Assignment_acknowledgement_hash_binds_assignment_version_but_excludes_server_recorded_time()
     {
         var actor = CreateActor("worker-a");

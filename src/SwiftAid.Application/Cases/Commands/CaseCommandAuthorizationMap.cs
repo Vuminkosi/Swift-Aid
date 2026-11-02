@@ -15,6 +15,7 @@ public static class CaseCommandAuthorizationMap
         return command switch
         {
             AcknowledgeAssignmentCommand => Requirement(CaseOperation.AcknowledgeAssignment, CaseCapability.AcknowledgeAssignment),
+            GrantCaseCollaboratorCommand or RevokeCaseCollaboratorCommand => Requirement(CaseOperation.ManageCollaborators, CaseCapability.ManageCollaborators),
             CorrectReportCommand => Requirement(CaseOperation.CorrectReport, CaseCapability.CorrectReport),
             RecordObservationCommand => Requirement(CaseOperation.RecordObservation, CaseCapability.RecordObservation),
             ScheduleFollowUpCommand or RecordFollowUpOutcomeCommand => Requirement(CaseOperation.ManageFollowUp, CaseCapability.ManageFollowUp),
