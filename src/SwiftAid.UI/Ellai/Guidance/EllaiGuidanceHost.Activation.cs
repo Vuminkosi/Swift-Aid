@@ -27,7 +27,7 @@ public partial class EllaiGuidanceHost
 
     private void ObserveGuidanceProposal(EllaiConversationTurnDto turn, bool newlyCompleted)
     {
-        if (_guidanceProposalTurn != turn.ClientUtteranceId)
+        if (_guidanceProposalTurn != turn.ClientUtteranceId && _generatedTour is null)
         {
             _guidanceProposalId = null;
             _guidanceProposalTurn = turn.ClientUtteranceId;
@@ -40,6 +40,8 @@ public partial class EllaiGuidanceHost
         _pendingGuidanceTurn = null;
         var proposal = turn.UiProposals.FirstOrDefault(p => p.Proposal.Kind == UiIntentKind.StartGuidance);
         if (proposal is null || _guidanceProposalId == proposal.ProposalId) return;
+        _ = CancelGeneratedGuidanceAsync();
+        _guidanceProposalTurn = turn.ClientUtteranceId;
         _guidanceProposalId = proposal.ProposalId;
         // Conversation restoration offers an explicit action; only the currently awaited turn auto-starts.
         if (newlyCompleted) _ = StartProposedGuidanceAsync();
@@ -65,9 +67,11 @@ public partial class EllaiGuidanceHost
         _preparingGuidance = true;
         _guidanceNotice = null;
         var turnId = _guidanceProposalTurn;
+        var activated = false;
         bool IsCurrent() => !_uiObservationLifetime.IsCancellationRequested &&
             _sessionView?.SessionId == session.SessionId && _sessionView.Status == "Active" &&
-            _guidanceProposalId == proposalId && _guidanceProposalTurn == turnId;
+            _guidanceProposalId == proposalId && _guidanceProposalTurn == turnId &&
+            (activated || _lastDurableTurn is null || _lastDurableTurn.ClientUtteranceId == turnId);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_uiObservationLifetime.Token);
         timeout.CancelAfter(TimeSpan.FromSeconds(100));
         var token = timeout.Token;
@@ -166,6 +170,7 @@ public partial class EllaiGuidanceHost
             if (!IsCurrent()) await started.CancelAsync(CancellationToken.None);
             else
             {
+                activated = true;
                 _generatedTour = started;
                 _controlGeneratedTour = PersistControl;
                 _generatedTourChanged = (_, _) => _ = InvokeAsync(async () =>

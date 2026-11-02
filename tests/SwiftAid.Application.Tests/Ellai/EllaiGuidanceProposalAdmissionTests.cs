@@ -257,6 +257,46 @@ public sealed class EllaiGuidanceProposalAdmissionTests
         Assert.Equal("Ready", EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("session", default))!.GuidanceJson)!.Status);
     }
 
+    [Theory]
+    [InlineData(false, "Ready")]
+    [InlineData(true, "Stale")]
+    public async Task AcceptedGuidanceSurvivesFollowupUnlessANewGuidanceRequestSupersedesIt(bool replacement, string expected)
+    {
+        var (service, store, observations, id) = await Fixture();
+        var checkpoint = await SeedProgress(store, observations, id);
+        var current = (await store.GetAsync("session", default))!;
+        await store.TryAcceptUtteranceAsync(current with { SessionVersion = current.SessionVersion + 1,
+            InteractionEpoch = current.InteractionEpoch + 1 }, current.SessionVersion, "followup", default, "{}");
+        var claim = (await store.ClaimNextAsync(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(1), default))!;
+        await store.CompleteAsync("session", "followup", claim.AttemptCount, DateTimeOffset.UtcNow, default,
+            EllaiUtteranceResolution.Completed("Here is an explanation.", current.InteractionEpoch + 1) with
+            {
+                UiProposalsJson = replacement ? EllaiUiProposalPayload.Serialize([new(UiIntentKind.StartGuidance, "ellai.guidance", null, null,
+                    new Dictionary<string, string> { ["feature"] = "report", ["objective"] = "A different tour" })]) : null,
+            });
+        var authority = new EllaiUiEntitlements("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>());
+        Assert.Equal(expected, (await service.AdmitAsync("session", id, authority, default)).Status);
+        if (replacement)
+        {
+            var after = (await store.GetAsync("session", default))!;
+            await store.TryAcceptUtteranceAsync(after with { SessionVersion = after.SessionVersion + 1,
+                InteractionEpoch = after.InteractionEpoch + 1 }, after.SessionVersion, "later-chat", default, "{}");
+            var later = (await store.ClaimNextAsync(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(1), default))!;
+            await store.CompleteAsync("session", "later-chat", later.AttemptCount, DateTimeOffset.UtcNow, default,
+                EllaiUtteranceResolution.Completed("An ordinary reply", after.InteractionEpoch + 1));
+            Assert.Equal("Stale", (await service.AdmitAsync("session", id, authority, default)).Status);
+        }
+        if (!replacement)
+        {
+            var paused = await service.ControlAsync("session", new(id, checkpoint.Plan!.PlanId, 1, "pause"), authority, default);
+            Assert.Equal("Paused", paused.Status);
+            var resumed = await service.ControlAsync("session", new(id, checkpoint.Plan.PlanId, paused.Version, "resume"), authority, default);
+            Assert.Equal("Ready", resumed.Status);
+            Assert.Equal("Completed", (await service.CompleteStepAsync("session",
+                new(id, checkpoint.Plan.PlanId, resumed.Version, "step-1", "context"), authority, default)).Status);
+        }
+    }
+
     private static async Task<EllaiGuidanceCheckpoint> SeedProgress(InMemoryEllaiSessionStore store,
         InMemoryEllaiUiObservationStore observations, string proposalId, PlanStepBehavior behavior = PlanStepBehavior.Explain)
     {

@@ -62,6 +62,29 @@ public sealed class EllaiSurfaceLogicTests
     }
 
     [Fact]
+    public async Task ActiveGuidanceSurvivesAnOrdinaryFollowupButNewGuidanceReplacesIt()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), string.Empty);
+        await InvokeAsync(host, "ObserveGuidanceProposal", GuidanceTurn(), false);
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        SetField(host, "_generatedTour", tour);
+        await InvokeAsync(host, "ObserveGuidanceProposal",
+            new EllaiConversationTurnDto("question", 2, "Why is this field needed?", null, "Processing", 0, null), false);
+        Assert.Same(tour, GetField<IBonboardingTourSession?>(host, "_generatedTour"));
+        Assert.Equal("proposal-1", GetField<string?>(host, "_guidanceProposalId"));
+        await InvokeAsync(host, "ObserveGuidanceProposal",
+            new EllaiConversationTurnDto("question", 2, "Why is this field needed?", "An explanation", "Completed", 1, DateTimeOffset.UtcNow), false);
+        Assert.Same(tour, GetField<IBonboardingTourSession?>(host, "_generatedTour"));
+        await InvokeAsync(host, "ObserveGuidanceProposal", GuidanceTurn() with
+        {
+            ClientUtteranceId = "different-tour", Sequence = 3,
+            UiProposals = [GuidanceTurn().UiProposals[0] with { ProposalId = "proposal-2" }],
+        }, false);
+        Assert.Null(GetField<IBonboardingTourSession?>(host, "_generatedTour"));
+        Assert.Equal("proposal-2", GetField<string?>(host, "_guidanceProposalId"));
+    }
+
+    [Fact]
     public async Task NewerTurnInvalidatesPendingGuidanceProposal()
     {
         var client = new FakeReviewClient();

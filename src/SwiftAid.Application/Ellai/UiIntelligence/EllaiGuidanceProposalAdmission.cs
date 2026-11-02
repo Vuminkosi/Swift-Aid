@@ -32,8 +32,9 @@ public sealed class EllaiGuidanceProposalAdmission(
             return new("Stale");
         var previous = EllaiGuidanceCheckpoint.Deserialize(session.GuidanceJson);
         var sameProposal = previous?.ProposalId == proposalId && previous.ScopeEpoch == authority.ScopeEpoch
+            && previous.InteractionEpoch <= admitted.InteractionEpoch;
+        var sameContext = sameProposal && previous!.ContextStamp == admitted.Observation.ContextStamp
             && previous.InteractionEpoch == admitted.InteractionEpoch;
-        var sameContext = sameProposal && previous!.ContextStamp == admitted.Observation.ContextStamp;
         var now = (clock ?? TimeProvider.System).GetUtcNow();
         if (sameContext && previous!.Status == "Generating" && previous.LeaseExpiresAtUtc > now)
             return new("Generating");
@@ -55,7 +56,8 @@ public sealed class EllaiGuidanceProposalAdmission(
             {
                 if (!sameContext)
                 {
-                    var rebound = previous with { ContextStamp = admitted.Observation.ContextStamp, Version = previous.Version + 1 };
+                    var rebound = previous with { ContextStamp = admitted.Observation.ContextStamp,
+                        InteractionEpoch = admitted.InteractionEpoch, Version = previous.Version + 1 };
                     var restored = await sessions.TryUpdateAsync(session with
                     {
                         SessionVersion = session.SessionVersion + 1,
@@ -171,7 +173,7 @@ public sealed class EllaiGuidanceProposalAdmission(
         var checkpoint = EllaiGuidanceCheckpoint.Deserialize(session.GuidanceJson);
         if (session.Status != "Active" || checkpoint?.Plan?.PlanId != request.PlanId ||
             checkpoint.ProposalId != request.ProposalId || checkpoint.ScopeEpoch != authority.ScopeEpoch ||
-            checkpoint.InteractionEpoch != session.InteractionEpoch) return new("Stale");
+            checkpoint.InteractionEpoch > session.InteractionEpoch) return new("Stale");
         var target = request.Command switch { "pause" => "Paused", "resume" => "Ready", _ => "Cancelled" };
         if (checkpoint.Status == target)
             return new(checkpoint.Status, checkpoint.Version, checkpoint.CurrentStepId, checkpoint.CompletedStepIds);
@@ -184,7 +186,7 @@ public sealed class EllaiGuidanceProposalAdmission(
             if (admission.Status != "Ready" || admission.Observation?.ContextStamp != checkpoint.ContextStamp)
                 return new("NeedsObservation");
         }
-        var next = checkpoint with { Status = target, Version = checkpoint.Version + 1 };
+        var next = checkpoint with { Status = target, Version = checkpoint.Version + 1, InteractionEpoch = session.InteractionEpoch };
         var updated = await sessions.TryUpdateAsync(session with
         {
             SessionVersion = session.SessionVersion + 1,
@@ -213,7 +215,7 @@ public sealed class EllaiGuidanceProposalAdmission(
             return new("Stale");
         var saved = EllaiGuidanceCheckpoint.Deserialize(session.GuidanceJson);
         if (saved?.Plan is not { } plan || saved.ProposalId != request.ProposalId || plan.PlanId != request.PlanId ||
-            saved.ScopeEpoch != authority.ScopeEpoch || saved.InteractionEpoch != admitted.InteractionEpoch ||
+            saved.ScopeEpoch != authority.ScopeEpoch || saved.InteractionEpoch > admitted.InteractionEpoch ||
             saved.ContextStamp != request.ContextStamp || admitted.Observation.ContextStamp != request.ContextStamp ||
             saved.Status is not ("Ready" or "Paused" or "Completed")) return new("Stale");
         if (saved.CompletedStepIds.Contains(request.StepId))
@@ -232,6 +234,7 @@ public sealed class EllaiGuidanceProposalAdmission(
         var next = saved with
         {
             Version = saved.Version + 1,
+            InteractionEpoch = admitted.InteractionEpoch,
             CurrentStepId = nextStep,
             CompletedStepIds = [.. saved.CompletedStepIds, step.StepKey],
             Status = nextStep is null ? "Completed" : "Ready",
@@ -257,8 +260,23 @@ public sealed class EllaiGuidanceProposalAdmission(
         var turns = await outbox.ReadConversationAsync(sessionId, authority.OwnerActorId, ct).ConfigureAwait(false);
         var latest = turns.MaxBy(turn => turn.Sequence);
         if (latest is null || latest.Outcome != "Completed") return new("Stale");
-        var proposal = EllaiConversationProjection.ToClient(latest).UiProposals
-            .SingleOrDefault(item => item.ProposalId == proposalId)?.Proposal;
+        var latestProposals = EllaiConversationProjection.ToClient(latest).UiProposals;
+        var proposal = latestProposals.SingleOrDefault(item => item.ProposalId == proposalId)?.Proposal;
+        if (proposal is null)
+        {
+            // An accepted guidance plan belongs to the conversation, not only to
+            // its originating turn. Only a new guidance proposal supersedes it.
+            var checkpoint = EllaiGuidanceCheckpoint.Deserialize(session.GuidanceJson);
+            if (checkpoint?.Plan is null || checkpoint.ProposalId != proposalId ||
+                checkpoint.ScopeEpoch != authority.ScopeEpoch || checkpoint.InteractionEpoch > session.InteractionEpoch ||
+                latestProposals.Any(item => item.Proposal.Kind == UiIntentKind.StartGuidance)) return new("Stale");
+            var origin = turns.SingleOrDefault(turn => turn.Outcome == "Completed" &&
+                EllaiConversationProjection.ToClient(turn).UiProposals.Any(item => item.ProposalId == proposalId));
+            if (origin is null || turns.Any(turn => turn.Sequence > origin.Sequence && turn.Outcome == "Completed" &&
+                EllaiConversationProjection.ToClient(turn).UiProposals.Any(item => item.Proposal.Kind == UiIntentKind.StartGuidance)))
+                return new("Stale");
+            proposal = EllaiConversationProjection.ToClient(origin).UiProposals.Single(item => item.ProposalId == proposalId).Proposal;
+        }
         if (proposal is null) return new("Stale");
         if (proposal.Kind != UiIntentKind.StartGuidance || proposal.FeatureId != "ellai.guidance" ||
             proposal.ResourceId is not null || proposal.ControlId is not null ||
