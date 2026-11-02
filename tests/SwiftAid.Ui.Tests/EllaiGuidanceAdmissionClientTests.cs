@@ -96,6 +96,33 @@ public sealed class EllaiGuidanceAdmissionClientTests
         Assert.Equal(5, result.Version);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task BrowserReceiptProofIsResolvedLocallyAndNeverIncludedInJson(bool available)
+    {
+        var posts = 0;
+        var expected = new EllaiGuidanceReceiptRequest("proposal", "plan", 4, "step", Guid.NewGuid(), Guid.NewGuid());
+        using var http = new HttpClient(new Handler(request =>
+        {
+            if (request.Method == HttpMethod.Get)
+                return new(HttpStatusCode.OK) { Content = JsonContent.Create(new { requestToken = "synthetic-token" }) };
+            posts++;
+            Assert.Equal("synthetic-private-proof", Assert.Single(request.Headers.GetValues("X-SwiftAid-Receipt-Proof")));
+            Assert.Equal(expected, request.Content!.ReadFromJsonAsync<EllaiGuidanceReceiptRequest>().GetAwaiter().GetResult());
+            Assert.DoesNotContain("synthetic-private-proof", request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            return new(HttpStatusCode.OK) { Content = JsonContent.Create(new EllaiGuidanceProgressDto("Completed", 5)) };
+        })) { BaseAddress = new Uri("https://localhost/") };
+        IEllaiReviewClient client = new EllaiReviewHttpClient(http, true, receiptProofResolver: (request, _) =>
+        {
+            Assert.Equal(expected, request);
+            return Task.FromResult<string?>(available ? "synthetic-private-proof" : null);
+        });
+        var result = await client.CompleteGuidanceReceiptAsync("session", expected, default);
+        Assert.Equal(available ? "Completed" : null, result?.Status);
+        Assert.Equal(available ? 1 : 0, posts);
+    }
+
     private sealed class Handler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>

@@ -2,6 +2,81 @@
    avatar. The bubble tail (see EllaiCompactComposer) points down at the
    MudFabMenu activator. The attached branch stays inline in the guidance
    flow and is intentionally not positioned here. */
+.ellai-guided-conversation {
+    min-inline-size: 0;
+    color: var(--mud-palette-text-primary);
+}
+
+.ellai-guided-conversation__heading,
+.ellai-guided-conversation__navigation {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+}
+
+.ellai-guided-conversation__suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-block-start: 0.5rem;
+    border-block-start: 1px solid var(--mud-palette-divider);
+    padding-block-start: 0.5rem;
+}
+
+.ellai-guided-conversation__heading strong,
+.ellai-guided-conversation__progress {
+    flex: 1;
+}
+
+.ellai-guided-conversation__navigation {
+    margin-block-start: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.ellai-guided-conversation__progress {
+    display: flex;
+    gap: 0.25rem;
+    min-inline-size: 3rem;
+    flex-wrap: wrap;
+}
+
+.ellai-guided-conversation__progress i {
+    inline-size: 0.3rem;
+    block-size: 0.3rem;
+    border-radius: 1rem;
+    background: var(--mud-palette-text-secondary);
+    opacity: 0.4;
+}
+
+.ellai-guided-conversation__progress i.is-current {
+    inline-size: 0.8rem;
+    background: var(--mud-palette-primary);
+    opacity: 1;
+}
+
+.ellai-guided-conversation__description {
+    margin-block: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+}
+
+.ellai-guided-conversation__validation {
+    font-size: 0.75rem;
+    color: var(--mud-palette-error);
+}
+
+.ellai-guided-conversation__composer {
+    margin-block-start: 0.75rem;
+    border-block-start: 1px solid var(--mud-palette-divider);
+    padding-block-start: 0.5rem;
+}
+
+.ellai-host ::deep .ellai-guided-popover {
+    inline-size: min(26rem, calc(100vw - 1rem));
+    max-inline-size: calc(100vw - 1rem);
+    max-block-size: calc(100dvh - 1rem);
+    overflow-y: auto;
+}
+
 .ellai-host__floating {
     position: fixed;
     z-index: 14;

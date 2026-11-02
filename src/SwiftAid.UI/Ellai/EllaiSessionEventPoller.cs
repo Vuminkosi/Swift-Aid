@@ -8,7 +8,8 @@ namespace SwiftAid.UI.Ellai;
 /// long-poll, active-review fetch, approve-selected and reject. Relative
 /// URLs: the host app supplies the authorized HttpClient. Non-success
 /// responses read as unavailable so the caller keeps polling.</summary>
-public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes = false, IEllaiClientSpeechDetectorFactory? speechDetectorFactory = null) : IEllaiReviewClient
+public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes = false, IEllaiClientSpeechDetectorFactory? speechDetectorFactory = null,
+    Func<EllaiGuidanceReceiptRequest, CancellationToken, Task<string?>>? receiptProofResolver = null) : IEllaiReviewClient
 {
     private const int MaximumPcmBytes = 3_840_000;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -763,6 +764,14 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
     }
 
     public async Task<EllaiGuidanceProgressDto?> CompleteGuidanceReceiptAsync(
+        string sessionId, EllaiGuidanceReceiptRequest request, CancellationToken cancellationToken)
+    {
+        if (receiptProofResolver is null) return null;
+        var proof = await receiptProofResolver(request, cancellationToken).ConfigureAwait(false);
+        return proof is null ? null : await CompleteGuidanceReceiptAsync(sessionId, request, proof, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<EllaiGuidanceProgressDto?> CompleteGuidanceReceiptAsync(
         string sessionId, EllaiGuidanceReceiptRequest request, string receiptProof, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -789,6 +798,21 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
                 request, cancellationToken).ConfigureAwait(false);
             return response.IsSuccessStatusCode
                 ? await response.Content.ReadFromJsonAsync<EllaiGuidanceProgressDto>(Json, cancellationToken).ConfigureAwait(false)
+                : null;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (HttpRequestException) { return null; }
+        catch (JsonException) { return null; }
+    }
+
+    public async Task<EllaiSessionResponseDto?> PrepareGuidanceNarrationAsync(
+        string sessionId, EllaiGuidanceNarrationRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await PostAsJsonAsync($"{SessionRoute(sessionId)}/guidance/narration", request, cancellationToken).ConfigureAwait(false);
+            return response.IsSuccessStatusCode
+                ? await response.Content.ReadFromJsonAsync<EllaiSessionResponseDto>(Json, cancellationToken).ConfigureAwait(false)
                 : null;
         }
         catch (OperationCanceledException) { throw; }

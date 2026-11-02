@@ -5,6 +5,29 @@ namespace SwiftAid.Application.Tests.Ellai;
 
 public sealed class EllaiObservedGuidanceTests
 {
+    [Theory]
+    [InlineData("report.entry", "open-report-form", "alternative", true)]
+    [InlineData("unregistered", "open-report-form", "alternative", false)]
+    [InlineData("report.entry", "invented", "alternative", false)]
+    [InlineData("report.entry", "open-report-form", "missing", false)]
+    public void SuggestionsResolveThroughSharedDictionaryAndAuthorizedRegistry(string controlId, string objectiveId, string reference, bool valid)
+    {
+        var (registry, _, _) = Create();
+        var step = new GuidancePlanStep("s1", "report.entry", "open-report-form", PlanStepBehavior.Explain,
+            null, null, [], [], "Read the heading.", null) { SuggestionIds = [reference] };
+        var draft = new EllaiGuidancePlanDraft(1, GuidancePlanStatus.Ready, "Tour", GuidanceMode.Navigation, [step], [], null)
+        {
+            Suggestions = new Dictionary<string, GuidanceStepSuggestion>
+            {
+                ["alternative"] = new("Explain the form", controlId, objectiveId)
+            }
+        };
+        var result = new EllaiGuidancePlanValidator(registry).Validate(draft, new("report", [], 20),
+            new HashSet<string> { "report" }, new HashSet<string>(), "plan", 1, 0, 0);
+        Assert.Equal(valid, result.Plan is not null);
+        if (valid) Assert.Equal(draft.Suggestions, result.Plan!.Suggestions);
+    }
+
     [Fact]
     public void HumanGuidanceForReadOnlyHeadingsUsesObservedPresentationWithoutWeakeningWrites()
     {

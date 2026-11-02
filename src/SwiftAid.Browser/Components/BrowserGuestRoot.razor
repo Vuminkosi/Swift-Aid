@@ -115,6 +115,7 @@ else
                                      SubmitAvailable="@CanSend"
                                      Draft="_draft"
                                      CurrentDraftId="_activeDraftId"
+                                     Receipt="_receivedReceipt"
                                      OnSaveDraft="SaveDraftAsync"
                                      OnSendReport="SendReportAsync"
                                      Feedback="@_feedback"
@@ -157,6 +158,7 @@ else
     private bool _isReport;
     private bool _isTracking;
     private Guid? _activeDraftId;
+    private IntakeReceipt? _receivedReceipt;
     private IReadOnlyList<PublicReportHistorySurface.HistoryItem> _history = [];
     private bool _historyLoading;
     private bool _storageAvailable = true;
@@ -367,6 +369,7 @@ else
     private async Task SendReportAsync(IntakeSubmission submission)
     {
         if (_busy || !CanSend) return;
+        _receivedReceipt = null;
         _busy = true;
         try
         {
@@ -378,6 +381,7 @@ else
             await SubmissionStore.QueueAsync(saved.ClientSubmissionId);
             await SubmissionCoordinator.SubmitPendingAsync();
             var submitted = await SubmissionStore.GetAsync(saved.ClientSubmissionId);
+            _receivedReceipt = submitted is { State: GuestSubmissionLocalState.Received } ? submitted.Receipt : null;
             await ReloadHistoryAsync();
             _feedback = submitted is { State: GuestSubmissionLocalState.Received, Receipt: not null }
                 ? "SwiftAid confirmed receiving your report. Its receipt is available in My reports."

@@ -131,7 +131,13 @@ public sealed record GuidancePlanStep(
     IReadOnlyList<string> FactIds,
     IReadOnlyList<string> EvidenceIds,
     string Explanation,
-    string? NextStepKey);
+    string? NextStepKey)
+{
+    public IReadOnlyList<string> SuggestionIds { get; init; } = [];
+}
+
+/// <summary>A preplanned, registered objective offered as a new conversational request, never an executable action.</summary>
+public sealed record GuidanceStepSuggestion(string Label, string ControlId, string ObjectiveId);
 
 /// <summary>Dynamic-guidance response contract draft, schema version 1.
 /// The application validator decides whether it becomes eligible.</summary>
@@ -144,6 +150,8 @@ public sealed record EllaiGuidancePlanDraft(
     IReadOnlyList<EllaiQuestion> Questions,
     string? StopReason)
 {
+    public IReadOnlyDictionary<string, GuidanceStepSuggestion> Suggestions { get; init; } = new Dictionary<string, GuidanceStepSuggestion>();
+
     public const int CurrentSchemaVersion = 1;
 
     public const int MaxStepsPerChunk = 8;
@@ -163,4 +171,7 @@ public sealed record ValidatedGuidancePlan(
     IReadOnlyList<GuidancePlanStep> Steps,
     IReadOnlyList<string> RemainingMandatoryObjectiveIds,
     string CatalogueVersion,
-    string UiContractVersion);
+    string UiContractVersion)
+{
+    public IReadOnlyDictionary<string, GuidanceStepSuggestion> Suggestions { get; init; } = new Dictionary<string, GuidanceStepSuggestion>();
+}

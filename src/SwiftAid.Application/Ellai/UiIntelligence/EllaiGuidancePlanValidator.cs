@@ -104,8 +104,19 @@ public sealed class EllaiGuidancePlanValidator(EllaiUiRegistry registry)
         var snapshot = registry.GetSnapshot(query, entitledFeatures, entitledCapabilities);
         var byId = snapshot.Descriptors.ToDictionary(d => d.ControlId, StringComparer.Ordinal);
 
+        if (draft.Suggestions is null || draft.Suggestions.Count > 12 || draft.Suggestions.Any(pair =>
+            string.IsNullOrWhiteSpace(pair.Key) || pair.Key.Length > 80 || pair.Value is not { } suggestion ||
+            string.IsNullOrWhiteSpace(suggestion.Label) || suggestion.Label.Length > 80 ||
+            string.IsNullOrWhiteSpace(suggestion.ControlId) || !byId.TryGetValue(suggestion.ControlId, out var target) ||
+            target.ObjectiveId != suggestion.ObjectiveId || target.RiskClass == UiRiskClass.R5))
+            return (null, ["Suggestions must name registered, entitled objectives with short labels."]);
+
         foreach (var step in draft.Steps)
         {
+            if (step.SuggestionIds is null || step.SuggestionIds.Count > 3 ||
+                step.SuggestionIds.Any(id => string.IsNullOrWhiteSpace(id) || !draft.Suggestions.ContainsKey(id)) ||
+                step.SuggestionIds.Distinct(StringComparer.Ordinal).Count() != step.SuggestionIds.Count)
+                errors.Add("Step suggestions must reference distinct entries in the plan dictionary.");
             if (!byId.TryGetValue(step.ControlId, out var descriptor))
             {
                 errors.Add($"Step {step.StepKey} targets unregistered or unentitled control {step.ControlId}.");
@@ -143,7 +154,7 @@ public sealed class EllaiGuidancePlanValidator(EllaiUiRegistry registry)
             draft.Steps.Select(s => s.StepKey).ToList(),
             Array.Empty<string>(), Array.Empty<string>(), steps,
             Array.Empty<string>(),
-            UiRegistrySnapshotCatalogue(snapshot), snapshot.UiContractVersion);
+            UiRegistrySnapshotCatalogue(snapshot), snapshot.UiContractVersion) { Suggestions = draft.Suggestions };
         return (plan, errors);
     }
 

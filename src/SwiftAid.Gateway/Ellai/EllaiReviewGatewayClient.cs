@@ -446,6 +446,17 @@ public sealed class EllaiReviewGatewayClient(
             scope.ServiceProvider, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<EllaiSessionResponseDto?> PrepareGuidanceNarrationAsync(
+        string sessionId, EllaiGuidanceNarrationRequest request, CancellationToken cancellationToken)
+    {
+        var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+        var principal = ResolvePrincipal(state.User, sessionId);
+        if (principal is null) return null;
+        await using var scope = _serviceProvider.CreateAsyncScope();
+        return await EllaiGuidanceProposalEndpoint.NarrateOwnedAsync(ActorContext.FromValidatedPrincipal(principal),
+            sessionId, request, scope.ServiceProvider, cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task<EllaiGuidancePlanDto?> PrepareGuidancePlanAsync(
         string sessionId, string proposalId, CancellationToken cancellationToken)
     {

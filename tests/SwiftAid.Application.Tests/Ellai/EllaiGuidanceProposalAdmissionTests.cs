@@ -708,6 +708,49 @@ public sealed class EllaiGuidanceProposalAdmissionTests
         Assert.Equal(expected, (await service.AdmitAsync("session", id, authority, default)).Status);
     }
 
+    [Fact]
+    public async Task NarrationUsesOnlyTheCurrentOwnedPersistedStepAndDeduplicates()
+    {
+        var (service, store, observations, id) = await Fixture();
+        var checkpoint = await SeedProgress(store, observations, id);
+        var authority = new EllaiUiEntitlements("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>());
+        var responses = new EllaiSessionResponseStore();
+        var request = new EllaiGuidanceNarrationRequest(id, checkpoint.Plan!.PlanId, checkpoint.CurrentStepId!, checkpoint.Version, "am_michael");
+        Assert.Null(await service.PrepareNarrationAsync("session", request, authority with { OwnerActorId = "other" }, responses, default));
+        Assert.Null(await service.PrepareNarrationAsync("session", request with { ExpectedVersion = checkpoint.Version + 1 }, authority, responses, default));
+        Assert.Null(await service.PrepareNarrationAsync("session", request with { StepId = "not-current" }, authority, responses, default));
+        Assert.Null(await service.PrepareNarrationAsync("session", request with { EnglishVoiceId = "untrusted" }, authority, responses, default));
+        var first = await service.PrepareNarrationAsync("session", request, authority, responses, default);
+        Assert.NotNull(first);
+        Assert.Equal(checkpoint.Plan.Steps[0].Explanation, first.Text);
+        Assert.Equal("turn", first.ClientUtteranceId);
+        Assert.Equal("am_michael", first.EnglishVoiceId);
+        Assert.Equal("Guidance", first.Progress?.State);
+        Assert.False(first.IsFinal);
+        Assert.Equal(first.Sequence, (await service.PrepareNarrationAsync("session", request, authority, responses, default))!.Sequence);
+        Assert.Single(responses.ReadSince("session", 0).Responses);
+        Assert.True(responses.CanSpeakProgress(first));
+        responses.InterruptProgress("session", first.Sequence);
+        Assert.False(responses.CanSpeakProgress(first));
+        var session = (await store.GetAsync("session", default))!;
+        await store.TryUpdateAsync(session with { SessionVersion = session.SessionVersion + 1,
+            GuidanceJson = EllaiGuidanceCheckpoint.Serialize(checkpoint with { Status = "Paused" }) }, session.SessionVersion, default);
+        Assert.Null(await service.PrepareNarrationAsync("session", request, authority, responses, default));
+    }
+
+    [Fact]
+    public void NewGuidanceCanSpeakAfterAnEarlierStepWasInterruptedButSupersedesItsAudio()
+    {
+        var responses = new EllaiSessionResponseStore();
+        var first = responses.PublishProgress("session", "turn", "First step", new("g1", "Guidance", "Guidance", true, 1, DateTimeOffset.UtcNow.AddMinutes(1)))!;
+        responses.InterruptProgress("session", first.Sequence);
+        var next = responses.PublishProgress("session", "turn", "Next step", new("g2", "Guidance", "Guidance", true, 1, DateTimeOffset.UtcNow.AddMinutes(1)))!;
+        Assert.False(responses.CanSpeakProgress(first));
+        Assert.True(responses.CanSpeakProgress(next));
+        responses.PublishChunk("session", "new-turn", 1, "A newer answer");
+        Assert.False(responses.CanSpeakProgress(next));
+    }
+
     private static async Task<EllaiGuidanceCheckpoint> SeedProgress(InMemoryEllaiSessionStore store,
         InMemoryEllaiUiObservationStore observations, string proposalId, PlanStepBehavior behavior = PlanStepBehavior.Explain)
     {

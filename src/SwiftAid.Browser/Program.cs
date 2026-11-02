@@ -31,7 +31,14 @@ BitBonboarding.AddBitBonboardingInMemoryStore(builder.Services);
 builder.Services.AddScoped<EllaiLauncher>();
 builder.Services.AddScoped<EllaiEventPoller>();
 builder.Services.AddScoped<IEllaiReviewClient>(serviceProvider =>
-    new EllaiReviewHttpClient(serviceProvider.GetRequiredService<HttpClient>(), useGuestRoutes: true));
+    new EllaiReviewHttpClient(serviceProvider.GetRequiredService<HttpClient>(), useGuestRoutes: true,
+        receiptProofResolver: async (request, ct) =>
+        {
+            var record = await serviceProvider.GetRequiredService<IGuestSubmissionPersistence>()
+                .GetAsync(request.ClientSubmissionId, ct);
+            return record?.State == GuestSubmissionLocalState.Received && record.Receipt?.ReceiptId == request.ReceiptId &&
+                record.Receipt.ClientSubmissionId == request.ClientSubmissionId ? record.ReceiptProof : null;
+        }));
 builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.IEllaiGuidanceControl, BrowserGuestEllaiGuidanceControl>();
 builder.Services.AddScoped<IPublicIntakeMetadataClient, BrowserPublicIntakeMetadataClient>();
 builder.Services.AddScoped<IPublicIntakeProcessingPolicyClient, BrowserPublicIntakeProcessingPolicyClient>();

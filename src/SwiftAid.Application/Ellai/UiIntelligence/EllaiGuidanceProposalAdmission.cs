@@ -47,7 +47,7 @@ public sealed partial class EllaiGuidanceProposalAdmission(
                 admitted.Observation.ViewInstanceId, admitted.Observation.ContextStamp,
                 admitted.Observation.Platform, admitted.Observation.ReceivedAtUtc, admitted.Observation.ControlStates);
             var draft = new EllaiGuidancePlanDraft(1, GuidancePlanStatus.Ready, admitted.Objective!,
-                GuidanceMode.Navigation, existing.Steps, [], null);
+                GuidanceMode.Navigation, existing.Steps, [], null) { Suggestions = existing.Suggestions };
             var accepted = validator.ValidateObserved(draft, new(admitted.Catalogue.Descriptors[0].FeatureId, [], 20),
                 authority.Features, authority.Capabilities, observed, admitted.Observation.ViewInstanceId,
                 admitted.Observation.ContextStamp, now, existing.PlanId, previous.CurrentStepId,

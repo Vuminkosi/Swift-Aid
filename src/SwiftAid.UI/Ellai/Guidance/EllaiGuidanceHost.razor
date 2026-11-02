@@ -16,7 +16,7 @@
 @implements IDisposable
 
 <div class="ellai-host">
-    <BonboardingRoot />
+    <BonboardingRoot PopoverClass="ellai-guided-popover" ChildContent="@(_generatedTour is null ? null : GuidancePopover)" />
     @if (_guidanceProposalId is not null && _generatedTour is null)
     {
         <MudButton Variant="Variant.Text" Disabled="@_preparingGuidance" OnClick="StartProposedGuidanceAsync">
@@ -56,49 +56,80 @@
             @StatusText
         </MudAlert>
     }
-    @if (IsActive && ShowComposer)
+    @if (_generatedTour is null && ShowComposer && (IsActive || !_startOutcomeUnknown))
     {
-        <div class="ellai-host__attached">
-            <EllaiCompactComposer Placement="EllaiSurfacePlacement.Attached"
-                                  StatusText="@GetComposerStatusText()" Phase="null"
-                                  ResponseText="@_latestResponseText" SentMessage="@_latestUserText"
-                                  LivePartialTranscript="@_livePartialVoiceTranscript"
-                                  InputText="@InputText" InputTextChanged="OnInputChanged"
-                                  Position="@Position" PositionChanged="OnPositionChanged"
-                                  CanSend="@CanSubmitText" CanCancel="@(!_startOutcomeUnknown)" CanUseMicrophone="@(CanStartVoiceCapture && _microphoneCaptureAvailable)"
-                                  CanUseRealtimeMicrophone="@(CanStartVoiceCapture && (_microphoneCaptureAvailable || _nativeVoiceCapture?.IsAvailable == true))"
-                                  IsLiveSpeaking="@(_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Live)"
-                                  IsRecordingAudio="@(_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Recorded)"
-                                  CanPlayResponse="@CanPlayResponse" IsPlayingResponse="@_isPlayingResponse" IsListeningEnabled="@_readResponsesAloud"
-                                  OnToggleResponseAudio="ToggleResponseAudioAsync"
-                                  OnSend="OnSend" OnCancel="OnCancel" OnClose="CloseComposerAsync" OnOpenSettings="OpenEllaiSettings"
-                                  OnStartVoice="StartRecordedCaptureAsync"
-                                  OnStartRealtimeVoice="StartLiveCaptureAsync" OnStopVoice="StopVoiceCaptureAsync" />
-        </div>
-    }
-    else if (ShowComposer && !_startOutcomeUnknown)
-    {
-        <div class="ellai-host__floating">
-            <EllaiCompactComposer Placement="EllaiSurfacePlacement.Floating"
-                                  StatusText="@GetComposerStatusText()" Phase="null"
-                                  ResponseText="@_latestResponseText" SentMessage="@_latestUserText"
-                                  LivePartialTranscript="@_livePartialVoiceTranscript"
-                                  InputText="@InputText" InputTextChanged="OnInputChanged"
-                                  Position="@Position" PositionChanged="OnPositionChanged"
-                                  CanSend="@CanSubmitText" CanCancel="@(!_startOutcomeUnknown)" CanUseMicrophone="@(CanStartVoiceCapture && _microphoneCaptureAvailable)"
-                                  CanUseRealtimeMicrophone="@(CanStartVoiceCapture && (_microphoneCaptureAvailable || _nativeVoiceCapture?.IsAvailable == true))"
-                                  IsLiveSpeaking="@(_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Live)"
-                                  IsRecordingAudio="@(_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Recorded)"
-                                  CanPlayResponse="@CanPlayResponse" IsPlayingResponse="@_isPlayingResponse" IsListeningEnabled="@_readResponsesAloud"
-                                  OnToggleResponseAudio="ToggleResponseAudioAsync"
-                                  OnSend="OnSend" OnCancel="OnCancel" OnClose="CloseComposerAsync" OnOpenSettings="OpenEllaiSettings"
-                                  OnStartVoice="StartRecordedCaptureAsync"
-                                  OnStartRealtimeVoice="StartLiveCaptureAsync" OnStopVoice="StopVoiceCaptureAsync" />
+        <div class="@(IsActive ? "ellai-host__attached" : "ellai-host__floating")">
+            @Composer(IsActive ? EllaiSurfacePlacement.Attached : EllaiSurfacePlacement.Floating)
         </div>
     }
 </div>
 
 @code {
+    private RenderFragment Composer(EllaiSurfacePlacement placement) => @<text>
+        <EllaiCompactComposer Placement="placement"
+                                  StatusText="@GetComposerStatusText()" Phase="null"
+                                  ResponseText="@_latestResponseText" SentMessage="@_latestUserText"
+                                  LivePartialTranscript="@_livePartialVoiceTranscript"
+                                  InputText="@InputText" InputTextChanged="OnInputChanged"
+                                  Position="@Position" PositionChanged="OnPositionChanged"
+                                  CanSend="@CanSubmitText" CanCancel="@(!_startOutcomeUnknown)" CanUseMicrophone="@(CanStartVoiceCapture && _microphoneCaptureAvailable)"
+                                  CanUseRealtimeMicrophone="@(CanStartVoiceCapture && (_microphoneCaptureAvailable || _nativeVoiceCapture?.IsAvailable == true))"
+                                  IsLiveSpeaking="@(_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Live)"
+                                  IsRecordingAudio="@(_isRecordingAudio && _captureMode == EllaiVoiceCaptureMode.Recorded)"
+                                  CanPlayResponse="@CanPlayResponse" IsPlayingResponse="@_isPlayingResponse" IsListeningEnabled="@_readResponsesAloud"
+                                  OnToggleResponseAudio="ToggleResponseAudioAsync"
+                                  OnSend="OnSend" OnCancel="OnCancel" OnClose="CloseComposerAsync" OnOpenSettings="OpenEllaiSettings"
+                                  OnStartVoice="StartRecordedCaptureAsync"
+                                  OnStartRealtimeVoice="StartLiveCaptureAsync" OnStopVoice="StopVoiceCaptureAsync" />
+    </text>;
+
+    private RenderFragment<BonboardingStepRenderContext> GuidancePopover => context => @<section class="ellai-guided-conversation" aria-label="Ellai walkthrough">
+        <header class="ellai-guided-conversation__heading">
+            <strong>Ellai guidance</strong>
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                           OnClick='@(() => ControlGeneratedTourAsync("cancel"))' aria-label="Cancel guidance" />
+        </header>
+        @if (!string.IsNullOrWhiteSpace(context.ValidationMessage))
+        {
+            <p role="status" class="ellai-guided-conversation__validation">@context.ValidationMessage</p>
+        }
+        @if (ShowComposer)
+        {
+            <div class="ellai-guided-conversation__composer">
+                @Composer(EllaiSurfacePlacement.Attached)
+            </div>
+        }
+        <div class="ellai-guided-conversation__navigation">
+            <span class="ellai-guided-conversation__progress" role="img" aria-label="@context.ProgressText">
+                @for (var index = 0; index < context.Count; index++)
+                {
+                    <i class="@(index == context.Index ? "is-current" : null)" aria-hidden="true"></i>
+                }
+            </span>
+            @if (!context.IsFirst)
+            {
+                <MudButton Size="Size.Small" OnClick='@(() => MoveGuidanceStepAsync("back"))'>Back</MudButton>
+            }
+            <MudButton Size="Size.Small" OnClick="@(async () => await context.SkipAsync())">Skip tour</MudButton>
+            <MudButton Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled"
+                       OnClick="@(async () => { CancelGuidanceCountdown(); await AdvanceGuidanceStepAsync(_uiObservationLifetime.Token); })">@context.NextLabel @(_guidanceCountdownSeconds is { } seconds ? $"({seconds})" : null)</MudButton>
+        </div>
+        @if (CurrentGuidanceStep is { SuggestionIds.Count: > 0 } currentStep && _generatedPlan is { } currentPlan)
+        {
+            <div class="ellai-guided-conversation__suggestions" aria-label="Suggested next steps">
+                @foreach (var id in currentStep.SuggestionIds)
+                {
+                    if (currentPlan.Suggestions.TryGetValue(id, out var suggestion))
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
+                                   Disabled="@(_selectingGuidanceSuggestion || _submittingUtterance || !string.IsNullOrWhiteSpace(InputText))"
+                                   OnClick="@(() => SelectGuidanceSuggestionAsync(id))">@suggestion.Label</MudButton>
+                    }
+                }
+            </div>
+        }
+    </section>;
+
     private CancellationTokenSource? _cts;
     private bool ShowComposer;
     private bool IsActive;
@@ -1794,7 +1825,12 @@
         _ = InvokeAsync(() =>
         {
             var latest = conversation.LastOrDefault();
-            if (latest is null || latest == _lastDurableTurn) return;
+            if (latest is null) return;
+            // HTTP deserialization creates a fresh proposal collection every poll.
+            // Compare its stable identities, otherwise an unchanged durable answer
+            // replaces the active step's narration on every history refresh.
+            if (_lastDurableTurn is { } previous && latest with { UiProposals = previous.UiProposals } == previous &&
+                latest.UiProposals.Select(item => item.ProposalId).SequenceEqual(previous.UiProposals.Select(item => item.ProposalId))) return;
             if (_lastDurableTurn is not null && latest.Sequence < _lastDurableTurn.Sequence) return;
             if (_thinkingUtteranceId is not null && latest.ClientUtteranceId != _thinkingUtteranceId
                 && !conversation.Any(turn => turn.ClientUtteranceId == _thinkingUtteranceId
@@ -1861,6 +1897,25 @@
                 && response.ClientUtteranceId != _latestUserUtteranceId) return;
             if (response.Progress is { } progress)
             {
+                if (progress.State == "Guidance")
+                {
+                    if (progress.EventId != _guidanceNarrationEventId || _generatedTour is null ||
+                        progress.ExpiresAtUtc <= DateTimeOffset.UtcNow) return;
+                    _latestResponseText = response.Text;
+                    _latestResponseSequence = response.Sequence;
+                    _latestResponseAudioSequences.Clear();
+                    _latestResponseAudioSequences.Add(response.Sequence);
+                    if (_readResponsesAloud)
+                    {
+                        _progressAudioSequences.Add(response.Sequence);
+                        _pendingResponseAudioSequences.Enqueue(response.Sequence);
+                        Interlocked.Exchange(ref _stopResponsePlaybackRequested, 0);
+                        if (!_responseAudioQueueRunning) _ = PlayQueuedResponseAudioAsync();
+                    }
+                    else BeginGuidanceCountdown(response.Sequence);
+                    StateHasChanged();
+                    return;
+                }
                 if (progress.State == "Interrupted") _silencedProgressTurnId = response.ClientUtteranceId;
                 if (progress.State is "Completed" or "Failed" or "Cancelled" or "Interrupted" or "Retrying")
                 {
@@ -2033,6 +2088,9 @@
         var sessionId = _sessionView.SessionId;
         var playbackId = Guid.NewGuid().ToString("N");
         var playbackCts = new CancellationTokenSource();
+        CancelGuidanceCountdown();
+        var playbackCompleted = false;
+        var narrationEventId = _guidanceNarrationEventId;
         _audioPlaybackCts = playbackCts;
         _activeResponseSequence = sequence;
         _activeResponsePlaybackId = playbackId;
@@ -2065,6 +2123,7 @@
             }
 
             StatusText = "Ellai speech playback finished.";
+            playbackCompleted = !playbackCts.IsCancellationRequested;
         }
         catch (OperationCanceledException) when (playbackCts.IsCancellationRequested)
         {
@@ -2089,6 +2148,8 @@
             playbackCts.Dispose();
             await InvokeAsync(StateHasChanged);
         }
+        if (playbackCompleted && narrationEventId is not null && narrationEventId == _guidanceNarrationEventId)
+            BeginGuidanceCountdown(sequence);
     }
 
     private void OnLauncherRequested(EllaiMode mode)
@@ -2251,6 +2312,7 @@
 
     private void OnInputChanged(string? value)
     {
+        CancelGuidanceCountdown();
         InputText = value;
         _submissionCorrectionRequired = false;
     }
@@ -2612,6 +2674,8 @@
     [JSInvokable]
     public Task OnClientSileroSpeech(string captureId)
     {
+        if (captureId == _liveVoiceCaptureId && _isRecordingAudio)
+            _ = InvokeAsync(() => { CancelGuidanceCountdown(); StateHasChanged(); });
         if (captureId != _liveVoiceCaptureId || !_isRecordingAudio || _captureMode != EllaiVoiceCaptureMode.Live
             || !_isPlayingResponse || !_captureEchoCancellationEnabled
             || Interlocked.CompareExchange(ref _localBargeInPending, 1, 0) != 0) return Task.CompletedTask;
@@ -2636,6 +2700,8 @@
 
     private void StopResponseAudio(string? interruptionTurnId = null, long streamEpoch = 0)
     {
+        CancelGuidanceCountdown();
+        _guidanceNarrationCts?.Cancel();
         if (interruptionTurnId is not null)
         {
             _silencedProgressTurnId = _latestUserUtteranceId;

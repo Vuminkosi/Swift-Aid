@@ -195,6 +195,7 @@ public static class EllaiEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict);
         group.MapGet("/sessions/{sessionId}/guidance/admission", EllaiGuidanceProposalEndpoint.ReadAsync);
         group.MapPost("/sessions/{sessionId}/guidance/plan", EllaiGuidanceProposalEndpoint.PrepareAsync);
+        group.MapPost("/sessions/{sessionId}/guidance/narration", EllaiGuidanceProposalEndpoint.NarrateAsync);
         group.MapPost("/sessions/{sessionId}/guidance/steps/complete", EllaiGuidanceProposalEndpoint.CompleteStepAsync);
         group.MapPost("/sessions/{sessionId}/guidance/control", EllaiGuidanceProposalEndpoint.ControlAsync);
         group.MapPost("/sessions/{sessionId}/guidance/receipt/complete", EllaiGuidanceProposalEndpoint.CompleteReceiptStepAsync)

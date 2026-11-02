@@ -112,6 +112,7 @@ public sealed class EllaiGuidanceAdmissionHttpTests
         builder.Services.AddScoped<EllaiGuidancePlanValidator>();
         builder.Services.AddScoped<IEllaiUiDiscoveryService, EllaiUiDiscoveryService>();
         builder.Services.AddSingleton<EllaiUsageLedger>();
+        builder.Services.AddSingleton<EllaiSessionResponseStore>();
         builder.Services.AddSingleton<IEllaiUsageStore, InMemoryEllaiUsageStore>();
         await using var app = builder.Build();
         app.Use((context, next) =>
@@ -127,6 +128,8 @@ public sealed class EllaiGuidanceAdmissionHttpTests
         app.MapPost("/sessions/{sessionId}/guidance/steps/complete", progressHandler);
         Delegate controlHandler = (Func<HttpContext, string, EllaiGuidanceControlRequest, IServiceProvider, CancellationToken, Task<IResult>>)EllaiGuidanceProposalEndpoint.ControlAsync;
         app.MapPost("/sessions/{sessionId}/guidance/control", controlHandler);
+        Delegate narrationHandler = (Func<HttpContext, string, EllaiGuidanceNarrationRequest, IServiceProvider, CancellationToken, Task<IResult>>)EllaiGuidanceProposalEndpoint.NarrateAsync;
+        app.MapPost("/sessions/{sessionId}/guidance/narration", narrationHandler);
         await app.StartAsync();
         try
         {
@@ -163,9 +166,23 @@ public sealed class EllaiGuidanceAdmissionHttpTests
                 scopes.Revoked = false;
             }
             var controlRequest = new EllaiGuidanceControlRequest(proposal.ProposalId, restored.Plan.PlanId, restored.ProgressVersion, "pause");
+            var narrationRequest = new EllaiGuidanceNarrationRequest(proposal.ProposalId, restored.Plan.PlanId,
+                restored.CurrentStepId!, restored.ProgressVersion);
+            using var narrationResponse = await client.PostAsJsonAsync("/sessions/owned/guidance/narration", narrationRequest);
+            Assert.Equal(HttpStatusCode.OK, narrationResponse.StatusCode);
+            var narration = (await narrationResponse.Content.ReadFromJsonAsync<EllaiSessionResponseDto>())!;
+            Assert.Equal(restored.Plan.Steps[0].Explanation, narration.Text);
+            Assert.Equal("Guidance", narration.Progress?.State);
+            Assert.True(narrationResponse.Headers.CacheControl?.NoStore);
+            using var duplicateNarration = await client.PostAsJsonAsync("/sessions/owned/guidance/narration", narrationRequest);
+            Assert.Equal(narration.Sequence, (await duplicateNarration.Content.ReadFromJsonAsync<EllaiSessionResponseDto>())!.Sequence);
+            using var foreignNarration = await client.PostAsJsonAsync("/sessions/foreign/guidance/narration", narrationRequest);
+            Assert.Equal(HttpStatusCode.NotFound, foreignNarration.StatusCode);
             using var pausedResponse = await client.PostAsJsonAsync("/sessions/owned/guidance/control", controlRequest);
             var paused = (await pausedResponse.Content.ReadFromJsonAsync<EllaiGuidanceProgressDto>())!;
             Assert.Equal("Paused", paused.Status);
+            using var pausedNarration = await client.PostAsJsonAsync("/sessions/owned/guidance/narration", narrationRequest);
+            Assert.Equal(HttpStatusCode.NotFound, pausedNarration.StatusCode);
             using var resumedResponse = await client.PostAsJsonAsync("/sessions/owned/guidance/control", controlRequest with { ExpectedVersion = paused.Version, Command = "resume" });
             var resumed = (await resumedResponse.Content.ReadFromJsonAsync<EllaiGuidanceProgressDto>())!;
             Assert.Equal("Ready", resumed.Status);

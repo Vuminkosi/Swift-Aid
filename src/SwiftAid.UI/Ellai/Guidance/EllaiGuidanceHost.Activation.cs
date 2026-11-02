@@ -27,6 +27,7 @@ public partial class EllaiGuidanceHost
 
     private async Task AdvanceValidatedInputAsync(CancellationToken ct)
     {
+        if (_guidanceCountdownSeconds is not null || _guidanceNarrationCts is not null || _isPlayingResponse) return;
         var tour = _generatedTour;
         if (_advancingValidatedInput || tour is null || _generatedPlan is null ||
             tour.Status is not (BonboardingTourStatus.Running or BonboardingTourStatus.Waiting)) return;
@@ -60,6 +61,7 @@ public partial class EllaiGuidanceHost
 
     private async Task MoveGuidanceStepAsync(string command)
     {
+        CancelGuidanceCountdown();
         if (_advancingValidatedInput || _generatedTour?.Status is not (BonboardingTourStatus.Running or BonboardingTourStatus.Waiting)) return;
         _advancingValidatedInput = true;
         try { await ControlGeneratedTourAsync(command); }
@@ -68,6 +70,7 @@ public partial class EllaiGuidanceHost
 
     private async Task ControlGeneratedTourAsync(string command)
     {
+        CancelGuidanceCountdown();
         var tour = _generatedTour;
         if (tour is null || _controlGeneratedTour is null) return;
         if (!await _controlGeneratedTour(command)) return;
@@ -384,6 +387,7 @@ public partial class EllaiGuidanceHost
 
     private async Task CancelGeneratedGuidanceAsync()
     {
+        EndGuidanceNarration();
         var tour = _generatedTour;
         _generatedTour = null;
         _generatedPlan = null;
@@ -602,12 +606,14 @@ public partial class EllaiGuidanceHost
             else
             {
                 activated = true;
+                ShowComposer = true;
                 _generatedTour = started;
                 _generatedPlan = plan;
                 _controlGeneratedTour = PersistControl;
                 _generatedTourChanged = (_, _) => _ = InvokeAsync(async () =>
                 {
                     if (!IsCurrent() || !ReferenceEquals(started, _generatedTour)) return;
+                    if (started.Status != BonboardingTourStatus.Running) EndGuidanceNarration();
                     try
                     {
                         var command = started.Status switch
@@ -633,9 +639,12 @@ public partial class EllaiGuidanceHost
                     }
                     catch (OperationCanceledException) { }
                     catch (HttpRequestException) { _guidanceNotice = "Guidance could not be saved. Try again."; }
+                    if (ReferenceEquals(started, _generatedTour) && started.Status == BonboardingTourStatus.Running)
+                        _ = NarrateGuidanceStepAsync(started, progressVersion);
                     StateHasChanged();
                 });
                 started.Changed += _generatedTourChanged;
+                _ = NarrateGuidanceStepAsync(started, progressVersion);
             }
         }
         catch (OperationCanceledException) { if (IsCurrent()) _guidanceNotice = "Guidance took too long. Try again."; }

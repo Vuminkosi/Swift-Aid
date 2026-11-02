@@ -10,6 +10,24 @@ namespace SwiftAid.Gateway.Ellai;
 /// <summary>Owner-scoped entry to proposal planning. Public reporting grants expose no managed case data.</summary>
 public static class EllaiGuidanceProposalEndpoint
 {
+    public static async Task<IResult> NarrateAsync(HttpContext http, string sessionId,
+        EllaiGuidanceNarrationRequest request, [FromServices] IServiceProvider services, CancellationToken ct)
+    {
+        http.Response.Headers.CacheControl = "no-store, private";
+        var result = await NarrateOwnedAsync(ActorContext.FromValidatedPrincipal(http.User), sessionId, request, services, ct);
+        return result is null ? Results.NotFound() : Results.Json(result);
+    }
+
+    internal static async Task<EllaiSessionResponseDto?> NarrateOwnedAsync(ActorContext actor, string sessionId,
+        EllaiGuidanceNarrationRequest request, IServiceProvider services, CancellationToken ct)
+    {
+        var session = await services.GetRequiredService<IEllaiSessionStore>().GetAsync(sessionId, ct);
+        if (session is null || session.OwnerActorId != actor.ActorId) return null;
+        var authority = await ResolveAuthorityAsync(services, actor, session.ScopeEpoch, ct);
+        return await services.GetRequiredService<EllaiGuidanceProposalAdmission>().PrepareNarrationAsync(
+            sessionId, request, authority, services.GetRequiredService<EllaiSessionResponseStore>(), ct);
+    }
+
     public static async Task<IResult> ReadAsync(HttpContext http, string sessionId, string proposalId,
         [FromServices] IEllaiSessionStore sessions,
         [FromServices] EllaiGuidanceProposalAdmission admission, CancellationToken ct)

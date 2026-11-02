@@ -221,6 +221,10 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
         string sessionId, EllaiGuidanceStepRequest request, CancellationToken cancellationToken) =>
         ClientFor(sessionId).CompleteGuidanceStepAsync(sessionId, request, cancellationToken);
 
+    public Task<EllaiSessionResponseDto?> PrepareGuidanceNarrationAsync(
+        string sessionId, EllaiGuidanceNarrationRequest request, CancellationToken cancellationToken) =>
+        ClientFor(sessionId).PrepareGuidanceNarrationAsync(sessionId, request, cancellationToken);
+
     public Task<EllaiGuidancePlanDto?> PrepareGuidancePlanAsync(
         string sessionId, string proposalId, CancellationToken cancellationToken) =>
         ClientFor(sessionId).PrepareGuidancePlanAsync(sessionId, proposalId, cancellationToken);

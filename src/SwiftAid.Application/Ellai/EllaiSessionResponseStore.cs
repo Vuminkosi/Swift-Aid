@@ -88,6 +88,10 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null,
     {
         lock (_gate)
         {
+            if (response.Progress is { State: "Guidance", Speak: true } narration)
+                return narration.ExpiresAtUtc > _timeProvider.GetUtcNow()
+                    && _sessions.TryGetValue(response.SessionId, out var guidanceSession)
+                    && !guidanceSession.Items.Any(item => item.Sequence > response.Sequence);
             return response.Progress is { Speak: true } progress
                 && progress.ExpiresAtUtc > _timeProvider.GetUtcNow()
                 && _sessions.TryGetValue(response.SessionId, out var session)
