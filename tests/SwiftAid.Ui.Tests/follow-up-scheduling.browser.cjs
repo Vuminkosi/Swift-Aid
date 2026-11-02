@@ -41,8 +41,28 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             assert(await page.getByLabel('Responsible staff member', { exact: true }).getByText('Synthetic colleague', { exact: true }).isVisible());
             assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `horizontal overflow at ${width}px`);
             assert.deepEqual(errors, [], `browser errors at ${width}px`);
+
+            await page.goto(`${base}/case-follow-up-fixture?Outcome=true`);
+            await page.waitForFunction(() => document.querySelector('#fixture-ready')?.textContent === 'True');
+            await page.getByText('Call reporting worker', { exact: true }).first().click();
+            await page.getByLabel('Choose an available action', { exact: true }).click();
+            await page.getByRole('option', { name: 'Record follow-up outcome', exact: true }).click();
+            await page.getByRole('combobox', { name: 'Follow-up outcome' }).click();
+            await page.getByRole('option', { name: 'Another follow-up needed', exact: true }).click();
+            await page.getByRole('group', { name: 'Follow-up date' }).waitFor();
+            await page.getByRole('group', { name: 'Follow-up time' }).waitFor();
+            await page.locator('label').filter({ hasText: 'Time zone' }).waitFor();
+            await page.getByRole('combobox', { name: 'Follow-up outcome' }).click();
+            await page.getByRole('option', { name: 'Unable to reach', exact: true }).waitFor();
+            assert.equal(await page.getByRole('option', { name: 'Referred for review', exact: true }).count(), 0);
+            await page.keyboard.press('Escape');
+            await page.getByLabel('Follow-up details', { exact: true }).fill('No contact; follow-up remains necessary.');
+            await page.getByRole('button', { name: 'Review action', exact: true }).click();
+            await page.getByRole('alert').getByText('Select a follow-up date and time.', { exact: true }).waitFor();
+            assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `outcome form overflow at ${width}px`);
+            assert.deepEqual(errors, [], `outcome form browser errors at ${width}px`);
         }
-        console.log('PASS rendered follow-up assignee selection and required-recipient/date validation at 390px and 1280px');
+        console.log('PASS rendered follow-up assignee validation and outcome reschedule controls/validation at 390px and 1280px');
     } finally {
         await browser?.close();
         host.kill();

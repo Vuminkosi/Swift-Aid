@@ -109,3 +109,7 @@ Synthetic Chromium coverage now exercises the mounted Follow-ups form at 390px a
 ## Outcome form correction - 2 November 2026
 
 Commit `3bf577e` closes a client/UI gap in SA-FUP-02/04/05 behavior: outcome rescheduling collects a staff-selected replacement due time, and Unreachable is recorded as Unreachable. Unsupported referral is no longer offered. Focused and full client tests pass (3 regression cases; 331 total), the UI project builds, and the existing synthetic Chromium journey passes at 390px/1280px. Browser date selection for outcome rescheduling, persistent full lifecycle, Android and live deployment remain unverified; SW-05-007 remains partial.
+
+## Outcome form browser verification - 2 November 2026
+
+An extended synthetic fixture now covers an acknowledged follow-up outcome. Chromium at 390px and 1280px confirms the replacement local schedule controls appear for “Another follow-up needed”, Unreachable is offered, unsupported referral is hidden, and missing date/time blocks review. The test-host build passed with zero warnings/errors. Browser calendar selection and submission, persistence, Android and deployed behavior remain unverified. SW-05-007 remains partial.
