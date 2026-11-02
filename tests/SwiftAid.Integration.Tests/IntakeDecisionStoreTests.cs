@@ -298,6 +298,20 @@ public sealed class IntakeDecisionStoreTests
             .SingleOrDefaultAsync(item => item.ActorId == officerId && item.OrganizationId == "org-zw-1");
         if (membership is null)
         {
+            // The membership grantor is an independent FK prerequisite. A fresh
+            // database may already contain the officer from a case-only fixture.
+            if (!await db.Actors.AnyAsync(item => item.ActorId == "granter-1"))
+            {
+                db.Actors.Add(new ActorEntity
+                {
+                    ActorId = "granter-1",
+                    Status = PersistentActorStatus.Active,
+                    CreatedAtUtc = now,
+                    UpdatedAtUtc = now
+                });
+                await db.SaveChangesAsync();
+            }
+
             membership = new OrganizationMembershipEntity
             {
                 MembershipId = Guid.NewGuid(),
