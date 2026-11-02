@@ -49,8 +49,7 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             assert(await page.getByText('Synthetic colleague', { exact: true }).isVisible());
             assert(!(await page.locator('body').innerText()).includes('private-recipient-id'));
             assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
-            await page.goto(`${base}/collaborator-fixture`);
-            await page.waitForFunction(() => document.querySelector('#fixture-ready')?.textContent === 'True');
+            // Revoke the grant just created, using the refreshed aggregate version.
             assert(await page.getByText('Synthetic colleague', { exact: true }).isVisible());
             assert(!(await page.locator('body').innerText()).includes('private-recipient-id'));
             await page.getByRole('button', { name: 'Review revocation', exact: true }).press('Enter');
@@ -69,13 +68,46 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             assert.equal(await page.getByRole('button', { name: 'Review revocation', exact: true }).count(), 0);
             assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
         }
+        for (const terminal of ['Conflict', 'Invalid', 'Denied']) {
+            await page.goto(`${base}/collaborator-fixture?Grant=true&Terminal=${terminal}`);
+            await page.waitForFunction(() => document.querySelector('#fixture-ready')?.textContent === 'True');
+            await page.getByRole('button', { name: 'Add collaborator', exact: true }).press('Enter');
+            await page.getByLabel('Eligible colleague', { exact: true }).selectOption('candidate-1');
+            await page.getByLabel('Manage follow-ups', { exact: true }).check();
+            await page.getByLabel('Access expires (local time)', { exact: true }).fill('2030-12-01T10:30');
+            await page.getByLabel('Reason for access', { exact: false }).fill('Synthetic grant reason');
+            await page.waitForFunction(() => [...document.querySelectorAll('button')].some(button => button.textContent.trim() === 'Review grant' && !button.disabled));
+            await page.getByRole('button', { name: 'Review grant', exact: true }).press('Enter');
+            await page.getByRole('button', { name: 'Confirm grant', exact: true }).press('Enter');
+            await page.getByText('The grant was not accepted. Review the refreshed access details before trying again.', { exact: true }).waitFor();
+            assert.equal(await page.getByRole('button', { name: 'Retry grant', exact: true }).count(), 0);
+            assert.equal(await page.getByText('Collaborator access granted.', { exact: true }).count(), 0);
+            assert.equal(await page.getByText('Synthetic colleague', { exact: true }).count(), 0);
+            if (terminal === 'Denied') {
+                assert.equal(await page.getByRole('button', { name: 'Add collaborator', exact: true }).count(), 0);
+            } else {
+                assert(await page.getByRole('button', { name: 'Add collaborator', exact: true }).isVisible());
+                assert(await page.getByRole('button', { name: 'Refresh access', exact: true }).isEnabled());
+                await page.getByRole('button', { name: 'Add collaborator', exact: true }).press('Enter');
+                await page.getByLabel('Eligible colleague', { exact: true }).selectOption('candidate-1');
+                await page.getByLabel('Manage follow-ups', { exact: true }).check();
+                await page.getByLabel('Access expires (local time)', { exact: true }).fill('2030-12-01T10:30');
+                await page.getByLabel('Reason for access', { exact: false }).fill('Synthetic grant reason');
+                await page.waitForFunction(() => [...document.querySelectorAll('button')].some(button => button.textContent.trim() === 'Review grant' && !button.disabled));
+                await page.getByRole('button', { name: 'Review grant', exact: true }).press('Enter');
+                await page.getByRole('button', { name: 'Confirm grant', exact: true }).press('Enter');
+                await page.getByText('The result is not confirmed. Retry sends the same grant request.', { exact: true }).waitFor();
+                await page.getByRole('button', { name: 'Retry grant', exact: true }).press('Enter');
+                await page.getByText('Collaborator access granted.', { exact: true }).waitFor();
+            }
+        }
         await page.goto(`${base}/collaborator-fixture?Denied=true`);
         await page.waitForFunction(() => document.querySelector('#fixture-ready')?.textContent === 'True');
         assert.equal(await page.getByRole('heading', { name: 'Collaborator access', exact: true }).count(), 0);
         assert.equal(await page.getByRole('button', { name: 'Review revocation', exact: true }).count(), 0);
         assert(!(await page.locator('body').innerText()).includes('Synthetic colleague'));
         assert.deepEqual(errors, []);
-        console.log('PASS: grant selection, explicit permissions, browser-local expiry, review, frozen uncertain retries, refreshed grant/revocation and no overflow at 390/1280px. Synthetic UI fixture.');
+        console.log('PASS: grant then revoke at refreshed version; explicit permissions, browser-local expiry, frozen uncertain retries and no overflow at 390/1280px; conflict/invalid fresh-review recovery and permission-loss removal. Synthetic UI fixture.');
     } finally {
         if (browser) await browser.close();
         host.kill();
