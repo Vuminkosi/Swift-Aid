@@ -183,9 +183,14 @@ public sealed class GuestIntakeTests
 
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
         Assert.True(response.Headers.CacheControl?.NoStore);
-        var receipt = await response.Content.ReadFromJsonAsync<IntakeReceipt>(JsonOptions);
+        var body = await response.Content.ReadAsStringAsync();
+        var receipt = JsonSerializer.Deserialize<IntakeReceipt>(body, JsonOptions);
         Assert.NotNull(receipt);
         Assert.Equal(submission.ClientSubmissionId, receipt.ClientSubmissionId);
+        using var document = JsonDocument.Parse(body);
+        Assert.False(document.RootElement.TryGetProperty("caseId", out _));
+        Assert.False(document.RootElement.TryGetProperty("assignedStaffId", out _));
+        Assert.False(document.RootElement.TryGetProperty("organizationId", out _));
         Assert.Equal(1, host.Submissions.SubmitCalls);
     }
 
