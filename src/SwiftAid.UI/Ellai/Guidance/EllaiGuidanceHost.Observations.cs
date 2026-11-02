@@ -18,7 +18,12 @@ public partial class EllaiGuidanceHost
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
             do
             {
-                await InvokeAsync(() => ReportCurrentUiAsync(token));
+                await InvokeAsync(async () =>
+                {
+                    await ReportCurrentUiAsync(token);
+                    await AdvanceValidatedInputAsync(token);
+                });
+                timer.Period = _generatedTour is null ? TimeSpan.FromSeconds(10) : TimeSpan.FromSeconds(1);
             } while (await timer.WaitForNextTickAsync(token));
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }

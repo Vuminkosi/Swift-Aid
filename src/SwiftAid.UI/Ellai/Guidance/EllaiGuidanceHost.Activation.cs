@@ -13,8 +13,28 @@ public partial class EllaiGuidanceHost
     private string? _guidanceNotice;
     private bool _preparingGuidance;
     private IBonboardingTourSession? _generatedTour;
+    private ValidatedGuidancePlan? _generatedPlan;
+    private bool _advancingValidatedInput;
     private EventHandler<BonboardingTourSessionChangedEventArgs>? _generatedTourChanged;
     private Func<string, Task<bool>>? _controlGeneratedTour;
+
+    private async Task AdvanceValidatedInputAsync(CancellationToken ct)
+    {
+        var tour = _generatedTour;
+        if (_advancingValidatedInput || tour is null || _generatedPlan is null ||
+            tour.Status is not (BonboardingTourStatus.Running or BonboardingTourStatus.Waiting)) return;
+        var step = _generatedPlan.Steps.SingleOrDefault(item => item.StepKey == tour.CurrentStep?.Id);
+        if (step?.Behavior != PlanStepBehavior.GuideHuman ||
+            !EllaiReportUiManifest.All.Any(control => control.ControlId == step.ControlId && control.ProofPolicyId == "proof-ui-validated") ||
+            _latestGuidanceObservation?.CompletedControlIds?.Contains(step.ControlId) != true) return;
+        _advancingValidatedInput = true;
+        try
+        {
+            // Bonboarding invokes CanAdvance, which reobserves and commits the existing server proof boundary.
+            await tour.NextAsync(ct);
+        }
+        finally { _advancingValidatedInput = false; }
+    }
 
     private async Task ControlGeneratedTourAsync(string command)
     {
@@ -88,6 +108,7 @@ public partial class EllaiGuidanceHost
     {
         var tour = _generatedTour;
         _generatedTour = null;
+        _generatedPlan = null;
         _controlGeneratedTour = null;
         if (tour is null) return;
         if (_generatedTourChanged is not null) tour.Changed -= _generatedTourChanged;
@@ -238,6 +259,7 @@ public partial class EllaiGuidanceHost
             {
                 activated = true;
                 _generatedTour = started;
+                _generatedPlan = plan;
                 _controlGeneratedTour = PersistControl;
                 _generatedTourChanged = (_, _) => _ = InvokeAsync(async () =>
                 {
@@ -258,6 +280,7 @@ public partial class EllaiGuidanceHost
                             started.Changed -= _generatedTourChanged;
                             _generatedTourChanged = null;
                             _generatedTour = null;
+                            _generatedPlan = null;
                             _controlGeneratedTour = null;
                             _guidanceProposalId = null;
                             _guidanceFeatureId = null;

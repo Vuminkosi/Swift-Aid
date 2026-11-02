@@ -27,6 +27,30 @@ public sealed class EllaiSurfaceLogicTests
             new Dictionary<string, string> { ["feature"] = "report", ["objective"] = "Open report form" }))]
     };
 
+    [Theory]
+    [InlineData("report.subject", PlanStepBehavior.GuideHuman, BonboardingTourStatus.Running, true, true)]
+    [InlineData("report.narrative", PlanStepBehavior.GuideHuman, BonboardingTourStatus.Waiting, true, true)]
+    [InlineData("report.subject", PlanStepBehavior.GuideHuman, BonboardingTourStatus.Paused, true, false)]
+    [InlineData("report.subject", PlanStepBehavior.GuideHuman, BonboardingTourStatus.Running, false, false)]
+    [InlineData("report.subject", PlanStepBehavior.Explain, BonboardingTourStatus.Running, true, false)]
+    [InlineData("report.submit", PlanStepBehavior.GuideHuman, BonboardingTourStatus.Running, true, false)]
+    public async Task AcceptedInputAdvancesThroughBonboardingWithoutSkippingItsProofCallback(
+        string controlId, PlanStepBehavior behavior, BonboardingTourStatus status, bool accepted, bool advances)
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), string.Empty);
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = status;
+        proxy.CurrentStep = new BonboardingStepDefinition { Id = "step" };
+        var step = new GuidancePlanStep("step", controlId, "objective", behavior, null, null, [], [], "Complete this step.", null);
+        SetField(host, "_generatedTour", tour);
+        SetField(host, "_generatedPlan", new ValidatedGuidancePlan("plan", 1, null, "Initial", ["step"], [], [], [step], [], "catalogue", "contract"));
+        SetField(host, "_latestGuidanceObservation", new UiObservationReport("view", "context", "web", [],
+            CompletedControlIds: accepted ? [controlId] : []));
+        await InvokeAsync(host, "AdvanceValidatedInputAsync", CancellationToken.None);
+        Assert.Equal(advances ? new[] { "NextAsync" } : Array.Empty<string>(), proxy.Calls);
+    }
+
     [Fact]
     public async Task RestoredGuidanceOffersActionWithoutAutomaticallyDispatching()
     {
@@ -2094,9 +2118,13 @@ public sealed class EllaiSurfaceLogicTests
     public class NoOpBonboardingServiceProxy : DispatchProxy
     {
         public List<string> Calls { get; } = [];
+        public BonboardingTourStatus? TourStatus { get; set; }
+        public BonboardingStepDefinition? CurrentStep { get; set; }
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
         {
-            if (targetMethod?.Name is "PauseAsync" or "ResumeAsync" or "CancelAsync") Calls.Add(targetMethod.Name);
+            if (targetMethod?.Name == "get_Status" && TourStatus.HasValue) return TourStatus.Value;
+            if (targetMethod?.Name == "get_CurrentStep") return CurrentStep;
+            if (targetMethod?.Name is "PauseAsync" or "ResumeAsync" or "CancelAsync" or "NextAsync") Calls.Add(targetMethod.Name);
             return targetMethod?.ReturnType == typeof(void)
                 ? null
                 : targetMethod?.ReturnType == typeof(Task)

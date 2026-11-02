@@ -5,6 +5,66 @@ namespace SwiftAid.Application.Tests.Ellai;
 
 public sealed class EllaiGuidanceProposalAdmissionTests
 {
+    [Fact]
+    public async Task WizardPlanContinuesAcrossValidatedTransitionsAndRestoresWithoutAnotherModelCall()
+    {
+        var (service, store, observations, id) = await Fixture();
+        var registry = new EllaiUiRegistry();
+        EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        var completion = new WizardCompletion();
+        var planner = new EllaiModelGuidancePlanner(completion);
+        var authority = new EllaiUiEntitlements("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>());
+        var usage = new InMemoryEllaiUsageStore();
+        var ledger = new EllaiUsageLedger();
+        Task<EllaiGuidancePlanningResult> Restore() => service.PlanAsync("session", id, authority, planner,
+            new EllaiUiDiscoveryService(), new EllaiGuidancePlanValidator(registry), ledger, usage, default);
+        async Task Observe(string context, string[] mounted, string[] completed) =>
+            await observations.RecordAsync(new("session", "view", context, "web", mounted, DateTimeOffset.UtcNow,
+                mounted.Select(control => new UiControlState(control, UiObservationState.Ready)).ToArray(),
+                CompletedControlIds: completed), default);
+        await Observe("subject", ["report.entry", "report.subject"], []);
+        Assert.Equal("Ready", (await Restore()).Status);
+        foreach (var index in Enumerable.Range(0, 4))
+        {
+            var context = index == 0 ? "details" : "review";
+            await Observe(context, index == 0 ? ["report.entry", "report.narrative", "report.time-location"] : ["report.entry", "report.review"],
+                index == 0 ? ["report.subject"] : ["report.subject", "report.narrative", "report.time-location"]);
+            var checkpoint = EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("session", default))!.GuidanceJson)!;
+            var result = await service.CompleteStepAsync("session", new(id, checkpoint.Plan!.PlanId, checkpoint.Version,
+                "s" + index, context), authority, default);
+            Assert.Equal(index == 3 ? "Completed" : "Ready", result.Status);
+            if (index < 3)
+            {
+                Assert.Equal("s" + (index + 1), result.CurrentStepId);
+                Assert.Equal("Ready", (await Restore()).Status);
+            }
+        }
+        Assert.Equal(1, completion.Calls);
+        var final = EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("session", default))!.GuidanceJson)!;
+        Assert.Equal("Completed", final.Status);
+        Assert.Equal(4, final.CompletedStepIds.Count);
+    }
+
+    private sealed class WizardCompletion : IEllaiTurnCompletionClient
+    {
+        public int Calls { get; private set; }
+        public Task<EllaiTurnCompletion> CompleteAsync(IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct)
+        {
+            Calls++;
+            var controls = new[] { "report.subject", "report.narrative", "report.time-location", "report.review" };
+            var steps = controls.Select((id, index) =>
+            {
+                var control = EllaiReportUiManifest.All.Single(item => item.ControlId == id);
+                return new GuidancePlanStep("s" + index, id, control.ObjectiveId!, index < 3 ? PlanStepBehavior.GuideHuman : PlanStepBehavior.Explain,
+                    null, null, [], [], "Complete this form step.", index < 3 ? "s" + (index + 1) : null);
+            }).ToArray();
+            var json = System.Text.Json.JsonSerializer.Serialize(new EllaiGuidancePlanDraft(1, GuidancePlanStatus.Ready,
+                "Create a report", GuidanceMode.Navigation, steps, [], null), new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
+                { Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } });
+            return Task.FromResult(new EllaiTurnCompletion(json, 10, 5));
+        }
+    }
+
     [Theory]
     [InlineData("report.subject", true, "Completed")]
     [InlineData("report.narrative", true, "Completed")]

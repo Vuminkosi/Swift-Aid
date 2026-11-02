@@ -50,7 +50,8 @@ public sealed class EllaiGuidanceProposalAdmission(
                 GuidanceMode.Navigation, existing.Steps, [], null);
             var accepted = validator.ValidateObserved(draft, new(admitted.Catalogue.Descriptors[0].FeatureId, [], 20),
                 authority.Features, authority.Capabilities, observed, admitted.Observation.ViewInstanceId,
-                admitted.Observation.ContextStamp, now, existing.PlanId);
+                admitted.Observation.ContextStamp, now, existing.PlanId, previous.CurrentStepId,
+                previous.CompletedStepIds.ToHashSet(StringComparer.Ordinal), admitted.Observation.CompletedControlIds?.ToHashSet(StringComparer.Ordinal));
             if (accepted.Plan is not null && existing.CatalogueVersion == admitted.Catalogue.CatalogueVersion
                 && existing.UiContractVersion == admitted.Catalogue.UiContractVersion)
             {

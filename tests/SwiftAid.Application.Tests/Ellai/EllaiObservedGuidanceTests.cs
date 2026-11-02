@@ -6,6 +6,47 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiObservedGuidanceTests
 {
     [Fact]
+    public void LaterWizardTargetsCanBePlannedAfterTheirRegisteredPrerequisites()
+    {
+        var (registry, _, _) = Create();
+        var ids = new[] { "report.subject", "report.narrative", "report.time-location", "report.review" };
+        var descriptors = ids.Select(id => EllaiReportUiManifest.All.Single(control => control.ControlId == id)).ToArray();
+        var steps = descriptors.Select((control, index) => new GuidancePlanStep("s" + index, control.ControlId, control.ObjectiveId!,
+            control.ProofPolicyId == "proof-ui-validated" ? PlanStepBehavior.GuideHuman : PlanStepBehavior.Explain,
+            null, null, [], [], "Complete this form step.", index + 1 < ids.Length ? "s" + (index + 1) : null)).ToArray();
+        var now = DateTimeOffset.UtcNow;
+        var observed = descriptors.Select((control, index) => new UiControlObservation(control.ControlId, 1, "view", "context",
+            index == 0 ? UiObservationState.Ready : UiObservationState.Unmounted, "web", now, null)).ToArray();
+        var draft = new EllaiGuidancePlanDraft(1, GuidancePlanStatus.Ready, "Capture a report", GuidanceMode.Navigation, steps, [], null);
+        var validator = new EllaiGuidancePlanValidator(registry);
+        Assert.NotNull(validator.ValidateObserved(draft, new("report", [], 20), new HashSet<string> { "report" },
+            new HashSet<string>(), observed, "view", "context", now, "plan").Plan);
+        var restored = observed.ToArray();
+        restored[0] = restored[0] with { State = UiObservationState.Unmounted };
+        restored[1] = restored[1] with { State = UiObservationState.Ready };
+        Assert.NotNull(validator.ValidateObserved(draft, new("report", [], 20), new HashSet<string> { "report" },
+            new HashSet<string>(), restored, "view", "context", now, "plan", "s1", new HashSet<string> { "s0" }).Plan);
+        Assert.Null(validator.ValidateObserved(draft, new("report", [], 20), new HashSet<string> { "report" },
+            new HashSet<string>(), restored, "view", "context", now, "plan", "s1", new HashSet<string>()).Plan);
+        restored[1] = restored[1] with { State = UiObservationState.Unmounted };
+        Assert.NotNull(validator.ValidateObserved(draft, new("report", [], 20), new HashSet<string> { "report" },
+            new HashSet<string>(), restored, "view", "context", now, "plan", "s1", new HashSet<string> { "s0" },
+            new HashSet<string> { "report.narrative" }).Plan);
+        restored[1] = restored[1] with { State = UiObservationState.Hidden };
+        Assert.Null(validator.ValidateObserved(draft, new("report", [], 20), new HashSet<string> { "report" },
+            new HashSet<string>(), restored, "view", "context", now, "plan", "s1", new HashSet<string> { "s0" },
+            new HashSet<string> { "report.narrative" }).Plan);
+        // The active target must still be visible; future targets cannot bypass a hidden or disabled control.
+        foreach (var state in new[] { UiObservationState.Hidden, UiObservationState.Disabled, UiObservationState.Ambiguous })
+        {
+            var changed = observed.ToArray();
+            changed[1] = changed[1] with { State = state };
+            Assert.Null(validator.ValidateObserved(draft, new("report", [], 20), new HashSet<string> { "report" },
+                new HashSet<string>(), changed, "view", "context", now, "plan").Plan);
+        }
+    }
+
+    [Fact]
     public void LegacyMountedOnlyReportsDoNotProveReadiness()
     {
         var (registry, _, _) = Create();

@@ -15,17 +15,35 @@ public sealed class EllaiGuidancePlanValidator(EllaiUiRegistry registry)
     public (ValidatedGuidancePlan? Plan, IReadOnlyList<string> Errors) ValidateObserved(
         EllaiGuidancePlanDraft draft, UiRegistryQuery query, IReadOnlySet<string> entitledFeatures,
         IReadOnlySet<string> entitledCapabilities, IReadOnlyList<UiControlObservation> observations,
-        string viewInstanceId, string contextStamp, DateTimeOffset now, string planId)
+        string viewInstanceId, string contextStamp, DateTimeOffset now, string planId,
+        string? currentStepId = null, IReadOnlySet<string>? completedStepIds = null, IReadOnlySet<string>? validatedControlIds = null)
     {
         var accepted = Validate(draft, query, entitledFeatures, entitledCapabilities, planId, 1, 0, 0);
         if (accepted.Plan is null) return accepted;
         var errors = new List<string>();
         var snapshot = registry.GetSnapshot(query, entitledFeatures, entitledCapabilities);
-        foreach (var step in draft.Steps)
+        var ordered = EllaiGuidanceSequence.Order(draft.Steps);
+        var activeIndex = currentStepId is null ? 0 : ordered.ToList().FindIndex(step => step.StepKey == currentStepId);
+        completedStepIds ??= new HashSet<string>();
+        if (activeIndex < 0 || completedStepIds.Count != activeIndex ||
+            ordered.Take(Math.Max(0, activeIndex)).Any(step => !completedStepIds.Contains(step.StepKey)))
+            return (null, ["Guidance progress must follow the accepted sequence."]);
+        var precedingControls = new HashSet<string>(StringComparer.Ordinal);
+        for (var index = 0; index < ordered.Count; index++)
         {
+            var step = ordered[index];
             var descriptor = snapshot.Descriptors.Single(d => d.ControlId == step.ControlId);
             var matches = observations.Where(o => o.ControlId == step.ControlId).ToArray();
-            if (matches.Length != 1 || matches[0].State != UiObservationState.Ready ||
+            var futureWizardTarget = index > activeIndex && descriptor.FeatureId == EllaiReportUiManifest.FeatureId &&
+                !descriptor.HumanConfirmationRequired && descriptor.RiskClass is UiRiskClass.R0 or UiRiskClass.R1 &&
+                descriptor.PrerequisiteIds.Count > 0 && descriptor.PrerequisiteIds.All(precedingControls.Contains) &&
+                matches.Length == 1 && matches[0].State == UiObservationState.Unmounted;
+            var validatedCurrentInput = index == activeIndex && step.Behavior == PlanStepBehavior.GuideHuman &&
+                descriptor.ProofPolicyId == "proof-ui-validated" && !descriptor.HumanConfirmationRequired &&
+                validatedControlIds?.Contains(step.ControlId) == true && matches.Length == 1 &&
+                matches[0].State is UiObservationState.Ready or UiObservationState.Unmounted;
+            if (matches.Length != 1 ||
+                (index >= activeIndex && matches[0].State != UiObservationState.Ready && !futureWizardTarget && !validatedCurrentInput) ||
                 matches[0].DescriptorVersion != descriptor.DescriptorVersion || matches[0].ViewInstanceId != viewInstanceId ||
                 matches[0].ContextStamp != contextStamp || now - matches[0].ObservedAtUtc > TimeSpan.FromSeconds(45) || matches[0].ObservedAtUtc > now)
                 errors.Add("Guidance requires a fresh, visible and enabled target in the current view.");
@@ -36,6 +54,7 @@ public sealed class EllaiGuidancePlanValidator(EllaiUiRegistry registry)
                     !(descriptor.FeatureId == EllaiNavigationManifest.FeatureId &&
                       EllaiNavigationManifest.ResolveStepDestination(step) is not null)))
                 errors.Add("Guidance metadata is not grounded in its registered control.");
+            precedingControls.Add(step.ControlId);
         }
         return errors.Count == 0 ? accepted : (null, errors);
     }
