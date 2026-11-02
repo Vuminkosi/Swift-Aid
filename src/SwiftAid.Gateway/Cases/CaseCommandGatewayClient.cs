@@ -69,7 +69,7 @@ public sealed class CaseCommandGatewayClient(
 
         CaseCommand command;
         var commandId = input.CommandId ?? Guid.NewGuid();
-        var expectedVersion = input.CommandType is ("CorrectReport" or "AcknowledgeAssignment") && input.ExpectedVersion.HasValue
+        var expectedVersion = input.CommandType is ("CorrectReport" or "AcknowledgeAssignment" or "GrantCaseCollaborator" or "RevokeCaseCollaborator") && input.ExpectedVersion.HasValue
             ? input.ExpectedVersion.Value
             : timelineResult.Timeline.Header.AggregateVersion;
         try
@@ -109,6 +109,17 @@ public sealed class CaseCommandGatewayClient(
 
         return input.CommandType switch
         {
+            "GrantCaseCollaborator" => new GrantCaseCollaboratorCommand(
+                commandId, expectedVersion,
+                input.GrantId ?? throw new ArgumentException("A grant identifier is required."),
+                input.CollaboratorActorId ?? throw new ArgumentException("A collaborator is required."),
+                input.CollaborationActions ?? throw new ArgumentException("Explicit collaboration actions are required."),
+                input.ExpiresAtUtc ?? throw new ArgumentException("A grant expiry is required."),
+                RequireReason(input), null, recordedAt),
+            "RevokeCaseCollaborator" => new RevokeCaseCollaboratorCommand(
+                commandId, expectedVersion,
+                input.GrantId ?? throw new ArgumentException("A grant identifier is required."),
+                RequireReason(input), null, recordedAt),
             "AcknowledgeAssignment" => new AcknowledgeAssignmentCommand(
                 commandId,
                 expectedVersion,

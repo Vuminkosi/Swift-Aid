@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using SwiftAid.Contracts.Cases;
+using SwiftAid.Contracts.Commands;
 
 namespace SwiftAid.Client.Cases;
 
@@ -94,7 +95,7 @@ public sealed class CaseCommandHttpClient(HttpClient httpClient) : ICaseCommandC
                     input.Resolution,
                     input.ActionSummary,
                     input.EvidenceEventIds,
-                    input.AssignmentVersion),
+                    input.AssignmentVersion, input.GrantId, input.CollaboratorActorId, input.CollaborationActions, input.ExpiresAtUtc),
                 JsonOptions,
                 cancellationToken).ConfigureAwait(false);
 
@@ -215,7 +216,11 @@ public sealed class CaseCommandHttpClient(HttpClient httpClient) : ICaseCommandC
         string? Resolution,
         string? ActionSummary,
         IReadOnlyList<string>? EvidenceEventIds,
-        long? AssignmentVersion);
+        long? AssignmentVersion,
+        Guid? GrantId,
+        string? CollaboratorActorId,
+        CaseCollaborationActions? CollaborationActions,
+        DateTimeOffset? ExpiresAtUtc);
 
     /// <summary>Accepted case-command receipt as returned by the endpoint.</summary>
     private sealed record CaseCommandWireResponse(

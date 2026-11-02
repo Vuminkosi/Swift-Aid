@@ -7,6 +7,7 @@ using SwiftAid.Client.LocalStore;
 using SwiftAid.Client.Outbox;
 using SwiftAid.Client.Sync;
 using SwiftAid.Contracts.Cases;
+using SwiftAid.Contracts.Commands;
 
 namespace SwiftAid.Client.Tests;
 
@@ -21,11 +22,22 @@ public sealed class CaseCommandOfflineTransportTests
     [Theory]
     [InlineData("Resolve", null)]
     [InlineData("AcknowledgeAssignment", 2L)]
+    [InlineData("GrantCaseCollaborator", null)]
+    [InlineData("RevokeCaseCollaborator", null)]
     public async Task Send_WhenOffline_QueuesIntentAndReplaysWithSameCommandIdOnReconnect(string commandType, long? assignmentVersion)
     {
         await using var fixture = new OfflineFixture();
         var caseId = Guid.NewGuid();
         var input = new CaseCommandInput(commandType, null, "Recorded offline.", null, null, null, 5, AssignmentVersion: assignmentVersion);
+        if (commandType is "GrantCaseCollaborator" or "RevokeCaseCollaborator")
+        {
+            input = input with
+            {
+                GrantId = Guid.NewGuid(), CollaboratorActorId = "recipient",
+                CollaborationActions = CaseCollaborationActions.ReadCase | CaseCollaborationActions.ManageFollowUp,
+                ExpiresAtUtc = DateTimeOffset.UtcNow.AddHours(1)
+            };
+        }
 
         fixture.Gateway.EnqueueThrow(new HttpRequestException("No network."));
         fixture.Gateway.EnqueueFunc(request =>
@@ -60,6 +72,16 @@ public sealed class CaseCommandOfflineTransportTests
         Assert.Equal(2, posts.Count);
         using var first = ReadBody(posts[0]);
         using var second = ReadBody(posts[1]);
+        if (input.GrantId.HasValue)
+        {
+            foreach (var document in new[] { first, second })
+            {
+                Assert.Equal(input.GrantId.Value, document.RootElement.GetProperty("grantId").GetGuid());
+                Assert.Equal(input.CollaboratorActorId, document.RootElement.GetProperty("collaboratorActorId").GetString());
+                Assert.Equal((int)input.CollaborationActions!.Value, document.RootElement.GetProperty("collaborationActions").GetInt32());
+                Assert.Equal(input.ExpiresAtUtc, document.RootElement.GetProperty("expiresAtUtc").GetDateTimeOffset());
+            }
+        }
         if (assignmentVersion.HasValue)
         {
             Assert.Equal(assignmentVersion.Value, first.RootElement.GetProperty("assignmentVersion").GetInt64());

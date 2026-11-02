@@ -1,3 +1,5 @@
+using SwiftAid.Contracts.Commands;
+
 namespace SwiftAid.Contracts.Cases;
 
 /// <summary>
@@ -5,14 +7,14 @@ namespace SwiftAid.Contracts.Cases;
 /// Only routing fields travel here; authorization always derives from the
 /// server-authenticated principal.
 /// </summary>
-/// <param name="CommandType">One of CorrectReport, RequestProtectedAction, ReviewProtectedAction, Resolve, Reopen, RecordObservation, ScheduleFollowUp, RecordFollowUpOutcome, RaiseEscalation, AcknowledgeEscalation, CloseEscalation.</param>
+/// <param name="CommandType">One of CorrectReport, RequestProtectedAction, ReviewProtectedAction, Resolve, Reopen, RecordObservation, ScheduleFollowUp, RecordFollowUpOutcome, RaiseEscalation, AcknowledgeEscalation, CloseEscalation, AcknowledgeAssignment, GrantCaseCollaborator, RevokeCaseCollaborator.</param>
 /// <param name="Action">Protected-action name (for example Reassign); required by RequestProtectedAction.</param>
 /// <param name="Reason">Operator reason; required except for AcknowledgeAssignment.</param>
 /// <param name="ProposedOwnerId">Reassignment target, reopened-case owner, or accepted owner.</param>
 /// <param name="RequestId">Protected-action request key.</param>
 /// <param name="Outcome">Review outcome name (Pending, Denied, Approved); required by ReviewProtectedAction.</param>
-/// <param name="ExpectedVersion">Optional caller concurrency hint. Servers replace it with the
-/// authoritative timeline header version before dispatch.</param>
+/// <param name="ExpectedVersion">Caller concurrency version. Supplied values are preserved for corrections,
+/// assignment acknowledgements and collaborator commands so retries keep their identity.</param>
 /// <param name="ObservationId">Observation key; required by RecordObservation.</param>
 /// <param name="Narrative">Observation narrative; required by RecordObservation.</param>
 /// <param name="Source">Observation source; required by RecordObservation.</param>
@@ -29,6 +31,10 @@ namespace SwiftAid.Contracts.Cases;
 /// <param name="ActionSummary">Optional action summary recorded with an acknowledgement.</param>
 /// <param name="EvidenceEventIds">Escalation evidence references for RaiseEscalation.</param>
 /// <param name="AssignmentVersion">Observed assignment event version; required by AcknowledgeAssignment and preserved on retry.</param>
+/// <param name="GrantId">Stable collaborator grant identity; required for grant and revoke.</param>
+/// <param name="CollaboratorActorId">Explicit recipient; required for grant.</param>
+/// <param name="CollaborationActions">Explicit action bitmask; required for grant and validated by the server.</param>
+/// <param name="ExpiresAtUtc">Explicit UTC grant expiry; required for grant.</param>
 public sealed record CaseCommandInput(
     string CommandType,
     string? Action,
@@ -53,7 +59,11 @@ public sealed record CaseCommandInput(
     string? ActionSummary = null,
     IReadOnlyList<string>? EvidenceEventIds = null,
     Guid? CommandId = null,
-    long? AssignmentVersion = null);
+    long? AssignmentVersion = null,
+    Guid? GrantId = null,
+    string? CollaboratorActorId = null,
+    CaseCollaborationActions? CollaborationActions = null,
+    DateTimeOffset? ExpiresAtUtc = null);
 
 /// <summary>Staff case-command outcome. Denial and absence share one value for privacy.</summary>
 public enum CaseCommandStatus

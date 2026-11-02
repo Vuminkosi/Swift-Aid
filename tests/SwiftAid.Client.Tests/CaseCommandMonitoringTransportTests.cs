@@ -5,6 +5,7 @@ using SwiftAid.Client.Cases;
 using SwiftAid.Client.Outbox;
 using SwiftAid.Client.Sync;
 using SwiftAid.Contracts.Cases;
+using SwiftAid.Contracts.Commands;
 
 namespace SwiftAid.Client.Tests;
 
@@ -14,6 +15,45 @@ namespace SwiftAid.Client.Tests;
 /// </summary>
 public sealed class CaseCommandMonitoringTransportTests
 {
+    [Fact]
+    public async Task Collaborator_scope_roundtrips_and_direct_http_preserves_identity()
+    {
+        var caseId = Guid.NewGuid();
+        var commandId = Guid.NewGuid();
+        var input = new CaseCommandInput("GrantCaseCollaborator", null, "Synthetic grant", null, null, null, 4,
+            CommandId: commandId, GrantId: Guid.NewGuid(), CollaboratorActorId: "recipient",
+            CollaborationActions: CaseCollaborationActions.ReadCase | CaseCollaborationActions.ReadAttachment,
+            ExpiresAtUtc: DateTimeOffset.UtcNow.AddHours(1));
+        var bytes = CaseCommandIntentCodec.Encode(CaseCommandIntentCodec.FromInput(input));
+        var decoded = CaseCommandIntentCodec.Decode(bytes);
+        Assert.Equal(bytes, CaseCommandIntentCodec.Encode(decoded));
+        Assert.Equal(input.GrantId, decoded.GrantId);
+        Assert.Equal(input.CollaboratorActorId, decoded.CollaboratorActorId);
+        Assert.Equal(input.CollaborationActions, decoded.CollaborationActions);
+        Assert.Equal(input.ExpiresAtUtc, decoded.ExpiresAtUtc);
+        var legacy = CaseCommandIntentCodec.Encode(new CaseCommandIntent("Resolve", null, "Synthetic", null, null, null));
+        using var oldBody = JsonDocument.Parse(legacy);
+        foreach (var field in new[] { "grantId", "collaboratorActorId", "collaborationActions", "expiresAtUtc" })
+        {
+            Assert.False(oldBody.RootElement.TryGetProperty(field, out _));
+        }
+
+        var handler = new ScriptedHandler([JsonResponse(HttpStatusCode.OK, new
+        {
+            caseId, commandId, eventIds = new[] { Guid.NewGuid() }, aggregateVersion = 5, reportRevision = 1
+        })]);
+        var client = new CaseCommandHttpClient(new HttpClient(handler) { BaseAddress = new Uri("https://gateway.test/") });
+        Assert.Equal(CaseCommandStatus.Accepted, (await client.SendAsync(caseId, input)).Status);
+        using var posted = JsonDocument.Parse(await Assert.Single(handler.Requests).Content!.ReadAsStringAsync());
+        var root = posted.RootElement;
+        Assert.Equal(commandId, root.GetProperty("commandId").GetGuid());
+        Assert.Equal(4, root.GetProperty("expectedVersion").GetInt64());
+        Assert.Equal(input.GrantId, root.GetProperty("grantId").GetGuid());
+        Assert.Equal(input.CollaboratorActorId, root.GetProperty("collaboratorActorId").GetString());
+        Assert.Equal((int)input.CollaborationActions!.Value, root.GetProperty("collaborationActions").GetInt32());
+        Assert.Equal(input.ExpiresAtUtc, root.GetProperty("expiresAtUtc").GetDateTimeOffset());
+    }
+
     [Fact]
     public void Assignment_version_roundtrips_without_adding_a_field_to_older_intents()
     {

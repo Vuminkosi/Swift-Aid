@@ -1,5 +1,6 @@
 using System.Text.Json;
 using SwiftAid.Contracts.Cases;
+using SwiftAid.Contracts.Commands;
 
 namespace SwiftAid.Client.Cases;
 
@@ -31,7 +32,11 @@ public sealed record CaseCommandIntent(
     string? Resolution = null,
     string? ActionSummary = null,
     IReadOnlyList<string>? EvidenceEventIds = null,
-    long? AssignmentVersion = null);
+    long? AssignmentVersion = null,
+    Guid? GrantId = null,
+    string? CollaboratorActorId = null,
+    CaseCollaborationActions? CollaborationActions = null,
+    DateTimeOffset? ExpiresAtUtc = null);
 
 /// <summary>Version-one JSON codec for <see cref="CaseCommandIntent"/> outbox payloads.</summary>
 public static class CaseCommandIntentCodec
@@ -65,7 +70,7 @@ public static class CaseCommandIntentCodec
             input.Resolution,
             input.ActionSummary,
             input.EvidenceEventIds,
-            input.AssignmentVersion);
+            input.AssignmentVersion, input.GrantId, input.CollaboratorActorId, input.CollaborationActions, input.ExpiresAtUtc);
     }
 
     public static byte[] Encode(CaseCommandIntent intent)
@@ -99,7 +104,7 @@ public static class CaseCommandIntentCodec
             intent.Resolution,
             intent.ActionSummary,
             intent.EvidenceEventIds,
-            intent.AssignmentVersion), JsonOptions);
+            intent.AssignmentVersion, intent.GrantId, intent.CollaboratorActorId, intent.CollaborationActions, intent.ExpiresAtUtc), JsonOptions);
     }
 
     public static CaseCommandIntent Decode(byte[] payload)
@@ -136,7 +141,7 @@ public static class CaseCommandIntentCodec
                 envelope.Resolution,
                 envelope.ActionSummary,
                 envelope.EvidenceEventIds,
-                envelope.AssignmentVersion);
+                envelope.AssignmentVersion, envelope.GrantId, envelope.CollaboratorActorId, envelope.CollaborationActions, envelope.ExpiresAtUtc);
         }
         catch (JsonException ex)
         {
@@ -168,5 +173,13 @@ public static class CaseCommandIntentCodec
         string? ActionSummary,
         IReadOnlyList<string>? EvidenceEventIds,
         [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-        long? AssignmentVersion);
+        long? AssignmentVersion,
+        [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        Guid? GrantId,
+        [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        string? CollaboratorActorId,
+        [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        CaseCollaborationActions? CollaborationActions,
+        [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        DateTimeOffset? ExpiresAtUtc);
 }

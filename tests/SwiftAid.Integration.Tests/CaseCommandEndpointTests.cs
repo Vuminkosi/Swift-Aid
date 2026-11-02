@@ -21,6 +21,65 @@ namespace SwiftAid.Integration.Tests;
 
 public sealed class CaseCommandEndpointTests
 {
+    [Theory]
+    [InlineData("recipient")]
+    [InlineData("actions")]
+    [InlineData("expiry")]
+    [InlineData("reason")]
+    public async Task Collaborator_grant_rejects_missing_scope_fields_before_dispatch(string missingField)
+    {
+        await using var host = await TestCommandHost.StartAsync();
+        var body = new CaseCommandApiRequest(1, "GrantCaseCollaborator", Guid.NewGuid(), 3, null, "Synthetic reason", null, null, null, null,
+            GrantId: Guid.NewGuid(), CollaboratorActorId: "recipient",
+            CollaborationActions: CaseCollaborationActions.ReadCase,
+            ExpiresAtUtc: DateTimeOffset.UtcNow.AddHours(1));
+        body = missingField switch
+        {
+            "recipient" => body with { CollaboratorActorId = null },
+            "actions" => body with { CollaborationActions = null },
+            "expiry" => body with { ExpiresAtUtc = null },
+            _ => body with { Reason = null }
+        };
+        using var request = CreateRequest(FixedCaseId, body);
+        using var response = await host.SendBearerAsync(request);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, host.Processor.Calls);
+    }
+
+    [Theory]
+    [InlineData("GrantCaseCollaborator")]
+    [InlineData("RevokeCaseCollaborator")]
+    public async Task Collaborator_commands_map_explicit_scope_and_identity(string commandType)
+    {
+        await using var host = await TestCommandHost.StartAsync();
+        var body = new CaseCommandApiRequest(1, commandType, Guid.NewGuid(), 3, null, "Synthetic reason", null, null, null, null,
+            GrantId: Guid.NewGuid(), CollaboratorActorId: "recipient",
+            CollaborationActions: CaseCollaborationActions.ReadCase | CaseCollaborationActions.ReadAttachment,
+            ExpiresAtUtc: DateTimeOffset.UtcNow.AddHours(1));
+        using var request = CreateRequest(FixedCaseId, body);
+        using var response = await host.SendBearerAsync(request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(body.CommandId, host.Processor.LastCommand!.CommandId);
+        Assert.Equal(body.ExpectedVersion, host.Processor.LastCommand.ExpectedVersion);
+        if (commandType == "GrantCaseCollaborator")
+        {
+            var grant = Assert.IsType<GrantCaseCollaboratorCommand>(host.Processor.LastCommand);
+            Assert.Equal(body.GrantId, grant.GrantId);
+            Assert.Equal(body.CollaboratorActorId, grant.CollaboratorActorId);
+            Assert.Equal(body.CollaborationActions, grant.Actions);
+            Assert.Equal(body.ExpiresAtUtc, grant.ExpiresAtUtc);
+        }
+        else
+        {
+            Assert.Equal(body.GrantId, Assert.IsType<RevokeCaseCollaboratorCommand>(host.Processor.LastCommand).GrantId);
+        }
+
+        using var missing = CreateRequest(FixedCaseId, body with { GrantId = null });
+        using var invalid = await host.SendBearerAsync(missing);
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        Assert.Equal(1, host.Processor.Calls);
+    }
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly Guid FixedCaseId = Guid.Parse("c0de0001-1111-4c22-9dd9-123456789abc");
 

@@ -13,6 +13,39 @@ namespace SwiftAid.Integration.Tests;
 
 public sealed class CaseCommandGatewayClientTests
 {
+    [Theory]
+    [InlineData("GrantCaseCollaborator")]
+    [InlineData("RevokeCaseCollaborator")]
+    public async Task Collaborator_commands_preserve_grant_identity_and_retry_version(string commandType)
+    {
+        var processor = new TestCaseCommandProcessor();
+        using var services = CreateServices(processor, new TestCaseTimelineQuery(FixedCaseId));
+        var client = new CaseCommandGatewayClient(new TestAuthenticationStateProvider(), services);
+        var input = new CaseCommandInput(commandType, null, "Synthetic reason", null, null, null, 2,
+            CommandId: Guid.NewGuid(), GrantId: Guid.NewGuid(), CollaboratorActorId: "recipient",
+            CollaborationActions: CaseCollaborationActions.ReadCase | CaseCollaborationActions.ManageFollowUp,
+            ExpiresAtUtc: DateTimeOffset.UtcNow.AddHours(1));
+        var result = await client.SendAsync(FixedCaseId, input);
+        Assert.Equal(CaseCommandStatus.Accepted, result.Status);
+        Assert.Equal(2, processor.LastCommand!.ExpectedVersion);
+        Assert.Equal(input.CommandId, processor.LastCommand.CommandId);
+        if (commandType == "GrantCaseCollaborator")
+        {
+            var grant = Assert.IsType<GrantCaseCollaboratorCommand>(processor.LastCommand);
+            Assert.Equal(input.GrantId, grant.GrantId);
+            Assert.Equal(input.CollaboratorActorId, grant.CollaboratorActorId);
+            Assert.Equal(input.CollaborationActions, grant.Actions);
+            Assert.Equal(input.ExpiresAtUtc, grant.ExpiresAtUtc);
+        }
+        else
+        {
+            Assert.Equal(input.GrantId, Assert.IsType<RevokeCaseCollaboratorCommand>(processor.LastCommand).GrantId);
+        }
+
+        Assert.Equal(CaseCommandStatus.Invalid, (await client.SendAsync(FixedCaseId, input with { GrantId = null })).Status);
+        Assert.Equal(1, processor.Calls);
+    }
+
     [Fact]
     public async Task Assignment_acknowledgement_preserves_assignment_and_retry_versions()
     {

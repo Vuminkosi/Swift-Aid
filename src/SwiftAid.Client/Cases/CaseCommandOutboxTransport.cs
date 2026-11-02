@@ -76,6 +76,10 @@ public sealed class CaseCommandOutboxTransport(HttpClient httpClient) : ICaseCom
                     actionSummary = intent.ActionSummary,
                     evidenceEventIds = intent.EvidenceEventIds,
                     assignmentVersion = intent.AssignmentVersion,
+                    grantId = intent.GrantId,
+                    collaboratorActorId = intent.CollaboratorActorId,
+                    collaborationActions = intent.CollaborationActions,
+                    expiresAtUtc = intent.ExpiresAtUtc,
                 },
                 JsonOptions,
                 cancellationToken).ConfigureAwait(false);

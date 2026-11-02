@@ -85,6 +85,17 @@ public static class CaseCommandEndpoints
 
         return request.CommandType switch
         {
+            "GrantCaseCollaborator" => new GrantCaseCollaboratorCommand(
+                request.CommandId, request.ExpectedVersion,
+                request.GrantId ?? throw new ArgumentException("A grant identifier is required."),
+                request.CollaboratorActorId ?? throw new ArgumentException("A collaborator is required."),
+                request.CollaborationActions ?? throw new ArgumentException("Explicit collaboration actions are required."),
+                request.ExpiresAtUtc ?? throw new ArgumentException("A grant expiry is required."),
+                RequireReason(request), request.OccurredAtUtc, recordedAt),
+            "RevokeCaseCollaborator" => new RevokeCaseCollaboratorCommand(
+                request.CommandId, request.ExpectedVersion,
+                request.GrantId ?? throw new ArgumentException("A grant identifier is required."),
+                RequireReason(request), request.OccurredAtUtc, recordedAt),
             "AcknowledgeAssignment" => new AcknowledgeAssignmentCommand(
                 request.CommandId,
                 request.ExpectedVersion,
@@ -668,7 +679,11 @@ public sealed record CaseCommandApiRequest(
     string? Resolution = null,
     string? ActionSummary = null,
     IReadOnlyList<string>? EvidenceEventIds = null,
-    long? AssignmentVersion = null);
+    long? AssignmentVersion = null,
+    Guid? GrantId = null,
+    string? CollaboratorActorId = null,
+    CaseCollaborationActions? CollaborationActions = null,
+    DateTimeOffset? ExpiresAtUtc = null);
 
 /// <summary>Accepted or replayed case-command receipt.</summary>
 public sealed record CaseCommandApiResponse(
