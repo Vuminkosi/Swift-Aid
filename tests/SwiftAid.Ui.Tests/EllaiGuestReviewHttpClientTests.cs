@@ -10,6 +10,42 @@ namespace SwiftAid.Ui.Tests;
 public sealed class EllaiGuestReviewHttpClientTests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReceiptProofIsRequestScopedAndNeverPlacedInJson(bool guest)
+    {
+        var handler = new ReceiptProofHandler();
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost/") };
+        var client = new EllaiReviewHttpClient(http, useGuestRoutes: guest);
+        var request = new EllaiGuidanceReceiptRequest("proposal", "plan", 1, "submit", Guid.NewGuid(), Guid.NewGuid());
+        var proof = Convert.ToBase64String(new byte[32]);
+        var result = await client.CompleteGuidanceReceiptAsync("session", request, proof, default);
+        Assert.Equal("Completed", result!.Status);
+        Assert.Equal(proof, handler.Proof);
+        Assert.DoesNotContain(proof, handler.Body!);
+        Assert.Equal(guest ? "csrf-test" : null, handler.Csrf);
+        Assert.Equal(guest ? "/api/v1/ellai/guest/sessions/session/guidance/receipt/complete" : "/api/v1/ellai/sessions/session/guidance/receipt/complete", handler.Path);
+        Assert.False(http.DefaultRequestHeaders.Contains("X-SwiftAid-Receipt-Proof"));
+        await client.ControlGuidanceAsync("session", new("proposal", "plan", 2, "pause"), default);
+        Assert.Null(handler.Proof);
+    }
+
+    private sealed class ReceiptProofHandler : HttpMessageHandler
+    {
+        public string? Proof, Body, Csrf, Path;
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("/antiforgery"))
+                return new(HttpStatusCode.OK) { Content = new StringContent("{\"requestToken\":\"csrf-test\"}", Encoding.UTF8, "application/json") };
+            Path = request.RequestUri.AbsolutePath;
+            Proof = request.Headers.TryGetValues("X-SwiftAid-Receipt-Proof", out var proofs) ? proofs.Single() : null;
+            Csrf = request.Headers.TryGetValues("X-CSRF-TOKEN", out var tokens) ? tokens.Single() : null;
+            Body = await request.Content!.ReadAsStringAsync(ct);
+            return new(HttpStatusCode.OK) { Content = new StringContent("{\"status\":\"Completed\",\"version\":2}", Encoding.UTF8, "application/json") };
+        }
+    }
+
+    [Theory]
     [InlineData("http://localhost:8080/", "ws://localhost:8080/api/v1/ellai/guest/sessions/guest-session/voice/live-stream?voiceCaptureId=capture-1&serverSubmission=true")]
     [InlineData("https://example.test/app/", "wss://example.test/app/api/v1/ellai/guest/sessions/guest-session/voice/live-stream?voiceCaptureId=capture-1&serverSubmission=true")]
     public void LiveVoiceWebSocketUsesSameOriginAndSecureScheme(

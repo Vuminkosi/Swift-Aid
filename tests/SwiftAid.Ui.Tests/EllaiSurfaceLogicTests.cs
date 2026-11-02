@@ -183,6 +183,30 @@ public sealed class EllaiSurfaceLogicTests
         Assert.Equal(advances ? new[] { "NextAsync" } : Array.Empty<string>(), proxy.Calls);
     }
 
+    [Theory]
+    [InlineData(true, BonboardingTourStatus.Running, true)]
+    [InlineData(false, BonboardingTourStatus.Running, false)]
+    [InlineData(true, BonboardingTourStatus.Paused, false)]
+    public async Task DisplayedReceiptRequestsProofCheckedAdvanceWithoutRestartingConversation(bool displayed, BonboardingTourStatus status, bool advances)
+    {
+        var context = new EllaiDisplayedReceiptContext();
+        if (displayed) context.Update(this, new SwiftAid.Contracts.Intake.IntakeReceipt(Guid.NewGuid(), Guid.NewGuid(),
+            SwiftAid.Contracts.Intake.IntakeStatus.ReceivedUnverified, SwiftAid.Contracts.Intake.IntakeRoutingStatus.NeedsRouting, DateTimeOffset.UtcNow));
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), "preserved draft", context);
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = status;
+        proxy.CurrentStep = new BonboardingStepDefinition { Id = "submit" };
+        var step = new GuidancePlanStep("submit", "report.submit", "submit-report", PlanStepBehavior.GuideHuman,
+            null, null, [], [], "Submit using the report form.", null);
+        SetField(host, "_generatedTour", tour);
+        SetField(host, "_generatedPlan", new ValidatedGuidancePlan("plan", 1, null, "Initial", ["submit"], [], [], [step], [], "catalogue", "contract"));
+        await InvokeAsync(host, "AdvanceValidatedInputAsync", CancellationToken.None);
+        Assert.Equal(advances ? new[] { "NextAsync" } : Array.Empty<string>(), proxy.Calls);
+        Assert.Equal("preserved draft", GetField<string>(host, "InputText"));
+        Assert.Equal("session-1", GetField<EllaiSessionView>(host, "_sessionView").SessionId);
+    }
+
     [Fact]
     public async Task RestoredGuidanceOffersActionWithoutAutomaticallyDispatching()
     {
@@ -1851,9 +1875,10 @@ public sealed class EllaiSurfaceLogicTests
     private static async Task<TestComponentHost<EllaiGuidanceHost>> CreateHost(
         FakeReviewClient client,
         EllaiSessionView session,
-        string inputText)
+        string inputText, EllaiDisplayedReceiptContext? receiptContext = null)
     {
         var services = new ServiceCollection();
+        if (receiptContext is not null) services.AddSingleton(receiptContext);
         services.AddLogging();
         services.AddMudServices();
         services.AddSingleton<IJSRuntime>(new NoOpJsRuntime());

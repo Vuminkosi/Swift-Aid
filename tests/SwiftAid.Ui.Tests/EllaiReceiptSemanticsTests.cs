@@ -1,5 +1,6 @@
 using System.Text.Json;
 using SwiftAid.Contracts.Ellai;
+using SwiftAid.UI.Ellai.Guidance;
 using SwiftAid.Contracts.Intake;
 using SwiftAid.UI.Components.Public;
 
@@ -7,6 +8,26 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed class EllaiReceiptSemanticsTests
 {
+    [Fact]
+    public void DisplayedReceiptContextClearsDisposedReferencesAndRejectsAmbiguity()
+    {
+        var context = new EllaiDisplayedReceiptContext();
+        var firstOwner = new object();
+        var secondOwner = new object();
+        var receipt = new IntakeReceipt(Guid.NewGuid(), Guid.NewGuid(), IntakeStatus.ReceivedUnverified,
+            IntakeRoutingStatus.NeedsRouting, DateTimeOffset.UtcNow);
+        context.Update(firstOwner, receipt);
+        Assert.Equal(receipt, context.Current);
+        context.Update(secondOwner, receipt with { ReceiptId = Guid.NewGuid() });
+        Assert.Null(context.Current);
+        context.Remove(firstOwner);
+        Assert.NotNull(context.Current);
+        context.Update(secondOwner, null);
+        Assert.Null(context.Current);
+        context.Remove(firstOwner);
+        Assert.Null(context.Current);
+    }
+
     [Fact]
     public void ReceiptSurfaceReportsPresenceWithoutPrivateIdentifiersOrCompletionProof()
     {

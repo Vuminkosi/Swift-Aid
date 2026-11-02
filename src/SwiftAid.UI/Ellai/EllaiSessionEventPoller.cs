@@ -744,6 +744,23 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
         catch (JsonException) { return null; }
     }
 
+    public async Task<EllaiGuidanceProgressDto?> CompleteGuidanceReceiptAsync(
+        string sessionId, EllaiGuidanceReceiptRequest request, string receiptProof, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        if (string.IsNullOrWhiteSpace(receiptProof) || receiptProof.Length > 128 || receiptProof.Any(char.IsControl)) return null;
+        try
+        {
+            using var response = await PostAsJsonAsync($"{SessionRoute(sessionId)}/guidance/receipt/complete",
+                request, cancellationToken, receiptProof).ConfigureAwait(false);
+            return response.IsSuccessStatusCode
+                ? await response.Content.ReadFromJsonAsync<EllaiGuidanceProgressDto>(Json, cancellationToken).ConfigureAwait(false) : null;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (HttpRequestException) { return null; }
+        catch (JsonException) { return null; }
+    }
+
     public async Task<EllaiGuidanceProgressDto?> CompleteGuidanceStepAsync(
         string sessionId, EllaiGuidanceStepRequest request, CancellationToken cancellationToken)
     {
@@ -902,11 +919,14 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
     }
 
     private async Task<HttpResponseMessage> PostAsJsonAsync<T>(
-        string requestUri, T value, CancellationToken cancellationToken)
+        string requestUri, T value, CancellationToken cancellationToken, string? receiptProof = null)
     {
         if (!_useGuestRoutes)
         {
-            return await _http.PostAsJsonAsync(requestUri, value, Json, cancellationToken).ConfigureAwait(false);
+            if (receiptProof is null) return await _http.PostAsJsonAsync(requestUri, value, Json, cancellationToken).ConfigureAwait(false);
+            using var request = new HttpRequestMessage(HttpMethod.Post, requestUri) { Content = JsonContent.Create(value, options: Json) };
+            request.Headers.Add("X-SwiftAid-Receipt-Proof", receiptProof);
+            return await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         }
 
         var requestToken = await GetGuestAntiforgeryTokenAsync(cancellationToken).ConfigureAwait(false);
@@ -915,7 +935,7 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
             throw new InvalidOperationException("Guest request validation is unavailable.");
         }
 
-        var response = await SendGuestPostAsync(requestUri, value, requestToken, cancellationToken)
+        var response = await SendGuestPostAsync(requestUri, value, requestToken, cancellationToken, receiptProof)
             .ConfigureAwait(false);
         if (response.StatusCode != System.Net.HttpStatusCode.BadRequest
             || !await IsAntiforgeryRejectionAsync(response, cancellationToken).ConfigureAwait(false))
@@ -935,18 +955,19 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
             return new HttpResponseMessage(System.Net.HttpStatusCode.BadRequest);
         }
 
-        return await SendGuestPostAsync(requestUri, value, requestToken, cancellationToken)
+        return await SendGuestPostAsync(requestUri, value, requestToken, cancellationToken, receiptProof)
             .ConfigureAwait(false);
     }
 
     private async Task<HttpResponseMessage> SendGuestPostAsync<T>(
-        string requestUri, T value, string requestToken, CancellationToken cancellationToken)
+        string requestUri, T value, string requestToken, CancellationToken cancellationToken, string? receiptProof = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, requestUri)
         {
             Content = System.Net.Http.Json.JsonContent.Create(value, options: Json),
         };
         request.Headers.TryAddWithoutValidation("X-CSRF-TOKEN", requestToken);
+        if (receiptProof is not null) request.Headers.Add("X-SwiftAid-Receipt-Proof", receiptProof);
         return await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
     }
 

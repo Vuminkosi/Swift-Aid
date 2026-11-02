@@ -48,6 +48,7 @@ if (migrateDatabase)
     return;
 }
 
+builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.EllaiDisplayedReceiptContext>();
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddHttpContextAccessor();

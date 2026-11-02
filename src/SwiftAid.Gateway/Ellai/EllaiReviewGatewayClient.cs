@@ -414,6 +414,23 @@ public sealed class EllaiReviewGatewayClient(
             scope.ServiceProvider, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<EllaiGuidanceProgressDto?> CompleteGuidanceReceiptAsync(
+        string sessionId, EllaiGuidanceReceiptRequest request, CancellationToken cancellationToken)
+    {
+        var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+        var principal = ResolvePrincipal(state.User, sessionId);
+        if (principal is null) return null;
+        var actor = ActorContext.FromValidatedPrincipal(principal);
+        await using var scope = _serviceProvider.CreateAsyncScope();
+        var session = await scope.ServiceProvider.GetRequiredService<IEllaiSessionStore>().GetAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (session is null || session.OwnerActorId != actor.ActorId) return null;
+        var authority = await scope.ServiceProvider.GetRequiredService<EllaiUiAuthorityResolver>()
+            .ResolveAsync(actor, session.ScopeEpoch, cancellationToken).ConfigureAwait(false);
+        return await _serviceProvider.GetRequiredService<SwiftAid.Gateway.Intake.WebGuestIntakeService>()
+            .CompleteGuidanceReceiptAsync(sessionId, request, authority,
+                scope.ServiceProvider.GetRequiredService<EllaiGuidanceProposalAdmission>(), cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task<EllaiGuidanceProgressDto?> CompleteGuidanceStepAsync(
         string sessionId, EllaiGuidanceStepRequest request, CancellationToken cancellationToken)
     {

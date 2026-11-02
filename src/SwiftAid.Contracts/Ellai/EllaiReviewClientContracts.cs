@@ -207,6 +207,10 @@ public interface IEllaiReviewClient
         string sessionId, EllaiGuidanceControlRequest request, CancellationToken cancellationToken) =>
         Task.FromResult<EllaiGuidanceProgressDto?>(null);
 
+    Task<EllaiGuidanceProgressDto?> CompleteGuidanceReceiptAsync(
+        string sessionId, EllaiGuidanceReceiptRequest request, CancellationToken cancellationToken) =>
+        Task.FromResult<EllaiGuidanceProgressDto?>(null);
+
     Task<EllaiGuidanceProgressDto?> CompleteGuidanceStepAsync(
         string sessionId, EllaiGuidanceStepRequest request, CancellationToken cancellationToken) =>
         Task.FromResult<EllaiGuidanceProgressDto?>(null);

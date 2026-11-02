@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
 using SwiftAid.Application.Intake;
+using SwiftAid.Application.Ellai;
+using SwiftAid.Contracts.Ellai;
 using SwiftAid.Contracts.Intake;
 
 namespace SwiftAid.Gateway.Intake;
@@ -45,6 +47,17 @@ public sealed class WebGuestIntakeService(
         }
 
         return await sessions.GetReceiptAsync(receiptId, _proof, ct).ConfigureAwait(false);
+    }
+
+    public async Task<EllaiGuidanceProgressDto?> CompleteGuidanceReceiptAsync(string ellaiSessionId,
+        EllaiGuidanceReceiptRequest request, EllaiUiEntitlements authority,
+        EllaiGuidanceProposalAdmission admission, CancellationToken ct)
+    {
+        if (_proof is null) return null;
+        // Keep the circuit-held proof private and isolate it from concurrent renewal.
+        var proof = _proof.ToArray();
+        try { return await admission.CompleteReceiptStepAsync(ellaiSessionId, request, proof, authority, sessions, ct).ConfigureAwait(false); }
+        finally { CryptographicOperations.ZeroMemory(proof); }
     }
 
     private async Task<IntakeCapability> EnsureCapabilityAsync(CancellationToken ct)

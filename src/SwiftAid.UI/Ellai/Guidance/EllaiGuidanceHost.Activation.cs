@@ -27,6 +27,12 @@ public partial class EllaiGuidanceHost
         if (_advancingValidatedInput || tour is null || _generatedPlan is null ||
             tour.Status is not (BonboardingTourStatus.Running or BonboardingTourStatus.Waiting)) return;
         var step = _generatedPlan.Steps.SingleOrDefault(item => item.StepKey == tour.CurrentStep?.Id);
+        if (step?.ControlId is "report.submit" or "report.receipt" &&
+            Services.GetService(typeof(EllaiDisplayedReceiptContext)) is EllaiDisplayedReceiptContext { Current: not null })
+        {
+            await AdvanceGuidanceStepAsync(ct);
+            return;
+        }
         if (step?.Behavior != PlanStepBehavior.GuideHuman ||
             !EllaiReportUiManifest.All.Any(control => control.ControlId == step.ControlId && control.ProofPolicyId == "proof-ui-validated") ||
             _latestGuidanceObservation?.CompletedControlIds?.Contains(step.ControlId) != true) return;
@@ -377,6 +383,23 @@ public partial class EllaiGuidanceHost
                 var admission = await ReviewClient.ReadGuidanceAdmissionAsync(session.SessionId, proposalId, ct);
                 if (admission?.Status != "Ready") return false;
                 var step = plan.Steps.SingleOrDefault(s => s.StepKey == stepId);
+                if (step?.ControlId is "report.submit" or "report.receipt" &&
+                    Services.GetService(typeof(EllaiDisplayedReceiptContext)) is EllaiDisplayedReceiptContext { Current: { } receipt })
+                {
+                    await progressGate.WaitAsync(ct);
+                    try
+                    {
+                        if (!IsCurrent()) return false;
+                        var progress = await ReviewClient.CompleteGuidanceReceiptAsync(session.SessionId,
+                            new(proposalId, plan.PlanId, progressVersion, stepId, receipt.ReceiptId, receipt.ClientSubmissionId), ct);
+                        if (!IsCurrent() || progress?.Status is not ("Ready" or "Completed") ||
+                            progress.CompletedStepIds?.Contains(stepId) != true) return false;
+                        progressVersion = progress.Version;
+                        durableStatus = progress.Status;
+                        return true;
+                    }
+                    finally { progressGate.Release(); }
+                }
                 var navigation = step is null ? null : EllaiNavigationManifest.ResolveStepDestination(step);
                 var validatedInput = step?.Behavior == PlanStepBehavior.GuideHuman &&
                     EllaiReportUiManifest.All.Any(control => control.ControlId == step.ControlId && control.ProofPolicyId == "proof-ui-validated") &&

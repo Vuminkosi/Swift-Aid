@@ -1,6 +1,8 @@
 @using SwiftAid.Contracts.Ellai
 @using SwiftAid.Contracts.Intake
 @implements IEllaiUiContextProvider
+@implements IDisposable
+@inject IServiceProvider Services
 <SwiftAid.UI.Ellai.Guidance.EllaiSemanticContext Provider="this" />
 
 @if (Receipt is not null)
@@ -31,6 +33,10 @@
 }
 
 @code {
+    private SwiftAid.UI.Ellai.Guidance.EllaiDisplayedReceiptContext? ReceiptContext =>
+        Services.GetService(typeof(SwiftAid.UI.Ellai.Guidance.EllaiDisplayedReceiptContext)) as SwiftAid.UI.Ellai.Guidance.EllaiDisplayedReceiptContext;
+    protected override void OnParametersSet() => ReceiptContext?.Update(this, Receipt);
+    public void Dispose() => ReceiptContext?.Remove(this);
     public string ComponentId => "public.report-receipt";
     public EllaiUiManifest Describe() => new(ComponentId, EllaiReportUiManifest.NavigationId,
         EllaiReportUiManifest.Definition.ComponentId,

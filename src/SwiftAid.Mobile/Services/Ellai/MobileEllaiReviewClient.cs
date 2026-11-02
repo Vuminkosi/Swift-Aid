@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using SwiftAid.Client.Intake;
 using SwiftAid.Contracts.Ellai;
 using SwiftAid.Mobile.Services.Authentication;
 using SwiftAid.UI.Ellai;
@@ -16,6 +17,7 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
     private readonly EllaiReviewHttpClient? _authenticated;
     private readonly EllaiReviewHttpClient? _guest;
     private readonly IMobileAuthenticationSession _authentication;
+    private readonly IGuestSubmissionPersistence? _intakePersistence;
     private readonly ConcurrentDictionary<string, byte> _guestSessions = new(StringComparer.Ordinal);
 
     public bool UsesGatewayPcmAudioDownload => true;
@@ -38,8 +40,9 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
     public MobileEllaiReviewClient(
         HttpClient? authenticatedHttp,
         HttpClient? guestHttp,
-        IMobileAuthenticationSession authentication, IEllaiClientSpeechDetectorFactory? speechDetectorFactory = null)
+        IMobileAuthenticationSession authentication, IEllaiClientSpeechDetectorFactory? speechDetectorFactory = null, IGuestSubmissionPersistence? intakePersistence = null)
     {
+        _intakePersistence = intakePersistence;
         _authentication = authentication ?? throw new ArgumentNullException(nameof(authentication));
         if (authenticatedHttp is not null && guestHttp is not null)
         {
@@ -191,6 +194,18 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
     public Task<EllaiGuidanceProgressDto?> ControlGuidanceAsync(
         string sessionId, EllaiGuidanceControlRequest request, CancellationToken cancellationToken) =>
         ClientFor(sessionId).ControlGuidanceAsync(sessionId, request, cancellationToken);
+
+    public async Task<EllaiGuidanceProgressDto?> CompleteGuidanceReceiptAsync(
+        string sessionId, EllaiGuidanceReceiptRequest request, CancellationToken cancellationToken)
+    {
+        if (_intakePersistence is null) return null;
+        var record = await _intakePersistence.GetAsync(request.ClientSubmissionId, cancellationToken).ConfigureAwait(false);
+        if (record?.State != GuestSubmissionLocalState.Received || record.Receipt?.ReceiptId != request.ReceiptId ||
+            record.Receipt.ClientSubmissionId != request.ClientSubmissionId) return null;
+        return ClientFor(sessionId) is EllaiReviewHttpClient client
+            ? await client.CompleteGuidanceReceiptAsync(sessionId, request, record.ReceiptProof, cancellationToken).ConfigureAwait(false)
+            : null;
+    }
 
     public Task<EllaiGuidanceProgressDto?> CompleteGuidanceStepAsync(
         string sessionId, EllaiGuidanceStepRequest request, CancellationToken cancellationToken) =>

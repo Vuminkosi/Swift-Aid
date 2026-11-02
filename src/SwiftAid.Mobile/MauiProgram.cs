@@ -90,6 +90,7 @@ public static class MauiProgram
 				fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
 			});
 
+		builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.EllaiDisplayedReceiptContext>();
 		builder.Services.AddMauiBlazorWebView();
 		builder.Services.AddSingleton<IThemeAppearanceSink, MobileThemeAppearanceSink>();
 		builder.Services.AddMudServices();
@@ -303,7 +304,8 @@ public static class MauiProgram
             gatewayBaseAddress is null
                 ? null
                 : sp.GetRequiredService<IHttpClientFactory>().CreateClient("SwiftAid.Ellai.Guest"),
-            sp.GetRequiredService<IMobileAuthenticationSession>(), sp.GetService<IEllaiClientSpeechDetectorFactory>()));
+            sp.GetRequiredService<IMobileAuthenticationSession>(), sp.GetService<IEllaiClientSpeechDetectorFactory>(),
+            sp.GetRequiredService<IGuestSubmissionPersistence>()));
         builder.Services.AddSingleton<IEllaiMicrophonePermission, MobileEllaiMicrophonePermission>();
 #if ANDROID
         builder.Services.AddSingleton<IEllaiClientSpeechDetectorFactory, SwiftAid.Mobile.Platforms.Android.AndroidSileroSpeechDetectorFactory>();
