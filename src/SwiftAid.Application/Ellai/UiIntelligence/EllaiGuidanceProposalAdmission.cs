@@ -157,7 +157,7 @@ public sealed partial class EllaiGuidanceProposalAdmission(
         if (current.Status != "Ready" || current.InteractionEpoch != admitted.InteractionEpoch ||
             current.Observation?.ViewInstanceId != admitted.Observation.ViewInstanceId ||
             current.Observation?.ContextStamp != admitted.Observation.ContextStamp) return new("Stale");
-        if (generated.Draft is null) return new("InvalidPlan");
+        if (generated.Draft is null) return new("InvalidPlan") { DiagnosticCode = "model-contract" };
         if (generated.Draft.Status != GuidancePlanStatus.Ready) return new(generated.Draft.Status.ToString());
         if (reportAlreadyReceived && generated.Draft.Steps.Any(step => step.ControlId == "report.submit"))
             return new("InvalidPlan");
@@ -167,7 +167,12 @@ public sealed partial class EllaiGuidanceProposalAdmission(
         var validation = validator.ValidateObserved(generated.Draft, new(feature, [], 20), authority.Features,
             authority.Capabilities, observed, admitted.Observation.ViewInstanceId, admitted.Observation.ContextStamp,
             (clock ?? TimeProvider.System).GetUtcNow(), planId);
-        return validation.Plan is null ? new("InvalidPlan") : new("Ready", validation.Plan);
+        return validation.Plan is null ? new("InvalidPlan")
+        {
+            DiagnosticCode = validation.Errors.Contains("Guidance requires a fresh, visible and enabled target in the current view.")
+                ? "target-state" : validation.Errors.Contains("Guidance metadata is not grounded in its registered control.")
+                    ? "registry-metadata" : "plan-contract"
+        } : new("Ready", validation.Plan);
     }
 
     public async Task<EllaiGuidanceProgressDto> ControlAsync(string sessionId,
@@ -391,4 +396,10 @@ public sealed partial class EllaiGuidanceProposalAdmission(
     }
 }
 
-public sealed record EllaiGuidancePlanningResult(string Status, ValidatedGuidancePlan? Plan = null);
+public sealed record EllaiGuidancePlanningResult(string Status, ValidatedGuidancePlan? Plan = null)
+{
+    // Fixed application codes only. Never copy model text, field values or
+    // validation messages into operational logs or client-facing guidance.
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? DiagnosticCode { get; init; }
+}

@@ -52,6 +52,10 @@ public static class EllaiGuidanceProposalEndpoint
             services.GetRequiredService<EllaiGuidancePlanValidator>(),
             services.GetRequiredService<EllaiUsageLedger>(),
             services.GetRequiredService<IEllaiUsageStore>(), ct).ConfigureAwait(false);
+        if (generated.DiagnosticCode is not null)
+            services.GetRequiredService<ILoggerFactory>().CreateLogger("SwiftAid.Ellai.Guidance")
+                .LogWarning("Ellai guidance rejected for session {SessionId}: {ReasonCode}",
+                    sessionId, generated.DiagnosticCode);
         var refreshedAuthority = await ResolveAuthorityAsync(services, actor, session.ScopeEpoch, ct).ConfigureAwait(false);
         if (!refreshedAuthority.Features.SetEquals(authority.Features) ||
             !refreshedAuthority.Capabilities.SetEquals(authority.Capabilities)) return new("Stale");
