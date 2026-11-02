@@ -195,6 +195,17 @@ Edit / Reject / Cancel); text or voice consent is never approval.
 
 ## 5. Dynamic UI Intelligence and surface
 
+The production `OrganizationsSurface`, shared by web and mobile, describes membership,
+directory, creation and invitation controls through `EllaiOrganizationUiManifest`.
+Discovery uses the existing fresh scope/epoch gate; it does not confer organization
+administration rights. Metadata contains no membership IDs, directory values, search
+text, invitation inputs, or issued codes. Control availability follows the rendered
+state and saving flags. Creation, joining and invitation controls remain R3 human
+operations with highlight-only bindings; observing them cannot prove a completed
+membership or invitation action. Their business services and approval rules are
+unchanged. Server receipt completion for those operations is not implemented by
+this semantic adapter.
+
 Direct `NavigateFeature` proposals use the shared menu registry, never a model URL.
 The host refreshes authentication and observes the destination before navigating;
 a collapsed but available menu is permitted, whereas disabled, absent or ambiguous

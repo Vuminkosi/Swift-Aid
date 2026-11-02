@@ -1,9 +1,12 @@
+@using SwiftAid.Contracts.Ellai
+@implements IEllaiUiContextProvider
+<SwiftAid.UI.Ellai.Guidance.EllaiSemanticContext Provider="this" />
 @using SwiftAid.UI.Components.Surfaces.Account
 @using SwiftAid.UI.Components.Theme
 
 <ErrorBoundary @ref="_boundary">
     <ChildContent>
-        <div class="organizations-surface">
+        <div class="organizations-surface" data-ellai-control="organizations.overview" data-bonboarding-anchor="ellai-organizations-overview">
 @if (Snapshot.ViewState == OrganizationsViewState.Loading)
 {
     <MudProgressLinear Indeterminate="true" Color="Color.Primary" aria-label="Loading your workspaces" />
@@ -23,7 +26,7 @@ else if (Snapshot.ViewState == OrganizationsViewState.Unavailable && Snapshot.Me
     <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert">
         @(Snapshot.StatusMessage ?? "Your workspaces are temporarily unavailable.")
     </MudAlert>
-    <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="OnRefresh"
+    <MudButton Variant="Variant.Text" Color="Color.Primary" data-ellai-control="organizations.refresh" data-bonboarding-anchor="ellai-organizations-refresh" OnClick="OnRefresh"
                StartIcon="@Icons.Material.Filled.Refresh" Class="auth-cta">
         Retry
     </MudButton>
@@ -38,7 +41,7 @@ else
         </MudAlert>
     }
     <MudPaper Class="pa-4 mb-4" Elevation="0">
-        <MudText Typo="Typo.subtitle1">Your workspaces</MudText>
+        <MudText data-ellai-control="organizations.memberships" data-bonboarding-anchor="ellai-organizations-memberships" Typo="Typo.subtitle1">Your workspaces</MudText>
         @if (Snapshot.Memberships.Count == 0)
         {
             <MudText Typo="Typo.body2">No workspaces yet. If you join one, it will appear here.</MudText>
@@ -60,26 +63,31 @@ else
     </MudPaper>
     <MudPaper Class="pa-4 mb-4" Elevation="0">
         <MudText Typo="Typo.subtitle1">Join an organization</MudText>
-        <MudTextField T="string" Label="Search organizations" Value="@_search" ValueChanged="SearchChangedAsync"
+        <MudTextField T="string" Label="Search organizations" data-ellai-control="organizations.search" data-bonboarding-anchor="ellai-organizations-search" Value="@_search" ValueChanged="SearchChangedAsync"
                       Variant="Variant.Outlined" Immediate="true" DebounceInterval="400" Clearable="true"
                       Disabled="@Snapshot.IsSaving" aria-label="Search organizations" />
-        @foreach (var option in Snapshot.Directory)
+        @if (Snapshot.Directory.Count > 0)
         {
-            <SwiftAidSettingsRow @key="option.OrganizationId"
-                                 Title="@option.OrganizationId"
-                                 Description="@option.Status"
-                                 Icon="@Icons.Material.Outlined.Groups">
-                <Trailing>
-                    <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@Snapshot.IsSaving"
-                               OnClick="@(() => RequestAsync(option.OrganizationId))" Class="auth-cta">
-                        Request access
-                    </MudButton>
-                </Trailing>
-            </SwiftAidSettingsRow>
+            <div data-ellai-control="organizations.directory" data-bonboarding-anchor="ellai-organizations-directory">
+            @foreach (var option in Snapshot.Directory)
+            {
+                <SwiftAidSettingsRow @key="option.OrganizationId"
+                                     Title="@option.OrganizationId"
+                                     Description="@option.Status"
+                                     Icon="@Icons.Material.Outlined.Groups">
+                    <Trailing>
+                        <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@Snapshot.IsSaving"
+                                   OnClick="@(() => RequestAsync(option.OrganizationId))" Class="auth-cta">
+                            Request access
+                        </MudButton>
+                    </Trailing>
+                </SwiftAidSettingsRow>
+            }
+            </div>
         }
         @if (Snapshot.Requests.Count > 0)
         {
-            <MudText Typo="Typo.subtitle2">Your requests</MudText>
+            <MudText data-ellai-control="organizations.requests" data-bonboarding-anchor="ellai-organizations-requests" Typo="Typo.subtitle2">Your requests</MudText>
             @foreach (var request in Snapshot.Requests)
             {
                 <MudText Typo="Typo.body2">@request.OrganizationId — @request.Status</MudText>
@@ -89,20 +97,20 @@ else
     <MudPaper Class="pa-4 mb-4" Elevation="0">
         <MudText Typo="Typo.subtitle1">Create an organization</MudText>
         <MudText Typo="Typo.body2">Start a new workspace. You become its first member and can invite others.</MudText>
-        <MudTextField T="string" Label="Organization id" Value="@_createOrganizationId" ValueChanged="CreateIdChanged"
+        <MudTextField T="string" Label="Organization id" data-ellai-control="organizations.create-name" data-bonboarding-anchor="ellai-organizations-create-name" Value="@_createOrganizationId" ValueChanged="CreateIdChanged"
                       Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" aria-label="New organization id" />
         <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@Snapshot.IsSaving"
-                   OnClick="CreateAsync" StartIcon="@Icons.Material.Filled.Add" Class="auth-cta">
+                   data-ellai-control="organizations.create" data-bonboarding-anchor="ellai-organizations-create" OnClick="CreateAsync" StartIcon="@Icons.Material.Filled.Add" Class="auth-cta">
             Create organization
         </MudButton>
     </MudPaper>
     <MudPaper Class="pa-4 mb-4" Elevation="0">
         <MudText Typo="Typo.subtitle1">Enter invitation code</MudText>
         <MudText Typo="Typo.body2">If your organization gave you a code, enter it to request access.</MudText>
-        <MudTextField T="string" Label="Invitation code" Value="@_code" ValueChanged="CodeChanged"
+        <MudTextField T="string" Label="Invitation code" data-ellai-control="organizations.invitation-code" data-bonboarding-anchor="ellai-organizations-invitation-code" Value="@_code" ValueChanged="CodeChanged"
                       Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" aria-label="Invitation code" />
         <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@Snapshot.IsSaving"
-                   OnClick="RedeemAsync" StartIcon="@Icons.Material.Filled.ConfirmationNumber" Class="auth-cta">
+                   data-ellai-control="organizations.redeem" data-bonboarding-anchor="ellai-organizations-redeem" OnClick="RedeemAsync" StartIcon="@Icons.Material.Filled.ConfirmationNumber" Class="auth-cta">
             Redeem code
         </MudButton>
     </MudPaper>
@@ -111,19 +119,19 @@ else
         <MudPaper Class="pa-4 mb-4" Elevation="0">
             <MudText Typo="Typo.subtitle1">Issue invitation codes</MudText>
             <MudText Typo="Typo.body2">Workspace staff can create codes for their organization. A new code is shown once — save it before sharing.</MudText>
-            <MudSelect T="string" Label="Organization" Value="@_issueOrganizationId" ValueChanged="IssueOrganizationChanged"
+            <MudSelect T="string" Label="Organization" data-ellai-control="organizations.issue-organization" data-bonboarding-anchor="ellai-organizations-issue-organization" Value="@_issueOrganizationId" ValueChanged="IssueOrganizationChanged"
                        Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" aria-label="Organization to invite to">
                 @foreach (var entry in Snapshot.Memberships.Where(IsStaffMember))
                 {
                     <MudSelectItem Value="@entry.OrganizationId">@entry.OrganizationId</MudSelectItem>
                 }
             </MudSelect>
-            <MudNumericField T="int" Label="Maximum uses" Value="@_issueMaxUses" ValueChanged="IssueMaxUsesChanged"
+            <MudNumericField T="int" Label="Maximum uses" data-ellai-control="organizations.issue-uses" data-bonboarding-anchor="ellai-organizations-issue-uses" Value="@_issueMaxUses" ValueChanged="IssueMaxUsesChanged"
                              Min="1" Max="100" Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" />
-            <MudNumericField T="int" Label="Valid for (days)" Value="@_issueValidDays" ValueChanged="IssueValidDaysChanged"
+            <MudNumericField T="int" Label="Valid for (days)" data-ellai-control="organizations.issue-days" data-bonboarding-anchor="ellai-organizations-issue-days" Value="@_issueValidDays" ValueChanged="IssueValidDaysChanged"
                              Min="1" Max="365" Variant="Variant.Outlined" Disabled="@Snapshot.IsSaving" />
             <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@Snapshot.IsSaving"
-                       OnClick="IssueAsync" StartIcon="@Icons.Material.Filled.Add" Class="auth-cta">
+                       data-ellai-control="organizations.issue" data-bonboarding-anchor="ellai-organizations-issue" OnClick="IssueAsync" StartIcon="@Icons.Material.Filled.Add" Class="auth-cta">
                 Create invitation code
             </MudButton>
             @if (Snapshot.IssuedInvitation is not null)
@@ -151,6 +159,26 @@ else
 </ErrorBoundary>
 
 @code {
+    public string ComponentId => EllaiOrganizationUiManifest.Definition.ComponentId;
+    public EllaiUiManifest Describe() => EllaiOrganizationUiManifest.Definition;
+    public EllaiUiState GetState() => new(ComponentId, Snapshot.ViewState == OrganizationsViewState.Loading, Snapshot.StatusIsError,
+        EllaiOrganizationUiManifest.Controls.Select(control => new UiControlState(control.ControlId, SemanticState(control.ControlId))).ToArray());
+    private UiObservationState SemanticState(string id)
+    {
+        if (id == "organizations.overview") return UiObservationState.Ready;
+        var unavailable = Snapshot.ViewState == OrganizationsViewState.Unavailable && Snapshot.Memberships.Count == 0;
+        if (id == "organizations.refresh") return unavailable ? UiObservationState.Ready : UiObservationState.Unmounted;
+        if (Snapshot.ViewState is OrganizationsViewState.Loading or OrganizationsViewState.SignedOut || unavailable)
+            return UiObservationState.Unmounted;
+        if (id == "organizations.directory") return Snapshot.Directory.Count == 0 ? UiObservationState.Unmounted :
+            Snapshot.IsSaving ? UiObservationState.Disabled : UiObservationState.Ready;
+        if (id == "organizations.requests") return Snapshot.Requests.Count > 0 ? UiObservationState.Ready : UiObservationState.Unmounted;
+        if (id.StartsWith("organizations.issue", StringComparison.Ordinal) && !Snapshot.Memberships.Any(IsStaffMember))
+            return UiObservationState.Unmounted;
+        return id == "organizations.memberships" || !Snapshot.IsSaving ? UiObservationState.Ready : UiObservationState.Disabled;
+    }
+
+
     [Parameter] public OrganizationsSnapshot Snapshot { get; set; } = OrganizationsSnapshot.Loading;
 
     [Parameter] public EventCallback OnRefresh { get; set; }
