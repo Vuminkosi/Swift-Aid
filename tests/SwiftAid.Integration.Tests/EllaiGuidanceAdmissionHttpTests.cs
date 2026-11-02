@@ -1,3 +1,5 @@
+using SwiftAid.Application.Authorization;
+using SwiftAid.Contracts.Sync;
 using System.Net.Http.Json;
 using System.Net;
 using System.Security.Claims;
@@ -54,8 +56,10 @@ public sealed class EllaiGuidanceAdmissionHttpTests
         }
         finally { await app.StopAsync(); }
     }
-    [Fact]
-    public async Task PlanningPostGeneratesOnceAndReturnsDurableOwnedPlan()
+    [Theory]
+    [InlineData("report", "report.entry")]
+    [InlineData("navigation", "navigation.dashboard")]
+    public async Task PlanningPostGeneratesOnceAndReturnsDurableOwnedPlan(string feature, string control)
     {
         var store = new InMemoryEllaiSessionStore();
         var session = new EllaiSessionRecord("owned", EllaiMode.GuideMe, "Active", 1, 1, 1, 1, 0, 12,
@@ -67,20 +71,24 @@ public sealed class EllaiGuidanceAdmissionHttpTests
             EllaiUtteranceResolution.Completed("I can guide you.", 1) with
             {
                 UiProposalsJson = EllaiUiProposalPayload.Serialize([new(UiIntentKind.StartGuidance, "ellai.guidance", null, null,
-                    new Dictionary<string, string> { ["feature"] = "report", ["objective"] = "Create a report" })]),
+                    new Dictionary<string, string> { ["feature"] = feature, ["objective"] = "Create a report" })]),
             });
         var proposal = EllaiConversationProjection.ToClient(Assert.Single(await store.ReadConversationAsync("owned", "owner", default))).UiProposals.Single();
         var registry = new EllaiUiRegistry();
         EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        foreach (var descriptor in EllaiNavigationManifest.Controls) registry.Register(descriptor);
         var observations = new InMemoryEllaiUiObservationStore();
-        await observations.RecordAsync(new("owned", "view", "context", "web", ["report.entry"], DateTimeOffset.UtcNow,
-            [new("report.entry", UiObservationState.Ready)]), default);
-        var completion = new SyntheticPlan();
+        await observations.RecordAsync(new("owned", "view", "context", "web", [control], DateTimeOffset.UtcNow,
+            [new(control, UiObservationState.Ready)]), default);
+        var completion = new SyntheticPlan(feature, control);
+        var scopes = new CurrentScopes();
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Services.AddSingleton<IEllaiSessionStore>(store);
         builder.Services.AddSingleton<IEllaiUtteranceOutboxStore>(store);
         builder.Services.AddSingleton(registry);
+        builder.Services.AddSingleton<IScopeService>(scopes);
+        builder.Services.AddScoped<EllaiUiAuthorityResolver>();
         builder.Services.AddSingleton<IEllaiUiObservationStore>(observations);
         builder.Services.AddSingleton<IEllaiTurnCompletionClient>(completion);
         builder.Services.AddScoped<EllaiModelGuidancePlanner>();
@@ -113,23 +121,31 @@ public sealed class EllaiGuidanceAdmissionHttpTests
                 Assert.Equal(HttpStatusCode.OK, response.StatusCode);
                 var plan = await response.Content.ReadFromJsonAsync<EllaiGuidancePlanDto>();
                 Assert.Equal("Ready", plan!.Status);
-                Assert.Equal("report.entry", Assert.Single(plan.Plan!.Steps).ControlId);
+                Assert.Equal(control, Assert.Single(plan.Plan!.Steps).ControlId);
                 Assert.Equal("context", plan.ContextStamp);
-                Assert.Equal("nav-report", plan.NavigationId);
+                Assert.Equal(feature == "navigation" ? "nav-dashboard" : "nav-report", plan.NavigationId);
                 Assert.True(response.Headers.CacheControl?.NoStore);
             }
             using var foreign = await client.PostAsJsonAsync("/sessions/foreign/guidance/plan", new EllaiGuidancePlanRequest(proposal.ProposalId));
             Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
             Assert.Equal(1, completion.Calls);
             var checkpoint = EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("owned", default))!.GuidanceJson)!;
-            await observations.RecordAsync(new("owned", "refreshed-view", "refreshed-context", "web", ["report.entry"], DateTimeOffset.UtcNow,
-                [new("report.entry", UiObservationState.Ready)]), default);
+            await observations.RecordAsync(new("owned", "refreshed-view", "refreshed-context", "web", [control], DateTimeOffset.UtcNow,
+                [new(control, UiObservationState.Ready)]), default);
             using var restoredResponse = await client.PostAsJsonAsync("/sessions/owned/guidance/plan", new EllaiGuidancePlanRequest(proposal.ProposalId));
             var restored = (await restoredResponse.Content.ReadFromJsonAsync<EllaiGuidancePlanDto>())!;
             Assert.Equal(checkpoint.Plan!.PlanId, restored.Plan!.PlanId);
             Assert.Equal("entry", restored.CurrentStepId);
             Assert.Equal(checkpoint.Version + 1, restored.ProgressVersion);
             Assert.Equal(1, completion.Calls);
+            if (feature == "navigation")
+            {
+                scopes.Revoked = true;
+                using var revoked = await client.PostAsJsonAsync("/sessions/owned/guidance/plan", new EllaiGuidancePlanRequest(proposal.ProposalId));
+                Assert.Equal(HttpStatusCode.NotFound, revoked.StatusCode);
+                Assert.Equal(1, completion.Calls);
+                scopes.Revoked = false;
+            }
             var controlRequest = new EllaiGuidanceControlRequest(proposal.ProposalId, restored.Plan.PlanId, restored.ProgressVersion, "pause");
             using var pausedResponse = await client.PostAsJsonAsync("/sessions/owned/guidance/control", controlRequest);
             var paused = (await pausedResponse.Content.ReadFromJsonAsync<EllaiGuidanceProgressDto>())!;
@@ -158,7 +174,19 @@ public sealed class EllaiGuidanceAdmissionHttpTests
         finally { await app.StopAsync(); }
     }
 
-    private sealed class SyntheticPlan : IEllaiTurnCompletionClient
+    private sealed class CurrentScopes : IScopeService
+    {
+        public bool Revoked { get; set; }
+        public ValueTask<ScopeManifest> GetAsync(ActorContext actor, CancellationToken cancellationToken)
+        {
+            if (Revoked) throw new ScopeUnavailableException(ScopeFailureCode.GrantMissing);
+            var now = DateTimeOffset.UtcNow;
+            return ValueTask.FromResult(new ScopeManifest([new("grant", now.AddMinutes(-1), now.AddMinutes(5),
+                ["organization"], ["workspace"], [], ["SZ"], [], [], [], ["ReadCase"], false)], actor.AccessEpoch, now.AddMinutes(5)));
+        }
+    }
+
+    private sealed class SyntheticPlan(string feature, string control) : IEllaiTurnCompletionClient
     {
         public int Calls { get; private set; }
         public Task<EllaiTurnCompletion> CompleteAsync(IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct)
@@ -169,7 +197,9 @@ public sealed class EllaiGuidanceAdmissionHttpTests
                  "steps":[{"stepKey":"entry","controlId":"report.entry","objectiveId":"open-report-form","behavior":"Explain",
                  "uiIntentBindingId":null,"resourceBindingKey":null,"factIds":["public-intake-no-account"],"evidenceIds":[],
                  "explanation":"This is the report form.","nextStepKey":null}],"questions":[],"stopReason":null}
-                """, 10, 5));
+                """.Replace("report.entry", control, StringComparison.Ordinal)
+                    .Replace("open-report-form", feature == "navigation" ? "open-dashboard" : "open-report-form", StringComparison.Ordinal)
+                    .Replace("[\"public-intake-no-account\"]", "[]", StringComparison.Ordinal), 10, 5));
         }
     }
 }

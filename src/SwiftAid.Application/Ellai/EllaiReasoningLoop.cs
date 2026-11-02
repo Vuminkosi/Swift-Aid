@@ -150,6 +150,8 @@ public sealed class EllaiReasoningLoop(
         {
             system += "\n## Interactive guidance\nFor requests to show, explain, or guide through application controls, " +
                 "discover the relevant feature using ellai_ui_catalogue before proposing guidance. " +
+                "For an application overview or system tour, query feature=navigation; for public case reporting, query feature=report. " +
+                "Discovery enforces current permissions; a denied navigation catalogue does not grant access through another tool. " +
                 "Use ellai_ui_observe with view=current to inspect the latest client-reported state; unavailable controls are not proof of unavailable routes. " +
                 "For a discovered supported feature, propose a StartGuidance UI intent with featureId=ellai.guidance, " +
                 "resourceId=null, controlId=null and arguments containing only feature (the discovered feature ID) and objective (the user's goal). " +

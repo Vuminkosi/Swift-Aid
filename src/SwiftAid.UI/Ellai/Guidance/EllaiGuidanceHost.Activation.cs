@@ -142,7 +142,8 @@ public partial class EllaiGuidanceHost
                 _guidanceNotice = "Guidance is not ready yet. Try again when the page has loaded.";
                 return;
             }
-            var anchors = EllaiReportUiManifest.All.ToDictionary(c => c.ControlId, c => c.AnchorBindingKey);
+            var anchors = EllaiReportUiManifest.All.Concat(EllaiNavigationManifest.Controls)
+                .ToDictionary(c => c.ControlId, c => c.AnchorBindingKey);
             if (plan.Steps.Any(step => step.ControlId is null || !anchors.ContainsKey(step.ControlId)))
             {
                 _guidanceNotice = "This guidance is not available on the current page.";

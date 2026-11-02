@@ -203,6 +203,7 @@ public sealed class EllaiToolBroker
     private readonly ICaseQueueQuery? _queue;
     private readonly IEllaiApprovalStore? _receipts;
     private readonly EllaiTopicService? _topics;
+    private readonly EllaiUiAuthorityResolver _uiAuthority;
     private readonly EllaiUiRegistry? _uiRegistry;
     private readonly IEllaiUiDiscoveryService? _uiDiscovery;
     private readonly IEllaiUiObservationStore? _uiObservations;
@@ -231,7 +232,8 @@ public sealed class EllaiToolBroker
         EllaiProductFactCatalog? productFacts = null, IGeographicRegistry? geography = null,
         ICaseImportStore? imports = null, ICaseImportWorkspaceReader? importWorkspaces = null,
         SwiftAid.Application.Classification.ICaseClassificationQuery? classification = null,
-        SwiftAid.Application.Surveillance.ISignalReviewService? signals = null)
+        SwiftAid.Application.Surveillance.ISignalReviewService? signals = null,
+        EllaiUiAuthorityResolver? uiAuthority = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _consent = consent ?? throw new ArgumentNullException(nameof(consent));
@@ -239,6 +241,7 @@ public sealed class EllaiToolBroker
         _queue = queue;
         _receipts = receipts;
         _topics = topics;
+        _uiAuthority = uiAuthority ?? new EllaiUiAuthorityResolver();
         _uiRegistry = uiRegistry;
         _uiDiscovery = uiDiscovery;
         _uiObservations = uiObservations;
@@ -337,7 +340,7 @@ public sealed class EllaiToolBroker
 
         if (string.Equals(canonical, EllaiToolNames.UiCatalogue, StringComparison.Ordinal))
         {
-            return Bound(ReadUiCatalogue(context, request));
+            return Bound(await ReadUiCatalogueAsync(context, request, ct).ConfigureAwait(false));
         }
 
         if (string.Equals(canonical, EllaiToolNames.UiObserve, StringComparison.Ordinal))
@@ -701,23 +704,21 @@ public sealed class EllaiToolBroker
             summary, matches.Count, false, EllaiToolReasonCodes.Ok);
     }
 
-    // Public reporting is available without a workspace grant. A model-provided
-    // feature may narrow this boundary, never expand it to private casework.
-    private static string? ResolveUiFeature(EllaiToolContext context, EllaiToolRequest request)
+    private static string? ResolveUiFeature(EllaiToolContext context, EllaiToolRequest request, EllaiUiEntitlements authority)
     {
-        var permitted = context.FeatureId == "public.product-help" ? EllaiReportUiManifest.FeatureId : context.FeatureId;
-        return !request.Arguments.TryGetValue("feature", out var requested) || requested == permitted ? permitted : null;
+        var defaultFeature = context.FeatureId == "public.product-help" ? EllaiReportUiManifest.FeatureId : context.FeatureId;
+        var requested = request.Arguments.GetValueOrDefault("feature", defaultFeature);
+        // Existing feature-specific sessions keep their metadata boundary. New capabilities
+        // require fresh server authority, including when the session itself names navigation.
+        if (requested == EllaiNavigationManifest.FeatureId)
+            return authority.Features.Contains(requested) ? requested : null;
+        return requested == defaultFeature || authority.Features.Contains(requested) ? requested : null;
     }
 
-    /// <summary>Live <c>ellai_ui_catalogue</c> slice from the registered
-    /// semantic registry: only descriptors the session feature is entitled
-    /// to, bounded, without resolved URLs/selectors. Entitlement is the
-    /// session feature plus an empty capability set — descriptors requiring
-    /// capabilities stay excluded until a scope-capability source exists
-    /// (fail-closed). An empty registry reads as an authorized empty.</summary>
-    private EllaiToolResult ReadUiCatalogue(EllaiToolContext context, EllaiToolRequest request)
+    private async Task<EllaiToolResult> ReadUiCatalogueAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
     {
-        var feature = ResolveUiFeature(context, request);
+        var authority = await _uiAuthority.ResolveAsync(context.Actor, context.ScopeEpoch, ct).ConfigureAwait(false);
+        var feature = ResolveUiFeature(context, request, authority);
         if (feature is null || request.Arguments.Keys.Any(key => key is not ("feature" or "goal" or "limit")))
             return Deny(request.ToolName, "The requested UI feature or argument is not available in this scope.", EllaiToolReasonCodes.InvalidArguments);
         if (_uiRegistry is null)
@@ -742,7 +743,7 @@ public sealed class EllaiToolBroker
         var snapshot = _uiRegistry.GetSnapshot(
             new UiRegistryQuery(feature, goalTags, limit),
             new HashSet<string>(StringComparer.Ordinal) { feature },
-            new HashSet<string>(StringComparer.Ordinal));
+            authority.Capabilities);
         var items = snapshot.Descriptors.Take(limit).ToList();
         if (items.Count == 0)
         {
@@ -772,7 +773,8 @@ public sealed class EllaiToolBroker
     private async Task<EllaiToolResult> ReadUiObserveAsync(
         EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
     {
-        var feature = ResolveUiFeature(context, request);
+        var authority = await _uiAuthority.ResolveAsync(context.Actor, context.ScopeEpoch, ct).ConfigureAwait(false);
+        var feature = ResolveUiFeature(context, request, authority);
         if (feature is null || request.Arguments.Keys.Any(key => key is not ("feature" or "controls" or "view" or "context")))
             return Deny(request.ToolName, "The requested UI feature or argument is not available in this scope.", EllaiToolReasonCodes.InvalidArguments);
         if (_uiRegistry is null || _uiDiscovery is null || _uiObservations is null)
@@ -826,7 +828,7 @@ public sealed class EllaiToolBroker
         var snapshot = _uiRegistry.GetSnapshot(
             new UiRegistryQuery(feature, goalTags, MaxItems),
             new HashSet<string>(StringComparer.Ordinal) { feature },
-            new HashSet<string>(StringComparer.Ordinal));
+            authority.Capabilities);
         var eligible = snapshot.Descriptors.ToDictionary(d => d.ControlId, StringComparer.Ordinal);
         var unknown = requested.Where(id => !eligible.ContainsKey(id)).ToList();
         if (unknown.Count > 0)

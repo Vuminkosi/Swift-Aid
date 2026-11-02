@@ -118,6 +118,7 @@ builder.Services.AddSingleton(_ =>
     foreach (var control in SwiftAid.Contracts.Ellai.EllaiNavigationManifest.Controls) registry.Register(control);
     return registry;
 });
+builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiUiAuthorityResolver>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiGuidancePlanValidator>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiGuidanceProposalAdmission>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiModelGuidancePlanner>();

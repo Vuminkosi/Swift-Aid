@@ -410,7 +410,7 @@ public sealed class EllaiReviewGatewayClient(
         if (principal is null) return null;
         var actor = ActorContext.FromValidatedPrincipal(principal);
         await using var scope = _serviceProvider.CreateAsyncScope();
-        return await EllaiGuidanceProposalEndpoint.ControlOwnedAsync(actor.ActorId, sessionId, request,
+        return await EllaiGuidanceProposalEndpoint.ControlOwnedAsync(actor, sessionId, request,
             scope.ServiceProvider, cancellationToken).ConfigureAwait(false);
     }
 
@@ -422,7 +422,7 @@ public sealed class EllaiReviewGatewayClient(
         if (principal is null) return null;
         var actor = ActorContext.FromValidatedPrincipal(principal);
         await using var scope = _serviceProvider.CreateAsyncScope();
-        return await EllaiGuidanceProposalEndpoint.CompleteStepOwnedAsync(actor.ActorId, sessionId, request,
+        return await EllaiGuidanceProposalEndpoint.CompleteStepOwnedAsync(actor, sessionId, request,
             scope.ServiceProvider, cancellationToken).ConfigureAwait(false);
     }
 
@@ -434,7 +434,7 @@ public sealed class EllaiReviewGatewayClient(
         if (principal is null) return null;
         var actor = ActorContext.FromValidatedPrincipal(principal);
         await using var scope = _serviceProvider.CreateAsyncScope();
-        return await EllaiGuidanceProposalEndpoint.PrepareOwnedAsync(actor.ActorId, sessionId, proposalId,
+        return await EllaiGuidanceProposalEndpoint.PrepareOwnedAsync(actor, sessionId, proposalId,
             scope.ServiceProvider, cancellationToken).ConfigureAwait(false);
     }
 
@@ -446,9 +446,10 @@ public sealed class EllaiReviewGatewayClient(
         if (principal is null) return null;
         var actor = ActorContext.FromValidatedPrincipal(principal);
         await using var scope = _serviceProvider.CreateAsyncScope();
-        return await EllaiGuidanceProposalEndpoint.ReadOwnedAsync(actor.ActorId, sessionId, proposalId,
+        return await EllaiGuidanceProposalEndpoint.ReadOwnedAsync(actor, sessionId, proposalId,
             scope.ServiceProvider.GetRequiredService<IEllaiSessionStore>(),
-            scope.ServiceProvider.GetRequiredService<EllaiGuidanceProposalAdmission>(), cancellationToken).ConfigureAwait(false);
+            scope.ServiceProvider.GetRequiredService<EllaiGuidanceProposalAdmission>(), cancellationToken,
+            scope.ServiceProvider.GetService<EllaiUiAuthorityResolver>()).ConfigureAwait(false);
     }
 
     public async Task<EllaiSessionResponsePageDto?> PollResponsesAsync(

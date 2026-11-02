@@ -14,7 +14,8 @@ public static class EllaiGuidanceProposalEndpoint
     {
         if (string.IsNullOrWhiteSpace(proposalId) || proposalId.Length > 512) return Results.BadRequest();
         var actor = ActorContext.FromValidatedPrincipal(http.User);
-        var result = await ReadOwnedAsync(actor.ActorId, sessionId, proposalId, sessions, admission, ct).ConfigureAwait(false);
+        var result = await ReadOwnedAsync(actor, sessionId, proposalId, sessions, admission, ct,
+            http.RequestServices.GetService<EllaiUiAuthorityResolver>()).ConfigureAwait(false);
         http.Response.Headers.CacheControl = "no-store, private";
         return result is null ? Results.NotFound() : Results.Json(result);
     }
@@ -25,18 +26,18 @@ public static class EllaiGuidanceProposalEndpoint
         if (string.IsNullOrWhiteSpace(request.ProposalId) || request.ProposalId.Length > 512) return Results.BadRequest();
         http.Response.Headers.CacheControl = "no-store, private";
         var actor = ActorContext.FromValidatedPrincipal(http.User);
-        var result = await PrepareOwnedAsync(actor.ActorId, sessionId, request.ProposalId, services, ct).ConfigureAwait(false);
+        var result = await PrepareOwnedAsync(actor, sessionId, request.ProposalId, services, ct).ConfigureAwait(false);
         return result is null ? Results.NotFound() : Results.Json(result);
     }
 
-    internal static async Task<EllaiGuidancePlanDto?> PrepareOwnedAsync(string actorId, string sessionId, string proposalId,
+    internal static async Task<EllaiGuidancePlanDto?> PrepareOwnedAsync(ActorContext actor, string sessionId, string proposalId,
         IServiceProvider services, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(proposalId) || proposalId.Length > 512) return null;
         var sessions = services.GetRequiredService<IEllaiSessionStore>();
         var session = await sessions.GetAsync(sessionId, ct).ConfigureAwait(false);
-        if (session is null || session.OwnerActorId != actorId) return null;
-        var authority = PublicReportAuthority(actorId, session.ScopeEpoch);
+        if (session is null || session.OwnerActorId != actor.ActorId) return null;
+        var authority = await ResolveAuthorityAsync(services, actor, session.ScopeEpoch, ct).ConfigureAwait(false);
         var admission = services.GetRequiredService<EllaiGuidanceProposalAdmission>();
         // Resolve provider dependencies only after ownership and proposal admission succeed.
         var admitted = await admission.AdmitAsync(sessionId, proposalId, authority, ct).ConfigureAwait(false);
@@ -49,8 +50,11 @@ public static class EllaiGuidanceProposalEndpoint
             services.GetRequiredService<EllaiGuidancePlanValidator>(),
             services.GetRequiredService<EllaiUsageLedger>(),
             services.GetRequiredService<IEllaiUsageStore>(), ct).ConfigureAwait(false);
+        var refreshedAuthority = await ResolveAuthorityAsync(services, actor, session.ScopeEpoch, ct).ConfigureAwait(false);
+        if (!refreshedAuthority.Features.SetEquals(authority.Features) ||
+            !refreshedAuthority.Capabilities.SetEquals(authority.Capabilities)) return new("Stale");
         var current = await sessions.GetAsync(sessionId, ct).ConfigureAwait(false);
-        if (current is null || current.OwnerActorId != actorId || current.ScopeEpoch != session.ScopeEpoch || current.Status != "Active")
+        if (current is null || current.OwnerActorId != actor.ActorId || current.ScopeEpoch != session.ScopeEpoch || current.Status != "Active")
             return null;
         var checkpoint = EllaiGuidanceCheckpoint.Deserialize(current.GuidanceJson);
         if (generated.Plan is not null && checkpoint?.Plan?.PlanId != generated.Plan.PlanId)
@@ -64,17 +68,17 @@ public static class EllaiGuidanceProposalEndpoint
     {
         http.Response.Headers.CacheControl = "no-store, private";
         var actor = ActorContext.FromValidatedPrincipal(http.User);
-        var result = await ControlOwnedAsync(actor.ActorId, sessionId, request, services, ct).ConfigureAwait(false);
+        var result = await ControlOwnedAsync(actor, sessionId, request, services, ct).ConfigureAwait(false);
         return result is null ? Results.NotFound() : Results.Json(result);
     }
 
-    internal static async Task<EllaiGuidanceProgressDto?> ControlOwnedAsync(string actorId, string sessionId,
+    internal static async Task<EllaiGuidanceProgressDto?> ControlOwnedAsync(ActorContext actor, string sessionId,
         EllaiGuidanceControlRequest request, IServiceProvider services, CancellationToken ct)
     {
         var session = await services.GetRequiredService<IEllaiSessionStore>().GetAsync(sessionId, ct).ConfigureAwait(false);
-        if (session is null || session.OwnerActorId != actorId) return null;
+        if (session is null || session.OwnerActorId != actor.ActorId) return null;
         return await services.GetRequiredService<EllaiGuidanceProposalAdmission>().ControlAsync(
-            sessionId, request, PublicReportAuthority(actorId, session.ScopeEpoch), ct).ConfigureAwait(false);
+            sessionId, request, await ResolveAuthorityAsync(services, actor, session.ScopeEpoch, ct).ConfigureAwait(false), ct).ConfigureAwait(false);
     }
 
     public static async Task<IResult> CompleteStepAsync(HttpContext http, string sessionId,
@@ -82,33 +86,34 @@ public static class EllaiGuidanceProposalEndpoint
     {
         http.Response.Headers.CacheControl = "no-store, private";
         var actor = ActorContext.FromValidatedPrincipal(http.User);
-        var result = await CompleteStepOwnedAsync(actor.ActorId, sessionId, request, services, ct).ConfigureAwait(false);
+        var result = await CompleteStepOwnedAsync(actor, sessionId, request, services, ct).ConfigureAwait(false);
         return result is null ? Results.NotFound() : Results.Json(result);
     }
 
-    internal static async Task<EllaiGuidanceProgressDto?> CompleteStepOwnedAsync(string actorId, string sessionId,
+    internal static async Task<EllaiGuidanceProgressDto?> CompleteStepOwnedAsync(ActorContext actor, string sessionId,
         EllaiGuidanceStepRequest request, IServiceProvider services, CancellationToken ct)
     {
         var sessions = services.GetRequiredService<IEllaiSessionStore>();
         var session = await sessions.GetAsync(sessionId, ct).ConfigureAwait(false);
-        if (session is null || session.OwnerActorId != actorId) return null;
+        if (session is null || session.OwnerActorId != actor.ActorId) return null;
         return await services.GetRequiredService<EllaiGuidanceProposalAdmission>().CompleteStepAsync(
-            sessionId, request, PublicReportAuthority(actorId, session.ScopeEpoch), ct).ConfigureAwait(false);
+            sessionId, request, await ResolveAuthorityAsync(services, actor, session.ScopeEpoch, ct).ConfigureAwait(false), ct).ConfigureAwait(false);
     }
 
-    private static EllaiUiEntitlements PublicReportAuthority(string actorId, string scopeEpoch) =>
-        new(actorId, scopeEpoch, new HashSet<string>(StringComparer.Ordinal) { EllaiReportUiManifest.FeatureId },
-            new HashSet<string>(StringComparer.Ordinal));
+    private static ValueTask<EllaiUiEntitlements> ResolveAuthorityAsync(IServiceProvider services,
+        ActorContext actor, string scopeEpoch, CancellationToken ct) =>
+        (services.GetService<EllaiUiAuthorityResolver>() ?? new EllaiUiAuthorityResolver())
+            .ResolveAsync(actor, scopeEpoch, ct);
 
-    internal static async Task<EllaiGuidanceAdmissionDto?> ReadOwnedAsync(string actorId, string sessionId, string proposalId,
-        IEllaiSessionStore sessions, EllaiGuidanceProposalAdmission admission, CancellationToken ct)
+    internal static async Task<EllaiGuidanceAdmissionDto?> ReadOwnedAsync(ActorContext actor, string sessionId, string proposalId,
+        IEllaiSessionStore sessions, EllaiGuidanceProposalAdmission admission, CancellationToken ct,
+        EllaiUiAuthorityResolver? resolver = null)
     {
         if (string.IsNullOrWhiteSpace(proposalId) || proposalId.Length > 512) return null;
         var session = await sessions.GetAsync(sessionId, ct).ConfigureAwait(false);
-        if (session is null || session.OwnerActorId != actorId) return null;
-        // This first route exposes only the public report capability, which requires no staff grant.
-        // Privileged capabilities must be added through a fresh scope service, never client metadata.
-        var authority = PublicReportAuthority(actorId, session.ScopeEpoch);
+        if (session is null || session.OwnerActorId != actor.ActorId) return null;
+        var authority = await (resolver ?? new EllaiUiAuthorityResolver())
+            .ResolveAsync(actor, session.ScopeEpoch, ct).ConfigureAwait(false);
         var result = await admission.AdmitAsync(sessionId, proposalId, authority, ct).ConfigureAwait(false);
         return result.Status == "Denied" ? null :
             new EllaiGuidanceAdmissionDto(result.Status, result.Objective, result.InteractionEpoch);

@@ -115,6 +115,8 @@ public sealed class EllaiGuidanceProposalAdmission(
             Status = generated.Plan is null ? "Failed" : "Ready",
             Plan = generated.Plan,
             CurrentStepId = generated.Plan?.Steps[0].StepKey,
+            NavigationId = generated.Plan is null ? checkpoint.NavigationId :
+                admitted.Catalogue.Descriptors.Single(descriptor => descriptor.ControlId == generated.Plan.Steps[0].ControlId).NavigationId,
         };
         var saved = await sessions.TryUpdateAsync(claimed with
         {
