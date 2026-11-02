@@ -127,6 +127,11 @@ public sealed class CaseCommandGatewayClient(
                     : throw new ArgumentException("An assignment version is required."),
                 null,
                 recordedAt),
+            "AcknowledgeFollowUp" => new AcknowledgeFollowUpCommand(
+                commandId, expectedVersion,
+                input.FollowUpId is { } followUpId && followUpId != Guid.Empty ? followUpId
+                    : throw new ArgumentException("A follow-up identifier is required."),
+                null, recordedAt),
             "CorrectReport" => new CorrectReportCommand(
                 commandId,
                 expectedVersion,

@@ -413,7 +413,7 @@ public sealed class CaseCommandProcessor : ICaseCommandProcessor
         ResolveCaseCommand => CaseOperation.ResolveCase,
         ReopenCaseCommand => CaseOperation.ReopenCase,
         RecordObservationCommand => CaseOperation.RecordObservation,
-        ScheduleFollowUpCommand or RecordFollowUpOutcomeCommand => CaseOperation.ManageFollowUp,
+        ScheduleFollowUpCommand or AcknowledgeFollowUpCommand or RecordFollowUpOutcomeCommand => CaseOperation.ManageFollowUp,
         RaiseEscalationCommand or AcknowledgeEscalationCommand or CloseEscalationCommand => CaseOperation.ManageEscalation,
         _ => throw new NotSupportedException("The command is outside the non-creation command set.")
     };
@@ -447,6 +447,7 @@ public sealed class CaseCommandProcessor : ICaseCommandProcessor
         ReopenCaseCommand reopening => reopening with { RecordedAtUtc = databaseNow },
         RecordObservationCommand observation => observation with { RecordedAtUtc = databaseNow },
         ScheduleFollowUpCommand schedule => schedule with { RecordedAtUtc = databaseNow },
+        AcknowledgeFollowUpCommand acknowledge => acknowledge with { RecordedAtUtc = databaseNow },
         RecordFollowUpOutcomeCommand outcome => outcome with { RecordedAtUtc = databaseNow },
         RaiseEscalationCommand escalation => escalation with { RecordedAtUtc = databaseNow },
         AcknowledgeEscalationCommand acknowledge => acknowledge with { RecordedAtUtc = databaseNow },

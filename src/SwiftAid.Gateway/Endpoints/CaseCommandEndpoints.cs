@@ -133,6 +133,8 @@ public static class CaseCommandEndpoints
                     : throw new ArgumentException("An assignment version is required."),
                 request.OccurredAtUtc,
                 recordedAt),
+            "AcknowledgeFollowUp" => new AcknowledgeFollowUpCommand(
+                request.CommandId, request.ExpectedVersion, RequireFollowUpId(request), request.OccurredAtUtc, recordedAt),
             "CorrectReport" => new CorrectReportCommand(
                 request.CommandId,
                 request.ExpectedVersion,
@@ -681,7 +683,7 @@ public static class CaseCommandEndpoints
 
 /// <summary>Version-one wire request for a managed-case non-creation command.</summary>
 /// <param name="SchemaVersion">Wire schema version; only 1 is supported.</param>
-/// <param name="CommandType">One of CorrectReport, RequestProtectedAction, ReviewProtectedAction, Resolve, Reopen, RecordObservation, ScheduleFollowUp, RecordFollowUpOutcome, RaiseEscalation, AcknowledgeEscalation, CloseEscalation.</param>
+/// <param name="CommandType">One of CorrectReport, RequestProtectedAction, ReviewProtectedAction, Resolve, Reopen, RecordObservation, ScheduleFollowUp, AcknowledgeFollowUp, RecordFollowUpOutcome, RaiseEscalation, AcknowledgeEscalation, CloseEscalation.</param>
 /// <param name="CommandId">Stable idempotency key for the command.</param>
 /// <param name="ExpectedVersion">Aggregate version the command applies to; at least 2.</param>
 /// <param name="OccurredAtUtc">Optional source occurrence time; the server clock is authoritative for recording.</param>
@@ -692,7 +694,7 @@ public static class CaseCommandEndpoints
 /// <param name="ObservationId">Observation key; required by RecordObservation.</param>
 /// <param name="Narrative">Observation narrative; required by RecordObservation.</param>
 /// <param name="Source">Observation source; required by RecordObservation.</param>
-/// <param name="FollowUpId">Follow-up key; required by ScheduleFollowUp and RecordFollowUpOutcome.</param>
+/// <param name="FollowUpId">Follow-up key; required by ScheduleFollowUp, AcknowledgeFollowUp and RecordFollowUpOutcome.</param>
 /// <param name="Purpose">Follow-up purpose; required by ScheduleFollowUp.</param>
 /// <param name="AssigneeActorId">Follow-up assignee; required by ScheduleFollowUp.</param>
 /// <param name="DueAtUtc">Follow-up due time; required by ScheduleFollowUp.</param>

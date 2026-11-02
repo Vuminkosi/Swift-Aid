@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "eventId": "2dafd8f0-f669-a278-6fdb-d1bfa05bd10a",
+  "eventType": "CaseFollowUpAcknowledged",
+  "caseId": "10000000-0000-0000-0000-000000000001",
+  "aggregateVersion": 4,
+  "reportRevision": 1,
+  "commandId": "20000000-0000-0000-0000-000000000015",
+  "actorId": "worker-1",
+  "occurredAtUtc": null,
+  "recordedAtUtc": "2026-10-26T08:01:00+00:00",
+  "payload": {
+    "followUpId": "40000000-0000-0000-0000-000000000002"
+  }
+}

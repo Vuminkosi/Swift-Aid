@@ -111,6 +111,8 @@ public sealed class CaseCommandAuthorizationMapTests
             new RecordObservationCommand(Guid.NewGuid(), 3, Guid.NewGuid(), "visit note", "home-visit", "record visit", null, Now), aggregate);
         var schedule = CaseCommandAuthorizationMap.Resolve(
             new ScheduleFollowUpCommand(Guid.NewGuid(), 3, Guid.NewGuid(), "revisit holding", "worker-1", Now.AddDays(2), "routine check", null, Now), aggregate);
+        var followUpAcknowledgement = CaseCommandAuthorizationMap.Resolve(
+            new AcknowledgeFollowUpCommand(Guid.NewGuid(), 3, Guid.NewGuid(), null, Now), aggregate);
         var outcome = CaseCommandAuthorizationMap.Resolve(
             new RecordFollowUpOutcomeCommand(Guid.NewGuid(), 3, Guid.NewGuid(), FollowUpOutcome.Missed, "nobody present", null, "attempt logged", null, Now), aggregate);
         var raise = CaseCommandAuthorizationMap.Resolve(
@@ -124,6 +126,8 @@ public sealed class CaseCommandAuthorizationMapTests
         Assert.Equal(CaseCapability.RecordObservation, observation.RequiredCapabilities);
         Assert.Equal([CaseOperation.ManageFollowUp], schedule.RequiredOperations);
         Assert.Equal(CaseCapability.ManageFollowUp, schedule.RequiredCapabilities);
+        Assert.Equal([CaseOperation.ManageFollowUp], followUpAcknowledgement.RequiredOperations);
+        Assert.Equal(CaseCapability.ManageFollowUp, followUpAcknowledgement.RequiredCapabilities);
         Assert.Equal([CaseOperation.ManageFollowUp], outcome.RequiredOperations);
         Assert.Equal(CaseCapability.ManageFollowUp, outcome.RequiredCapabilities);
         Assert.Equal([CaseOperation.ManageEscalation], raise.RequiredOperations);

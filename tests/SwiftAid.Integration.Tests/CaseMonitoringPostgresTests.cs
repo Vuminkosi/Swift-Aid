@@ -9,6 +9,8 @@ using SwiftAid.Application.Cases;
 using SwiftAid.Application.Cases.Commands;
 using SwiftAid.Application.Serialization;
 using SwiftAid.Contracts.Commands;
+using SwiftAid.Contracts.Cases;
+using SwiftAid.Contracts.Events;
 using SwiftAid.Domain.Cases;
 using SwiftAid.Infrastructure.Authorization;
 using SwiftAid.Infrastructure.Configuration;
@@ -33,6 +35,43 @@ public sealed class CaseMonitoringPostgresTests
 {
     private static readonly DateTimeOffset FirstDueAtUtc = new(2026, 10, 30, 8, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset SecondDueAtUtc = new(2026, 11, 2, 8, 0, 0, TimeSpan.Zero);
+
+    [IntakePostgresFact]
+    public async Task AssignedWorkerAcknowledgement_PersistsAndRemainsDueInAuthorizedQueue()
+    {
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var grantGroupId = await SeedMonitoringScopeAsync(db,
+            [CaseOperation.ReadCase, CaseOperation.ManageFollowUp]);
+        using var keyRing = SyntheticMonitoringKeyRing.Create();
+        using var provider = ProtectedPayloadDataProtectionProviderFactory.Create(
+            keyRing.CreateOptions(), new TestHostEnvironment(Environments.Production));
+        var caseId = await SeedMonitoredCaseAsync(db, keyRing.CreateOptions(), provider);
+        await using var cleanup = new CaseMonitoringCleanup(caseId, grantGroupId);
+        var actor = CreateOfficer("officer-1");
+        var followUpId = Guid.NewGuid();
+
+        var scheduled = await ProcessCommandAsync(db, actor, caseId,
+            new ScheduleFollowUpCommand(Guid.NewGuid(), 2, followUpId, "record next observation", "officer-1",
+                FirstDueAtUtc, "staff scheduled", null, DateTimeOffset.UtcNow), keyRing.CreateOptions(), provider);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, scheduled.Status);
+        var acknowledged = await ProcessCommandAsync(db, actor, caseId,
+            new AcknowledgeFollowUpCommand(Guid.NewGuid(), 3, followUpId, null, DateTimeOffset.UtcNow),
+            keyRing.CreateOptions(), provider);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, acknowledged.Status);
+        Assert.Equal(4, acknowledged.AggregateVersion);
+
+        await using var verify = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var projection = await verify.ManagedCaseFollowUps.AsNoTracking().SingleAsync(item => item.FollowUpId == followUpId);
+        Assert.Equal(FollowUpStatus.Acknowledged, projection.Status);
+        var eventRow = await verify.CaseEvents.AsNoTracking().SingleAsync(item => item.AggregateVersion == 4 && item.CaseId == caseId);
+        Assert.Equal(nameof(CaseEventType.CaseFollowUpAcknowledged), eventRow.EventType);
+        Assert.Equal("officer-1", eventRow.ActorId);
+
+        var queue = await QueryQueueAsync(actor, FirstDueAtUtc.AddDays(2));
+        var item = Assert.Single(queue.Items);
+        Assert.Equal("Acknowledged", item.Status);
+        Assert.True(item.IsOverdue);
+    }
 
     [IntakePostgresFact]
     public async Task ScheduleFollowUp_then_CompletedOutcome_closes_follow_up()
@@ -594,6 +633,17 @@ public sealed class CaseMonitoringPostgresTests
         var query = new CaseMonitoringSummaryQuery(
             new PostgresCaseMonitoringSummaryStore(context), policy, unitOfWork);
         return await query.GetAsync(actor, caseId, CancellationToken.None);
+    }
+
+    private static async Task<MonitoringQueueResult> QueryQueueAsync(ActorContext actor, DateTimeOffset utcNow)
+    {
+        await using var context = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var unitOfWork = new PostgresCaseCommandUnitOfWork(context);
+        var policy = new CaseAccessPolicy(
+            new PostgresCurrentAccessGrantStore(context, unitOfWork),
+            new PostgresCaseAccessDescriptorStore(context, unitOfWork));
+        var query = new CaseMonitoringQueueQuery(new PostgresCaseMonitoringQueueStore(context), policy, unitOfWork);
+        return await query.GetAssignedAsync(actor, null, utcNow, CancellationToken.None);
     }
 
     private sealed class CaseMonitoringCleanup(Guid caseId, string grantGroupId) : IAsyncDisposable

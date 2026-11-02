@@ -78,6 +78,43 @@ public sealed class MonitoringWorkflowTests
     }
 
     [Fact]
+    public void FollowUpAcknowledgement_IsRecordedOnceByAssignedWorkerAndPreservesOpenWork()
+    {
+        var (aggregate, events) = AcceptedCase();
+        var followUpId = Guid.NewGuid();
+        aggregate = Apply(aggregate, events,
+            new ScheduleFollowUpCommand(Guid.NewGuid(), 0, followUpId, "record next reported observation", "worker-1", DueAt, "staff scheduled", null, RecordedAt),
+            MonitoringActor());
+
+        var worker = new ActorCapabilities("worker-1", CaseCapability.ManageFollowUp);
+        aggregate = Apply(aggregate, events,
+            new AcknowledgeFollowUpCommand(Guid.NewGuid(), 0, followUpId, null, RecordedAt), worker);
+
+        var acknowledgement = Assert.IsType<CaseFollowUpAcknowledged>(events[^1]);
+        Assert.Equal("worker-1", acknowledgement.ActorId);
+        var followUp = Assert.Single(aggregate.FollowUps);
+        Assert.Equal(FollowUpStatus.Acknowledged, followUp.Status);
+        Assert.Equal(DueAt, followUp.DueAtUtc);
+        Assert.Equal(followUpId, followUp.FollowUpId);
+        Assert.Throws<InvalidOperationException>(() => Apply(aggregate, events,
+            new AcknowledgeFollowUpCommand(Guid.NewGuid(), 0, followUpId, null, RecordedAt), worker));
+    }
+
+    [Fact]
+    public void FollowUpAcknowledgement_RejectsNonAssignee()
+    {
+        var (aggregate, events) = AcceptedCase();
+        var followUpId = Guid.NewGuid();
+        aggregate = Apply(aggregate, events,
+            new ScheduleFollowUpCommand(Guid.NewGuid(), 0, followUpId, "callback", "worker-1", DueAt, "staff scheduled", null, RecordedAt),
+            MonitoringActor());
+
+        Assert.Throws<UnauthorizedAccessException>(() => Apply(aggregate, events,
+            new AcknowledgeFollowUpCommand(Guid.NewGuid(), 0, followUpId, null, RecordedAt),
+            new ActorCapabilities("officer-1", CaseCapability.ManageFollowUp)));
+    }
+
+    [Fact]
     public void MissedOutcome_RetainsScheduleWithoutCompletingCare()
     {
         var (aggregate, events) = AcceptedCase();

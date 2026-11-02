@@ -152,7 +152,8 @@ public sealed class CaseMonitoringQueueQuery(
 
                 await lease.CommitAsync(ct).ConfigureAwait(false);
                 var overdue = kind == MonitoringQueueKind.FollowUp &&
-                    string.Equals(candidate.Status, nameof(FollowUpStatus.Scheduled), StringComparison.Ordinal) &&
+                    (string.Equals(candidate.Status, nameof(FollowUpStatus.Scheduled), StringComparison.Ordinal) ||
+                     string.Equals(candidate.Status, nameof(FollowUpStatus.Acknowledged), StringComparison.Ordinal)) &&
                     candidate.DueAtUtc.HasValue &&
                     candidate.DueAtUtc.Value < utcNow;
                 overdue |= kind == MonitoringQueueKind.Assistance &&

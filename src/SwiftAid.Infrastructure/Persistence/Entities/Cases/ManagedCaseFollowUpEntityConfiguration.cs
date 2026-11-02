@@ -10,7 +10,7 @@ public sealed class ManagedCaseFollowUpEntityConfiguration : IEntityTypeConfigur
     {
         builder.ToTable("managed_case_follow_ups", table =>
         {
-            table.HasCheckConstraint("ck_managed_case_follow_ups_status", "status IN ('Scheduled', 'Completed', 'Missed', 'Unreachable', 'Cancelled')");
+            table.HasCheckConstraint("ck_managed_case_follow_ups_status", "status IN ('Scheduled', 'Completed', 'Missed', 'Unreachable', 'Cancelled', 'Acknowledged')");
             table.HasCheckConstraint("ck_managed_case_follow_ups_text", "length(btrim(purpose)) > 0 AND length(btrim(assignee_actor_id)) > 0");
             table.HasCheckConstraint("ck_managed_case_follow_ups_versions", "scheduled_version > 0 AND (outcome_version IS NULL OR outcome_version > 0)");
         });

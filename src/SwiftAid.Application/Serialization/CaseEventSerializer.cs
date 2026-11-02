@@ -44,6 +44,8 @@ public sealed class CaseEventSerializer
                 new CaseObservationRecordedPayload(observation.ObservationId, observation.Narrative, observation.Source)),
             CaseFollowUpScheduled scheduled => Serialize(scheduled, CaseEventType.CaseFollowUpScheduled,
                 new CaseFollowUpScheduledPayload(scheduled.FollowUpId, scheduled.Purpose, scheduled.AssigneeActorId, NormalizeTimestamp(scheduled.DueAtUtc))),
+            CaseFollowUpAcknowledged acknowledgement => Serialize(acknowledgement, CaseEventType.CaseFollowUpAcknowledged,
+                new CaseFollowUpAcknowledgedPayload(acknowledgement.FollowUpId)),
             CaseFollowUpOutcomeRecorded outcome => Serialize(outcome, CaseEventType.CaseFollowUpOutcomeRecorded,
                 MapFollowUpOutcome(outcome)),
             CaseEscalationRaised raised => Serialize(raised, CaseEventType.CaseEscalationRaised,
@@ -64,7 +66,7 @@ public sealed class CaseEventSerializer
             CaseReported { ReportData: CaseReportEventData.HumanV2 or CaseReportEventData.AnimalV2 } => 2,
             CaseReportCorrected { CorrectedReportData: CaseReportEventData.HumanV2 or CaseReportEventData.AnimalV2 } => 2,
             CaseReported or CaseAssigned or CaseAssignmentAcknowledged or CaseReportCorrected or CaseActionRequested or CaseActionRequestReviewed or CaseResolved or CaseReopened
-            or CaseObservationRecorded or CaseFollowUpScheduled or CaseFollowUpOutcomeRecorded
+            or CaseObservationRecorded or CaseFollowUpScheduled or CaseFollowUpAcknowledged or CaseFollowUpOutcomeRecorded
             or CaseEscalationRaised or CaseEscalationAcknowledged or CaseEscalationClosed
             or CaseCollaboratorGranted or CaseCollaboratorRevoked or AssistanceRequested or AssistanceActivityRecorded => 1,
             _ => throw new NotSupportedException($"Event type {@event.GetType().Name} is not supported by the case-event wire contract.")

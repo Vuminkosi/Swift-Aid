@@ -22,6 +22,7 @@ GOLDEN_EVENT_FIXTURE_NAMES = (
     "case-escalation-raised.v1.json",
     "case-follow-up-outcome-missed.v1.json",
     "case-follow-up-outcome-rescheduled.v1.json",
+    "case-follow-up-acknowledged.v1.json",
     "case-follow-up-scheduled.v1.json",
     "case-observation-recorded.v1.json",
     "case-reopened.v1.json",

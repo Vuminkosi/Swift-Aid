@@ -9,8 +9,8 @@ using SwiftAid.Infrastructure.Persistence.Entities.Cases;
 namespace SwiftAid.Infrastructure.Persistence.Repositories.Cases;
 
 /// <summary>
-/// Lists open monitoring work newest-relevant-first from the monitoring projections.
-/// Open follow-ups are Scheduled (including rescheduled); open escalations are Raised.
+/// Lists open monitoring work due-first from the monitoring projections.
+/// Open follow-ups are Scheduled or Acknowledged; open escalations are Raised.
 /// No sealed payloads are read.
 /// </summary>
 public sealed class PostgresCaseMonitoringQueueStore(SwiftAidDbContext dbContext) : ICaseMonitoringQueueStore
@@ -27,7 +27,8 @@ public sealed class PostgresCaseMonitoringQueueStore(SwiftAidDbContext dbContext
         }
 
         var rows = await _dbContext.ManagedCaseFollowUps.AsNoTracking()
-            .Where(item => item.AssigneeActorId == assigneeActorId && item.Status == FollowUpStatus.Scheduled)
+            .Where(item => item.AssigneeActorId == assigneeActorId &&
+                (item.Status == FollowUpStatus.Scheduled || item.Status == FollowUpStatus.Acknowledged))
             .OrderBy(item => item.DueAtUtc)
             .ThenBy(item => item.FollowUpId)
             .Take(take)
@@ -70,7 +71,7 @@ public sealed class PostgresCaseMonitoringQueueStore(SwiftAidDbContext dbContext
         }
 
         var rows = await _dbContext.ManagedCaseFollowUps.AsNoTracking()
-            .Where(item => item.Status == FollowUpStatus.Scheduled)
+            .Where(item => item.Status == FollowUpStatus.Scheduled || item.Status == FollowUpStatus.Acknowledged)
             .OrderBy(item => item.DueAtUtc)
             .ThenBy(item => item.FollowUpId)
             .Take(take)

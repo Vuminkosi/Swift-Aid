@@ -11,7 +11,7 @@
     "caseId": { "type": "string", "format": "uuid" },
     "expectedVersion": { "type": "integer", "minimum": 0 },
     "commandType": {
-      "enum": ["CaseReported", "CaseReportCorrected", "CaseActionRequested", "CaseActionRequestReviewed", "CaseResolved", "CaseReopened", "CaseObservationRecorded", "CaseFollowUpScheduled", "CaseFollowUpOutcomeRecorded", "CaseEscalationRaised", "CaseEscalationAcknowledged", "CaseEscalationClosed"]
+      "enum": ["CaseReported", "CaseReportCorrected", "CaseActionRequested", "CaseActionRequestReviewed", "CaseResolved", "CaseReopened", "CaseObservationRecorded", "CaseFollowUpScheduled", "CaseFollowUpAcknowledged", "CaseFollowUpOutcomeRecorded", "CaseEscalationRaised", "CaseEscalationAcknowledged", "CaseEscalationClosed"]
     },
     "occurredAtUtc": { "type": ["string", "null"], "format": "date-time" },
     "reason": { "type": ["string", "null"], "minLength": 1 },
@@ -25,6 +25,7 @@
         { "$ref": "#/$defs/reopening" },
         { "$ref": "#/$defs/observationRecord" },
         { "$ref": "#/$defs/followUpSchedule" },
+        { "$ref": "#/$defs/followUpAcknowledgement" },
         { "$ref": "#/$defs/followUpOutcome" },
         { "$ref": "#/$defs/escalationRaise" },
         { "$ref": "#/$defs/escalationAcknowledge" },
@@ -41,6 +42,7 @@
     { "if": { "properties": { "commandType": { "const": "CaseReopened" } }, "required": ["commandType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/reopening" } } } },
     { "if": { "properties": { "commandType": { "const": "CaseObservationRecorded" } }, "required": ["commandType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/observationRecord" } } } },
     { "if": { "properties": { "commandType": { "const": "CaseFollowUpScheduled" } }, "required": ["commandType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/followUpSchedule" } } } },
+    { "if": { "properties": { "commandType": { "const": "CaseFollowUpAcknowledged" } }, "required": ["commandType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/followUpAcknowledgement" } } } },
     { "if": { "properties": { "commandType": { "const": "CaseFollowUpOutcomeRecorded" } }, "required": ["commandType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/followUpOutcome" } } } },
     { "if": { "properties": { "commandType": { "const": "CaseEscalationRaised" } }, "required": ["commandType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/escalationRaise" } } } },
     { "if": { "properties": { "commandType": { "const": "CaseEscalationAcknowledged" } }, "required": ["commandType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/escalationAcknowledge" } } } },
@@ -123,6 +125,12 @@
         "dueAtUtc": { "type": "string", "format": "date-time" },
         "reason": { "type": "string", "minLength": 1 }
       }
+    },
+    "followUpAcknowledgement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["followUpId"],
+      "properties": { "followUpId": { "type": "string", "format": "uuid" } }
     },
     "followUpOutcome": {
       "type": "object", "additionalProperties": false,

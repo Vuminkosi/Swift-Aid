@@ -8,7 +8,7 @@
   "properties": {
     "schemaVersion": { "const": 1 },
     "eventId": { "type": "string", "format": "uuid" },
-    "eventType": { "enum": ["CaseReported", "CaseAssigned", "CaseReportCorrected", "CaseActionRequested", "CaseActionRequestReviewed", "CaseResolved", "CaseReopened", "CaseObservationRecorded", "CaseFollowUpScheduled", "CaseFollowUpOutcomeRecorded", "CaseEscalationRaised", "CaseEscalationAcknowledged", "CaseEscalationClosed"] },
+    "eventType": { "enum": ["CaseReported", "CaseAssigned", "CaseReportCorrected", "CaseActionRequested", "CaseActionRequestReviewed", "CaseResolved", "CaseReopened", "CaseObservationRecorded", "CaseFollowUpScheduled", "CaseFollowUpAcknowledged", "CaseFollowUpOutcomeRecorded", "CaseEscalationRaised", "CaseEscalationAcknowledged", "CaseEscalationClosed"] },
     "caseId": { "type": "string", "format": "uuid" },
     "aggregateVersion": { "type": "integer", "minimum": 1 },
     "reportRevision": { "type": "integer", "minimum": 1 },
@@ -27,6 +27,7 @@
         { "$ref": "#/$defs/reopening" },
         { "$ref": "#/$defs/observationRecorded" },
         { "$ref": "#/$defs/followUpScheduled" },
+        { "$ref": "#/$defs/followUpAcknowledged" },
         { "$ref": "#/$defs/followUpOutcomeRecorded" },
         { "$ref": "#/$defs/escalationRaised" },
         { "$ref": "#/$defs/escalationAcknowledged" },
@@ -44,6 +45,7 @@
     { "if": { "properties": { "eventType": { "const": "CaseReopened" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/reopening" } } } },
     { "if": { "properties": { "eventType": { "const": "CaseObservationRecorded" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/observationRecorded" } } } },
     { "if": { "properties": { "eventType": { "const": "CaseFollowUpScheduled" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/followUpScheduled" } } } },
+    { "if": { "properties": { "eventType": { "const": "CaseFollowUpAcknowledged" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/followUpAcknowledged" } } } },
     { "if": { "properties": { "eventType": { "const": "CaseFollowUpOutcomeRecorded" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/followUpOutcomeRecorded" } } } },
     { "if": { "properties": { "eventType": { "const": "CaseEscalationRaised" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/escalationRaised" } } } },
     { "if": { "properties": { "eventType": { "const": "CaseEscalationAcknowledged" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/escalationAcknowledged" } } } },
@@ -127,6 +129,12 @@
         "assigneeActorId": { "type": "string", "minLength": 1 },
         "dueAtUtc": { "type": "string", "format": "date-time" }
       }
+    },
+    "followUpAcknowledged": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["followUpId"],
+      "properties": { "followUpId": { "type": "string", "format": "uuid" } }
     },
     "followUpOutcomeRecorded": {
       "type": "object", "additionalProperties": false,

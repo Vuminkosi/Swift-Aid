@@ -118,6 +118,8 @@ internal static class CaseEventJournalReader
                     ["observationId", "narrative", "source"], ValidateObservationPayload),
                 nameof(CaseEventType.CaseFollowUpScheduled) => Read<CaseFollowUpScheduledPayload>(serialized,
                     ["followUpId", "purpose", "assigneeActorId", "dueAtUtc"], ValidateFollowUpScheduledPayload),
+                nameof(CaseEventType.CaseFollowUpAcknowledged) => Read<CaseFollowUpAcknowledgedPayload>(serialized,
+                    ["followUpId"], ValidateFollowUpAcknowledgedPayload),
                 nameof(CaseEventType.CaseFollowUpOutcomeRecorded) => Read<CaseFollowUpOutcomeRecordedPayload>(serialized,
                     ["followUpId", "outcome", "outcomeNotes", "previousDueAtUtc", "newDueAtUtc", "reason"], ValidateFollowUpOutcomePayload),
                 nameof(CaseEventType.CaseEscalationRaised) => Read<CaseEscalationRaisedPayload>(serialized,
@@ -286,6 +288,12 @@ internal static class CaseEventJournalReader
                 envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
                 envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
                 scheduled.FollowUpId, scheduled.Purpose, scheduled.AssigneeActorId, scheduled.DueAtUtc),
+            CaseEventType.CaseFollowUpAcknowledged when payload is CaseFollowUpAcknowledgedPayload acknowledgement => new CaseFollowUpAcknowledged(
+                envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
+                envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc, acknowledgement.FollowUpId),
+            CaseEventType.CaseFollowUpAcknowledged when payload is CaseFollowUpAcknowledgedPayload acknowledgement => new CaseFollowUpAcknowledged(
+                envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
+                envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc, acknowledgement.FollowUpId),
             CaseEventType.CaseFollowUpOutcomeRecorded when payload is CaseFollowUpOutcomeRecordedPayload outcome => new CaseFollowUpOutcomeRecorded(
                 envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
                 envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
@@ -640,6 +648,14 @@ internal static class CaseEventJournalReader
         RequireText(value.Purpose);
         RequireIdentifier(value.AssigneeActorId);
         if (value.DueAtUtc == default)
+        {
+            throw InvalidJournal();
+        }
+    }
+
+    private static void ValidateFollowUpAcknowledgedPayload(JsonElement payload, CaseFollowUpAcknowledgedPayload value)
+    {
+        if (!IsCanonicalGuid(payload, "followUpId") || value.FollowUpId == Guid.Empty)
         {
             throw InvalidJournal();
         }

@@ -7,7 +7,7 @@ namespace SwiftAid.Contracts.Cases;
 /// Only routing fields travel here; authorization always derives from the
 /// server-authenticated principal.
 /// </summary>
-/// <param name="CommandType">One of CorrectReport, RequestProtectedAction, ReviewProtectedAction, Resolve, Reopen, RecordObservation, ScheduleFollowUp, RecordFollowUpOutcome, RaiseEscalation, AcknowledgeEscalation, CloseEscalation, AcknowledgeAssignment, GrantCaseCollaborator, RevokeCaseCollaborator.</param>
+/// <param name="CommandType">One of CorrectReport, RequestProtectedAction, ReviewProtectedAction, Resolve, Reopen, RecordObservation, ScheduleFollowUp, AcknowledgeFollowUp, RecordFollowUpOutcome, RaiseEscalation, AcknowledgeEscalation, CloseEscalation, AcknowledgeAssignment, GrantCaseCollaborator, RevokeCaseCollaborator.</param>
 /// <param name="Action">Protected-action name (for example Reassign); required by RequestProtectedAction.</param>
 /// <param name="Reason">Operator reason; required except for AcknowledgeAssignment.</param>
 /// <param name="ProposedOwnerId">Reassignment target, reopened-case owner, or accepted owner.</param>
@@ -18,7 +18,7 @@ namespace SwiftAid.Contracts.Cases;
 /// <param name="ObservationId">Observation key; required by RecordObservation.</param>
 /// <param name="Narrative">Observation narrative; required by RecordObservation.</param>
 /// <param name="Source">Observation source; required by RecordObservation.</param>
-/// <param name="FollowUpId">Follow-up key; required by ScheduleFollowUp and RecordFollowUpOutcome.</param>
+/// <param name="FollowUpId">Follow-up key; required by ScheduleFollowUp, AcknowledgeFollowUp and RecordFollowUpOutcome.</param>
 /// <param name="Purpose">Follow-up purpose; required by ScheduleFollowUp.</param>
 /// <param name="AssigneeActorId">Follow-up assignee; required by ScheduleFollowUp.</param>
 /// <param name="DueAtUtc">Follow-up due time; required by ScheduleFollowUp.</param>

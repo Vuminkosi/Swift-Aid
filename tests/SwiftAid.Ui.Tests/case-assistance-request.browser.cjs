@@ -45,6 +45,21 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
         }
         for (const width of [390, 1280]) {
             await page.setViewportSize({ width, height: 900 });
+            await page.goto(`${base}/case-follow-up-fixture`);
+            await page.waitForFunction(() => document.querySelector('#fixture-ready')?.textContent === 'True');
+            await page.getByText('Call reporting worker', { exact: true }).first().click();
+            await page.getByLabel('Choose an available action', { exact: true }).click();
+            await page.getByRole('option', { name: 'Acknowledge follow-up', exact: true }).click();
+            await page.getByRole('button', { name: 'Review action', exact: true }).click();
+            await page.getByRole('button', { name: 'Confirm action', exact: true }).click();
+            await page.getByLabel('Selected work details').getByText('Acknowledged', { exact: true }).waitFor();
+            assert.equal(await page.locator('#request-result').innerText(), 'Acknowledged');
+            assert(await page.getByLabel('Selected work details').getByText('Call reporting worker', { exact: true }).isVisible());
+            assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `follow-up horizontal overflow at ${width}px`);
+            assert.deepEqual(errors, [], `follow-up browser errors at ${width}px`);
+        }
+        for (const width of [390, 1280]) {
+            await page.setViewportSize({ width, height: 900 });
             await page.goto(`${base}/case-assistance-receipt-fixture?Receipt=true`);
             await page.waitForFunction(() => document.querySelector('#fixture-ready')?.textContent === 'True');
             await page.getByRole('tab', { name: 'Assistance', exact: true }).click();
@@ -83,7 +98,7 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `unfulfilled horizontal overflow at ${width}px`);
             assert.deepEqual(errors, [], `unfulfilled browser errors at ${width}px`);
         }
-        console.log('PASS synthetic assistance request, receipt, and unmet-need visibility at 390px and 1280px');
+        console.log('PASS synthetic assistance request, receipt, unmet-need, and follow-up acknowledgement at 390px and 1280px');
     } finally {
         await browser?.close();
         host.kill();

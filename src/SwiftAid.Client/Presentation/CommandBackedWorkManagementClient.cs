@@ -86,7 +86,8 @@ public sealed class CommandBackedWorkManagementClient(
             .Where(item => item.CaseId == caseId)
             .GroupBy(item => (item.Kind, item.WorkItemId))
             .Select(group => group.First())
-            .Select(item => TryMapItem(item))
+            .Select(item => TryMapItem(item, assigned.Access == CaseQueueAccess.Allowed && assigned.Items.Any(assignedItem =>
+                assignedItem.Kind == item.Kind && assignedItem.WorkItemId == item.WorkItemId)))
             .Where(mapped => mapped is not null)
             .Select(mapped => mapped!)
             .Concat(MapAssignment(header));
@@ -221,7 +222,7 @@ public sealed class CommandBackedWorkManagementClient(
             CanAcknowledgeAssignment: canAcknowledge);
     }
 
-    private static WorkManagementItem? TryMapItem(MonitoringQueueItem item)
+    private static WorkManagementItem? TryMapItem(MonitoringQueueItem item, bool assignedToCurrentActor = false)
     {
         if (item.CaseId == Guid.Empty || item.WorkItemId == Guid.Empty)
         {
@@ -230,7 +231,7 @@ public sealed class CommandBackedWorkManagementClient(
 
         return item.Kind switch
         {
-            MonitoringQueueKind.FollowUp => MapFollowUp(item),
+            MonitoringQueueKind.FollowUp => MapFollowUp(item, assignedToCurrentActor),
             MonitoringQueueKind.Escalation => MapEscalation(item),
             MonitoringQueueKind.Assistance => MapAssistance(item),
             _ => null,
@@ -272,11 +273,12 @@ public sealed class CommandBackedWorkManagementClient(
             CanAcknowledgeAssignment: false);
     }
 
-    private static WorkManagementItem? MapFollowUp(MonitoringQueueItem item)
+    private static WorkManagementItem? MapFollowUp(MonitoringQueueItem item, bool assignedToCurrentActor)
     {
         var status = item.Status switch
         {
             "Scheduled" => WorkManagementStatus.Scheduled,
+            "Acknowledged" => WorkManagementStatus.Acknowledged,
             "Completed" => WorkManagementStatus.Completed,
             "Missed" => WorkManagementStatus.Missed,
             "Unreachable" => WorkManagementStatus.Unreachable,
@@ -296,6 +298,14 @@ public sealed class CommandBackedWorkManagementClient(
                 WorkManagementAction.RecordFollowUpOutcome,
                 WorkManagementAction.CancelFollowUp]
             : [];
+        if (status == WorkManagementStatus.Scheduled && assignedToCurrentActor)
+        {
+            actions = [.. actions, WorkManagementAction.AcknowledgeFollowUp];
+        }
+        else if (status == WorkManagementStatus.Acknowledged)
+        {
+            actions = [WorkManagementAction.RescheduleFollowUp, WorkManagementAction.RecordFollowUpOutcome, WorkManagementAction.CancelFollowUp];
+        }
 
         return new WorkManagementItem(
             $"{FollowUpPrefix}{item.WorkItemId:D}",
@@ -404,6 +414,9 @@ public sealed class CommandBackedWorkManagementClient(
                 Purpose: "Follow-up scheduled from the case workspace.",
                 AssigneeActorId: assignee,
                 DueAtUtc: due),
+        WorkManagementAction.AcknowledgeFollowUp when TryFollowUpId(command.WorkKey, out var acknowledgeFollowUpId) =>
+            new CaseCommandInput("AcknowledgeFollowUp", null, null, null, null, null,
+                command.ExpectedVersion, FollowUpId: acknowledgeFollowUpId),
         WorkManagementAction.RescheduleFollowUp when TryFollowUpId(command.WorkKey, out var followUpId) &&
             command.DueAtUtc is { } &&
             command.NewDueAtUtc is { } =>

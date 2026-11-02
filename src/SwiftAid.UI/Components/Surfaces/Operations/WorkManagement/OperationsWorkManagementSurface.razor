@@ -912,6 +912,7 @@
         OperationsWorkAction.RecordAssistanceUnmet => "Record unmet assistance need",
         OperationsWorkAction.CancelAssistance => "Cancel assistance request",
         OperationsWorkAction.ScheduleFollowUp => "Schedule follow-up",
+        OperationsWorkAction.AcknowledgeFollowUp => "Acknowledge follow-up",
         OperationsWorkAction.RescheduleFollowUp => "Reschedule follow-up",
         OperationsWorkAction.CancelFollowUp => "Cancel follow-up",
         OperationsWorkAction.RecordFollowUpOutcome => "Record follow-up outcome",
@@ -962,7 +963,7 @@
     public enum OperationsWorkKind { Assignment, Assistance, FollowUp, Escalation }
     public enum OperationsWorkStatus { Open, Pending, AcknowledgementPending, Accepted, InProgress, Provided, ReceiptConfirmed, Unfulfilled, Assigned, Acknowledged, Requested, Scheduled, Rescheduled, Missed, Unreachable, Cancelled, Completed, Resolved, NeedsReview, Unavailable }
     public enum OperationsAssignmentStatus { Unassigned, AcknowledgementPending, AssignedToYou, Assigned, Unavailable }
-    public enum OperationsWorkAction { AssignWorker, ReassignWorker, RequestAssistance, AcceptAssistance, RecordAssistanceProgress, RecordAssistanceProvided, ConfirmAssistanceReceived, RecordAssistanceUnmet, CancelAssistance, ScheduleFollowUp, RescheduleFollowUp, CancelFollowUp, RecordFollowUpOutcome, RequestEscalation, AcknowledgeEscalation, RecordEscalationAction, ResolveEscalation, AcknowledgeAssignment }
+    public enum OperationsWorkAction { AssignWorker, ReassignWorker, RequestAssistance, AcceptAssistance, RecordAssistanceProgress, RecordAssistanceProvided, ConfirmAssistanceReceived, RecordAssistanceUnmet, CancelAssistance, ScheduleFollowUp, AcknowledgeFollowUp, RescheduleFollowUp, CancelFollowUp, RecordFollowUpOutcome, RequestEscalation, AcknowledgeEscalation, RecordEscalationAction, ResolveEscalation, AcknowledgeAssignment }
     public enum AssistanceNeed { Transport, Supplies, SpecialistSupport, Other }
     public enum FollowUpOutcome { ContactMade, NoContact, NeedsAnotherFollowUp, ReferredForReview }
     public enum EscalationReason { NeedsSupervisorReview, ServiceBarrier, TimeSensitive, Other }

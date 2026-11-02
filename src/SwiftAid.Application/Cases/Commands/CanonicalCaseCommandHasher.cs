@@ -91,7 +91,7 @@ public static class CanonicalCaseCommandHasher
 
         if (command is not (CorrectReportCommand or RequestCaseActionCommand or ReviewCaseActionRequestCommand or ResolveCaseCommand or ReopenCaseCommand
             or RecordObservationCommand or ScheduleFollowUpCommand or RecordFollowUpOutcomeCommand
-            or RaiseEscalationCommand or AcknowledgeEscalationCommand or CloseEscalationCommand or AcknowledgeAssignmentCommand
+            or RaiseEscalationCommand or AcknowledgeEscalationCommand or CloseEscalationCommand or AcknowledgeAssignmentCommand or AcknowledgeFollowUpCommand
             or GrantCaseCollaboratorCommand or RevokeCaseCollaboratorCommand or RequestAssistanceCommand or UpdateAssistanceCommand))
         {
             throw new NotSupportedException($"Command type {command.GetType().Name} is not supported by canonical hash protocol v1.");
@@ -302,6 +302,16 @@ public static class CanonicalCaseCommandHasher
                     writer.WriteString("purpose", scheduleSnapshot.Purpose);
                     writer.WriteString("assigneeActorId", scheduleSnapshot.AssigneeActorId);
                     writer.WriteString("dueAtUtc", scheduleSnapshot.DueAtUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+                    writer.WriteEndObject();
+                });
+
+            case AcknowledgeFollowUpCommand acknowledge:
+                RequireIdentifier(acknowledge.FollowUpId, nameof(acknowledge.FollowUpId));
+                var acknowledgementSnapshot = acknowledge with { OccurredAtUtc = Normalize(acknowledge.OccurredAtUtc) };
+                return (acknowledgementSnapshot, "AcknowledgeFollowUp", "Follow-up acknowledged", writer =>
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("followUpId", acknowledgementSnapshot.FollowUpId.ToString("D"));
                     writer.WriteEndObject();
                 });
 

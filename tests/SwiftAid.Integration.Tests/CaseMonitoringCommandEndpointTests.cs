@@ -39,6 +39,37 @@ public sealed class CaseMonitoringCommandEndpointTests
         }
     }
 
+    [Fact]
+    public async Task FollowUpAcknowledgement_MapsStableFollowUpIdentifier()
+    {
+        await using var host = await TestCommandHost.StartAsync();
+        var commandId = Guid.NewGuid();
+        var followUpId = Guid.NewGuid();
+        using var request = CreateRequest(FixedCaseId, new CaseCommandApiRequest(
+            1, "AcknowledgeFollowUp", commandId, 3, null, null, null, null, null, null,
+            FollowUpId: followUpId));
+
+        using var response = await host.SendBearerAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var command = Assert.IsType<AcknowledgeFollowUpCommand>(host.Processor.LastCommand);
+        Assert.Equal(commandId, command.CommandId);
+        Assert.Equal(followUpId, command.FollowUpId);
+    }
+
+    [Fact]
+    public async Task FollowUpAcknowledgement_WithoutIdentifierIsRejected()
+    {
+        await using var host = await TestCommandHost.StartAsync();
+        using var request = CreateRequest(FixedCaseId, new CaseCommandApiRequest(
+            1, "AcknowledgeFollowUp", Guid.NewGuid(), 3, null, null, null, null, null, null));
+
+        using var response = await host.SendBearerAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, host.Processor.Calls);
+    }
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly Guid FixedCaseId = Guid.Parse("c0de0001-1111-4c22-9dd9-123456789abc");
 

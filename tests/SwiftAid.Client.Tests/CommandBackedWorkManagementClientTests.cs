@@ -166,6 +166,7 @@ public sealed class CommandBackedWorkManagementClientTests
         Assert.Equal(WorkManagementStatus.Scheduled, followUp.Status);
         Assert.Equal($"fu:{FollowUpId:D}", followUp.WorkKey);
         Assert.Contains(WorkManagementAction.RecordFollowUpOutcome, followUp.AvailableActions);
+        Assert.Contains(WorkManagementAction.AcknowledgeFollowUp, followUp.AvailableActions);
         Assert.Contains(WorkManagementAction.RescheduleFollowUp, followUp.AvailableActions);
         Assert.Contains(WorkManagementAction.CancelFollowUp, followUp.AvailableActions);
 
@@ -173,6 +174,34 @@ public sealed class CommandBackedWorkManagementClientTests
         Assert.Equal(WorkManagementStatus.Requested, escalation.Status);
         Assert.Equal($"esc:{EscalationId:D}", escalation.WorkKey);
         Assert.Contains(WorkManagementAction.AcknowledgeEscalation, escalation.AvailableActions);
+    }
+
+    [Fact]
+    public async Task GetAsync_ProjectsAcknowledgedFollowUpAsOpenWithoutAnotherAcknowledgement()
+    {
+        var client = new CommandBackedWorkManagementClient(new StubCommandClient(),
+            new StubMonitoringClient(followUpStatus: "Acknowledged"), new StubTimelineClient());
+        var result = await client.GetAsync(CaseId, new WorkManagementQuery(new PageRequest(1, 25)));
+        var followUp = Assert.Single(result.Value!.Items.Items, item => item.Kind == WorkManagementKind.FollowUp);
+
+        Assert.Equal(WorkManagementStatus.Acknowledged, followUp.Status);
+        Assert.DoesNotContain(WorkManagementAction.AcknowledgeFollowUp, followUp.AvailableActions);
+        Assert.Contains(WorkManagementAction.RecordFollowUpOutcome, followUp.AvailableActions);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AcknowledgeFollowUp_SendsTypedCommandAndIdentifier()
+    {
+        var commands = new StubCommandClient();
+        var client = new CommandBackedWorkManagementClient(commands, new StubMonitoringClient(), new StubTimelineClient());
+        var result = await client.ExecuteAsync(new WorkManagementCommand(CaseId, $"fu:{FollowUpId:D}",
+            WorkManagementAction.AcknowledgeFollowUp, ExpectedVersion: 7), new WorkManagementQuery(new PageRequest(1, 25)));
+
+        Assert.Equal(UiCapabilityResultCode.Success, result.Code);
+        var sent = Assert.Single(commands.Sent);
+        Assert.Equal("AcknowledgeFollowUp", sent.Input.CommandType);
+        Assert.Equal(FollowUpId, sent.Input.FollowUpId);
+        Assert.Equal(7, sent.Input.ExpectedVersion);
     }
 
     [Fact]
@@ -295,24 +324,25 @@ public sealed class CommandBackedWorkManagementClientTests
         Assert.Equal(WorkManagementKind.Escalation, Assert.Single(result.Value!.Items.Items).Kind);
     }
 
-    private sealed class StubMonitoringClient(bool denyAssigned = false, MonitoringQueueItem? assistance = null) : IMonitoringQueueClient
+    private sealed class StubMonitoringClient(bool denyAssigned = false, MonitoringQueueItem? assistance = null,
+        string followUpStatus = "Scheduled") : IMonitoringQueueClient
     {
         public Task<MonitoringQueueResult> GetAssignedAsync(int? limit, CancellationToken cancellationToken = default) =>
             Task.FromResult(new MonitoringQueueResult(denyAssigned ? CaseQueueAccess.Denied : CaseQueueAccess.Allowed,
-                assistance is null ? [FollowUpItem()] : [FollowUpItem(), assistance]));
+                assistance is null ? [FollowUpItem(followUpStatus)] : [FollowUpItem(followUpStatus), assistance]));
 
         public Task<MonitoringQueueResult> GetOpenAsync(int? limit, CancellationToken cancellationToken = default) =>
             Task.FromResult(new MonitoringQueueResult(CaseQueueAccess.Allowed,
                 assistance is null ? [EscalationItem()] : [EscalationItem(), assistance]));
 
-        private static MonitoringQueueItem FollowUpItem() => new(
+        private static MonitoringQueueItem FollowUpItem(string status) => new(
             CaseId,
             MonitoringQueueKind.FollowUp,
             FollowUpId,
             "Water point visit",
             "worker-actor-9",
             new DateTimeOffset(2026, 11, 6, 9, 0, 0, TimeSpan.Zero),
-            "Scheduled",
+            status,
             IsOverdue: false,
             new DateTimeOffset(2026, 10, 20, 8, 0, 0, TimeSpan.Zero),
             AggregateVersion: 7);

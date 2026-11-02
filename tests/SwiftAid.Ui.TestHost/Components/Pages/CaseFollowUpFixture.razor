@@ -1,0 +1,45 @@
+@page "/case-follow-up-fixture"
+@using SwiftAid.UI.Components.Surfaces.Operations
+@using SwiftAid.UI.Components.Surfaces.Operations.WorkManagement
+@using static SwiftAid.UI.Components.Surfaces.Operations.WorkManagement.OperationsWorkManagementSurface
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<output id="fixture-ready">@_ready</output>
+<output id="request-result">@_result</output>
+<OperationsWorkManagementSurface Title="Follow-ups" Description="Synthetic follow-up acknowledgement scenario."
+                                 State="OperationsSurfaceState.Populated" Items="_items" OnAction="RecordAction" />
+
+@code {
+    private static readonly Guid CaseId = Guid.Parse("b2210000-2222-4222-8222-222222222222");
+    private static readonly Guid FollowUpId = Guid.Parse("f4410000-4444-4444-8444-444444444444");
+    private bool _ready;
+    private string _result = "Scheduled";
+    private IReadOnlyList<OperationsWorkItem> _items =
+    [
+        new OperationsWorkItem(CaseId, $"fu:{FollowUpId:D}", 7, "SYNTHETIC-CASE", OperationsWorkKind.FollowUp,
+            OperationsWorkStatus.Scheduled, OperationsAssignmentStatus.AssignedToYou, "Call reporting worker",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(1), [OperationsWorkAction.AcknowledgeFollowUp], [], null)
+    ];
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { _ready = true; StateHasChanged(); }
+    }
+
+    private void RecordAction(OperationsWorkActionRequest request)
+    {
+        if (request.CaseId != CaseId || request.WorkKey != $"fu:{FollowUpId:D}" || request.ExpectedVersion != 7 ||
+            request.Action != OperationsWorkAction.AcknowledgeFollowUp)
+            throw new InvalidOperationException("Unexpected synthetic follow-up acknowledgement.");
+
+        _result = "Acknowledged";
+        _items =
+        [
+            new OperationsWorkItem(CaseId, $"fu:{FollowUpId:D}", 8, "SYNTHETIC-CASE", OperationsWorkKind.FollowUp,
+                OperationsWorkStatus.Acknowledged, OperationsAssignmentStatus.AssignedToYou, "Call reporting worker",
+                DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(1),
+                [OperationsWorkAction.RescheduleFollowUp, OperationsWorkAction.RecordFollowUpOutcome, OperationsWorkAction.CancelFollowUp], [], null)
+        ];
+    }
+}

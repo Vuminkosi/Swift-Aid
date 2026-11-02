@@ -86,6 +86,7 @@ public sealed class CaseTimelineQueryTests
     [InlineData("AssistanceReceiptConfirmed", "Assistance receipt confirmed")]
     [InlineData("AssistanceUnfulfilled", "Assistance not fulfilled")]
     [InlineData("AssistanceCancelled", "Assistance request cancelled")]
+    [InlineData("CaseFollowUpAcknowledged", "Follow-up acknowledged")]
     public async Task AssistanceLifecycleEvents_HaveExplicitSafeTimelineLabels(string eventType, string expectedLabel)
     {
         var header = new CaseTimelineHeader(Guid.NewGuid(), "org-1", "workspace-1", "SZ", "Active", "officer-1", 2, 1,

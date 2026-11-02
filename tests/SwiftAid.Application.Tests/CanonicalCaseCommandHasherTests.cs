@@ -275,6 +275,10 @@ public sealed class CanonicalCaseCommandHasherTests
         var outcome = new RecordFollowUpOutcomeCommand(CommandId, 3, Guid.NewGuid(), FollowUpOutcome.Missed, "nobody present", null, "attempt logged", Now, Now);
         var outcomeHash = CreateSnapshot(actor, CaseId, outcome).CanonicalPayloadHash;
         Assert.NotEqual(outcomeHash, CreateSnapshot(actor, CaseId, outcome with { Outcome = FollowUpOutcome.Unreachable }).CanonicalPayloadHash);
+        var followUpAcknowledgement = new AcknowledgeFollowUpCommand(CommandId, 3, Guid.NewGuid(), Now, Now);
+        var followUpAcknowledgementHash = CreateSnapshot(actor, CaseId, followUpAcknowledgement).CanonicalPayloadHash;
+        Assert.NotEqual(followUpAcknowledgementHash, CreateSnapshot(actor, CaseId,
+            followUpAcknowledgement with { FollowUpId = Guid.NewGuid() }).CanonicalPayloadHash);
 
         var escalation = new RaiseEscalationCommand(CommandId, 3, Guid.NewGuid(), "concern", ["event-a"], "duty-officer", Now, Now);
         var escalationHash = CreateSnapshot(actor, CaseId, escalation).CanonicalPayloadHash;
@@ -288,7 +292,7 @@ public sealed class CanonicalCaseCommandHasherTests
         var closeHash = CreateSnapshot(actor, CaseId, close).CanonicalPayloadHash;
         Assert.NotEqual(closeHash, CreateSnapshot(actor, CaseId, close with { Resolution = "other resolution" }).CanonicalPayloadHash);
 
-        Assert.Distinct([observationHash, scheduleHash, outcomeHash, escalationHash, acknowledgeHash, closeHash]);
+        Assert.Distinct([observationHash, scheduleHash, outcomeHash, followUpAcknowledgementHash, escalationHash, acknowledgeHash, closeHash]);
 
         var invalidOutcome = outcome with { Outcome = (FollowUpOutcome)999 };
         Assert.Throws<ArgumentOutOfRangeException>(() => CreateSnapshot(actor, CaseId, invalidOutcome));

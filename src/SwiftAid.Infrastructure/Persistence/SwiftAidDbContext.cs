@@ -643,7 +643,7 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
         caseEvent.ToTable("case_events", table =>
         {
             table.HasCheckConstraint("ck_case_events_versions", "aggregate_version > 0 AND report_revision > 0 AND schema_version > 0");
-            table.HasCheckConstraint("ck_case_events_type", "event_type IN ('CaseReported', 'CaseAssigned', 'CaseReportCorrected', 'CaseActionRequested', 'CaseActionRequestReviewed', 'CaseResolved', 'CaseReopened', 'CaseObservationRecorded', 'CaseFollowUpScheduled', 'CaseFollowUpOutcomeRecorded', 'CaseEscalationRaised', 'CaseEscalationAcknowledged', 'CaseEscalationClosed', 'CaseAssignmentAcknowledged', 'CaseCollaboratorGranted', 'CaseCollaboratorRevoked')");
+            table.HasCheckConstraint("ck_case_events_type", "event_type IN ('CaseReported', 'CaseAssigned', 'CaseReportCorrected', 'CaseActionRequested', 'CaseActionRequestReviewed', 'CaseResolved', 'CaseReopened', 'CaseObservationRecorded', 'CaseFollowUpScheduled', 'CaseFollowUpAcknowledged', 'CaseFollowUpOutcomeRecorded', 'CaseEscalationRaised', 'CaseEscalationAcknowledged', 'CaseEscalationClosed', 'CaseAssignmentAcknowledged', 'CaseCollaboratorGranted', 'CaseCollaboratorRevoked', 'AssistanceRequested', 'AssistanceAccepted', 'AssistanceProgressRecorded', 'AssistanceProvided', 'AssistanceReceiptConfirmed', 'AssistanceUnfulfilled', 'AssistanceCancelled')");
             table.HasCheckConstraint("ck_case_events_actor", "length(btrim(actor_id)) > 0");
         });
         caseEvent.HasKey(entity => entity.EventId).HasName("pk_case_events");

@@ -398,7 +398,7 @@ public sealed partial class PostgresCaseCommandPersistence : ICaseCommandPersist
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (@event is not (CaseAssigned or CaseReportCorrected or CaseActionRequested or CaseActionRequestReviewed or CaseResolved or CaseReopened
-                or CaseObservationRecorded or CaseFollowUpScheduled or CaseFollowUpOutcomeRecorded
+                or CaseObservationRecorded or CaseFollowUpScheduled or CaseFollowUpAcknowledged or CaseFollowUpOutcomeRecorded
                 or CaseEscalationRaised or CaseEscalationAcknowledged or CaseEscalationClosed or CaseAssignmentAcknowledged
                 or CaseCollaboratorGranted or CaseCollaboratorRevoked
                 or AssistanceRequested or AssistanceActivityRecorded))
@@ -596,6 +596,17 @@ public sealed partial class PostgresCaseCommandPersistence : ICaseCommandPersist
                         ScheduledVersion = scheduled.AggregateVersion,
                         OutcomeVersion = null
                     });
+                    break;
+                case CaseFollowUpAcknowledged acknowledgement:
+                    var acknowledgedFollowUp = await _dbContext.ManagedCaseFollowUps
+                        .SingleOrDefaultAsync(item => item.FollowUpId == acknowledgement.FollowUpId, cancellationToken)
+                        .ConfigureAwait(false)
+                        ?? throw InvalidJournal();
+                    if (acknowledgedFollowUp.CaseId != acknowledgement.CaseId ||
+                        acknowledgedFollowUp.Status != FollowUpStatus.Scheduled ||
+                        !string.Equals(acknowledgedFollowUp.AssigneeActorId, acknowledgement.ActorId, StringComparison.Ordinal))
+                        throw InvalidJournal();
+                    acknowledgedFollowUp.Status = FollowUpStatus.Acknowledged;
                     break;
                 case CaseFollowUpOutcomeRecorded outcome:
                     var followUp = await _dbContext.ManagedCaseFollowUps

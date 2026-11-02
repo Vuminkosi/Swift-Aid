@@ -26,7 +26,8 @@ AssistanceProgressRecorded,
 AssistanceProvided,
 AssistanceReceiptConfirmed,
 AssistanceUnfulfilled,
-AssistanceCancelled
+    AssistanceCancelled,
+    CaseFollowUpAcknowledged
 }
 
 public abstract record CaseEventPayload;
@@ -77,6 +78,8 @@ public sealed record CaseReopenedPayload(string Reason, string AccountableOwnerI
 public sealed record CaseObservationRecordedPayload(Guid ObservationId, string Narrative, string Source) : CaseEventPayload;
 
 public sealed record CaseFollowUpScheduledPayload(Guid FollowUpId, string Purpose, string AssigneeActorId, DateTimeOffset DueAtUtc) : CaseEventPayload;
+
+public sealed record CaseFollowUpAcknowledgedPayload(Guid FollowUpId) : CaseEventPayload;
 
 public sealed record CaseFollowUpOutcomeRecordedPayload(
     Guid FollowUpId,

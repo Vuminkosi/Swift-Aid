@@ -19,7 +19,7 @@ public static class CaseCommandAuthorizationMap
             RequestAssistanceCommand or UpdateAssistanceCommand => Requirement(CaseOperation.ManageAssistance, CaseCapability.ManageAssistance),
             CorrectReportCommand => Requirement(CaseOperation.CorrectReport, CaseCapability.CorrectReport),
             RecordObservationCommand => Requirement(CaseOperation.RecordObservation, CaseCapability.RecordObservation),
-            ScheduleFollowUpCommand or RecordFollowUpOutcomeCommand => Requirement(CaseOperation.ManageFollowUp, CaseCapability.ManageFollowUp),
+            ScheduleFollowUpCommand or AcknowledgeFollowUpCommand or RecordFollowUpOutcomeCommand => Requirement(CaseOperation.ManageFollowUp, CaseCapability.ManageFollowUp),
             RaiseEscalationCommand or AcknowledgeEscalationCommand or CloseEscalationCommand => Requirement(CaseOperation.ManageEscalation, CaseCapability.ManageEscalation),
             RequestCaseActionCommand request => ResolveRequest(request),
             ReviewCaseActionRequestCommand review => ResolveReview(review, replayedAggregate),

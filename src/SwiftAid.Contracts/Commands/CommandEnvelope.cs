@@ -96,6 +96,15 @@ public sealed record ScheduleFollowUpCommand(
     DateTimeOffset RecordedAtUtc)
     : CaseCommand(CommandId, ExpectedVersion, OccurredAtUtc, RecordedAtUtc);
 
+/// <summary>Records that the assigned worker has accepted responsibility for a scheduled follow-up.</summary>
+public sealed record AcknowledgeFollowUpCommand(
+    Guid CommandId,
+    long ExpectedVersion,
+    Guid FollowUpId,
+    DateTimeOffset? OccurredAtUtc,
+    DateTimeOffset RecordedAtUtc)
+    : CaseCommand(CommandId, ExpectedVersion, OccurredAtUtc, RecordedAtUtc);
+
 /// <summary>Terminal follow-up outcome. Missed and unreachable never imply care completed.</summary>
 public enum FollowUpOutcome
 {

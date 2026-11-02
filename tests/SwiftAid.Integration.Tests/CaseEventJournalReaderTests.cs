@@ -150,6 +150,27 @@ public sealed class CaseEventJournalReaderTests
         Assert.Equal(RecordedAtUtc, CaseAggregate.Replay(events.Append(restored)).AssignmentAcknowledgedAtUtc);
     }
 
+    [Fact]
+    public void FollowUpAcknowledgementRoundTripsAndReplaysAssignedWorkerProvenance()
+    {
+        var initial = CaseAggregate.CreateManagedCase(Guid.NewGuid(), Guid.NewGuid(), "workspace-1", CreateHumanReport(),
+            null, RecordedAtUtc, new ActorCapabilities("officer-1", CaseCapability.AcceptReport));
+        var aggregate = CaseAggregate.Replay(initial);
+        var followUpId = Guid.NewGuid();
+        aggregate.Apply(RoundTrip(Assert.Single(aggregate.Decide(new ScheduleFollowUpCommand(Guid.NewGuid(), 2, followUpId,
+            "record next reported observation", "worker-1", RecordedAtUtc.AddDays(2), "staff scheduled", null, RecordedAtUtc),
+            new ActorCapabilities("officer-1", CaseCapability.ManageFollowUp)))));
+        var acknowledgement = Assert.Single(aggregate.Decide(new AcknowledgeFollowUpCommand(Guid.NewGuid(), aggregate.AggregateVersion,
+            followUpId, null, RecordedAtUtc.AddMinutes(1)), new ActorCapabilities("worker-1", CaseCapability.ManageFollowUp)));
+        aggregate.Apply(RoundTrip(acknowledgement));
+
+        var replayed = CaseAggregate.Replay(initial.Concat(aggregate.Events.Skip(initial.Count)));
+        var followUp = Assert.Single(replayed.FollowUps);
+        Assert.Equal(FollowUpStatus.Acknowledged, followUp.Status);
+        Assert.Equal("worker-1", Assert.IsType<CaseFollowUpAcknowledged>(acknowledgement).ActorId);
+        Assert.Equal(followUpId, followUp.FollowUpId);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]

@@ -30,3 +30,18 @@ public sealed class CaseTimelineAssistanceLabelTests
         return Assert.IsType<string>(method!.Invoke(null, [eventType, CaseTimelineEntryKind.Authoritative]));
     }
 }
+
+public sealed class CaseTimelineFollowUpLabelTests
+{
+    [Fact]
+    public void FollowUpAcknowledgement_has_explicit_label_and_category()
+    {
+        var type = typeof(CaseTimelineView);
+        var labelMapper = type.GetMethod("SafeEventLabel", BindingFlags.NonPublic | BindingFlags.Static);
+        var categoryMapper = type.GetMethod("EventCategory", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(labelMapper);
+        Assert.NotNull(categoryMapper);
+        Assert.Equal("Follow-up acknowledged", labelMapper!.Invoke(null, ["CaseFollowUpAcknowledged", CaseTimelineEntryKind.Authoritative]));
+        Assert.Equal("Follow-up", categoryMapper!.Invoke(null, ["CaseFollowUpAcknowledged", CaseTimelineEntryKind.Authoritative]));
+    }
+}
