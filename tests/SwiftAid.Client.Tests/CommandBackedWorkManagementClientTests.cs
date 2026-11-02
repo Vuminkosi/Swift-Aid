@@ -77,6 +77,60 @@ public sealed class CommandBackedWorkManagementClientTests
     private static readonly Guid CaseId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid FollowUpId = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid EscalationId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+    private static readonly Guid AssistanceId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+
+    [Fact]
+    public async Task Assistance_projects_open_state_and_receipt_confirmation_sends_provenance()
+    {
+        var commands = new StubCommandClient();
+        var monitoring = new StubMonitoringClient(assistance: new MonitoringQueueItem(
+            CaseId, MonitoringQueueKind.Assistance, AssistanceId, "Transport support", "owner-actor-1",
+            null, "Provided", false, DateTimeOffset.UtcNow, 6));
+        var client = new CommandBackedWorkManagementClient(commands, monitoring, new StubTimelineClient());
+        var query = new WorkManagementQuery(new PageRequest(1, 25), WorkManagementKind.Assistance);
+
+        var read = await client.GetAsync(CaseId, query);
+        var item = Assert.Single(read.Value!.Items.Items);
+        Assert.Equal(WorkManagementStatus.Provided, item.Status);
+        Assert.Contains(WorkManagementAction.ConfirmAssistanceReceived, item.AvailableActions);
+
+        var receipt = new WorkManagementCommand(CaseId, item.WorkKey,
+            WorkManagementAction.ConfirmAssistanceReceived, 7,
+            Details: "Recipient reported receiving arranged transport",
+            AssistanceReceiptConfirmed: true,
+            ReceiptMethod: "In person",
+            ReceiptContext: "At service point");
+        Assert.True(receipt.IsValid);
+        await client.ExecuteAsync(receipt, query);
+
+        var sent = Assert.Single(commands.Sent).Input;
+        Assert.Equal("UpdateAssistance", sent.CommandType);
+        Assert.Equal(AssistanceId, sent.AssistanceId);
+        Assert.Equal(SwiftAid.Contracts.Commands.AssistanceStatus.ReceiptConfirmed, sent.AssistanceStatus);
+        Assert.Equal("Recipient reported receiving arranged transport", sent.AssistanceNote);
+        Assert.Equal("In person", sent.ReceiptMethod);
+        Assert.Equal("At service point", sent.ReceiptContext);
+    }
+
+    [Fact]
+    public async Task Assistance_request_uses_stable_work_key_and_current_accountable_owner()
+    {
+        var commands = new StubCommandClient();
+        var client = new CommandBackedWorkManagementClient(commands,
+            new StubMonitoringClient(), new StubTimelineClient());
+        var request = new WorkManagementCommand(CaseId, $"assistance:new:{AssistanceId:D}",
+            WorkManagementAction.RequestAssistance, 7,
+            AssistanceNeed: WorkManagementAssistanceNeed.Transport,
+            Details: "Transport coordination needed");
+
+        await client.ExecuteAsync(request, new WorkManagementQuery(new PageRequest(1, 25)));
+
+        var sent = Assert.Single(commands.Sent).Input;
+        Assert.Equal("RequestAssistance", sent.CommandType);
+        Assert.Equal(AssistanceId, sent.AssistanceId);
+        Assert.Equal("owner-actor-1", sent.ResponsibleActorId);
+        Assert.Equal("Transport: Transport coordination needed", sent.AssistanceNeed);
+    }
 
     [Fact]
     public async Task GetAsync_ProjectsFollowUpsAndEscalationsFromMonitoringQueue()
@@ -223,13 +277,15 @@ public sealed class CommandBackedWorkManagementClientTests
         Assert.Equal(WorkManagementKind.Escalation, Assert.Single(result.Value!.Items.Items).Kind);
     }
 
-    private sealed class StubMonitoringClient(bool denyAssigned = false) : IMonitoringQueueClient
+    private sealed class StubMonitoringClient(bool denyAssigned = false, MonitoringQueueItem? assistance = null) : IMonitoringQueueClient
     {
         public Task<MonitoringQueueResult> GetAssignedAsync(int? limit, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new MonitoringQueueResult(denyAssigned ? CaseQueueAccess.Denied : CaseQueueAccess.Allowed, [FollowUpItem()]));
+            Task.FromResult(new MonitoringQueueResult(denyAssigned ? CaseQueueAccess.Denied : CaseQueueAccess.Allowed,
+                assistance is null ? [FollowUpItem()] : [FollowUpItem(), assistance]));
 
         public Task<MonitoringQueueResult> GetOpenAsync(int? limit, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new MonitoringQueueResult(CaseQueueAccess.Allowed, [EscalationItem()]));
+            Task.FromResult(new MonitoringQueueResult(CaseQueueAccess.Allowed,
+                assistance is null ? [EscalationItem()] : [EscalationItem(), assistance]));
 
         private static MonitoringQueueItem FollowUpItem() => new(
             CaseId,

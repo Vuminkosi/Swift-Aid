@@ -95,7 +95,9 @@ public sealed class CaseCommandHttpClient(HttpClient httpClient) : ICaseCommandC
                     input.Resolution,
                     input.ActionSummary,
                     input.EvidenceEventIds,
-                    input.AssignmentVersion, input.GrantId, input.CollaboratorActorId, input.CollaborationActions, input.ExpiresAtUtc),
+                    input.AssignmentVersion, input.GrantId, input.CollaboratorActorId, input.CollaborationActions, input.ExpiresAtUtc,
+                    input.AssistanceId, input.AssistanceNeed, input.ResponsibleActorId, input.AssistanceStatus?.ToString(),
+                    input.AssistanceNote, input.ReceiptMethod, input.ReceiptContext),
                 JsonOptions,
                 cancellationToken).ConfigureAwait(false);
 
@@ -220,7 +222,14 @@ public sealed class CaseCommandHttpClient(HttpClient httpClient) : ICaseCommandC
         Guid? GrantId,
         string? CollaboratorActorId,
         CaseCollaborationActions? CollaborationActions,
-        DateTimeOffset? ExpiresAtUtc);
+        DateTimeOffset? ExpiresAtUtc,
+        Guid? AssistanceId,
+        string? AssistanceNeed,
+        string? ResponsibleActorId,
+        string? AssistanceStatus,
+        string? AssistanceNote,
+        string? ReceiptMethod,
+        string? ReceiptContext);
 
     /// <summary>Accepted case-command receipt as returned by the endpoint.</summary>
     private sealed record CaseCommandWireResponse(

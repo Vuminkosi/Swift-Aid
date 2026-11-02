@@ -21,6 +21,7 @@
                              OnDownloadEvidence="DownloadEvidenceAsync" UploadEvidenceAsyncCallback="UploadEvidenceAsync"
                              ObservationsData="_observations" OnRefreshObservations="LoadObservationsAsync" RecordObservationAsyncCallback="RecordObservationAsync"
                              WorkState="_workState" WorkItems="_workItems" WorkIsBusy="_workBusy"
+                             WorkVersion="@(_workSnapshot?.Version ?? 0)"
                              WorkStatusMessage="@_workStatusMessage" WorkStatusIsError="_workStatusIsError"
                              OnWorkAction="ExecuteWorkActionAsync" OnWorkRetry="LoadWorkAsync">
     <ReportContent><CaseReportEvidence Report="_reportDetails" Loading="_reportLoading" OnRetry="LoadReportAsync" /></ReportContent>
@@ -291,7 +292,10 @@
                 LocalOffset: request.LocalOffset,
                 CancellationReason: request.CancellationReason,
                 Reason: request.Reason,
-                ResolutionSummary: request.ResolutionSummary);
+                ResolutionSummary: request.ResolutionSummary,
+                ReceiptMethod: request.AssistanceReceiptMethod,
+                ReceiptContext: request.AssistanceReceiptContext,
+                CommandId: request.CommandId);
             if (!command.IsValid)
             {
                 _workStatusMessage = "Check the action details and try again.";

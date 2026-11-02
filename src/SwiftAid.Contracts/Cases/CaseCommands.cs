@@ -63,7 +63,14 @@ public sealed record CaseCommandInput(
     Guid? GrantId = null,
     string? CollaboratorActorId = null,
     CaseCollaborationActions? CollaborationActions = null,
-    DateTimeOffset? ExpiresAtUtc = null);
+    DateTimeOffset? ExpiresAtUtc = null,
+    Guid? AssistanceId = null,
+    string? AssistanceNeed = null,
+    string? ResponsibleActorId = null,
+    AssistanceStatus? AssistanceStatus = null,
+    string? AssistanceNote = null,
+    string? ReceiptMethod = null,
+    string? ReceiptContext = null);
 
 /// <summary>Staff case-command outcome. Denial and absence share one value for privacy.</summary>
 public enum CaseCommandStatus

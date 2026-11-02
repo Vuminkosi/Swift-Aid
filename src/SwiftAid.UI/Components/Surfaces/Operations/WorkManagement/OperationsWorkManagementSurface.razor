@@ -164,6 +164,8 @@
                                 @if (action == OperationsWorkAction.ConfirmAssistanceReceived)
                                 {
                                     <MudCheckBox T="bool" @bind-Value="_confirmedReceived" Color="Color.Primary" Label="I confirm the assistance was received" Disabled="@IsBusy" />
+                                    <MudTextField T="string" @bind-Value="_assistanceReceiptMethod" Label="How was receipt confirmed?" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" Disabled="@IsBusy" />
+                                    <MudTextField T="string" @bind-Value="_assistanceReceiptContext" Label="Receipt confirmation context" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" Disabled="@IsBusy" />
                                 }
 
                                 @if (action is OperationsWorkAction.ScheduleFollowUp or OperationsWorkAction.RescheduleFollowUp)
@@ -315,6 +317,8 @@
     private string? _resolutionReason;
     private EscalationActionKind? _escalationAction;
     private bool _confirmedReceived;
+    private string? _assistanceReceiptMethod;
+    private string? _assistanceReceiptContext;
     private bool _reviewing;
     private string? _validationMessage;
 
@@ -580,6 +584,13 @@
             return;
         }
 
+        if (action == OperationsWorkAction.ConfirmAssistanceReceived &&
+            (string.IsNullOrWhiteSpace(_assistanceReceiptMethod) || string.IsNullOrWhiteSpace(_assistanceReceiptContext)))
+        {
+            _validationMessage = "Record how receipt was confirmed and the context of that confirmation.";
+            return;
+        }
+
         _reviewing = true;
     }
 
@@ -626,7 +637,9 @@
                 OperationsWorkAction.ResolveEscalation => _resolutionReason?.Trim(),
                 _ => null
             },
-            ResolutionSummary: action == OperationsWorkAction.ResolveEscalation ? _resolutionSummary?.Trim() : null));
+            ResolutionSummary: action == OperationsWorkAction.ResolveEscalation ? _resolutionSummary?.Trim() : null,
+            AssistanceReceiptMethod: action == OperationsWorkAction.ConfirmAssistanceReceived ? _assistanceReceiptMethod?.Trim() : null,
+            AssistanceReceiptContext: action == OperationsWorkAction.ConfirmAssistanceReceived ? _assistanceReceiptContext?.Trim() : null));
     }
 
     private void EditAction() => _reviewing = false;
@@ -648,6 +661,8 @@
         _resolutionReason = null;
         _escalationAction = null;
         _confirmedReceived = false;
+        _assistanceReceiptMethod = null;
+        _assistanceReceiptContext = null;
         _reviewing = false;
         _validationMessage = null;
     }
@@ -680,16 +695,24 @@
 
     private static bool NeedsDetails(OperationsWorkAction action) => action is
         OperationsWorkAction.RequestAssistance or
+        OperationsWorkAction.AcceptAssistance or
+        OperationsWorkAction.RecordAssistanceProgress or
         OperationsWorkAction.RecordAssistanceProvided or
         OperationsWorkAction.RecordAssistanceUnmet or
+        OperationsWorkAction.CancelAssistance or
+        OperationsWorkAction.ConfirmAssistanceReceived or
         OperationsWorkAction.RecordFollowUpOutcome or
         OperationsWorkAction.RecordEscalationAction;
 
     private static string DetailsLabel(OperationsWorkAction action) => action switch
     {
         OperationsWorkAction.RequestAssistance => "Describe the requested assistance",
+        OperationsWorkAction.AcceptAssistance => "Describe the acceptance of responsibility",
+        OperationsWorkAction.RecordAssistanceProgress => "Describe the progress made",
         OperationsWorkAction.RecordAssistanceProvided => "Describe the assistance provided",
         OperationsWorkAction.RecordAssistanceUnmet => "Describe what remains unmet",
+        OperationsWorkAction.CancelAssistance => "Explain why the request is cancelled",
+        OperationsWorkAction.ConfirmAssistanceReceived => "Describe the receipt confirmation",
         OperationsWorkAction.RecordFollowUpOutcome => "Follow-up details",
         OperationsWorkAction.RecordEscalationAction => "Administrative action details",
         _ => "Additional details"
@@ -882,9 +905,12 @@
         OperationsWorkAction.AssignWorker => "Assign worker",
         OperationsWorkAction.ReassignWorker => "Reassign worker",
         OperationsWorkAction.RequestAssistance => "Request assistance",
+        OperationsWorkAction.AcceptAssistance => "Accept assistance responsibility",
+        OperationsWorkAction.RecordAssistanceProgress => "Record assistance progress",
         OperationsWorkAction.RecordAssistanceProvided => "Record assistance provided",
         OperationsWorkAction.ConfirmAssistanceReceived => "Confirm assistance received",
         OperationsWorkAction.RecordAssistanceUnmet => "Record unmet assistance need",
+        OperationsWorkAction.CancelAssistance => "Cancel assistance request",
         OperationsWorkAction.ScheduleFollowUp => "Schedule follow-up",
         OperationsWorkAction.RescheduleFollowUp => "Reschedule follow-up",
         OperationsWorkAction.CancelFollowUp => "Cancel follow-up",
@@ -936,7 +962,7 @@
     public enum OperationsWorkKind { Assignment, Assistance, FollowUp, Escalation }
     public enum OperationsWorkStatus { Open, Pending, AcknowledgementPending, Accepted, InProgress, Provided, ReceiptConfirmed, Unfulfilled, Assigned, Acknowledged, Requested, Scheduled, Rescheduled, Missed, Unreachable, Cancelled, Completed, Resolved, NeedsReview, Unavailable }
     public enum OperationsAssignmentStatus { Unassigned, AcknowledgementPending, AssignedToYou, Assigned, Unavailable }
-    public enum OperationsWorkAction { AssignWorker, ReassignWorker, RequestAssistance, RecordAssistanceProvided, ConfirmAssistanceReceived, RecordAssistanceUnmet, ScheduleFollowUp, RescheduleFollowUp, CancelFollowUp, RecordFollowUpOutcome, RequestEscalation, AcknowledgeEscalation, RecordEscalationAction, ResolveEscalation, AcknowledgeAssignment }
+    public enum OperationsWorkAction { AssignWorker, ReassignWorker, RequestAssistance, AcceptAssistance, RecordAssistanceProgress, RecordAssistanceProvided, ConfirmAssistanceReceived, RecordAssistanceUnmet, CancelAssistance, ScheduleFollowUp, RescheduleFollowUp, CancelFollowUp, RecordFollowUpOutcome, RequestEscalation, AcknowledgeEscalation, RecordEscalationAction, ResolveEscalation, AcknowledgeAssignment }
     public enum AssistanceNeed { Transport, Supplies, SpecialistSupport, Other }
     public enum FollowUpOutcome { ContactMade, NoContact, NeedsAnotherFollowUp, ReferredForReview }
     public enum EscalationReason { NeedsSupervisorReview, ServiceBarrier, TimeSensitive, Other }
@@ -995,5 +1021,8 @@
         TimeSpan? LocalOffset = null,
         string? CancellationReason = null,
         string? Reason = null,
-        string? ResolutionSummary = null);
+        string? ResolutionSummary = null,
+        string? AssistanceReceiptMethod = null,
+        string? AssistanceReceiptContext = null,
+        Guid? CommandId = null);
 }

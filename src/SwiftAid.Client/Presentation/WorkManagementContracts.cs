@@ -51,9 +51,12 @@ public enum WorkManagementAction
     AssignWorker,
     ReassignWorker,
     RequestAssistance,
+    AcceptAssistance,
+    RecordAssistanceProgress,
     RecordAssistanceProvided,
     ConfirmAssistanceReceived,
     RecordAssistanceUnmet,
+    CancelAssistance,
     ScheduleFollowUp,
     RescheduleFollowUp,
     CancelFollowUp,
@@ -173,13 +176,17 @@ public sealed record WorkManagementCommand(
     TimeSpan? LocalOffset = null,
     string? CancellationReason = null,
     string? Reason = null,
-    string? ResolutionSummary = null)
+    string? ResolutionSummary = null,
+    string? ReceiptMethod = null,
+    string? ReceiptContext = null,
+    Guid? CommandId = null)
 {
     public bool IsValid =>
         CaseId != Guid.Empty &&
         !string.IsNullOrWhiteSpace(WorkKey) &&
         WorkKey.Length <= 120 &&
         ExpectedVersion > 0 &&
+        (CommandId is null || CommandId != Guid.Empty) &&
         Enum.IsDefined(Action) &&
         HasValidPayload();
 
@@ -190,11 +197,14 @@ public sealed record WorkManagementCommand(
         WorkManagementAction.AcknowledgeAssignment => IsEmptyExcept(),
         WorkManagementAction.RequestAssistance =>
             AssistanceNeed is { } need && Enum.IsDefined(need) && HasText(Details, 300) && IsEmptyExcept(nameof(AssistanceNeed), nameof(Details)),
+        WorkManagementAction.AcceptAssistance or WorkManagementAction.RecordAssistanceProgress or WorkManagementAction.CancelAssistance =>
+            HasText(Details, 300) && IsEmptyExcept(nameof(Details)),
         WorkManagementAction.RecordAssistanceProvided or WorkManagementAction.RecordAssistanceUnmet =>
             AssistanceNeed is { } supportNeed && Enum.IsDefined(supportNeed) &&
             HasText(Details, 300) && IsEmptyExcept(nameof(AssistanceNeed), nameof(Details)),
         WorkManagementAction.ConfirmAssistanceReceived =>
-            AssistanceReceiptConfirmed && IsEmptyExcept(nameof(AssistanceReceiptConfirmed)),
+            AssistanceReceiptConfirmed && HasText(Details, 300) && HasText(ReceiptMethod, 120) && HasText(ReceiptContext, 300) &&
+            IsEmptyExcept(nameof(AssistanceReceiptConfirmed), nameof(Details), nameof(ReceiptMethod), nameof(ReceiptContext)),
         WorkManagementAction.ScheduleFollowUp =>
             HasUtc(DueAtUtc) && HasLocalSchedule() && IsEmptyExcept(nameof(DueAtUtc), nameof(LocalTimeZoneId), nameof(LocalOffset)),
         WorkManagementAction.RescheduleFollowUp =>
@@ -228,6 +238,8 @@ public sealed record WorkManagementCommand(
         (EscalationReason is null || allowed.Contains(nameof(EscalationReason), StringComparer.Ordinal)) &&
         (EscalationAction is null || allowed.Contains(nameof(EscalationAction), StringComparer.Ordinal)) &&
         (!AssistanceReceiptConfirmed || allowed.Contains(nameof(AssistanceReceiptConfirmed), StringComparer.Ordinal)) &&
+        (ReceiptMethod is null || allowed.Contains(nameof(ReceiptMethod), StringComparer.Ordinal)) &&
+        (ReceiptContext is null || allowed.Contains(nameof(ReceiptContext), StringComparer.Ordinal)) &&
         (DueAtUtc is null || allowed.Contains(nameof(DueAtUtc), StringComparer.Ordinal)) &&
         (NewDueAtUtc is null || allowed.Contains(nameof(NewDueAtUtc), StringComparer.Ordinal)) &&
         (LocalTimeZoneId is null || allowed.Contains(nameof(LocalTimeZoneId), StringComparer.Ordinal)) &&

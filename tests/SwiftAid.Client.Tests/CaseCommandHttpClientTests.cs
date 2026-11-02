@@ -19,6 +19,33 @@ public sealed class CaseCommandHttpClientTests
         Assert.Equal(5, body.RootElement.GetProperty("expectedVersion").GetInt64());
     }
 
+    [Fact]
+    public async Task Assistance_commands_transmit_actor_and_receipt_provenance_fields()
+    {
+        var caseId = Guid.NewGuid();
+        var commandId = Guid.NewGuid();
+        var handler = new ScriptedHandler([JsonResponse(HttpStatusCode.Conflict, new { })]);
+        var client = Create(handler);
+        var input = new CaseCommandInput("UpdateAssistance", null, null, null, null, null, 8,
+            CommandId: commandId,
+            AssistanceId: Guid.NewGuid(),
+            AssistanceStatus: SwiftAid.Contracts.Commands.AssistanceStatus.ReceiptConfirmed,
+            AssistanceNote: "Recipient reported receiving support",
+            ReceiptMethod: "In person",
+            ReceiptContext: "At the agreed service point");
+
+        await client.SendAsync(caseId, input);
+
+        using var body = JsonDocument.Parse(await Assert.Single(handler.Requests).Content!.ReadAsStringAsync());
+        var root = body.RootElement;
+        Assert.Equal(commandId, root.GetProperty("commandId").GetGuid());
+        Assert.Equal(input.AssistanceId, root.GetProperty("assistanceId").GetGuid());
+        Assert.Equal("ReceiptConfirmed", root.GetProperty("assistanceStatus").GetString());
+        Assert.Equal("Recipient reported receiving support", root.GetProperty("assistanceNote").GetString());
+        Assert.Equal("In person", root.GetProperty("receiptMethod").GetString());
+        Assert.Equal("At the agreed service point", root.GetProperty("receiptContext").GetString());
+    }
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     [Fact]

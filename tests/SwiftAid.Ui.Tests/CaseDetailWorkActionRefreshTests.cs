@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.RenderTree;
 using Microsoft.AspNetCore.Components.Web;
@@ -17,6 +18,35 @@ namespace SwiftAid.Ui.Tests;
 #pragma warning disable BL0006 // The test renderer inspects component parameters to exercise the real page callback.
 public sealed class CaseDetailWorkActionRefreshTests
 {
+    [Fact]
+    public async Task AssistanceRequest_UsesCurrentVersionAndStableRequestIdentity()
+    {
+        var caseId = Guid.NewGuid();
+        var requestId = Guid.NewGuid();
+        OperationsWorkManagementSurface.OperationsWorkActionRequest? captured = null;
+        var component = new OperationsCaseDetailSurface();
+        SetParameter(component, nameof(OperationsCaseDetailSurface.CaseId), caseId);
+        SetParameter(component, nameof(OperationsCaseDetailSurface.WorkVersion), 7L);
+        SetParameter(component, nameof(OperationsCaseDetailSurface.OnWorkAction),
+            EventCallback.Factory.Create<OperationsWorkManagementSurface.OperationsWorkActionRequest>(
+                new object(), request => captured = request));
+        SetPrivateField(component, "_showAssistanceRequest", true);
+        SetPrivateField(component, "_assistanceRequestId", (Guid?)requestId);
+        SetPrivateField(component, "_newAssistanceNeed", OperationsWorkManagementSurface.AssistanceNeed.Transport);
+        SetPrivateField(component, "_newAssistanceDetails", "Transport coordination needed");
+
+        await InvokePrivateAsync(component, "SubmitAssistanceRequestAsync");
+
+        Assert.NotNull(captured);
+        Assert.Equal(caseId, captured!.CaseId);
+        Assert.Equal($"assistance:new:{requestId:D}", captured.WorkKey);
+        Assert.Equal(requestId, captured.CommandId);
+        Assert.Equal(7, captured.ExpectedVersion);
+        Assert.Equal(OperationsWorkManagementSurface.OperationsWorkAction.RequestAssistance, captured.Action);
+        Assert.Equal(OperationsWorkManagementSurface.AssistanceNeed.Transport, captured.AssistanceNeed);
+        Assert.Equal("Transport coordination needed", captured.Details);
+    }
+
     [Fact]
     public async Task MissingOptionalDiscussionAndEvidenceProvidersDoNotPreventCaseRendering()
     {
@@ -179,6 +209,19 @@ public sealed class CaseDetailWorkActionRefreshTests
         var value = renderer.GetComponentParameter(rootId, typeof(OperationsCaseDetailSurface), name);
         Assert.IsType<T>(value);
         return (T)value!;
+    }
+
+    private static void SetPrivateField(object target, string name, object? value) =>
+        target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(target, value);
+
+    private static void SetParameter(object target, string name, object? value) =>
+        target.GetType().GetProperty(name, BindingFlags.Instance | BindingFlags.Public)!.SetValue(target, value);
+
+    private static async Task InvokePrivateAsync(object target, string name)
+    {
+        var operation = (Task)target.GetType().GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(target, null)!;
+        await operation;
     }
 
     private static (ServiceProvider Services, TestRenderer Renderer) CreateRenderer(FakeWorkManagementClient workClient, bool optionalProviders = true)

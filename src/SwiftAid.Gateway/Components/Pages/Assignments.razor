@@ -172,7 +172,10 @@
                 LocalOffset: request.LocalOffset,
                 CancellationReason: request.CancellationReason,
                 Reason: request.Reason,
-                ResolutionSummary: request.ResolutionSummary), CreateQuery());
+                ResolutionSummary: request.ResolutionSummary,
+                ReceiptMethod: request.AssistanceReceiptMethod,
+                ReceiptContext: request.AssistanceReceiptContext,
+                CommandId: request.CommandId), CreateQuery());
 
             if (result.Succeeded)
             {

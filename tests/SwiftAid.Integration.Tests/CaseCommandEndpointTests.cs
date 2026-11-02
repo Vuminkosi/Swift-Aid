@@ -103,7 +103,7 @@ public sealed class CaseCommandEndpointTests
     {
         await using var host = await TestCommandHost.StartAsync();
         var request = new CaseCommandApiRequest(1, "UpdateAssistance", Guid.NewGuid(), 3, null, null, null, null, null, null,
-            AssistanceId: Guid.NewGuid(), AssistanceStatus: AssistanceStatus.ReceiptConfirmed,
+            AssistanceId: Guid.NewGuid(), AssistanceStatus: nameof(AssistanceStatus.ReceiptConfirmed),
             AssistanceNote: "Recipient reports receipt", ReceiptMethod: "In person", ReceiptContext: "At service point");
         using var response = await host.SendBearerAsync(CreateRequest(FixedCaseId, request));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);

@@ -123,7 +123,7 @@ public static class CaseCommandEndpoints
             "UpdateAssistance" => new UpdateAssistanceCommand(
                 request.CommandId, request.ExpectedVersion,
                 request.AssistanceId ?? throw new ArgumentException("An assistance identifier is required."),
-                request.AssistanceStatus ?? throw new ArgumentException("An assistance status is required."),
+                RequireAssistanceStatus(request),
                 RequireAssistanceNote(request), RequireReceiptMethod(request), RequireReceiptContext(request),
                 request.OccurredAtUtc, recordedAt),
             "AcknowledgeAssignment" => new AcknowledgeAssignmentCommand(
@@ -513,12 +513,17 @@ public static class CaseCommandEndpoints
     private static string RequireAssistanceNote(CaseCommandApiRequest request) =>
         string.IsNullOrWhiteSpace(request.AssistanceNote) ? throw new ArgumentException("An assistance activity note is required.") : request.AssistanceNote;
 
+    private static AssistanceStatus RequireAssistanceStatus(CaseCommandApiRequest request) =>
+        Enum.TryParse<AssistanceStatus>(request.AssistanceStatus, ignoreCase: false, out var status) && Enum.IsDefined(status)
+            ? status
+            : throw new ArgumentException("A supported assistance status is required.");
+
     private static string? RequireReceiptMethod(CaseCommandApiRequest request) =>
-        request.AssistanceStatus == AssistanceStatus.ReceiptConfirmed && string.IsNullOrWhiteSpace(request.ReceiptMethod)
+        string.Equals(request.AssistanceStatus, nameof(AssistanceStatus.ReceiptConfirmed), StringComparison.Ordinal) && string.IsNullOrWhiteSpace(request.ReceiptMethod)
             ? throw new ArgumentException("A receipt method is required.") : request.ReceiptMethod;
 
     private static string? RequireReceiptContext(CaseCommandApiRequest request) =>
-        request.AssistanceStatus == AssistanceStatus.ReceiptConfirmed && string.IsNullOrWhiteSpace(request.ReceiptContext)
+        string.Equals(request.AssistanceStatus, nameof(AssistanceStatus.ReceiptConfirmed), StringComparison.Ordinal) && string.IsNullOrWhiteSpace(request.ReceiptContext)
             ? throw new ArgumentException("Receipt context is required.") : request.ReceiptContext;
 
     private static DateTimeOffset RequireDueAtUtc(CaseCommandApiRequest request)
@@ -734,7 +739,7 @@ public sealed record CaseCommandApiRequest(
     Guid? AssistanceId = null,
     string? AssistanceNeed = null,
     string? ResponsibleActorId = null,
-    AssistanceStatus? AssistanceStatus = null,
+    string? AssistanceStatus = null,
     string? AssistanceNote = null,
     string? ReceiptMethod = null,
     string? ReceiptContext = null);

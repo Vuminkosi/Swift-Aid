@@ -149,6 +149,38 @@
             <OperationsWorkManagementSurface Title="Follow-ups" Description="Schedule visits, manage deadlines, and record completion outcomes." State="WorkState" Items="FollowUpItems" IsBusy="WorkIsBusy" StatusMessage="@WorkStatusMessage" StatusIsError="WorkStatusIsError" OnAction="HandleWorkActionAsync" OnRetry="OnWorkRetry" />
         </MudTabPanel>
         <MudTabPanel Text="Assistance" data-ellai-control="case-detail.assistance" data-bonboarding-anchor="ellai-case-detail-assistance" Icon="@Icons.Material.Outlined.VolunteerActivism">
+            <section class="case-detail__section" aria-label="Request assistance">
+                @if (!_showAssistanceRequest)
+                {
+                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.AddCircleOutline"
+                               Disabled="@(WorkIsBusy || WorkVersion < 2)" OnClick="OpenAssistanceRequest">
+                        Request assistance
+                    </MudButton>
+                }
+                else
+                {
+                    <MudPaper Class="case-detail__panel pa-4" Outlined="true">
+                        <MudText Typo="Typo.subtitle1" HtmlTag="h2">New assistance request</MudText>
+                        <MudSelect T="OperationsWorkManagementSurface.AssistanceNeed?" @bind-Value="_newAssistanceNeed"
+                                   Label="Assistance need" Variant="Variant.Outlined" Margin="Margin.Dense">
+                            @foreach (var need in Enum.GetValues<OperationsWorkManagementSurface.AssistanceNeed>())
+                            {
+                                <MudSelectItem T="OperationsWorkManagementSurface.AssistanceNeed?" Value="@((OperationsWorkManagementSurface.AssistanceNeed?)need)">@need</MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudTextField T="string" @bind-Value="_newAssistanceDetails" Label="Describe the requested support"
+                                      Lines="3" Variant="Variant.Outlined" Margin="Margin.Dense" MaxLength="300" />
+                        @if (!string.IsNullOrWhiteSpace(_assistanceRequestError))
+                        {
+                            <MudAlert Severity="Severity.Warning" Dense="true" role="alert">@_assistanceRequestError</MudAlert>
+                        }
+                        <MudStack Row="true" Spacing="2" Class="mt-3">
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(WorkIsBusy || WorkVersion < 2)" OnClick="SubmitAssistanceRequestAsync">Submit request</MudButton>
+                            <MudButton Variant="Variant.Text" Disabled="@WorkIsBusy" OnClick="CancelAssistanceRequest">Cancel</MudButton>
+                        </MudStack>
+                    </MudPaper>
+                }
+            </section>
             <OperationsWorkManagementSurface Title="Assistance" Description="Track referrals, resource requests, and receipt confirmation." State="WorkState" Items="AssistanceItems" IsBusy="WorkIsBusy" StatusMessage="@WorkStatusMessage" StatusIsError="WorkStatusIsError" OnAction="HandleWorkActionAsync" OnRetry="OnWorkRetry" />
         </MudTabPanel>
         <MudTabPanel Text="Discussion" data-ellai-control="case-detail.discussion" data-bonboarding-anchor="ellai-case-detail-discussion" Icon="@Icons.Material.Outlined.Forum">
@@ -286,6 +318,7 @@
     [Parameter] public Func<CaseDetailObservationRequest, Task<CaseDetailCommandOutcome>>? RecordObservationAsyncCallback { get; set; }
     [Parameter] public OperationsSurfaceState WorkState { get; set; } = OperationsSurfaceState.Unavailable;
     [Parameter] public IReadOnlyList<OperationsWorkManagementSurface.OperationsWorkItem> WorkItems { get; set; } = Array.Empty<OperationsWorkManagementSurface.OperationsWorkItem>();
+    [Parameter] public long WorkVersion { get; set; }
     [Parameter] public bool WorkIsBusy { get; set; }
     [Parameter] public string? WorkStatusMessage { get; set; }
     [Parameter] public bool WorkStatusIsError { get; set; }
@@ -309,6 +342,11 @@
     private IReadOnlyCollection<string> _selectedEvidence = Array.Empty<string>();
     private IReadOnlyCollection<string> _observationEvidence = Array.Empty<string>();
     private Guid _boundCaseId;
+    private bool _showAssistanceRequest;
+    private OperationsWorkManagementSurface.AssistanceNeed? _newAssistanceNeed;
+    private string? _newAssistanceDetails;
+    private string? _assistanceRequestError;
+    private Guid? _assistanceRequestId;
 
     private static readonly string[] TabKeys = EllaiCaseDetailUiManifest.Tabs.ToArray();
 
@@ -324,7 +362,11 @@
 
     protected override void OnParametersSet()
     {
-        if (CaseId != _boundCaseId) { _boundCaseId = CaseId; _caseVersion = 0; _savingCorrection = false; CloseDiscussionForm(); CloseObservationForm(); CloseCorrectionForm(); }
+        if (CaseId != _boundCaseId) { _boundCaseId = CaseId; _caseVersion = 0; _savingCorrection = false; CloseDiscussionForm(); CloseObservationForm(); CloseCorrectionForm(); CancelAssistanceRequest(); }
+        if (_assistanceRequestId is { } assistanceId && WorkItems.Any(item => item.WorkKey == $"ast:{assistanceId:D}"))
+        {
+            CancelAssistanceRequest();
+        }
         if (_showCorrectionForm && (CorrectionData is { State: CaseDetailPanelState.Denied } ||
             CorrectionData is { State: CaseDetailPanelState.Populated, CanCorrectReport: false } ||
             CorrectionData is { State: CaseDetailPanelState.Populated, ReportKind: not CaseDetailCorrectionKind.LegacyV1 }))
@@ -336,6 +378,49 @@
             _correctionAccessChanged = false;
         }
         _caseVersion = Math.Max(_caseVersion, Math.Max(DiscussionData?.AggregateVersion ?? 0, EvidenceData?.AggregateVersion ?? 0));
+    }
+
+    private void OpenAssistanceRequest()
+    {
+        _assistanceRequestId = Guid.NewGuid();
+        _newAssistanceNeed = null;
+        _newAssistanceDetails = null;
+        _assistanceRequestError = null;
+        _showAssistanceRequest = true;
+    }
+
+    private void CancelAssistanceRequest()
+    {
+        _showAssistanceRequest = false;
+        _assistanceRequestId = null;
+        _newAssistanceNeed = null;
+        _newAssistanceDetails = null;
+        _assistanceRequestError = null;
+    }
+
+    private async Task SubmitAssistanceRequestAsync()
+    {
+        if (!_showAssistanceRequest || _assistanceRequestId is not { } assistanceId || WorkVersion < 2 ||
+            _newAssistanceNeed is not { } need || string.IsNullOrWhiteSpace(_newAssistanceDetails) ||
+            !OnWorkAction.HasDelegate || WorkIsBusy)
+        {
+            _assistanceRequestError = "Select the support type and describe the requested assistance.";
+            return;
+        }
+
+        await OnWorkAction.InvokeAsync(new OperationsWorkManagementSurface.OperationsWorkActionRequest(
+            CaseId,
+            $"assistance:new:{assistanceId:D}",
+            WorkVersion,
+            OperationsWorkManagementSurface.OperationsWorkAction.RequestAssistance,
+            null,
+            need,
+            _newAssistanceDetails.Trim(),
+            null,
+            null,
+            null,
+            false,
+            CommandId: assistanceId));
     }
 
     private Task SyncActiveTabToUriAsync()

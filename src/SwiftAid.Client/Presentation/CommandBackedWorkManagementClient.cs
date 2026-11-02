@@ -17,6 +17,7 @@ public sealed class CommandBackedWorkManagementClient(
     private const int MonitoringLimit = 200;
     private const string FollowUpPrefix = "fu:";
     private const string EscalationPrefix = "esc:";
+    private const string AssistancePrefix = "ast:";
 
     private readonly ICaseCommandClient _commands = commands ?? throw new ArgumentNullException(nameof(commands));
     private readonly IMonitoringQueueClient _monitoring = monitoring ?? throw new ArgumentNullException(nameof(monitoring));
@@ -128,7 +129,8 @@ public sealed class CommandBackedWorkManagementClient(
         }
 
         var assignee = command.WorkerKey;
-        if (command.Action == WorkManagementAction.ScheduleFollowUp && string.IsNullOrWhiteSpace(assignee))
+        if ((command.Action is WorkManagementAction.ScheduleFollowUp or WorkManagementAction.RequestAssistance) &&
+            string.IsNullOrWhiteSpace(assignee))
         {
             assignee = await GetAccountableOwnerAsync(command.CaseId, cancellationToken).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(assignee))
@@ -187,7 +189,8 @@ public sealed class CommandBackedWorkManagementClient(
         if (query.OverdueOnly is { } overdueOnly)
         {
             var isOverdue = item.DueAtUtc is { } due && due < DateTimeOffset.UtcNow &&
-                item.Status is WorkManagementStatus.Scheduled or WorkManagementStatus.Requested;
+                item.Status is WorkManagementStatus.Scheduled or WorkManagementStatus.Requested or
+                    WorkManagementStatus.Accepted or WorkManagementStatus.InProgress or WorkManagementStatus.Provided;
             if (isOverdue != overdueOnly)
             {
                 return false;
@@ -229,8 +232,44 @@ public sealed class CommandBackedWorkManagementClient(
         {
             MonitoringQueueKind.FollowUp => MapFollowUp(item),
             MonitoringQueueKind.Escalation => MapEscalation(item),
+            MonitoringQueueKind.Assistance => MapAssistance(item),
             _ => null,
         };
+    }
+
+    private static WorkManagementItem? MapAssistance(MonitoringQueueItem item)
+    {
+        if (!Enum.TryParse<WorkManagementStatus>(item.Status, ignoreCase: false, out var status) ||
+            status is not (WorkManagementStatus.Requested or WorkManagementStatus.Accepted or
+                WorkManagementStatus.InProgress or WorkManagementStatus.Provided))
+        {
+            return null;
+        }
+
+        IReadOnlyList<WorkManagementAction> actions = status switch
+        {
+            WorkManagementStatus.Requested => [WorkManagementAction.AcceptAssistance],
+            WorkManagementStatus.Accepted => [WorkManagementAction.RecordAssistanceProgress, WorkManagementAction.RecordAssistanceUnmet, WorkManagementAction.CancelAssistance],
+            WorkManagementStatus.InProgress => [WorkManagementAction.RecordAssistanceProvided, WorkManagementAction.RecordAssistanceUnmet, WorkManagementAction.CancelAssistance],
+            WorkManagementStatus.Provided => [WorkManagementAction.ConfirmAssistanceReceived],
+            _ => []
+        };
+
+        return new WorkManagementItem(
+            $"{AssistancePrefix}{item.WorkItemId:D}",
+            $"AST-{item.WorkItemId:N}"[..12].ToUpperInvariant(),
+            WorkManagementKind.Assistance,
+            status,
+            WorkManagementAssignmentStatus.Assigned,
+            string.IsNullOrWhiteSpace(item.Summary) ? "Assistance request" : item.Summary,
+            item.RecordedAtUtc,
+            item.DueAtUtc,
+            actions,
+            [],
+            [],
+            item.AssigneeActorId,
+            AssignedWorkerLabel: null,
+            CanAcknowledgeAssignment: false);
     }
 
     private static WorkManagementItem? MapFollowUp(MonitoringQueueItem item)
@@ -333,6 +372,24 @@ public sealed class CommandBackedWorkManagementClient(
 
     private static CaseCommandInput? MapCommand(WorkManagementCommand command, string? assignee) => command.Action switch
     {
+        WorkManagementAction.RequestAssistance when TryNewAssistanceId(command.WorkKey, out var newAssistanceId) &&
+            command.AssistanceNeed is { } assistanceNeed =>
+            new CaseCommandInput("RequestAssistance", null, null, null, null, null,
+                command.ExpectedVersion, CommandId: command.CommandId ?? newAssistanceId,
+                AssistanceId: newAssistanceId,
+                AssistanceNeed: $"{assistanceNeed}: {command.Details}", ResponsibleActorId: assignee),
+        WorkManagementAction.AcceptAssistance when TryAssistanceId(command.WorkKey, out var acceptId) =>
+            MapAssistanceUpdate(command, acceptId, AssistanceStatus.Accepted),
+        WorkManagementAction.RecordAssistanceProgress when TryAssistanceId(command.WorkKey, out var progressId) =>
+            MapAssistanceUpdate(command, progressId, AssistanceStatus.InProgress),
+        WorkManagementAction.RecordAssistanceProvided when TryAssistanceId(command.WorkKey, out var providedId) =>
+            MapAssistanceUpdate(command, providedId, AssistanceStatus.Provided),
+        WorkManagementAction.RecordAssistanceUnmet when TryAssistanceId(command.WorkKey, out var unmetId) =>
+            MapAssistanceUpdate(command, unmetId, AssistanceStatus.Unfulfilled),
+        WorkManagementAction.CancelAssistance when TryAssistanceId(command.WorkKey, out var cancelledId) =>
+            MapAssistanceUpdate(command, cancelledId, AssistanceStatus.Cancelled),
+        WorkManagementAction.ConfirmAssistanceReceived when TryAssistanceId(command.WorkKey, out var receiptId) =>
+            MapAssistanceUpdate(command, receiptId, AssistanceStatus.ReceiptConfirmed),
         WorkManagementAction.AcknowledgeAssignment when
             command.WorkKey.StartsWith("assignment:", StringComparison.Ordinal) &&
             long.TryParse(command.WorkKey.AsSpan("assignment:".Length),
@@ -387,6 +444,16 @@ public sealed class CommandBackedWorkManagementClient(
         _ => null,
     };
 
+    private static CaseCommandInput MapAssistanceUpdate(
+        WorkManagementCommand command, Guid assistanceId, AssistanceStatus status) =>
+        new("UpdateAssistance", null, null, null, null, null, command.ExpectedVersion,
+            CommandId: command.CommandId,
+            AssistanceId: assistanceId,
+            AssistanceStatus: status,
+            AssistanceNote: command.Details,
+            ReceiptMethod: command.ReceiptMethod,
+            ReceiptContext: command.ReceiptContext);
+
     private static (string Name, DateTimeOffset? NewDue)? MapOutcome(
         WorkManagementFollowUpOutcome? outcome,
         DateTimeOffset? newDue) => outcome switch
@@ -411,6 +478,21 @@ public sealed class CommandBackedWorkManagementClient(
         return workKey.StartsWith(EscalationPrefix, StringComparison.Ordinal) &&
             Guid.TryParse(workKey.AsSpan(EscalationPrefix.Length), out escalationId) &&
             escalationId != Guid.Empty;
+    }
+
+    private static bool TryAssistanceId(string workKey, out Guid assistanceId)
+    {
+        assistanceId = Guid.Empty;
+        return workKey.StartsWith(AssistancePrefix, StringComparison.Ordinal) &&
+            Guid.TryParse(workKey.AsSpan(AssistancePrefix.Length), out assistanceId) && assistanceId != Guid.Empty;
+    }
+
+    private static bool TryNewAssistanceId(string workKey, out Guid assistanceId)
+    {
+        const string prefix = "assistance:new:";
+        assistanceId = Guid.Empty;
+        return workKey.StartsWith(prefix, StringComparison.Ordinal) &&
+            Guid.TryParse(workKey.AsSpan(prefix.Length), out assistanceId) && assistanceId != Guid.Empty;
     }
 
     private static string WorkspaceReason(string verb) => $"{verb} from the case workspace.";
