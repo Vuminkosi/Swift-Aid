@@ -27,6 +27,54 @@ namespace SwiftAid.Integration.Tests;
 public sealed partial class CaseCommandProcessingPostgresTests
 {
     [CaseAuthorityPostgresFact]
+    public async Task Revoking_expired_grant_does_not_remove_its_replacement_or_change_recipient_epoch()
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync();
+        await using var cleanup = new CaseCommandProcessingCleanup(fixture);
+        await AddOperationAsync(fixture, CaseOperation.ManageCollaborators);
+        cleanup.TrackTargetGrant(await AddEligibleTargetGrantAsync(fixture));
+        await SetInitialWorkflowVersionAsync(fixture);
+        using var keyRing = SyntheticPayloadKeyRing.Create();
+        using var provider = ProtectedPayloadDataProtectionProviderFactory.Create(
+            keyRing.CreateOptions(), new TestHostEnvironment(Environments.Production));
+        await SeedInitialJournalAsync(fixture, keyRing.CreateOptions(), provider);
+        async Task<CaseCommandProcessingResult> Process(CaseCommand command) =>
+            await ProcessCommandAsync(fixture, fixture.CreateActor(), command, keyRing.CreateOptions(), provider);
+
+        var original = new GrantCaseCollaboratorCommand(Guid.NewGuid(), 2, Guid.NewGuid(), fixture.NewOwnerActorId,
+            CaseCollaborationActions.ReadCase, DateTimeOffset.UtcNow.AddSeconds(5), "Synthetic temporary access", null, DateTimeOffset.UnixEpoch);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, (await Process(original)).Status);
+        // Allow the real stored deadline to pass; do not rewrite the protected journal or projection.
+        var remaining = original.ExpiresAtUtc - DateTimeOffset.UtcNow + TimeSpan.FromMilliseconds(150);
+        if (remaining > TimeSpan.Zero) await Task.Delay(remaining);
+        var replacement = new GrantCaseCollaboratorCommand(Guid.NewGuid(), 3, Guid.NewGuid(), fixture.NewOwnerActorId,
+            CaseCollaborationActions.ReadCase, DateTimeOffset.UtcNow.AddHours(1), "Synthetic renewed access", null, DateTimeOffset.UnixEpoch);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, (await Process(replacement)).Status);
+        var oldRevoke = new RevokeCaseCollaboratorCommand(Guid.NewGuid(), 4, original.GrantId,
+            "Synthetic historical revocation", null, DateTimeOffset.UnixEpoch);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, (await Process(oldRevoke)).Status);
+        Assert.Equal(CaseCommandProcessingStatus.Replayed, (await Process(oldRevoke)).Status);
+        await using (var check = fixture.CreateDbContext())
+        {
+            var share = await check.CaseShares.SingleAsync(item => item.CaseId == fixture.CaseId && item.ActorId == fixture.NewOwnerActorId);
+            Assert.Equal(replacement.GrantId, share.GrantId);
+            Assert.True(share.IsActive);
+            Assert.Equal(2, share.Version);
+            Assert.Null(share.RevokedByActorId);
+            Assert.Equal(fixture.AccessEpoch + 2, (await check.ActorAccessStates.SingleAsync(item => item.ActorId == fixture.NewOwnerActorId)).AccessEpoch);
+        }
+        var aggregate = await ReadAggregateAsync(fixture, fixture.CreateActor(), keyRing.CreateOptions(), provider);
+        Assert.NotNull(aggregate.Collaborators.Single(item => item.GrantId == original.GrantId).RevokedAtUtc);
+        Assert.Null(aggregate.Collaborators.Single(item => item.GrantId == replacement.GrantId).RevokedAtUtc);
+        var revoke = new RevokeCaseCollaboratorCommand(Guid.NewGuid(), 5, replacement.GrantId,
+            "Synthetic current revocation", null, DateTimeOffset.UnixEpoch);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, (await Process(revoke)).Status);
+        await using var verification = fixture.CreateDbContext();
+        Assert.False((await verification.CaseShares.SingleAsync(item => item.CaseId == fixture.CaseId && item.ActorId == fixture.NewOwnerActorId)).IsActive);
+        Assert.Equal(fixture.AccessEpoch + 3, (await verification.ActorAccessStates.SingleAsync(item => item.ActorId == fixture.NewOwnerActorId)).AccessEpoch);
+    }
+
+    [CaseAuthorityPostgresFact]
     public async Task Collaborator_grant_and_revocation_persist_bounded_access_and_epochs_atomically()
     {
         await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync();
