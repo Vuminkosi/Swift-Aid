@@ -530,3 +530,7 @@ Source audit in [SW-04-002 offline report audit](SW-04-002-OFFLINE-REPORT-AUDIT.
 ## SW-04-003/004 report capture/schema audit - 2 November 2026
 
 Source audit in [SW-04-003/004 schema audit](SW-04-003-004-REPORT-SCHEMA-AUDIT.md) found optional narrative/observations/original-audio references, separate captured/occurrence times and unknown presence semantics. Guest contract distinguishes human/individual/herd/flock/group, but structured species/count source/precision fields were not found. Mobile audio remains local-only; no tests run. EV-045.
+
+## SW-04-005/006 time and review audit - 2 November 2026
+
+Source audit in [SW-04-005/006 audit](SW-04-005-006-TIME-REVIEW-AUDIT.md) found distinct capture/occurrence time fields and precision/offset/zone selection. Required review/processing acknowledgements default false; material edits clear review confirmation. Relative-time/upload chain, proposed extraction and rendered reset behavior remain NOT VERIFIED. No tests run; EV-046.
