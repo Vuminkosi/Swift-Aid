@@ -534,3 +534,7 @@ Source audit in [SW-04-003/004 schema audit](SW-04-003-004-REPORT-SCHEMA-AUDIT.m
 ## SW-04-005/006 time and review audit - 2 November 2026
 
 Source audit in [SW-04-005/006 audit](SW-04-005-006-TIME-REVIEW-AUDIT.md) found distinct capture/occurrence time fields and precision/offset/zone selection. Required review/processing acknowledgements default false; material edits clear review confirmation. Relative-time/upload chain, proposed extraction and rendered reset behavior remain NOT VERIFIED. No tests run; EV-046.
+
+## SW-04-007 guest queue verification - 2 November 2026
+
+Focused command dotnet test tests/SwiftAid.Client.Tests/SwiftAid.Client.Tests.csproj --no-restore -m:1 -nr:false --filter FullyQualifiedName~GuestSubmissionJourneyTests --verbosity minimal PASS 9/9; EncryptedGuestAudioPersistenceTests PASS 12/12. These cover local queue/retry/receipt and encrypted audio persistence/hash. Android force-stop/reboot and live ambiguous server response replay remain NOT VERIFIED. Details EV-047/048, [audit](SW-04-007-GUEST-QUEUE-AUDIT.md).
