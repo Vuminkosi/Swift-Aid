@@ -1,0 +1,49 @@
+@page "/collaborator-fixture"
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.UI.Components.Surfaces.Operations.CaseDetail
+@using SwiftAid.UI.Components.Theme
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<output id="fixture-ready">@_ready</output>
+<CaseCollaboratorsPanel CaseId="_client.CaseId" TimelineClient="_client" CommandClient="_client" />
+
+@code {
+    [SupplyParameterFromQuery] public bool Denied { get; set; }
+    private bool _ready;
+    private readonly FixtureClient _client = new();
+    protected override void OnParametersSet() => _client.Denied = Denied;
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { _ready = true; StateHasChanged(); }
+    }
+
+    private sealed class FixtureClient : ICaseTimelineClient, ICaseCommandClient
+    {
+        public Guid CaseId { get; } = Guid.NewGuid();
+        private readonly Guid _grantId = Guid.NewGuid();
+        private CaseCommandInput? _first;
+        private bool _revoked;
+        public bool Denied { get; set; }
+        public Task<CaseTimelineResult> GetAsync(Guid caseId, int? limit, CancellationToken cancellationToken = default, long? beforeAggregateVersion = null) =>
+            Task.FromResult(Denied ? new CaseTimelineResult(CaseTimelineAccess.NotFoundOrNotAuthorized, null) : new CaseTimelineResult(CaseTimelineAccess.Found, new CaseTimeline(
+                new CaseTimelineHeader(CaseId, "org", "workspace", "SZ", "Active", "private-owner-id", _revoked ? 4 : 3, 1, DateTimeOffset.UtcNow), [],
+                Collaboration: new CaseCollaborationView(true, [new CaseCollaboratorGrantView(_grantId, "private-recipient-id", "Synthetic colleague",
+                    ["ReadCase", "ManageFollowUp"], DateTimeOffset.UtcNow.AddHours(1), _revoked)]))));
+
+        public Task<CaseCommandResult> SendAsync(Guid caseId, CaseCommandInput input, CancellationToken cancellationToken = default)
+        {
+            if (caseId != CaseId || input.GrantId != _grantId || input.ExpectedVersion != 3 ||
+                input.CommandType != "RevokeCaseCollaborator" || input.Reason != "Synthetic reason" || input.CommandId is null)
+                throw new InvalidOperationException("Unexpected synthetic revocation.");
+            if (_first is null)
+            {
+                _first = input;
+                return Task.FromResult(new CaseCommandResult(CaseCommandStatus.Unavailable, input.CommandId.Value, [], null, null));
+            }
+            if (_first != input) throw new InvalidOperationException("Retry changed the frozen command.");
+            _revoked = true;
+            return Task.FromResult(new CaseCommandResult(CaseCommandStatus.Accepted, input.CommandId.Value, [Guid.NewGuid()], 4, 1));
+        }
+    }
+}

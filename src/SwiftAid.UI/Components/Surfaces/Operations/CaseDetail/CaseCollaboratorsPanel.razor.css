@@ -1,0 +1,8 @@
+.collaborators { margin-block: 1.25rem; min-width: 0; }
+.collaborators__heading, .collaborators__buttons { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
+.collaborators__list { list-style: none; padding: 0; margin: 1rem 0; display: grid; gap: .75rem; }
+.collaborators__list li, .collaborators__review { padding: 1rem; border: 1px solid var(--mud-palette-divider); border-radius: var(--mud-default-borderradius); overflow-wrap: anywhere; }
+.collaborators__list p { margin: .35rem 0; }
+.collaborators__status { margin-inline-start: .75rem; color: var(--mud-palette-text-secondary); }
+.collaborators__buttons { justify-content: flex-start; margin-top: .75rem; }
+.collaborators ::deep .collaborators__action { min-height: 44px; }
