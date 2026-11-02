@@ -181,6 +181,48 @@ public sealed class CaseMonitoringQueueTests
     }
 
     [IntakePostgresFact]
+    public async Task UnfulfilledAssistance_RemainsVisibleInAssignedAndOpenQueuesWithReason()
+    {
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var grantGroupId = await SeedQueueScopeAsync(db,
+            [CaseOperation.ReadCase, CaseOperation.ManageAssistance]);
+        using var keyRing = SyntheticQueueKeyRing.Create();
+        using var provider = ProtectedPayloadDataProtectionProviderFactory.Create(
+            keyRing.CreateOptions(), new TestHostEnvironment(Environments.Production));
+        var caseId = await SeedQueueCaseAsync(db, keyRing.CreateOptions(), provider);
+        await using var cleanup = new QueueCleanup(caseId, grantGroupId);
+        var actor = CreateOfficer("officer-1");
+        var assistanceId = Guid.NewGuid();
+
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, (await ProcessCommandAsync(db, actor, caseId,
+            new RequestAssistanceCommand(Guid.NewGuid(), 2, assistanceId, "Transport support", "officer-1",
+                null, null, DateTimeOffset.UtcNow), keyRing.CreateOptions(), provider)).Status);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, (await ProcessCommandAsync(db, actor, caseId,
+            new UpdateAssistanceCommand(Guid.NewGuid(), 3, assistanceId, AssistanceStatus.Accepted,
+                "Request accepted", null, null, null, DateTimeOffset.UtcNow), keyRing.CreateOptions(), provider)).Status);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, (await ProcessCommandAsync(db, actor, caseId,
+            new UpdateAssistanceCommand(Guid.NewGuid(), 4, assistanceId, AssistanceStatus.Unfulfilled,
+                "No eligible transport provider was available", null, null, null, DateTimeOffset.UtcNow),
+            keyRing.CreateOptions(), provider)).Status);
+
+        var projection = await db.ManagedCaseAssistance.AsNoTracking().SingleAsync(item => item.AssistanceId == assistanceId);
+        Assert.Equal(AssistanceStatus.Unfulfilled, projection.Status);
+        Assert.Equal("No eligible transport provider was available", projection.LastNote);
+
+        var assigned = await CreateQuery(db).GetAssignedAsync(actor, null, QueryNowUtc, CancellationToken.None);
+        var assignedItem = Assert.Single(assigned.Items);
+        Assert.Equal("Unfulfilled", assignedItem.Status);
+        Assert.Contains("Transport support", assignedItem.Summary, StringComparison.Ordinal);
+        Assert.Contains("No eligible transport provider was available", assignedItem.Summary, StringComparison.Ordinal);
+
+        var open = await CreateQuery(db).GetOpenAsync(actor, null, QueryNowUtc, CancellationToken.None);
+        var openItem = Assert.Single(open.Items);
+        Assert.Equal(assistanceId, openItem.WorkItemId);
+        Assert.Equal("Unfulfilled", openItem.Status);
+        Assert.Contains("No eligible transport provider was available", openItem.Summary, StringComparison.Ordinal);
+    }
+
+    [IntakePostgresFact]
     public async Task UnreadableCase_SkippedNeverListed()
     {
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();

@@ -241,7 +241,7 @@ public sealed class CommandBackedWorkManagementClient(
     {
         if (!Enum.TryParse<WorkManagementStatus>(item.Status, ignoreCase: false, out var status) ||
             status is not (WorkManagementStatus.Requested or WorkManagementStatus.Accepted or
-                WorkManagementStatus.InProgress or WorkManagementStatus.Provided))
+                WorkManagementStatus.InProgress or WorkManagementStatus.Provided or WorkManagementStatus.Unfulfilled))
         {
             return null;
         }

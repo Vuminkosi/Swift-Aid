@@ -152,7 +152,8 @@ public sealed class PostgresCaseMonitoringQueueStore(SwiftAidDbContext dbContext
         ValidateTake(take);
         return await GetAssistanceAsync(item => item.ResponsibleActorId == actorId &&
             (item.Status == AssistanceStatus.Requested || item.Status == AssistanceStatus.Accepted ||
-             item.Status == AssistanceStatus.InProgress || item.Status == AssistanceStatus.Provided), take, ct)
+             item.Status == AssistanceStatus.InProgress || item.Status == AssistanceStatus.Provided ||
+             item.Status == AssistanceStatus.Unfulfilled), take, ct)
             .ConfigureAwait(false);
     }
 
@@ -160,7 +161,7 @@ public sealed class PostgresCaseMonitoringQueueStore(SwiftAidDbContext dbContext
     {
         ValidateTake(take);
         return GetAssistanceAsync(item => item.Status != AssistanceStatus.ReceiptConfirmed &&
-            item.Status != AssistanceStatus.Unfulfilled && item.Status != AssistanceStatus.Cancelled, take, ct);
+            item.Status != AssistanceStatus.Cancelled, take, ct);
     }
 
     private async Task<IReadOnlyList<MonitoringQueueCandidate>> GetAssistanceAsync(
@@ -174,7 +175,7 @@ public sealed class PostgresCaseMonitoringQueueStore(SwiftAidDbContext dbContext
             .Take(take)
             .Select(item => new
             {
-                item.CaseId, item.AssistanceId, item.Need, item.ResponsibleActorId,
+                item.CaseId, item.AssistanceId, item.Need, item.LastNote, item.ResponsibleActorId,
                 item.DueAtUtc, item.Status, item.LastEventVersion,
                 RecordedAtUtc = _dbContext.CaseEvents
                     .Where(journal => journal.CaseId == item.CaseId && journal.AggregateVersion == item.LastEventVersion)
@@ -185,7 +186,10 @@ public sealed class PostgresCaseMonitoringQueueStore(SwiftAidDbContext dbContext
 
         return rows.Where(item => item.RecordedAtUtc.HasValue).Select(item => new MonitoringQueueCandidate(
             item.CaseId, nameof(MonitoringQueueKind.Assistance), item.AssistanceId,
-            item.Need, item.ResponsibleActorId, item.DueAtUtc, item.Status.ToString(),
+            item.Status == AssistanceStatus.Unfulfilled
+                ? $"{item.Need} - Unfulfilled: {item.LastNote}"
+                : item.Need,
+            item.ResponsibleActorId, item.DueAtUtc, item.Status.ToString(),
             item.RecordedAtUtc!.Value, item.LastEventVersion)).ToArray();
     }
 

@@ -17,6 +17,7 @@
     private static readonly Guid CaseId = Guid.Parse("b2210000-2222-4222-8222-222222222222");
     private static readonly Guid ReceiptAssistanceId = Guid.Parse("a3310000-3333-4333-8333-333333333333");
     [SupplyParameterFromQuery(Name = "Receipt")] public bool ReceiptMode { get; set; }
+    [SupplyParameterFromQuery(Name = "Unfulfilled")] public bool UnfulfilledMode { get; set; }
     private bool _ready;
     private string _requestResult = "Pending";
     private IReadOnlyList<OperationsWorkItem> _items = Array.Empty<OperationsWorkItem>();
@@ -30,6 +31,14 @@
                 OperationsWorkKind.Assistance, OperationsWorkStatus.Provided, OperationsAssignmentStatus.AssignedToYou,
                 "Transport: Synthetic transport arranged", DateTimeOffset.UtcNow, null,
                 [OperationsWorkAction.ConfirmAssistanceReceived], [], null)];
+        }
+        else if (UnfulfilledMode && _items.Count == 0)
+        {
+            _requestResult = "Unfulfilled";
+            _items = [new OperationsWorkItem(CaseId, $"ast:{ReceiptAssistanceId:D}", 9, "SYNTHETIC-CASE",
+                OperationsWorkKind.Assistance, OperationsWorkStatus.Unfulfilled, OperationsAssignmentStatus.AssignedToYou,
+                "Transport support - Unfulfilled: No eligible provider was available", DateTimeOffset.UtcNow, null,
+                [], [], null)];
         }
     }
 

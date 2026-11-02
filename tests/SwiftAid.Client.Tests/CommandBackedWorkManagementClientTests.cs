@@ -113,6 +113,24 @@ public sealed class CommandBackedWorkManagementClientTests
     }
 
     [Fact]
+    public async Task Assistance_unfulfilled_remains_visible_without_available_mutation_actions()
+    {
+        var monitoring = new StubMonitoringClient(assistance: new MonitoringQueueItem(
+            CaseId, MonitoringQueueKind.Assistance, AssistanceId,
+            "Transport support - Unfulfilled: Provider unavailable", "owner-actor-1",
+            null, "Unfulfilled", false, DateTimeOffset.UtcNow, 8));
+        var client = new CommandBackedWorkManagementClient(new StubCommandClient(), monitoring, new StubTimelineClient());
+
+        var result = await client.GetAsync(CaseId,
+            new WorkManagementQuery(new PageRequest(1, 25), WorkManagementKind.Assistance));
+
+        var item = Assert.Single(result.Value!.Items.Items);
+        Assert.Equal(WorkManagementStatus.Unfulfilled, item.Status);
+        Assert.Contains("Provider unavailable", item.Summary, StringComparison.Ordinal);
+        Assert.Empty(item.AvailableActions);
+    }
+
+    [Fact]
     public async Task Assistance_request_uses_stable_work_key_and_current_accountable_owner()
     {
         var commands = new StubCommandClient();

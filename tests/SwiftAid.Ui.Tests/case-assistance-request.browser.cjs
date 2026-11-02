@@ -67,7 +67,20 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `receipt horizontal overflow at ${width}px`);
             assert.deepEqual(errors, [], `receipt browser errors at ${width}px`);
         }
-        console.log('PASS synthetic assistance request and receipt workflows at 390px and 1280px');
+        for (const width of [390, 1280]) {
+            await page.setViewportSize({ width, height: 900 });
+            await page.goto(`${base}/case-assistance-fixture?Unfulfilled=true`);
+            await page.waitForFunction(() => document.querySelector('#fixture-ready')?.textContent === 'True');
+            await page.getByRole('tab', { name: 'Assistance', exact: true }).click();
+            const details = page.getByLabel('Selected work details');
+            await details.getByText('Assistance not fulfilled', { exact: true }).waitFor();
+            assert(await details.getByText('Transport support - Unfulfilled: No eligible provider was available', { exact: true }).isVisible());
+            await details.getByText('Actions are unavailable for this item.', { exact: true }).waitFor();
+            assert.equal(await page.locator('#request-result').innerText(), 'Unfulfilled');
+            assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `unfulfilled horizontal overflow at ${width}px`);
+            assert.deepEqual(errors, [], `unfulfilled browser errors at ${width}px`);
+        }
+        console.log('PASS synthetic assistance request, receipt, and unmet-need visibility at 390px and 1280px');
     } finally {
         await browser?.close();
         host.kill();
