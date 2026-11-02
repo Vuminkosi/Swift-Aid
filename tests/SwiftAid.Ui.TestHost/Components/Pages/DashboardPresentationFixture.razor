@@ -1,0 +1,31 @@
+@page "/dashboard-presentation-fixture"
+@using SwiftAid.UI.Components.Surfaces.Operations
+@using SwiftAid.UI.Components.Theme
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<main style="max-width:1400px;margin:auto;padding:1rem" data-fixture-ready="@_ready.ToString().ToLowerInvariant()">
+    <MudButton OnClick="ToggleCategories">Toggle condition categories</MudButton>
+    <OperationsDashboard Overview="Overview" OverviewState="OperationsSurfaceState.Populated"
+                         MapState="OperationsSurfaceState.Populated" MapAreas="_areas" RegionOptions="_areas" RegionCode="SZ" />
+</main>
+
+@code {
+    private bool _ready;
+    private bool _multiple;
+    private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
+    private readonly OperationsMapSurface.AreaAggregateView[] _areas =
+        [new("SZ", "Eswatini", OperationsMapSurface.AggregatePrecision.Country, 195, null, null, false, null, Now)];
+    private DashboardOverviewView Overview => new("Eswatini", DashboardSectorView.Human,
+        DashboardCompletenessView.Complete, DashboardFreshnessView.Current, Now, Now.AddHours(1), [],
+        _multiple
+            ? [new(DashboardSectorView.Human, "Reported fever", "For review", 120, null, null, null, false),
+               new(DashboardSectorView.Human, "Reported cough", "For review", 75, null, null, null, false)]
+            : [new(DashboardSectorView.Human, "Human cases", "Unclassified", 195, null, null, null, false)], [], []);
+
+    private void ToggleCategories() => _multiple = !_multiple;
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { _ready = true; StateHasChanged(); }
+    }
+}

@@ -1,4 +1,5 @@
 @using SwiftAid.Contracts.Ellai
+@using System.Globalization
 @implements IEllaiUiContextProvider
 <SwiftAid.UI.Ellai.Guidance.EllaiSemanticContext Provider="this" />
 
@@ -167,6 +168,24 @@
                                         Title="@(IsPartial ? "Condition totals incomplete" : "No condition reports")"
                                         Description="@(IsPartial ? "Some condition totals are unavailable for this scope." : "There are no condition reports in this selected scope.")" />
                 }
+                else if (conditionGroups.Count == 1)
+                {
+                    var group = conditionGroups[0];
+                    <div class="operations-dashboard__condition-summary">
+                        <span class="operations-dashboard__condition-classification">@group.ClassificationLabel</span>
+                        <div class="operations-dashboard__condition-counts">
+                            @if (Sector != DashboardSectorView.Animal)
+                            {
+                                <div><strong>@(group.Human is { IsSuppressed: false, HumanCaseCount: { } human } ? human.ToString("N0") : SeriesUnavailableLabel(group.Human))</strong><span>Human cases</span></div>
+                            }
+                            @if (Sector != DashboardSectorView.Human)
+                            {
+                                <div><strong>@(group.Animal is { IsSuppressed: false, AnimalReportCount: { } animal } ? animal.ToString("N0") : SeriesUnavailableLabel(group.Animal))</strong><span>Animal reports</span></div>
+                            }
+                        </div>
+                        <p>@group.CategoryLabel <span aria-hidden="true">·</span> @PeriodLabel</p>
+                    </div>
+                }
                 else
                 {
                     <div class="operations-dashboard__chart-frame" role="group" aria-label="Reported conditions by selected health sector">
@@ -184,7 +203,7 @@
                                 <div class="operations-dashboard__chart-grid" aria-hidden="true">
                                     @foreach (var tick in chartTicks)
                                     {
-                                        <span class="operations-dashboard__chart-grid-line" style="bottom:@ChartTickPosition(tick)%"></span>
+                                        <span class="operations-dashboard__chart-grid-line" style="bottom:@ChartTickPosition(tick).ToString("0.###", CultureInfo.InvariantCulture)%"></span>
                                     }
                                 </div>
                                 <div class="operations-dashboard__vertical-chart @(Sector == DashboardSectorView.OneHealth ? "operations-dashboard__vertical-chart--one-health" : "")" style="@($"--condition-count:{Math.Min(conditionGroups.Count, 8)}")" role="list" aria-label="Condition totals">
@@ -204,7 +223,7 @@
                                                 <div class="operations-dashboard__bar-local-grid" aria-hidden="true">
                                                     @foreach (var tick in chartTicks)
                                                     {
-                                                        <span class="operations-dashboard__chart-grid-line" style="bottom:@ChartTickPosition(tick)%"></span>
+                                                        <span class="operations-dashboard__chart-grid-line" style="bottom:@ChartTickPosition(tick).ToString("0.###", CultureInfo.InvariantCulture)%"></span>
                                                     }
                                                 </div>
                                                 @if (Sector != DashboardSectorView.Animal)
@@ -222,7 +241,7 @@
                                                             <span class="operations-dashboard__bar-track" aria-hidden="true">
                                                                 @if (group.Human.HumanCaseCount.Value > 0)
                                                                 {
-                                                                    <span class="operations-dashboard__bar-fill operations-dashboard__bar-fill--human" style="height:@BarHeight(group.Human.HumanCaseCount.Value)%"></span>
+                                                                    <span class="operations-dashboard__bar-fill operations-dashboard__bar-fill--human" style="height:@BarHeight(group.Human.HumanCaseCount.Value).ToString("0.###", CultureInfo.InvariantCulture)%"></span>
                                                                 }
                                                             </span>
                                                         </div>
@@ -243,7 +262,7 @@
                                                             <span class="operations-dashboard__bar-track" aria-hidden="true">
                                                                 @if (group.Animal.AnimalReportCount.Value > 0)
                                                                 {
-                                                                    <span class="operations-dashboard__bar-fill operations-dashboard__bar-fill--animal" style="height:@BarHeight(group.Animal.AnimalReportCount.Value)%"></span>
+                                                                    <span class="operations-dashboard__bar-fill operations-dashboard__bar-fill--animal" style="height:@BarHeight(group.Animal.AnimalReportCount.Value).ToString("0.###", CultureInfo.InvariantCulture)%"></span>
                                                                 }
                                                             </span>
                                                         </div>
@@ -488,7 +507,7 @@
     private string BarLabelTop(long value)
     {
         var labelTopRem = 1.2 + (100 - BarHeight(value)) / 100d * 8.8 - 1.1;
-        return $"{Math.Max(0.05, labelTopRem):0.##}rem";
+        return Math.Max(0.05, labelTopRem).ToString("0.##", CultureInfo.InvariantCulture) + "rem";
     }
 
     private static string ChartValueLabel(long value)

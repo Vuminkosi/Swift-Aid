@@ -4399,3 +4399,9 @@ The real create-and-submit request reached `/report` but failed target-state val
 - Shared report anchors now surround the visible subject choices, editable narrative, country selector and processing confirmation. Semantic IDs and server evidence/authorization rules are unchanged. This covers web and MAUI shared markup.
 - PASS: TestHost build (`dotnet build ... --no-restore -m:1 -nr:false -p:WasmBuildNative=false`), and `node tests/SwiftAid.Ui.Tests/ellai-report.browser.cjs` at 1280/390 pixels, including actual control containment, confirmation Ready state, validation, save failure/success and synthetic receipt behavior. The added anchor regression failed before the correction.
 - The real HTTPS Gateway/Muse walkthrough generated eight steps and reached confirmations but repeatedly returned Stale before this correction. Full live receipt acceptance after rebuild, tour narration, attached composer and physical-device behavior remain NOT VERIFIED.
+
+### Compact dashboard condition and map presentation — 2 November 2026
+
+- Single-condition results use a compact count summary instead of a large mostly empty chart. Multi-condition charts retain count scales and now use defined MudBlazor palette colours and culture-invariant CSS percentages. Privacy-suppressed values remain suppressed.
+- Dashboard panels no longer stretch the condition card to match map height. Compact maps omit the redundant selected-country detail card; the full surveillance detail view is unchanged.
+- PASS: TestHost build and `node tests/SwiftAid.Ui.Tests/dashboard-presentation.browser.cjs` at 1280px light/390px dark. Verified compact height, visible category bars, map link and no horizontal page overflow. Screenshots visually reviewed in `.codex/dashboard-{summary,chart}-{1280,390}.png`. These are synthetic presentation checks, not live surveillance-data validation; basemap tile delivery and physical-device rendering NOT VERIFIED.

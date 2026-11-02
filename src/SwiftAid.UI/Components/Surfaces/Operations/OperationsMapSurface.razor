@@ -56,7 +56,7 @@
             <OperationsStreetMap Country="@(FocusCountry ?? "SZ")" Points="@(Details?.Points ?? [])"
                                  @bind-ShowHuman="_showHuman" @bind-ShowAnimal="_showAnimal" Focus="Focus" />
 
-            @if (SelectedArea is not null)
+            @if (!CompactPreview && SelectedArea is not null)
             {
                 <div class="operations-map__selection" role="status" aria-live="polite" aria-atomic="true">
                     <MudText Typo="Typo.subtitle2">@DisplayAreaLabel(SelectedArea.AreaLabel)</MudText>
