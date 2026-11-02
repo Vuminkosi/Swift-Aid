@@ -61,6 +61,33 @@ This verifies packet validation and local consumer regressions, not microphone/d
 
 The shared C# and browser JavaScript capture gates reject a frame that would exceed the ESV1 ten-minute sample-position limit before advancing their positions. Each accepts the last valid frame and a heartbeat at the limit; the next frame fails without mutating position. JavaScript also rejects invalid initial stream identities/positions. EV-072 and EV-073 record the focused producer-boundary evidence. Client recovery/UX after the limit and live capture are not covered.
 
+## Ellai read-tool registry and dispatch - 3 November 2026
+
+`EllaiToolNames.All` is the canonical advertised allowlist (18 names). `TryResolveCanonical` accepts two compatibility aliases (`ellai_voice_capability` and `ellai_guidance_session`) and resolves them to canonical handlers; aliases are not advertised. `InvokeAsync` applies session/profile allowlisting, a remaining-call budget, required scope, an eight-argument cap, bounded argument checks, reasoning-text consent (with the documented public-product-help exception), policy authorization, and the common result-byte bound before dispatch. Results share `EllaiToolResult` fields: tool name, allowed/denial reason, evidence, summary, item count, truncation and reason code. This catalog is source-derived and does not claim provider-schema registration or live model execution.
+
+| Canonical tool(s) | Arguments advertised to model | Dispatch / data boundary | Version or persistence evidence |
+|---|---|---|---|
+| `ellai_state` | projection, limit, optional country/workflow/sort | `ReadStateAsync`; feature or authorized owned-case queue | Reads current application projection; no independent wire schema identified in broker. |
+| `ellai_evidence` | ref, optional field | Broker returns bounded versioned evidence references | Evidence references carry provenance/version metadata; backing source varies by reference. |
+| `ellai_topic` | ref | `ReadTopicsAsync`; session topic/checkpoint service | Durable topic/checkpoint entities exist; see topic service and persistence entities. |
+| `ellai_capabilities` | optional feature | Static/current capability descriptors | No separate serialized schema identified. |
+| `ellai_receipts` | optional receipt | `ReadReceiptsAsync`; approval receipt store, session-bound | Durable approval store; result is minimized evidence. |
+| `ellai_productfacts` | optional topic | `ReadProductFacts`; versioned nonmedical product-fact catalog | Catalog supplies versioned facts; no external model call. |
+| `ellai_now` | none | Server UTC clock | Result uses round-trip UTC and Unix milliseconds; ephemeral. |
+| `ellai_docs_search` | q, optional limit | Approved technical documentation index | Read-only curated reference; no raw repository source. |
+| `ellai_docs_get` | exact section | Approved section retrieval | Section identifier and provenance returned; read-only. |
+| `ellai_ui_catalogue` | optional feature/goal/limit | `ReadUiCatalogueAsync`; entitlement-filtered UI registry | Registry/catalogue and UI contract versions are checked by admission. |
+| `ellai_ui_observe` | controls, optional view/context/feature | `ReadUiObserveAsync`; client-posted mounted-control observation | Client observation is server-stamped for freshness; not a durable UI schema. |
+| `ellai_ingestion_schema` | none | Canonical CSV capture schema and authority guidance | Static contract description; performs no submission. |
+| `ellai_validate_observations` | observations_json | Bounded original-string validation; no inference or submission | JSON-array parser and CSV field bound; no persistence. |
+| `ellai_locations` | q, optional country/limit | `ReadLocationsAsync`; public geographic registry | Read-only registry lookup; user selects a match. |
+| `ellai_import_destinations` | none | `ReadImportsAsync`; current actor-authorized destinations | Reads import workspace authorization; no case contents. |
+| `ellai_imports` | workspace_id, organization_id, country | `ReadImportsAsync`; caller's recent imports in one permitted destination | Import store read; returns minimized state. |
+| `ellai_import_status` | import_id | `ReadImportsAsync`; caller's durable import status/counts | Durable import store read; does not submit or return case contents. |
+| `ellai_classification_evidence` | case_id | `ReadClassificationAsync`; authorized persisted evidence for current case revision | Read-only classification query; no inference, diagnosis, or clinical probability. |
+
+Source anchors: `src/SwiftAid.Application/Ellai/Tools/EllaiToolBroker.cs` (`EllaiToolNames`, `TryResolveCanonical`, `ToolDescriptions`, `InvokeAsync`); `src/SwiftAid.Application/Ellai/UiIntelligence/EllaiUiRegistry.cs`; `src/SwiftAid.Infrastructure/Persistence/Ellai/` (durable session/topic/receipt stores). The catalog exposes a concrete crosswalk for the broker surface, while remaining gaps include formal per-tool argument/result schemas, exhaustive test mapping, and source-to-consumer/persistence linkage for every evidence reference. These gaps keep SW-01-004 partial.
+
 ## Gaps and follow-up
 
 - Build a generated or maintained crosswalk of every command/event/job/tool/audio/UI/public-projection type to schema version, authoritative owner, producer, consumer, persistence form, compatibility policy and relevant tests.
@@ -68,5 +95,6 @@ The shared C# and browser JavaScript capture gates reject a frame that would exc
 - Document the worker job type registry and distinguish envelope validation from execution, durable acknowledgement and retry behavior.
 - Trace each audio/session version from client capture through Gateway, storage, response preparation and cancellation/error paths.
 - Verify projection contracts and serialization/privacy boundaries against their routes and consumers.
+- Add formal per-tool argument/result schemas and map each tool to focused authorization, denial, truncation, and persistence tests; the source registry/dispatch inventory above is not a substitute for those checks.
 
 The v1 event schema was changed in this reconciliation; no migration or package change was needed. Current ownership for broader shared contract/schema work remains to be confirmed from active handoffs (BL-005).
