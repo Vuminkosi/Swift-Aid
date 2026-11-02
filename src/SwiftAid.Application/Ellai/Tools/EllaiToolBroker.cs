@@ -710,7 +710,7 @@ public sealed class EllaiToolBroker
         var requested = request.Arguments.GetValueOrDefault("feature", defaultFeature);
         // Existing feature-specific sessions keep their metadata boundary. New capabilities
         // require fresh server authority, including when the session itself names navigation.
-        if (requested is EllaiNavigationManifest.FeatureId or EllaiDashboardUiManifest.FeatureId)
+        if (requested is EllaiNavigationManifest.FeatureId or EllaiDashboardUiManifest.FeatureId or EllaiCaseListUiManifest.FeatureId)
             return authority.Features.Contains(requested) ? requested : null;
         return requested == defaultFeature || authority.Features.Contains(requested) ? requested : null;
     }

@@ -216,7 +216,9 @@ public partial class EllaiGuidanceHost
             if (!IsCurrent()) return;
             var destination = result?.NavigationId == EllaiReportUiManifest.NavigationId ? "/report" :
                 _guidanceFeatureId == EllaiDashboardUiManifest.FeatureId && result?.NavigationId == EllaiDashboardUiManifest.NavigationId
-                    ? EllaiNavigationManifest.ResolveRoute(EllaiDashboardUiManifest.NavigationId) : null;
+                    ? EllaiNavigationManifest.ResolveRoute(EllaiDashboardUiManifest.NavigationId) :
+                _guidanceFeatureId == EllaiCaseListUiManifest.FeatureId && result?.NavigationId == EllaiCaseListUiManifest.NavigationId
+                    ? EllaiNavigationManifest.ResolveRoute(EllaiCaseListUiManifest.NavigationId) : null;
             if (result?.Status == "NeedsNavigation" && destination is not null)
             {
                 // This is a registered public destination, never a model-supplied URL.
@@ -225,7 +227,12 @@ public partial class EllaiGuidanceHost
                 {
                     await Task.Delay(250, token);
                     await ReportCurrentUiAsync(token);
-                    var entry = _guidanceFeatureId == EllaiDashboardUiManifest.FeatureId ? "dashboard.overview" : "report.entry";
+                    var entry = _guidanceFeatureId switch
+                    {
+                        EllaiDashboardUiManifest.FeatureId => "dashboard.overview",
+                        EllaiCaseListUiManifest.FeatureId => "case-list.overview",
+                        _ => "report.entry",
+                    };
                     if (_latestGuidanceObservation?.MountedControlIds.Contains(entry) == true) break;
                 }
                 if (!IsCurrent()) return;
@@ -247,7 +254,7 @@ public partial class EllaiGuidanceHost
                 _guidanceNotice = "Guidance is not ready yet. Try again when the page has loaded.";
                 return;
             }
-            var anchors = EllaiReportUiManifest.All.Concat(EllaiNavigationManifest.Controls).Concat(EllaiDashboardUiManifest.Controls)
+            var anchors = EllaiReportUiManifest.All.Concat(EllaiNavigationManifest.Controls).Concat(EllaiDashboardUiManifest.Controls).Concat(EllaiCaseListUiManifest.Controls)
                 .ToDictionary(c => c.ControlId, c => c.AnchorBindingKey);
             if (plan.Steps.Any(step => step.ControlId is null || !anchors.ContainsKey(step.ControlId)))
             {

@@ -1,10 +1,13 @@
+@using SwiftAid.Contracts.Ellai
+@implements IEllaiUiContextProvider
+<SwiftAid.UI.Ellai.Guidance.EllaiSemanticContext Provider="this" />
 @using SwiftAid.UI.Components.Theme
 
 <section class="operations-case-queue" aria-labelledby="case-queue-title">
     <div class="operations-case-queue__header">
         <div>
             <MudText Typo="Typo.overline" Color="Color.Secondary" Class="operations-case-queue__eyebrow">Officer workspace</MudText>
-            <MudText Typo="Typo.h4" HtmlTag="h1" id="case-queue-title" Class="operations-case-queue__title">@Title</MudText>
+            <MudText Typo="Typo.h4" HtmlTag="h1" id="case-queue-title" data-ellai-control="case-list.overview" data-bonboarding-anchor="ellai-case-list-overview" Class="operations-case-queue__title">@Title</MudText>
             <MudText Typo="Typo.body2" Color="Color.Secondary" Class="operations-case-queue__description">@Description</MudText>
         </div>
         <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">@Actions</MudStack>
@@ -15,13 +18,13 @@
         @if (FilterOptions?.CanFilterSearch != false)
         {
             <MudTextField T="string" Value="@Query.Search" ValueChanged="SearchChangedAsync" Immediate="true"
-                          Label="Search case reference, country or status" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Label="Search case reference, country or status" data-ellai-control="case-list.search" data-bonboarding-anchor="ellai-case-list-search" Variant="Variant.Outlined" Margin="Margin.Dense"
                           Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Clearable="true" />
         }
         @if (FilterOptions?.CanFilterSector == true)
         {
             <MudSelect T="SectorKind?" Value="@Query.Sector" ValueChanged="SectorChangedAsync"
-                       Label="Human or animal" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                       Label="Human or animal" data-ellai-control="case-list.sector" data-bonboarding-anchor="ellai-case-list-sector" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
                 @foreach (var option in FilterOptions.Sectors)
                 {
                     <MudSelectItem T="SectorKind?" Value="@ParseSector(option.Key)">@option.Label</MudSelectItem>
@@ -31,7 +34,7 @@
         @if (FilterOptions?.CanFilterWorkflow == true)
         {
             <MudSelect T="string" Value="@Query.WorkflowKey" ValueChanged="WorkflowChangedAsync"
-                       Label="Status" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                       Label="Status" data-ellai-control="case-list.status" data-bonboarding-anchor="ellai-case-list-status" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
                 @foreach (var option in FilterOptions.Workflows)
                 {
                     <MudSelectItem Value="@option.Key">@option.Label</MudSelectItem>
@@ -41,7 +44,7 @@
         @if (FilterOptions?.CanFilterCountry == true)
         {
             <MudSelect T="string" Value="@Query.CountryCode" ValueChanged="CountryChangedAsync"
-                       Label="Country" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                       Label="Country" data-ellai-control="case-list.country" data-bonboarding-anchor="ellai-case-list-country" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
                 @foreach (var option in FilterOptions.Countries)
                 {
                     <MudSelectItem Value="@option.Key">@option.Label</MudSelectItem>
@@ -51,7 +54,7 @@
         @if (FilterOptions?.CanFilterRegion == true)
         {
             <MudSelect T="string" Value="@Query.RegionKey" ValueChanged="RegionChangedAsync"
-                       Label="Region" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                       Label="Region" data-ellai-control="case-list.region" data-bonboarding-anchor="ellai-case-list-region" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
                 @foreach (var option in FilterOptions.Regions)
                 {
                     <MudSelectItem Value="@option.Key">@option.Label</MudSelectItem>
@@ -61,7 +64,7 @@
         @if (FilterOptions?.CanFilterAssignee == true)
         {
             <MudSelect T="string" Value="@Query.AssigneeKey" ValueChanged="AssigneeChangedAsync"
-                       Label="Assigned worker" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                       Label="Assigned worker" data-ellai-control="case-list.assignee" data-bonboarding-anchor="ellai-case-list-assignee" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
                 @foreach (var option in FilterOptions.Assignees)
                 {
                     <MudSelectItem Value="@option.Key">@option.Label</MudSelectItem>
@@ -71,7 +74,7 @@
         @if (FilterOptions?.CanFilterReportedCategory == true)
         {
             <MudSelect T="string" Value="@Query.ReportedCategoryKey" ValueChanged="CategoryChangedAsync"
-                       Label="Reported category" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                       Label="Reported category" data-ellai-control="case-list.category" data-bonboarding-anchor="ellai-case-list-category" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
                 @foreach (var option in FilterOptions.ReportedCategories)
                 {
                     <MudSelectItem Value="@option.Key">@option.Label</MudSelectItem>
@@ -80,22 +83,22 @@
         }
         @if (FilterOptions?.CanFilterUpdatedDate == true)
         {
-            <MudDatePicker Date="@UpdatedFromDate" DateChanged="UpdatedFromChangedAsync" Label="Updated from" Clearable="true" />
-            <MudDatePicker Date="@UpdatedToDate" DateChanged="UpdatedToChangedAsync" Label="Updated to" Clearable="true" />
+            <MudDatePicker Date="@UpdatedFromDate" DateChanged="UpdatedFromChangedAsync" Label="Updated from" data-ellai-control="case-list.from" data-bonboarding-anchor="ellai-case-list-from" Clearable="true" />
+            <MudDatePicker Date="@UpdatedToDate" DateChanged="UpdatedToChangedAsync" Label="Updated to" data-ellai-control="case-list.to" data-bonboarding-anchor="ellai-case-list-to" Clearable="true" />
         }
         <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="ToggleSort"
                    StartIcon="@((Query.NewestFirst) ? Icons.Material.Filled.ArrowDownward : Icons.Material.Filled.ArrowUpward)"
-                   aria-label="Change case update sorting order">
+                   aria-label="Change case update sorting order" data-ellai-control="case-list.sort" data-bonboarding-anchor="ellai-case-list-sort">
             @(Query.NewestFirst ? "Newest first" : "Oldest first")
         </MudButton>
         @if (HasActiveFilters)
         {
-            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.FilterAltOff" OnClick="ClearFiltersAsync" aria-label="Clear case filters">Clear filters</MudButton>
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.FilterAltOff" OnClick="ClearFiltersAsync" aria-label="Clear case filters" data-ellai-control="case-list.clear" data-bonboarding-anchor="ellai-case-list-clear">Clear filters</MudButton>
         }
         @if (OnRetry.HasDelegate)
         {
             <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Primary" OnClick="OnRetry"
-                           aria-label="Refresh case queue" />
+                           aria-label="Refresh case queue" data-ellai-control="case-list.refresh" data-bonboarding-anchor="ellai-case-list-refresh" />
         }
     </div>
     </MudHidden>
@@ -105,13 +108,13 @@
             @if (FilterOptions?.CanFilterSearch != false)
             {
                 <MudTextField T="string" Value="@Query.Search" ValueChanged="SearchChangedAsync" Immediate="true" DebounceInterval="250"
-                              Placeholder="Search cases..." Variant="Variant.Outlined" Margin="Margin.Dense"
+                              Placeholder="Search cases..." data-ellai-control="case-list.mobile-search" data-bonboarding-anchor="ellai-case-list-mobile-search" Variant="Variant.Outlined" Margin="Margin.Dense"
                               Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Clearable="true"
                               aria-label="Search cases" />
             }
             <MudChipSet T="string" SelectedValue="@SelectedQuickFilter" SelectedValueChanged="QuickFilterChangedAsync"
                         SelectionMode="SelectionMode.SingleSelection" CheckMark="false"
-                        Class="operations-case-queue__quick-filters" aria-label="Filter cases by type or status">
+                        Class="operations-case-queue__quick-filters" aria-label="Filter cases by type or status" data-ellai-control="case-list.quick" data-bonboarding-anchor="ellai-case-list-quick">
                 <MudChip T="string" Value="@("all")" Color="Color.Primary">All</MudChip>
                 @if (FilterOptions?.CanFilterSector == true)
                 {
@@ -150,7 +153,7 @@
     else
     {
         <MudHidden Breakpoint="Breakpoint.MdAndDown">
-            <MudTable Items="Items" Hover="true" Dense="true" FixedHeader="true" RowsPerPage="Query.PageSize" Class="operations-case-queue__table" aria-label="Authorized cases">
+            <MudTable Items="Items" Hover="true" Dense="true" FixedHeader="true" RowsPerPage="Query.PageSize" Class="operations-case-queue__table" data-ellai-control="case-list.table" data-bonboarding-anchor="ellai-case-list-table" aria-label="Authorized cases">
                 <HeaderContent>
                     <MudTh>Case / type</MudTh><MudTh>Observations</MudTh><MudTh>Status</MudTh><MudTh>Location</MudTh><MudTh>Classification</MudTh><MudTh>Assigned to</MudTh><MudTh>Updated</MudTh><MudTh><span class="operations-case-queue__sr-only">Open case</span></MudTh>
                 </HeaderContent>
@@ -170,7 +173,7 @@
             </MudTable>
         </MudHidden>
         <MudHidden Breakpoint="Breakpoint.MdAndDown" Invert="true">
-            <section class="operations-case-queue__rows" aria-label="Authorized cases">
+            <section class="operations-case-queue__rows" data-ellai-control="case-list.cards" data-bonboarding-anchor="ellai-case-list-cards" aria-label="Authorized cases">
                 @foreach (var item in Items)
                 {
                     <article class="operations-case-queue__row" @key="item.CaseId">
@@ -205,7 +208,7 @@
         </MudHidden>
         @if (PageCount > 1)
         {
-            <MudPagination Count="@PageCount" Selected="@Query.PageNumber" SelectedChanged="PageChangedAsync" aria-label="Case list pages" />
+            <MudPagination Count="@PageCount" Selected="@Query.PageNumber" SelectedChanged="PageChangedAsync" aria-label="Case list pages" data-ellai-control="case-list.pages" data-bonboarding-anchor="ellai-case-list-pages" />
         }
         <MudText Typo="Typo.caption" Color="Color.Secondary" Class="operations-case-queue__note">Showing @Items.Count of @TotalCount cases in this list.</MudText>
     }
@@ -217,6 +220,29 @@
 </section>
 
 @code {
+    public string ComponentId => EllaiCaseListUiManifest.Definition.ComponentId;
+    public EllaiUiManifest Describe() => EllaiCaseListUiManifest.Definition;
+    public EllaiUiState GetState() => new(ComponentId, State == OperationsSurfaceState.Loading, State == OperationsSurfaceState.Error,
+        EllaiCaseListUiManifest.Controls.Select(control => new UiControlState(control.ControlId,
+            IsSemanticControlRendered(control.ControlId) ? UiObservationState.Ready : UiObservationState.Unmounted)).ToArray());
+
+    private bool IsSemanticControlRendered(string id) => id switch
+    {
+        "case-list.search" or "case-list.mobile-search" => FilterOptions?.CanFilterSearch != false,
+        "case-list.sector" => FilterOptions?.CanFilterSector == true,
+        "case-list.status" => FilterOptions?.CanFilterWorkflow == true,
+        "case-list.country" => FilterOptions?.CanFilterCountry == true,
+        "case-list.region" => FilterOptions?.CanFilterRegion == true,
+        "case-list.assignee" => FilterOptions?.CanFilterAssignee == true,
+        "case-list.category" => FilterOptions?.CanFilterReportedCategory == true,
+        "case-list.from" or "case-list.to" => FilterOptions?.CanFilterUpdatedDate == true,
+        "case-list.clear" => HasActiveFilters,
+        "case-list.refresh" => OnRetry.HasDelegate,
+        "case-list.table" or "case-list.cards" => State == OperationsSurfaceState.Populated && Items.Count > 0,
+        "case-list.pages" => State == OperationsSurfaceState.Populated && Items.Count > 0 && PageCount > 1,
+        _ => true,
+    };
+
     public enum SectorKind
     {
         Unknown,
