@@ -1,7 +1,7 @@
 # SW-05-007 follow-up audit
 
-Date: 2 November 2026  
-Branch: `interactive-ellai`  
+Date: 2 November 2026
+Branch: `interactive-ellai`
 Audited revision: `d52de0a`
 
 ## Result
