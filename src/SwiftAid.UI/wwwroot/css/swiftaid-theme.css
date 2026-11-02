@@ -1,3 +1,27 @@
+/* Bonboarding shares the application palette, including explicit theme overrides.
+   Root specificity also wins over the library's OS-preference media query. */
+:root[data-theme="agentic"] .bit-bonboarding-root,
+:root[data-theme="agentic"] .bit-bonboarding-themed {
+    color-scheme: inherit;
+    --bit-bonboarding-surface: var(--ais-bg-surface);
+    --bit-bonboarding-surface-subtle: var(--ais-bg-subtle);
+    --bit-bonboarding-text: var(--ais-text-primary);
+    --bit-bonboarding-text-muted: var(--ais-text-secondary);
+    --bit-bonboarding-border: var(--ais-border-default);
+    --bit-bonboarding-border-strong: var(--ais-border-control);
+    --bit-bonboarding-accent: var(--ais-action-primary);
+    --bit-bonboarding-accent-hover: var(--ais-action-hover);
+    --bit-bonboarding-accent-active: var(--ais-action-pressed);
+    --bit-bonboarding-accent-text: var(--ais-action-on-primary);
+    --bit-bonboarding-accent-soft: var(--ais-bg-selection);
+    --bit-bonboarding-danger: var(--ais-danger-fg);
+    --bit-bonboarding-danger-hover: var(--ais-danger-fg);
+    --bit-bonboarding-danger-text: var(--ais-bg-surface);
+    --bit-bonboarding-spotlight-ring: var(--ais-focus);
+    --bit-bonboarding-spotlight-glow: var(--ais-bg-selection);
+    --bit-bonboarding-font: var(--ais-font-sans);
+}
+
 :root[data-theme="agentic"] {
     color-scheme: light;
     /* Agentic Interface System semantic tokens (single source of truth). --sa-* names stay as compatibility aliases. */
