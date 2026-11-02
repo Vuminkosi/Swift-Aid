@@ -558,3 +558,7 @@ SW-04-011 source/tests cover local repeated queue and in-process intake/promotio
 ## SW-05-001 managed case command verification - 2 November 2026
 
 Focused CaseAggregateTests PASS 20/20 and CaseCommandProcessorTests PASS 15/15. These cover domain replay/correction/order and application command/idempotency paths. PostgreSQL atomic journal/projection/receipt/audit/outbox tests remain gated and were not run; full rebuild/runtime flow NOT VERIFIED. Evidence EV-053/054, [audit](SW-05-001-CASE-EVENT-AUDIT.md).
+
+## SW-05-002 authorized case workspace audit - 2 November 2026
+
+Source inspection recorded in [SW-05-002 case workspace audit](SW-05-002-CASE-WORKSPACE-AUDIT.md). Authenticated Gateway queue and responsive desktop/mobile UI exist, but Gateway's 100-row source cap, Mobile's 500-row fail-closed cap, unavailable filters/owner fields, absent next-action/activity contract, and unrun live/browser/device verification keep the task PARTIAL. No new tests run. EV-055.

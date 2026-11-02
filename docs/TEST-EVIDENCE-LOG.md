@@ -75,3 +75,8 @@ The master orchestrator owns checklist status, evidence linking and regression c
 | BL-008 | Recording consent plus model/data/asset rights incomplete | Rights owner not recorded; orchestrator tracks evidence | Add source, license, provenance and consent/approval evidence per `RIGHTS-REGISTER.md` |
 
 Historical IDs in `docs/BLOCKERS.md` remain valid where present. New IDs must be unique and linked to a checklist item; do not recycle a closed ID. A documentation status never substitutes for its required runtime test or independent review.
+
+## SW-05-002 source audit — 2 November 2026
+
+Source inspection recorded in [case workspace audit](SW-05-002-CASE-WORKSPACE-AUDIT.md). No new tests run. Existing UI component tests are not rendered browser/device acceptance. EV-055.
+
