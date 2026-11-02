@@ -109,7 +109,7 @@
 
 **Exit gate:** Evidence for all applicable checks below; blockers and conditional gates explicitly accounted for.
 
-- [ ] **SW-05-001** — Verify case event stream, immutable report corrections, append-only comments, projections rebuild, expected-version and idempotent commands.
+- [ ] **SW-05-001** — Verify case event stream, immutable report corrections, append-only comments, projections rebuild, expected-version and idempotent commands. Partial: domain tests PASS 20/20 and application command tests PASS 15/15; atomic PostgreSQL journal/projection/receipt/audit/outbox suite and live rebuild remain NOT VERIFIED; [audit](docs/SW-05-001-CASE-EVENT-AUDIT.md).
 - [ ] **SW-05-002** — Provide authorized case list/search/filter/sort/pagination and accurate activity/owner/next-action information on mobile and web.
 - [ ] **SW-05-003** — Implement detail tabs: Overview, History, Follow-ups, Observations, Assistance, Discussion, Attachments and applicable escalation/action panels.
 - [ ] **SW-05-004** — Keep clinical classification, lab status, administrative workflow, outcome, operational priority and signal state distinct.

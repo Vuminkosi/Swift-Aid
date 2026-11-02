@@ -554,3 +554,7 @@ Source audit in [SW-04-010 media audit](SW-04-010-MEDIA-LIFECYCLE-AUDIT.md) foun
 ## SW-04-011/012 duplicate/replay and Android audit - 2 November 2026
 
 SW-04-011 source/tests cover local repeated queue and in-process intake/promotion replay (EV-047/049/050), but concurrent reviewers, timeout-after-live-commit and PostgreSQL attachment replay were not verified. SW-04-012 is NOT VERIFIED: prior Android evidence was Welcome only; no offline report → process death → reconnect receipt → authorized readback was performed, and guest transport remains local-only. Details EV-052, [audit](SW-04-011-012-REPLAY-DEVICE-AUDIT.md).
+
+## SW-05-001 managed case command verification - 2 November 2026
+
+Focused CaseAggregateTests PASS 20/20 and CaseCommandProcessorTests PASS 15/15. These cover domain replay/correction/order and application command/idempotency paths. PostgreSQL atomic journal/projection/receipt/audit/outbox tests remain gated and were not run; full rebuild/runtime flow NOT VERIFIED. Evidence EV-053/054, [audit](SW-05-001-CASE-EVENT-AUDIT.md).
