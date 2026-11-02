@@ -11,6 +11,7 @@ using MudBlazor;
 using MudBlazor.Services;
 using SwiftAid.Contracts.Ellai;
 using SwiftAid.UI.Components.Layout;
+using SwiftAid.UI.Components.Surfaces.Operations;
 using SwiftAid.UI.Ellai;
 using SwiftAid.UI.Ellai.Components;
 using SwiftAid.UI.Ellai.Guidance;
@@ -21,6 +22,35 @@ namespace SwiftAid.Ui.Tests;
 public sealed class AuthorizedLayoutNavigationAccessibilityTests
 {
     private const string NavigationDrawerId = "swiftaid-authorized-navigation";
+
+    [Fact]
+    public async Task CompactCaseFiltersToggleUpdatesExpandedStateWithoutChangingQuery()
+    {
+        await using var services = CreateServices(Breakpoint.Xs, out _);
+        await using var renderer = new TestRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        var host = await renderer.RenderAsync<OperationsCaseQueue>();
+        await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var originalQuery = host.Component.Query;
+            Assert.DoesNotContain("--expanded", renderer.GetElementAttribute(host.ComponentId, "case-queue-advanced-filters", "class"));
+            Assert.Equal("case-queue-advanced-filters",
+                renderer.GetRenderedAttribute(host.ComponentId, typeof(MudButton), "aria-controls"));
+            Assert.Equal("false",
+                renderer.GetRenderedAttribute(host.ComponentId, typeof(MudButton), "aria-expanded"));
+            var toggle = (EventCallback<MouseEventArgs>)renderer.GetComponentParameter(
+                host.ComponentId, typeof(MudButton), nameof(MudButton.OnClick))!;
+            await toggle.InvokeAsync(new MouseEventArgs());
+            Assert.Contains("--expanded", renderer.GetElementAttribute(host.ComponentId, "case-queue-advanced-filters", "class"));
+            Assert.Equal("true",
+                renderer.GetRenderedAttribute(host.ComponentId, typeof(MudButton), "aria-expanded"));
+            await toggle.InvokeAsync(new MouseEventArgs());
+            Assert.DoesNotContain("--expanded", renderer.GetElementAttribute(host.ComponentId, "case-queue-advanced-filters", "class"));
+            Assert.Equal(originalQuery, host.Component.Query);
+            Assert.Equal("false",
+                renderer.GetRenderedAttribute(host.ComponentId, typeof(MudButton), "aria-expanded"));
+        });
+        host.Dispose();
+    }
 
     [Fact]
     public async Task Menu_RendersTrustedRoutesAndMatchingSemanticAnchors()
@@ -317,6 +347,25 @@ public sealed class AuthorizedLayoutNavigationAccessibilityTests
         }
 
         public int GetComponentCount(int rootId, Type componentType) => FindComponentIds(rootId, componentType).Count();
+
+        public string GetElementAttribute(int rootId, string elementId, string name)
+        {
+            var frames = GetCurrentRenderTreeFrames(rootId);
+            for (var i = 0; i < frames.Count; i++)
+            {
+                if (frames.Array[i].FrameType != RenderTreeFrameType.Element) continue;
+                string? id = null;
+                string? value = null;
+                for (var j = i + 1; j < frames.Count && frames.Array[j].FrameType == RenderTreeFrameType.Attribute; j++)
+                {
+                    var attribute = frames.Array[j];
+                    if (attribute.AttributeName == "id") id = attribute.AttributeValue?.ToString();
+                    if (attribute.AttributeName == name) value = attribute.AttributeValue?.ToString();
+                }
+                if (id == elementId) return value ?? string.Empty;
+            }
+            throw new InvalidOperationException($"Element {elementId} was not rendered.");
+        }
 
         public string? GetRenderedAttribute(int rootId, Type componentType, string attributeName, string? componentId = null)
         {
