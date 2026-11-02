@@ -16,7 +16,7 @@ public sealed class EllaiModelGuidancePlanner(IEllaiTurnCompletionClient complet
 
     public async Task<(EllaiGuidancePlanDraft? Draft, EllaiTurnCompletion Usage, IReadOnlyList<string> Errors)> ComposeAsync(
         string objective, GuidanceMode mode, UiRegistrySnapshot snapshot,
-        IReadOnlyList<UiControlObservation> observations, CancellationToken ct)
+        IReadOnlyList<UiControlObservation> observations, CancellationToken ct, bool reportAlreadyReceived = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(objective);
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -34,12 +34,15 @@ public sealed class EllaiModelGuidancePlanner(IEllaiTurnCompletionClient complet
                 "appear earlier in the sequence. Never reinterpret Hidden, Disabled, Ambiguous or stale controls as available. " +
                 "Use GuideHuman with uiIntentBindingId=null for input controls whose proofPolicyId is proof-ui-validated; " +
                 "ask the user to complete the form and use its Continue control. Only the application can confirm validation. " +
+                "Use GuideHuman for humanConfirmationRequired controls: describe the existing human action, never perform it. " +
+                "When reportAlreadyReceived is true, a server-verified intake receipt already exists for this guidance request. " +
+                "Do not include report.submit or ask for another submission; guide receipt review and remaining read-only steps. " +
                 "Do not invent observed state or completion evidence. Never submit, approve, or modify a report. " +
                 "Questions have questionId, text, choiceIds. If context is insufficient, return NeedsInput with no steps. " +
                 "Keep each explanation under 1000 characters. Preserve the requested objective and mode."),
-            new("user", JsonSerializer.Serialize(new { objective, mode, snapshot.CatalogueVersion, snapshot.UiContractVersion,
+            new("user", JsonSerializer.Serialize(new { objective, mode, reportAlreadyReceived, snapshot.CatalogueVersion, snapshot.UiContractVersion,
                 controls = snapshot.Descriptors.Select(d => new { d.ControlId, d.DescriptorVersion, d.ElementKind,
-                    d.Semantics, d.ProofPolicyId, d.AllowedIntentBindings, d.NavigationId, d.GoalTags, d.ProductFactIds, d.ObjectiveId, d.RiskClass, d.SupportedModes, d.PrerequisiteIds, d.SuccessorIds }),
+                    d.Semantics, d.ProofPolicyId, d.HumanConfirmationRequired, d.AllowedIntentBindings, d.NavigationId, d.GoalTags, d.ProductFactIds, d.ObjectiveId, d.RiskClass, d.SupportedModes, d.PrerequisiteIds, d.SuccessorIds }),
                 observations = observations.Select(o => new { o.ControlId, o.DescriptorVersion, o.State, o.ViewInstanceId, o.ContextStamp, o.ObservedAtUtc }) }, Json))
         ], 2048, ct).ConfigureAwait(false);
         try

@@ -75,7 +75,8 @@ public sealed partial class EllaiGuidanceProposalAdmission(
         var checkpoint = new EllaiGuidanceCheckpoint(proposalId, admitted.Observation.ContextStamp,
             authority.ScopeEpoch, admitted.InteractionEpoch, (previous?.Version ?? 0) + 1,
             Guid.NewGuid().ToString("N"), "Generating", now.AddMinutes(2), null, null, [], [],
-            admitted.Catalogue.Descriptors[0].NavigationId) { GenerationAttempt = attempt, FeatureId = admitted.Catalogue.Descriptors[0].FeatureId, StartedAtUtc = sameProposal ? previous!.StartedAtUtc ?? now : now };
+            admitted.Catalogue.Descriptors[0].NavigationId) { GenerationAttempt = attempt, FeatureId = admitted.Catalogue.Descriptors[0].FeatureId, StartedAtUtc = sameProposal ? previous!.StartedAtUtc ?? now : now,
+                IntakeEvidence = sameProposal ? previous!.IntakeEvidence : null };
         var claimed = await sessions.TryUpdateAsync(session with
         {
             SessionVersion = session.SessionVersion + 1,
@@ -143,8 +144,11 @@ public sealed partial class EllaiGuidanceProposalAdmission(
             admitted.Observation.MountedControlIds.ToHashSet(StringComparer.Ordinal),
             admitted.Observation.ViewInstanceId, admitted.Observation.ContextStamp,
             admitted.Observation.Platform, admitted.Observation.ReceivedAtUtc, admitted.Observation.ControlStates);
+        var planningSession = await sessions.GetAsync(sessionId, ct).ConfigureAwait(false);
+        var planningCheckpoint = EllaiGuidanceCheckpoint.Deserialize(planningSession?.GuidanceJson);
+        var reportAlreadyReceived = planningCheckpoint?.ProposalId == proposalId && planningCheckpoint.IntakeEvidence is not null;
         var generated = await planner.ComposeAsync(admitted.Objective!, GuidanceMode.Navigation,
-            admitted.Catalogue, observed, ct).ConfigureAwait(false);
+            admitted.Catalogue, observed, ct, reportAlreadyReceived).ConfigureAwait(false);
         var sample = new EllaiUsageSample(sessionId, Math.Max(0, generated.Usage.PromptTokens), Math.Max(0, generated.Usage.CompletionTokens));
         ledger.Record(sample);
         await usage.RecordAsync(new(sessionId, sample.PromptTokens, sample.CompletionTokens,
@@ -155,6 +159,8 @@ public sealed partial class EllaiGuidanceProposalAdmission(
             current.Observation?.ContextStamp != admitted.Observation.ContextStamp) return new("Stale");
         if (generated.Draft is null) return new("InvalidPlan");
         if (generated.Draft.Status != GuidancePlanStatus.Ready) return new(generated.Draft.Status.ToString());
+        if (reportAlreadyReceived && generated.Draft.Steps.Any(step => step.ControlId == "report.submit"))
+            return new("InvalidPlan");
         var feature = admitted.Catalogue.Descriptors[0].FeatureId;
         var planId = "plan-" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
             System.Text.Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(new[] { sessionId, proposalId, admitted.Observation.ContextStamp })))).ToLowerInvariant();

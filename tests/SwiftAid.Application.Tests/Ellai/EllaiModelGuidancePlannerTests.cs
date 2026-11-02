@@ -42,6 +42,21 @@ public sealed class EllaiModelGuidancePlannerTests
         Assert.DoesNotContain("Draft", completion.Context);
     }
 
+    [Fact]
+    public async Task PlannerReceivesReceiptPresenceAndHumanOwnershipWithoutReceiptSecrets()
+    {
+        var completion = new InspectingCompletion();
+        await new EllaiModelGuidancePlanner(completion).ComposeAsync("help", GuidanceMode.Navigation,
+            new(EllaiReportUiManifest.All, "catalogue", "ui", false), [], default, reportAlreadyReceived: true);
+        using var json = System.Text.Json.JsonDocument.Parse(completion.Context);
+        Assert.True(json.RootElement.GetProperty("reportAlreadyReceived").GetBoolean());
+        var submit = json.RootElement.GetProperty("controls").EnumerateArray().Single(control => control.GetProperty("controlId").GetString() == "report.submit");
+        Assert.True(submit.GetProperty("humanConfirmationRequired").GetBoolean());
+        Assert.DoesNotContain("receiptId", completion.Context, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("receiptProof", completion.Context, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("clientSubmissionId", completion.Context, StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed class InspectingCompletion : IEllaiTurnCompletionClient
     {
         public string Context { get; private set; } = "";

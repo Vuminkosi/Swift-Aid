@@ -210,6 +210,33 @@ public sealed class EllaiGuidanceProposalAdmissionTests
         Assert.Equal(15, (await usage.TotalsAsync("session", default)).TotalTokens);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReplanningPreservesVerifiedReceiptBindingForTheSameProposal(bool providerFails)
+    {
+        var (service, store, observations, id) = await Fixture();
+        var checkpoint = await SeedProgress(store, observations, id);
+        var now = DateTimeOffset.UtcNow;
+        var evidence = new EllaiGuidanceIntakeEvidence(Guid.NewGuid(), Guid.NewGuid(), now.AddSeconds(-10), now);
+        checkpoint = checkpoint with { StartedAtUtc = now.AddMinutes(-1), IntakeEvidence = evidence };
+        var session = (await store.GetAsync("session", default))!;
+        await store.TryUpdateAsync(session with { SessionVersion = session.SessionVersion + 1,
+            GuidanceJson = EllaiGuidanceCheckpoint.Serialize(checkpoint) }, session.SessionVersion, default);
+        var registry = new EllaiUiRegistry();
+        EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        // SeedProgress uses an old catalogue version, requiring regeneration.
+        var planning = service.PlanAsync("session", id,
+            new("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>()),
+            new EllaiModelGuidancePlanner(new PlannerCompletion(() => providerFails ? Task.FromException(new HttpRequestException("synthetic provider failure")) : Task.CompletedTask)),
+            new EllaiUiDiscoveryService(), new EllaiGuidancePlanValidator(registry), new EllaiUsageLedger(), new InMemoryEllaiUsageStore(), default);
+        if (providerFails) await Assert.ThrowsAsync<HttpRequestException>(() => planning);
+        else Assert.Equal("Ready", (await planning).Status);
+        var restored = EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("session", default))!.GuidanceJson)!;
+        Assert.Equal(evidence, restored.IntakeEvidence);
+        Assert.Equal(checkpoint.StartedAtUtc, restored.StartedAtUtc);
+    }
+
     [Fact]
     public async Task ConcurrentPlanningUsesOneDurableLeaseAndCompletedPlanIsReused()
     {
