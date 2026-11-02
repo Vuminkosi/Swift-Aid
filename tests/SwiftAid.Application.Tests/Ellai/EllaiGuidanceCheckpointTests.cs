@@ -27,6 +27,25 @@ public sealed class EllaiGuidanceCheckpointTests
         Assert.Throws<ArgumentException>(() => EllaiGuidanceCheckpoint.Serialize(Sample() with { ContextStamp = new string('x', 100_000) }));
     }
 
+    [Theory]
+    [InlineData("cycle")]
+    [InlineData("unknown")]
+    [InlineData("unreachable")]
+    [InlineData("duplicate")]
+    public void StoredPlansRejectInvalidStepGraphs(string defect)
+    {
+        var checkpoint = Sample();
+        var first = checkpoint.Plan!.Steps[0];
+        IReadOnlyList<GuidancePlanStep> steps = defect switch
+        {
+            "cycle" => [first with { NextStepKey = "second" }, first with { StepKey = "second", NextStepKey = first.StepKey }],
+            "unknown" => [first with { NextStepKey = "unknown" }],
+            "unreachable" => [first, first with { StepKey = "orphan" }],
+            _ => [first, first],
+        };
+        Assert.Throws<ArgumentException>(() => EllaiGuidanceCheckpoint.Serialize(checkpoint with { Plan = checkpoint.Plan with { Steps = steps } }));
+    }
+
     internal static EllaiGuidanceCheckpoint Sample() => new(
         "proposal", "context", "scope", 1, 1, "generation", "Ready", DateTimeOffset.UtcNow,
         new("plan-1", 1, null, "Initial acceptance", ["step-1"], [], [],

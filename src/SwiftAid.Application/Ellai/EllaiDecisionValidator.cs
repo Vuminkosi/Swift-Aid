@@ -215,12 +215,8 @@ public static class EllaiDecisionValidator
 
         if (errors.Count == 0 && draft.Steps.Count > 0)
         {
-            var byKey = draft.Steps.ToDictionary(step => step.StepKey, StringComparer.Ordinal);
-            var visited = new HashSet<string>(StringComparer.Ordinal);
-            string? next = draft.Steps[0].StepKey;
-            while (next is not null && visited.Add(next)) next = byKey[next].NextStepKey;
-            if (next is not null || visited.Count != draft.Steps.Count)
-                errors.Add("Guidance steps must form one connected, acyclic sequence.");
+            try { EllaiGuidanceSequence.Order(draft.Steps); }
+            catch (ArgumentException) { errors.Add("Guidance steps must form one connected, acyclic sequence."); }
         }
 
         return errors;

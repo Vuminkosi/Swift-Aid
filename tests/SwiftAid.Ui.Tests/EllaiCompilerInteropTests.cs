@@ -22,6 +22,16 @@ public sealed class EllaiCompilerInteropTests
         Array.Empty<string>(), "ellai-catalogue/1.0", "ellai-uicontract/1.0");
 
     [Fact]
+    public void CompilerFollowsValidatedLinksForNextAndPreviousPresentation()
+    {
+        var first = Plan().Steps[0] with { NextStepKey = "s3" };
+        var plan = Plan() with { Steps = [first, first with { StepKey = "s2", NextStepKey = null },
+            first with { StepKey = "s3", NextStepKey = "s2" }] };
+        var definition = new EllaiBonboardingCompiler().Compile(plan, new Dictionary<string, string>());
+        Assert.Equal(new[] { "s1", "s3", "s2" }, definition.Steps.Select(step => step.Id));
+    }
+
+    [Fact]
     public void NavigationUsesRegisteredBonboardingRouteRatherThanModelUrls()
     {
         var step = new GuidancePlanStep("navigate", "navigation.cases", "open-cases", PlanStepBehavior.RequestUiIntent,

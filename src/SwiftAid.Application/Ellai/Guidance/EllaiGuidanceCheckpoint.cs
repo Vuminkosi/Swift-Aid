@@ -81,7 +81,7 @@ public sealed record EllaiGuidanceCheckpoint(
                 || !Bounded(step.ControlId, 120) || !Bounded(step.Explanation, EllaiGuidancePlanDraft.MaxExplanationChars)
                 || !Enum.IsDefined(step.Behavior)))
             throw new ArgumentException("Invalid guidance plan checkpoint.");
-        var keys = Plan.Steps.Select(step => step.StepKey).ToHashSet(StringComparer.Ordinal);
+        var keys = EllaiGuidanceSequence.Order(Plan.Steps).Select(step => step.StepKey).ToHashSet(StringComparer.Ordinal);
         if (keys.Count != Plan.Steps.Count || (CurrentStepId is not null && !keys.Contains(CurrentStepId))
             || CompletedStepIds.Any(id => !keys.Contains(id)))
             throw new ArgumentException("Guidance progress must reference accepted plan steps.");

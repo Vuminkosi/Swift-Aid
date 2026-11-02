@@ -234,8 +234,7 @@ public sealed class EllaiGuidanceProposalAdmission(
             !admitted.Observation.MountedControlIds.Contains(step.ControlId) ||
             admitted.Observation.ControlStates?.Count(item => item.ControlId == step.ControlId && item.State == UiObservationState.Ready) != 1)
             return new("EvidenceRequired", saved.Version, saved.CurrentStepId, saved.CompletedStepIds);
-        var index = plan.Steps.ToList().FindIndex(item => item.StepKey == step.StepKey);
-        var nextStep = index + 1 < plan.Steps.Count ? plan.Steps[index + 1].StepKey : null;
+        var nextStep = step.NextStepKey;
         var next = saved with
         {
             Version = saved.Version + 1,

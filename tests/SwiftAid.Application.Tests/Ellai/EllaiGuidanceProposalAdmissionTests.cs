@@ -18,6 +18,30 @@ public sealed class EllaiGuidanceProposalAdmissionTests
     }
 
     [Fact]
+    public async Task DurableProgressFollowsValidatedLinksRatherThanArrayOrder()
+    {
+        var (service, store, observations, id) = await Fixture();
+        var checkpoint = await SeedProgress(store, observations, id);
+        var first = checkpoint.Plan!.Steps[0] with { NextStepKey = "third" };
+        checkpoint = checkpoint with { Plan = checkpoint.Plan with { Steps =
+            [first, first with { StepKey = "second", NextStepKey = null }, first with { StepKey = "third", NextStepKey = "second" }] } };
+        var session = (await store.GetAsync("session", default))!;
+        await store.TryUpdateAsync(session with { SessionVersion = session.SessionVersion + 1,
+            GuidanceJson = EllaiGuidanceCheckpoint.Serialize(checkpoint) }, session.SessionVersion, default);
+        var authority = new EllaiUiEntitlements("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>());
+        long version = checkpoint.Version;
+        foreach (var (step, next) in new (string, string?)[] { ("step-1", "third"), ("third", "second"), ("second", null) })
+        {
+            var result = await service.CompleteStepAsync("session", new(id, checkpoint.Plan.PlanId, version, step, "context"), authority, default);
+            Assert.Equal(next, result.CurrentStepId);
+            Assert.Equal(next is null ? "Completed" : "Ready", result.Status);
+            version = result.Version;
+            var restored = EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("session", default))!.GuidanceJson)!;
+            Assert.Equal(next, restored.CurrentStepId);
+        }
+    }
+
+    [Fact]
     public async Task FreshMountedEvidenceAllowsPlanningButANewerTurnFencesTheProposal()
     {
         var (service, store, observations, id) = await Fixture();

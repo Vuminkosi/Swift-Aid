@@ -22,7 +22,7 @@ public sealed class EllaiBonboardingCompiler
         {
             Id = $"ellai-generated-{plan.PlanId}-r{plan.Revision}",
             Title = "Ellai guidance",
-            Steps = plan.Steps.Select(s => ToStep(
+            Steps = EllaiGuidanceSequence.Order(plan.Steps).Select(s => ToStep(
                 s.StepKey, s.Explanation, ResolveTarget(s.ControlId, anchorByControlId), verifyCompletion, ResolveRoute(s))).ToList()
         };
     }
