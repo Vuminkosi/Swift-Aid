@@ -17,7 +17,7 @@
 | SW-00-010 | Passed | [Change control](docs/CHANGE-CONTROL.md) records the active canonical branch/worktree and shared-path ownership, no-push, and non-destructive rules; per-path owners still require live handoff confirmation. |
 | SW-01-001 | Passed | [Topology audit](docs/TOPOLOGY-AUDIT.md) maps MAUI, Gateway/web, .NET layers, PostgreSQL/PostGIS, retained services and the optional Python classification-worker profile; runtime health remains separate. |
 | SW-01-002 | Partial / blocked | [Runtime checks](docs/SW-01-002-RUNTIME.md): local service readiness and Gateway-to-service links passed; Compose Gateway restart returned exit 1 because of the stale optional classification-worker network namespace. No external-provider call or full workflow was run. |
-| SW-01-004 | In progress | Corrected one Gateway audio endpoint service-binding defect; focused authorization integration suite passes. Broader command/event/audio contract inventory remains. |
+| SW-01-004 | In progress | Case command/event map now includes schema-v1 Gateway dispatch, assigned-worker follow-up acknowledgement through strict replay and PostgreSQL projection, queue/UI consumers and evidence. Journal reader 34/34 passes after duplicate replay arm removal. Full per-contract producer/consumer/schema/persistence catalog for all commands, jobs, tools, audio, registry and public projections remains open. |
 
 ## Usage and release accounting
 
