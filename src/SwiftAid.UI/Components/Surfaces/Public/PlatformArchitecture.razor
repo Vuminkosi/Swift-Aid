@@ -3,9 +3,9 @@
         <div>
             <p class="platform-flow__eyebrow">The connected platform</p>
             <h2 id="platform-flow-title">How SwiftAid comes together</h2>
-            <p>From an offline report to a shared understanding. Follow the services that connect people, evidence and action.</p>
+            <p>One connected platform turns community reports into intelligence teams can act on. Follow the path from frontline observation to coordinated review.</p>
         </div>
-        <button type="button" class="platform-flow__toggle" aria-pressed="@_paused" @onclick="() => _paused = !_paused">
+        <button type="button" class="platform-flow__toggle" aria-pressed="@(_paused ? "true" : "false")" @onclick="() => _paused = !_paused">
             @(_paused ? "Play flow" : "Pause flow")
         </button>
     </header>
@@ -17,7 +17,7 @@
     <div class="platform-flow__viewport" tabindex="0" role="region" aria-label="SwiftAid architecture diagram. Scroll horizontally to explore." aria-describedby="platform-flow-note">
         <svg class="platform-flow__diagram" viewBox="0 0 1440 930" role="img" aria-labelledby="architecture-title architecture-description">
             <title id="architecture-title">SwiftAid services and data flow</title>
-            <desc id="architecture-description">Web and mobile connect to the Gateway. Application rules authorize PostgreSQL records, private storage and jobs. The PostgreSQL outbox drives Ellai reasoning and tools. Voice uses Muse transcription, Silero and MMS-TTS. Worker processing includes translation, classification and surveillance review. A complete connection list follows this diagram.</desc>
+            <desc id="architecture-description">Web and mobile connect to the Gateway. Application rules authorize PostgreSQL records, private storage and jobs. The PostgreSQL outbox drives Ellai reasoning and tools. Voice uses Muse transcription, Silero, Kokoro for English speech and MMS-TTS for Shona, Nyanja and Tsonga. Worker processing includes translation, classification and surveillance review. A complete connection list follows this diagram.</desc>
             <defs>
                 <marker id="architecture-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
                     <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" />
@@ -46,7 +46,7 @@
     <div class="platform-flow__footnotes">
         <p><strong>Offline capture, connected intelligence.</strong> Mobile drafts stay on the device until synchronization. AI analysis uses available inference connectivity.</p>
         <p><strong>Evidence stays accountable.</strong> PostgreSQL is authoritative. Search indexes and caches are derived. Tools retain access checks and approvals; signals require human review.</p>
-        <p><strong>Language &amp; guidance.</strong> Translation quality requires language review. Dynamic UI guidance integration is in progress. Local Llama reasoning is optional.</p>
+        <p><strong>A voice for more communities.</strong> Ellai speaks English with Kokoro and uses MMS-TTS for Shona, Nyanja and Tsonga. Translation preserves the original wording for review.</p>
     </div>
     <details class="platform-flow__connections">
         <summary>Read all connections</summary>
@@ -73,10 +73,11 @@
         new("ollama", "Meta Llama / Ollama", "Optional local inference", 1220, 310, "ai"),
         new("sessions", "Multi-turn sessions", "Persistent context", 1220, 440, "ai"),
         new("tools", "Agentic tools", "Authorized orchestration", 980, 180, "ai"),
-        new("guidance", "Dynamic UI guidance", "Bit.Bonboarding · in progress", 1220, 570, "ai"),
+        new("guidance", "Dynamic UI guidance", "Context-aware assistance", 1220, 570, "ai"),
         new("asr", "Muse Voice Transcribe", "Speech to text", 260, 300, "ai"),
         new("vad", "Silero ONNX", "Voice turn coordination", 260, 430, "ai"),
-        new("tts", "MMS-TTS", "Spoken responses", 260, 560, "ai"),
+        new("tts", "MMS-TTS", "Shona / Nyanja / Tsonga", 260, 560, "ai"),
+        new("kokoro", "Kokoro", "English speech · Heart", 20, 560, "ai"),
         new("media", "Private original media", "Original evidence", 500, 300, "core"),
         new("minio", "MinIO", "Private object storage", 740, 300, "core"),
         new("derived", "Derived data", "Index + cache", 500, 430, "core"),
@@ -108,6 +109,7 @@
         new("gateway", "asr", "M361 182 L361 300"),
         new("gateway", "vad", "M315 182 C240 230 240 390 280 430"),
         new("gateway", "tts", "M305 182 C230 240 225 520 270 560"),
+        new("gateway", "kokoro", "M285 182 C242 230 242 260 242 300 L242 490 Q242 535 121 560"),
         new("app", "media", "M601 182 L601 300"),
         new("app", "derived", "M520 182 C475 250 475 400 520 430"),
         new("app", "nats", "M510 182 C465 250 465 660 520 700"),

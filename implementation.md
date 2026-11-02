@@ -4306,3 +4306,8 @@ User explicitly adjusted the frozen speech pace from 0.92 to 0.95 and requested 
 - Worker adapter hashes local assets, rejects mismatched voices, bounds inference output, and preserves the actual PCM sample rate. Gateway preparation now forwards native response language rather than rejecting it or requesting English.
 - PASS: worker 34 tests + four subtests; Gateway speech client/preparation/coordinator 28 tests; real four-language synthesis via HTTP in an isolated network-disabled container; combined image build and offline cached rebuild.
 - Pending: user voice selection, Gateway deployment, browser/device playback and subjective language quality. Synthetic WAV and image build logs retained under .codex.
+
+### Homepage product positioning and Kokoro architecture (2 November 2026)
+
+- Added an explicit Gateway-to-Kokoro node and connection, native MMS language labels, and accessible diagram description. Replaced development-status copy with community reporting, early-warning intelligence and coordinated follow-through benefits; retained human review and clinical boundaries.
+- PASS: shared UI/TestHost builds; Chromium landing fixture at 1280px light and 390px dark, new connection, pause interaction, SVG label fit and horizontal containment. Fixed aria-pressed serialization found by the browser test. Screenshots retained in .codex/landing-kokoro-1280.png and .codex/landing-kokoro-390.png. Deployed homepage refresh remains pending.
