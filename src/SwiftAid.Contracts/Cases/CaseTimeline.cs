@@ -52,7 +52,9 @@ public sealed record CaseTimelineHeader(
     long ReportRevision,
     DateTimeOffset CreatedAtUtc,
     long? AssignmentVersion = null,
-    DateTimeOffset? AssignmentAcknowledgedAtUtc = null);
+    DateTimeOffset? AssignmentAcknowledgedAtUtc = null,
+    bool CanAcknowledgeAssignment = false,
+    DateTimeOffset? AssignmentRecordedAtUtc = null);
 
 /// <summary>Ordered oldest-first immutable history for one managed case.</summary>
 public sealed record CaseTimeline(

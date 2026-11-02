@@ -9,6 +9,32 @@ namespace SwiftAid.Application.Tests;
 
 public sealed class CaseTimelineQueryTests
 {
+    [Theory]
+    [InlineData("officer-1", "Active", false, true, true)]
+    [InlineData("officer-1", "Active", false, false, false)]
+    [InlineData("other-owner", "Active", false, true, false)]
+    [InlineData("officer-1", "Resolved", false, true, false)]
+    [InlineData("officer-1", "Active", true, true, false)]
+    public async Task Assignment_action_requires_pending_owner_and_explicit_permission(
+        string owner, string workflow, bool acknowledged, bool granted, bool expected)
+    {
+        var header = new CaseTimelineHeader(Guid.NewGuid(), "org-1", "workspace-1", "ZW", workflow, owner, 3, 1,
+            DateTimeOffset.UtcNow, 2, acknowledged ? DateTimeOffset.UtcNow : null, CanAcknowledgeAssignment: true);
+        var query = new CaseTimelineQuery(new StubStore(header, null, []), new AssignmentPolicy(granted), new StubUnitOfWork());
+        var result = await query.GetAsync(CreateOfficer(), header.CaseId, 1, CancellationToken.None);
+        Assert.Equal(expected, result.Timeline!.Header.CanAcknowledgeAssignment);
+    }
+
+    private sealed class AssignmentPolicy(bool granted) : ICaseAccessPolicy
+    {
+        public ValueTask<AccessDecision> AuthorizeAsync(ActorContext actor, Guid caseId, CaseOperation operation, CancellationToken cancellationToken) =>
+            ValueTask.FromResult(new AccessDecision(operation == CaseOperation.ReadCase || granted,
+                operation == CaseOperation.ReadCase || granted ? AccessDecisionCode.Allowed : AccessDecisionCode.GrantMissing, null));
+
+        public ValueTask<AccessDecision> AuthorizeAllAsync(ActorContext actor, Guid caseId, IReadOnlyCollection<CaseOperation> operations, CancellationToken cancellationToken) =>
+            ValueTask.FromResult(new AccessDecision(granted, granted ? AccessDecisionCode.Allowed : AccessDecisionCode.GrantMissing, null));
+    }
+
     [Fact]
     public async Task Assignment_acknowledgement_has_a_readable_authoritative_label()
     {

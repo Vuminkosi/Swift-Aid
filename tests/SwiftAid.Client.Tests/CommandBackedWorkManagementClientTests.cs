@@ -5,6 +5,33 @@ namespace SwiftAid.Client.Tests;
 
 public sealed class CommandBackedWorkManagementClientTests
 {
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task Assignment_projects_pending_or_acknowledged_with_only_authorized_action(bool acknowledged, bool allowed)
+    {
+        var header = Header() with { AssignmentVersion = 2, AssignmentAcknowledgedAtUtc = acknowledged ? DateTimeOffset.UtcNow : null,
+            CanAcknowledgeAssignment = allowed, AssignmentRecordedAtUtc = DateTimeOffset.UtcNow.AddHours(-1) };
+        var commands = new StubCommandClient();
+        var client = new CommandBackedWorkManagementClient(commands, new StubMonitoringClient(),
+            new StubTimelineClient(timeline: new CaseTimeline(header, [])));
+        var query = new WorkManagementQuery(new PageRequest(1, 25));
+        var result = await client.GetAsync(CaseId, query);
+        var assignment = Assert.Single(result.Value!.Items.Items, item => item.Kind == WorkManagementKind.Assignment);
+        Assert.Equal(acknowledged ? WorkManagementStatus.Acknowledged : WorkManagementStatus.AcknowledgementPending, assignment.Status);
+        Assert.Equal(allowed && !acknowledged, assignment.CanAcknowledgeAssignment);
+        Assert.Equal(allowed && !acknowledged, assignment.AvailableActions.Contains(WorkManagementAction.AcknowledgeAssignment));
+        if (allowed && !acknowledged)
+        {
+            await client.ExecuteAsync(new WorkManagementCommand(CaseId, assignment.WorkKey, WorkManagementAction.AcknowledgeAssignment, 7), query);
+            var sent = Assert.Single(commands.Sent).Input;
+            Assert.Equal("AcknowledgeAssignment", sent.CommandType);
+            Assert.Equal(2, sent.AssignmentVersion);
+            Assert.Equal(7, sent.ExpectedVersion);
+        }
+    }
+
     private static readonly Guid CaseId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid FollowUpId = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid EscalationId = Guid.Parse("33333333-3333-3333-3333-333333333333");

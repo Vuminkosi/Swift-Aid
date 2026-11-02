@@ -82,6 +82,7 @@ public sealed class CommandBackedWorkManagementClient(
             .Select(item => TryMapItem(item))
             .Where(mapped => mapped is not null)
             .Select(mapped => mapped!)
+            .Concat(MapAssignment(header))
             .Where(item => MatchesQuery(item, query))
             .ToArray();
 
@@ -183,6 +184,27 @@ public sealed class CommandBackedWorkManagementClient(
         }
 
         return true;
+    }
+
+    private static IEnumerable<WorkManagementItem> MapAssignment(CaseTimelineHeader header)
+    {
+        if (header.AssignmentVersion is not > 0 || header.AssignmentVersion > header.AggregateVersion ||
+            header.AssignmentRecordedAtUtc is null)
+        {
+            yield break;
+        }
+
+        var acknowledged = header.AssignmentAcknowledgedAtUtc.HasValue;
+        var canAcknowledge = !acknowledged && header.Workflow != "Resolved" && header.CanAcknowledgeAssignment;
+        yield return new WorkManagementItem(
+            $"assignment:{header.AssignmentVersion.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
+            "Case assignment", WorkManagementKind.Assignment,
+            acknowledged ? WorkManagementStatus.Acknowledged : WorkManagementStatus.AcknowledgementPending,
+            acknowledged ? WorkManagementAssignmentStatus.Assigned : WorkManagementAssignmentStatus.AcknowledgementPending,
+            acknowledged ? "The accountable owner acknowledged this assignment." : "Waiting for the accountable owner to acknowledge this assignment.",
+            header.AssignmentAcknowledgedAtUtc ?? header.AssignmentRecordedAtUtc.Value, null,
+            canAcknowledge ? [WorkManagementAction.AcknowledgeAssignment] : [], [], [],
+            CanAcknowledgeAssignment: canAcknowledge);
     }
 
     private static WorkManagementItem? TryMapItem(MonitoringQueueItem item)
@@ -300,6 +322,13 @@ public sealed class CommandBackedWorkManagementClient(
 
     private static CaseCommandInput? MapCommand(WorkManagementCommand command, string? assignee) => command.Action switch
     {
+        WorkManagementAction.AcknowledgeAssignment when
+            command.WorkKey.StartsWith("assignment:", StringComparison.Ordinal) &&
+            long.TryParse(command.WorkKey.AsSpan("assignment:".Length),
+                System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var assignmentVersion) &&
+            assignmentVersion > 0 =>
+            new CaseCommandInput("AcknowledgeAssignment", null, null, null, null, null,
+                command.ExpectedVersion, AssignmentVersion: assignmentVersion),
         WorkManagementAction.ScheduleFollowUp when command.DueAtUtc is { } due =>
             new CaseCommandInput(
                 "ScheduleFollowUp", null, WorkspaceReason("Scheduled"), null, null, null,

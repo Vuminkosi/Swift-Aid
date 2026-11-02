@@ -35,25 +35,30 @@ public sealed class PostgresCaseTimelineStore(SwiftAidDbContext dbContext) : ICa
 
         // Read independently of the requested history page. A reopened case establishes
         // a new assignment even when the accountable owner has not changed.
-        var assignmentVersion = await _dbContext.CaseEvents.AsNoTracking()
+        var assignment = await _dbContext.CaseEvents.AsNoTracking()
             .Where(item => item.CaseId == caseId && item.AggregateVersion <= header.AggregateVersion &&
                 (item.EventType == "CaseAssigned" || item.EventType == "CaseReopened"))
             .OrderByDescending(item => item.AggregateVersion)
-            .Select(item => (long?)item.AggregateVersion)
+            .Select(item => new { item.AggregateVersion, item.RecordedAtUtc })
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
-        if (assignmentVersion is null)
+        if (assignment is null)
         {
             return header;
         }
 
         var acknowledgedAt = await _dbContext.CaseEvents.AsNoTracking()
             .Where(item => item.CaseId == caseId && item.EventType == "CaseAssignmentAcknowledged" &&
-                item.AggregateVersion > assignmentVersion.Value && item.AggregateVersion <= header.AggregateVersion &&
+                item.AggregateVersion > assignment.AggregateVersion && item.AggregateVersion <= header.AggregateVersion &&
                 item.ActorId == header.AccountableOwnerActorId)
             .OrderByDescending(item => item.AggregateVersion)
             .Select(item => (DateTimeOffset?)item.RecordedAtUtc)
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
-        return header with { AssignmentVersion = assignmentVersion, AssignmentAcknowledgedAtUtc = acknowledgedAt };
+        return header with
+        {
+            AssignmentVersion = assignment.AggregateVersion,
+            AssignmentRecordedAtUtc = assignment.RecordedAtUtc,
+            AssignmentAcknowledgedAtUtc = acknowledgedAt
+        };
     }
 
     public async Task<IReadOnlyList<CaseTimelineRow>> GetEventsAsync(

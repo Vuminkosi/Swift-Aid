@@ -34,6 +34,7 @@ public sealed class CaseTimelineTests
         await SeedEventAsync(db, caseId, 2, "CaseAssigned", now.AddMinutes(1));
         var pending = await CreateQuery(db).GetAsync(CreateOfficer("officer-1"), caseId, 1, CancellationToken.None);
         Assert.Equal(2, pending.Timeline!.Header.AssignmentVersion);
+        Assert.Equal(now.AddMinutes(1), pending.Timeline.Header.AssignmentRecordedAtUtc);
         Assert.Null(pending.Timeline.Header.AssignmentAcknowledgedAtUtc);
 
         await SeedEventAsync(db, caseId, 3, "CaseAssignmentAcknowledged", now.AddMinutes(2));
@@ -50,6 +51,7 @@ public sealed class CaseTimelineTests
             .ExecuteUpdateAsync(update => update.SetProperty(item => item.AggregateVersion, 5));
         var reopened = await CreateQuery(db).GetAsync(CreateOfficer("officer-1"), caseId, 1, CancellationToken.None);
         Assert.Equal(5, reopened.Timeline!.Header.AssignmentVersion);
+        Assert.Equal(now.AddMinutes(4), reopened.Timeline.Header.AssignmentRecordedAtUtc);
         Assert.Null(reopened.Timeline.Header.AssignmentAcknowledgedAtUtc);
     }
 

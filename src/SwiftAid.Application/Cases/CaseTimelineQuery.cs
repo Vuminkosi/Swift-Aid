@@ -111,6 +111,17 @@ public sealed class CaseTimelineQuery(
                 return new CaseTimelineResult(CaseTimelineAccess.NotFoundOrNotAuthorized, null);
             }
 
+            var canAcknowledge = false;
+            if (header.AssignmentVersion is > 0 && header.AssignmentVersion <= header.AggregateVersion &&
+                header.AssignmentAcknowledgedAtUtc is null && header.Workflow != "Resolved" &&
+                string.Equals(header.AccountableOwnerActorId, actor.ActorId, StringComparison.Ordinal))
+            {
+                var acknowledgementDecision = await _policy.AuthorizeAsync(
+                    actor, caseId, CaseOperation.AcknowledgeAssignment, ct).ConfigureAwait(false);
+                canAcknowledge = acknowledgementDecision.IsAllowed;
+            }
+
+            header = header with { CanAcknowledgeAssignment = canAcknowledge };
             var rows = await _store.GetEventsAsync(caseId, take + 1, beforeAggregateVersion, ct).ConfigureAwait(false);
             var hasOlderEntries = rows.Count > take;
             var pageRows = rows

@@ -1,0 +1,39 @@
+@page "/assignment-acknowledgement-fixture"
+@using SwiftAid.UI.Components.Surfaces.Operations
+@using SwiftAid.UI.Components.Surfaces.Operations.WorkManagement
+@using SwiftAid.UI.Components.Theme
+@using static SwiftAid.UI.Components.Surfaces.Operations.WorkManagement.OperationsWorkManagementSurface
+
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<output id="fixture-ready">@_ready</output>
+<OperationsWorkManagementSurface Title="Synthetic assignment" State="OperationsSurfaceState.Populated"
+    Items="Items" OnAction="Acknowledge" />
+<output id="submitted">@_submitted</output>
+
+@code {
+    private bool _ready;
+    private bool _submitted;
+    private static readonly Guid CaseId = Guid.Parse("a1230000-1111-4111-8111-111111111111");
+    private IReadOnlyList<OperationsWorkItem> Items => [new(CaseId, "assignment:2", _submitted ? 4 : 3,
+        "Case assignment", OperationsWorkKind.Assignment,
+        _submitted ? OperationsWorkStatus.Acknowledged : OperationsWorkStatus.AcknowledgementPending,
+        _submitted ? OperationsAssignmentStatus.Assigned : OperationsAssignmentStatus.AcknowledgementPending,
+        _submitted ? "The accountable owner acknowledged this assignment." : "Waiting for the accountable owner to acknowledge this assignment.",
+        DateTimeOffset.UtcNow, null, _submitted ? [] : [OperationsWorkAction.AcknowledgeAssignment], [])];
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) { _ready = true; StateHasChanged(); }
+    }
+
+    private void Acknowledge(OperationsWorkActionRequest request)
+    {
+        if (request.CaseId != CaseId || request.WorkKey != "assignment:2" || request.ExpectedVersion != 3 ||
+            request.Action != OperationsWorkAction.AcknowledgeAssignment)
+        {
+            throw new InvalidOperationException("Unexpected synthetic assignment request.");
+        }
+        _submitted = true;
+    }
+}
