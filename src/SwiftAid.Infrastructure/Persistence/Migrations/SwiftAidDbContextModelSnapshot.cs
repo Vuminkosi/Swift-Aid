@@ -859,6 +859,10 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("actor_id");
 
+                    b.PrimitiveCollection<string[]>("AllowedOperations")
+                        .HasColumnType("text[]")
+                        .HasColumnName("allowed_operations");
+
                     b.Property<string>("ChangeReason")
                         .HasColumnType("text")
                         .HasColumnName("change_reason");
@@ -912,6 +916,8 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_case_shares_grantor", "length(btrim(granted_by_actor_id)) > 0");
 
                             t.HasCheckConstraint("ck_case_shares_lock_token_zero", "lock_token = 0");
+
+                            t.HasCheckConstraint("ck_case_shares_operations", "allowed_operations IS NULL OR (array_position(allowed_operations, NULL) IS NULL AND allowed_operations @> ARRAY['ReadCase']::text[] AND allowed_operations <@ ARRAY['ReadCase','ReadAttachment','Synchronize','RecordObservation','ManageFollowUp','ManageEscalation']::text[])");
 
                             t.HasCheckConstraint("ck_case_shares_version", "version > 0");
                         });

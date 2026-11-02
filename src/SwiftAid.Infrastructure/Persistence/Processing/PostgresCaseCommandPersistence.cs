@@ -37,6 +37,8 @@ public sealed class PostgresCaseCommandPersistence : ICaseCommandPersistence
              WHERE share.case_id = mc.case_id
                AND share.actor_id = @actor_id
                AND share.is_active
+               AND share.granted_at_utc <= clock_timestamp()
+               AND (share.allowed_operations IS NULL OR @required_operations::text[] <@ share.allowed_operations)
                AND (share.expires_at_utc IS NULL OR share.expires_at_utc > clock_timestamp()))
          OR (authority.can_access_jurisdictional_cases
              AND EXISTS (SELECT 1 FROM public.managed_case_regions AS any_region WHERE any_region.case_id = mc.case_id)

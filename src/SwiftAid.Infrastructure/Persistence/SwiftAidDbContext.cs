@@ -568,12 +568,14 @@ public sealed class SwiftAidDbContext(DbContextOptions<SwiftAidDbContext> option
             table.HasCheckConstraint("ck_case_shares_grantor", "length(btrim(granted_by_actor_id)) > 0");
             table.HasCheckConstraint("ck_case_shares_version", "version > 0");
             table.HasCheckConstraint("ck_case_shares_lock_token_zero", "lock_token = 0");
+            table.HasCheckConstraint("ck_case_shares_operations", "allowed_operations IS NULL OR (array_position(allowed_operations, NULL) IS NULL AND allowed_operations @> ARRAY['ReadCase']::text[] AND allowed_operations <@ ARRAY['ReadCase','ReadAttachment','Synchronize','RecordObservation','ManageFollowUp','ManageEscalation']::text[])");
         });
         ConfigureLockToken(share);
         share.HasKey(entity => new { entity.CaseId, entity.ActorId }).HasName("pk_case_shares");
         share.HasIndex(entity => new { entity.ActorId, entity.IsActive, entity.ExpiresAtUtc })
             .HasDatabaseName("ix_case_shares_actor_status_expiry");
         share.Property(entity => entity.CaseId).HasColumnName("case_id");
+        share.Property(entity => entity.AllowedOperations).HasColumnName("allowed_operations").HasColumnType("text[]");
         share.Property(entity => entity.ActorId).HasColumnName("actor_id").HasColumnType("text");
         share.Property(entity => entity.Version).HasColumnName("version").IsConcurrencyToken();
         share.Property(entity => entity.IsActive).HasColumnName("is_active");

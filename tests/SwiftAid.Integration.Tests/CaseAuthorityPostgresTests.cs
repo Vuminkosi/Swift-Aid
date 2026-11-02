@@ -2,6 +2,8 @@ using System.Data.Common;
 using System.Threading;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases.Commands;
@@ -14,6 +16,45 @@ namespace SwiftAid.Integration.Tests;
 [Collection(CaseAuthorityPostgresCollection.Name)]
 public sealed class CaseAuthorityPostgresTests
 {
+    [CaseAuthorityPostgresFact]
+    public async Task Bounded_share_limits_real_policy_and_scope_manifest_to_its_persisted_actions()
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(makeCurrentActorOwner: false, createActiveShare: true);
+        await using (var setup = fixture.CreateDbContext())
+        {
+            var share = await setup.CaseShares.SingleAsync(item => item.CaseId == fixture.CaseId && item.ActorId == fixture.ActorId);
+            share.AllowedOperations = [nameof(CaseOperation.ReadCase)];
+            setup.AccessGrantOperations.Add(new AccessGrantOperationEntity
+            {
+                GrantGroupId = fixture.GrantGroupId, Operation = CaseOperation.ReadAttachment
+            });
+            await setup.SaveChangesAsync();
+            var invalid = await Assert.ThrowsAsync<PostgresException>(() => setup.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE case_shares SET allowed_operations = ARRAY['ReadCase','ResolveCase']::text[] WHERE case_id = {fixture.CaseId} AND actor_id = {fixture.ActorId}"));
+            Assert.Equal(PostgresErrorCodes.CheckViolation, invalid.SqlState);
+            Assert.Equal("ck_case_shares_operations", invalid.ConstraintName);
+
+            var rollback = await Assert.ThrowsAsync<PostgresException>(() => setup.GetService<IMigrator>()
+                .MigrateAsync("20261102174651_AssignmentAcknowledgement"));
+            Assert.Equal(PostgresErrorCodes.RaiseException, rollback.SqlState);
+            Assert.Contains("Cannot remove bounded share operations", rollback.MessageText);
+            Assert.Contains("20261102181615_BoundedCaseShareOperations", await setup.Database.GetAppliedMigrationsAsync());
+        }
+
+        await using var db = fixture.CreateDbContext();
+        var unit = new PostgresCaseCommandUnitOfWork(db);
+        var actor = fixture.CreateActor();
+        await using var lease = await unit.BeginCaseAsync(actor, fixture.CaseId, [], CaseLeaseMode.Read, CancellationToken.None);
+        var store = new PostgresCurrentAccessGrantStore(db, unit);
+        var policy = new CaseAccessPolicy(store, new PostgresCaseAccessDescriptorStore(db, unit));
+        Assert.True((await policy.AuthorizeAsync(actor, fixture.CaseId, CaseOperation.ReadCase, CancellationToken.None)).IsAllowed);
+        Assert.False((await policy.AuthorizeAsync(actor, fixture.CaseId, CaseOperation.ReadAttachment, CancellationToken.None)).IsAllowed);
+        var manifest = await new ScopeService(store).GetAsync(actor, CancellationToken.None);
+        var sharedScope = Assert.Single(manifest.Grants, item => item.CaseIds.Contains(fixture.CaseId));
+        Assert.Equal([nameof(CaseOperation.ReadCase)], sharedScope.Operations);
+        Assert.False(sharedScope.CanAccessJurisdictionalCases);
+    }
+
 
     [CaseAuthorityPostgresFact]
     public async Task Missing_wrong_case_wrong_context_and_disposed_leases_fail_before_adapter_sql()

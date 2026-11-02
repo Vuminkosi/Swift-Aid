@@ -159,6 +159,8 @@ public sealed class ManagedCaseRegionEntity
 
 public sealed class CaseShareEntity
 {
+    /// <summary>Null preserves legacy shares; explicit values bound a collaborator's actions.</summary>
+    public string[]? AllowedOperations { get; set; }
     public Guid CaseId { get; set; }
     public required string ActorId { get; set; }
     public long Version { get; set; }

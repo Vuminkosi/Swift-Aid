@@ -181,7 +181,15 @@ public sealed class PostgresCurrentAccessGrantStore : ICurrentAccessGrantStore
                     [grant.Sector],
                     [grant.SensitivityCode],
                     operations.Where(operation => string.Equals(operation.GrantGroupId, grant.GrantGroupId, StringComparison.Ordinal))
-                        .Select(operation => operation.Operation)));
+                        .Select(operation => operation.Operation),
+                    shareIsActive && activeShare!.AllowedOperations is { } shareOperations
+                        ? new Dictionary<Guid, IEnumerable<CaseOperation>>
+                        {
+                            [lease.CaseId] = shareOperations.Select(value =>
+                                Enum.TryParse<CaseOperation>(value, out var operation) && operation.ToString() == value && Enum.IsDefined(operation)
+                                    ? operation : throw new InvalidDataException("The shared operation scope is invalid."))
+                        }
+                        : null));
             }
         }
 
