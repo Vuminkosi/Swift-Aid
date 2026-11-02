@@ -33,9 +33,9 @@ All commands below ran from the canonical checkout on .NET SDK 10.0.403 unless s
 | `dotnet build src/SwiftAid.Mobile/SwiftAid.Mobile.csproj -c Release -f net10.0-android --no-restore -m:1 -nr:false -p:EmbedAssembliesIntoApk=true --verbosity quiet` | PASS: 0 warnings, 0 errors. No Android device install or interaction was performed. |
 | `uv run --project workers --locked pytest workers/tests -q` | PASS: 59 passed, 3 skipped. |
 | `docker compose --profile local-bootstrap -f infra/compose.yml config --format json` | PASS: configuration parsed; no workflow claim. |
-| `node tests/SwiftAid.Browser.Tests/guest-storage.browser.cjs` | NOT VERIFIED: the local Node environment lacks the `playwright` module. |
+| Initial `node tests/SwiftAid.Browser.Tests/guest-storage.browser.cjs` | Initially NOT VERIFIED because Node did not resolve the repository-local Playwright package. Refreshed verification below passes after setting `NODE_PATH` to the existing package; no package was added. |
 
-The three display failures were stale assertions for distance units, locality wording and capitalization; they now assert the current accessible output. Four renderer failures came from the test `IJSRuntime` returning null for `IJSObjectReference`; its no-op reference now supports the MudBlazor rendering path. The UI suite and full solution test run passed after this test-only correction. Browser guest-storage remains NOT VERIFIED because Playwright is not installed.
+The three display failures were stale assertions for distance units, locality wording and capitalization; they now assert the current accessible output. Four renderer failures came from the test `IJSRuntime` returning null for `IJSObjectReference`; its no-op reference now supports the MudBlazor rendering path. The UI suite and the previous solution test run passed after this test-only correction. The refreshed current-run results and iOS packaging limitation are recorded below.
 
 ## Supplied-document reconciliation
 
@@ -54,3 +54,19 @@ The supplied attachment directory contains the two execution-directive text file
 - `docs/PROGRESS.md`, `docs/ACCEPTANCE.md`, `docs/CAPABILITIES.md`, `docs/TRACEABILITY.md`, `docs/TASK-OWNERS.md`
 - `src/SwiftAid.Gateway/Program.cs`, `src/SwiftAid.Gateway/Endpoints/EllaiGuestEndpoints.cs`, `src/SwiftAid.Infrastructure/Persistence/Migrations/`
 - Command output from `git`, `dotnet`, `uv`, `docker compose`, and the focused Node browser-harness attempt as listed above
+
+## Refreshed baseline checks — 2 November 2026
+
+The following checks were rerun on branch `interactive-ellai` after commit `8b4a07dfbd3f4188408b51fc1fbacc091998bee2`.
+
+| Check | Result |
+|---|---|
+| `dotnet test SwiftAid.sln --no-build --no-restore -m:1 -nr:false -p:WasmBuildNative=false -p:TargetFrameworks=net10.0-android --verbosity quiet` | PASS, exit 0: Domain 104; Application 895 passed / 3 skipped; Integration 689 passed / 239 skipped; Client 326; UI 542. Total 2,556 passed / 242 skipped / 0 failed. |
+| Unrestricted `dotnet test SwiftAid.sln --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet` | FAIL: iOS target build cannot copy `GoogleDataTransport` XCFramework privacy resources and headers from the local NuGet cache (MSB3030). Locked restore completed but did not repair those missing package files. Android Release target was separately built successfully. |
+| `workers/.venv/Scripts/python.exe -m pytest workers/tests -q` | PASS: 59 passed, 3 skipped. Environment uses repository Python venv. |
+| `$env:NODE_PATH=(Resolve-Path '.codex/case-list-browser/node_modules').Path; node tests/SwiftAid.Browser.Tests/guest-storage.browser.cjs` | PASS: all 6 focused guest-storage browser checks. |
+| `node tests/SwiftAid.Ui.Tests/case-assistance-request.browser.cjs` with the local Playwright package | PASS: synthetic assistance request, receipt, unmet-need, and follow-up acknowledgement at 390px and 1280px. |
+| `dotnet build src/SwiftAid.Mobile/SwiftAid.Mobile.csproj -c Release --no-restore -f net10.0-android -m:1 -nr:false --verbosity quiet` | PASS: 0 warnings, 0 errors. No device install or physical-device interaction was performed. |
+| `docker compose -f infra/compose.yml config -q` | PASS: Compose configuration parses. This is configuration validation only. The previously recorded Compose restart failure remains under SW-01-002; no restart was attempted during this pass. |
+
+SW-00-004 baseline capture is complete with the iOS package failure and Compose runtime limitation explicitly recorded. Browser harness availability is verified through the existing local Playwright package; no repository dependency was added. Evidence log entry: EV-057.

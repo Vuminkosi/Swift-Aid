@@ -84,3 +84,7 @@ Source inspection recorded in [case workspace audit](SW-05-002-CASE-WORKSPACE-AU
 ## SW-05-003 case detail audit — 2 November 2026
 
 Source inspection recorded in [case detail audit](SW-05-003-CASE-DETAIL-AUDIT.md). All seven named tabs are present in the shared component; live authorized actions, escalation panels and browser/device journeys remain unverified. No new tests run. EV-056.
+
+## EV-057 — SW-00-004 refreshed baseline — 2 November 2026
+
+Post-acknowledgement baseline on `interactive-ellai` at `8b4a07d`: Android-scoped full .NET suite 2,556 passed / 242 skipped / 0 failed; worker Python 59 passed / 3 skipped; guest-storage browser 6 checks passed; synthetic assistance/follow-up Chromium passed at 390px and 1280px; Android Release build 0 warnings/errors; Compose configuration validation passed. Unrestricted solution test still fails on missing local iOS GoogleDataTransport files (MSB3030); Compose restart was not retried and its prior failure remains tracked as BL-009. Detailed commands/results: `docs/BASELINE-AUDIT.md`.
