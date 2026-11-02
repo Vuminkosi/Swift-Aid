@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -54,4 +54,3 @@ public sealed class EllaiGuidanceAdmissionHttpTests
         finally { await app.StopAsync(); }
     }
 }
-

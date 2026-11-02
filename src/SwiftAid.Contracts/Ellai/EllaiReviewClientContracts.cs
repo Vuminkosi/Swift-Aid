@@ -203,6 +203,10 @@ public sealed record EllaiSessionCancelResult(
 /// keeps its cursor and retries; replay never replays commands.</summary>
 public interface IEllaiReviewClient
 {
+    Task<EllaiGuidanceAdmissionDto?> ReadGuidanceAdmissionAsync(
+        string sessionId, string proposalId, CancellationToken cancellationToken) =>
+        Task.FromResult<EllaiGuidanceAdmissionDto?>(null);
+
     bool UsesGatewayPcmAudioDownload => false;
 
     Uri CreateLiveVoiceWebSocketUri(Uri baseUri, string sessionId, string voiceCaptureId, long voiceCaptureOffsetSamples = 0)

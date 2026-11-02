@@ -1,0 +1,39 @@
+﻿using System.Net;
+using System.Net.Http.Json;
+using SwiftAid.Contracts.Ellai;
+using SwiftAid.UI.Ellai;
+
+namespace SwiftAid.Ui.Tests;
+
+public sealed class EllaiGuidanceAdmissionClientTests
+{
+    [Theory]
+    [InlineData(true, "/api/v1/ellai/guest/sessions/session/guidance/admission")]
+    [InlineData(false, "/api/v1/ellai/sessions/session/guidance/admission")]
+    public async Task UsesCurrentSessionRouteAndEncodesProposalIdentity(bool guest, string path)
+    {
+        using var http = new HttpClient(new Handler(request =>
+        {
+            Assert.Equal(HttpMethod.Get, request.Method);
+            Assert.Equal(path, request.RequestUri!.AbsolutePath);
+            Assert.Equal("?proposalId=session%3Aturn%26other%3Dvalue%3A0", request.RequestUri.Query);
+            return new(HttpStatusCode.OK) { Content = JsonContent.Create(new EllaiGuidanceAdmissionDto("Ready", "Create a report", 3)) };
+        })) { BaseAddress = new Uri("https://localhost/") };
+        var result = await new EllaiReviewHttpClient(http, guest).ReadGuidanceAdmissionAsync("session", "session:turn&other=value:0", default);
+        Assert.Equal("Ready", result!.Status);
+        Assert.Equal(3, result.InteractionEpoch);
+    }
+
+    [Fact]
+    public async Task DenialDoesNotBecomeReady()
+    {
+        using var http = new HttpClient(new Handler(_ => new(HttpStatusCode.NotFound))) { BaseAddress = new Uri("https://localhost/") };
+        Assert.Null(await new EllaiReviewHttpClient(http).ReadGuidanceAdmissionAsync("session", "unknown", default));
+    }
+
+    private sealed class Handler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(respond(request));
+    }
+}

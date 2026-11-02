@@ -188,6 +188,10 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
         string sessionId, string requestId, CancellationToken cancellationToken) =>
         ClientFor(sessionId).RejectReviewAsync(sessionId, requestId, cancellationToken);
 
+    public Task<EllaiGuidanceAdmissionDto?> ReadGuidanceAdmissionAsync(
+        string sessionId, string proposalId, CancellationToken cancellationToken) =>
+        ClientFor(sessionId).ReadGuidanceAdmissionAsync(sessionId, proposalId, cancellationToken);
+
     public Task<bool> ReportUiObservationAsync(
         string sessionId, UiObservationReport report, CancellationToken cancellationToken) =>
         ClientFor(sessionId).ReportUiObservationAsync(sessionId, report, cancellationToken);
