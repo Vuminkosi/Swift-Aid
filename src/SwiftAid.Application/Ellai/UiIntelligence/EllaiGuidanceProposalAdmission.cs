@@ -16,6 +16,44 @@ public sealed class EllaiGuidanceProposalAdmission(
     IEllaiSessionStore sessions, IEllaiUtteranceOutboxStore outbox,
     EllaiUiRegistry registry, IEllaiUiObservationStore observations, TimeProvider? clock = null)
 {
+    /// <summary>Generates through the existing planner, charges usage, then rechecks the durable
+    /// proposal and current UI context. The result still requires durable activation.</summary>
+    public async Task<EllaiGuidancePlanningResult> PlanAsync(string sessionId, string proposalId,
+        EllaiUiEntitlements authority, EllaiModelGuidancePlanner planner,
+        IEllaiUiDiscoveryService discovery, EllaiGuidancePlanValidator validator,
+        EllaiUsageLedger ledger, IEllaiUsageStore usage, CancellationToken ct)
+    {
+        var admitted = await AdmitAsync(sessionId, proposalId, authority, ct).ConfigureAwait(false);
+        if (admitted.Status != "Ready" || admitted.Catalogue is null || admitted.Observation is null)
+            return new(admitted.Status);
+        await ledger.HydrateAsync(sessionId, usage, ct).ConfigureAwait(false);
+        var estimate = System.Text.Encoding.UTF8.GetByteCount(System.Text.Json.JsonSerializer.Serialize(admitted)) + 4096;
+        if (!ledger.TryReserve(sessionId, estimate)) return new("BudgetUnavailable");
+        var observed = discovery.Observe(admitted.Catalogue,
+            admitted.Observation.MountedControlIds.ToHashSet(StringComparer.Ordinal),
+            admitted.Observation.ViewInstanceId, admitted.Observation.ContextStamp,
+            admitted.Observation.Platform, admitted.Observation.ReceivedAtUtc, admitted.Observation.ControlStates);
+        var generated = await planner.ComposeAsync(admitted.Objective!, GuidanceMode.Navigation,
+            admitted.Catalogue, observed, ct).ConfigureAwait(false);
+        var sample = new EllaiUsageSample(sessionId, Math.Max(0, generated.Usage.PromptTokens), Math.Max(0, generated.Usage.CompletionTokens));
+        ledger.Record(sample);
+        await usage.RecordAsync(new(sessionId, sample.PromptTokens, sample.CompletionTokens,
+            ledger.DollarsFor(sample), (clock ?? TimeProvider.System).GetUtcNow()), CancellationToken.None).ConfigureAwait(false);
+        var current = await AdmitAsync(sessionId, proposalId, authority, ct).ConfigureAwait(false);
+        if (current.Status != "Ready" || current.InteractionEpoch != admitted.InteractionEpoch ||
+            current.Observation?.ViewInstanceId != admitted.Observation.ViewInstanceId ||
+            current.Observation?.ContextStamp != admitted.Observation.ContextStamp) return new("Stale");
+        if (generated.Draft is null) return new("InvalidPlan");
+        if (generated.Draft.Status != GuidancePlanStatus.Ready) return new(generated.Draft.Status.ToString());
+        var feature = admitted.Catalogue.Descriptors[0].FeatureId;
+        var planId = "plan-" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(new[] { sessionId, proposalId, admitted.Observation.ContextStamp })))).ToLowerInvariant();
+        var validation = validator.ValidateObserved(generated.Draft, new(feature, [], 20), authority.Features,
+            authority.Capabilities, observed, admitted.Observation.ViewInstanceId, admitted.Observation.ContextStamp,
+            (clock ?? TimeProvider.System).GetUtcNow(), planId);
+        return validation.Plan is null ? new("InvalidPlan") : new("Ready", validation.Plan);
+    }
+
     public async Task<EllaiGuidanceAdmission> AdmitAsync(string sessionId, string proposalId,
         EllaiUiEntitlements authority, CancellationToken ct)
     {
@@ -54,3 +92,5 @@ public sealed class EllaiGuidanceProposalAdmission(
             objective, catalogue, observation, session.InteractionEpoch);
     }
 }
+
+public sealed record EllaiGuidancePlanningResult(string Status, ValidatedGuidancePlan? Plan = null);

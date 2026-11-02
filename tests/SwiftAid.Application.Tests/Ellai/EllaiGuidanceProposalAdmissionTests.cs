@@ -46,6 +46,45 @@ public sealed class EllaiGuidanceProposalAdmissionTests
             new("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>()), default)).Status);
     }
 
+    [Theory]
+    [InlineData(false, "Ready")]
+    [InlineData(true, "Stale")]
+    public async Task ModelPlanIsChargedAndRejectedWhenPageChangesDuringGeneration(bool changePage, string expected)
+    {
+        var (service, store, observations, id) = await Fixture();
+        var now = DateTimeOffset.UtcNow;
+        await observations.RecordAsync(new("session", "view", "context", "web", ["report.entry"], now,
+            [new("report.entry", UiObservationState.Ready)]), default);
+        var registry = new EllaiUiRegistry();
+        EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        var usage = new InMemoryEllaiUsageStore();
+        var planner = new EllaiModelGuidancePlanner(new PlannerCompletion(async () =>
+        {
+            if (changePage) await observations.RecordAsync(new("session", "other-view", "new-context", "web", ["report.entry"], now,
+                [new("report.entry", UiObservationState.Ready)]), default);
+        }));
+        var result = await service.PlanAsync("session", id,
+            new("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>()), planner,
+            new EllaiUiDiscoveryService(), new EllaiGuidancePlanValidator(registry), new EllaiUsageLedger(), usage, default);
+        Assert.Equal(expected, result.Status);
+        Assert.Equal(!changePage, result.Plan is not null);
+        Assert.Equal(15, (await usage.TotalsAsync("session", default)).TotalTokens);
+    }
+
+    private sealed class PlannerCompletion(Func<Task> beforeReturn) : IEllaiTurnCompletionClient
+    {
+        public async Task<EllaiTurnCompletion> CompleteAsync(IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct)
+        {
+            await beforeReturn();
+            return new("""
+                {"schemaVersion":1,"status":"Ready","objective":"Create a report","mode":"Navigation",
+                 "steps":[{"stepKey":"entry","controlId":"report.entry","objectiveId":"open-report-form","behavior":"Explain",
+                 "uiIntentBindingId":null,"resourceBindingKey":null,"factIds":["public-intake-no-account"],"evidenceIds":[],
+                 "explanation":"This is the report form.","nextStepKey":null}],"questions":[],"stopReason":null}
+                """, 10, 5);
+        }
+    }
+
     private static async Task<(EllaiGuidanceProposalAdmission Service, InMemoryEllaiSessionStore Store,
         InMemoryEllaiUiObservationStore Observations, string ProposalId)> Fixture()
     {
