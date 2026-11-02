@@ -19,7 +19,10 @@ public sealed record EllaiChatMessage(
 /// <summary>Text completion for one reasoning turn with provider-reported
 /// token usage for the ledger. The loop parses <see cref="Text"/> through
 /// <see cref="EllaiModelTurnParser"/>; free prose is never a tool call.</summary>
-public sealed record EllaiTurnCompletion(string Text, int PromptTokens, int CompletionTokens);
+public sealed record EllaiTurnCompletion(string Text, int PromptTokens, int CompletionTokens)
+{
+    public string? FinishReason { get; init; }
+}
 
 /// <summary>Text-completion lane for one reasoning turn. Implemented in
 /// Intelligence over the routed provider (Meta/Ollama/serverless); the loop

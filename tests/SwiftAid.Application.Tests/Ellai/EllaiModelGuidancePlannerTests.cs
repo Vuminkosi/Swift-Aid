@@ -5,6 +5,40 @@ namespace SwiftAid.Application.Tests.Ellai;
 
 public sealed class EllaiModelGuidancePlannerTests
 {
+    [Fact]
+    public async Task LengthLimitedResponseCannotActivateGuidanceAndRetainsUsage()
+    {
+        var result = await new EllaiModelGuidancePlanner(new Completion("""
+            {"schemaVersion":1,"status":"NeedsInput","objective":"help","mode":"Navigation",
+             "steps":[],"questions":[{"questionId":"q1","text":"Which report?","choiceIds":[]}],"stopReason":null}
+            """, "length")).ComposeAsync("help", GuidanceMode.Navigation, new([], "catalogue", "ui", false), [], default);
+        Assert.Null(result.Draft);
+        Assert.Contains("The guidance response reached its output limit.", result.Errors);
+        Assert.Equal(17, result.Usage.PromptTokens);
+        Assert.Equal("length", result.Usage.FinishReason);
+    }
+
+    [Fact]
+    public async Task PlannerProvidesRoomForACompleteStructuredWalkthrough()
+    {
+        var completion = new BudgetAwareCompletion();
+        var result = await new EllaiModelGuidancePlanner(completion).ComposeAsync(
+            "help", GuidanceMode.Navigation, new([], "catalogue", "ui", false), [], default);
+        Assert.NotNull(result.Draft);
+        Assert.Equal(8192, completion.RequestedTokens);
+    }
+
+    private sealed class BudgetAwareCompletion : IEllaiTurnCompletionClient
+    {
+        public int RequestedTokens { get; private set; }
+        public Task<EllaiTurnCompletion> CompleteAsync(IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct)
+        {
+            RequestedTokens = maxTokens;
+            return Task.FromResult(new EllaiTurnCompletion(maxTokens <= 2048 ? "{\"schemaVersion\":1," :
+                """{"schemaVersion":1,"status":"NeedsInput","objective":"help","mode":"Navigation","steps":[],"questions":[{"questionId":"q1","text":"Which report?","choiceIds":[]}],"stopReason":null}""", 2782, maxTokens <= 2048 ? 2048 : 3000));
+        }
+    }
+
     [Theory]
     [InlineData("null")]
     [InlineData("{\"schemaVersion\":1,\"status\":\"Ready\",\"objective\":\"help\",\"mode\":\"Navigation\",\"steps\":null,\"questions\":[]}")]
@@ -67,13 +101,13 @@ public sealed class EllaiModelGuidancePlannerTests
         }
     }
 
-    private sealed class Completion(string text) : IEllaiTurnCompletionClient
+    private sealed class Completion(string text, string? finishReason = null) : IEllaiTurnCompletionClient
     {
         public Task<EllaiTurnCompletion> CompleteAsync(IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct)
         {
             Assert.Equal("system", messages[0].Role);
-            Assert.Equal(2048, maxTokens);
-            return Task.FromResult(new EllaiTurnCompletion(text, 17, 9));
+            Assert.Equal(EllaiModelGuidancePlanner.MaxCompletionTokens, maxTokens);
+            return Task.FromResult(new EllaiTurnCompletion(text, 17, 9) { FinishReason = finishReason });
         }
     }
 }

@@ -138,7 +138,8 @@ public sealed partial class EllaiGuidanceProposalAdmission(
         if (admitted.Status != "Ready" || admitted.Catalogue is null || admitted.Observation is null)
             return new(admitted.Status);
         await ledger.HydrateAsync(sessionId, usage, ct).ConfigureAwait(false);
-        var estimate = System.Text.Encoding.UTF8.GetByteCount(System.Text.Json.JsonSerializer.Serialize(admitted)) + 4096;
+        var estimate = System.Text.Encoding.UTF8.GetByteCount(System.Text.Json.JsonSerializer.Serialize(admitted))
+            + EllaiModelGuidancePlanner.MaxCompletionTokens + 4096;
         if (!ledger.TryReserve(sessionId, estimate)) return new("BudgetUnavailable");
         var observed = discovery.Observe(admitted.Catalogue,
             admitted.Observation.MountedControlIds.ToHashSet(StringComparer.Ordinal),
@@ -157,7 +158,10 @@ public sealed partial class EllaiGuidanceProposalAdmission(
         if (current.Status != "Ready" || current.InteractionEpoch != admitted.InteractionEpoch ||
             current.Observation?.ViewInstanceId != admitted.Observation.ViewInstanceId ||
             current.Observation?.ContextStamp != admitted.Observation.ContextStamp) return new("Stale");
-        if (generated.Draft is null) return new("InvalidPlan") { DiagnosticCode = "model-contract" };
+        if (generated.Draft is null) return new("InvalidPlan")
+        {
+            DiagnosticCode = generated.Usage.FinishReason == "length" ? "output-limit" : "model-contract"
+        };
         if (generated.Draft.Status != GuidancePlanStatus.Ready) return new(generated.Draft.Status.ToString());
         if (reportAlreadyReceived && generated.Draft.Steps.Any(step => step.ControlId == "report.submit"))
             return new("InvalidPlan");

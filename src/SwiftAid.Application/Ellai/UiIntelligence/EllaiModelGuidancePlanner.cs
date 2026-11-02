@@ -8,6 +8,7 @@ namespace SwiftAid.Application.Ellai;
 /// be charged by the admitting session; drafts never authorize UI or domain actions.</summary>
 public sealed class EllaiModelGuidancePlanner(IEllaiTurnCompletionClient completions)
 {
+    public const int MaxCompletionTokens = 8192;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
@@ -45,7 +46,9 @@ public sealed class EllaiModelGuidancePlanner(IEllaiTurnCompletionClient complet
                 controls = snapshot.Descriptors.Select(d => new { d.ControlId, d.DescriptorVersion, d.ElementKind,
                     d.Semantics, d.ProofPolicyId, d.HumanConfirmationRequired, d.AllowedIntentBindings, d.NavigationId, d.GoalTags, d.ProductFactIds, d.ObjectiveId, d.RiskClass, d.SupportedModes, d.PrerequisiteIds, d.SuccessorIds }),
                 observations = observations.Select(o => new { o.ControlId, o.DescriptorVersion, o.State, o.ViewInstanceId, o.ContextStamp, o.ObservedAtUtc }) }, Json))
-        ], 2048, ct).ConfigureAwait(false);
+        ], MaxCompletionTokens, ct).ConfigureAwait(false);
+        if (string.Equals(completion.FinishReason, "length", StringComparison.OrdinalIgnoreCase))
+            return (null, completion, ["The guidance response reached its output limit."]);
         try
         {
             if (completion.Text.Length > 32768)
