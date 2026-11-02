@@ -8,6 +8,25 @@ namespace SwiftAid.Application.Tests.Ellai;
 
 public sealed class EllaiUiAuthorityResolverTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AccountMetadataAuthorityDoesNotRequireCaseLeaseOrFallBackAfterRevocation(bool active)
+    {
+        var scopes = new MutableScopes(new([], 7, DateTimeOffset.UtcNow.AddMinutes(1))) { Unavailable = true };
+        var authority = await new EllaiUiAuthorityResolver(scopes, identityAuthority: new IdentityAuthority(active))
+            .ResolveAsync(Actor, "scope", default);
+        Assert.Equal(active, authority.Features.Contains(EllaiNavigationManifest.FeatureId));
+        Assert.Equal(active, authority.Features.Contains(EllaiCaseDetailUiManifest.FeatureId));
+        Assert.Equal(0, scopes.Calls);
+        Assert.Equal(active ? new[] { EllaiNavigationManifest.Capability } : [], authority.Capabilities);
+    }
+
+    private sealed class IdentityAuthority(bool active) : IEllaiUiIdentityAuthority
+    {
+        public ValueTask<bool> IsCurrentAsync(ActorContext actor, CancellationToken ct) => ValueTask.FromResult(active);
+    }
+
     private static readonly ActorContext Actor = ActorContext.FromValidatedPrincipal(new ClaimsPrincipal(
         new ClaimsIdentity([new(ClaimTypes.NameIdentifier, "owner"), new(ActorContext.AccessEpochClaimType, "7")], "test")));
 
@@ -52,7 +71,7 @@ public sealed class EllaiUiAuthorityResolverTests
     }
 
     [Theory]
-    [InlineData("navigation", 15)]
+    [InlineData("navigation", 16)]
     [InlineData("dashboard", 8)]
     [InlineData("case-list", 18)]
     [InlineData("case-detail", 10)]

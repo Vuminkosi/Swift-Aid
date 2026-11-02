@@ -4,21 +4,31 @@ using SwiftAid.Contracts.Ellai;
 namespace SwiftAid.Application.Ellai;
 
 /// <summary>Fresh server authority for UI metadata. Navigation grants no case read or action permission.</summary>
-public sealed class EllaiUiAuthorityResolver(IScopeService? scopes = null, TimeProvider? clock = null)
+public sealed class EllaiUiAuthorityResolver(IScopeService? scopes = null, TimeProvider? clock = null,
+    IEllaiUiIdentityAuthority? identityAuthority = null)
 {
     public async ValueTask<EllaiUiEntitlements> ResolveAsync(ActorContext? actor, string scopeEpoch, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         HashSet<string> features = [EllaiReportUiManifest.FeatureId, EllaiCommunityUiManifest.FeatureId];
         HashSet<string> capabilities = [];
-        if (actor is not null && scopes is not null)
+        if (actor is not null && (identityAuthority is not null || scopes is not null))
         {
             try
             {
-                var scope = await scopes.GetAsync(actor, ct).ConfigureAwait(false);
                 var now = (clock ?? TimeProvider.System).GetUtcNow();
-                if (scope.AccessEpoch == actor.AccessEpoch && scope.ExpiresAtUtc > now &&
-                    scope.Grants.Any(grant => grant.ValidFromUtc <= now && grant.ExpiresAtUtc > now))
+                var current = false;
+                if (identityAuthority is not null)
+                {
+                    current = await identityAuthority.IsCurrentAsync(actor, ct).ConfigureAwait(false);
+                }
+                else if (scopes is not null)
+                {
+                    var scope = await scopes.GetAsync(actor, ct).ConfigureAwait(false);
+                    current = scope.AccessEpoch == actor.AccessEpoch && scope.ExpiresAtUtc > now &&
+                        scope.Grants.Any(grant => grant.ValidFromUtc <= now && grant.ExpiresAtUtc > now);
+                }
+                if (current)
                 {
                     features.Add(EllaiNavigationManifest.FeatureId);
                     features.Add(EllaiDashboardUiManifest.FeatureId);

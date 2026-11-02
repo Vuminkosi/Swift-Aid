@@ -541,3 +541,11 @@ Case evidence uses responsive paired panels for original observations and nearby
 Every Ellai status uses a decorative three-bar animation, including unknown/fallback labels. Connecting/reconnecting use a quicker wave; Thinking retains purple text and bold animated dots; other states use a gentle pulse. Reduced-motion preferences disable both animations. The shared component covers web and MAUI without changing voice lifecycle behavior.
 
 Verification: `case-evidence-status.browser.cjs` passed in Chromium at 1280px/light and 390px/dark with ten status labels, map link attributes, responsive panels, no horizontal overflow, reduced motion and no page errors. `ellai-microphone-toggle.browser.cjs` passed at 1280, 390 and 320px. These are synthetic shared-component browser checks, not physical-mobile or live case-data validation.
+
+### Ellai navigation identity and classification ordering
+
+Production UI discovery now checks the current PostgreSQL actor status, expiry and access epoch through `IEllaiUiIdentityAuthority`. The case-bound grant adapter requires an active case transaction and cannot establish menu discovery authority outside one. This metadata-only authority grants no case reads, mutations or approval receipts; destination APIs and record navigation still authorize their own resources. Missing, revoked, expired or stale identities cannot receive signed-in navigation metadata. Home is a registered menu destination shared by web and mobile.
+
+Case classification evidence is ordered by result creation time descending (association time breaks ties); the shared case panel selects the newest result rather than prioritizing an older current-configuration result. Existing configuration and translation-review labels remain visible.
+
+Focused verification: 100 application tests passed for UI authority, navigation payloads, manifest routes and guidance admission. The reported signed-in session had an active, unexpired PostgreSQL actor at epoch 0; the previous scope resolver depended on the case-lease-only adapter. Real signed-in tour execution after this correction remains NOT VERIFIED.

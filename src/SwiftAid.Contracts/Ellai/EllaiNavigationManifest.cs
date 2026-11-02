@@ -16,6 +16,7 @@ public static class EllaiNavigationManifest
     public const string Capability = "navigation.authenticated";
     public static IReadOnlyList<EllaiNavigationDestination> Destinations { get; } = Array.AsReadOnly<EllaiNavigationDestination>(
     [
+        new("home", "/", "Home", "Return to the SwiftAid home page.", "Main"),
         new("dashboard", "/dashboard", "Dashboard", "View the authorized operational overview.", "Main"),
         new("cases", "/my-cases", "Cases", "Find and filter cases available to your account.", "Main"),
         new("assignments", "/assignments", "Assignments", "Review your case assignments.", "Main"),

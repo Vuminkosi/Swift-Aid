@@ -28,7 +28,7 @@ public sealed class PostgresCaseClassificationQuery(SwiftAidDbContext db, ICaseA
                                  join header in db.ManagedCases.AsNoTracking() on association.CaseId equals header.CaseId
                                  where header.CaseId == caseId && association.ReportRevision == header.ReportRevision &&
                                      header.OrganizationId == result.OrganizationId && header.WorkspaceId == result.WorkspaceId
-                                 orderby association.CreatedAtUtc descending
+                                 orderby result.CreatedAtUtc descending, association.CreatedAtUtc descending
                                  select new { association, result, config }).Take(10).ToListAsync(ct);
             var sourceIds = records.Select(row => row.association.SourceEventId).ToArray();
             var translationIds = records.Select(row => JsonSerializer.Deserialize<ClassificationProfile>(row.config.ProfileJson)!.Translation?.ArtifactId)

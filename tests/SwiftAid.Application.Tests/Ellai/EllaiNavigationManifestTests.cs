@@ -44,6 +44,7 @@ public sealed class EllaiNavigationManifestTests
     [Fact]
     public void DestinationsAreUniqueAndUseOnlyRegisteredApplicationRoutes()
     {
+        Assert.Equal("/", EllaiNavigationManifest.ResolveRoute("nav-home"));
         var destinations = EllaiNavigationManifest.Destinations;
         Assert.Equal(destinations.Count, destinations.Select(item => item.ControlId).Distinct().Count());
         Assert.Equal(destinations.Count, destinations.Select(item => item.Anchor).Distinct().Count());

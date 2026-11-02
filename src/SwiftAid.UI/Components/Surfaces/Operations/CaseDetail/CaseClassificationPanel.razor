@@ -20,7 +20,7 @@
     {
         <MudText Typo="Typo.body2" role="status">We couldn’t load the analysis. Check your connection and try Refresh.</MudText>
     }
-    else if (_snapshot.Items.OrderByDescending(i => i.CurrentConfiguration).ThenByDescending(i => i.CreatedAtUtc).FirstOrDefault() is { } item)
+    else if (_snapshot.Items.OrderByDescending(i => i.CreatedAtUtc).FirstOrDefault() is { } item)
     {
         <div class="classification-panel__status" role="status" aria-live="polite">
             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@StatusColor(item)">@StatusLabel(item)</MudChip>
