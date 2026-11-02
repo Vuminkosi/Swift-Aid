@@ -28,6 +28,7 @@ The master orchestrator owns checklist status, evidence linking and regression c
 | EV-016 | `dotnet package list --project SwiftAid.sln --vulnerable --include-transitive --no-restore --format json` | PASS, exit 0; 16 projects enumerated, no vulnerable packages listed. Snapshot scope only; full supply-chain/license review NOT VERIFIED. | SW-01-003, [pin audit](SW-01-003-PIN-AUDIT.md) |
 | EV-017 | `uv lock --check` (working directory `workers/`) | PASS; resolved 54 packages, lock consistent. | SW-01-003, [pin audit](SW-01-003-PIN-AUDIT.md) |
 | EV-018 | `npm ls --package-lock-only --depth=0` (repository root) | PASS; four declared direct packages present in the lock. Playwright absent. | SW-01-003 / BL-003, [pin audit](SW-01-003-PIN-AUDIT.md) |
+| EV-019 | Read-only source trace for SW-01-004 | PARTIAL: mapped command/event/job/outbox/audio/UI registry/public projection surfaces; no complete cross-contract coverage or runtime compatibility claim. | SW-01-004, [contract inventory](SW-01-004-CONTRACT-MAP.md) |
 
 ## Active regression and blocker ownership
 

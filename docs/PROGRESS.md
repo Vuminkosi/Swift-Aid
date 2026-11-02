@@ -422,3 +422,7 @@ Local Compose readiness checks passed for Gateway liveness, PostgreSQL listener,
 ## SW-01-003 dependency pin audit - 2 November 2026
 
 Read-only audit recorded in [SW-01-003 pin audit](SW-01-003-PIN-AUDIT.md). Locked .NET restore, 16-project vulnerability query (exit 0, no listed findings), Python uv lock --check, and root npm lock inventory passed. Several external images remain mutable or lack digests; complete image vulnerability, license and SBOM review plus model/data/asset rights remain NOT VERIFIED. Kept SW-01-003 unchecked and added BL-010; no shared dependency/image files changed pending current path ownership (BL-005). Evidence EV-016 through EV-018.
+
+## SW-01-004 contract map - 2 November 2026
+
+Read-only contract inventory recorded in [SW-01-004 contract map](SW-01-004-CONTRACT-MAP.md), covering managed commands/events, client and ingestion outboxes, worker job envelopes, AI tools/plans, Ellai audio/session contracts, UI registry and public projections. This is PARTIAL: a complete producer/consumer/version/persistence crosswalk, full event-list reconciliation, worker execution/ACK evidence and runtime compatibility are NOT VERIFIED. No shared contract or migration was changed; current owners remain unresolved under BL-005. Evidence EV-019.
