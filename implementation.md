@@ -4489,3 +4489,10 @@ Deployment follow-up: image d7c1e856176adf70b3dcfd90297a889ee201f2a4aa97c6f5e668
 WebGuestIntakeService now keeps private capability/proof state in the circuit but resolves intake/session services in a fresh async DI scope per operation. A cancellable semaphore serializes capability renewal, submissions and receipt verification; every scope is disposed after completion. Guidance receipt admission also uses the operation scope. Existing direct-constructor tests remain supported; production explicitly selects IServiceScopeFactory. This removes the circuit-long DbContext sharing path without widening authorization, exposing proofs or changing intake idempotency.
 
 PASS: 11 WebGuestIntakeServiceTests including fresh/disposed dependencies per submit, retained private proof, overlapping-waiter cancellation, capability renewal and receipts. Evidence: .codex/ellai-intake-scope-tests.log. The observed live DbContext concurrency error motivated this correction; live authenticated report submission and receipt completion remain NOT VERIFIED. Callback-finished UI copy and authenticated draft-saving availability remain separate outstanding defects. No migration.
+
+
+### Report outcome presentation (2026-11-02)
+
+Removed the guided report stepper callback-completed banner and unused completion state. Returning normally from a callback is not server acceptance: parent handlers also return after handled failures. PublicReportSurface retains actual parent feedback and server receipts without a contradictory finished message. Shared web/mobile validation is unchanged.
+
+PASS: 20 focused GuidedReportDraftPersistenceTests and EllaiReportAnchorTests; command: dotnet test tests/SwiftAid.Ui.Tests/SwiftAid.Ui.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter "FullyQualifiedName~GuidedReportDraftPersistenceTests|FullyQualifiedName~EllaiReportAnchorTests" --verbosity quiet. Evidence: .codex/ellai-report-outcome-ui-tests.log. Live submission and authenticated draft recovery remain NOT VERIFIED. No migration.

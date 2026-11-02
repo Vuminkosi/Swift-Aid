@@ -363,15 +363,6 @@
                 {
                     <MudText Color="Color.Error" Typo="Typo.body2" role="alert">@_submitError</MudText>
                 }
-                @if (_submitComplete)
-                {
-                    @if (!string.IsNullOrWhiteSpace(SubmitCompleteMessage))
-                    {
-                        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status" aria-live="polite">
-                            @SubmitCompleteMessage
-                        </MudAlert>
-                    }
-                }
             </section>
             <div class="guided-report__actions">
                 <MudButton ButtonType="ButtonType.Button" Variant="Variant.Text" OnClick="GoBack" StartIcon="@Icons.Material.Filled.ArrowBack">Back</MudButton>
@@ -457,7 +448,6 @@
     private PendingDraftRefresh? _pendingDraftRefresh;
     private PendingDraftRefresh? _confirmedDraftSave;
     private bool _submitting;
-    private bool _submitComplete;
     private DraftSaveState _saveState = DraftSaveState.Unsaved;
     private ReportSubjectCategory? _subjectCategory;
 
@@ -581,9 +571,6 @@
     public string SubmitProgressLabel { get; set; } = "Sending…";
 
     [Parameter]
-    public string SubmitCompleteMessage { get; set; } = "Sending has finished. Check the status shown on this page.";
-
-    [Parameter]
     public string DraftSaveButtonLabel { get; set; } = "Save draft";
 
     [Parameter]
@@ -691,7 +678,6 @@
             _subjectCategory = GetSubjectCategory(Draft.SubjectScope);
             _stepError = null;
             _submitError = null;
-            _submitComplete = false;
         }
 
         if (HasCountryCatalogue &&
@@ -829,7 +815,6 @@
             _messageStore.Clear(field);
             _stepError = null;
             _submitError = null;
-            _submitComplete = false;
             _saveState = DraftSaveState.Unsaved;
             _editContext.NotifyValidationStateChanged();
             return;
@@ -1136,7 +1121,6 @@
         _stepError = null;
         _observationChoiceMessage = null;
         _submitError = null;
-        _submitComplete = false;
         _saveState = DraftSaveState.Unsaved;
         if (args.FieldIdentifier.FieldName != nameof(PublicReportDraft.ReportReviewConfirmed))
         {
@@ -1378,7 +1362,6 @@
         }
 
         _submitting = true;
-        _submitComplete = false;
         _submitError = null;
         try
         {
@@ -1388,8 +1371,9 @@
                 ProcessingPolicyVersion,
                 Countries,
                 CountryCatalogueIsCurrent);
+            // Callback completion is not a submission receipt. The parent surface renders
+            // the authoritative queued/failed/received outcome and any server receipt.
             await OnSubmit.InvokeAsync(submission);
-            _submitComplete = true;
         }
         catch
         {
