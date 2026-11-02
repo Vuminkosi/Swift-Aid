@@ -48,6 +48,7 @@ The master orchestrator owns checklist status, evidence linking and regression c
 | EV-036 | Read-only SW-02-010 onboarding/account UX inventory | PARTIAL: Gateway/Mobile account and welcome page/test sources exist; no rendered responsive, accessibility, browser/device or persistent first-use workflow evidence. No tests run. | SW-02-010 / BL-003, [UX audit](SW-02-010-ONBOARDING-UX-AUDIT.md) |
 | EV-037 | `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false --filter FullyQualifiedName~GeographicRegistryTests --verbosity minimal` | PASS: 7 passed, 0 failed/skipped using in-memory SQLite; importer/reconciler/search scope only, live PostgreSQL migration NOT VERIFIED. | SW-03-001/002, [geographic seed audit](SW-03-001-GEOGRAPHIC-SEED-AUDIT.md) |
 | EV-038 | Read-only SW-03-003 picker source inventory | PARTIAL: shared debounced search-first component, ancestry, retry and browse/provisional source paths found; no test run, rendered accessibility or all-surface reuse NOT VERIFIED. | SW-03-003, [picker audit](SW-03-003-LOCATION-PICKER-AUDIT.md) |
+| EV-039 | Read-only SW-03-004 fallback/verification audit | PARTIAL: generic cascade and manual provisional callback found; country-specific behavior and authorized registry verification flow NOT VERIFIED/found. No tests run. | SW-03-004, [fallback audit](SW-03-004-LOCATION-FALLBACK-AUDIT.md) |
 
 ## Active regression and blocker ownership
 

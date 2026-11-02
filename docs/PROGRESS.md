@@ -502,3 +502,7 @@ The seed contains 264 SZ/ZW/ZA locations with source/verification metadata; it e
 ## SW-03-003 shared location picker audit - 2 November 2026
 
 Source audit in [SW-03-003 picker audit](SW-03-003-LOCATION-PICKER-AUDIT.md) found a reusable search-first MudAutocomplete with 250 ms debounce, ancestry, retry and browse/provisional states, backed by country-scoped bounded search. Focused tests were not run here; rendered accessibility/race states and reuse across every required surface remain NOT VERIFIED. EV-038.
+
+## SW-03-004 location fallback audit - 2 November 2026
+
+Source audit in [SW-03-004 fallback audit](SW-03-004-LOCATION-FALLBACK-AUDIT.md) found a generic country/region-or-province/locality cascade and manual provisional callback in the report wizard. Country-specific hierarchy behavior and authorized registry verification workflow were not established; offline/unknown scenarios remain unverified. No tests run; EV-039.
