@@ -43,3 +43,42 @@ Verification: `python -m pytest infra/ellai-tts/tests -q -p no:cacheprovider` pa
 4 tests. Filter response was checked at 8, 16, 22.05 and 48 kHz. Real listening,
 same-waveform model A/B, deployed latency and mobile playback remain NOT VERIFIED.
 Do not enable the profile by default until those checks are assessed.
+
+## Kokoro English adapter (integration in progress)
+
+`ELLAI_TTS_ENGLISH_PROVIDER=kokoro` selects `af_heart` at speed 0.95, loaded from
+`ELLAI_KOKORO_MODEL_PATH` (default `/models/kokoro`). The model, configuration and
+Heart voice files are SHA-256 checked before loading. Only English uses this
+adapter; existing `ELLAI_TTS_NATIVE_PROFILES` continue selecting their pinned MMS
+checkpoints. Omitted or `default` voice IDs resolve within the requested language;
+a language/voice mismatch returns 422. English Kokoro PCM is mono s16le at 24 kHz.
+MMS clarity processing is never applied to Kokoro.
+
+The optional `kokoro` dependency group is locked separately. `Dockerfile.kokoro`
+reuses the local MMS runtime image and cached AntHill English linguistic assets;
+it installs only missing runtime dependencies. It requires those local images and
+does not provision voice weights. The combined image built successfully; a subsequent
+build reused it with `--network=none`. Base `Dockerfile` remains MMS-only. Do not select the
+Kokoro provider in that image without installing the optional dependencies and
+the cached `en_core_web_sm` model.
+
+Real adapter verification on 2 November 2026 used the cached Kokoro 0.9.4 / torch
+2.14.1 runtime with Docker `--network none`: 104,400 finite samples, 24 kHz,
+4.35 seconds of speech, peak 0.6121, cold load plus synthesis 6.44 seconds. The
+retained synthetic listening sample is `.codex/ellai-kokoro-reference.wav`.
+This proves local adapter inference, not Gateway delivery, subjective quality or
+physical-device playback. Gateway routing now forwards the actual response language;
+installed-voice selection and deployment remain outstanding. No new model assets were downloaded.
+
+The combined image also passed real HTTP synthesis with networking disabled:
+English Heart returned 94,800 PCM bytes at 24 kHz in 637 ms; MMS Shona returned
+39,936 bytes in 2,951 ms; Nyanja 37,888 bytes in 3,105 ms; Tsonga 35,840 bytes in
+2,727 ms. Native samples were 16 kHz and included checkpoint loading. Every response
+reported rate 0.95. Native test text was only the synthetic product name, not a
+language-quality evaluation. Worker tests passed 34 tests and four subtests;
+Gateway synthesis/preparation/playback coordination tests passed 28 tests.
+
+Compose now selects Kokoro English by default, mounts the reused local Kokoro
+artifacts from `.codex/models/kokoro`, and reads pinned native profiles from
+`native-profiles.json` against `.codex/models`. English remains the default request
+language. Missing assets produce unavailable speech, never cross-language fallback.

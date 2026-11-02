@@ -241,15 +241,20 @@ services:
   ellai-tts:
     build:
       context: ./ellai-tts
-      dockerfile: Dockerfile
-    image: swiftaid/ellai-tts:mms-eng-pinned
+      dockerfile: Dockerfile.kokoro
+    image: swiftaid/ellai-tts:kokoro-mms-local
     profiles: ["ellai-voice"]
     environment:
       ELLAI_TTS_MODEL_PATH: /models
+      ELLAI_TTS_ENGLISH_PROVIDER: kokoro
+      ELLAI_KOKORO_MODEL_PATH: /kokoro
       ELLAI_TTS_INTERNAL_KEY: ${ELLAI_TTS_INTERNAL_KEY:-}
       ELLAI_TTS_CLARITY_PROFILES: ${ELLAI_TTS_CLARITY_PROFILES:-{}}
+      OMP_NUM_THREADS: "4"
     volumes:
       - ellai-tts-model-data:/models:ro
+      - ../.codex/models/kokoro:/kokoro:ro
+      - ../.codex/models:/native:ro
     healthcheck:
       test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health/ready', timeout=3).read()"]
       interval: 15s

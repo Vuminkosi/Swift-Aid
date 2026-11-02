@@ -1852,3 +1852,7 @@ No application build, model call, device scenario, medical review, social send o
 [C01]: docs/RULES-SOURCE-REGISTER.md#c01-participant-guide
 
 [C02]: docs/RULES-SOURCE-REGISTER.md#c02-bonus-prize-slide
+
+### Owner-directed English speech provider exception (2 November 2026)
+
+Kokoro-82M is approved as the default English synthesis provider, using af_heart at speed 0.95. This is a narrow exception to SA-META-01 for English TTS only. English remains the default language. Explicit Shona (sna), Nyanja (nya), and Tsonga (tso) output retains the corresponding MMS-TTS checkpoint at speaking rate 0.95. Muse Spark, Muse Voice Transcribe, translation providers, authorization and existing Live Speak capture remain unchanged. English voice choices must correspond to installed, validated voice assets. Runtime model downloads and silent language fallback are not permitted. Implementation and verification status remain in implementation.md.

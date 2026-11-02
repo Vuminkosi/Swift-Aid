@@ -9,10 +9,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1
 
+# The MMS-only base is retained for native inference and Kokoro image layering.
+ENV ELLAI_TTS_ENGLISH_PROVIDER=mms
+
 WORKDIR /app
 COPY --from=uv /uv /uvx /bin/
 COPY pyproject.toml uv.lock ./
-COPY app.py voice_pool.py audio_processing.py ./
+COPY app.py voice_pool.py audio_processing.py kokoro_voice.py ./
 
 RUN addgroup --system swiftaid \
     && adduser --system --ingroup swiftaid swiftaid \

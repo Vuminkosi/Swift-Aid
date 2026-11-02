@@ -38,7 +38,7 @@ public sealed class EllaiPreparedResponseAudio(
             }
 
             var key = (response.SessionId, response.Sequence);
-            if (_entries.ContainsKey(key) || !speech.IsConfigured || response.Language != "eng"
+            if (_entries.ContainsKey(key) || !speech.IsConfigured || response.Language is not ("eng" or "sna" or "nya" or "tso")
                 || string.IsNullOrWhiteSpace(response.Text)
                 || (response.Progress is not null && (!response.Progress.Speak
                     || response.Progress.ExpiresAtUtc <= DateTimeOffset.UtcNow))
@@ -148,7 +148,8 @@ public sealed class EllaiPreparedResponseAudio(
                     for (var index = 0; index < sentences.Count; index++)
                     {
                         using var upstream = await speech.SynthesizeAsync(
-                            $"{audio.Response.SessionId}-{audio.Response.Sequence}-{index}", sentences[index], cancellation.Token);
+                            $"{audio.Response.SessionId}-{audio.Response.Sequence}-{index}", sentences[index],
+                            audio.Response.Language, null, cancellation.Token);
                         if (!EllaiSpeechResponseContract.IsValidPcmResponse(upstream))
                             throw new InvalidOperationException("Invalid speech response.");
                         var headers = new Dictionary<string, string[]>();

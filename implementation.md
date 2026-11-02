@@ -4299,3 +4299,10 @@ User explicitly adjusted the frozen speech pace from 0.92 to 0.95 and requested 
 ### Ellai optional MMS synthesis clarity (2 November 2026)
 - Added opt-in, language-scoped HP80 / shelf180 -3dB / presence3k +1.5dB / -1dBFS sample-peak processing before PCM encoding; exact bypass and 0.95 native pace preserved. No capture, turn or orchestration changes.
 - Verified: worker suite 27 tests + 4 subtests; browser playback contract 4 tests; Compose configuration validation. Physical playback, model A/B and deployment remain NOT VERIFIED; disabled by default.
+
+### Ellai Kokoro English and native MMS routing (2 November 2026)
+
+- Owner-directed default: English Kokoro af_heart at 0.95; explicit sna/nya/tso retain their pinned MMS checkpoints at 0.95. No Muse, translation, VAD or microphone changes.
+- Worker adapter hashes local assets, rejects mismatched voices, bounds inference output, and preserves the actual PCM sample rate. Gateway preparation now forwards native response language rather than rejecting it or requesting English.
+- PASS: worker 34 tests + four subtests; Gateway speech client/preparation/coordinator 28 tests; real four-language synthesis via HTTP in an isolated network-disabled container; combined image build and offline cached rebuild.
+- Pending: user voice selection, Gateway deployment, browser/device playback and subjective language quality. Synthetic WAV and image build logs retained under .codex.

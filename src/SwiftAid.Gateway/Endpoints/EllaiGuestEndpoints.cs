@@ -447,7 +447,7 @@ public static class EllaiGuestEndpoints
             return Results.NotFound();
         }
 
-        if (response.Language != "eng")
+        if (response.Language is not ("eng" or "sna" or "nya" or "tso"))
         {
             return Results.Problem(
                 statusCode: StatusCodes.Status503ServiceUnavailable,

@@ -13,6 +13,12 @@ public interface IEllaiSpeechSynthesisClient
         string requestId,
         string text,
         CancellationToken cancellationToken);
+
+    Task<HttpResponseMessage> SynthesizeAsync(
+        string requestId, string text, string language, string? voiceId,
+        CancellationToken cancellationToken) => language == "eng" && voiceId is null or "default"
+            ? SynthesizeAsync(requestId, text, cancellationToken)
+            : throw new InvalidOperationException("The requested speech profile is unavailable.");
 }
 
 internal static class EllaiSpeechResponseContract
@@ -54,10 +60,20 @@ public sealed class EllaiSpeechSynthesisClient : IEllaiSpeechSynthesisClient
     public Task<HttpResponseMessage> SynthesizeAsync(
         string requestId,
         string text,
+        CancellationToken cancellationToken) =>
+        SynthesizeAsync(requestId, text, "eng", null, cancellationToken);
+
+    public Task<HttpResponseMessage> SynthesizeAsync(
+        string requestId, string text, string language, string? voiceId,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(requestId);
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        if (language is not ("eng" or "sna" or "nya" or "tso")
+            || (voiceId is not null && voiceId != "default" && (language != "eng" || voiceId != "af_heart")))
+        {
+            throw new ArgumentException("The requested speech profile is unavailable.");
+        }
         if (!IsConfigured)
         {
             throw new InvalidOperationException("Gateway speech synthesis is not configured.");
@@ -66,7 +82,7 @@ public sealed class EllaiSpeechSynthesisClient : IEllaiSpeechSynthesisClient
         var request = new HttpRequestMessage(HttpMethod.Post, "v1/synthesize")
         {
             Content = JsonContent.Create(
-                new EllaiSpeechSynthesisRequest(requestId, text),
+                new EllaiSpeechSynthesisRequest(requestId, text, language, voiceId ?? "default"),
                 options: new JsonSerializerOptions(JsonSerializerDefaults.Web)),
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _internalKey);
@@ -76,8 +92,5 @@ public sealed class EllaiSpeechSynthesisClient : IEllaiSpeechSynthesisClient
             cancellationToken);
     }
 
-    private sealed record EllaiSpeechSynthesisRequest(string RequestId, string Text)
-    {
-        public string VoiceId { get; } = "swiftaid-mms-english-v1";
-    }
+    private sealed record EllaiSpeechSynthesisRequest(string RequestId, string Text, string Language, string VoiceId);
 }

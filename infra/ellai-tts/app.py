@@ -35,10 +35,15 @@ class LoadedVoice:
     tokenizer: VitsTokenizer
     sample_rate: int
 
+    def synthesize(self, text: str) -> np.ndarray:
+        inputs = self.tokenizer(text=text, return_tensors="pt")
+        with torch.inference_mode():
+            return self.model(**inputs, speaking_rate=SPEAKING_RATE).waveform[0].detach().cpu().numpy()
+
 
 class SynthesisRequest(BaseModel):
     text: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
-    voice_id: str = Field(default=VOICE_ID, min_length=1, max_length=80, alias="voiceId")
+    voice_id: str | None = Field(default=None, min_length=1, max_length=80, alias="voiceId")
     request_id: str = Field(min_length=1, max_length=120, alias="requestId")
     language: str = Field(default="eng", min_length=3, max_length=3)
     bypass_processing: bool = Field(default=False, strict=True, alias="bypassProcessing")
@@ -73,12 +78,30 @@ async def lifespan(application: FastAPI) -> Iterator[None]:
     application.state.clarity_profiles = read_clarity_profiles(os.environ.get("ELLAI_TTS_CLARITY_PROFILES", "{}"))
     model_path = Path(os.environ.get("ELLAI_TTS_MODEL_PATH", "/models/mms-tts-eng"))
     english = VoiceProfile(VOICE_ID, "eng", EXPECTED_MODEL_ID, EXPECTED_REVISION, EXPECTED_MODEL_SHA256, model_path)
-    profiles = read_profiles(os.environ.get("ELLAI_TTS_NATIVE_PROFILES", "[]"), english)
+    provider = os.environ.get("ELLAI_TTS_ENGLISH_PROVIDER", "kokoro")
+    if provider == "kokoro":
+        from kokoro_voice import MODEL_ID, MODEL_SHA256
+        english = VoiceProfile("af_heart", "eng", MODEL_ID, "v1.0", MODEL_SHA256,
+                               Path(os.environ.get("ELLAI_KOKORO_MODEL_PATH", "/models/kokoro")))
+    elif provider != "mms":
+        raise ValueError("Unsupported English speech provider.")
+    native_profiles = os.environ.get("ELLAI_TTS_NATIVE_PROFILES")
+    if native_profiles is None:
+        native_file = os.environ.get("ELLAI_TTS_NATIVE_PROFILES_FILE")
+        native_profiles = Path(native_file).read_text(encoding="utf-8-sig") if native_file else "[]"
+    profiles = read_profiles(native_profiles, english)
+    def load_profile(profile):
+        if profile.model_id == "hexgrad/Kokoro-82M":
+            from kokoro_voice import KokoroVoice
+            return KokoroVoice(profile.directory, profile.voice_id)
+        return load_voice(profile.directory) if profile.language == "eng" else load_voice(profile.directory, profile.sha256)
+
     application.state.pool = VoicePool(profiles,
-        lambda profile: load_voice(profile.directory) if profile.language == "eng" else load_voice(profile.directory, profile.sha256),
+        load_profile,
         int(os.environ.get("ELLAI_TTS_MAX_RESIDENT_MODELS", "2")))
+    application.state.english = english
     try:
-        with application.state.pool.use(VOICE_ID):
+        with application.state.pool.use(english.voice_id):
             application.state.voice = True
     except (OSError, RuntimeError, ValueError):
         application.state.voice = None
@@ -97,7 +120,8 @@ def live() -> dict[str, str]:
 def ready() -> dict[str, str]:
     if not os.environ.get("ELLAI_TTS_INTERNAL_KEY") or getattr(app.state, "voice", None) is None:
         raise HTTPException(status_code=503, detail="The approved speech checkpoint is unavailable.")
-    return {"status": "ready", "voiceId": VOICE_ID, "modelId": EXPECTED_MODEL_ID}
+    english = app.state.english
+    return {"status": "ready", "voiceId": english.voice_id, "modelId": english.model_id}
 
 
 def _frames(pcm: bytes) -> Iterator[bytes]:
@@ -117,17 +141,18 @@ def synthesize(
         raise HTTPException(status_code=401, detail="Unauthorized.")
 
     pool = app.state.pool
-    profile = pool.profiles.get(request.voice_id)
+    voice_id = request.voice_id
+    if voice_id is None or voice_id == "default":
+        voice_id = next((item.voice_id for item in pool.profiles.values() if item.language == request.language), None)
+    profile = pool.profiles.get(voice_id)
     if profile is None or profile.language != request.language:
         raise HTTPException(status_code=422, detail="The requested voice profile is unavailable.")
     if _MARKUP.search(request.text) or not request.text.strip():
         raise HTTPException(status_code=422, detail="The speech text is invalid.")
 
     try:
-        with pool.use(request.voice_id) as (profile, voice):
-            inputs = voice.tokenizer(text=request.text, return_tensors="pt")
-            with torch.inference_mode():
-                waveform = voice.model(**inputs, speaking_rate=SPEAKING_RATE).waveform[0].detach().cpu().numpy()
+        with pool.use(voice_id) as (profile, voice):
+            waveform = voice.synthesize(request.text)
     except VoiceBusy:
         raise HTTPException(status_code=429, detail="Speech synthesis is busy.", headers={"Retry-After": "1"})
     except (OSError, RuntimeError, ValueError):
@@ -136,7 +161,7 @@ def synthesize(
     if waveform.ndim != 1 or waveform.size == 0 or waveform.size > MAX_SAMPLE_COUNT:
         raise HTTPException(status_code=422, detail="The synthesized audio exceeds its limit.")
     clarity = app.state.clarity_profiles.get(profile.language, ClarityProfile())
-    if request.bypass_processing:
+    if request.bypass_processing or profile.model_id == "hexgrad/Kokoro-82M":
         clarity = ClarityProfile()
     try:
         waveform = process(waveform, voice.sample_rate, clarity)

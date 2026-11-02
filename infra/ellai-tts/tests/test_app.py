@@ -15,8 +15,9 @@ class FakeModel:
         return type("Output", (), {"waveform": torch.tensor([[0.0, 0.5, -0.5]])})()
 
 
-def client(monkeypatch):
+def client(monkeypatch, provider="mms"):
     monkeypatch.setenv("ELLAI_TTS_INTERNAL_KEY", "test-only-key")
+    monkeypatch.setenv("ELLAI_TTS_ENGLISH_PROVIDER", provider)
     monkeypatch.setattr(
         tts_app,
         "load_voice",
@@ -133,3 +134,38 @@ def test_processing_is_once_before_encoding_and_bypass_is_original(monkeypatch):
     assert original.content == (waveform * 32767).astype("<i2").tobytes()
     assert processed.headers["x-swiftaid-audio-processing"] == "clarity-v1"
     assert original.headers["x-swiftaid-audio-processing"] == "bypass"
+
+
+def test_kokoro_default_and_native_language_routing(monkeypatch):
+    from pathlib import Path
+    from voice_pool import VoiceProfile
+    import kokoro_voice
+
+    monkeypatch.setenv("ELLAI_TTS_ENGLISH_PROVIDER", "kokoro")
+    monkeypatch.setenv("ELLAI_TTS_CLARITY_PROFILES", '{"eng":{"enabled":true}}')
+    monkeypatch.setattr(kokoro_voice, "KokoroVoice", lambda *_: tts_app.LoadedVoice(FakeModel(), FakeTokenizer(), 24000))
+    with client(monkeypatch, provider="kokoro") as test_client:
+        headers = {"Authorization": "Bearer test-only-key"}
+        payload = {"text": "Synthetic test.", "requestId": "kokoro-1"}
+        response = test_client.post("/v1/synthesize", headers=headers, json=payload)
+        assert response.status_code == 200
+        assert response.headers["x-swiftaid-voice-id"] == "af_heart"
+        assert response.headers["x-swiftaid-model-id"] == "hexgrad/Kokoro-82M"
+        assert response.headers["x-swiftaid-sample-rate"] == "24000"
+        assert response.headers["x-swiftaid-speaking-rate"] == "0.95"
+        assert response.headers["x-swiftaid-audio-processing"] == "bypass"
+        assert test_client.get("/health/ready").json()["voiceId"] == "af_heart"
+        payload.update(language="sna", voiceId="af_heart")
+        assert test_client.post("/v1/synthesize", headers=headers, json=payload).status_code == 422
+        for language in ("sna", "nya", "tso"):
+            pool = tts_app.app.state.pool
+            profile = VoiceProfile(f"mms-{language}", language, f"facebook/mms-tts-{language}", "a" * 40, "b" * 64, Path("/models/native"))
+            pool.profiles[profile.voice_id] = profile
+            pool.loader = lambda _: tts_app.LoadedVoice(FakeModel(), FakeTokenizer(), 16000)
+            payload.update(language=language, voiceId="default")
+            native = test_client.post("/v1/synthesize", headers=headers, json=payload)
+            assert native.status_code == 200
+            assert native.headers["x-swiftaid-model-id"] == profile.model_id
+            assert native.headers["x-swiftaid-sample-rate"] == "16000"
+        payload.update(language="ssw", voiceId="default")
+        assert test_client.post("/v1/synthesize", headers=headers, json=payload).status_code == 422
