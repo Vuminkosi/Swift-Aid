@@ -422,8 +422,7 @@ public sealed class EllaiReviewGatewayClient(
         return store.ReadSince(sessionId, Math.Max(0, cursor)) with
         {
             StreamId = store.StreamId,
-            Conversation = conversation.Select(turn => new EllaiConversationTurnDto(turn.ClientUtteranceId,
-                turn.Sequence, turn.UserText, turn.AssistantText, turn.Outcome, turn.AttemptCount, turn.CompletedAtUtc)).ToArray(),
+            Conversation = conversation.Select(EllaiConversationProjection.ToClient).ToArray(),
         };
     }
 

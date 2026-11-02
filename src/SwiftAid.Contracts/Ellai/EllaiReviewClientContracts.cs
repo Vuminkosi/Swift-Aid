@@ -86,7 +86,14 @@ public sealed record EllaiSessionResponsePageDto(
 /// <summary>Owner-authorized durable turn. A provisional chunk is never a completed turn.</summary>
 public sealed record EllaiConversationTurnDto(
     string ClientUtteranceId, long Sequence, string? UserText, string? AssistantText,
-    string Outcome, int AttemptCount, DateTimeOffset? CompletedAtUtc);
+    string Outcome, int AttemptCount, DateTimeOffset? CompletedAtUtc)
+{
+    /// <summary>Unexecuted model proposals. Consumers must request fresh authorization and plan validation.
+    /// Restoring conversation history must never automatically execute these proposals.</summary>
+    public IReadOnlyList<EllaiUiProposalDto> UiProposals { get; init; } = [];
+}
+
+public sealed record EllaiUiProposalDto(string ProposalId, UiIntentProposal Proposal);
 
 public sealed record EllaiSessionHistoryItemDto(
     string SessionId, string Mode, string Status, DateTimeOffset UpdatedAtUtc,
