@@ -24,6 +24,7 @@ VOICE_ID = "swiftaid-mms-english-v1"
 MAX_TEXT_LENGTH = 2000
 MAX_SAMPLE_COUNT = 16_000 * 60 * 2
 FRAME_BYTES = 32 * 1024
+SPEAKING_RATE = 0.92
 _MARKUP = re.compile(r"<[^>]*>")
 
 
@@ -123,7 +124,7 @@ def synthesize(
         with pool.use(request.voice_id) as (profile, voice):
             inputs = voice.tokenizer(text=request.text, return_tensors="pt")
             with torch.inference_mode():
-                waveform = voice.model(**inputs).waveform[0].detach().cpu().numpy()
+                waveform = voice.model(**inputs, speaking_rate=SPEAKING_RATE).waveform[0].detach().cpu().numpy()
     except VoiceBusy:
         raise HTTPException(status_code=429, detail="Speech synthesis is busy.", headers={"Retry-After": "1"})
     except (OSError, RuntimeError, ValueError):
@@ -138,6 +139,7 @@ def synthesize(
         headers={
             "X-SwiftAid-Voice-Id": profile.voice_id,
             "X-SwiftAid-Sample-Rate": str(voice.sample_rate),
+            "X-SwiftAid-Speaking-Rate": str(SPEAKING_RATE),
             "X-SwiftAid-Channels": "1",
             "X-SwiftAid-Sample-Format": "s16le",
             "X-SwiftAid-Model-Id": profile.model_id,

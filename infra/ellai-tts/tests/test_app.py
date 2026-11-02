@@ -92,3 +92,24 @@ def test_busy_worker_applies_backpressure(monkeypatch):
                                     json={"text": "Synthetic test", "requestId": "busy-1"})
         assert response.status_code == 429
         assert response.headers["retry-after"] == "1"
+
+
+def test_synthesis_uses_native_calm_speaking_rate(monkeypatch):
+    calls = []
+    original = FakeModel.__call__
+
+    def capture(self, **inputs):
+        calls.append(inputs.get("speaking_rate"))
+        return original(self, **inputs)
+
+    monkeypatch.setattr(FakeModel, "__call__", capture)
+    with client(monkeypatch) as test_client:
+        response = test_client.post(
+            "/v1/synthesize",
+            headers={"Authorization": "Bearer test-only-key"},
+            json={"text": "Take your time. I am here to help.", "requestId": "calm-1"},
+        )
+    assert response.status_code == 200
+    assert calls == [0.92]
+    assert response.headers["x-swiftaid-speaking-rate"] == "0.92"
+    assert response.headers["x-swiftaid-sample-rate"] == "16000"
