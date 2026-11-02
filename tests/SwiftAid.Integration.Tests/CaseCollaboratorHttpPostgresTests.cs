@@ -76,6 +76,13 @@ public sealed partial class CaseCommandProcessingPostgresTests
             var policy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(db, unit), new PostgresCaseAccessDescriptorStore(db, unit));
             return new CaseTimelineQuery(new PostgresCaseTimelineStore(db), policy, unit);
         });
+        builder.Services.AddScoped<ICaseCollaboratorCandidatesQuery>(services =>
+        {
+            var db = services.GetRequiredService<SwiftAidDbContext>();
+            var unit = new PostgresCaseCommandUnitOfWork(db);
+            var policy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(db, unit), new PostgresCaseAccessDescriptorStore(db, unit));
+            return new CaseCollaboratorCandidatesQuery(new PostgresCaseCollaboratorCandidatesStore(db), policy, unit);
+        });
         await using var application = builder.Build();
         application.UseAuthentication();
         application.UseAuthorization();
@@ -116,6 +123,20 @@ public sealed partial class CaseCommandProcessingPostgresTests
         }
 
         await AssertReadStatus("recipient-old", HttpStatusCode.NotFound);
+        async Task AssertCandidates(HttpStatusCode expected, int count = 0, string suffix = "")
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/cases/{fixture.CaseId:D}/collaborator-candidates{suffix}");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "officer");
+            using var response = await client.SendAsync(request);
+            Assert.Equal(expected, response.StatusCode);
+            if (expected == HttpStatusCode.OK)
+            {
+                var page = await response.Content.ReadFromJsonAsync<CaseCollaboratorCandidatePage>();
+                Assert.Equal(count, page!.Items.Count);
+                Assert.All(page.Items, item => Assert.Equal(fixture.NewOwnerActorId, item.ActorId));
+            }
+        }
+        await AssertCandidates(HttpStatusCode.NotFound);
 
         var grant = new CaseCommandApiRequest(1, "GrantCaseCollaborator", Guid.NewGuid(), 2, null,
             "Synthetic private grant reason", null, null, null, null,
@@ -145,6 +166,8 @@ public sealed partial class CaseCommandProcessingPostgresTests
             Assert.DoesNotContain(fixture.NewOwnerActorId, await denied.Content.ReadAsStringAsync());
         }
         await AddOperationAsync(fixture, CaseOperation.ManageCollaborators);
+        await AssertCandidates(HttpStatusCode.OK, 1);
+        await AssertCandidates(HttpStatusCode.BadRequest, suffix: "?limit=51");
         using (var invalid = await Send(grant with { CollaborationActions = (CaseCollaborationActions)64 }))
         {
             Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
@@ -171,6 +194,7 @@ public sealed partial class CaseCommandProcessingPostgresTests
         await AssertReadStatus("recipient-old", HttpStatusCode.NotFound);
         await AssertReadStatus("recipient", HttpStatusCode.OK);
         await AssertManagementView(false);
+        await AssertCandidates(HttpStatusCode.OK);
         using (var changedReplay = await Send(grant with { Reason = "Changed after acceptance" }))
         {
             Assert.Equal(HttpStatusCode.Conflict, changedReplay.StatusCode);

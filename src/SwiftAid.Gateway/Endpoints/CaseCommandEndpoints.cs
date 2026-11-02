@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using OpenIddict.Validation.AspNetCore;
 using SwiftAid.Application.Authorization;
+using SwiftAid.Application.Cases;
 using SwiftAid.Application.Cases.Commands;
 using SwiftAid.Contracts.Commands;
 
@@ -49,6 +50,24 @@ public static class CaseCommandEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
             .Produces<ProblemDetails>(StatusCodes.Status413PayloadTooLarge)
             .Produces<ProblemDetails>(StatusCodes.Status503ServiceUnavailable);
+
+        endpoints.MapGet("/api/v1/cases/{caseId:guid}/collaborator-candidates", GetCollaboratorCandidatesAsync)
+            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes });
+    }
+
+    private static async Task<IResult> GetCollaboratorCandidatesAsync(
+        HttpContext context, Guid caseId, string? search, string? after, int? limit, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var actor = TryGetActor(context);
+            if (actor is null) return Results.Problem(statusCode: 401, title: "Authentication is required.");
+            var query = context.RequestServices.GetService<ICaseCollaboratorCandidatesQuery>();
+            var page = query is null ? null : await query.GetAsync(actor, caseId, search, after, limit ?? 25, cancellationToken).ConfigureAwait(false);
+            return page is null ? Results.Problem(statusCode: 404, title: "The case was not found.") : Results.Json(page);
+        }
+        catch (UnauthorizedAccessException) { return Results.Problem(statusCode: 401, title: "Authentication is required."); }
+        catch (ArgumentException) { return Results.Problem(statusCode: 400, title: "The candidate query is invalid."); }
     }
 
     /// <summary>Converts the fixed version-one wire request to the trusted application command.</summary>
