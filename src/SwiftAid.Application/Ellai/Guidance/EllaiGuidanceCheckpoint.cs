@@ -24,6 +24,8 @@ public sealed record EllaiGuidanceCheckpoint(
     string? NavigationId)
 {
     public string? FeatureId { get; init; }
+    public DateTimeOffset? StartedAtUtc { get; init; }
+    public EllaiGuidanceIntakeEvidence? IntakeEvidence { get; init; }
     public IReadOnlyList<string> SkippedStepIds { get; init; } = [];
 
     public int SchemaVersion { get; init; } = 1;
@@ -59,6 +61,9 @@ public sealed record EllaiGuidanceCheckpoint(
 
     private void Validate()
     {
+        if (IntakeEvidence is { } evidence && (evidence.ReceiptId == Guid.Empty || evidence.ClientSubmissionId == Guid.Empty ||
+            StartedAtUtc is null || evidence.ReceivedAtUtc < StartedAtUtc || evidence.VerifiedAtUtc < evidence.ReceivedAtUtc))
+            throw new ArgumentException("Invalid intake receipt evidence.");
         if ((FeatureId is not null && !Bounded(FeatureId, 120)) || SchemaVersion != 1 || InteractionEpoch < 1 || Version < 1 || GenerationAttempt is < 1 or > 3
             || !Bounded(ProposalId, 512) || !Bounded(ContextStamp, 512) || !Bounded(ScopeEpoch, 512)
             || !Bounded(GenerationId, 120)
@@ -96,3 +101,7 @@ public sealed record EllaiGuidanceCheckpoint(
 
     private static bool Bounded(string? value, int maximum) => !string.IsNullOrWhiteSpace(value) && value.Length <= maximum;
 }
+
+/// <summary>Server-verified receipt identity; never contains the private ownership proof.</summary>
+public sealed record EllaiGuidanceIntakeEvidence(Guid ReceiptId, Guid ClientSubmissionId,
+    DateTimeOffset ReceivedAtUtc, DateTimeOffset VerifiedAtUtc);

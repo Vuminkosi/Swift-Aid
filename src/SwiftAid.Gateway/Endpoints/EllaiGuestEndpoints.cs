@@ -119,6 +119,8 @@ public static class EllaiGuestEndpoints
         group.MapPost("/sessions/{sessionId}/guidance/plan", EllaiGuidanceProposalEndpoint.PrepareAsync);
         group.MapPost("/sessions/{sessionId}/guidance/steps/complete", EllaiGuidanceProposalEndpoint.CompleteStepAsync);
         group.MapPost("/sessions/{sessionId}/guidance/control", EllaiGuidanceProposalEndpoint.ControlAsync);
+        group.MapPost("/sessions/{sessionId}/guidance/receipt/complete", EllaiGuidanceProposalEndpoint.CompleteReceiptStepAsync)
+            .WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(4096));
 
         group.MapPost("/sessions/{sessionId}/ui-observations", EllaiEndpoints.ReportUiObservationAsync)
             .WithMetadata(new RequestSizeLimitAttribute(8 * 1024));

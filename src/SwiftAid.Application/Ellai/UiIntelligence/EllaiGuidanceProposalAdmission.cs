@@ -12,7 +12,7 @@ public sealed record EllaiGuidanceAdmission(string Status, string? Objective = n
 
 /// <summary>Resolves a durable proposal and fences it against session ownership, scope,
 /// newer turns and current UI evidence before the existing model planner is invoked.</summary>
-public sealed class EllaiGuidanceProposalAdmission(
+public sealed partial class EllaiGuidanceProposalAdmission(
     IEllaiSessionStore sessions, IEllaiUtteranceOutboxStore outbox,
     EllaiUiRegistry registry, IEllaiUiObservationStore observations, TimeProvider? clock = null)
 {
@@ -75,7 +75,7 @@ public sealed class EllaiGuidanceProposalAdmission(
         var checkpoint = new EllaiGuidanceCheckpoint(proposalId, admitted.Observation.ContextStamp,
             authority.ScopeEpoch, admitted.InteractionEpoch, (previous?.Version ?? 0) + 1,
             Guid.NewGuid().ToString("N"), "Generating", now.AddMinutes(2), null, null, [], [],
-            admitted.Catalogue.Descriptors[0].NavigationId) { GenerationAttempt = attempt, FeatureId = admitted.Catalogue.Descriptors[0].FeatureId };
+            admitted.Catalogue.Descriptors[0].NavigationId) { GenerationAttempt = attempt, FeatureId = admitted.Catalogue.Descriptors[0].FeatureId, StartedAtUtc = sameProposal ? previous!.StartedAtUtc ?? now : now };
         var claimed = await sessions.TryUpdateAsync(session with
         {
             SessionVersion = session.SessionVersion + 1,

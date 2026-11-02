@@ -347,3 +347,8 @@ public sealed record EllaiGuidanceProgressDto(string Status, long Version = 0, s
 
 /// <summary>Lifecycle only; never authorization to submit a form or mark steps completed.</summary>
 public sealed record EllaiGuidanceControlRequest(string ProposalId, string PlanId, long ExpectedVersion, string Command);
+
+/// <summary>References the report whose ownership proof is carried outside model/UI observations.</summary>
+public sealed record EllaiGuidanceReceiptRequest(
+    string ProposalId, string PlanId, long ExpectedVersion, string StepId,
+    Guid ReceiptId, Guid ClientSubmissionId);

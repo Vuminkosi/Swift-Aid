@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using SwiftAid.Application.Authorization;
+using SwiftAid.Application.Intake;
+using SwiftAid.Gateway.Endpoints;
 using SwiftAid.Application.Ellai;
 using SwiftAid.Contracts.Ellai;
 
@@ -79,6 +81,25 @@ public static class EllaiGuidanceProposalEndpoint
         if (session is null || session.OwnerActorId != actor.ActorId) return null;
         return await services.GetRequiredService<EllaiGuidanceProposalAdmission>().ControlAsync(
             sessionId, request, await ResolveAuthorityAsync(services, actor, session.ScopeEpoch, ct).ConfigureAwait(false), ct).ConfigureAwait(false);
+    }
+
+    public static async Task<IResult> CompleteReceiptStepAsync(HttpContext http, string sessionId,
+        EllaiGuidanceReceiptRequest request, [FromServices] IServiceProvider services, CancellationToken ct)
+    {
+        http.Response.Headers.CacheControl = "no-store, private";
+        var actor = ActorContext.FromValidatedPrincipal(http.User);
+        var session = await services.GetRequiredService<IEllaiSessionStore>().GetAsync(sessionId, ct).ConfigureAwait(false);
+        if (session is null || session.OwnerActorId != actor.ActorId) return Results.NotFound();
+        if (!http.Request.Headers.TryGetValue("X-SwiftAid-Receipt-Proof", out var values) || values.Count != 1 ||
+            !IntakeReceiptProof.TryDecode(values[0], out var proof)) return Results.BadRequest();
+        try
+        {
+            var result = await services.GetRequiredService<EllaiGuidanceProposalAdmission>().CompleteReceiptStepAsync(
+                sessionId, request, proof, await ResolveAuthorityAsync(services, actor, session.ScopeEpoch, ct).ConfigureAwait(false),
+                services.GetRequiredService<IIntakeSessionEndpointService>(), ct).ConfigureAwait(false);
+            return Results.Json(result);
+        }
+        finally { IntakeReceiptProof.Clear(proof); }
     }
 
     public static async Task<IResult> CompleteStepAsync(HttpContext http, string sessionId,

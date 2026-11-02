@@ -42,6 +42,9 @@ public sealed class EllaiGuidanceAdmissionHttpTests
         });
         Delegate handler = (Func<HttpContext, string, string, IEllaiSessionStore, EllaiGuidanceProposalAdmission, CancellationToken, Task<IResult>>)EllaiGuidanceProposalEndpoint.ReadAsync;
         app.MapGet("/sessions/{sessionId}/guidance/admission", handler);
+        Delegate receiptHandler = (Func<HttpContext, string, EllaiGuidanceReceiptRequest, IServiceProvider, CancellationToken, Task<IResult>>)EllaiGuidanceProposalEndpoint.CompleteReceiptStepAsync;
+        app.MapPost("/sessions/{sessionId}/guidance/receipt/complete", receiptHandler);
+
         await app.StartAsync();
         try
         {
@@ -53,6 +56,16 @@ public sealed class EllaiGuidanceAdmissionHttpTests
             Assert.Contains("Stale", await own.Content.ReadAsStringAsync());
             Assert.True(own.Headers.CacheControl?.NoStore);
             Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/sessions/owned/guidance/admission?proposalId=")).StatusCode);
+            var receiptRequest = new EllaiGuidanceReceiptRequest("proposal", "plan", 1, "step", Guid.NewGuid(), Guid.NewGuid());
+            using var foreignReceipt = await client.PostAsJsonAsync("/sessions/foreign/guidance/receipt/complete", receiptRequest);
+            Assert.Equal(HttpStatusCode.NotFound, foreignReceipt.StatusCode);
+            using var noProof = await client.PostAsJsonAsync("/sessions/owned/guidance/receipt/complete", receiptRequest);
+            Assert.Equal(HttpStatusCode.BadRequest, noProof.StatusCode);
+            Assert.True(noProof.Headers.CacheControl?.NoStore);
+            client.DefaultRequestHeaders.Add("X-SwiftAid-Receipt-Proof", "invalid-proof");
+            using var invalidProof = await client.PostAsJsonAsync("/sessions/owned/guidance/receipt/complete", receiptRequest);
+            Assert.Equal(HttpStatusCode.BadRequest, invalidProof.StatusCode);
+
         }
         finally { await app.StopAsync(); }
     }

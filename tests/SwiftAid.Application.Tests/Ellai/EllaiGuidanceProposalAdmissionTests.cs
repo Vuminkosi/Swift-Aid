@@ -1,5 +1,7 @@
 using SwiftAid.Application.Ellai;
 using SwiftAid.Contracts.Ellai;
+using SwiftAid.Application.Intake;
+using SwiftAid.Contracts.Intake;
 
 namespace SwiftAid.Application.Tests.Ellai;
 
@@ -290,6 +292,65 @@ public sealed class EllaiGuidanceProposalAdmissionTests
                  "explanation":"This is the report form.","nextStepKey":null}],"questions":[],"stopReason":null}
                 """, 10, 5);
         }
+    }
+
+    [Theory]
+    [InlineData("valid", "Completed")]
+    [InlineData("proof", "EvidenceRequired")]
+    [InlineData("submission", "EvidenceRequired")]
+    [InlineData("old", "EvidenceRequired")]
+    [InlineData("owner", "Denied")]
+    [InlineData("version", "Conflict")]
+    public async Task ReceiptCompletionRequiresOwnedCurrentMatchingDurableReceipt(string defect, string expected)
+    {
+        var (service, store, observations, id) = await Fixture();
+        var checkpoint = await SeedProgress(store, observations, id);
+        var descriptor = EllaiReportUiManifest.All.Single(control => control.ControlId == "report.submit");
+        checkpoint = checkpoint with { StartedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-1), Plan = checkpoint.Plan! with { Steps =
+            [checkpoint.Plan.Steps[0] with { ControlId = descriptor.ControlId, ObjectiveId = descriptor.ObjectiveId!, Behavior = PlanStepBehavior.GuideHuman }] } };
+        var session = (await store.GetAsync("session", default))!;
+        await store.TryUpdateAsync(session with { SessionVersion = session.SessionVersion + 1,
+            GuidanceJson = EllaiGuidanceCheckpoint.Serialize(checkpoint) }, session.SessionVersion, default);
+        var receipt = new IntakeReceipt(Guid.NewGuid(), Guid.NewGuid(), IntakeStatus.ReceivedUnverified,
+            IntakeRoutingStatus.NeedsRouting, DateTimeOffset.UtcNow.AddSeconds(-10));
+        var source = new ReceiptAuthority(defect == "proof" ? null : receipt with
+        {
+            ClientSubmissionId = defect == "submission" ? Guid.NewGuid() : receipt.ClientSubmissionId,
+            ReceivedAtUtc = defect == "old" ? DateTimeOffset.UtcNow.AddDays(-1) : receipt.ReceivedAtUtc,
+        });
+        var request = new EllaiGuidanceReceiptRequest(id, checkpoint.Plan.PlanId,
+            defect == "version" ? 999 : checkpoint.Version, "step-1", receipt.ReceiptId, receipt.ClientSubmissionId);
+        var authority = new EllaiUiEntitlements(defect == "owner" ? "foreign" : "owner", "scope", new HashSet<string> { "report" }, new HashSet<string>());
+        var result = await service.CompleteReceiptStepAsync("session", request, new byte[32], authority, source, default);
+        Assert.Equal(expected, result.Status);
+        var saved = EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("session", default))!.GuidanceJson)!;
+        if (expected == "Completed")
+        {
+            Assert.Equal(receipt.ReceiptId, saved.IntakeEvidence!.ReceiptId);
+            Assert.Equal("step-1", Assert.Single(saved.CompletedStepIds));
+            var replay = await service.CompleteReceiptStepAsync("session", request, new byte[32], authority, source, default);
+            Assert.Equal(result.Version, replay.Version);
+            Assert.DoesNotContain("receiptProof", EllaiGuidanceCheckpoint.Serialize(saved), StringComparison.OrdinalIgnoreCase);
+        }
+        else
+        {
+            Assert.Null(saved.IntakeEvidence);
+            Assert.Empty(saved.CompletedStepIds);
+        }
+        if (defect is "owner" or "version") Assert.Equal(0, source.Reads);
+    }
+
+    private sealed class ReceiptAuthority(IntakeReceipt? receipt) : IIntakeSessionEndpointService
+    {
+        public int Reads { get; private set; }
+        public Task<IntakeReceipt?> GetReceiptAsync(Guid receiptId, ReadOnlyMemory<byte> proof, CancellationToken ct)
+        {
+            Reads++;
+            Assert.Equal(32, proof.Length);
+            return Task.FromResult(receipt);
+        }
+        public Task<IntakeSessionResponse?> CreateAsync(Guid sessionId, ReadOnlyMemory<byte> proof, CancellationToken ct) => throw new NotSupportedException();
+        public Task<IntakeCapability?> ResolveCapabilityAsync(string opaqueCapability, Guid sessionId, ReadOnlyMemory<byte> proof, CancellationToken ct) => throw new NotSupportedException();
     }
 
     [Fact]
