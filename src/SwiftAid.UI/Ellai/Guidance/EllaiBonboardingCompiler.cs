@@ -50,7 +50,8 @@ public sealed class EllaiBonboardingCompiler
         new()
         {
             Id = id,
-            Title = text,
+            Title = "Ellai guidance",
+            Description = text,
             Target = target,
             Route = route,
             Interaction = interaction,

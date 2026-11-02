@@ -70,6 +70,8 @@ public sealed class EllaiCompilerInteropTests
 
         Assert.StartsWith("ellai-generated-plan-1-r1", definition.Id, StringComparison.Ordinal);
         Assert.Equal(2, definition.Steps.Count);
+        Assert.Equal("Ellai guidance", definition.Steps[0].Title);
+        Assert.Equal("See the queue.", definition.Steps[0].Description);
         Assert.False(definition.Steps[0].Target.IsNone);
         Assert.True(definition.Steps[0].Target.IsDynamic);
     }
