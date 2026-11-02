@@ -82,7 +82,8 @@ public enum WorkManagementFollowUpOutcome
     ContactMade,
     NoContact,
     NeedsAnotherFollowUp,
-    ReferredForReview
+    ReferredForReview,
+    Unreachable
 }
 
 public enum WorkManagementEscalationReason
@@ -216,7 +217,11 @@ public sealed record WorkManagementCommand(
         WorkManagementAction.CancelFollowUp =>
             HasUtc(DueAtUtc) && HasText(CancellationReason, 300) && IsEmptyExcept(nameof(DueAtUtc), nameof(CancellationReason)),
         WorkManagementAction.RecordFollowUpOutcome =>
-            FollowUpOutcome is { } outcome && Enum.IsDefined(outcome) && HasText(Details, 300) && IsEmptyExcept(nameof(Details), nameof(FollowUpOutcome)),
+            FollowUpOutcome is { } outcome && outcome != WorkManagementFollowUpOutcome.ReferredForReview &&
+            Enum.IsDefined(outcome) && HasText(Details, 300) &&
+            (outcome == WorkManagementFollowUpOutcome.NeedsAnotherFollowUp
+                ? HasUtc(NewDueAtUtc) && HasLocalSchedule() && IsEmptyExcept(nameof(Details), nameof(FollowUpOutcome), nameof(NewDueAtUtc), nameof(LocalTimeZoneId), nameof(LocalOffset))
+                : NewDueAtUtc is null && LocalTimeZoneId is null && LocalOffset is null && IsEmptyExcept(nameof(Details), nameof(FollowUpOutcome))),
         WorkManagementAction.RequestEscalation =>
             EscalationReason is { } escalationReason && Enum.IsDefined(escalationReason) && HasText(Reason, 300) && IsEmptyExcept(nameof(EscalationReason), nameof(Reason)),
         WorkManagementAction.AcknowledgeEscalation => IsEmptyExcept(),

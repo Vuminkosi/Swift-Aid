@@ -171,7 +171,7 @@
                                     <MudTextField T="string" @bind-Value="_assistanceReceiptContext" Label="Receipt confirmation context" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" Disabled="@IsBusy" />
                                 }
 
-                                @if (action is OperationsWorkAction.ScheduleFollowUp or OperationsWorkAction.RescheduleFollowUp)
+                                @if (RequiresFollowUpSchedule(action))
                                 {
                                     @if (action == OperationsWorkAction.ScheduleFollowUp)
                                     {
@@ -196,7 +196,7 @@
                                         }
                                     }
                                     <MudText Typo="Typo.caption" Color="Color.Secondary">Enter the local follow-up date and time, then choose the time zone. UTC is calculated only after you confirm.</MudText>
-                                    @if (action == OperationsWorkAction.RescheduleFollowUp)
+                                    @if (action == OperationsWorkAction.RescheduleFollowUp || IsAnotherFollowUpOutcome)
                                     {
                                         <MudAlert Severity="Severity.Info" Dense="true">Current due time: @DueLabel(item.DueAtUtc). This value will remain visible in the reschedule history.</MudAlert>
                                     }
@@ -224,7 +224,7 @@
                                 @if (action == OperationsWorkAction.RecordFollowUpOutcome)
                                 {
                                     <MudSelect T="FollowUpOutcome?" Value="@_followUpOutcome" ValueChanged="SetFollowUpOutcome" Label="Follow-up outcome" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" Disabled="@IsBusy">
-                                        @foreach (var outcome in Enum.GetValues<FollowUpOutcome>())
+                                        @foreach (var outcome in FollowUpOutcomes(item))
                                         {
                                             <MudSelectItem T="FollowUpOutcome?" Value="@((FollowUpOutcome?)outcome)">@FollowUpOutcomeLabel(outcome)</MudSelectItem>
                                         }
@@ -520,6 +520,14 @@
     private void SetTimeZone(string? timeZoneId) { _timeZoneId = timeZoneId; _selectedUtcOffset = null; _reviewing = false; _validationMessage = null; }
     private void SetSelectedUtcOffset(string? offset) { _selectedUtcOffset = offset; _reviewing = false; _validationMessage = null; }
     private void SetFollowUpOutcome(FollowUpOutcome? outcome) { _followUpOutcome = outcome; _reviewing = false; _validationMessage = null; }
+    private bool IsAnotherFollowUpOutcome => _followUpOutcome == FollowUpOutcome.NeedsAnotherFollowUp;
+    private bool RequiresFollowUpSchedule(OperationsWorkAction action) =>
+        action is OperationsWorkAction.ScheduleFollowUp or OperationsWorkAction.RescheduleFollowUp ||
+        action == OperationsWorkAction.RecordFollowUpOutcome && IsAnotherFollowUpOutcome;
+    private static IEnumerable<FollowUpOutcome> FollowUpOutcomes(OperationsWorkItem item) =>
+        item.Status is OperationsWorkStatus.Missed or OperationsWorkStatus.Unreachable
+            ? [FollowUpOutcome.NeedsAnotherFollowUp]
+            : [FollowUpOutcome.ContactMade, FollowUpOutcome.NoContact, FollowUpOutcome.Unreachable, FollowUpOutcome.NeedsAnotherFollowUp];
     private void SetEscalationReason(EscalationReason? reason) { _escalationReason = reason; _reviewing = false; _validationMessage = null; }
     private void SetEscalationReasonText(string? reason) { _escalationReasonText = reason; _reviewing = false; _validationMessage = null; }
     private void SetCancellationReason(string? reason) { _cancellationReason = reason; _reviewing = false; _validationMessage = null; }
@@ -560,7 +568,7 @@
             return;
         }
 
-        if (action is OperationsWorkAction.ScheduleFollowUp or OperationsWorkAction.RescheduleFollowUp)
+        if (RequiresFollowUpSchedule(action))
         {
             if (action == OperationsWorkAction.RescheduleFollowUp && item.DueAtUtc is null)
             {
@@ -677,16 +685,18 @@
         }
 
         _reviewing = false;
-        var scheduledAt = action is OperationsWorkAction.ScheduleFollowUp or OperationsWorkAction.RescheduleFollowUp
+        var requiresSchedule = RequiresFollowUpSchedule(action);
+        var scheduledAt = requiresSchedule
             ? ConfirmedFollowUpDueAtUtc()
             : null;
-        if ((action is OperationsWorkAction.ScheduleFollowUp or OperationsWorkAction.RescheduleFollowUp) && scheduledAt is null)
+        if (requiresSchedule && scheduledAt is null)
         {
             _validationMessage = "This date and time do not match the selected time zone. Choose a valid time and offset.";
             return;
         }
 
         var isReschedule = action == OperationsWorkAction.RescheduleFollowUp;
+        var isOutcomeReschedule = action == OperationsWorkAction.RecordFollowUpOutcome && IsAnotherFollowUpOutcome;
         await OnAction.InvokeAsync(new OperationsWorkActionRequest(
             item.CaseId,
             item.WorkKey,
@@ -700,9 +710,9 @@
             _escalationAction,
             _confirmedReceived,
             DueAtUtc: isReschedule || action == OperationsWorkAction.CancelFollowUp ? item.DueAtUtc : scheduledAt,
-            NewDueAtUtc: isReschedule ? scheduledAt : null,
-            LocalTimeZoneId: action is OperationsWorkAction.ScheduleFollowUp or OperationsWorkAction.RescheduleFollowUp ? _timeZoneId : null,
-            LocalOffset: (action is OperationsWorkAction.ScheduleFollowUp or OperationsWorkAction.RescheduleFollowUp) && SelectedTimeZone is { } selectedZone && SelectedLocalDateTime is { } localDateTime
+            NewDueAtUtc: isReschedule || isOutcomeReschedule ? scheduledAt : null,
+            LocalTimeZoneId: requiresSchedule ? _timeZoneId : null,
+            LocalOffset: requiresSchedule && SelectedTimeZone is { } selectedZone && SelectedLocalDateTime is { } localDateTime
                 ? GetSelectedOffset(selectedZone, localDateTime)
                 : null,
             CancellationReason: action == OperationsWorkAction.CancelFollowUp ? _cancellationReason?.Trim() : null,
@@ -802,7 +812,7 @@
     private string ReviewMessage(OperationsWorkAction action, OperationsWorkItem item)
     {
         var message = $"Review {ActionLabel(action).ToLowerInvariant()} for {SafeDisplayReference(item.DisplayReference)}.";
-        if (action is OperationsWorkAction.ScheduleFollowUp or OperationsWorkAction.RescheduleFollowUp)
+        if (RequiresFollowUpSchedule(action))
         {
             var zone = SelectedTimeZone;
             var newLocal = SelectedLocalDateTime;
@@ -810,7 +820,7 @@
             {
                 var localOffset = GetSelectedOffset(zone, newLocal.Value);
                 var selectedOffsetText = localOffset is { } offset ? OffsetLabel(offset) : "offset pending";
-                message += action == OperationsWorkAction.RescheduleFollowUp
+                message += action == OperationsWorkAction.RescheduleFollowUp || IsAnotherFollowUpOutcome
                     ? $" Current due time: {FormatInTimeZone(item.DueAtUtc!.Value, zone)}. New due time: {newLocal.Value:g} {selectedOffsetText} ({zone.DisplayName})."
                     : $" Due time: {newLocal.Value:g} {selectedOffsetText} ({zone.DisplayName}).";
             }
@@ -1022,8 +1032,8 @@
     {
         FollowUpOutcome.ContactMade => "Contact recorded",
         FollowUpOutcome.NoContact => "No contact recorded",
+        FollowUpOutcome.Unreachable => "Unable to reach",
         FollowUpOutcome.NeedsAnotherFollowUp => "Another follow-up needed",
-        FollowUpOutcome.ReferredForReview => "Referred for review",
         _ => "Outcome unavailable"
     };
 
@@ -1050,7 +1060,7 @@
     public enum OperationsAssignmentStatus { Unassigned, AcknowledgementPending, AssignedToYou, Assigned, Unavailable }
     public enum OperationsWorkAction { AssignWorker, ReassignWorker, RequestAssistance, AcceptAssistance, RecordAssistanceProgress, RecordAssistanceProvided, ConfirmAssistanceReceived, RecordAssistanceUnmet, CancelAssistance, ScheduleFollowUp, AcknowledgeFollowUp, RescheduleFollowUp, CancelFollowUp, RecordFollowUpOutcome, RequestEscalation, AcknowledgeEscalation, RecordEscalationAction, ResolveEscalation, AcknowledgeAssignment }
     public enum AssistanceNeed { Transport, Supplies, SpecialistSupport, Other }
-    public enum FollowUpOutcome { ContactMade, NoContact, NeedsAnotherFollowUp, ReferredForReview }
+    public enum FollowUpOutcome { ContactMade, NoContact, NeedsAnotherFollowUp, ReferredForReview, Unreachable }
     public enum EscalationReason { NeedsSupervisorReview, ServiceBarrier, TimeSensitive, Other }
     public enum EscalationActionKind { Reviewed, CoordinatedWithTeam, ResourceRequestRecorded, NoActionTaken }
     public sealed record WorkFilter(

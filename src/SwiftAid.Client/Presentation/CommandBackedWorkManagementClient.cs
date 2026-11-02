@@ -475,6 +475,7 @@ public sealed class CommandBackedWorkManagementClient(
     {
         WorkManagementFollowUpOutcome.ContactMade => (nameof(FollowUpOutcome.Completed), null),
         WorkManagementFollowUpOutcome.NoContact => (nameof(FollowUpOutcome.Missed), null),
+        WorkManagementFollowUpOutcome.Unreachable => (nameof(FollowUpOutcome.Unreachable), null),
         WorkManagementFollowUpOutcome.NeedsAnotherFollowUp => (nameof(FollowUpOutcome.Rescheduled), newDue),
         _ => null,
     };

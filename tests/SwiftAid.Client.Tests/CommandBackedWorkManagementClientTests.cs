@@ -1,5 +1,6 @@
 using SwiftAid.Client.Presentation;
 using SwiftAid.Contracts.Cases;
+using SwiftAid.Contracts.Commands;
 
 namespace SwiftAid.Client.Tests;
 
@@ -273,6 +274,75 @@ public sealed class CommandBackedWorkManagementClientTests
         var sent = Assert.Single(commands.Sent);
         Assert.Equal("eligible-staff-1", sent.Input.AssigneeActorId);
         Assert.Equal("Revisit the reported site.", sent.Input.Purpose);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AnotherFollowUpOutcome_RequiresAndMapsNewDueTime()
+    {
+        var commands = new StubCommandClient();
+        var client = new CommandBackedWorkManagementClient(
+            commands, new StubMonitoringClient(), new StubTimelineClient());
+        var newDueAtUtc = new DateTimeOffset(2026, 11, 8, 9, 0, 0, TimeSpan.Zero);
+        var command = new WorkManagementCommand(
+            CaseId,
+            $"fu:{FollowUpId:D}",
+            WorkManagementAction.RecordFollowUpOutcome,
+            ExpectedVersion: 7,
+            Details: "No contact; try after the market day.",
+            FollowUpOutcome: WorkManagementFollowUpOutcome.NeedsAnotherFollowUp,
+            NewDueAtUtc: newDueAtUtc,
+            LocalTimeZoneId: "UTC",
+            LocalOffset: TimeSpan.Zero);
+
+        var result = await client.ExecuteAsync(command, new WorkManagementQuery(new PageRequest(1, 25)));
+
+        Assert.Equal(UiCapabilityResultCode.Success, result.Code);
+        var sent = Assert.Single(commands.Sent);
+        Assert.Equal(nameof(FollowUpOutcome.Rescheduled), sent.Input.OutcomeName);
+        Assert.Equal(newDueAtUtc, sent.Input.NewDueAtUtc);
+        Assert.Equal("No contact; try after the market day.", sent.Input.OutcomeNotes);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_UnsupportedReferralOutcome_IsRejectedWithoutSending()
+    {
+        var commands = new StubCommandClient();
+        var client = new CommandBackedWorkManagementClient(
+            commands, new StubMonitoringClient(), new StubTimelineClient());
+        var command = new WorkManagementCommand(
+            CaseId,
+            $"fu:{FollowUpId:D}",
+            WorkManagementAction.RecordFollowUpOutcome,
+            ExpectedVersion: 7,
+            Details: "Synthetic referral note.",
+            FollowUpOutcome: WorkManagementFollowUpOutcome.ReferredForReview);
+
+        var result = await client.ExecuteAsync(command, new WorkManagementQuery(new PageRequest(1, 25)));
+
+        Assert.Equal(UiCapabilityResultCode.InvalidRequest, result.Code);
+        Assert.Empty(commands.Sent);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_UnreachableOutcome_MapsToUnreachableWithoutCompletingFollowUp()
+    {
+        var commands = new StubCommandClient();
+        var client = new CommandBackedWorkManagementClient(
+            commands, new StubMonitoringClient(), new StubTimelineClient());
+        var command = new WorkManagementCommand(
+            CaseId,
+            $"fu:{FollowUpId:D}",
+            WorkManagementAction.RecordFollowUpOutcome,
+            ExpectedVersion: 7,
+            Details: "Could not reach the assigned contact.",
+            FollowUpOutcome: WorkManagementFollowUpOutcome.Unreachable);
+
+        var result = await client.ExecuteAsync(command, new WorkManagementQuery(new PageRequest(1, 25)));
+
+        Assert.Equal(UiCapabilityResultCode.Success, result.Code);
+        var sent = Assert.Single(commands.Sent);
+        Assert.Equal(nameof(FollowUpOutcome.Unreachable), sent.Input.OutcomeName);
+        Assert.Null(sent.Input.NewDueAtUtc);
     }
 
     [Fact]
