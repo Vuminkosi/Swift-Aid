@@ -190,6 +190,7 @@ public static class EllaiEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict);
         group.MapGet("/sessions/{sessionId}/guidance/admission", EllaiGuidanceProposalEndpoint.ReadAsync);
+        group.MapPost("/sessions/{sessionId}/guidance/plan", EllaiGuidanceProposalEndpoint.PrepareAsync);
 
         group.MapPost("/sessions/{sessionId}/ui-observations", ReportUiObservationAsync)
             .WithMetadata(new RequestSizeLimitAttribute(MaximumRequestBodyBytes))

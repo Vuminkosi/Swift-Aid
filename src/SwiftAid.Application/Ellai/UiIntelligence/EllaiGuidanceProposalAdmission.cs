@@ -91,6 +91,9 @@ public sealed class EllaiGuidanceProposalAdmission(
             throw;
         }
 
+        if (generated.Plan is not null)
+            generated = generated with { Plan = generated.Plan with { PlanId = "plan-" + checkpoint.GenerationId } };
+
         var next = checkpoint with
         {
             Version = checkpoint.Version + 1,

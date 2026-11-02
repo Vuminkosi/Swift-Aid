@@ -31,6 +31,28 @@ public sealed class EllaiGuidanceAdmissionClientTests
         Assert.Null(await new EllaiReviewHttpClient(http).ReadGuidanceAdmissionAsync("session", "unknown", default));
     }
 
+    [Theory]
+    [InlineData(true, "/api/v1/ellai/guest/sessions/session/guidance/plan")]
+    [InlineData(false, "/api/v1/ellai/sessions/session/guidance/plan")]
+    public async Task PlanningUsesPostAndGuestAntiforgeryWithoutSendingAuthority(bool guest, string path)
+    {
+        using var http = new HttpClient(new Handler(request =>
+        {
+            if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath.EndsWith("/antiforgery", StringComparison.Ordinal))
+                return new(HttpStatusCode.OK) { Content = JsonContent.Create(new { requestToken = "synthetic-token" }) };
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal(path, request.RequestUri!.AbsolutePath);
+            if (guest) Assert.True(request.Headers.Contains("X-CSRF-TOKEN"));
+            var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            using var json = System.Text.Json.JsonDocument.Parse(body);
+            Assert.Single(json.RootElement.EnumerateObject());
+            Assert.Equal("proposal", json.RootElement.GetProperty("proposalId").GetString());
+            return new(HttpStatusCode.OK) { Content = JsonContent.Create(new EllaiGuidancePlanDto("Generating")) };
+        })) { BaseAddress = new Uri("https://localhost/") };
+        var result = await new EllaiReviewHttpClient(http, guest).PrepareGuidancePlanAsync("session", "proposal", default);
+        Assert.Equal("Generating", result!.Status);
+    }
+
     private sealed class Handler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>

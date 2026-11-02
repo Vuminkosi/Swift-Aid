@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using System.Net;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Builder;
@@ -52,5 +53,87 @@ public sealed class EllaiGuidanceAdmissionHttpTests
             Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/sessions/owned/guidance/admission?proposalId=")).StatusCode);
         }
         finally { await app.StopAsync(); }
+    }
+    [Fact]
+    public async Task PlanningPostGeneratesOnceAndReturnsDurableOwnedPlan()
+    {
+        var store = new InMemoryEllaiSessionStore();
+        var session = new EllaiSessionRecord("owned", EllaiMode.GuideMe, "Active", 1, 1, 1, 1, 0, 12,
+            "owner", "scope", null, null, DateTimeOffset.UtcNow);
+        await store.CreateAsync(session, default);
+        await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2 }, 1, "turn", default, "{}");
+        var claim = (await store.ClaimNextAsync(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(1), default))!;
+        await store.CompleteAsync("owned", "turn", claim.AttemptCount, DateTimeOffset.UtcNow, default,
+            EllaiUtteranceResolution.Completed("I can guide you.", 1) with
+            {
+                UiProposalsJson = EllaiUiProposalPayload.Serialize([new(UiIntentKind.StartGuidance, "ellai.guidance", null, null,
+                    new Dictionary<string, string> { ["feature"] = "report", ["objective"] = "Create a report" })]),
+            });
+        var proposal = EllaiConversationProjection.ToClient(Assert.Single(await store.ReadConversationAsync("owned", "owner", default))).UiProposals.Single();
+        var registry = new EllaiUiRegistry();
+        EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        var observations = new InMemoryEllaiUiObservationStore();
+        await observations.RecordAsync(new("owned", "view", "context", "web", ["report.entry"], DateTimeOffset.UtcNow,
+            [new("report.entry", UiObservationState.Ready)]), default);
+        var completion = new SyntheticPlan();
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddSingleton<IEllaiSessionStore>(store);
+        builder.Services.AddSingleton<IEllaiUtteranceOutboxStore>(store);
+        builder.Services.AddSingleton(registry);
+        builder.Services.AddSingleton<IEllaiUiObservationStore>(observations);
+        builder.Services.AddSingleton<IEllaiTurnCompletionClient>(completion);
+        builder.Services.AddScoped<EllaiModelGuidancePlanner>();
+        builder.Services.AddScoped<EllaiGuidanceProposalAdmission>();
+        builder.Services.AddScoped<EllaiGuidancePlanValidator>();
+        builder.Services.AddScoped<IEllaiUiDiscoveryService, EllaiUiDiscoveryService>();
+        builder.Services.AddSingleton<EllaiUsageLedger>();
+        builder.Services.AddSingleton<IEllaiUsageStore, InMemoryEllaiUsageStore>();
+        await using var app = builder.Build();
+        app.Use((context, next) =>
+        {
+            context.User = new ClaimsPrincipal(new ClaimsIdentity([
+                new Claim(ClaimTypes.NameIdentifier, "owner"),
+                new Claim(SwiftAid.Application.Authorization.ActorContext.AccessEpochClaimType, "1")], "fixture"));
+            return next(context);
+        });
+        Delegate handler = (Func<HttpContext, string, EllaiGuidancePlanRequest, IServiceProvider, CancellationToken, Task<IResult>>)EllaiGuidanceProposalEndpoint.PrepareAsync;
+        app.MapPost("/sessions/{sessionId}/guidance/plan", handler);
+        await app.StartAsync();
+        try
+        {
+            using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
+            for (var index = 0; index < 2; index++)
+            {
+                using var response = await client.PostAsJsonAsync("/sessions/owned/guidance/plan", new EllaiGuidancePlanRequest(proposal.ProposalId));
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                var plan = await response.Content.ReadFromJsonAsync<EllaiGuidancePlanDto>();
+                Assert.Equal("Ready", plan!.Status);
+                Assert.Equal("report.entry", Assert.Single(plan.Plan!.Steps).ControlId);
+                Assert.Equal("context", plan.ContextStamp);
+                Assert.Equal("nav-report", plan.NavigationId);
+                Assert.True(response.Headers.CacheControl?.NoStore);
+            }
+            using var foreign = await client.PostAsJsonAsync("/sessions/foreign/guidance/plan", new EllaiGuidancePlanRequest(proposal.ProposalId));
+            Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+            Assert.Equal(1, completion.Calls);
+            Assert.NotNull(EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("owned", default))!.GuidanceJson)!.Plan);
+        }
+        finally { await app.StopAsync(); }
+    }
+
+    private sealed class SyntheticPlan : IEllaiTurnCompletionClient
+    {
+        public int Calls { get; private set; }
+        public Task<EllaiTurnCompletion> CompleteAsync(IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct)
+        {
+            Calls++;
+            return Task.FromResult(new EllaiTurnCompletion("""
+                {"schemaVersion":1,"status":"Ready","objective":"Create a report","mode":"Navigation",
+                 "steps":[{"stepKey":"entry","controlId":"report.entry","objectiveId":"open-report-form","behavior":"Explain",
+                 "uiIntentBindingId":null,"resourceBindingKey":null,"factIds":["public-intake-no-account"],"evidenceIds":[],
+                 "explanation":"This is the report form.","nextStepKey":null}],"questions":[],"stopReason":null}
+                """, 10, 5));
+        }
     }
 }

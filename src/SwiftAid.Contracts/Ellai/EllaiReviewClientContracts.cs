@@ -203,6 +203,10 @@ public sealed record EllaiSessionCancelResult(
 /// keeps its cursor and retries; replay never replays commands.</summary>
 public interface IEllaiReviewClient
 {
+    Task<EllaiGuidancePlanDto?> PrepareGuidancePlanAsync(
+        string sessionId, string proposalId, CancellationToken cancellationToken) =>
+        Task.FromResult<EllaiGuidancePlanDto?>(null);
+
     Task<EllaiGuidanceAdmissionDto?> ReadGuidanceAdmissionAsync(
         string sessionId, string proposalId, CancellationToken cancellationToken) =>
         Task.FromResult<EllaiGuidanceAdmissionDto?>(null);
@@ -323,3 +327,6 @@ public interface IEllaiReviewClient
 
 /// <summary>Readiness for a persisted proposal; never permission to execute an application action.</summary>
 public sealed record EllaiGuidanceAdmissionDto(string Status, string? Objective, long InteractionEpoch);
+
+public sealed record EllaiGuidancePlanRequest(string ProposalId);
+public sealed record EllaiGuidancePlanDto(string Status, ValidatedGuidancePlan? Plan = null, string? ContextStamp = null, string? NavigationId = null);
