@@ -20,6 +20,8 @@ public sealed class SessionReminderOccurrenceEntityConfiguration : IEntityTypeCo
             .HasDatabaseName("ux_session_reminder_occurrences_session_version_lead");
         builder.HasIndex(entity => new { entity.SessionId, entity.Status, entity.RemindAtUtc })
             .HasDatabaseName("ix_session_reminder_occurrences_due");
+        builder.HasIndex(entity => new { entity.Status, entity.RemindAtUtc, entity.OccurrenceId })
+            .HasDatabaseName("ix_session_reminder_occurrences_global_due");
         builder.Property(entity => entity.OccurrenceId).HasColumnName("occurrence_id").HasColumnType("uuid");
         builder.Property(entity => entity.SessionId).HasColumnName("session_id").HasColumnType("uuid");
         builder.Property(entity => entity.RemindAtUtc).HasColumnName("remind_at_utc").HasColumnType("timestamp with time zone");

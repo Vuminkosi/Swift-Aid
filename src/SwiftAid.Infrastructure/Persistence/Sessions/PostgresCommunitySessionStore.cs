@@ -50,6 +50,7 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(session);
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
         var entity = await Entities()
             .SingleOrDefaultAsync(item => item.SessionId == session.SessionId, ct)
             .ConfigureAwait(false);
@@ -65,11 +66,12 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
 
         OverwriteEntity(session, entity);
         AppendRevision(session, actorId, reason, recordedAtUtc);
-        await SyncRemindersAsync(session, reminderSync, occurrences ?? [], ct).ConfigureAwait(false);
+        await SyncRemindersAsync(session, reminderSync, occurrences ?? [], recordedAtUtc, ct).ConfigureAwait(false);
 
         try
         {
             await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
+            await transaction.CommitAsync(ct).ConfigureAwait(false);
         }
         catch (DbUpdateConcurrencyException exception)
         {
@@ -126,6 +128,7 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
         CommunitySession session,
         SessionReminderSync sync,
         IReadOnlyList<SessionReminderOccurrence> occurrences,
+        DateTimeOffset recordedAtUtc,
         CancellationToken ct)
     {
         var reminders = _dbContext.Set<SessionReminderOccurrenceEntity>();
@@ -136,6 +139,14 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
             case SessionReminderSync.Recompute:
                 // Reminder dispatch/execution belongs to the P6.3 durable-reminder lane.
                 // Only non-sent rows are replaced; Sent rows are left untouched.
+                await _dbContext.SessionReminderDeliveries
+                    .Where(item => item.SessionId == session.SessionId && item.Status == "Pending")
+                    .ExecuteUpdateAsync(update => update
+                        .SetProperty(item => item.Status, "Suppressed")
+                        .SetProperty(item => item.LeaseId, (Guid?)null)
+                        .SetProperty(item => item.LeaseUntilUtc, (DateTimeOffset?)null)
+                        .SetProperty(item => item.UpdatedAtUtc, recordedAtUtc), ct)
+                    .ConfigureAwait(false);
                 var stale = await reminders
                     .Where(item => item.SessionId == session.SessionId && item.Status != "Sent")
                     .ToListAsync(ct)
@@ -156,6 +167,14 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
 
                 return;
             case SessionReminderSync.SuppressPending:
+                await _dbContext.SessionReminderDeliveries
+                    .Where(item => item.SessionId == session.SessionId && item.Status == "Pending")
+                    .ExecuteUpdateAsync(update => update
+                        .SetProperty(item => item.Status, "Suppressed")
+                        .SetProperty(item => item.LeaseId, (Guid?)null)
+                        .SetProperty(item => item.LeaseUntilUtc, (DateTimeOffset?)null)
+                        .SetProperty(item => item.UpdatedAtUtc, recordedAtUtc), ct)
+                    .ConfigureAwait(false);
                 await reminders
                     .Where(item => item.SessionId == session.SessionId && item.Status == "Pending")
                     .ExecuteUpdateAsync(

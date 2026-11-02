@@ -4134,6 +4134,98 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Sessions.SessionReminderDeliveryEntity", b =>
+                {
+                    b.Property<Guid>("DeliveryId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("delivery_id");
+
+                    b.Property<string>("AccountId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("account_id");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempt_count");
+
+                    b.Property<DateTimeOffset>("AvailableAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("available_at_utc");
+
+                    b.Property<string>("Channel")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("channel");
+
+                    b.Property<string>("ConsentReference")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("consent_reference");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<Guid?>("LeaseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lease_id");
+
+                    b.Property<DateTimeOffset?>("LeaseUntilUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_until_utc");
+
+                    b.Property<Guid>("OccurrenceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("occurrence_id");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.Property<long>("SessionVersion")
+                        .HasColumnType("bigint")
+                        .HasColumnName("session_version");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<long>("SubscriptionVersion")
+                        .HasColumnType("bigint")
+                        .HasColumnName("subscription_version");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.HasKey("DeliveryId")
+                        .HasName("pk_session_reminder_deliveries");
+
+                    b.HasIndex("SessionId", "Status")
+                        .HasDatabaseName("ix_session_reminder_deliveries_session_status");
+
+                    b.HasIndex("Status", "AvailableAtUtc", "LeaseUntilUtc")
+                        .HasDatabaseName("ix_session_reminder_deliveries_claim");
+
+                    b.HasIndex("OccurrenceId", "AccountId", "SubscriptionVersion", "Channel")
+                        .IsUnique()
+                        .HasDatabaseName("ux_session_reminder_deliveries_occurrence_recipient_version_channel");
+
+                    b.ToTable("session_reminder_deliveries", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_session_reminder_deliveries_channel", "channel IN ('Email', 'MobilePush')");
+
+                            t.HasCheckConstraint("ck_session_reminder_deliveries_lease", "(lease_id IS NULL) = (lease_until_utc IS NULL)");
+
+                            t.HasCheckConstraint("ck_session_reminder_deliveries_status", "status IN ('Pending', 'Submitted', 'Suppressed', 'OutcomeUnknown')");
+
+                            t.HasCheckConstraint("ck_session_reminder_deliveries_versions", "session_version > 0 AND subscription_version > 0 AND attempt_count >= 0");
+                        });
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Sessions.SessionReminderOccurrenceEntity", b =>
                 {
                     b.Property<Guid>("OccurrenceId")
@@ -4171,6 +4263,9 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                     b.HasIndex("SessionId", "Version", "LeadHours")
                         .IsUnique()
                         .HasDatabaseName("ux_session_reminder_occurrences_session_version_lead");
+
+                    b.HasIndex("Status", "RemindAtUtc", "OccurrenceId")
+                        .HasDatabaseName("ix_session_reminder_occurrences_global_due");
 
                     b.ToTable("session_reminder_occurrences", null, t =>
                         {
@@ -5355,6 +5450,16 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_community_session_subscriptions_session");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Sessions.SessionReminderDeliveryEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.Sessions.CommunitySessionEntity", null)
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_session_reminder_deliveries_session");
                 });
 
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Sessions.SessionReminderOccurrenceEntity", b =>

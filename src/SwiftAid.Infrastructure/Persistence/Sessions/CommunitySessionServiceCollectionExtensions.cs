@@ -19,6 +19,7 @@ public static class CommunitySessionServiceCollectionExtensions
         services.AddScoped<IEventSubscriptionStore, PostgresEventSubscriptionStore>();
         services.AddSingleton(TimeProvider.System);
         services.AddScoped<IEventSubscriptionService, EventSubscriptionService>();
+        services.AddScoped<ISessionReminderDeliveryStore, PostgresSessionReminderDeliveryStore>();
         return services;
     }
 }

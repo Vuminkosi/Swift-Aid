@@ -381,6 +381,92 @@ public sealed class SessionSchedulingTests
         }
     }
 
+    [IntakePostgresFact]
+    public async Task Due_session_reminder_materializes_once_and_cancellation_invalidates_claim()
+    {
+        var sessionId = Guid.NewGuid();
+        var accountId = $"session-reminder-{Guid.NewGuid():N}";
+        var secondAccountId = $"session-reminder-{Guid.NewGuid():N}";
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var sessionStore = new PostgresCommunitySessionStore(db);
+        var subscriptionService = new EventSubscriptionService(
+            new PostgresEventSubscriptionStore(db), new CommunitySessionService(sessionStore), TimeProvider.System);
+        var setup = CreateService(db);
+        try
+        {
+            await CreateActiveActorAsync(db, accountId);
+            await CreateActiveActorAsync(db, secondAccountId);
+            await PublishAsync(setup, sessionId, SessionVisibility.Public);
+            var options = Assert.IsType<EventSubscriptionOptions>(
+                await subscriptionService.GetOptionsAsync(sessionId, accountId, CancellationToken.None));
+            var subscription = await subscriptionService.SubscribeAsync(
+                sessionId, accountId, options.SessionVersion, options.ConsentReference, "Email", CancellationToken.None);
+            var secondSubscription = await subscriptionService.SubscribeAsync(
+                sessionId, secondAccountId, options.SessionVersion, options.ConsentReference, "Email", CancellationToken.None);
+
+            await db.SessionReminderOccurrences
+                .Where(item => item.SessionId == sessionId)
+                .OrderBy(item => item.RemindAtUtc)
+                .Take(1)
+                .ExecuteUpdateAsync(update => update.SetProperty(
+                    item => item.RemindAtUtc, DateTimeOffset.UtcNow.AddMinutes(-1)));
+
+            var deliveryStore = new PostgresSessionReminderDeliveryStore(db);
+            var now = DateTimeOffset.UtcNow;
+            Assert.Equal(1, await deliveryStore.MaterializeDueAsync(now, 1, CancellationToken.None));
+            Assert.Equal(1, await deliveryStore.MaterializeDueAsync(now, 1, CancellationToken.None));
+            Assert.Equal(0, await deliveryStore.MaterializeDueAsync(now, 10, CancellationToken.None));
+
+            var deliveries = await db.SessionReminderDeliveries.AsNoTracking()
+                .Where(item => item.SessionId == sessionId).ToListAsync();
+            Assert.Equal(2, deliveries.Count);
+            Assert.All(deliveries, delivery =>
+            {
+                Assert.Contains(delivery.AccountId, new[] { accountId, secondAccountId });
+                Assert.Equal("Email", delivery.Channel);
+                Assert.Equal(options.SessionVersion, delivery.SessionVersion);
+                Assert.Equal(options.ConsentReference, delivery.ConsentReference);
+                Assert.Equal("Pending", delivery.Status);
+            });
+            Assert.Equal(subscription.Version, deliveries.Single(item => item.AccountId == accountId).SubscriptionVersion);
+            Assert.Equal(secondSubscription.Version, deliveries.Single(item => item.AccountId == secondAccountId).SubscriptionVersion);
+
+            await using var competingDb = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+            var claims = await Task.WhenAll(
+                deliveryStore.ClaimDueAsync(now, TimeSpan.FromMinutes(1), 10, CancellationToken.None),
+                new PostgresSessionReminderDeliveryStore(competingDb).ClaimDueAsync(
+                    now, TimeSpan.FromMinutes(1), 10, CancellationToken.None));
+            var claimed = claims.SelectMany(batch => batch).ToArray();
+            Assert.Equal(2, claimed.Length);
+            Assert.Empty(await deliveryStore.ClaimDueAsync(
+                now, TimeSpan.FromMinutes(1), 10, CancellationToken.None));
+
+            await setup.ExecuteAsync(new CancelSessionCommand(
+                    sessionId, options.SessionVersion, "Venue unavailable", "cancel for integration test", now),
+                "officer-1", CancellationToken.None);
+
+            var suppressed = await db.SessionReminderDeliveries.AsNoTracking()
+                .Where(item => item.SessionId == sessionId).ToListAsync();
+            Assert.All(suppressed, item =>
+            {
+                Assert.Equal("Suppressed", item.Status);
+                Assert.Null(item.LeaseId);
+            });
+            foreach (var claim in claimed)
+            {
+                Assert.False(await deliveryStore.CompleteAsync(
+                    claim.DeliveryId, claim.LeaseId, SessionReminderDeliveryStatus.Submitted, now,
+                    CancellationToken.None));
+            }
+        }
+        finally
+        {
+            await CleanupAsync(sessionId);
+            await CleanupActorAsync(accountId);
+            await CleanupActorAsync(secondAccountId);
+        }
+    }
+
     private static async Task CreateActiveActorAsync(SwiftAid.Infrastructure.Persistence.SwiftAidDbContext db, string actorId)
     {
         var now = DateTimeOffset.UtcNow;
@@ -501,6 +587,9 @@ public sealed class SessionSchedulingTests
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
         foreach (var sessionId in sessionIds)
         {
+            var deliveries = await db.SessionReminderDeliveries
+                .Where(item => item.SessionId == sessionId).ToListAsync();
+            db.SessionReminderDeliveries.RemoveRange(deliveries);
             var subscriptions = await db.CommunitySessionSubscriptions
                 .Where(item => item.SessionId == sessionId).ToListAsync();
             db.CommunitySessionSubscriptions.RemoveRange(subscriptions);
