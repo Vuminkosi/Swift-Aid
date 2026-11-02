@@ -30,6 +30,28 @@ public sealed class EllaiModelGuidancePlannerTests
         Assert.Empty(result.Errors);
     }
 
+    [Fact]
+    public async Task PlannerReceivesComponentSemanticsWithoutFormValues()
+    {
+        var completion = new InspectingCompletion();
+        await new EllaiModelGuidancePlanner(completion).ComposeAsync("help", GuidanceMode.Navigation,
+            new(EllaiReportUiManifest.All, "catalogue", "ui", false), [], default);
+        Assert.Contains("Capture", EllaiReportUiManifest.Definition.Purpose);
+        Assert.Contains("Select the country", completion.Context);
+        Assert.Contains("Report validation", completion.Context);
+        Assert.DoesNotContain("Draft", completion.Context);
+    }
+
+    private sealed class InspectingCompletion : IEllaiTurnCompletionClient
+    {
+        public string Context { get; private set; } = "";
+        public Task<EllaiTurnCompletion> CompleteAsync(IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct)
+        {
+            Context = messages.Single(message => message.Role == "user").Content;
+            return Task.FromResult(new EllaiTurnCompletion("null", 0, 0));
+        }
+    }
+
     private sealed class Completion(string text) : IEllaiTurnCompletionClient
     {
         public Task<EllaiTurnCompletion> CompleteAsync(IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct)

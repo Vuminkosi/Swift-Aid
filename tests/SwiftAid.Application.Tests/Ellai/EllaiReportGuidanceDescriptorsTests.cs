@@ -7,6 +7,22 @@ namespace SwiftAid.Application.Tests.Ellai;
 [Trait("Task", "ELL-T33")]
 public sealed class EllaiReportGuidanceDescriptorsTests
 {
+    [Fact]
+    public void ComponentAndGatewayShareOneSemanticManifest()
+    {
+        Assert.Same(EllaiReportUiManifest.All, EllaiReportGuidanceDescriptors.All);
+        Assert.Equal("report.form", EllaiReportUiManifest.Definition.ComponentId);
+        Assert.All(EllaiReportUiManifest.Definition.Controls, control =>
+        {
+            Assert.NotNull(control.Semantics);
+            Assert.False(string.IsNullOrWhiteSpace(control.Semantics.Purpose));
+            Assert.Contains(control.ProofPolicyId!, control.Semantics.CompletionSignals);
+        });
+        var submit = EllaiReportUiManifest.All.Single(control => control.ControlId == "report.submit");
+        Assert.NotEmpty(submit.Semantics!.ValidationRequirements);
+        Assert.True(submit.HumanConfirmationRequired);
+    }
+
     private static EllaiUiRegistry SeededRegistry()
     {
         var registry = new EllaiUiRegistry();

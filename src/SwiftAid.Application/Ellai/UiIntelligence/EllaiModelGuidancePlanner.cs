@@ -33,7 +33,7 @@ public sealed class EllaiModelGuidancePlanner(IEllaiTurnCompletionClient complet
                 "Keep each explanation under 1000 characters. Preserve the requested objective and mode."),
             new("user", JsonSerializer.Serialize(new { objective, mode, snapshot.CatalogueVersion, snapshot.UiContractVersion,
                 controls = snapshot.Descriptors.Select(d => new { d.ControlId, d.DescriptorVersion, d.ElementKind,
-                    d.GoalTags, d.ProductFactIds, d.ObjectiveId, d.RiskClass, d.SupportedModes, d.PrerequisiteIds, d.SuccessorIds }),
+                    d.Semantics, d.GoalTags, d.ProductFactIds, d.ObjectiveId, d.RiskClass, d.SupportedModes, d.PrerequisiteIds, d.SuccessorIds }),
                 observations = observations.Select(o => new { o.ControlId, o.DescriptorVersion, o.State, o.ViewInstanceId, o.ContextStamp, o.ObservedAtUtc }) }, Json))
         ], 2048, ct).ConfigureAwait(false);
         try

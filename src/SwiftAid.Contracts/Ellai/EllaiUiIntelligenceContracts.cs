@@ -66,7 +66,11 @@ public sealed record UiControlDescriptor(
     string? ProofPolicyId,
     IReadOnlyList<string> RequiredCapabilities,
     string DataClassification,
-    bool HumanConfirmationRequired);
+    bool HumanConfirmationRequired)
+{
+    /// <summary>Application-authored semantics, never current field values or model instructions.</summary>
+    public EllaiUiSemantics? Semantics { get; init; }
+}
 
 /// <summary>Client-posted mounted-control report: the live UI observation
 /// channel input. The server stamps receipt time; freshness derives from
