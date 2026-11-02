@@ -4307,6 +4307,14 @@ User explicitly adjusted the frozen speech pace from 0.92 to 0.95 and requested 
 - PASS: worker 34 tests + four subtests; Gateway speech client/preparation/coordinator 28 tests; real four-language synthesis via HTTP in an isolated network-disabled container; combined image build and offline cached rebuild.
 - Pending: user voice selection, Gateway deployment, browser/device playback and subjective language quality. Synthetic WAV and image build logs retained under .codex.
 
+### Ellai English voice preferences (2 November 2026)
+
+- Shared About & settings exposes installed English voices from the authenticated internal TTS catalogue through a public, session-free Gateway inventory. Heart is the default; Michael is available only when its pinned embedding is installed and verified.
+- The device preference is validated and saved with the language pair. Typed requests and the next live/recorded capture carry it into the existing durable work envelope. Response chunks, progress, reconciliation and eager audio preparation retain that turn's voice; greeting requests carry the same choice. No schema migration, capture DSP, VAD timing or transport replacement is involved.
+- PASS: 16 focused UI/client tests, 40 synthesis/preparation/transcription/WebSocket tests, 8 JavaScript storage/playback tests, 26 focused Python tests plus four subtests; Android embedded-assembly build with zero warnings/errors. Python unittest discovery was the wrong runner; the corrected pytest invocation above passes.
+- Real running Compose TTS catalogue returned Heart and Michael; synthesis returned their exact voice IDs and 24 kHz PCM (160800 bytes/1036 ms Heart, 189600 bytes/8252 ms first-load Michael). This proves provider output, not subjective pronunciation quality or physical-device playback. Browser and deployment checks are recorded separately below when performed.
+- PASS deployed Chromium: `node tests/SwiftAid.Ui.Tests/ellai-voice-settings.browser.cjs` against localhost:8080 at 1280/390 pixels; both voice choices, local-storage persistence after reload, no page errors or horizontal overflow. Initial automation targeted MudBlazor's hidden input; corrected to its rendered combobox. Screenshots retained in `.codex/ellai-voice-settings-{width}.png`. Gateway and TTS recreated and healthy; Gateway container image matches rebuilt `dc7bed7ee388...`. Android built with embedded assemblies; installation and device interaction NOT VERIFIED in this slice. No migration required.
+
 ### Homepage product positioning and Kokoro architecture (2 November 2026)
 
 - Added an explicit Gateway-to-Kokoro node and connection, native MMS language labels, and accessible diagram description. Replaced development-status copy with community reporting, early-warning intelligence and coordinated follow-through benefits; retained human review and clinical boundaries.

@@ -9,6 +9,20 @@ namespace SwiftAid.Ui.Tests;
 [Trait("Feature", "Ellai")]
 public sealed class EllaiGuestReviewHttpClientTests
 {
+    [Fact]
+    public void SelectedVoiceAndReplyLanguageReachLiveCaptureWithoutDuplicateQueryFields()
+    {
+        using var http = new HttpClient(new RecordingHandler()) { BaseAddress = new Uri("https://localhost/") };
+        var client = new EllaiReviewHttpClient(http, useGuestRoutes: true);
+        var preferences = new EllaiLanguagePreferences("eng", "nya", "am_michael");
+        client.ConfigureSpeechPreferences(preferences);
+        var uri = client.CreateLiveVoiceWebSocketUri(http.BaseAddress, "session", "capture");
+        Assert.Equal(uri, preferences.ApplyToVoiceUri(uri));
+        Assert.Contains("outputLanguage=nya&englishVoiceId=am_michael", uri.Query);
+        Assert.Contains("voiceCaptureId=capture", uri.Query);
+        Assert.Equal("wss", uri.Scheme);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -46,8 +60,8 @@ public sealed class EllaiGuestReviewHttpClientTests
     }
 
     [Theory]
-    [InlineData("http://localhost:8080/", "ws://localhost:8080/api/v1/ellai/guest/sessions/guest-session/voice/live-stream?voiceCaptureId=capture-1&serverSubmission=true")]
-    [InlineData("https://example.test/app/", "wss://example.test/app/api/v1/ellai/guest/sessions/guest-session/voice/live-stream?voiceCaptureId=capture-1&serverSubmission=true")]
+    [InlineData("http://localhost:8080/", "ws://localhost:8080/api/v1/ellai/guest/sessions/guest-session/voice/live-stream?voiceCaptureId=capture-1&serverSubmission=true&outputLanguage=eng&englishVoiceId=af_heart")]
+    [InlineData("https://example.test/app/", "wss://example.test/app/api/v1/ellai/guest/sessions/guest-session/voice/live-stream?voiceCaptureId=capture-1&serverSubmission=true&outputLanguage=eng&englishVoiceId=af_heart")]
     public void LiveVoiceWebSocketUsesSameOriginAndSecureScheme(
         string baseAddress, string expected)
     {
@@ -153,7 +167,7 @@ public sealed class EllaiGuestReviewHttpClientTests
 
         var audio = await client.DownloadListeningGreetingAudioAsync("guest-session", CancellationToken.None);
 
-        Assert.Equal("/api/v1/ellai/guest/sessions/guest-session/voice/greeting/audio", handler.Path);
+        Assert.Equal("/api/v1/ellai/guest/sessions/guest-session/voice/greeting/audio?englishVoiceId=af_heart", handler.Path);
         Assert.NotNull(audio);
         Assert.Equal(0, audio.Sequence);
         Assert.Equal("swiftaid-mms-english-v1", audio.VoiceId);
@@ -192,7 +206,7 @@ public sealed class EllaiGuestReviewHttpClientTests
             "guest-session", [1, 2, 3, 4], EllaiVoiceCaptureMode.Recorded, CancellationToken.None);
 
         Assert.Equal("heard words", transcript?.Transcript);
-        Assert.Equal("/api/v1/ellai/guest/sessions/guest-session/voice/recorded?serverSubmission=true", handler.PostPath);
+        Assert.Equal("/api/v1/ellai/guest/sessions/guest-session/voice/recorded?serverSubmission=true&outputLanguage=eng&englishVoiceId=af_heart", handler.PostPath);
         Assert.Equal("audio/wav", handler.ContentType);
         Assert.Equal(new byte[] { 1, 2, 3, 4 }, handler.AudioBytes);
         Assert.Equal("csrf-test", handler.CsrfToken);
@@ -209,7 +223,7 @@ public sealed class EllaiGuestReviewHttpClientTests
             "guest-session", [1, 2, 3, 4], EllaiVoiceCaptureMode.Live, CancellationToken.None);
 
         Assert.Equal("heard words", transcript?.Transcript);
-        Assert.Equal("/api/v1/ellai/guest/sessions/guest-session/voice/recover?serverSubmission=true", handler.PostPath);
+        Assert.Equal("/api/v1/ellai/guest/sessions/guest-session/voice/recover?serverSubmission=true&outputLanguage=eng&englishVoiceId=af_heart", handler.PostPath);
         Assert.Equal("application/octet-stream", handler.ContentType);
         Assert.Equal(new byte[] { 1, 2, 3, 4 }, handler.AudioBytes);
         Assert.Equal("csrf-test", handler.CsrfToken);

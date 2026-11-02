@@ -57,14 +57,14 @@ export async function disposeAudioPlayback() {
     await context?.close();
 }
 
-function makeUrl(sessionId, sequence, guest, purpose, playbackId) {
+function makeUrl(sessionId, sequence, guest, purpose, playbackId, englishVoiceId) {
     const route = guest ? "api/v1/ellai/guest" : "api/v1/ellai";
     const audioRoute = purpose === "live-activation"
         ? "voice/greeting/audio"
         : `responses/${sequence}/audio`;
     const playback = purpose === null && playbackId
         ? `?playbackId=${encodeURIComponent(playbackId)}`
-        : "";
+        : purpose === "live-activation" ? `?englishVoiceId=${encodeURIComponent(englishVoiceId)}` : "";
     return `/${route}/sessions/${encodeURIComponent(sessionId)}/${audioRoute}${playback}`;
 }
 
@@ -91,11 +91,12 @@ export async function playResponse(sessionId, sequence, playbackId) {
     return playPcm(sessionId, sequence, null, playbackId);
 }
 
-export async function playListeningGreeting(sessionId) {
-    return playPcm(sessionId, 0, "live-activation", "");
+export async function playListeningGreeting(sessionId, englishVoiceId = "af_heart") {
+    if (!['af_heart', 'am_michael'].includes(englishVoiceId)) throw new Error("Unsupported English voice.");
+    return playPcm(sessionId, 0, "live-activation", "", englishVoiceId);
 }
 
-async function playPcm(sessionId, sequence, purpose, playbackId) {
+async function playPcm(sessionId, sequence, purpose, playbackId, englishVoiceId = "af_heart") {
     stopResponse(sessionId);
     const record = {
         controller: new AbortController(),
@@ -104,7 +105,7 @@ async function playPcm(sessionId, sequence, purpose, playbackId) {
     activePlayback.set(sessionId, record);
 
     try {
-        let response = await fetch(makeUrl(sessionId, sequence, true, purpose, playbackId), {
+        let response = await fetch(makeUrl(sessionId, sequence, true, purpose, playbackId, englishVoiceId), {
             credentials: "same-origin",
             cache: "no-store",
             signal: record.controller.signal,
@@ -114,7 +115,7 @@ async function playPcm(sessionId, sequence, purpose, playbackId) {
         // performs its own authentication and ownership checks.
         if (response.status === 401 || response.status === 404) {
             await response.body?.cancel();
-            response = await fetch(makeUrl(sessionId, sequence, false, purpose, playbackId), {
+            response = await fetch(makeUrl(sessionId, sequence, false, purpose, playbackId, englishVoiceId), {
                 credentials: "same-origin",
                 cache: "no-store",
                 signal: record.controller.signal,

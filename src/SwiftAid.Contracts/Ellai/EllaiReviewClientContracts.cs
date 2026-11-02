@@ -70,7 +70,8 @@ public sealed record EllaiSessionResponseDto(
     bool IsReconciliation = false,
     string? Outcome = null,
     EllaiInteractionProgressDto? Progress = null,
-    string Language = "eng");
+    string Language = "eng",
+    string? EnglishVoiceId = null);
 
 /// <summary>Ephemeral runtime narration; never an assistant answer or approval receipt.</summary>
 public sealed record EllaiInteractionProgressDto(
@@ -203,6 +204,11 @@ public sealed record EllaiSessionCancelResult(
 /// keeps its cursor and retries; replay never replays commands.</summary>
 public interface IEllaiReviewClient
 {
+    void ConfigureSpeechPreferences(EllaiLanguagePreferences preferences) { }
+
+    Task<IReadOnlyList<EllaiEnglishVoiceDto>> ListEnglishVoicesAsync(CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<EllaiEnglishVoiceDto>>([]);
+
     Task<EllaiGuidanceProgressDto?> ControlGuidanceAsync(
         string sessionId, EllaiGuidanceControlRequest request, CancellationToken cancellationToken) =>
         Task.FromResult<EllaiGuidanceProgressDto?>(null);

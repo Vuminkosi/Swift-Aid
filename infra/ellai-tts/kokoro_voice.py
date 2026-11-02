@@ -10,6 +10,10 @@ MODEL_ID = "hexgrad/Kokoro-82M"
 MODEL_SHA256 = "496dba118d1a58f5f3db2efc88dbdc216e0483fc89fe6e47ee1f2c53f18ad1e4"
 CONFIG_SHA256 = "5abb01e2403b072bf03d04fde160443e209d7a0dad49a423be15196b9b43c17f"
 HEART_SHA256 = "0ab5709b8ffab19bfd849cd11d98f75b60af7733253ad0d67b12382a102cb4ff"
+ENGLISH_VOICES = {
+    "af_heart": ("Heart", HEART_SHA256),
+    "am_michael": ("Michael", "9a443b79a4b22489a5b0ab7c651a0bcd1a30bef675c28333f06971abbd47bd37"),
+}
 SAMPLE_RATE = 24000
 SPEED = 0.95
 
@@ -27,15 +31,15 @@ class KokoroVoice:
     """Called under the existing voice pool's exclusive inference lock."""
     sample_rate = SAMPLE_RATE
 
-    def __init__(self, directory: Path, voice_id: str = "af_heart", voice_sha256: str = HEART_SHA256):
-        if not re.fullmatch(r"[ab][fm]_[a-z0-9]+", voice_id):
+    def __init__(self, directory: Path, voice_id: str = "af_heart"):
+        if voice_id not in ENGLISH_VOICES:
             raise ValueError("Only installed English Kokoro voices are supported.")
         model_file = directory / "kokoro-v1_0.pth"
         config_file = directory / "config.json"
         self.voice_file = directory / "voices" / f"{voice_id}.pt"
         verify_file(model_file, MODEL_SHA256)
         verify_file(config_file, CONFIG_SHA256)
-        verify_file(self.voice_file, voice_sha256)
+        verify_file(self.voice_file, ENGLISH_VOICES[voice_id][1])
         # Imported only when explicitly configured, so MMS-only deployments need
         # no Kokoro packages. Assets are checked before any model code executes.
         os.environ["HF_HUB_OFFLINE"] = "1"

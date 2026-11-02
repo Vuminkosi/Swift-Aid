@@ -93,7 +93,8 @@ public sealed class EllaiUtteranceWorker(
 
         var progress = new EllaiToolProgressPublisher(
             scopedServices.GetRequiredService<EllaiSessionResponseStore>(), work.SessionId,
-            item.ClientUtteranceId, work.ControllerEpoch, item.AttemptCount);
+            item.ClientUtteranceId, work.ControllerEpoch, item.AttemptCount,
+            englishVoiceId: work.Languages?.EnglishVoiceId);
         try
         {
             var sessions = scopedServices.GetRequiredService<IEllaiSessionStore>();
@@ -137,7 +138,8 @@ public sealed class EllaiUtteranceWorker(
                 // Transient delivery is only a hint; the owner can recover the committed outcome
                 // from PostgreSQL even when this process exits before this publication.
                 scopedServices.GetService<EllaiSessionResponseStore>()?.Reconcile(
-                    work.SessionId, item.ClientUtteranceId, committed, work.Languages?.OutputLanguage ?? "eng");
+                    work.SessionId, item.ClientUtteranceId, committed, work.Languages?.OutputLanguage ?? "eng",
+                    work.Languages?.EnglishVoiceId);
                 progress.Finish(committed.Outcome);
             }
             _logger.LogInformation(
@@ -237,7 +239,7 @@ public sealed class EllaiUtteranceWorker(
         var chunkIndex = 0;
         return (text, _) =>
         {
-            responses.PublishChunk(work.SessionId, work.ClientUtteranceId, ++chunkIndex, text);
+            responses.PublishChunk(work.SessionId, work.ClientUtteranceId, ++chunkIndex, text, work.Languages?.EnglishVoiceId);
             return ValueTask.CompletedTask;
         };
     }

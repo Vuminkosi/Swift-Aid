@@ -24,6 +24,9 @@ public sealed class EllaiReviewGatewayClient(
     private readonly EllaiGuestSessionIdentity _guestSessionIdentity =
         guestSessionIdentity ?? new EllaiGuestSessionIdentity();
 
+    public Task<IReadOnlyList<EllaiEnglishVoiceDto>> ListEnglishVoicesAsync(CancellationToken cancellationToken) =>
+        _serviceProvider.GetRequiredService<IEllaiSpeechSynthesisClient>().ListEnglishVoicesAsync(cancellationToken);
+
     public async Task<EllaiSessionHistoryPageDto?> ListSessionHistoryAsync(int offset, CancellationToken cancellationToken)
     {
         var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);

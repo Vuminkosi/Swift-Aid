@@ -90,6 +90,16 @@ async def lifespan(application: FastAPI) -> Iterator[None]:
         native_file = os.environ.get("ELLAI_TTS_NATIVE_PROFILES_FILE")
         native_profiles = Path(native_file).read_text(encoding="utf-8-sig") if native_file else "[]"
     profiles = read_profiles(native_profiles, english)
+    if provider == "kokoro":
+        from kokoro_voice import ENGLISH_VOICES, verify_file
+        for voice_id, (_, digest) in ENGLISH_VOICES.items():
+            if voice_id == english.voice_id:
+                continue
+            voice_file = english.directory / "voices" / f"{voice_id}.pt"
+            if voice_file.is_file():
+                verify_file(voice_file, digest)
+                profiles[voice_id] = VoiceProfile(voice_id, "eng", english.model_id,
+                                                  english.revision, english.sha256, english.directory)
     def load_profile(profile):
         if profile.model_id == "hexgrad/Kokoro-82M":
             from kokoro_voice import KokoroVoice
@@ -129,16 +139,27 @@ def _frames(pcm: bytes) -> Iterator[bytes]:
         yield pcm[offset : offset + FRAME_BYTES]
 
 
+def _authorize(authorization: str | None) -> None:
+    secret = os.environ.get("ELLAI_TTS_INTERNAL_KEY", "")
+    if not secret or not authorization or not hmac.compare_digest(authorization, f"Bearer {secret}"):
+        raise HTTPException(status_code=401, detail="Unauthorized.")
+
+
+@app.get("/v1/voices")
+def list_voices(authorization: str | None = Header(default=None)) -> list[dict[str, str]]:
+    _authorize(authorization)
+    from kokoro_voice import ENGLISH_VOICES
+    return [{"voiceId": profile.voice_id, "name": ENGLISH_VOICES[profile.voice_id][0], "language": "eng"}
+            for profile in app.state.pool.profiles.values()
+            if profile.model_id == "hexgrad/Kokoro-82M" and profile.voice_id in ENGLISH_VOICES]
+
+
 @app.post("/v1/synthesize")
 def synthesize(
     request: SynthesisRequest,
     authorization: str | None = Header(default=None),
 ) -> StreamingResponse:
-    secret = os.environ.get("ELLAI_TTS_INTERNAL_KEY", "")
-    if not secret or not authorization or not hmac.compare_digest(
-        authorization, f"Bearer {secret}"
-    ):
-        raise HTTPException(status_code=401, detail="Unauthorized.")
+    _authorize(authorization)
 
     pool = app.state.pool
     voice_id = request.voice_id

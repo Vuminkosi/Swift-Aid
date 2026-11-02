@@ -39,7 +39,22 @@
                         }
                     </MudSelect>
                     <MudText Typo="Typo.caption">Default: English for input and replies. Choices are saved on this device.</MudText>
-                    <MudText Typo="Typo.caption">Other languages currently apply to typed messages. Voice uses English. Translations may contain mistakes.</MudText>
+                    <MudText Typo="Typo.caption">Voice input uses English. Shona, Nyanja and Tsonga replies can be read aloud. Translations may contain mistakes.</MudText>
+                    @if (_languages.OutputLanguage == "eng")
+                    {
+                        <MudSelect T="string" Label="Ellai's English voice" Value="@_languages.EnglishVoiceId"
+                                   ValueChanged="SetEnglishVoiceAsync" Disabled="@(!_languagesLoaded || _englishVoices.Count == 0)">
+                            @foreach (var voice in _englishVoices)
+                            {
+                                <MudSelectItem T="string" Value="@voice.VoiceId">@voice.Name</MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudText Typo="Typo.caption">Default: Heart, with a calm speaking pace. Changes apply to new messages and the next Live Speak session.</MudText>
+                        @if (_languagesLoaded && _englishVoices.Count == 0)
+                        {
+                            <MudText Typo="Typo.caption" role="status">Voice choices are unavailable right now.</MudText>
+                        }
+                    }
                     @if (_languageSaveFailed)
                     {
                         <MudAlert Severity="Severity.Warning" role="status">Your language choices couldn't be saved. Please try again.</MudAlert>
@@ -66,7 +81,7 @@
                         <dt>Read replies aloud</dt><dd>Off for typed conversations. Select Listen to Ellai to read this and new replies aloud.</dd>
                         <dt>Live Speak replies</dt><dd>Voice turns on when you start Live Speak. You can turn it off beside the status.</dd>
                         <dt>Microphone</dt><dd>Off until you select Record or Live Speak. Live Speak stays ready between turns until you stop it.</dd>
-                        <dt>Voice speed</dt><dd>Normal</dd>
+                        <dt>Voice speed</dt><dd>Calm</dd>
                     </dl>
                     <MudText Typo="Typo.caption">Your listening choice lasts for the open conversation. A new conversation or reload uses these defaults.</MudText>
                 </MudPaper>
@@ -151,6 +166,7 @@
     private readonly SemaphoreSlim _languageSaveGate = new(1, 1);
     private bool _languagesLoaded;
     private bool _languageSaveFailed;
+    private IReadOnlyList<EllaiEnglishVoiceDto> _englishVoices = [];
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -161,14 +177,18 @@
             var saved = await module.InvokeAsync<EllaiLanguagePreferences>("load");
             _languages = saved is not null && saved.IsValid() ? saved : new();
             _languagesLoaded = true;
+            _englishVoices = await ReviewClient.ListEnglishVoicesAsync(_lifetime.Token);
         }
         catch (JSException) { _languageSaveFailed = true; }
         catch (JSDisconnectedException) { return; }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { return; }
         await InvokeAsync(StateHasChanged);
     }
 
     private Task SetInputLanguageAsync(string language) => SaveLanguagesAsync(_languages with { InputLanguage = language });
     private Task SetOutputLanguageAsync(string language) => SaveLanguagesAsync(_languages with { OutputLanguage = language });
+    private Task SetEnglishVoiceAsync(string voice) => _englishVoices.Any(item => item.VoiceId == voice)
+        ? SaveLanguagesAsync(_languages with { EnglishVoiceId = voice }) : Task.CompletedTask;
 
     private async Task SaveLanguagesAsync(EllaiLanguagePreferences value)
     {

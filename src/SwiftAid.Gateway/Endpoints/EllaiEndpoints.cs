@@ -23,6 +23,10 @@ public static class EllaiEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
+        // Public inventory contains installed English voice labels only, never session data.
+        endpoints.MapGet("/api/v1/ellai/voices", async (IEllaiSpeechSynthesisClient speech, CancellationToken ct) =>
+            Results.Json(await speech.ListEnglishVoicesAsync(ct))).AllowAnonymous();
+
         var group = endpoints.MapGroup("/api/v1/ellai");
         group.RequireAuthorization("SwiftAidStaffApi");
         group.AddEndpointFilter(async (context, next) =>
@@ -736,12 +740,15 @@ public static class EllaiEndpoints
             return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Voice transcription consent is required.");
         }
 
+        var preferences = EllaiSpeechPreferences.Read(request.Query);
+        if (preferences is null) return Results.BadRequest();
         var result = await transcription.TranscribeAsync(
             sessionId, captureMode, request.Body, request.ContentLength, cancellationToken,
             request.Query["voiceCaptureId"].FirstOrDefault(),
             long.TryParse(request.Query["voiceCaptureOffsetSamples"].FirstOrDefault(), out var offsetSamples)
                 ? offsetSamples : 0,
-            submissionPrincipal: request.Query["serverSubmission"] == "true" ? http.User : null)
+            submissionPrincipal: request.Query["serverSubmission"] == "true" ? http.User : null,
+            speechPreferences: preferences)
             .ConfigureAwait(false);
         return result is not null
             ? Results.Json(result)

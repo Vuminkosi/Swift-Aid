@@ -8,7 +8,7 @@ namespace SwiftAid.Gateway.Ellai;
 /// boundary as typed messages. No client receipt or microphone EOF is required.</summary>
 internal sealed class EllaiVoiceTurnAdmission(
     IServiceProvider services, string sessionId, ClaimsPrincipal principal,
-    EllaiVoiceTurnCoordinator? coordinator = null) : IDisposable
+    EllaiVoiceTurnCoordinator? coordinator = null, EllaiLanguagePreferences? speechPreferences = null) : IDisposable
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
 
@@ -49,7 +49,8 @@ internal sealed class EllaiVoiceTurnAdmission(
                     sessionId, principal, timeout.Token).ConfigureAwait(false);
                 if (session is null) return new(EllaiClientOperationStatus.Unauthorized, null);
                 var request = new SubmitUtteranceRequest(utteranceId, sessionId, session.SessionVersion,
-                    transcript, null, "typed", session.SessionVersion);
+                    transcript, null, "typed", session.SessionVersion,
+                    Languages: (speechPreferences ?? new()) with { InputLanguage = "eng" });
                 var result = await scope.ServiceProvider.GetRequiredService<EllaiUtteranceSubmissionService>()
                     .SubmitAsync(sessionId, request, principal, timeout.Token,
                         coordinator is null ? "recorded-voice" : "live-voice").ConfigureAwait(false);

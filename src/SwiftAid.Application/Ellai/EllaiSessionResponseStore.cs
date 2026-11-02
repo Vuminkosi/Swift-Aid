@@ -18,7 +18,7 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null,
     private readonly Dictionary<string, SessionResponses> _sessions = new(StringComparer.Ordinal);
 
     public EllaiSessionResponseDto? PublishProgress(
-        string sessionId, string utteranceId, string text, EllaiInteractionProgressDto progress)
+        string sessionId, string utteranceId, string text, EllaiInteractionProgressDto progress, string? englishVoiceId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(utteranceId);
@@ -32,7 +32,7 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null,
             }
             if (session.Items.Any(item => item.Progress?.EventId == progress.EventId)) return null;
             var response = new EllaiSessionResponseDto(++session.Sequence, sessionId, text,
-                _timeProvider.GetUtcNow(), utteranceId, IsFinal: false, Progress: progress);
+                _timeProvider.GetUtcNow(), utteranceId, IsFinal: false, Progress: progress, EnglishVoiceId: englishVoiceId);
             session.Items.AddLast(response);
             session.LastUpdatedAtUtc = response.CreatedAtUtc;
             while (session.Items.Count > MaximumResponsesPerSession) session.Items.RemoveFirst();
@@ -114,7 +114,7 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null,
     }
 
     public EllaiSessionResponseDto? PublishChunk(
-        string sessionId, string clientUtteranceId, int chunkIndex, string text)
+        string sessionId, string clientUtteranceId, int chunkIndex, string text, string? englishVoiceId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(clientUtteranceId);
@@ -145,7 +145,8 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null,
             }
 
             var response = new EllaiSessionResponseDto(
-                ++session.Sequence, sessionId, boundedText, _timeProvider.GetUtcNow(), clientUtteranceId, IsFinal: false);
+                ++session.Sequence, sessionId, boundedText, _timeProvider.GetUtcNow(), clientUtteranceId, IsFinal: false,
+                EnglishVoiceId: englishVoiceId);
             session.LastUpdatedAtUtc = response.CreatedAtUtc;
             session.LastClientUtteranceId = deliveryId;
             session.Items.AddLast(response);
@@ -172,7 +173,7 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null,
     }
 
     public EllaiSessionResponseDto Reconcile(string sessionId, string utteranceId, EllaiUtteranceResolution resolution,
-        string language = "eng")
+        string language = "eng", string? englishVoiceId = null)
     {
         resolution.Validate();
         lock (_gate)
@@ -188,7 +189,8 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null,
             if (existing is not null) return existing;
             var response = new EllaiSessionResponseDto(++session.Sequence, sessionId,
                 resolution.AssistantText ?? string.Empty, _timeProvider.GetUtcNow(), utteranceId,
-                IsFinal: true, IsReconciliation: true, Outcome: resolution.Outcome, Language: language);
+                IsFinal: true, IsReconciliation: true, Outcome: resolution.Outcome, Language: language,
+                EnglishVoiceId: englishVoiceId);
             session.Items.AddLast(response);
             session.LastUpdatedAtUtc = response.CreatedAtUtc;
             while (session.Items.Count > MaximumResponsesPerSession) session.Items.RemoveFirst();

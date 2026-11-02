@@ -1,4 +1,4 @@
-﻿# SwiftAid | AI-Powered Community Disease Surveillance and Early Outbreak Intelligence
+# SwiftAid | AI-Powered Community Disease Surveillance and Early Outbreak Intelligence
 
 **Give underserved communities an earlier voice in public health surveillance.**
 
@@ -70,7 +70,7 @@ Ellai can help describe the import schema, validate observation formatting and i
 | **Muse Spark** | Hosted Ellai reasoning: understand requests, select authorized read tools, use context and produce responses. | Validated output cannot grant access or bypass approval receipts. Account-specific endpoints/model IDs are configured privately. |
 | **Muse Voice Transcribe** | Convert live or uploaded speech into text; Gateway-confirmed turns enter durable processing. | A provisional endpoint is not a completed conversation. Languages need individual quality evaluation. |
 | **Meta MMS-TTS** | Speak responses and brief tool-progress acknowledgements through Gateway audio delivery. | Current checkpoint `facebook/mms-tts-eng`: English, noncommercial use, opt-in deployment. |
-| **Kokoro-82M** | Selected English synthesis provider, with `af_heart` as the default voice at speed `0.95`. | Local model and Heart voice are available; Gateway routing and user voice selection are being integrated. Not a Meta model. Native Shona, Nyanja and Tsonga retain MMS-TTS. |
+| **Kokoro-82M** | Selected English synthesis provider, with `af_heart` as the default voice at speed `0.95`. | English defaults to Heart; installed English voices are selectable in Ellai About & settings. Not a Meta model. Native Shona, Nyanja and Tsonga retain MMS-TTS. |
 | **Meta Llama via Ollama** | Optional local open-weight text reasoning through the existing provider abstraction. | `llama3.2:3b` is a development starting point, not a claim of Muse-equivalent quality. It does not replace ASR or TTS. |
 
 Silero ONNX detects acoustic activity at Gateway; it is a separate component, **not a Meta model**. Microsoft Agent Framework integration and application orchestration connect reasoning to existing contracts. Authorization, persistence and approval remain application responsibilities. Generic browser/device TTS is not substituted for MMS-TTS. English acknowledgements remain the fallback until siSwati and Shona translations are reviewed.
@@ -440,14 +440,16 @@ Return to hosted Meta by recreating Gateway with only `infra/compose.yml` and ho
 
 ## Optional MMS-TTS output
 
-### English voice transition
+### English voice selection
 
-The approved target routing is below. This is configuration intent, **not a claim
-that the running Gateway has switched**. Kokoro routing, installed-voice selection
-in shared web/mobile settings, and end-to-end playback verification are in progress.
-Only installed voices should be offered; unavailable languages must not silently
-fall back to another language. Muse transcription, Silero and the voice transport
-remain unchanged.
+English defaults to Kokoro Heart at speed 0.95. In **Ellai → About & settings →
+Languages → Ellai's English voice**, choose an installed voice (Heart or Michael).
+The choice is saved on the device and applies to new messages and the next Live
+Speak session, including its greeting. Web and mobile share this settings page.
+The Gateway carries the selected voice with the accepted turn and prepared audio.
+Unavailable languages do not silently fall back to another language. Muse
+transcription, Silero and the voice transport remain unchanged. Physical-device
+playback and subjective pronunciation quality remain unverified.
 
 ```json
 {

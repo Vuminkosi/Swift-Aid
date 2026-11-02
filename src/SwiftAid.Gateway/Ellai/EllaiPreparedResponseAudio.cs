@@ -149,7 +149,8 @@ public sealed class EllaiPreparedResponseAudio(
                     {
                         using var upstream = await speech.SynthesizeAsync(
                             $"{audio.Response.SessionId}-{audio.Response.Sequence}-{index}", sentences[index],
-                            audio.Response.Language, null, cancellation.Token);
+                            audio.Response.Language, audio.Response.Language == "eng" ? audio.Response.EnglishVoiceId : null,
+                            cancellation.Token);
                         if (!EllaiSpeechResponseContract.IsValidPcmResponse(upstream))
                             throw new InvalidOperationException("Invalid speech response.");
                         var headers = new Dictionary<string, string[]>();

@@ -22,6 +22,16 @@ public sealed class MobileEllaiReviewClient : IEllaiReviewClient
 
     public bool UsesGatewayPcmAudioDownload => true;
 
+    public void ConfigureSpeechPreferences(EllaiLanguagePreferences preferences)
+    {
+        _guest?.ConfigureSpeechPreferences(preferences);
+        _authenticated?.ConfigureSpeechPreferences(preferences);
+    }
+
+    public Task<IReadOnlyList<EllaiEnglishVoiceDto>> ListEnglishVoicesAsync(CancellationToken cancellationToken) =>
+        _guest?.ListEnglishVoicesAsync(cancellationToken)
+        ?? Task.FromResult<IReadOnlyList<EllaiEnglishVoiceDto>>([]);
+
     public async Task<EllaiSessionHistoryPageDto?> ListSessionHistoryAsync(int offset, CancellationToken cancellationToken)
     {
         if (_authenticated is null || _guest is null) return null;

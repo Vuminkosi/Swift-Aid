@@ -17,6 +17,23 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
     private readonly bool _useGuestRoutes = useGuestRoutes;
     private string? _guestAntiforgeryToken;
     private string? _responseStreamId;
+    private EllaiLanguagePreferences _speechPreferences = new();
+
+    public void ConfigureSpeechPreferences(EllaiLanguagePreferences preferences)
+    {
+        if (!preferences.IsValid()) throw new ArgumentException("Invalid speech preferences.");
+        _speechPreferences = preferences;
+    }
+
+    public async Task<IReadOnlyList<EllaiEnglishVoiceDto>> ListEnglishVoicesAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<EllaiEnglishVoiceDto[]>("api/v1/ellai/voices", Json, cancellationToken) ?? [];
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception) { return []; }
+    }
 
     public async Task<EllaiSessionHistoryPageDto?> ListSessionHistoryAsync(int offset, CancellationToken cancellationToken)
     {
@@ -49,7 +66,7 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
         {
             Scheme = uri.Scheme == Uri.UriSchemeHttps ? "wss" : "ws",
         };
-        return builder.Uri;
+        return _speechPreferences.ApplyToVoiceUri(builder.Uri);
     }
 
     public async Task<EllaiSessionStartResult> StartSessionAsync(
@@ -260,6 +277,7 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
             route += $"&{string.Join('&', query)}";
         }
         var contentType = mode == EllaiVoiceCaptureMode.Recorded ? "audio/wav" : "application/octet-stream";
+        route += $"&outputLanguage={Uri.EscapeDataString(_speechPreferences.OutputLanguage)}&englishVoiceId={Uri.EscapeDataString(_speechPreferences.EnglishVoiceId)}";
         try
         {
             using var response = await PostBytesAsync(route, audio, contentType, cancellationToken)
@@ -551,7 +569,7 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
     public Task<EllaiResponseAudio?> DownloadListeningGreetingAudioAsync(
         string sessionId, CancellationToken cancellationToken) =>
         DownloadPcmAudioAsync(
-            sessionId, $"{SessionRoute(sessionId)}/voice/greeting/audio", 0,
+            sessionId, $"{SessionRoute(sessionId)}/voice/greeting/audio?englishVoiceId={Uri.EscapeDataString(_speechPreferences.EnglishVoiceId)}", 0,
             "live-activation", expectedPlaybackId: null, cancellationToken);
 
     private async Task<EllaiResponseAudio?> DownloadPcmAudioAsync(

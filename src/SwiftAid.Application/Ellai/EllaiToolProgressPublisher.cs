@@ -6,7 +6,7 @@ namespace SwiftAid.Application.Ellai;
 /// It never executes tools, invokes TTS, grants approval, or writes conversation messages.</summary>
 public sealed class EllaiToolProgressPublisher(
     EllaiSessionResponseStore responses, string sessionId, string utteranceId,
-    long controllerEpoch, int attempt, TimeProvider? timeProvider = null)
+    long controllerEpoch, int attempt, TimeProvider? timeProvider = null, string? englishVoiceId = null)
 {
     private readonly object _gate = new();
     private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
@@ -84,7 +84,7 @@ public sealed class EllaiToolProgressPublisher(
             : $"{utteranceId}:{attempt}:{++_sequence}";
         if (speak) _lastSpeech = now;
         responses.PublishProgress(sessionId, utteranceId, text,
-            new(id, state, operation, speak, controllerEpoch, now.AddSeconds(speak ? 8 : 30)));
+            new(id, state, operation, speak, controllerEpoch, now.AddSeconds(speak ? 8 : 30)), englishVoiceId);
     }
 
     // English is the only validated catalogue. ss/sn deliberately fall back to

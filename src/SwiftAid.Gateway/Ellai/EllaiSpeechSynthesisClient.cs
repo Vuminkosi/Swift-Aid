@@ -2,12 +2,16 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
+using SwiftAid.Contracts.Ellai;
 
 namespace SwiftAid.Gateway.Ellai;
 
 public interface IEllaiSpeechSynthesisClient
 {
     bool IsConfigured { get; }
+
+    Task<IReadOnlyList<EllaiEnglishVoiceDto>> ListEnglishVoicesAsync(CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<EllaiEnglishVoiceDto>>([]);
 
     Task<HttpResponseMessage> SynthesizeAsync(
         string requestId,
@@ -57,6 +61,27 @@ public sealed class EllaiSpeechSynthesisClient : IEllaiSpeechSynthesisClient
     public bool IsConfigured => _httpClient.BaseAddress is not null
         && !string.IsNullOrWhiteSpace(_internalKey);
 
+    public async Task<IReadOnlyList<EllaiEnglishVoiceDto>> ListEnglishVoicesAsync(CancellationToken cancellationToken)
+    {
+        if (!IsConfigured) return [];
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(3));
+        using var request = new HttpRequestMessage(HttpMethod.Get, "v1/voices");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _internalKey);
+        try
+        {
+            using var response = await _httpClient.SendAsync(request, timeout.Token);
+            if (!response.IsSuccessStatusCode) return [];
+            var voices = await response.Content.ReadFromJsonAsync<EllaiEnglishVoiceDto[]>(timeout.Token);
+            return (voices ?? []).Where(voice => voice.Language == "eng"
+                && EllaiLanguagePreferences.IsSupportedEnglishVoice(voice.VoiceId))
+                .DistinctBy(voice => voice.VoiceId).Take(8).ToArray();
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { return []; }
+        catch (HttpRequestException) { return []; }
+        catch (JsonException) { return []; }
+    }
+
     public Task<HttpResponseMessage> SynthesizeAsync(
         string requestId,
         string text,
@@ -70,7 +95,8 @@ public sealed class EllaiSpeechSynthesisClient : IEllaiSpeechSynthesisClient
         ArgumentException.ThrowIfNullOrWhiteSpace(requestId);
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
         if (language is not ("eng" or "sna" or "nya" or "tso")
-            || (voiceId is not null && voiceId != "default" && (language != "eng" || voiceId != "af_heart")))
+            || (voiceId is not null && voiceId != "default" && (language != "eng"
+                || !SwiftAid.Contracts.Ellai.EllaiLanguagePreferences.IsSupportedEnglishVoice(voiceId))))
         {
             throw new ArgumentException("The requested speech profile is unavailable.");
         }

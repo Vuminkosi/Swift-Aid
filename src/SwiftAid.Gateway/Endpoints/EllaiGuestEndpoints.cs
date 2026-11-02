@@ -370,12 +370,15 @@ public static class EllaiGuestEndpoints
             return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Voice transcription consent is required.");
         }
 
+        var preferences = EllaiSpeechPreferences.Read(request.Query);
+        if (preferences is null) return Results.BadRequest();
         var result = await transcription.TranscribeAsync(
             sessionId, captureMode, request.Body, request.ContentLength, cancellationToken,
             request.Query["voiceCaptureId"].FirstOrDefault(),
             long.TryParse(request.Query["voiceCaptureOffsetSamples"].FirstOrDefault(), out var offsetSamples)
                 ? offsetSamples : 0,
-            submissionPrincipal: request.Query["serverSubmission"] == "true" ? http.User : null)
+            submissionPrincipal: request.Query["serverSubmission"] == "true" ? http.User : null,
+            speechPreferences: preferences)
             .ConfigureAwait(false);
         return result is not null
             ? Results.Json(result)
@@ -648,12 +651,14 @@ public static class EllaiGuestEndpoints
                 title: "Ellai speech is unavailable for this session.");
         }
 
+        var preferences = EllaiSpeechPreferences.Read(http.Request.Query);
+        if (preferences is null) return Results.BadRequest();
         HttpResponseMessage upstream;
         try
         {
             upstream = await speech.SynthesizeAsync(
                 $"{sessionId}-live-activation", "Hi, What's on your mind!",
-                http.RequestAborted).ConfigureAwait(false);
+                "eng", preferences.EnglishVoiceId, http.RequestAborted).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested)
         {

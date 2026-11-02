@@ -52,11 +52,13 @@ public sealed class EllaiVoiceTranscriptionService(
     public async Task<EllaiVoiceTranscriptionResult?> TranscribeAsync(
         string sessionId, EllaiVoiceCaptureMode mode, Stream audio, long? contentLength,
         CancellationToken cancellationToken, string? voiceCaptureId = null,
-        long voiceCaptureOffsetSamples = 0, ClaimsPrincipal? submissionPrincipal = null)
+        long voiceCaptureOffsetSamples = 0, ClaimsPrincipal? submissionPrincipal = null,
+        EllaiLanguagePreferences? speechPreferences = null)
     {
         ArgumentNullException.ThrowIfNull(audio);
         if (string.IsNullOrWhiteSpace(sessionId)
             || !Enum.IsDefined(mode)
+            || (speechPreferences is not null && !speechPreferences.IsValid())
             || (mode == EllaiVoiceCaptureMode.Recorded && !options.HasUploadAsrRoute)
             || (mode == EllaiVoiceCaptureMode.Live && !options.HasRealtimeAsrRoute)
             || contentLength is < 1 or > MaximumAudioBytes)
@@ -82,7 +84,7 @@ public sealed class EllaiVoiceTranscriptionService(
             using var turn = turnCoordinator.BeginStream(sessionId, cancellationToken, voiceCaptureId,
                 serverSubmission: submissionPrincipal is not null);
             using var admission = submissionPrincipal is null ? null
-                : new EllaiVoiceTurnAdmission(services, sessionId, submissionPrincipal, turnCoordinator);
+                : new EllaiVoiceTurnAdmission(services, sessionId, submissionPrincipal, turnCoordinator, speechPreferences);
             var turnOptions = services.GetService<EllaiVoiceTurnOptions>() ?? new EllaiVoiceTurnOptions();
             using var durationCts = new CancellationTokenSource(
                 TimeSpan.FromMilliseconds(turnOptions.MaximumTurnDurationMs));
@@ -161,7 +163,8 @@ public sealed class EllaiVoiceTranscriptionService(
             var transcript = result.Transcript.Trim();
             if (transcript.Length is not (> 0 and <= 8_000)) return null;
             if (submissionPrincipal is null) return new EllaiVoiceTranscriptionResult(transcript);
-            using var admission = new EllaiVoiceTurnAdmission(services, sessionId, submissionPrincipal);
+            using var admission = new EllaiVoiceTurnAdmission(services, sessionId, submissionPrincipal,
+                speechPreferences: speechPreferences);
             var accepted = await admission.SubmitAsync(utteranceId, transcript).ConfigureAwait(false);
             return new EllaiVoiceTranscriptionResult(transcript, utteranceId, accepted, ServerSubmission: true);
         }

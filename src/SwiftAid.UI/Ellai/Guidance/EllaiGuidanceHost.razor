@@ -194,6 +194,7 @@
     private long _lastVoiceTurnStatusEpoch;
     private string? _voiceTurnCursorSessionId;
     private EllaiVoiceCaptureMode? _captureMode;
+    private EllaiLanguagePreferences _speechPreferences = new();
     private bool _microphoneCaptureAvailable;
     private bool _voiceNetworkOnline = true;
     private bool _nativeVoiceCaptureActive;
@@ -445,6 +446,7 @@
         var capturingAlongsidePlayback = mode == EllaiVoiceCaptureMode.Live && _isPlayingResponse;
         try
         {
+            await LoadSpeechPreferencesAsync();
             if (mode == EllaiVoiceCaptureMode.Live)
             {
                 StatusText = "Hi, What's on your mind!";
@@ -511,8 +513,8 @@
                 _ = await _captureModule!.InvokeAsync<string>(
                     "startCapture", _captureDotnetReference, mode == EllaiVoiceCaptureMode.Live, session.SessionId,
                     useBrowserLiveVoiceWebSocket
-                        ? ReviewClient.CreateLiveVoiceWebSocketUri(
-                            new Uri(Navigation.BaseUri), session.SessionId, _liveVoiceCaptureId!).ToString()
+                        ? _speechPreferences.ApplyToVoiceUri(ReviewClient.CreateLiveVoiceWebSocketUri(
+                            new Uri(Navigation.BaseUri), session.SessionId, _liveVoiceCaptureId!)).ToString()
                         : string.Empty);
             }
             _nativeVoiceCaptureActive = useNativeLiveCapture;
@@ -719,8 +721,8 @@
                 var replay = SnapshotCapturedAudio();
                 try
                 {
-                    var socketUrl = ReviewClient.CreateLiveVoiceWebSocketUri(
-                        new Uri(Navigation.BaseUri), sessionId, _liveVoiceCaptureId!, 0).ToString();
+                    var socketUrl = _speechPreferences.ApplyToVoiceUri(ReviewClient.CreateLiveVoiceWebSocketUri(
+                        new Uri(Navigation.BaseUri), sessionId, _liveVoiceCaptureId!, 0)).ToString();
                     var connected = await _captureModule!.InvokeAsync<bool>(
                         "reconnectVoiceStream", socketUrl, replay).ConfigureAwait(false);
                     if (!connected)
@@ -1198,6 +1200,19 @@
         _ => null,
     };
 
+    private async Task LoadSpeechPreferencesAsync()
+    {
+        try
+        {
+            await using var module = await JS.InvokeAsync<IJSObjectReference>("import",
+                "./_content/SwiftAid.UI/js/ellai-language-preferences.js");
+            var preferences = await module.InvokeAsync<EllaiLanguagePreferences>("load");
+            _speechPreferences = preferences is not null && preferences.IsValid() ? preferences : new();
+        }
+        catch (JSException) { _speechPreferences = new(); }
+        ReviewClient.ConfigureSpeechPreferences(_speechPreferences);
+    }
+
     private async Task<bool> PlayListeningGreetingAsync(string sessionId)
     {
         try
@@ -1220,7 +1235,7 @@
 
             _speechModule ??= await JS.InvokeAsync<Microsoft.JSInterop.IJSObjectReference>(
                 "import", "./_content/SwiftAid.UI/js/ellai-audio-playback.js");
-            await _speechModule.InvokeVoidAsync("playListeningGreeting", sessionId);
+            await _speechModule.InvokeVoidAsync("playListeningGreeting", sessionId, _speechPreferences.EnglishVoiceId);
             return true;
         }
         catch (OperationCanceledException) when (_cts?.IsCancellationRequested == true)

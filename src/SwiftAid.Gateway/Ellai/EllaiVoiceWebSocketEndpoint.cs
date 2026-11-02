@@ -29,7 +29,8 @@ public static class EllaiVoiceWebSocketEndpoint
         }
 
         var captureId = http.Request.Query["voiceCaptureId"].FirstOrDefault();
-        if (string.IsNullOrWhiteSpace(captureId) || captureId.Length > 64
+        var preferences = EllaiSpeechPreferences.Read(http.Request.Query);
+        if (preferences is null || string.IsNullOrWhiteSpace(captureId) || captureId.Length > 64
             || !long.TryParse(http.Request.Query["voiceCaptureOffsetSamples"].FirstOrDefault(), out var offset)
                 && http.Request.Query.ContainsKey("voiceCaptureOffsetSamples")
             || offset is < 0 or > SwiftAid.Contracts.Ellai.EllaiSpeechEvent.MaximumPosition)
@@ -53,7 +54,8 @@ public static class EllaiVoiceWebSocketEndpoint
                 cancellationToken,
                 captureId,
                 Math.Max(0, offset),
-                submissionPrincipal: http.Request.Query["serverSubmission"] == "true" ? principal : null)
+                submissionPrincipal: http.Request.Query["serverSubmission"] == "true" ? principal : null,
+                speechPreferences: preferences)
                 .ConfigureAwait(false);
 
             if (socket.State is WebSocketState.Open or WebSocketState.CloseReceived)

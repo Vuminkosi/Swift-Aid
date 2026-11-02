@@ -9,6 +9,26 @@ namespace SwiftAid.Integration.Tests;
 
 public sealed class EllaiSpeechSynthesisClientTests
 {
+    [Fact]
+    public async Task EagerPreparationUsesTheVoiceCommittedWithTheResponse()
+    {
+        using var handler = new CaptureHandler();
+        using var http = new HttpClient(handler);
+        using var prepared = new EllaiPreparedResponseAudio(Create(http), NullLogger<EllaiPreparedResponseAudio>.Instance);
+        await prepared.StartAsync(CancellationToken.None);
+        try
+        {
+            prepared.Published(new EllaiSessionResponseDto(1, "voice-choice", "Synthetic sentence.",
+                DateTimeOffset.UtcNow, "turn", EnglishVoiceId: "am_michael"));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            using var audio = await prepared.OpenAsync("voice-choice", 1, timeout.Token);
+            using var request = JsonDocument.Parse(handler.Body!);
+            Assert.Equal("am_michael", request.RootElement.GetProperty("voiceId").GetString());
+            Assert.Equal("eng", request.RootElement.GetProperty("language").GetString());
+        }
+        finally { await prepared.StopAsync(CancellationToken.None); }
+    }
+
     [Theory]
     [InlineData("sna")]
     [InlineData("nya")]
@@ -34,6 +54,7 @@ public sealed class EllaiSpeechSynthesisClientTests
 
     [Theory]
     [InlineData("eng", "af_heart")]
+    [InlineData("eng", "am_michael")]
     [InlineData("eng", null)]
     [InlineData("sna", "default")]
     [InlineData("nya", "default")]

@@ -147,6 +147,10 @@ def test_kokoro_default_and_native_language_routing(monkeypatch):
     with client(monkeypatch, provider="kokoro") as test_client:
         headers = {"Authorization": "Bearer test-only-key"}
         payload = {"text": "Synthetic test.", "requestId": "kokoro-1"}
+        assert test_client.get("/v1/voices").status_code == 401
+        assert test_client.get("/v1/voices", headers=headers).json() == [
+            {"voiceId": "af_heart", "name": "Heart", "language": "eng"}
+        ]
         response = test_client.post("/v1/synthesize", headers=headers, json=payload)
         assert response.status_code == 200
         assert response.headers["x-swiftaid-voice-id"] == "af_heart"
