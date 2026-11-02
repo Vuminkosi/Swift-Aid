@@ -75,6 +75,10 @@ public sealed record CaseReported : CaseEvent
     public string WorkspaceId { get; init; }
 }
 public sealed record CaseAssigned(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, string AccountableOwnerId) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
+
+public sealed record CaseAssignmentAcknowledged(Guid CaseId, long AggregateVersion, long ReportRevision,
+    Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, long AssignmentVersion)
+    : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
 public sealed record CaseReportCorrected : CaseEvent
 {
     public CaseReportCorrected(Guid caseId, long aggregateVersion, long reportRevision, Guid commandId, string actorId,
@@ -150,6 +154,8 @@ public sealed class CaseAggregate
     public CaseReportEventData? ReportData { get; private set; }
     public string? WorkspaceId { get; private set; }
     public string? AccountableOwnerId { get; private set; }
+    public long AssignmentVersion { get; private set; }
+    public DateTimeOffset? AssignmentAcknowledgedAtUtc { get; private set; }
     public CaseObservationRecorded? LatestObservation { get; private set; }
     public int ObservationCount { get; private set; }
     public IReadOnlyList<FollowUpState> FollowUps => _followUps.AsReadOnly();
@@ -243,6 +249,7 @@ public sealed class CaseAggregate
             RaiseEscalationCommand escalation => DecideRaiseEscalation(escalation, actor, version),
             AcknowledgeEscalationCommand acknowledge => DecideAcknowledgeEscalation(acknowledge, actor, version),
             CloseEscalationCommand close => DecideCloseEscalation(close, actor, version),
+            AcknowledgeAssignmentCommand acknowledge => DecideAcknowledgeAssignment(acknowledge, actor, version),
             _ => throw new NotSupportedException($"The command type {command.GetType().Name} is not supported by this aggregate.")
         };
     }
@@ -350,6 +357,8 @@ public sealed class CaseAggregate
         }
 
         AccountableOwnerId = assignment.AccountableOwnerId;
+        AssignmentVersion = assignment.AggregateVersion;
+        AssignmentAcknowledgedAtUtc = null;
         AggregateVersion = assignment.AggregateVersion;
         _events.Add(assignment);
     }
@@ -544,6 +553,17 @@ public sealed class CaseAggregate
         return Array.AsReadOnly<CaseEvent>([new CaseEscalationClosed(CaseId, version, ReportRevision, command.CommandId, actor.ActorId, command.OccurredAtUtc, command.RecordedAtUtc, command.EscalationId, command.Resolution, command.Reason)]);
     }
 
+    private IReadOnlyList<CaseEvent> DecideAcknowledgeAssignment(AcknowledgeAssignmentCommand command, ActorCapabilities actor, long version)
+    {
+        RequireCapability(actor, CaseCapability.AcknowledgeAssignment);
+        if (actor.ActorId != AccountableOwnerId)
+            throw new UnauthorizedAccessException("Only the current accountable owner can acknowledge assignment.");
+        if (command.AssignmentVersion != AssignmentVersion || AssignmentAcknowledgedAtUtc is not null || Workflow == CaseWorkflow.Resolved)
+            throw new InvalidOperationException("The assignment is no longer pending acknowledgement.");
+        return Array.AsReadOnly<CaseEvent>([new CaseAssignmentAcknowledged(CaseId, version, ReportRevision,
+            command.CommandId, actor.ActorId, command.OccurredAtUtc, command.RecordedAtUtc, AssignmentVersion)]);
+    }
+
     private void ApplyExistingEvent(CaseEvent @event)
     {
         switch (@event)
@@ -556,6 +576,8 @@ public sealed class CaseAggregate
                 }
 
                 AccountableOwnerId = assignment.AccountableOwnerId;
+                AssignmentVersion = assignment.AggregateVersion;
+                AssignmentAcknowledgedAtUtc = null;
                 break;
             case CaseAssigned when AggregateVersion >= 2:
                 throw new InvalidDataException("A post-acceptance assignment must be applied together with its approved request-review event.");
@@ -597,11 +619,19 @@ public sealed class CaseAggregate
                 RequireText(reopening.Reason, nameof(reopening.Reason));
                 RequireText(reopening.AccountableOwnerId, nameof(reopening.AccountableOwnerId));
                 AccountableOwnerId = reopening.AccountableOwnerId;
+                AssignmentVersion = reopening.AggregateVersion;
+                AssignmentAcknowledgedAtUtc = null;
                 Workflow = CaseWorkflow.Active;
                 WorkflowVersion = reopening.AggregateVersion;
                 break;
             case CaseReopened:
                 throw new InvalidDataException("Reopening requires a resolved case and its current report revision.");
+            case CaseAssignmentAcknowledged acknowledgement:
+                if (acknowledgement.ReportRevision != ReportRevision || acknowledgement.AssignmentVersion != AssignmentVersion ||
+                    acknowledgement.ActorId != AccountableOwnerId || AssignmentAcknowledgedAtUtc is not null || Workflow == CaseWorkflow.Resolved)
+                    throw new InvalidDataException("Acknowledgement must reference the current pending assignment and its owner.");
+                AssignmentAcknowledgedAtUtc = acknowledgement.RecordedAtUtc;
+                break;
             case CaseObservationRecorded observation when observation.ReportRevision == ReportRevision:
                 RequireText(observation.Narrative, nameof(observation.Narrative));
                 RequireText(observation.Source, nameof(observation.Source));
@@ -816,6 +846,7 @@ public sealed class CaseAggregate
     {
         CaseReported reported => reported with { ReportData = SnapshotReportData(reported.ReportData) },
         CaseAssigned assignment => assignment,
+        CaseAssignmentAcknowledged acknowledgement => acknowledgement,
         CaseReportCorrected correction => correction with { CorrectedReportData = SnapshotReportData(correction.CorrectedReportData) },
         CaseActionRequested request => request with { EvidenceEventIds = Array.AsReadOnly(request.EvidenceEventIds.ToArray()) },
         CaseActionRequestReviewed review => review,

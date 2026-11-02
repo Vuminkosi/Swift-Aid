@@ -13,6 +13,10 @@ public sealed record CommandEnvelope<TPayload>(
 
 public abstract record CaseCommand(Guid CommandId, long ExpectedVersion, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc);
 
+public sealed record AcknowledgeAssignmentCommand(Guid CommandId, long ExpectedVersion, long AssignmentVersion,
+    DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc)
+    : CaseCommand(CommandId, ExpectedVersion, OccurredAtUtc, RecordedAtUtc);
+
 public sealed record AcceptCaseCommand(
     Guid CommandId,
     Guid CaseId,
@@ -185,7 +189,8 @@ public enum CaseCapability
     ReviewProtectedAction = 64,
     RecordObservation = 128,
     ManageFollowUp = 256,
-    ManageEscalation = 512
+    ManageEscalation = 512,
+    AcknowledgeAssignment = 1024
 }
 
 public sealed record ActorCapabilities(string ActorId, CaseCapability Capabilities)
