@@ -20,7 +20,7 @@ public sealed record CaseQueueCandidate(
     DateTimeOffset? CreatedAtUtc = null);
 
 /// <summary>Recorded routing filters, not clinical or classification-review inference.</summary>
-public sealed record CaseQueueFilter(string? CountryCode = null, string? Workflow = null, bool NewestReportedFirst = false);
+public sealed record CaseQueueFilter(string? CountryCode = null, string? Workflow = null, bool NewestReportedFirst = false, IReadOnlyList<Guid>? CaseIds = null);
 
 /// <summary>Persistence port for the "my cases" queue. Rows arrive newest-first.</summary>
 public interface ICaseQueueStore
@@ -82,6 +82,8 @@ public sealed class CaseQueueQuery(
             throw new ArgumentException("Country must be an uppercase two-letter code.", nameof(filter));
         if (filter.Workflow is { } workflow && workflow is not ("Reported" or "UnderReview" or "Active" or "AwaitingFollowUp" or "Resolved"))
             throw new ArgumentException("Unknown recorded workflow.", nameof(filter));
+        if (filter.CaseIds is { } ids && (ids.Count > 20 || ids.Any(id => id == Guid.Empty)))
+            throw new ArgumentException("At most 20 nonempty case IDs are supported.", nameof(filter));
         return ReadAsync(actor, limit, filter, ct);
     }
 

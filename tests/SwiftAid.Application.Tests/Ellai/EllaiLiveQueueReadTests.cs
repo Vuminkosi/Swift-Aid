@@ -52,12 +52,12 @@ public sealed class EllaiLiveQueueReadTests
             new Claim(ActorContext.AccessEpochClaimType, "3"),
         }, "test")));
 
-    private static EllaiToolBroker GrantedBroker(ICaseQueueQuery? queue = null)
+    private static EllaiToolBroker GrantedBroker(ICaseQueueQuery? queue = null, EllaiTopicService? topics = null)
     {
         var consent = new EllaiConsentService();
         consent.Grant("session-1", EllaiConsentDimension.ReasoningText,
             EllaiToolBroker.ToolReadPurpose, EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
-        return new EllaiToolBroker(new EllaiPolicyService(), consent, null, queue);
+        return new EllaiToolBroker(new EllaiPolicyService(), consent, null, queue, topics: topics);
     }
 
     private static IReadOnlyDictionary<string, string> Args(params (string Key, string Value)[] pairs) =>
@@ -124,6 +124,103 @@ public sealed class EllaiLiveQueueReadTests
         Assert.False(result.Allowed);
         Assert.Equal(EllaiToolReasonCodes.InvalidArguments, result.ReasonCode);
         Assert.Null(queue.LastActor);
+    }
+
+    [Fact]
+    public async Task ResultRecallReauthorizesIdsAndUsesCurrentVersions()
+    {
+        var topics = new EllaiTopicService();
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [Row("01", 7), Row("02", 8)]) };
+        var context = Context with { Actor = TestActor() };
+        await GrantedBroker(queue, topics).InvokeAsync(context,
+            new(EllaiToolNames.State, Args(("projection", "queue"))), CancellationToken.None);
+        // One record is no longer authorized; another changed. An unrelated newly returned row must not leak in.
+        queue.Result = new(CaseQueueAccess.Allowed, [Row("01", 9), Row("03", 1)]);
+        var recalled = await GrantedBroker(queue, topics).InvokeAsync(context,
+            new(EllaiToolNames.Topic, Args(("ref", "case-results"))), CancellationToken.None);
+        Assert.True(recalled.Allowed);
+        Assert.Equal(1, recalled.ItemCount);
+        Assert.Equal("9", Assert.Single(recalled.Evidence).Version);
+        Assert.Contains("changed since retrieval", recalled.ResultSummary);
+        Assert.DoesNotContain(Row("02", 8).CaseId.ToString(), recalled.ResultSummary);
+        Assert.DoesNotContain(Row("03", 1).CaseId.ToString(), recalled.ResultSummary);
+        Assert.Equal(new[] { Row("01", 7).CaseId, Row("02", 8).CaseId }, queue.LastFilter!.CaseIds);
+    }
+
+    [Fact]
+    public async Task ResultSnapshotsCannotBeReadThroughGenericTopicLookupOrChangedScope()
+    {
+        var topics = new EllaiTopicService();
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [Row("01", 7)]) };
+        var context = Context with { Actor = TestActor() };
+        var broker = GrantedBroker(queue, topics);
+        await broker.InvokeAsync(context, new(EllaiToolNames.State, Args(("projection", "queue"))), CancellationToken.None);
+        foreach (var reference in new[] { "the first issue", "latest case", "Ellai" })
+        {
+            var generic = await broker.InvokeAsync(context,
+                new(EllaiToolNames.Topic, Args(("ref", reference))), CancellationToken.None);
+            Assert.Equal(0, generic.ItemCount);
+            Assert.DoesNotContain(Row("01", 7).CaseId.ToString(), generic.ResultSummary);
+        }
+        var memory = new EllaiCaseResultMemory(topics, queue);
+        Assert.False((await memory.RecallAsync(context with { ScopeEpoch = "changed" }, CancellationToken.None)).Allowed);
+        Assert.False((await memory.RecallAsync(context with { SessionId = "other" }, CancellationToken.None)).Allowed);
+        Assert.False((await memory.RecallAsync(context with { Actor = null }, CancellationToken.None)).Allowed);
+    }
+
+    [Theory]
+    [InlineData("other-actor", 24)]
+    [InlineData("actor-1", -1)]
+    public async Task ResultRecallRejectsOtherOwnersAndExpiredSnapshots(string actorId, int expiresInHours)
+    {
+        var topics = new EllaiTopicService();
+        var queue = new FakeQueue();
+        var snapshot = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            ActorId = actorId, ScopeEpoch = Context.ScopeEpoch,
+            ExpiresAtUtc = DateTimeOffset.UtcNow.AddHours(expiresInHours),
+            Cases = new[] { new { Id = Row("01", 7).CaseId, Version = 7L } }
+        });
+        await topics.TrackAsync(Context.SessionId, EllaiCaseResultMemory.TopicTitle, ["case-results"],
+            snapshot, "case-results/1");
+        var recalled = await new EllaiCaseResultMemory(topics, queue).RecallAsync(
+            Context with { Actor = TestActor() }, CancellationToken.None);
+        Assert.False(recalled.Allowed);
+        Assert.Empty(recalled.Evidence);
+        Assert.Null(queue.LastActor);
+    }
+
+    [Fact]
+    public async Task ResultRecallDoesNotPresentAnOutageAsAnEmptyResult()
+    {
+        var topics = new EllaiTopicService();
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [Row("01", 7)]) };
+        var context = Context with { Actor = TestActor() };
+        var memory = new EllaiCaseResultMemory(topics, queue);
+        await memory.RememberAsync(context, queue.Result.Items, CancellationToken.None);
+        queue.Result = new(CaseQueueAccess.Unavailable, []);
+        var recalled = await memory.RecallAsync(context, CancellationToken.None);
+        Assert.False(recalled.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, recalled.ReasonCode);
+        Assert.Empty(recalled.Evidence);
+    }
+
+    [Fact]
+    public async Task EmptySearchReplacesPreviousResultSet()
+    {
+        var topics = new EllaiTopicService();
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [Row("01", 7)]) };
+        var context = Context with { Actor = TestActor() };
+        var broker = GrantedBroker(queue, topics);
+        var search = new EllaiToolRequest(EllaiToolNames.State, Args(("projection", "queue")));
+        await broker.InvokeAsync(context, search, CancellationToken.None);
+        queue.Result = new(CaseQueueAccess.Allowed, []);
+        await broker.InvokeAsync(context, search, CancellationToken.None);
+        var recalled = await broker.InvokeAsync(context,
+            new(EllaiToolNames.Topic, Args(("ref", "case-results"))), CancellationToken.None);
+        Assert.True(recalled.Allowed);
+        Assert.Empty(recalled.Evidence);
+        Assert.Contains("was empty", recalled.ResultSummary);
     }
 
     [Fact]

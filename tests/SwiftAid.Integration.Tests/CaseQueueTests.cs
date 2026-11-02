@@ -70,8 +70,46 @@ public sealed class CaseQueueTests
         var rows = await new PostgresCaseQueueStore(db).GetOwnedCasesAsync("officer-1", 1,
             new CaseQueueFilter("SZ", "Reported", true), CancellationToken.None);
         Assert.Equal(target, Assert.Single(rows).CaseId);
+        var byId = await new PostgresCaseQueueStore(db).GetOwnedCasesAsync("officer-1", 1,
+            new CaseQueueFilter(CaseIds: [target]), CancellationToken.None);
+        Assert.Equal(target, Assert.Single(byId).CaseId);
+        Assert.Empty(await new PostgresCaseQueueStore(db).GetOwnedCasesAsync("officer-1", 1,
+            new CaseQueueFilter(CaseIds: []), CancellationToken.None));
         Assert.Empty(await new PostgresCaseQueueStore(db).GetOwnedCasesAsync("another-owner", 1,
             new CaseQueueFilter("SZ", "Reported", true), CancellationToken.None));
+    }
+
+    [IntakePostgresFact]
+    public async Task EllaiCaseReferencesSurviveNewDatabaseContext()
+    {
+        var sessionId = "recall-" + Guid.NewGuid().ToString("N");
+        var actor = CreateOfficer("officer-1");
+        var context = new SwiftAid.Application.Ellai.EllaiToolContext(sessionId, "scope-1", "cases", null,
+            4, true, "consent/1", SwiftAid.Application.Ellai.EllaiProcessingClassification.SyntheticDemo, actor);
+        Guid caseId;
+        await using (var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync())
+        {
+            if (!await db.Actors.AnyAsync(x => x.ActorId == "granter-1"))
+            {
+                db.Actors.Add(new ActorEntity { ActorId = "granter-1", Status = PersistentActorStatus.Active,
+                    CreatedAtUtc = DateTimeOffset.UtcNow, UpdatedAtUtc = DateTimeOffset.UtcNow });
+                await db.SaveChangesAsync();
+            }
+            await CaseRegistrationBackendTests.SeedRegistrationGrantAsync(db);
+            caseId = await IntakeDecisionStoreTests.SeedManagedCaseAsync(db);
+            await SeedRegionScopeAsync(db, caseId);
+            var topics = new SwiftAid.Application.Ellai.EllaiTopicService(
+                new SwiftAid.Infrastructure.Persistence.Ellai.PostgresEllaiTopicStore(db));
+            await new SwiftAid.Application.Ellai.EllaiCaseResultMemory(topics, CreateQuery(db)).RememberAsync(context,
+                [new CaseQueueItem(caseId, "Reported", "ZW", "officer-1", 1, DateTimeOffset.UtcNow)], CancellationToken.None);
+        }
+        await using var restored = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var recalled = await new SwiftAid.Application.Ellai.EllaiCaseResultMemory(
+            new SwiftAid.Application.Ellai.EllaiTopicService(
+                new SwiftAid.Infrastructure.Persistence.Ellai.PostgresEllaiTopicStore(restored)),
+            CreateQuery(restored)).RecallAsync(context, CancellationToken.None);
+        Assert.True(recalled.Allowed);
+        Assert.Equal(caseId.ToString("D"), Assert.Single(recalled.Evidence).ResourceId);
     }
 
     [IntakePostgresFact]

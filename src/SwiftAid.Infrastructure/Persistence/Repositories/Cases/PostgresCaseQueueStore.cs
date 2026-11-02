@@ -18,14 +18,14 @@ public sealed class PostgresCaseQueueStore(SwiftAidDbContext dbContext) : ICaseQ
 
     public Task<IReadOnlyList<CaseQueueCandidate>> GetOwnedCasesAsync(
         string ownerActorId, int take, CaseQueueFilter filter, CancellationToken ct) =>
-        ReadAsync(ownerActorId, take, null, filter.CountryCode, null, ct, filter.Workflow, filter.NewestReportedFirst);
+        ReadAsync(ownerActorId, take, null, filter.CountryCode, null, ct, filter.Workflow, filter.NewestReportedFirst, filter.CaseIds);
 
     public Task<IReadOnlyList<CaseQueueCandidate>> GetAsync(string ownerActorId, string workspaceId,
         string countryCode, DateTimeOffset sinceUtc, int take, CancellationToken ct) =>
         ReadAsync(ownerActorId, take, workspaceId, countryCode, sinceUtc, ct);
 
     private async Task<IReadOnlyList<CaseQueueCandidate>> ReadAsync(
-        string ownerActorId, int take, string? workspaceId, string? countryCode, DateTimeOffset? sinceUtc, CancellationToken ct, string? workflow = null, bool newestReportedFirst = false)
+        string ownerActorId, int take, string? workspaceId, string? countryCode, DateTimeOffset? sinceUtc, CancellationToken ct, string? workflow = null, bool newestReportedFirst = false, IReadOnlyList<Guid>? caseIds = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(ownerActorId);
         if (take < 1)
@@ -37,6 +37,7 @@ public sealed class PostgresCaseQueueStore(SwiftAidDbContext dbContext) : ICaseQ
             : Enum.Parse<SwiftAid.Domain.Cases.CaseWorkflow>(workflow);
         var rows = await _dbContext.ManagedCases.AsNoTracking()
             .Where(item => item.AccountableOwnerActorId == ownerActorId)
+            .Where(item => caseIds == null || caseIds.Contains(item.CaseId))
             .Where(item => workspaceId == null || item.WorkspaceId == workspaceId)
             .Where(item => countryCode == null || item.CountryCode == countryCode)
             .Where(item => workflowValue == null || item.Workflow == workflowValue)

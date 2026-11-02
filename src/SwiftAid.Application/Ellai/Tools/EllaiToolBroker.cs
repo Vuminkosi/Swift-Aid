@@ -167,7 +167,7 @@ public sealed class EllaiToolBroker
     {
         $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, country?, workflow?, sort?) — permitted feature or owned-case queue. country is an uppercase two-letter code (Zimbabwe=ZW, Eswatini=SZ); workflow is Reported, UnderReview, Active, AwaitingFollowUp or Resolved; sort=latest-reported or latest-updated. Reported is a recorded workflow, not proof that no human reviewed a case. Classification review status is not supplied; clarify ambiguous unreviewed requests.",
         $"{EllaiToolNames.Evidence}(ref, field?) — versioned source items with provenance.",
-        $"{EllaiToolNames.Topic}(ref) — session topic candidates with checkpoints.",
+        $"{EllaiToolNames.Topic}(ref) — session topic candidates with checkpoints. Use ref=case-results to recall the last retained case list with fresh authorization; never invent a remembered result set.",
         $"{EllaiToolNames.Capabilities}(feature?) — capability readiness, no credentials.",
         $"{EllaiToolNames.Receipts}(receipt?) — durable receipts, session-bound.",
         $"{EllaiToolNames.ProductFacts}(topic?) — versioned nonmedical product facts.",
@@ -581,13 +581,26 @@ public sealed class EllaiToolBroker
         }
 
         var items = result.Items.Take(limit).ToList();
+        var recallNotice = "";
+        if (_topics is not null)
+        {
+            try
+            {
+                await new EllaiCaseResultMemory(_topics, _queue).RememberAsync(context, items, ct).ConfigureAwait(false);
+                recallNotice = " Result references retained for this session; recall with ellai_topic(ref=case-results).";
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                recallNotice = " Result references could not be retained; do not claim they were remembered.";
+            }
+        }
         var lines = items.Select(item =>
             $"case {item.CaseId:D} · workflow {item.Workflow}; country {item.CountryCode} · v{item.AggregateVersion} · updated {item.UpdatedAtUtc:O}");
         var evidence = items.Select(item => new EvidenceRef(
             "CaseQueue", item.CaseId.ToString("D"), item.AggregateVersion.ToString(System.Globalization.CultureInfo.InvariantCulture), null,
             item.CaseId.ToString("D"))).ToList();
         return new EllaiToolResult(request.ToolName, true, null, evidence,
-            "Owned cases only; review status is not supplied. " +
+            "Owned cases only; review status is not supplied." + recallNotice + "\n" +
             (items.Count == 0 ? "The permitted work queue is empty." : string.Join("\n", lines)),
             items.Count, items.Count >= limit, EllaiToolReasonCodes.Ok);
     }
@@ -700,9 +713,22 @@ public sealed class EllaiToolBroker
                 EllaiToolReasonCodes.InvalidArguments);
         }
 
+        if (string.Equals(reference.Trim(), EllaiCaseResultMemory.Reference, StringComparison.OrdinalIgnoreCase))
+        {
+            if (_queue is null) return Deny(request.ToolName, "Case recall is unavailable.", EllaiToolReasonCodes.Unavailable);
+            try
+            {
+                return await new EllaiCaseResultMemory(_topics, _queue).RecallAsync(context, ct).ConfigureAwait(false);
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                return Deny(request.ToolName, "Case recall is unavailable. Try the search again.", EllaiToolReasonCodes.Unavailable);
+            }
+        }
         var (resolved, ambiguous) = await _topics
             .ResolveAsync(context.SessionId, reference.Trim(), ct).ConfigureAwait(false);
-        var matches = resolved.Take(MaxItems).ToList();
+        // Reserved snapshots must never escape through generic topic/ordinal lookup.
+        var matches = resolved.Where(topic => topic.Title != EllaiCaseResultMemory.TopicTitle).Take(MaxItems).ToList();
         if (matches.Count == 0)
         {
             return Allow(request.ToolName, "No permitted topic matches the reference.", 0, false);
