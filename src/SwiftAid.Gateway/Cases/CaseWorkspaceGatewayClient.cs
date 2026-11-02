@@ -113,20 +113,25 @@ public sealed class CaseWorkspaceGatewayClient(
             .OrderBy(option => option.Label, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var filterOptions = new CaseWorkspaceFilterOptions(
-            [],
+            queue.Items.Select(item => ToSector(item.Sector)).Distinct()
+                .Select(sector => new CaseWorkspaceOption(sector.ToString(), sector.ToString())).ToArray(),
             workflows,
             countryOptions,
             [],
             [],
-            [],
+            queue.Items.Select(item => item.Classification).OfType<string>()
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+                .Select(value => new CaseWorkspaceOption(value, value)).ToArray(),
             new CaseWorkspaceFilterCapabilities(
                 Search: true,
-                Sector: false,
+                Sector: true,
                 Workflow: true,
                 Country: countries.Succeeded && countries.Value is not null,
                 Region: false,
                 Assignee: false,
-                ReportedCategory: false,
+                ReportedCategory: true,
                 UpdatedDate: true));
 
         return Success(filterOptions, "Some filters are not available for this case list.");
@@ -137,12 +142,7 @@ public sealed class CaseWorkspaceGatewayClient(
         PublicReference: "Case " + item.CaseId.ToString("N")[..8],
         item.Workflow,
         countryLabels.GetValueOrDefault(item.CountryCode) ?? "Country not listed",
-        item.Sector switch
-        {
-            "HumanHealth" => CaseWorkspaceSector.Human,
-            "AnimalHealth" => CaseWorkspaceSector.Animal,
-            _ => CaseWorkspaceSector.Unknown
-        },
+        ToSector(item.Sector),
         RegionLabel: null,
         AssigneeLabel: "Assigned to you",
         ReportedCategoryLabel: item.Classification,
@@ -151,12 +151,19 @@ public sealed class CaseWorkspaceGatewayClient(
         [CaseWorkspaceAction.Open]);
 
     private static bool HasUnsupportedFilter(CaseWorkspaceQuery query) =>
-        query.Sector.HasValue ||
         !string.IsNullOrWhiteSpace(query.RegionKey) ||
-        !string.IsNullOrWhiteSpace(query.AssigneeKey) ||
-        !string.IsNullOrWhiteSpace(query.ReportedCategoryKey);
+        !string.IsNullOrWhiteSpace(query.AssigneeKey);
+
+    private static CaseWorkspaceSector ToSector(string? sector) => sector switch
+    {
+        "HumanHealth" => CaseWorkspaceSector.Human,
+        "AnimalHealth" => CaseWorkspaceSector.Animal,
+        _ => CaseWorkspaceSector.Unknown
+    };
 
     private static bool Matches(CaseQueueItem item, CaseWorkspaceRow row, CaseWorkspaceQuery query) =>
+        (!query.Sector.HasValue || row.Sector == query.Sector.Value) &&
+        (query.ReportedCategoryKey is null || string.Equals(item.Classification, query.ReportedCategoryKey, StringComparison.OrdinalIgnoreCase)) &&
         (query.Workflow is null || string.Equals(item.Workflow, query.Workflow, StringComparison.OrdinalIgnoreCase)) &&
         (query.CountryCode is null || string.Equals(item.CountryCode, query.CountryCode, StringComparison.OrdinalIgnoreCase)) &&
         (!query.UpdatedFromUtc.HasValue || item.UpdatedAtUtc >= query.UpdatedFromUtc.Value) &&
