@@ -63,6 +63,15 @@ internal static class CaseEventJournalReader
                     ["workspaceId", "report"], ValidateReportPayload),
                 nameof(CaseEventType.CaseAssigned) => Read<CaseAssignedPayload>(serialized,
                     ["accountableOwnerId"], ValidateAssignedPayload),
+                nameof(CaseEventType.CaseCollaboratorGranted) => Read<CaseCollaboratorGrantedPayload>(serialized,
+                    ["grantId", "collaboratorActorId", "actions", "expiresAtUtc", "reason"], ValidateCollaboratorGranted),
+                nameof(CaseEventType.CaseCollaboratorRevoked) => Read<CaseCollaboratorRevokedPayload>(serialized,
+                    ["grantId", "reason"], (payload, value) =>
+                    {
+                        RequireCanonicalGuid(payload, "grantId");
+                        if (value.GrantId == Guid.Empty) throw InvalidJournal();
+                        RequireText(value.Reason);
+                    }),
                 nameof(CaseEventType.CaseAssignmentAcknowledged) => Read<CaseAssignmentAcknowledgedPayload>(serialized,
                     ["assignmentVersion"], (payload, value) =>
                     {
@@ -269,11 +278,34 @@ internal static class CaseEventJournalReader
                 envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
                 envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
                 closed.EscalationId, closed.Resolution, closed.Reason),
+            CaseEventType.CaseCollaboratorGranted when payload is CaseCollaboratorGrantedPayload grant && grant.ExpiresAtUtc > envelope.RecordedAtUtc =>
+                new CaseCollaboratorGranted(envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision,
+                    envelope.CommandId, envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
+                    grant.GrantId, grant.CollaboratorActorId, grant.Actions, grant.ExpiresAtUtc, grant.Reason),
+            CaseEventType.CaseCollaboratorRevoked when payload is CaseCollaboratorRevokedPayload revoke =>
+                new CaseCollaboratorRevoked(envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision,
+                    envelope.CommandId, envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc, revoke.GrantId, revoke.Reason),
             CaseEventType.CaseAssignmentAcknowledged when payload is CaseAssignmentAcknowledgedPayload acknowledgement && acknowledgement.AssignmentVersion < envelope.AggregateVersion =>
                 new CaseAssignmentAcknowledged(envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision,
                     envelope.CommandId, envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc, acknowledgement.AssignmentVersion),
             _ => throw InvalidJournal()
         };
+    }
+
+    private static void ValidateCollaboratorGranted(JsonElement payload, CaseCollaboratorGrantedPayload value)
+    {
+        const CaseCollaborationActions allowed = CaseCollaborationActions.ReadCase | CaseCollaborationActions.ReadAttachment |
+            CaseCollaborationActions.Synchronize | CaseCollaborationActions.RecordObservation |
+            CaseCollaborationActions.ManageFollowUp | CaseCollaborationActions.ManageEscalation;
+        RequireCanonicalGuid(payload, "grantId");
+        RequireText(value.CollaboratorActorId);
+        RequireText(value.Reason);
+        if (value.GrantId == Guid.Empty || (value.Actions & ~allowed) != 0 ||
+            !value.Actions.HasFlag(CaseCollaborationActions.ReadCase) ||
+            payload.GetProperty("actions").ValueKind != JsonValueKind.String ||
+            payload.GetProperty("actions").GetString() != value.Actions.ToString() ||
+            payload.GetProperty("expiresAtUtc").ValueKind != JsonValueKind.String || value.ExpiresAtUtc.Offset != TimeSpan.Zero)
+            throw InvalidJournal();
     }
 
     private static void ValidateNestedPayload<TPayload>(JsonElement payload, Action<JsonElement, TPayload> validate)

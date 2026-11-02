@@ -21,6 +21,10 @@ public sealed class CaseEventSerializer
             CaseReported reported => SerializeReported(reported),
             CaseAssigned assignment => Serialize(assignment, CaseEventType.CaseAssigned,
                 new CaseAssignedPayload(assignment.AccountableOwnerId)),
+            CaseCollaboratorGranted grant => Serialize(grant, CaseEventType.CaseCollaboratorGranted,
+                new CaseCollaboratorGrantedPayload(grant.GrantId, grant.CollaboratorActorId, grant.Actions, grant.ExpiresAtUtc, grant.Reason)),
+            CaseCollaboratorRevoked revoke => Serialize(revoke, CaseEventType.CaseCollaboratorRevoked,
+                new CaseCollaboratorRevokedPayload(revoke.GrantId, revoke.Reason)),
             CaseAssignmentAcknowledged acknowledgement when acknowledgement.AssignmentVersion > 0 && acknowledgement.AssignmentVersion < acknowledgement.AggregateVersion =>
                 Serialize(acknowledgement, CaseEventType.CaseAssignmentAcknowledged,
                     new CaseAssignmentAcknowledgedPayload(acknowledgement.AssignmentVersion)),
@@ -58,7 +62,8 @@ public sealed class CaseEventSerializer
             CaseReportCorrected { CorrectedReportData: CaseReportEventData.HumanV2 or CaseReportEventData.AnimalV2 } => 2,
             CaseReported or CaseAssigned or CaseAssignmentAcknowledged or CaseReportCorrected or CaseActionRequested or CaseActionRequestReviewed or CaseResolved or CaseReopened
             or CaseObservationRecorded or CaseFollowUpScheduled or CaseFollowUpOutcomeRecorded
-            or CaseEscalationRaised or CaseEscalationAcknowledged or CaseEscalationClosed => 1,
+            or CaseEscalationRaised or CaseEscalationAcknowledged or CaseEscalationClosed
+            or CaseCollaboratorGranted or CaseCollaboratorRevoked => 1,
             _ => throw new NotSupportedException($"Event type {@event.GetType().Name} is not supported by the case-event wire contract.")
         };
     }

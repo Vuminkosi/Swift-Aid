@@ -9,6 +9,75 @@ namespace SwiftAid.Integration.Tests;
 
 public sealed class CaseEventJournalReaderTests
 {
+    [Fact]
+    public void CollaboratorGrantAndRevocationRoundTripAndReplay()
+    {
+        var initial = CaseAggregate.CreateManagedCase(Guid.NewGuid(), Guid.NewGuid(), "workspace-1", CreateHumanReport(),
+            null, RecordedAtUtc, new ActorCapabilities("worker-1", CaseCapability.AcceptReport));
+        var aggregate = CaseAggregate.Replay(initial);
+        var command = new GrantCaseCollaboratorCommand(Guid.NewGuid(), 2, Guid.NewGuid(), "worker-2",
+            CaseCollaborationActions.ReadCase | CaseCollaborationActions.ReadAttachment | CaseCollaborationActions.RecordObservation,
+            RecordedAtUtc.AddHours(1), "Synthetic scoped grant", null, RecordedAtUtc);
+        var grant = Assert.Single(aggregate.Decide(command, new("officer", CaseCapability.ManageCollaborators)));
+        var restoredGrant = RoundTrip(grant);
+        aggregate.Apply(restoredGrant);
+        var revoke = Assert.Single(aggregate.Decide(new RevokeCaseCollaboratorCommand(Guid.NewGuid(), 3, command.GrantId,
+            "Synthetic revoke", null, RecordedAtUtc.AddMinutes(1)), new("officer", CaseCapability.ManageCollaborators)));
+        var restoredRevoke = RoundTrip(revoke);
+        var replayed = CaseAggregate.Replay(initial.Concat([restoredGrant, restoredRevoke]));
+        var collaborator = Assert.Single(replayed.Collaborators);
+        Assert.Equal(command.Actions, collaborator.Actions);
+        Assert.Equal(command.ExpiresAtUtc, collaborator.ExpiresAtUtc);
+        Assert.Equal("worker-2", collaborator.ActorId);
+        Assert.Equal(revoke.RecordedAtUtc, collaborator.RevokedAtUtc);
+        Assert.Equal("worker-1", replayed.AccountableOwnerId);
+    }
+
+    private static CaseEvent RoundTrip(CaseEvent source)
+    {
+        var bytes = Serializer.SerializeToUtf8Bytes(source);
+        var restored = CaseEventJournalReader.Read(ToRow(source), bytes);
+        Assert.Equal(bytes, Serializer.SerializeToUtf8Bytes(restored));
+        Assert.Equal(source.EventId, restored.EventId);
+        return restored;
+    }
+
+    [Theory]
+    [InlineData("actions", "0")]
+    [InlineData("actions", "1")]
+    [InlineData("actions", "\"RecordObservation\"")]
+    [InlineData("actions", "\"ReadCase, 64\"")]
+    [InlineData("actions", "\"readcase\"")]
+    [InlineData("expiresAtUtc", "\"2026-10-27T08:01:00+00:00\"")]
+    [InlineData("expiresAtUtc", "\"2026-10-27T12:00:00+02:00\"")]
+    [InlineData("collaboratorActorId", "\" \"")]
+    [InlineData("grantId", "\"00000000-0000-0000-0000-000000000000\"")]
+    [InlineData("reason", "null")]
+    public void CollaboratorGrantRejectsMalformedScopeAndProvenance(string field, string json)
+    {
+        var grant = new CaseCollaboratorGranted(Guid.NewGuid(), 3, 1, Guid.NewGuid(), "officer", null, RecordedAtUtc,
+            Guid.NewGuid(), "worker-2", CaseCollaborationActions.ReadCase, RecordedAtUtc.AddHours(1), "Synthetic grant");
+        var document = System.Text.Json.Nodes.JsonNode.Parse(Serializer.SerializeToUtf8Bytes(grant))!;
+        document["payload"]![field] = System.Text.Json.Nodes.JsonNode.Parse(json);
+        Assert.Throws<InvalidDataException>(() => CaseEventJournalReader.Read(ToRow(grant),
+            System.Text.Encoding.UTF8.GetBytes(document.ToJsonString())));
+    }
+
+    [Fact]
+    public void CollaboratorEventsRejectUnknownFieldsAndSqlActorMismatch()
+    {
+        var revoke = new CaseCollaboratorRevoked(Guid.NewGuid(), 4, 1, Guid.NewGuid(), "officer", null, RecordedAtUtc,
+            Guid.NewGuid(), "Synthetic revoke");
+        var bytes = Serializer.SerializeToUtf8Bytes(revoke);
+        var row = ToRow(revoke);
+        row.ActorId = "other-officer";
+        Assert.Throws<InvalidDataException>(() => CaseEventJournalReader.Read(row, bytes));
+        var document = System.Text.Json.Nodes.JsonNode.Parse(bytes)!;
+        document["payload"]!["allowEverything"] = true;
+        Assert.Throws<InvalidDataException>(() => CaseEventJournalReader.Read(ToRow(revoke),
+            System.Text.Encoding.UTF8.GetBytes(document.ToJsonString())));
+    }
+
     private static readonly CaseEventSerializer Serializer = new();
     private static readonly DateTimeOffset RecordedAtUtc = new(2026, 10, 27, 8, 1, 0, TimeSpan.Zero);
 

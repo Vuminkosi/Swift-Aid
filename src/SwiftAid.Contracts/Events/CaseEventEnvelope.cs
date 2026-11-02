@@ -17,7 +17,9 @@ public enum CaseEventType
     CaseEscalationRaised,
     CaseEscalationAcknowledged,
     CaseEscalationClosed,
-    CaseAssignmentAcknowledged
+    CaseAssignmentAcknowledged,
+    CaseCollaboratorGranted,
+    CaseCollaboratorRevoked
 }
 
 public abstract record CaseEventPayload;
@@ -33,6 +35,11 @@ public sealed record CaseReportedPayload(string WorkspaceId, CaseReportPayload R
 public sealed record CaseAssignedPayload(string AccountableOwnerId) : CaseEventPayload;
 
 public sealed record CaseAssignmentAcknowledgedPayload(long AssignmentVersion) : CaseEventPayload;
+
+public sealed record CaseCollaboratorGrantedPayload(Guid GrantId, string CollaboratorActorId,
+    CaseCollaborationActions Actions, DateTimeOffset ExpiresAtUtc, string Reason) : CaseEventPayload;
+
+public sealed record CaseCollaboratorRevokedPayload(Guid GrantId, string Reason) : CaseEventPayload;
 
 public sealed record CaseReportCorrectedPayload(
     CaseReportPayload Report,
