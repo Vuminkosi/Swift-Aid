@@ -10,3 +10,8 @@ public sealed record CaseCollaboratorCandidate(string Key, string ActorId, strin
 }
 
 public sealed record CaseCollaboratorCandidatePage(IReadOnlyList<CaseCollaboratorCandidate> Items, string? NextCursor);
+
+public interface ICaseCollaboratorCandidatesClient
+{
+    Task<CaseCollaboratorCandidatePage?> GetAsync(Guid caseId, string? search, string? after, CancellationToken cancellationToken = default);
+}

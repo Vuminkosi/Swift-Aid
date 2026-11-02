@@ -8,7 +8,7 @@
     <section class="collaborators" aria-labelledby="collaborators-heading" aria-busy="@(_loading || _sending).ToString().ToLowerInvariant()">
         <div class="collaborators__heading">
             <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="collaborators-heading">Collaborator access</MudText>
-            <MudButton Variant="Variant.Text" Disabled="@(_loading || _sending || _pending is not null)" OnClick="LoadAsync">Refresh access</MudButton>
+            <MudButton Variant="Variant.Text" Disabled="@(_loading || _sending || _pending is not null || _grantEditing)" OnClick="LoadAsync">Refresh access</MudButton>
         </div>
         @if (_loading)
         {
@@ -21,6 +21,11 @@
         else if (_timeline?.Collaboration is { } view)
         {
             <MudText Typo="Typo.body2">These grants apply only to this case. The accountable owner stays the same.</MudText>
+            @if (view.CanGrant && _selected is null)
+            {
+                <CaseCollaboratorGrantForm @key="CaseId" CaseId="CaseId" ExpectedVersion="_timeline.Header.AggregateVersion"
+                    CandidatesClient="CandidatesClient" CommandClient="CommandClient" OnChanged="LoadAsync" OnStatus="@(value => _message = value)" OnEditingChanged="@(value => _grantEditing = value)" />
+            }
             @if (view.Grants.Count == 0)
             {
                 <MudText Typo="Typo.body2">No collaborator grants have been recorded through case management.</MudText>
@@ -31,8 +36,8 @@
                     <li @key="grant.GrantId">
                         <div><strong>@(grant.SafeActorDisplayLabel ?? "Name unavailable")</strong><span class="collaborators__status">@Status(grant)</span></div>
                         <p>@string.Join(", ", grant.Operations.Select(OperationLabel))</p>
-                        <p>Expires @grant.ExpiresAtUtc.ToLocalTime().ToString("g")</p>
-                        @if (!grant.IsRevoked && _selected is null)
+                        <p>Expires @grant.ExpiresAtUtc.ToUniversalTime().ToString("u") (UTC)</p>
+                        @if (!grant.IsRevoked && _selected is null && !_grantEditing)
                         {
                             <MudButton Variant="Variant.Outlined" Color="Color.Warning" Class="collaborators__action" OnClick="@(() => Select(grant))">Review revocation</MudButton>
                         }
@@ -63,6 +68,8 @@
     [Parameter] public Guid CaseId { get; set; }
     [Parameter] public ICaseTimelineClient? TimelineClient { get; set; }
     [Parameter] public ICaseCommandClient? CommandClient { get; set; }
+    [Parameter] public ICaseCollaboratorCandidatesClient? CandidatesClient { get; set; }
+    private bool _grantEditing;
     private CaseTimeline? _timeline;
     private CaseCollaboratorGrantView? _selected;
     private CaseCommandInput? _pending;
@@ -87,6 +94,7 @@
             _pending = null;
             _message = null;
             _sending = false;
+            _grantEditing = false;
             await LoadAsync();
         }
     }

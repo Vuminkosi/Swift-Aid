@@ -1,0 +1,172 @@
+@using SwiftAid.Contracts.Cases
+@using SwiftAid.Contracts.Commands
+@using Microsoft.Extensions.DependencyInjection
+@using Microsoft.JSInterop
+@inject IServiceProvider Services
+@inject IJSRuntime JS
+@implements IDisposable
+
+@if (!_open)
+{
+    <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="OpenAsync">Add collaborator</MudButton>
+}
+else
+{
+    <div class="grant-form" role="group" aria-label="Add collaborator">
+        @if (_pending is null)
+        {
+            <MudText Typo="Typo.body2">Choose one eligible permission scope. The server checks it again when you confirm.</MudText>
+            <MudTextField T="string" Label="Find a colleague" @bind-Value="_search" MaxLength="120" Disabled="_loading" />
+            <MudButton Disabled="_loading" OnClick="SearchAsync">Search colleagues</MudButton>
+            @if (_loading) { <p role="status">Loading eligible colleagues…</p> }
+            <div class="grant-form__field">
+                <label for="@_candidateControlId">Eligible colleague</label>
+                <select id="@_candidateControlId" value="@_key" @onchange="Select" disabled="@_loading">
+                    <option value="">Choose a colleague and scope</option>
+                    @foreach (var candidate in _items)
+                    {
+                        <option value="@candidate.Key" disabled="@(candidate.SafeDisplayLabel is null)">@(candidate.SafeDisplayLabel ?? "Name unavailable") — @string.Join(", ", candidate.Operations.Select(Label))</option>
+                    }
+                </select>
+            </div>
+            @if (_next is not null) { <MudButton Disabled="_loading" OnClick="MoreAsync">More colleagues</MudButton> }
+            @if (!_loading && _items.Count == 0) { <p>No eligible colleagues were found.</p> }
+            @if (Selected is { } selected)
+            {
+                <fieldset><legend>Permissions for this case</legend>
+                    @foreach (var operation in selected.Operations.Where(IsSupported))
+                    {
+                        <label class="grant-form__permission"><input type="checkbox" checked="@_operations.Contains(operation)" disabled="@(operation == "ReadCase")" @onchange="@(e => Toggle(operation, e.Value is true))" /> @Label(operation)</label>
+                    }
+                </fieldset>
+            }
+            <label class="grant-form__field">Access expires (local time)
+                <input type="datetime-local" @bind="_expires" />
+            </label>
+            <MudTextField T="string" Label="Reason for access" @bind-Value="_reason" Immediate="true" Required="true" Lines="3" MaxLength="2000" />
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_loading || Selected?.SafeDisplayLabel is null || _expires is null || string.IsNullOrWhiteSpace(_reason))" OnClick="Review">Review grant</MudButton>
+            <MudButton Disabled="_loading" OnClick="CloseAsync">Cancel</MudButton>
+        }
+        else
+        {
+            <MudText Typo="Typo.subtitle2">Review access for @_reviewName</MudText>
+            <p>@string.Join(", ", _reviewOperations.Select(Label))</p>
+            <p>Expires @_pending.ExpiresAtUtc?.ToString("u") (UTC)</p>
+            <p class="grant-form__reason">@_pending.Reason</p>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_sending" OnClick="SubmitAsync">@(_sending ? "Submitting…" : _attempted ? "Retry grant" : "Confirm grant")</MudButton>
+            <MudButton Disabled="@(_sending || _attempted)" OnClick="Edit">Back to edit</MudButton>
+        }
+        @if (_message is not null) { <p role="status" aria-live="polite">@_message</p> }
+    </div>
+}
+
+@code {
+    [Parameter] public Guid CaseId { get; set; }
+    [Parameter] public long ExpectedVersion { get; set; }
+    [Parameter] public ICaseCollaboratorCandidatesClient? CandidatesClient { get; set; }
+    [Parameter] public ICaseCommandClient? CommandClient { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+    [Parameter] public EventCallback<string> OnStatus { get; set; }
+    [Parameter] public EventCallback<bool> OnEditingChanged { get; set; }
+    private readonly CancellationTokenSource _lifetime = new();
+    private readonly string _candidateControlId = $"collaborator-{Guid.NewGuid():N}";
+    private readonly List<CaseCollaboratorCandidate> _items = [];
+    private readonly HashSet<string> _operations = new(StringComparer.Ordinal);
+    private string? _key, _next, _message, _reviewName;
+    private string _search = "", _query = "", _reason = "";
+    private string[] _reviewOperations = [];
+    private DateTime? _expires;
+    private CaseCommandInput? _pending;
+    private bool _open, _loading, _sending, _attempted, _disposed;
+    private CaseCollaboratorCandidate? Selected => _items.SingleOrDefault(item => item.Key == _key);
+
+    private async Task OpenAsync() { _open = true; await OnEditingChanged.InvokeAsync(true); await SearchAsync(); }
+    private async Task CloseAsync() { _open = false; _message = null; _key = null; _reason = ""; _expires = null; await OnEditingChanged.InvokeAsync(false); }
+    private Task SearchAsync() { _items.Clear(); _key = null; _next = null; _query = _search; return LoadAsync(null); }
+    private Task MoreAsync() => LoadAsync(_next);
+    private async Task LoadAsync(string? after)
+    {
+        _loading = true; _message = null;
+        try
+        {
+            var client = CandidatesClient ?? Services.GetService<ICaseCollaboratorCandidatesClient>();
+            if (client is null) throw new InvalidOperationException();
+            var page = await client.GetAsync(CaseId, _query, after, _lifetime.Token);
+            if (_disposed) return;
+            if (page is null) { _items.Clear(); _key = null; _next = null; _message = "You cannot select collaborators for this case."; return; }
+            foreach (var item in page.Items.Where(item => !_items.Any(existing => existing.Key == item.Key))) _items.Add(item);
+            _next = page.NextCursor;
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception) { if (!_disposed) _message = "Colleagues could not be loaded. Try searching again."; }
+        finally { if (!_disposed) _loading = false; }
+    }
+    private void Select(ChangeEventArgs args) { _key = args.Value?.ToString(); _operations.Clear(); _operations.Add("ReadCase"); }
+    private void Toggle(string operation, bool enabled) { if (enabled) _operations.Add(operation); else _operations.Remove(operation); }
+    private async Task Review()
+    {
+        var selected = Selected;
+        if (_loading || selected?.SafeDisplayLabel is null || !selected.Operations.Contains("ReadCase") || _expires is null || string.IsNullOrWhiteSpace(_reason)) return;
+        var localExpiry = _expires.Value.ToString("yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture);
+        var reason = _reason.Trim();
+        var actions = CaseCollaborationActions.ReadCase;
+        foreach (var operation in _operations.Where(operation => selected.Operations.Contains(operation) && IsSupported(operation)))
+            actions |= Enum.Parse<CaseCollaborationActions>(operation);
+        var operations = _operations.Order(StringComparer.Ordinal).ToArray();
+        _loading = true;
+        try
+        {
+            await using var module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/SwiftAid.UI/js/collaborator-expiry.js");
+            var utc = await module.InvokeAsync<string?>("toUtc", localExpiry);
+            if (_disposed || !_open) return;
+            if (!DateTimeOffset.TryParse(utc, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var expiry))
+            {
+                _message = "Choose a valid local expiry time.";
+                return;
+            }
+            if (expiry <= DateTimeOffset.UtcNow) { _message = "Choose a future expiry."; return; }
+            _reviewOperations = operations;
+            _reviewName = selected.SafeDisplayLabel;
+            _pending = new CaseCommandInput("GrantCaseCollaborator", null, reason, null, null, null, ExpectedVersion,
+                CommandId: Guid.NewGuid(), GrantId: Guid.NewGuid(), CollaboratorActorId: selected.ActorId, CollaborationActions: actions, ExpiresAtUtc: expiry);
+            _attempted = false;
+            _message = null;
+        }
+        catch (JSException) { if (!_disposed) _message = "The expiry time could not be checked. Try reviewing again."; }
+        finally { if (!_disposed) _loading = false; }
+    }
+    private void Edit() { _pending = null; _message = null; }
+    private async Task SubmitAsync()
+    {
+        if (_pending is null || _sending) return;
+        _sending = true; _attempted = true;
+        try
+        {
+            var client = CommandClient ?? Services.GetService<ICaseCommandClient>();
+            if (client is null) throw new InvalidOperationException();
+            var result = await client.SendAsync(CaseId, _pending, _lifetime.Token);
+            if (_disposed) return;
+            if (result.Status is CaseCommandStatus.Accepted or CaseCommandStatus.Replayed)
+            {
+                await OnStatus.InvokeAsync("Collaborator access granted.");
+                _pending = null; await CloseAsync(); await OnChanged.InvokeAsync();
+            }
+            else if (result.Status is CaseCommandStatus.Denied or CaseCommandStatus.Conflict or CaseCommandStatus.Invalid)
+            {
+                await OnStatus.InvokeAsync("The grant was not accepted. Review the refreshed access details before trying again.");
+                _pending = null; await CloseAsync(); await OnChanged.InvokeAsync();
+            }
+            else _message = "The result is not confirmed. Retry sends the same grant request.";
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception) { if (!_disposed) _message = "The result is not confirmed. Retry sends the same grant request."; }
+        finally { if (!_disposed) _sending = false; }
+    }
+    private static bool IsSupported(string operation) => operation is "ReadCase" or "ReadAttachment" or "Synchronize" or "RecordObservation" or "ManageFollowUp" or "ManageEscalation";
+    private static string Label(string operation) => operation switch
+    {
+        "ReadCase" => "Read case", "ReadAttachment" => "Read attachments", "Synchronize" => "Offline sync", "RecordObservation" => "Record observations",
+        "ManageFollowUp" => "Manage follow-ups", "ManageEscalation" => "Manage escalations", _ => "Unknown permission"
+    };
+    public void Dispose() { _disposed = true; _lifetime.Cancel(); _lifetime.Dispose(); }
+}

@@ -16,3 +16,6 @@
 | BL-012 | SW-01-010 production transport and recovery evidence | Partial / blocked | Local Compose is Development/loopback and uses internal MinIO HTTP; production TLS/internal auth, encryption-at-rest, backup retention and verified restore are NOT VERIFIED. See [transport/storage audit](SW-01-010-TRANSPORT-STORAGE-AUDIT.md). |
 
 The unrelated restarting `redis` container is owned by the `core-banking-sim` Compose project, not SwiftAid. It is recorded in `docs/BASELINE-AUDIT.md` as an external runtime observation and is not a SwiftAid service blocker. No foreign service or data was changed.
+
+
+SW-05-005 collaborator grant form (2 November 2026): shared named-recipient picker, explicit bounded actions/expiry/reason, review, frozen uncertain retry and refreshed roster implemented with Gateway scoped discovery and authenticated Mobile transport. Browser-local expiry conversion and daylight-saving gap rejection verified. PASS: 320 client tests; 43 focused gateway/endpoint tests; Gateway/Ui.TestHost builds; synthetic Chromium grant/revoke, assignment and seven-tab checks at 390/1280px. Full signed-in browser-to-database and Android device/revocation acceptance remain NOT VERIFIED. No checkbox advanced. Evidence: docs/SW-05-005-OWNERSHIP-VERIFICATION.md.
