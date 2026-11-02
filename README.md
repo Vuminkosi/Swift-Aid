@@ -63,13 +63,14 @@ See the [CSV format and examples](docs/architecture/gateway-import-format.md), [
 
 Ellai can help describe the import schema, validate observation formatting and inspect the current staff member's authorized import progress. These tools preserve the normal submission and approval boundaries.
 
-## Meta models and their roles
+## Meta models and supporting voice technology
 
 | Model / route | Use in SwiftAid | Boundary |
 | --- | --- | --- |
 | **Muse Spark** | Hosted Ellai reasoning: understand requests, select authorized read tools, use context and produce responses. | Validated output cannot grant access or bypass approval receipts. Account-specific endpoints/model IDs are configured privately. |
 | **Muse Voice Transcribe** | Convert live or uploaded speech into text; Gateway-confirmed turns enter durable processing. | A provisional endpoint is not a completed conversation. Languages need individual quality evaluation. |
 | **Meta MMS-TTS** | Speak responses and brief tool-progress acknowledgements through Gateway audio delivery. | Current checkpoint `facebook/mms-tts-eng`: English, noncommercial use, opt-in deployment. |
+| **Kokoro-82M** | Selected English synthesis provider, with `af_heart` as the default voice at speed `0.95`. | Local model and Heart voice are available; Gateway routing and user voice selection are being integrated. Not a Meta model. Native Shona, Nyanja and Tsonga retain MMS-TTS. |
 | **Meta Llama via Ollama** | Optional local open-weight text reasoning through the existing provider abstraction. | `llama3.2:3b` is a development starting point, not a claim of Muse-equivalent quality. It does not replace ASR or TTS. |
 
 Silero ONNX detects acoustic activity at Gateway; it is a separate component, **not a Meta model**. Microsoft Agent Framework integration and application orchestration connect reasoning to existing contracts. Authorization, persistence and approval remain application responsibilities. Generic browser/device TTS is not substituted for MMS-TTS. English acknowledgements remain the fallback until siSwati and Shona translations are reviewed.
@@ -438,6 +439,35 @@ Validate a greeting, a public information lookup and history refresh. Require a 
 Return to hosted Meta by recreating Gateway with only `infra/compose.yml` and hosted settings. Stop Ollama with the two-file command when no longer needed. Local inference runs on a Gateway-reachable host, not automatically on phones; clients still need to reach it.
 
 ## Optional MMS-TTS output
+
+### English voice transition
+
+The approved target routing is below. This is configuration intent, **not a claim
+that the running Gateway has switched**. Kokoro routing, installed-voice selection
+in shared web/mobile settings, and end-to-end playback verification are in progress.
+Only installed voices should be offered; unavailable languages must not silently
+fall back to another language. Muse transcription, Silero and the voice transport
+remain unchanged.
+
+```json
+{
+  "eng": { "provider": "kokoro", "voiceId": "af_heart", "speed": 0.95 },
+  "sna": { "provider": "mms", "voiceId": "default", "speakingRate": 0.95 },
+  "nya": { "provider": "mms", "voiceId": "default", "speakingRate": 0.95 },
+  "tso": { "provider": "mms", "voiceId": "default", "speakingRate": 0.95 }
+}
+```
+
+Reuse local model, voice and package caches before downloading anything. Runtime
+inference must not download model assets. `default` selects the configured MMS
+checkpoint for that exact language, not the English checkpoint. Kokoro produces
+24 kHz audio; consumers must use the returned sample rate rather than relabel it
+as 16 kHz. The optional MMS clarity filter is disabled by default and does not
+authorize applying the same EQ in clients.
+
+Kokoro's [model weights](https://huggingface.co/hexgrad/Kokoro-82M) and
+[implementation](https://github.com/hexgrad/kokoro) are Apache-2.0 licensed. This
+does not change the separate MMS noncommercial restrictions below.
 
 The `ellai-voice` profile requires the pinned English checkpoint in `ellai-tts-model-data`, its expected file hash, and a shared random `ELLAI_TTS_INTERNAL_KEY`. An empty volume cannot synthesize speech; assets are not included in the app image.
 
