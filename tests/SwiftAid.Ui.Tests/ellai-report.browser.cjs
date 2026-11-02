@@ -27,9 +27,10 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             await page.emulateMedia({ colorScheme: width === 390 ? 'dark' : 'light' });
             await page.goto(base + '/ellai-report-fixture');
             await page.waitForSelector('[data-fixture-ready=true]');
-            const collect = () => page.evaluate(async () => (await import('/_content/SwiftAid.UI/js/ellai-ui-observations.js')).collect());
-            const accepted = async id => page.waitForFunction(async id => {
-                const report = (await import('/_content/SwiftAid.UI/js/ellai-ui-observations.js')).collect();
+            await page.evaluate(async () => { window.fixtureObservations = await import('/_content/SwiftAid.UI/js/ellai-ui-observations.js'); });
+            const collect = () => page.evaluate(() => window.fixtureObservations.collect());
+            const accepted = async id => page.waitForFunction(id => {
+                const report = window.fixtureObservations.collect();
                 return report.completedControlIds?.includes(id);
             }, id);
             await page.getByRole('button', { name: 'Continue to details', exact: true }).click();
@@ -39,6 +40,19 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             assert(!(await collect()).completedControlIds?.includes('report.narrative'));
 
             await page.getByLabel('Describe what happened').fill('SYNTHETIC-PRIVATE observed concern for fixture only.');
+            await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+            await page.getByRole('button', { name: 'Finish fixture storage', exact: true }).waitFor();
+            assert(!(await collect()).completedControlIds?.includes('report.save'));
+            await page.getByRole('button', { name: 'Fail fixture storage', exact: true }).click();
+            await page.getByRole('button', { name: 'Save draft', exact: true }).waitFor();
+            assert(!(await collect()).completedControlIds?.includes('report.save'));
+            await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+            await page.getByRole('button', { name: 'Finish fixture storage', exact: true }).click();
+            await accepted('report.save');
+            assert((await page.evaluate(() => localStorage.getItem('swiftaid.synthetic-draft-fixture')))?.includes('SYNTHETIC-PRIVATE'));
+            await page.getByLabel('Describe what happened').fill('SYNTHETIC-PRIVATE newer unsaved observation.');
+            await page.getByLabel('Describe what happened').press('Tab');
+            await page.waitForFunction(() => !window.fixtureObservations.collect().completedControlIds?.includes('report.save'));
             await page.getByRole('button', { name: 'Review report', exact: true }).click();
             await accepted('report.narrative');
             await accepted('report.time-location');
@@ -50,7 +64,7 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             await page.getByRole('checkbox', { name: 'I reviewed the original statement and the known or unknown details above.', exact: true }).check();
             await accepted('report.confirmations');
             await page.getByRole('checkbox', { name: 'I reviewed the report-handling information.', exact: true }).uncheck();
-            await page.waitForFunction(async () => !(await import('/_content/SwiftAid.UI/js/ellai-ui-observations.js')).collect().completedControlIds?.includes('report.confirmations'));
+            await page.waitForFunction(() => !window.fixtureObservations.collect().completedControlIds?.includes('report.confirmations'));
             assert(await send.isDisabled());
             await page.getByRole('checkbox', { name: 'I reviewed the report-handling information.', exact: true }).check();
             await page.getByRole('checkbox', { name: 'I reviewed the original statement and the known or unknown details above.', exact: true }).check();
@@ -60,7 +74,7 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             assert(!(await collect()).completedControlIds?.includes('report.submit'));
             await send.click();
             await page.getByRole('heading', { name: 'Your report receipt' }).waitFor();
-            await page.waitForFunction(async () => (await import('/_content/SwiftAid.UI/js/ellai-ui-observations.js')).collect().controlStates.some(c => c.controlId === 'report.receipt' && c.state === 4));
+            await page.waitForFunction(() => window.fixtureObservations.collect().controlStates.some(c => c.controlId === 'report.receipt' && c.state === 4));
             const report = await collect();
             assert.equal(await page.locator('#submission-count').textContent(), '1');
             assert(!report.completedControlIds?.includes('report.receipt'));

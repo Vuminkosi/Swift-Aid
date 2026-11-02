@@ -71,6 +71,8 @@ public sealed class EllaiGuidanceProposalAdmissionTests
     [InlineData("report.subject", true, "Completed")]
     [InlineData("report.narrative", true, "Completed")]
     [InlineData("report.time-location", true, "Completed")]
+    [InlineData("report.save", true, "Completed")]
+    [InlineData("report.save", false, "EvidenceRequired")]
     [InlineData("report.subject", false, "EvidenceRequired")]
     [InlineData("report.submit", true, "EvidenceRequired")]
     public async Task GuideHumanRequiresRegisteredValidationProofAndCannotUseItForSubmission(string controlId, bool completed, string expected)

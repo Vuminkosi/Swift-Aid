@@ -109,7 +109,7 @@
                     </MudButton>
                     @if (OnSaveDraft.HasDelegate)
                     {
-                        <MudButton ButtonType="ButtonType.Button" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Save" Disabled="@(!CanSaveDraft || _saving)" OnClick="SaveDraftAsync">
+                        <MudButton ButtonType="ButtonType.Button" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Save" Disabled="@(!CanSaveDraft || _saving)" OnClick="SaveDraftAsync" data-ellai-control="report.save" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.save")'>
                             @(_saving ? DraftSavingLabel : DraftSaveButtonLabel)
                         </MudButton>
                     }
@@ -279,7 +279,7 @@
                 </MudButton>
                 @if (OnSaveDraft.HasDelegate)
                 {
-                    <MudButton ButtonType="ButtonType.Button" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Save" Disabled="@(!CanSaveDraft || _saving)" OnClick="SaveDraftAsync">
+                    <MudButton ButtonType="ButtonType.Button" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Save" Disabled="@(!CanSaveDraft || _saving)" OnClick="SaveDraftAsync" data-ellai-control="report.save" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.save")'>
                         @(_saving ? DraftSavingLabel : DraftSaveButtonLabel)
                     </MudButton>
                 }
@@ -371,7 +371,7 @@
                 <MudButton ButtonType="ButtonType.Button" Variant="Variant.Text" OnClick="GoBack" StartIcon="@Icons.Material.Filled.ArrowBack">Back</MudButton>
                 @if (OnSaveDraft.HasDelegate)
                 {
-                    <MudButton ButtonType="ButtonType.Button" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Save" Disabled="@(!CanSaveDraft || _saving)" OnClick="SaveDraftAsync">
+                    <MudButton ButtonType="ButtonType.Button" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Save" Disabled="@(!CanSaveDraft || _saving)" OnClick="SaveDraftAsync" data-ellai-control="report.save" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.save")'>
                         @(_saving ? DraftSavingLabel : DraftSaveButtonLabel)
                     </MudButton>
                 }
@@ -449,6 +449,7 @@
     private PublicReportDraft? _savingSourceSnapshot;
     private PublicReportDraft? _savingSourceDraft;
     private PendingDraftRefresh? _pendingDraftRefresh;
+    private PendingDraftRefresh? _confirmedDraftSave;
     private bool _submitting;
     private bool _submitComplete;
     private DraftSaveState _saveState = DraftSaveState.Unsaved;
@@ -1261,6 +1262,7 @@
         _saving = true;
         _savingDraftId = CurrentDraftId;
         _pendingDraftRefresh = null;
+        _confirmedDraftSave = null;
         _saveState = DraftSaveState.Saving;
         var sourceDraft = Draft;
         _savingSourceDraft = sourceDraft;
@@ -1288,6 +1290,8 @@
             if (sameReport && unchanged)
             {
                 _saveState = DraftSaveState.Saved;
+                if (_activeSaveRequest.PersistedDraftId is not null)
+                    _confirmedDraftSave = _pendingDraftRefresh;
             }
             else
             {

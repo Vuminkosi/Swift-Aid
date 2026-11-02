@@ -4,6 +4,7 @@
 @using SwiftAid.UI.Components.Public
 @using SwiftAid.UI.Components.Public.GuidedReportStepper
 @using SwiftAid.UI.Components.Theme
+@inject IJSRuntime JS
 
 <SwiftAidThemeProvider />
 <MudPopoverProvider />
@@ -13,17 +14,40 @@
         CountryCatalogueIsCurrent="true" PrivacyNoticeReference="/privacy" PrivacyNoticeIsCurrent="true"
         ProcessingPolicyReference="/policy" ProcessingPolicyVersion="fixture-v1"
         ProcessingPolicyAcknowledgementLabel="I reviewed the report-handling information."
-        OnSubmit="Receive" SubmitButtonLabel="Send report" />
+        OnSubmit="Receive" SubmitButtonLabel="Send report" CurrentDraftId="_draftId" OnSaveDraft="SaveAsync" />
+    @if (_pendingSave is not null)
+    {
+        <button @onclick="CompleteSave">Finish fixture storage</button>
+        <button @onclick="FailSave">Fail fixture storage</button>
+    }
     @if (_receipt is not null) { <PublicReportReceipt Receipt="_receipt" /> }
     <output id="submission-count">@_submissions</output>
 </main>
 @code {
     private bool _ready;
+    private Guid? _draftId;
+    private TaskCompletionSource? _pendingSave;
     private int _submissions;
     private IntakeReceipt? _receipt;
     private readonly PublicReportDraft _draft = new() { SubjectScope = IntakeSubjectScope.Human,
         CountryCode = "SZ", LocationUnknown = true, OccurrencePrecision = ReportedTimePrecision.Unknown };
     private readonly PublicCountryOption[] _countries = [new("SZ", "Eswatini")];
+    private async Task SaveAsync(PublicReportSaveRequest request)
+    {
+        _pendingSave = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            await _pendingSave.Task;
+            var id = Guid.NewGuid();
+            await JS.InvokeVoidAsync("localStorage.setItem", "swiftaid.synthetic-draft-fixture",
+                System.Text.Json.JsonSerializer.Serialize(request.Submission));
+            request.ConfirmPersisted(id);
+            _draftId = id;
+        }
+        finally { _pendingSave = null; }
+    }
+    private void CompleteSave() => _pendingSave?.TrySetResult();
+    private void FailSave() => _pendingSave?.TrySetException(new IOException("Synthetic storage failure."));
     protected override void OnAfterRender(bool firstRender)
     {
         if (firstRender) { _ready = true; StateHasChanged(); }

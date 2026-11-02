@@ -53,7 +53,7 @@ public sealed class EllaiReportGuidanceDescriptorsTests
             {
                 "report.entry", "report.subject", "report.narrative", "report.time-location",
                 "report.voice-note", "report.review", "report.confirmations",
-                "report.submit", "report.receipt",
+                "report.submit", "report.receipt", "report.save",
             },
             ids);
     }

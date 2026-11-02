@@ -17,7 +17,7 @@ this revision), **Implemented** (code present, unit-covered),
 ## 1. Runtime policy pipeline
 
 **Status: Implemented.** The approved LLM policy file
-(`docs/ellai/ellai-system-instruction.md`, currently version **1.5**) loads
+(`docs/ellai/ellai-system-instruction.md`, currently version **1.6**) loads
 once at gateway startup via `EllaiRuntimePolicy.Load` / `ResolvePath`
 (`src/SwiftAid.Application/Ellai/EllaiRuntimePolicy.cs`). Every guarded
 reasoning call carries the exact text as its system message, stamped with

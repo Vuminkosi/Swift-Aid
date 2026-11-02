@@ -69,6 +69,7 @@ public static class EllaiReportUiManifest
         "report.confirmations" => "Confirm the report handling terms through the real checkbox.",
         "report.submit" => "The user submits the validated report through the existing application workflow.",
         "report.receipt" => "Read the server-issued intake receipt after successful persistence.",
+        "report.save" => "Save the current report on this device. Completion requires confirmed local storage of these values; this does not submit the report.",
         _ => throw new ArgumentOutOfRangeException(nameof(controlId))
     };
 
@@ -181,6 +182,18 @@ public static class EllaiReportUiManifest
             [],
             "verify-report-receipt",
             "intake-receipt-accepted",
+            false),
+        Describe(
+            "report.save",
+            "report-save-draft",
+            "Button",
+            UiRiskClass.R1,
+            ["save-report-draft", "save-draft", "offline-report"],
+            ["public-intake-no-account"],
+            ["report.entry"],
+            [],
+            "save-report-draft",
+            "proof-ui-validated",
             false),
     ];
 

@@ -6,6 +6,27 @@ namespace SwiftAid.Ui.Tests;
 public sealed partial class GuidedReportDraftPersistenceTests
 {
     [Fact]
+    public async Task DraftCompletionRequiresStorageConfirmationAndCurrentUneditedValues()
+    {
+        var id = Guid.NewGuid();
+        var stored = false;
+        var component = CreateStepper(CreateDraft(), request =>
+        {
+            if (stored) request.ConfirmPersisted(id);
+            return Task.CompletedTask;
+        }, currentDraftId: id);
+        bool Completed() => component.GetState().Controls.Single(control => control.ControlId == "report.save").CompletionAccepted;
+        Assert.False(Completed());
+        await InvokeSaveDraftAsync(component);
+        Assert.False(Completed());
+        stored = true;
+        await InvokeSaveDraftAsync(component);
+        Assert.True(Completed());
+        component.Draft.Narrative = "A newer unsaved observation.";
+        Assert.False(Completed());
+    }
+
+    [Fact]
     public async Task StorageIdentityUpdatePreservesStepWithoutReplacingEditableDraft()
     {
         var component = CreateStepper(CreateDraft(), _ => Task.CompletedTask);
