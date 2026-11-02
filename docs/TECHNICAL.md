@@ -195,6 +195,21 @@ Edit / Reject / Cancel); text or voice consent is never approval.
 
 ## 5. Dynamic UI Intelligence and surface
 
+Interactive case presentation reuses the shared case pages. `OpenAuthorizedRecord`
+accepts only a canonical case GUID and obtains a fresh `ICaseTimelineClient` read
+before generating the fixed local route; the destination rechecks access.
+`SetPermittedFilter` targets a registered filter on the currently mounted case list.
+The host requires a newly completed turn and a fresh server-accepted observation;
+the component resolves only current unambiguous option keys/labels, validates date
+ranges, resets pagination, and invokes its existing authorized query callback.
+Country changes clear the prior region. Date filter arguments use `yyyy-MM-dd`
+UTC boundaries. No model URL, authority flag, record write, or arbitrary UI script
+is accepted. Duplicate/restored proposals and stale turn/page/session results do
+not execute. A filter callback is a request, not evidence that results loaded.
+These paths have automated shared-component and host coverage; live Muse/browser
+conversation acceptance and mobile interaction remain unverified for this slice.
+
+
 Ellai About session history opens `EllaiConversationDialog` through the shared
 MudDialog provider. Desktop uses `MaxWidth.Medium`; Android/iOS and small browser
 viewports use full-screen. Pinned MIT-licensed `MudX.MudBlazor.Extension` 9.10.0

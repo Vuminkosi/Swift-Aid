@@ -17,6 +17,7 @@ builder.RootComponents.Add<BrowserGuestRoot>("#guest-root");
 builder.RootComponents.Add<HeadOutlet>("head::after");
 
 builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.EllaiDisplayedReceiptContext>();
+builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.EllaiCaseFilterContext>();
 builder.Services.AddMudServices();
 builder.Services.AddAuthorizationCore();
 builder.Services.AddCascadingAuthenticationState();

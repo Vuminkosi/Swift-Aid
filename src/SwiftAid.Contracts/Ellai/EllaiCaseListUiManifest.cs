@@ -32,7 +32,7 @@ public static class EllaiCaseListUiManifest
     private static UiControlDescriptor Control(string key, string label, string purpose, string kind) =>
         new("case-list." + key, FeatureId, 1, "ellai-uicontract/1.0", "OperationsCaseQueue", kind,
             label, purpose, [label], ["cases", "filters", key], [], NavigationId, "ellai-case-list-" + key,
-            ["HighlightControl"], UiRiskClass.R0, [GuidanceMode.SystemTour, GuidanceMode.Navigation], [], [],
+            EllaiCaseFilterProposal.Keys.Contains(key) ? ["HighlightControl", "SetPermittedFilter"] : ["HighlightControl"], UiRiskClass.R0, [GuidanceMode.SystemTour, GuidanceMode.Navigation], [], [],
             "explain-" + key, "proof-ui-observed", [EllaiNavigationManifest.Capability], "application-metadata", false)
         { Semantics = new(purpose, kind is "Input" or "Date" ? kind : null, [], ["proof-ui-observed"]) };
 }

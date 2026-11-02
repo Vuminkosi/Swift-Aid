@@ -1,5 +1,7 @@
 @using SwiftAid.Contracts.Ellai
 @implements IEllaiUiContextProvider
+@implements IDisposable
+@inject IServiceProvider EllaiServices
 <SwiftAid.UI.Ellai.Guidance.EllaiSemanticContext Provider="this" />
 @using SwiftAid.UI.Components.Theme
 

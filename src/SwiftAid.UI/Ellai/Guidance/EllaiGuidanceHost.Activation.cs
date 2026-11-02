@@ -14,6 +14,7 @@ public partial class EllaiGuidanceHost
     private string? _lastGuidanceControlProposalId;
     private string? _lastTabSelectionProposalId;
     private string? _lastCaseNavigationProposalId;
+    private string? _lastCaseFilterProposalId;
     private string? _guidanceNotice;
     private bool _preparingGuidance;
     private IBonboardingTourSession? _generatedTour;
@@ -93,6 +94,17 @@ public partial class EllaiGuidanceHost
         if (turn.Outcome != "Completed") return;
         newlyCompleted |= _pendingGuidanceTurn == turn.ClientUtteranceId;
         _pendingGuidanceTurn = null;
+        var filterProposals = turn.UiProposals.Where(item => item.Proposal.Kind == UiIntentKind.SetPermittedFilter).Take(2).ToArray();
+        if (filterProposals.Length > 0)
+        {
+            if (filterProposals.Length == 1 && newlyCompleted && filterProposals[0].ProposalId != _lastCaseFilterProposalId &&
+                EllaiCaseFilterProposal.IsValid(filterProposals[0].Proposal))
+            {
+                _lastCaseFilterProposalId = filterProposals[0].ProposalId;
+                _ = ApplyCaseFilterAsync(turn.ClientUtteranceId, filterProposals[0].ProposalId, filterProposals[0].Proposal);
+            }
+            return;
+        }
         var recordProposals = turn.UiProposals.Where(item => item.Proposal.Kind == UiIntentKind.OpenAuthorizedRecord).Take(2).ToArray();
         if (recordProposals.Length > 0)
         {
@@ -138,6 +150,33 @@ public partial class EllaiGuidanceHost
         _guidanceFeatureId = proposal.Proposal.Arguments.GetValueOrDefault("feature");
         // Conversation restoration offers an explicit action; only the currently awaited turn auto-starts.
         if (newlyCompleted) _ = StartProposedGuidanceAsync();
+    }
+
+    private async Task ApplyCaseFilterAsync(string turnId, string proposalId, UiIntentProposal proposal)
+    {
+        if (_sessionView is not { Status: "Active" } session || !EllaiCaseFilterProposal.IsValid(proposal)) return;
+        var originalUri = Navigation.Uri;
+        bool IsCurrent() => !_uiObservationLifetime.IsCancellationRequested && Navigation.Uri == originalUri &&
+            _sessionView?.SessionId == session.SessionId && _sessionView.Status == "Active" &&
+            _lastDurableTurn is { Outcome: "Completed" } current && current.ClientUtteranceId == turnId &&
+            _lastCaseFilterProposalId == proposalId;
+        try
+        {
+            if (!IsCurrent()) return;
+            await ReportUiForFeatureAsync(EllaiCaseListUiManifest.FeatureId, _uiObservationLifetime.Token);
+            if (!IsCurrent()) return;
+            var ready = _latestGuidanceObservation?.ControlStates?.Count(control =>
+                control.ControlId == proposal.ControlId && control.State == UiObservationState.Ready) == 1;
+            var context = Services.GetService(typeof(EllaiCaseFilterContext)) as EllaiCaseFilterContext;
+            var applied = ready && context is not null && await context.ApplyAsync(proposal, _uiObservationLifetime.Token);
+            if (IsCurrent()) _guidanceNotice = applied ? "Filter requested." : "That filter is not available on this page.";
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception) when (exception is HttpRequestException or Microsoft.JSInterop.JSException)
+        {
+            if (IsCurrent()) _guidanceNotice = "The filter could not be applied. Try again.";
+        }
+        if (IsCurrent()) await InvokeAsync(StateHasChanged);
     }
 
     private async Task OpenAuthorizedCaseAsync(string turnId, string proposalId, UiIntentProposal proposal)
