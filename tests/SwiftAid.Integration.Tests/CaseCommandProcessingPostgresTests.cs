@@ -6,6 +6,7 @@ using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Npgsql;
 using SwiftAid.Application.Authorization;
+using SwiftAid.Application.Cases;
 using SwiftAid.Application.Cases.Commands;
 using SwiftAid.Application.Serialization;
 using SwiftAid.Contracts.Commands;
@@ -15,6 +16,7 @@ using SwiftAid.Infrastructure.Configuration;
 using SwiftAid.Infrastructure.Persistence;
 using SwiftAid.Infrastructure.Persistence.Processing;
 using SwiftAid.Infrastructure.Persistence.Protection;
+using SwiftAid.Infrastructure.Persistence.Repositories.Cases;
 using SwiftAid.Infrastructure.Persistence.Transactions;
 
 namespace SwiftAid.Integration.Tests;
@@ -27,13 +29,24 @@ public sealed class CaseCommandProcessingPostgresTests
     {
         await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync();
         await using var cleanup = new CaseCommandProcessingCleanup(fixture);
-        await AddOperationAsync(fixture, CaseOperation.AcknowledgeAssignment);
         await SetInitialWorkflowVersionAsync(fixture);
         using var keyRing = SyntheticPayloadKeyRing.Create();
         using var provider = ProtectedPayloadDataProtectionProviderFactory.Create(
             keyRing.CreateOptions(), new TestHostEnvironment(Environments.Production));
         await SeedInitialJournalAsync(fixture, keyRing.CreateOptions(), provider);
         var command = new AcknowledgeAssignmentCommand(Guid.NewGuid(), 2, 2, null, DateTimeOffset.UnixEpoch);
+
+        async Task<SwiftAid.Contracts.Cases.CaseTimelineHeader> ReadHeaderAsync()
+        {
+            await using var context = fixture.CreateDbContext();
+            var unitOfWork = new PostgresCaseCommandUnitOfWork(context);
+            var policy = new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(context, unitOfWork),
+                new PostgresCaseAccessDescriptorStore(context, unitOfWork));
+            var query = new CaseTimelineQuery(new PostgresCaseTimelineStore(context), policy, unitOfWork);
+            var result = await query.GetAsync(fixture.CreateActor(), fixture.CaseId, 1, CancellationToken.None);
+            Assert.Equal(SwiftAid.Contracts.Cases.CaseTimelineAccess.Found, result.Access);
+            return Assert.IsType<SwiftAid.Contracts.Cases.CaseTimeline>(result.Timeline).Header;
+        }
 
         async Task<CaseCommandProcessingResult> ProcessAsync(CaseCommand input)
         {
@@ -47,9 +60,35 @@ public sealed class CaseCommandProcessingPostgresTests
                 .ProcessAsync(fixture.CreateActor(), fixture.CaseId, 1, input, CancellationToken.None);
         }
 
+        var withoutGrant = await ReadHeaderAsync();
+        Assert.Equal(2, withoutGrant.AssignmentVersion);
+        Assert.NotNull(withoutGrant.AssignmentRecordedAtUtc);
+        Assert.Null(withoutGrant.AssignmentAcknowledgedAtUtc);
+        Assert.False(withoutGrant.CanAcknowledgeAssignment);
+        Assert.Equal(CaseCommandProcessingStatus.Denied, (await ProcessAsync(command)).Status);
+
+        await AddOperationAsync(fixture, CaseOperation.AcknowledgeAssignment);
+        Assert.True((await ReadHeaderAsync()).CanAcknowledgeAssignment);
+        await using (var revokePendingContext = fixture.CreateDbContext())
+        {
+            await revokePendingContext.AccessGrantOperations
+                .Where(item => item.GrantGroupId == fixture.GrantGroupId && item.Operation == CaseOperation.AcknowledgeAssignment)
+                .ExecuteDeleteAsync();
+        }
+
+        var revokedPending = await ReadHeaderAsync();
+        Assert.False(revokedPending.CanAcknowledgeAssignment);
+        Assert.Null(revokedPending.AssignmentAcknowledgedAtUtc);
+        Assert.Equal(CaseCommandProcessingStatus.Denied, (await ProcessAsync(command)).Status);
+        await AddOperationAsync(fixture, CaseOperation.AcknowledgeAssignment);
         var accepted = await ProcessAsync(command);
         Assert.Equal(CaseCommandProcessingStatus.Accepted, accepted.Status);
         Assert.Equal(3, accepted.AggregateVersion);
+        var acknowledgedHeader = await ReadHeaderAsync();
+        Assert.Equal(3, acknowledgedHeader.AggregateVersion);
+        Assert.Equal(2, acknowledgedHeader.AssignmentVersion);
+        Assert.NotNull(acknowledgedHeader.AssignmentAcknowledgedAtUtc);
+        Assert.False(acknowledgedHeader.CanAcknowledgeAssignment);
         var replayed = await ProcessAsync(command);
         Assert.Equal(CaseCommandProcessingStatus.Replayed, replayed.Status);
         Assert.Equal(accepted.EventIds.ToArray(), replayed.EventIds.ToArray());
@@ -66,11 +105,13 @@ public sealed class CaseCommandProcessingPostgresTests
 
         var deniedReplay = await ProcessAsync(command);
         Assert.Equal(CaseCommandProcessingStatus.Denied, deniedReplay.Status);
+        Assert.False((await ReadHeaderAsync()).CanAcknowledgeAssignment);
 
         await using var verification = fixture.CreateDbContext();
         var row = await verification.CaseEvents.AsNoTracking().SingleAsync(item => item.CommandId == command.CommandId);
         Assert.Equal("CaseAssignmentAcknowledged", row.EventType);
         Assert.True(row.RecordedAtUtc > command.RecordedAtUtc);
+        Assert.Equal(row.RecordedAtUtc, acknowledgedHeader.AssignmentAcknowledgedAtUtc);
         Assert.Single(await verification.CommandReceipts.Where(item => item.CommandId == command.CommandId).ToArrayAsync());
         Assert.Single(await verification.DomainOutbox.Where(item => item.EventId == row.EventId).ToArrayAsync());
         var projection = await verification.ManagedCases.AsNoTracking().SingleAsync(item => item.CaseId == fixture.CaseId);
