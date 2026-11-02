@@ -145,3 +145,7 @@ PASS: focused `EllaiSpeechEventContractTests` (4 passed); `dotnet test tests/Swi
 ## EV-072 - SW-01-004 C# audio producer position bound - 3 November 2026
 
 PASS: `dotnet test tests/SwiftAid.Ui.Tests/SwiftAid.Ui.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter FullyQualifiedName~EllaiSilenceGateTests --logger 'console;verbosity=minimal'` (5 passed, including last-valid-frame acceptance, heartbeat at the limit, and rejection without position advancement); `git diff --check`. Verifies the shared C# capture gate against the ESV1 ten-minute position cap. Browser JavaScript gate parity, actual microphone duration and recovery/UX after the cap are NOT VERIFIED.
+
+## EV-073 - SW-01-004 browser audio producer position bound - 3 November 2026
+
+PASS: `node --test tests/voice/ellai-segmented-audio.test.mjs` (5 passed, including final permitted frame, heartbeat at the cap, rejection without position advancement, and invalid initial position/epoch). `git diff --check` passed. This is a JavaScript module test with no browser microphone or Gateway connection; post-limit recovery/UX remains NOT VERIFIED.

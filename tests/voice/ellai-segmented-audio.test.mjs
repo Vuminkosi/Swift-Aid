@@ -42,3 +42,19 @@ test("local interruption waits for confirmed speech, independently of network ac
     assert.equal(interruptions, 1);
     gate.dispose();
 });
+
+test("capture accepts the final permitted frame and rejects the next without advancing", () => {
+    const maximumPosition = 24_000 * 60 * 10;
+    const gate = new SilenceGate(1, maximumPosition - 768);
+    assert.deepEqual(gate.push(new Uint8Array(1536), 0), []);
+    assert.equal(gate.position, maximumPosition);
+    assert.equal(position(gate.heartbeat()), maximumPosition);
+    assert.throws(() => gate.push(new Uint8Array(1536), 0), /position limit/);
+    assert.equal(gate.position, maximumPosition);
+    gate.dispose();
+});
+
+test("capture rejects invalid initial stream positions", () => {
+    assert.throws(() => new SilenceGate(0), /Invalid voice stream identity or position/);
+    assert.throws(() => new SilenceGate(1, 24_000 * 60 * 10 + 1), /Invalid voice stream identity or position/);
+});

@@ -1,7 +1,11 @@
 export const protocol = "swiftaid.voice.segmented.v1";
+const maximumPosition = 24_000 * 60 * 10;
 
 export class SilenceGate {
     constructor(epoch, position = 0, onSpeech = () => {}) {
+        if (!Number.isSafeInteger(epoch) || epoch < 1 || !Number.isSafeInteger(position)
+            || position < 0 || position > maximumPosition)
+            throw new Error("Invalid voice stream identity or position.");
         this.epoch = epoch; this.position = position; this.initialPosition = position;
         this.sequence = 0; this.preRoll = []; this.buffered = 0;
         this.quiet = 0; this.speech = 0; this.speaking = false;
@@ -23,6 +27,8 @@ export class SilenceGate {
         if (pcm.byteLength === 0 || pcm.byteLength > 8192 || pcm.byteLength % 2 || !Number.isFinite(probability))
             throw new Error("Invalid speech frame.");
         const start = this.position, count = pcm.byteLength / 2, packets = [];
+        if (count > maximumPosition || start > maximumPosition - count)
+            throw new Error("Voice capture exceeded the segmented-audio position limit.");
         this.position += count;
         const positive = probability >= (this.speaking ? 0.25 : 0.5);
         if (!this.speaking) {

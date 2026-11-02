@@ -263,3 +263,7 @@ SW-01-004 worker envelope parity (3 November 2026): PASS worker delivery/envelop
 SW-01-004 segmented-audio protocol bound: PASS contract boundary tests 4/4, UI silence-gate regressions 4/4, Gateway segmented-audio tests 6/6. Overflow-safe validation rejects out-of-range `long.MaxValue` sample positions and accepts the last valid audio sample. Microphone/device, live-provider and deployed WebSocket behavior remain NOT VERIFIED.
 
 SW-01-004 C# segmented-audio producer bound (3 November 2026): EllaiSilenceGate rejects PCM frames that exceed the ESV1 ten-minute sample position before state mutation. PASS focused UI suite 5/5, including last-valid-frame acceptance, heartbeat at the maximum, and rejection without position advancement. Browser JavaScript gate parity and post-limit client behavior remain NOT VERIFIED. See EV-072.
+
+## EV-073 - SW-01-004 browser audio producer position bound - 3 November 2026
+
+PASS: `node --test tests/voice/ellai-segmented-audio.test.mjs` (5 passed, including final permitted frame, heartbeat at the cap, rejection without position advancement, and invalid initial position/epoch). `git diff --check` passed. This is a JavaScript module test with no browser microphone or Gateway connection; post-limit recovery/UX remains NOT VERIFIED.
