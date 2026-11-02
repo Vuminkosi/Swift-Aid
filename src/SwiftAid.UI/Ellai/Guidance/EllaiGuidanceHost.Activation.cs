@@ -28,6 +28,14 @@ public partial class EllaiGuidanceHost
         if (step?.Behavior != PlanStepBehavior.GuideHuman ||
             !EllaiReportUiManifest.All.Any(control => control.ControlId == step.ControlId && control.ProofPolicyId == "proof-ui-validated") ||
             _latestGuidanceObservation?.CompletedControlIds?.Contains(step.ControlId) != true) return;
+        await AdvanceGuidanceStepAsync(ct);
+    }
+
+    private async Task AdvanceGuidanceStepAsync(CancellationToken ct)
+    {
+        var tour = _generatedTour;
+        if (_advancingValidatedInput || tour is null ||
+            tour.Status is not (BonboardingTourStatus.Running or BonboardingTourStatus.Waiting)) return;
         _advancingValidatedInput = true;
         try
         {
@@ -113,7 +121,18 @@ public partial class EllaiGuidanceHost
                     return;
                 }
                 OfferSavedGuidance(fresh.Session);
-                if (command == "resume") await StartProposedGuidanceAsync();
+                if (command is "resume" or "next")
+                {
+                    if (command == "next" && saved.Status != "Ready")
+                    {
+                        _guidanceNotice = "Resume the guidance before moving to the next step.";
+                        return;
+                    }
+                    await StartProposedGuidanceAsync();
+                    if (command == "next" && controlId == _lastGuidanceControlProposalId &&
+                        _sessionView?.SessionId == session.SessionId)
+                        await AdvanceGuidanceStepAsync(_uiObservationLifetime.Token);
+                }
                 else
                 {
                     var progress = await ReviewClient.ControlGuidanceAsync(session.SessionId,
@@ -129,7 +148,8 @@ public partial class EllaiGuidanceHost
                 }
                 return;
             }
-            await ControlGeneratedTourAsync(command);
+            if (command == "next") await AdvanceGuidanceStepAsync(_uiObservationLifetime.Token);
+            else await ControlGeneratedTourAsync(command);
         }
         catch (OperationCanceledException) { }
         catch (Exception exception) when (exception is HttpRequestException or Microsoft.JSInterop.JSException)

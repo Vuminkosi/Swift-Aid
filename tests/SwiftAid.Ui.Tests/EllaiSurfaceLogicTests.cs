@@ -165,6 +165,8 @@ public sealed class EllaiSurfaceLogicTests
     [InlineData("pause", true, false, null)]
     [InlineData("approve", true, true, null)]
     [InlineData("stop-speech", true, true, null)]
+    [InlineData("next", true, true, "NextAsync")]
+    [InlineData("next", false, true, null)]
     public async Task ConversationalGuidanceControlUsesDurableBoundaryAndNeverReplaysHistory(
         string command, bool fresh, bool persisted, string? expectedMethod)
     {
@@ -173,6 +175,7 @@ public sealed class EllaiSurfaceLogicTests
         var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
         var proxy = (NoOpBonboardingServiceProxy)(object)tour;
         SetField(host, "_generatedTour", tour);
+        proxy.TourStatus = BonboardingTourStatus.Running;
         var commands = new List<string>();
         SetField(host, "_controlGeneratedTour", (Func<string, Task<bool>>)(value =>
         {
@@ -190,6 +193,56 @@ public sealed class EllaiSurfaceLogicTests
         else Assert.Equal(expectedMethod, Assert.Single(proxy.Calls));
         Assert.Equal(fresh && command is "pause" or "resume" or "cancel" ? 1 : 0, commands.Count);
         Assert.Same(tour, GetField<IBonboardingTourSession?>(host, "_generatedTour"));
+    }
+
+    [Fact]
+    public async Task ConcurrentConversationalNextRequestsCannotAdvanceTwice()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), string.Empty);
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = BonboardingTourStatus.Running;
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        proxy.NextHandler = () => { started.SetResult(); return release.Task; };
+        SetField(host, "_generatedTour", tour);
+        var first = InvokeAsync(host, "DispatchConversationalGuidanceControlAsync", "next");
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        try
+        {
+            await InvokeAsync(host, "DispatchConversationalGuidanceControlAsync", "next");
+            Assert.Equal("NextAsync", Assert.Single(proxy.Calls));
+        }
+        finally { release.TrySetResult(); await first; }
+    }
+
+    [Fact]
+    public async Task DetachedNextDoesNotResumePausedGuidance()
+    {
+        var client = new FakeReviewClient
+        {
+            ResumeResult = new(EllaiClientOperationStatus.Accepted,
+                CreateSession(1) with { Guidance = new("saved-proposal", "saved-plan", "report", "Paused", 4) })
+        };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        await InvokeAsync(host, "DispatchConversationalGuidanceControlAsync", "next");
+        Assert.Equal(0, client.GuidancePlanCalls);
+        Assert.Empty(client.GuidanceControls);
+    }
+
+    [Theory]
+    [InlineData(BonboardingTourStatus.Paused)]
+    [InlineData(BonboardingTourStatus.Completed)]
+    [InlineData(BonboardingTourStatus.Cancelled)]
+    public async Task ConversationalNextDoesNotAdvanceInactiveGuidance(BonboardingTourStatus status)
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), string.Empty);
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = status;
+        SetField(host, "_generatedTour", tour);
+        await InvokeAsync(host, "DispatchConversationalGuidanceControlAsync", "next");
+        Assert.Empty(proxy.Calls);
     }
 
     [Fact]
@@ -2180,11 +2233,13 @@ public sealed class EllaiSurfaceLogicTests
         public List<string> Calls { get; } = [];
         public BonboardingTourStatus? TourStatus { get; set; }
         public BonboardingStepDefinition? CurrentStep { get; set; }
+        public Func<Task>? NextHandler { get; set; }
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
         {
             if (targetMethod?.Name == "get_Status" && TourStatus.HasValue) return TourStatus.Value;
             if (targetMethod?.Name == "get_CurrentStep") return CurrentStep;
             if (targetMethod?.Name is "PauseAsync" or "ResumeAsync" or "CancelAsync" or "NextAsync") Calls.Add(targetMethod.Name);
+            if (targetMethod?.Name == "NextAsync" && NextHandler is not null) return NextHandler();
             return targetMethod?.ReturnType == typeof(void)
                 ? null
                 : targetMethod?.ReturnType == typeof(Task)

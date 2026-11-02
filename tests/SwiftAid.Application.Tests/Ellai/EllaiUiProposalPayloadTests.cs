@@ -10,6 +10,7 @@ public sealed class EllaiUiProposalPayloadTests
     [InlineData("resume", true)]
     [InlineData("cancel", true)]
     [InlineData("stop-speech", true)]
+    [InlineData("next", true)]
     [InlineData("approve", false)]
     [InlineData("complete", false)]
     public void GuidanceControlAllowsOnlyBoundedNonBusinessCommands(string command, bool valid)

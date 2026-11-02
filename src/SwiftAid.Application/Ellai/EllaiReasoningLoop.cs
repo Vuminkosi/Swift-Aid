@@ -160,6 +160,8 @@ public sealed class EllaiReasoningLoop(
                 "For an explicit request to pause, resume or cancel existing guidance, propose ControlGuidance with featureId=ellai.guidance, " +
                 "resourceId=null, controlId=null and exactly one argument command=pause, resume or cancel. " +
                 "For stop speaking while keeping guidance, use command=stop-speech; never cancel the tour for a speech-only interruption. " +
+                "For an explicit request to advance the current guidance step, use command=next. This requests evidence-checked advancement, " +
+                "never completion of a field, submission, or approval. Do not claim advancement until application evidence confirms it. " +
                 "Emit at most one guidance intent per turn. These are requested controls, not evidence that the client executed them.";
         }
         var thread = new List<EllaiChatMessage>(request.Conversation ?? []);
