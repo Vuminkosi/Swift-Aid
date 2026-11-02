@@ -490,3 +490,7 @@ Test-source review in [SW-02-008 failure-path audit](SW-02-008-IDENTITY-FAILURE-
 ## SW-02-009 guest/account isolation audit - 2 November 2026
 
 Source inventory in [SW-02-009 isolation audit](SW-02-009-GUEST-ACCOUNT-ISOLATION-AUDIT.md) found guest encrypted draft/audio stores separated from staff auth/session services. Browser cleanup restart test source exists but cannot run locally because Playwright is absent (BL-003); web/Android account-switch and wrong-account isolation remain NOT VERIFIED. No tests run; EV-035.
+
+## SW-02-010 onboarding/account UX inventory - 2 November 2026
+
+UX/source inventory in [SW-02-010 audit](SW-02-010-ONBOARDING-UX-AUDIT.md) found Gateway/Mobile welcome, sign-in, profile/account pages, local welcome stores and UI test sources. No rendered responsive/accessibility, browser/device or persistent first-use journey was performed; Playwright remains unavailable (BL-003). No tests run; EV-036.
