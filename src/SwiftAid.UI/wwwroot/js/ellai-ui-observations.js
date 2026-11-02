@@ -28,7 +28,12 @@ let previousPath = location.pathname;
 let contextStamp = crypto.randomUUID();
 let previousState = null;
 
-export function collect() {
+export function collect(requestedControls = null) {
+    // The host supplies registered IDs for the active feature, never selectors.
+    // Invalid filters return no targets rather than silently broadening the snapshot.
+    const requested = requestedControls === null ? null : new Set(
+        Array.isArray(requestedControls) && requestedControls.length <= 20 &&
+        requestedControls.every(id => semanticId.test(id ?? '')) ? requestedControls : []);
     if (location.pathname !== previousPath) {
         previousPath = location.pathname;
         viewInstanceId = crypto.randomUUID();
@@ -38,12 +43,13 @@ export function collect() {
     const registrations = new Map();
     for (const element of document.querySelectorAll('[data-ellai-control]')) {
         const controlId = element.getAttribute('data-ellai-control');
-        if (!semanticId.test(controlId ?? '')) continue;
+        if (!semanticId.test(controlId ?? '') || (requested !== null && !requested.has(controlId))) continue;
         if (!registrations.has(controlId)) registrations.set(controlId, []);
         registrations.get(controlId).push(element);
     }
     // Bound the wire snapshot, retaining every duplicate for ambiguity detection.
-    for (const [controlId, elements] of [...registrations.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(0, 20)) {
+    for (const [controlId, elements] of [...registrations.entries()].sort(([a], [b]) =>
+        Number(a.startsWith('navigation.')) - Number(b.startsWith('navigation.')) || a.localeCompare(b)).slice(0, 20)) {
         let state = 4; // UiObservationState.Ready
         if (elements.length !== 1) state = 5; // UiObservationState.Ambiguous
         else {

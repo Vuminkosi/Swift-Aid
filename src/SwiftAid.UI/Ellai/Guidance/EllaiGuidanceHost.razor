@@ -242,6 +242,9 @@
     [Parameter]
     public EventCallback OnCreateGuide { get; set; }
 
+    [Parameter]
+    public EventCallback RevealNavigation { get; set; }
+
     protected override void OnInitialized()
     {
         Launcher.Requested += OnLauncherRequested;
@@ -2677,6 +2680,7 @@
     private void CancelPriorSession()
     {
         _guidanceProposalId = null;
+        _guidanceFeatureId = null;
         _guidanceProposalTurn = null;
         _pendingGuidanceTurn = null;
         _lastGuidanceControlProposalId = null;

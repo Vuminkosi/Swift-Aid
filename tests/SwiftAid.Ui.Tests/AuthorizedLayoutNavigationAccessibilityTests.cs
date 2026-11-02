@@ -41,6 +41,32 @@ public sealed class AuthorizedLayoutNavigationAccessibilityTests
         }
     }
 
+    [Theory]
+    [InlineData(Breakpoint.Xs)]
+    [InlineData(Breakpoint.Md)]
+    public async Task GuidanceRevealOpensExistingDrawerAndWorkspaceGroup(Breakpoint breakpoint)
+    {
+        await using var services = CreateServices(breakpoint, out _);
+        await using var renderer = new TestRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        using var host = await renderer.RenderAsync<AuthorizedLayout>();
+        await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var reveal = (EventCallback)renderer.GetComponentParameter(host.ComponentId,
+                typeof(EllaiGuidanceHost), nameof(EllaiGuidanceHost.RevealNavigation))!;
+            await reveal.InvokeAsync();
+            Assert.True(GetDrawerOpen(renderer, host.ComponentId, NavigationDrawerId));
+            Assert.Equal(true, renderer.GetComponentParameter(host.ComponentId, typeof(MudNavGroup), nameof(MudNavGroup.Expanded)));
+            Assert.Equal(true, renderer.GetComponentParameter(host.ComponentId, typeof(SwiftAidNavMenu), nameof(SwiftAidNavMenu.IsNavigationVisible)));
+            var toggle = (EventCallback<MouseEventArgs>)renderer.GetComponentParameter(host.ComponentId,
+                typeof(MudIconButton), nameof(MudIconButton.OnClick))!;
+            await toggle.InvokeAsync(new MouseEventArgs());
+            Assert.False(GetDrawerOpen(renderer, host.ComponentId, NavigationDrawerId));
+            await reveal.InvokeAsync();
+            Assert.True(GetDrawerOpen(renderer, host.ComponentId, NavigationDrawerId));
+            Assert.Equal(1, renderer.GetComponentCount(host.ComponentId, typeof(MudDrawer)));
+        });
+    }
+
     [Fact]
     public async Task AuthorizedLayout_RendersEllaiLauncherConnectedToGuidanceHost()
     {

@@ -8,7 +8,7 @@
         <MudNavLink @key="destination.Id" Href="@destination.Route" Match="NavLinkMatch.Prefix" Icon="@NavigationIcon(destination.Id)"
                     data-ellai-control="@destination.ControlId" data-bonboarding-anchor="@destination.Anchor">@destination.Label</MudNavLink>
     }
-    <MudNavGroup Title="Workspace" Icon="@Icons.Material.Filled.Work" Expanded="false">
+    <MudNavGroup Title="Workspace" Icon="@Icons.Material.Filled.Work" @bind-Expanded="_workspaceExpanded">
         @foreach (var destination in EllaiNavigationManifest.Destinations.Where(item => item.Group == "Workspace"))
         {
             <MudNavLink @key="destination.Id" Href="@destination.Route" Match="NavLinkMatch.Prefix" Icon="@NavigationIcon(destination.Id)"
@@ -23,10 +23,28 @@
 </MudNavMenu>
 
 @code {
+    [Parameter]
+    public long RevealVersion { get; set; }
+
+    [Parameter]
+    public bool IsNavigationVisible { get; set; } = true;
+
+    private long _lastRevealVersion;
+    private bool _workspaceExpanded;
+
+    protected override void OnParametersSet()
+    {
+        if (RevealVersion == _lastRevealVersion) return;
+        _lastRevealVersion = RevealVersion;
+        _workspaceExpanded = true;
+    }
+
     public string ComponentId => EllaiNavigationManifest.Definition.ComponentId;
     public EllaiUiManifest Describe() => EllaiNavigationManifest.Definition;
     public EllaiUiState GetState() => new(ComponentId, false, false,
-        EllaiNavigationManifest.Controls.Select(control => new UiControlState(control.ControlId, UiObservationState.Ready)).ToArray());
+        EllaiNavigationManifest.Destinations.Select(destination => new UiControlState(destination.ControlId,
+            IsNavigationVisible && (destination.Group != "Workspace" || _workspaceExpanded)
+                ? UiObservationState.Ready : UiObservationState.Hidden)).ToArray());
 
     private static string NavigationIcon(string id) => id switch
     {

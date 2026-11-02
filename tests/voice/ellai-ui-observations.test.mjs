@@ -83,3 +83,41 @@ test('provider state cannot make a missing or hidden DOM control ready', () => {
     f.add('cases.filter', { hidden: true });
     assert.equal(f.collect().controlStates[0].state, 2);
 });
+
+
+test('navigation cannot crowd current page controls out of a bounded snapshot', () => {
+    const f = fixture();
+    for (let i = 0; i < 15; i++) f.add(`navigation.link-${i}`);
+    for (let i = 0; i < 9; i++) f.add(`report.field-${i}`);
+    const report = f.collect();
+    assert.equal(report.controlStates.length, 20);
+    assert.equal(report.controlStates.filter(item => item.controlId.startsWith('report.')).length, 9);
+});
+
+test('targeted feature observation stays bounded and preserves duplicate and hidden evidence', () => {
+    const f = fixture();
+    f.add('navigation.cases', { hidden: true });
+    f.add('report.entry');
+    f.add('report.entry');
+    const report = f.collect(['report.entry', 'navigation.cases', 'missing.control']);
+    assert.equal(report.controlStates.length, 2);
+    assert.equal(report.controlStates.find(item => item.controlId === 'report.entry').state, 5);
+    assert.equal(report.controlStates.find(item => item.controlId === 'navigation.cases').state, 2);
+    assert.equal(f.collect(['missing.control']).controlStates.length, 0);
+});
+
+test('invalid observation filters cannot broaden to every control', () => {
+    const f = fixture();
+    f.add('report.entry');
+    for (const filter of ['report.entry', ['arbitrary#selector'], Array(21).fill('report.entry'), []])
+        assert.equal(f.collect(filter).controlStates.length, 0);
+});
+
+test('changing observation focus invalidates context while stable focus retains it', () => {
+    const f = fixture();
+    f.add('report.entry');
+    f.add('navigation.cases');
+    const report = f.collect(['report.entry']);
+    assert.equal(report.contextStamp, f.collect(['report.entry']).contextStamp);
+    assert.notEqual(report.contextStamp, f.collect(['navigation.cases']).contextStamp);
+});

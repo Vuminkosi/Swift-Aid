@@ -6,6 +6,7 @@ namespace SwiftAid.UI.Ellai.Guidance;
 public partial class EllaiGuidanceHost
 {
     private string? _guidanceProposalId;
+    private string? _guidanceFeatureId;
     private string? _guidanceProposalTurn;
     private string? _pendingGuidanceTurn;
     private string? _lastGuidanceControlProposalId;
@@ -31,6 +32,7 @@ public partial class EllaiGuidanceHost
         if (_guidanceProposalTurn != turn.ClientUtteranceId && _generatedTour is null)
         {
             _guidanceProposalId = null;
+            _guidanceFeatureId = null;
             _guidanceProposalTurn = turn.ClientUtteranceId;
             _guidanceNotice = null;
             _ = CancelGeneratedGuidanceAsync();
@@ -58,6 +60,7 @@ public partial class EllaiGuidanceHost
         _ = CancelGeneratedGuidanceAsync();
         _guidanceProposalTurn = turn.ClientUtteranceId;
         _guidanceProposalId = proposal.ProposalId;
+        _guidanceFeatureId = proposal.Proposal.Arguments.GetValueOrDefault("feature");
         // Conversation restoration offers an explicit action; only the currently awaited turn auto-starts.
         if (newlyCompleted) _ = StartProposedGuidanceAsync();
     }
@@ -113,6 +116,25 @@ public partial class EllaiGuidanceHost
         {
             await ReportCurrentUiAsync(token);
             if (!IsCurrent()) return;
+            if (_guidanceFeatureId == EllaiNavigationManifest.FeatureId && RevealNavigation.HasDelegate)
+            {
+                // A durable server-admitted proposal may reveal presentation, never grant access.
+                var admission = await ReviewClient.ReadGuidanceAdmissionAsync(session.SessionId, proposalId, token);
+                if (!IsCurrent()) return;
+                if (admission?.Status is "Ready" or "NeedsObservation" or "NeedsNavigation" or "WaitingForControl")
+                {
+                    await RevealNavigation.InvokeAsync();
+                    for (var attempt = 0; attempt < 40 && IsCurrent(); attempt++)
+                    {
+                        await Task.Delay(250, token);
+                        await ReportCurrentUiAsync(token);
+                        if (EllaiNavigationManifest.Controls.All(control =>
+                            _latestGuidanceObservation?.ControlStates?.Any(state =>
+                                state.ControlId == control.ControlId && state.State == UiObservationState.Ready) == true)) break;
+                    }
+                }
+            }
+            if (!IsCurrent()) return;
             var result = await ReviewClient.PrepareGuidancePlanAsync(session.SessionId, proposalId, token);
             if (!IsCurrent()) return;
             if (result?.Status == "NeedsNavigation" && result.NavigationId == EllaiReportUiManifest.NavigationId)
@@ -132,6 +154,7 @@ public partial class EllaiGuidanceHost
             if (result?.Status is "Cancelled" or "Completed")
             {
                 _guidanceProposalId = null;
+                _guidanceFeatureId = null;
                 _guidanceNotice = null;
                 return;
             }
@@ -229,6 +252,7 @@ public partial class EllaiGuidanceHost
                             _generatedTour = null;
                             _controlGeneratedTour = null;
                             _guidanceProposalId = null;
+                            _guidanceFeatureId = null;
                         }
                     }
                     catch (OperationCanceledException) { }

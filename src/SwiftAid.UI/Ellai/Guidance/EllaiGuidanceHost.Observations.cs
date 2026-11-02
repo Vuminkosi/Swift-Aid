@@ -43,7 +43,14 @@ public partial class EllaiGuidanceHost
         {
             _uiObservationModule ??= await JS.InvokeAsync<IJSObjectReference>("import", token,
                 "./_content/SwiftAid.UI/js/ellai-ui-observations.js");
-            var report = await _uiObservationModule.InvokeAsync<UiObservationReport>("collect", token);
+            var requestedControls = _guidanceFeatureId switch
+            {
+                EllaiNavigationManifest.FeatureId => EllaiNavigationManifest.Controls.Select(control => control.ControlId).ToArray(),
+                EllaiReportUiManifest.FeatureId => EllaiReportUiManifest.All.Select(control => control.ControlId).ToArray(),
+                _ => null,
+            };
+            var report = await _uiObservationModule.InvokeAsync<UiObservationReport>("collect", token,
+                new object?[] { requestedControls });
             if (report is null) return;
             report = report with { Platform = OperatingSystem.IsAndroid() ? "android" : OperatingSystem.IsIOS() ? "ios" : "web" };
             if (report.IsValid() && _sessionView?.SessionId == session.SessionId)

@@ -37,7 +37,7 @@
                Elevation="0" Variant="DrawerVariant.Responsive" Class="swiftaid-authorized-drawer"
                id="swiftaid-authorized-navigation">
         <div class="swiftaid-authorized-navigation">
-            <SwiftAidNavMenu />
+            <SwiftAidNavMenu RevealVersion="_navigationRevealVersion" IsNavigationVisible="_drawerOpen" />
         </div>
     </MudDrawer>
     <MudMainContent Class="swiftaid-authorized-main">
@@ -48,12 +48,13 @@
 </MudLayout>
 </div>
 
-<EllaiGuidanceHost />
+<EllaiGuidanceHost RevealNavigation="RevealNavigationAsync" />
 <EllaiLauncherMenu OnModeSelected="RequestEllaiMode" />
 
 @code {
     private readonly Guid _viewportObserverId = Guid.NewGuid();
     private bool _drawerOpen;
+    private long _navigationRevealVersion;
     private bool? _isMobileViewport;
     private bool _viewportSubscribed;
 
@@ -89,6 +90,13 @@
     private EllaiLauncher EllaiLauncher { get; set; } = default!;
 
     private void RequestEllaiMode(SwiftAid.Contracts.Ellai.EllaiMode mode) => EllaiLauncher.Request(mode);
+
+    private Task RevealNavigationAsync() => InvokeAsync(() =>
+    {
+        _drawerOpen = true;
+        _navigationRevealVersion++;
+        StateHasChanged();
+    });
 
     private void DrawerToggle()
     {
