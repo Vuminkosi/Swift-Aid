@@ -119,6 +119,7 @@ builder.Services.AddSingleton(_ =>
     foreach (var control in SwiftAid.Contracts.Ellai.EllaiDashboardUiManifest.Controls) registry.Register(control);
     foreach (var control in SwiftAid.Contracts.Ellai.EllaiCaseListUiManifest.Controls) registry.Register(control);
     foreach (var control in SwiftAid.Contracts.Ellai.EllaiCaseDetailUiManifest.Controls) registry.Register(control);
+    foreach (var control in SwiftAid.Contracts.Ellai.EllaiCommunityUiManifest.Controls) registry.Register(control);
     return registry;
 });
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiUiAuthorityResolver>();

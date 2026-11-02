@@ -75,6 +75,7 @@ public partial class EllaiGuidanceHost
                 EllaiDashboardUiManifest.FeatureId => EllaiDashboardUiManifest.Controls.Select(control => control.ControlId).ToArray(),
                 EllaiCaseListUiManifest.FeatureId => EllaiCaseListUiManifest.Controls.Select(control => control.ControlId).ToArray(),
                 EllaiCaseDetailUiManifest.FeatureId => EllaiCaseDetailUiManifest.Controls.Select(control => control.ControlId).ToArray(),
+                EllaiCommunityUiManifest.FeatureId => EllaiCommunityUiManifest.Controls.Select(control => control.ControlId).ToArray(),
                 _ => null,
             };
             var report = await _uiObservationModule.InvokeAsync<UiObservationReport>("collect", token,

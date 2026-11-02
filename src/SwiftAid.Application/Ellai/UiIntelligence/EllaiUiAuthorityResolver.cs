@@ -9,7 +9,7 @@ public sealed class EllaiUiAuthorityResolver(IScopeService? scopes = null, TimeP
     public async ValueTask<EllaiUiEntitlements> ResolveAsync(ActorContext? actor, string scopeEpoch, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        HashSet<string> features = [EllaiReportUiManifest.FeatureId];
+        HashSet<string> features = [EllaiReportUiManifest.FeatureId, EllaiCommunityUiManifest.FeatureId];
         HashSet<string> capabilities = [];
         if (actor is not null && scopes is not null)
         {

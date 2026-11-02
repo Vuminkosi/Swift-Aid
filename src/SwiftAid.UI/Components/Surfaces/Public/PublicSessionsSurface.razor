@@ -1,10 +1,13 @@
+@using SwiftAid.Contracts.Ellai
+@implements IEllaiUiContextProvider
+<SwiftAid.UI.Ellai.Guidance.EllaiSemanticContext Provider="this" />
 @using SwiftAid.Contracts.Sessions
 @using SwiftAid.UI.Components
 @using SwiftAid.UI.Components.Sessions
 @using SwiftAid.UI.Components.Theme
 @inject NavigationManager Navigation
 
-<MudContainer Fixed="true" Class="public-resource-surface">
+<MudContainer Fixed="true" Class="public-resource-surface" data-ellai-control="community-sessions.browse" data-bonboarding-anchor="ellai-community-browse">
     <MudHidden Breakpoint="Breakpoint.SmAndDown">
         <SwiftAidPageHeading Eyebrow="Public community" Title="Community sessions" Description="Browse published sessions. Calendar downloads, copied invitations and shared text never mark attendance or send automatically." HeadingId="public-sessions-heading" />
     </MudHidden>
@@ -21,7 +24,7 @@
             }
         </header>
 
-        <div class="public-sessions-mobile-tabs" role="group" aria-label="Filter sessions by date">
+        <div class="public-sessions-mobile-tabs" data-ellai-control="community-sessions.mobile-period" data-bonboarding-anchor="ellai-community-mobile-period" role="group" aria-label="Filter sessions by date">
             <button type="button" aria-pressed="@(_periodFilter == SessionPeriodFilter.Upcoming)"
                     class="@( _periodFilter == SessionPeriodFilter.Upcoming ? "public-sessions-mobile-tabs__tab is-active" : "public-sessions-mobile-tabs__tab")"
                     @onclick="() => PeriodChangedAsync(SessionPeriodFilter.Upcoming)">
@@ -62,7 +65,7 @@
     {
         <MudHidden Breakpoint="Breakpoint.SmAndDown">
             <section class="public-sessions-filters" aria-label="Filter community sessions">
-                <MudTextField T="string" Label="Search sessions" Value="@_searchText"
+                <MudTextField T="string" Label="Search sessions" data-ellai-control="community-sessions.search" data-bonboarding-anchor="ellai-community-search" Value="@_searchText"
                               ValueChanged="SearchChangedAsync" Variant="Variant.Outlined"
                               Immediate="true" DebounceInterval="250" Clearable="true"
                               Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
@@ -70,24 +73,24 @@
                 <span id="sessions-search-help" class="public-sessions-hint">Search session title, summary, presenter, topic, language, or region.</span>
 
             <details class="public-sessions-filters__advanced">
-                <summary>More filters <span class="public-sessions-filters__count">@FilteredSessions.Count of @Sessions.Count sessions</span></summary>
+                <summary data-ellai-control="community-sessions.more-filters" data-bonboarding-anchor="ellai-community-more-filters">More filters <span class="public-sessions-filters__count">@FilteredSessions.Count of @Sessions.Count sessions</span></summary>
                 <div class="public-sessions-filters__controls">
             <div class="public-sessions-filters__row">
-                <MudSelect T="SessionPeriodFilter" Label="When" Value="@_periodFilter" ValueChanged="PeriodChangedAsync"
+                <MudSelect T="SessionPeriodFilter" Label="When" data-ellai-control="community-sessions.period" data-bonboarding-anchor="ellai-community-period" Value="@_periodFilter" ValueChanged="PeriodChangedAsync"
                            Variant="Variant.Outlined" Dense="true">
                     <MudSelectItem T="SessionPeriodFilter" Value="@SessionPeriodFilter.Upcoming">Upcoming</MudSelectItem>
                     <MudSelectItem T="SessionPeriodFilter" Value="@SessionPeriodFilter.Past">Past</MudSelectItem>
                     <MudSelectItem T="SessionPeriodFilter" Value="@SessionPeriodFilter.CustomDates">Choose dates</MudSelectItem>
                     <MudSelectItem T="SessionPeriodFilter" Value="@SessionPeriodFilter.All">All dates</MudSelectItem>
                 </MudSelect>
-                <MudSelect T="string" Label="Category" Value="@_categoryFilter" ValueChanged="CategoryChangedAsync"
+                <MudSelect T="string" Label="Category" data-ellai-control="community-sessions.category" data-bonboarding-anchor="ellai-community-category" Value="@_categoryFilter" ValueChanged="CategoryChangedAsync"
                            Variant="Variant.Outlined" Dense="true" Clearable="true">
                     @foreach (var category in Categories)
                     {
                         <MudSelectItem T="string" Value="@category">@category</MudSelectItem>
                     }
                 </MudSelect>
-                <MudSelect T="string" Label="Language" Value="@_languageFilter" ValueChanged="LanguageChangedAsync"
+                <MudSelect T="string" Label="Language" data-ellai-control="community-sessions.language" data-bonboarding-anchor="ellai-community-language" Value="@_languageFilter" ValueChanged="LanguageChangedAsync"
                            Variant="Variant.Outlined" Dense="true" Clearable="true">
                     @foreach (var language in Languages)
                     {
@@ -99,8 +102,8 @@
             @if (_periodFilter == SessionPeriodFilter.CustomDates)
             {
                 <div class="public-sessions-filters__row public-sessions-filters__dates">
-                    <MudDatePicker Date="@_dateFrom" DateChanged="DateFromChangedAsync" Label="From date" Variant="Variant.Outlined" />
-                    <MudDatePicker Date="@_dateTo" DateChanged="DateToChangedAsync" Label="To date" Variant="Variant.Outlined" />
+                    <MudDatePicker Date="@_dateFrom" DateChanged="DateFromChangedAsync" Label="From date" data-ellai-control="community-sessions.from" data-bonboarding-anchor="ellai-community-from" Variant="Variant.Outlined" />
+                    <MudDatePicker Date="@_dateTo" DateChanged="DateToChangedAsync" Label="To date" data-ellai-control="community-sessions.to" data-bonboarding-anchor="ellai-community-to" Variant="Variant.Outlined" />
                 </div>
             }
 
@@ -141,7 +144,7 @@
         <MudPaper Class="public-session-details" Elevation="0" Outlined="true" aria-labelledby="public-session-details-title">
             <div class="public-session-details__heading">
                 <div>
-                    <MudText id="public-session-details-title" Typo="Typo.subtitle1" HtmlTag="h2">Session details</MudText>
+                    <MudText id="public-session-details-title" data-ellai-control="community-sessions.details" data-bonboarding-anchor="ellai-community-details" Typo="Typo.subtitle1" HtmlTag="h2">Session details</MudText>
                     <MudText Typo="Typo.body2" Color="Color.Secondary">@selected.Title</MudText>
                 </div>
                 <MudSelect T="Guid" Label="Selected session" Value="@_selectedSessionId" ValueChanged="SessionSelectedAsync"
@@ -316,6 +319,20 @@
 </MudContainer>
 
 @code {
+    public string ComponentId => EllaiCommunityUiManifest.Definition.ComponentId;
+    public EllaiUiManifest Describe() => EllaiCommunityUiManifest.Definition;
+    public EllaiUiState GetState() => new(ComponentId, Loading, ErrorMessage is not null,
+        EllaiCommunityUiManifest.Controls.Select(control => new UiControlState(control.ControlId,
+            IsSemanticControlRendered(control.ControlId) ? UiObservationState.Ready : UiObservationState.Unmounted)).ToArray());
+
+    private bool IsSemanticControlRendered(string id) => id switch
+    {
+        "community-sessions.browse" or "community-sessions.mobile-period" => true,
+        "community-sessions.details" => !Loading && ErrorMessage is null && SelectedSession is not null,
+        "community-sessions.from" or "community-sessions.to" => !Loading && ErrorMessage is null && Sessions.Count > 0 && _periodFilter == SessionPeriodFilter.CustomDates,
+        _ => !Loading && ErrorMessage is null && Sessions.Count > 0,
+    };
+
     [Parameter, EditorRequired] public IReadOnlyList<PublicSessionView> Sessions { get; set; } = Array.Empty<PublicSessionView>();
     [Parameter] public bool Loading { get; set; }
     [Parameter] public string? ErrorMessage { get; set; }

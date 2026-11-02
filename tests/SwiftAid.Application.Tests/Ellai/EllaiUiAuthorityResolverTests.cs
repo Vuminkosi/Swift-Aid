@@ -42,7 +42,7 @@ public sealed class EllaiUiAuthorityResolverTests
         var noActor = await new EllaiUiAuthorityResolver(empty).ResolveAsync(null, "scope", default);
         foreach (var authority in new[] { noService, noGrant, noActor })
         {
-            Assert.Equal([EllaiReportUiManifest.FeatureId], authority.Features);
+            Assert.Equal(new HashSet<string> { EllaiReportUiManifest.FeatureId, EllaiCommunityUiManifest.FeatureId }, authority.Features);
             Assert.Empty(authority.Capabilities);
         }
     }
@@ -73,6 +73,23 @@ public sealed class EllaiUiAuthorityResolverTests
         Assert.False((await broker.InvokeAsync(context, request, default)).Allowed);
         Assert.False((await broker.InvokeAsync(context with { FeatureId = feature }, request, default)).Allowed);
         Assert.Equal(3, scopes.Calls);
+    }
+
+    [Fact]
+    public async Task PublicCommunityDiscoveryDoesNotRequireOrGrantStaffAuthority()
+    {
+        var registry = new EllaiUiRegistry();
+        foreach (var control in EllaiCommunityUiManifest.Controls) registry.Register(control);
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService(), uiRegistry: registry);
+        var context = new EllaiToolContext("guest-session", "guest-scope", "public.product-help", null, 4, true,
+            DataClassification: EllaiProcessingClassification.UserProvidedNonSensitive,
+            ConsentPurpose: EllaiConsentService.PublicProductHelpPurpose);
+        var result = await broker.InvokeAsync(context, new(EllaiToolNames.UiCatalogue,
+            new Dictionary<string, string> { ["feature"] = EllaiCommunityUiManifest.FeatureId }), default);
+        Assert.True(result.Allowed);
+        Assert.Equal(10, result.ItemCount);
+        Assert.DoesNotContain("ExecuteAction", result.ResultSummary);
+        Assert.All(EllaiCommunityUiManifest.Controls, control => Assert.Equal(new[] { "HighlightControl" }, control.AllowedIntentBindings));
     }
 
     [Fact]
