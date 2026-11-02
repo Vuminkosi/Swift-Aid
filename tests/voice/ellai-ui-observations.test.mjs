@@ -4,7 +4,7 @@ import { runInNewContext } from 'node:vm';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 
-const source = readFileSync('src/SwiftAid.UI/wwwroot/js/ellai-ui-observations.js', 'utf8').replace('export function collect()', 'function collect()');
+const source = readFileSync('src/SwiftAid.UI/wwwroot/js/ellai-ui-observations.js', 'utf8').replaceAll('export function ', 'function ');
 function fixture() {
     const nodes = [];
     const context = { crypto: { randomUUID }, location: { pathname: '/' },
@@ -56,4 +56,30 @@ test('stable observations retain stamps; navigation and changed state invalidate
     assert.notEqual(first.contextStamp, f.collect().contextStamp);
     f.context.location.pathname = '/cases';
     assert.notEqual(first.viewInstanceId, f.collect().viewInstanceId);
+});
+
+
+test('provider snapshots update by instance and disposal removes only their own state', () => {
+    const f = fixture();
+    f.add('cases.filter');
+    assert.equal(typeof f.context.updateComponent, 'function');
+    f.context.updateComponent('instance-a', { componentId: 'cases.form', controls: [{ controlId: 'cases.filter', state: 3 }] });
+    assert.equal(f.collect().controlStates[0].state, 3);
+    f.context.updateComponent('instance-a', { componentId: 'cases.form', controls: [{ controlId: 'cases.filter', state: 4 }] });
+    assert.equal(f.collect().controlStates[0].state, 4);
+    f.context.updateComponent('instance-b', { componentId: 'cases.form', controls: [{ controlId: 'cases.filter', state: 4 }] });
+    assert.equal(f.collect().controlStates[0].state, 5);
+    f.context.removeComponent('instance-a');
+    assert.equal(f.collect().controlStates[0].state, 4);
+    f.context.removeComponent('instance-b');
+    assert.equal(f.collect().controlStates[0].state, 4);
+});
+
+test('provider state cannot make a missing or hidden DOM control ready', () => {
+    const f = fixture();
+    assert.equal(typeof f.context.updateComponent, 'function');
+    f.context.updateComponent('instance-a', { componentId: 'cases.form', controls: [{ controlId: 'cases.filter', state: 4 }] });
+    assert.equal(f.collect().controlStates.length, 0);
+    f.add('cases.filter', { hidden: true });
+    assert.equal(f.collect().controlStates[0].state, 2);
 });

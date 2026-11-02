@@ -19,6 +19,12 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
         assert.equal(first.contextStamp, (await collect()).contextStamp);
         await page.evaluate(() => history.pushState({}, '', '/report'));
         assert.notEqual(first.viewInstanceId, (await collect()).viewInstanceId);
+        await page.evaluate(async () => (await import('/observe.js')).updateComponent('report-instance', {
+            componentId: 'report.form', controls: [{ controlId: 'report.submit', state: 3 }]
+        }));
+        assert.equal((await collect()).controlStates.find(c => c.controlId === 'report.submit').state, 3);
+        await page.evaluate(async () => (await import('/observe.js')).removeComponent('report-instance'));
+        assert.equal((await collect()).controlStates.find(c => c.controlId === 'report.submit').state, 4);
         await page.locator('#report-submit').evaluate(e => e.disabled = true);
         const disabled = await collect();
         assert.equal(disabled.controlStates.find(c => c.controlId === 'report.submit').state, 3);

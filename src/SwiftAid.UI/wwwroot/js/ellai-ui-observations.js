@@ -4,6 +4,25 @@
 // never authorization; the Gateway filters these IDs against trusted descriptors.
 const semanticId = /^[a-z][a-z0-9.-]{0,119}$/;
 
+// Value-only snapshots, keyed by a disposable component instance token.
+// No .NET component references, callbacks, field values or labels are retained.
+const components = new Map();
+export function updateComponent(instanceId, snapshot) {
+    if (typeof instanceId !== 'string' || instanceId.length > 120 || !instanceId ||
+        !semanticId.test(snapshot?.componentId ?? '') || !Array.isArray(snapshot.controls) ||
+        snapshot.controls.length > 20) return false;
+    if (!components.has(instanceId) && components.size >= 128) return false;
+    const controls = snapshot.controls.map(control => ({ controlId: control.controlId, state: control.state }));
+    if (controls.some(control => !semanticId.test(control.controlId ?? '') ||
+        !Number.isInteger(control.state) || control.state < 0 || control.state > 6)) return false;
+    components.set(instanceId, { path: location.pathname, controls });
+    return true;
+}
+
+export function removeComponent(instanceId) {
+    components.delete(instanceId);
+}
+
 let viewInstanceId = crypto.randomUUID();
 let previousPath = location.pathname;
 let contextStamp = crypto.randomUUID();
@@ -36,6 +55,11 @@ export function collect() {
             else if (element.matches(':disabled') ||
                 element.closest('[disabled], [aria-disabled="true"]')) state = 3; // Disabled
         }
+        const semanticStates = [...components.values()]
+            .filter(component => component.path === location.pathname)
+            .flatMap(component => component.controls.filter(control => control.controlId === controlId));
+        if (semanticStates.length > 1) state = 5; // Multiple owners are ambiguous, never actionable.
+        else if (state === 4 && semanticStates.length === 1) state = semanticStates[0].state;
         controlStates.push({ controlId, state });
     }
     const stateKey = JSON.stringify(controlStates);

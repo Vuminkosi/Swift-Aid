@@ -7,6 +7,8 @@
 @implements IDisposable
 @implements SwiftAid.Contracts.Ellai.IEllaiUiContextProvider
 
+<SwiftAid.UI.Ellai.Guidance.EllaiSemanticContext Provider="this" />
+
 <section class="guided-report" aria-labelledby="guided-report-title">
     <MudText id="guided-report-title" data-ellai-control="report.entry" Typo="Typo.h5" HtmlTag="h1">Report a concern</MudText>
     @if (_step == 0)
