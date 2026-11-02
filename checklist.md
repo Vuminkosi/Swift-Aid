@@ -102,8 +102,8 @@
 - [ ] **SW-04-008** — Guest intake stores immutable ReceivedUnverified evidence and scoped proof, with NeedsRouting/NoServiceCoverage where applicable. Partial: source states/capability digest and anonymous bounded routes exist; `GuestIntakeTests` PASS 16/16 with in-process fakes, while live persistence/durability remains NOT VERIFIED; [audit](docs/SW-04-008-GUEST-RECEIPT-AUDIT.md).
 - [ ] **SW-04-009** — Route only to explicit eligible organization catchments; authorized promotion links unchanged evidence atomically to owned managed case. Partial: source separates `NeedsRouting`/`NoServiceCoverage` from explicit queue eligibility; promotion processor tests PASS 19/19 with stubs, while live catchments, atomic PostgreSQL linkage and reviewer races NOT VERIFIED; [audit](docs/SW-04-009-INTAKE-ROUTING-PROMOTION-AUDIT.md).
 - [ ] **SW-04-010** — Keep upload/media lifecycle independent of case acceptance; test pending attachment and no-ASR scenarios. Partial/blocked: guest audio remains local/encrypted and `IAttachmentService` explicitly disallows guest callers before P2.4 upload-proof; pending guest upload/no-ASR journey NOT VERIFIED; [audit](docs/SW-04-010-MEDIA-LIFECYCLE-AUDIT.md).
-- [ ] **SW-04-011** — Verify duplicate intake/managed-case prevention across timeout, concurrent reviewers and replay.
-- [ ] **SW-04-012** — Prove Android Release offline → restart → reconnect → accepted receipt and independent authorized readback.
+- [ ] **SW-04-011** — Verify duplicate intake/managed-case prevention across timeout, concurrent reviewers and replay. Partial: focused client queue tests PASS 9/9 and in-process intake/promotion suites PASS 16/16 and 19/19; live timeout-after-commit, concurrent reviewer and PostgreSQL attachment replay NOT VERIFIED; [audit](docs/SW-04-011-012-REPLAY-DEVICE-AUDIT.md).
+- [ ] **SW-04-012** — Prove Android Release offline → restart → reconnect → accepted receipt and independent authorized readback. NOT VERIFIED: prior Android evidence covered Welcome only; guest transport remains local-only; [audit](docs/SW-04-011-012-REPLAY-DEVICE-AUDIT.md).
 
 ### Phase 05 — Managed case lifecycle and complete case UI (`P0`)
 
