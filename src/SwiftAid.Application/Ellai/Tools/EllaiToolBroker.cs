@@ -849,7 +849,8 @@ public sealed class EllaiToolBroker
             !string.Equals(report.ViewInstanceId, view.Trim(), StringComparison.Ordinal);
         var ordered = requested.Select(id => stale ? byId[id] with { State = UiObservationState.Stale } : byId[id]).ToList();
         var lines = ordered.Select(o =>
-            $"control {o.ControlId} · {o.State} · view {o.ViewInstanceId} · {o.Platform}");
+            $"control {o.ControlId} · {o.State} · view {o.ViewInstanceId} · {o.Platform}" +
+            $"; client form validation accepted {!stale && eligible[o.ControlId].ProofPolicyId == "proof-ui-validated" && report.CompletedControlIds?.Contains(o.ControlId) == true}");
         var evidence = ordered.Select(o => new EvidenceRef(
             "UiObservation", o.ControlId, o.State.ToString(), null, o.ControlId)).ToList();
         var header = $"ClientObservation: {ordered.Count} control(s) from view " +

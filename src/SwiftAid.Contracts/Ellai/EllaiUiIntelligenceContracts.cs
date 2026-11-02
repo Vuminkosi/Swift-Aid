@@ -81,9 +81,13 @@ public sealed record UiObservationReport(
     string Platform,
     IReadOnlyList<string> MountedControlIds,
     IReadOnlyList<UiControlState>? ControlStates = null,
-    string? CurrentNavigationId = null)
+    string? CurrentNavigationId = null,
+    IReadOnlyList<string>? CompletedControlIds = null)
 {
     public bool IsValid() =>
+        (CompletedControlIds is null || CompletedControlIds.Count <= 20 &&
+            CompletedControlIds.All(id => !string.IsNullOrWhiteSpace(id) && id.Length <= 120) &&
+            CompletedControlIds.Distinct(StringComparer.Ordinal).Count() == CompletedControlIds.Count) &&
         (CurrentNavigationId is null || CurrentNavigationId == EllaiReportUiManifest.NavigationId ||
             EllaiNavigationManifest.ResolveRoute(CurrentNavigationId) is not null) &&
         !string.IsNullOrWhiteSpace(ViewInstanceId) && ViewInstanceId.Length <= 120 &&
@@ -98,7 +102,7 @@ public sealed record UiObservationReport(
 }
 
 /// <summary>Presentation evidence only; never grants authorization or proves a business action.</summary>
-public sealed record UiControlState(string ControlId, UiObservationState State);
+public sealed record UiControlState(string ControlId, UiObservationState State, bool CompletionAccepted = false);
 
 /// <summary>Bounded timestamped observation of a registered control.</summary>
 public sealed record UiControlObservation(

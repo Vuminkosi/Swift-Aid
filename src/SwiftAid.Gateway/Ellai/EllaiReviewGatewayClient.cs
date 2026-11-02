@@ -702,7 +702,7 @@ public sealed class EllaiReviewGatewayClient(
                     .Where(id => !string.IsNullOrWhiteSpace(id))
                     .Select(id => id.Trim())
                     .ToList(),
-                DateTimeOffset.UtcNow, report.ControlStates, report.CurrentNavigationId), cancellationToken).ConfigureAwait(false);
+                DateTimeOffset.UtcNow, report.ControlStates, report.CurrentNavigationId, report.CompletedControlIds), cancellationToken).ConfigureAwait(false);
             return true;
         }
         catch (OperationCanceledException)

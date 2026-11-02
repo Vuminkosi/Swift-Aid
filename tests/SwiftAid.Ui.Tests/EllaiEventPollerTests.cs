@@ -470,13 +470,14 @@ public sealed class EllaiEventPollerTests
 
         var reported = await client.ReportUiObservationAsync(
             "s-9",
-            new UiObservationReport("view-9", "ctx-9", "web", new[] { "cases.queue" }, CurrentNavigationId: "nav-cases"),
+            new UiObservationReport("view-9", "ctx-9", "web", new[] { "cases.queue" }, CurrentNavigationId: "nav-cases", CompletedControlIds: ["report.subject"]),
             CancellationToken.None);
 
         Assert.True(reported);
         Assert.Equal("POST", handler.LastMethod);
         Assert.Contains("api/v1/ellai/sessions/s-9/ui-observations", handler.LastPath, StringComparison.Ordinal);
         Assert.Contains("\"currentNavigationId\":\"nav-cases\"", handler.LastBody);
+        Assert.Contains("\"completedControlIds\":[\"report.subject\"]", handler.LastBody);
     }
 
     [Fact]

@@ -10,6 +10,28 @@ namespace SwiftAid.Ui.Tests;
 public sealed class GuidedReportDraftPersistenceTests
 {
     [Fact]
+    public async Task SemanticCompletionComesFromAcceptedValidationAndNeverIncludesEnteredValues()
+    {
+        var component = CreateStepper(CreateDraft(string.Empty), _ => Task.CompletedTask);
+        Assert.DoesNotContain(component.GetState().Controls, control => control.CompletionAccepted);
+        await (Task)Invoke(component, "ContinueFromTypeAsync")!;
+        Assert.True(component.GetState().Controls.Single(control => control.ControlId == "report.subject").CompletionAccepted);
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+        Assert.False(component.GetState().Controls.Single(control => control.ControlId == "report.narrative").CompletionAccepted);
+        component.Draft.Narrative = "Synthetic private observation for validation only.";
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+        var state = component.GetState();
+        Assert.True(state.Controls.Single(control => control.ControlId == "report.narrative").CompletionAccepted);
+        Assert.True(state.Controls.Single(control => control.ControlId == "report.time-location").CompletionAccepted);
+        Assert.False(state.Controls.Single(control => control.ControlId == "report.submit").CompletionAccepted);
+        Assert.DoesNotContain("Synthetic private", System.Text.Json.JsonSerializer.Serialize(state));
+        component.Draft = CreateDraft("A different draft.");
+        component.CurrentDraftId = Guid.NewGuid();
+        InvokeOnParametersSet(component);
+        Assert.DoesNotContain(component.GetState().Controls, control => control.CompletionAccepted);
+    }
+
+    [Fact]
     public async Task UnavailableStorageDisablesSaveAndDoesNotReportSuccess()
     {
         var saveCalls = 0;

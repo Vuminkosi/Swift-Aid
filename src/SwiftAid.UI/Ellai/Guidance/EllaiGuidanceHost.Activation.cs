@@ -207,14 +207,17 @@ public partial class EllaiGuidanceHost
                 if (admission?.Status != "Ready") return false;
                 var step = plan.Steps.SingleOrDefault(s => s.StepKey == stepId);
                 var navigation = step is null ? null : EllaiNavigationManifest.ResolveStepDestination(step);
+                var validatedInput = step?.Behavior == PlanStepBehavior.GuideHuman &&
+                    EllaiReportUiManifest.All.Any(control => control.ControlId == step.ControlId && control.ProofPolicyId == "proof-ui-validated") &&
+                    _latestGuidanceObservation?.CompletedControlIds?.Contains(step.ControlId) == true;
                 var observedContext = _latestGuidanceObservation?.ContextStamp;
                 // Route evidence proves navigation only, never a record read, edit or submission.
                 if (!IsCurrent() || step is null ||
-                    (step.Behavior != PlanStepBehavior.Explain && navigation is null) ||
-                    (navigation is null && observedContext != result.ContextStamp) ||
+                    (step.Behavior != PlanStepBehavior.Explain && navigation is null && !validatedInput) ||
+                    (navigation is null && !validatedInput && observedContext != result.ContextStamp) ||
                     (navigation is not null && _latestGuidanceObservation?.CurrentNavigationId != navigation.NavigationId) ||
-                    _latestGuidanceObservation?.ControlStates?.Any(state => state.ControlId == step.ControlId &&
-                        state.State == UiObservationState.Ready) != true) return false;
+                    (!validatedInput && _latestGuidanceObservation?.ControlStates?.Any(state => state.ControlId == step.ControlId &&
+                        state.State == UiObservationState.Ready) != true)) return false;
                 await progressGate.WaitAsync(ct);
                 try
                 {

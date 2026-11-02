@@ -6,6 +6,33 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiGuidanceProposalAdmissionTests
 {
     [Theory]
+    [InlineData("report.subject", true, "Completed")]
+    [InlineData("report.narrative", true, "Completed")]
+    [InlineData("report.time-location", true, "Completed")]
+    [InlineData("report.subject", false, "EvidenceRequired")]
+    [InlineData("report.submit", true, "EvidenceRequired")]
+    public async Task GuideHumanRequiresRegisteredValidationProofAndCannotUseItForSubmission(string controlId, bool completed, string expected)
+    {
+        var (service, store, observations, id) = await Fixture();
+        var checkpoint = await SeedProgress(store, observations, id, PlanStepBehavior.GuideHuman);
+        var descriptor = EllaiReportUiManifest.All.Single(control => control.ControlId == controlId);
+        checkpoint = checkpoint with { Plan = checkpoint.Plan! with { Steps =
+            [checkpoint.Plan.Steps[0] with { ControlId = controlId, ObjectiveId = descriptor.ObjectiveId! }] } };
+        var session = (await store.GetAsync("session", default))!;
+        await store.TryUpdateAsync(session with { SessionVersion = session.SessionVersion + 1,
+            GuidanceJson = EllaiGuidanceCheckpoint.Serialize(checkpoint) }, session.SessionVersion, default);
+        // The wizard moved on: its title is mounted but the validated field is no longer in the DOM.
+        var context = expected == "Completed" ? "validated-context" : "context";
+        await observations.RecordAsync(new("session", "view", context, "web", ["report.entry"], DateTimeOffset.UtcNow,
+            [new("report.entry", UiObservationState.Ready)], CompletedControlIds: completed ? [controlId] : []), default);
+        var authority = new EllaiUiEntitlements("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>());
+        var result = await service.CompleteStepAsync("session", new(id, checkpoint.Plan.PlanId, checkpoint.Version, "step-1", context), authority, default);
+        Assert.Equal(expected, result.Status);
+        var restored = EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("session", default))!.GuidanceJson)!;
+        Assert.Equal(expected == "Completed" ? 1 : 0, restored.CompletedStepIds.Count);
+    }
+
+    [Theory]
     [InlineData("owner", "scope", true, "NeedsObservation")]
     [InlineData("other", "scope", true, "Denied")]
     [InlineData("owner", "old-scope", true, "Denied")]

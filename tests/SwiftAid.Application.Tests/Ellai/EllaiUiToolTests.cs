@@ -8,6 +8,26 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiUiToolTests
 {
     [Theory]
+    [InlineData(0, "True")]
+    [InlineData(60, "False")]
+    public async Task ObservationExposesOnlyFreshPolicyEligibleValidationEvidence(int age, string accepted)
+    {
+        var registry = SeededRegistry();
+        EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        var store = new InMemoryEllaiUiObservationStore();
+        await store.RecordAsync(new("session-1", "view", "context", "web", ["report.entry"],
+            DateTimeOffset.UtcNow.AddSeconds(-age), [new("report.entry", UiObservationState.Ready)],
+            CompletedControlIds: ["report.subject", "report.submit"]), default);
+        var result = await GrantedBroker(registry, store).InvokeAsync(Context with { FeatureId = "public.product-help" },
+            new(EllaiToolNames.UiObserve, Args(("controls", "report.subject,report.submit"), ("view", "current"))), default);
+        Assert.True(result.Allowed);
+        Assert.EndsWith("client form validation accepted " + accepted,
+            result.ResultSummary.Split('\n').Single(line => line.StartsWith("control report.subject", StringComparison.Ordinal)));
+        Assert.EndsWith("client form validation accepted False",
+            result.ResultSummary.Split('\n').Single(line => line.StartsWith("control report.submit", StringComparison.Ordinal)));
+    }
+
+    [Theory]
     [InlineData(46, "view-9", UiObservationState.Ready, "Stale")]
     [InlineData(0, "other", UiObservationState.Ready, "Stale")]
     [InlineData(-10, "view-9", UiObservationState.Ready, "Stale")]

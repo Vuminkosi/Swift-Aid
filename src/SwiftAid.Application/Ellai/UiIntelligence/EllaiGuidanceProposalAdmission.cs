@@ -218,21 +218,23 @@ public sealed class EllaiGuidanceProposalAdmission(
         var saved = EllaiGuidanceCheckpoint.Deserialize(session.GuidanceJson);
         var step = saved?.Plan?.Steps.SingleOrDefault(item => item.StepKey == request.StepId);
         var navigation = step is null ? null : EllaiNavigationManifest.ResolveStepDestination(step);
+        var descriptor = admitted.Catalogue.Descriptors.SingleOrDefault(item => item.ControlId == step?.ControlId);
+        var validatedInput = step?.Behavior == PlanStepBehavior.GuideHuman && descriptor?.ProofPolicyId == "proof-ui-validated" &&
+            !descriptor.HumanConfirmationRequired && admitted.Observation.CompletedControlIds?.Contains(step.ControlId) == true;
         if (saved?.Plan is not { } plan || saved.ProposalId != request.ProposalId || plan.PlanId != request.PlanId ||
             saved.ScopeEpoch != authority.ScopeEpoch || saved.InteractionEpoch > admitted.InteractionEpoch ||
-            (navigation is null && saved.ContextStamp != request.ContextStamp) || admitted.Observation.ContextStamp != request.ContextStamp ||
+            (navigation is null && !validatedInput && saved.ContextStamp != request.ContextStamp) || admitted.Observation.ContextStamp != request.ContextStamp ||
             saved.Status is not ("Ready" or "Paused" or "Completed")) return new("Stale");
         if (saved.CompletedStepIds.Contains(request.StepId))
             return new(saved.Status, saved.Version, saved.CurrentStepId, saved.CompletedStepIds);
         if (saved.Version != request.ExpectedVersion || saved.CurrentStepId != request.StepId || saved.Status != "Ready")
             return new("Conflict", saved.Version, saved.CurrentStepId, saved.CompletedStepIds);
-        var descriptor = admitted.Catalogue.Descriptors.SingleOrDefault(item => item.ControlId == step?.ControlId);
-        if (step is null || descriptor is null || (step.Behavior != PlanStepBehavior.Explain && navigation is null) ||
+        if (step is null || descriptor is null || (step.Behavior != PlanStepBehavior.Explain && navigation is null && !validatedInput) ||
             (navigation is not null && (descriptor.FeatureId != EllaiNavigationManifest.FeatureId ||
                 admitted.Observation.CurrentNavigationId != navigation.NavigationId)) ||
             descriptor.HumanConfirmationRequired ||
-            !admitted.Observation.MountedControlIds.Contains(step.ControlId) ||
-            admitted.Observation.ControlStates?.Count(item => item.ControlId == step.ControlId && item.State == UiObservationState.Ready) != 1)
+            (!validatedInput && (!admitted.Observation.MountedControlIds.Contains(step.ControlId) ||
+                admitted.Observation.ControlStates?.Count(item => item.ControlId == step.ControlId && item.State == UiObservationState.Ready) != 1)))
             return new("EvidenceRequired", saved.Version, saved.CurrentStepId, saved.CompletedStepIds);
         var nextStep = step.NextStepKey;
         var next = saved with

@@ -46,7 +46,7 @@ public static class EllaiReportUiManifest
             prerequisites,
             successors,
             objectiveId,
-            proofPolicyId,
+            controlId is "report.subject" or "report.narrative" or "report.time-location" ? "proof-ui-validated" : proofPolicyId,
             Array.Empty<string>(),
             "public-report",
             humanConfirmationRequired)
@@ -54,7 +54,8 @@ public static class EllaiReportUiManifest
             Semantics = new EllaiUiSemantics(
                 Purpose(controlId), elementKind == "Input" ? "report-field" : null,
                 controlId == "report.submit" ? ["Report validation and processing confirmation must succeed."] : [],
-                proofPolicyId is null ? [] : [proofPolicyId])
+                controlId is "report.subject" or "report.narrative" or "report.time-location" ? ["proof-ui-validated"] :
+                    proofPolicyId is null ? [] : [proofPolicyId])
         };
 
     private static string Purpose(string controlId) => controlId switch

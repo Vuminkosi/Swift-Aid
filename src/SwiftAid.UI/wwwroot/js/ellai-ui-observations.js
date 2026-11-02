@@ -12,7 +12,7 @@ export function updateComponent(instanceId, snapshot) {
         !semanticId.test(snapshot?.componentId ?? '') || !Array.isArray(snapshot.controls) ||
         snapshot.controls.length > 20) return false;
     if (!components.has(instanceId) && components.size >= 128) return false;
-    const controls = snapshot.controls.map(control => ({ controlId: control.controlId, state: control.state }));
+    const controls = snapshot.controls.map(control => ({ controlId: control.controlId, state: control.state, completionAccepted: control.completionAccepted === true }));
     if (controls.some(control => !semanticId.test(control.controlId ?? '') ||
         !Number.isInteger(control.state) || control.state < 0 || control.state > 6)) return false;
     components.set(instanceId, { path: location.pathname, controls });
@@ -68,11 +68,26 @@ export function collect(requestedControls = null) {
         else if (state === 4 && semanticStates.length === 1) state = semanticStates[0].state;
         controlStates.push({ controlId, state });
     }
-    const stateKey = JSON.stringify(controlStates);
+    // Validation evidence belongs to the mounted component, even after its wizard
+    // moves past the validated field. It is never evidence of a server mutation.
+    const completionOwners = new Map();
+    for (const component of components.values()) {
+        if (component.path !== location.pathname) continue;
+        for (const control of component.controls) {
+            if (requested !== null && !requested.has(control.controlId)) continue;
+            const owners = completionOwners.get(control.controlId) ?? [];
+            owners.push(control.completionAccepted);
+            completionOwners.set(control.controlId, owners);
+        }
+    }
+    const completedControlIds = [...completionOwners.entries()]
+        .filter(([, owners]) => owners.length === 1 && owners[0])
+        .map(([id]) => id).sort().slice(0, 20);
+    const stateKey = JSON.stringify({ controlStates, completedControlIds });
     if (stateKey !== previousState) {
         previousState = stateKey;
         contextStamp = crypto.randomUUID();
     }
     return { viewInstanceId, contextStamp, platform: "web",
-        mountedControlIds: controlStates.map(c => c.controlId), controlStates };
+        mountedControlIds: controlStates.map(c => c.controlId), controlStates, completedControlIds };
 }

@@ -121,3 +121,32 @@ test('changing observation focus invalidates context while stable focus retains 
     assert.equal(report.contextStamp, f.collect(['report.entry']).contextStamp);
     assert.notEqual(report.contextStamp, f.collect(['navigation.cases']).contextStamp);
 });
+
+
+test('validated controls survive wizard unmount but not component disposal or ambiguous ownership', () => {
+    const f = fixture();
+    const snapshot = { componentId: 'report.form', controls: [{ controlId: 'report.subject', state: 1, completionAccepted: true }] };
+    f.context.updateComponent('form', snapshot);
+    const report = f.collect();
+    assert.equal(report.mountedControlIds.length, 0);
+    assert.equal(report.completedControlIds.join(), 'report.subject');
+    assert.equal(f.collect(['report.narrative']).completedControlIds.length, 0);
+    f.context.updateComponent('duplicate', snapshot);
+    assert.equal(f.collect().completedControlIds.length, 0);
+    f.context.removeComponent('duplicate');
+    f.context.removeComponent('form');
+    assert.equal(f.collect().completedControlIds.length, 0);
+});
+
+test('completion changes invalidate context and only literal accepted validation is used', () => {
+    const f = fixture();
+    const snapshot = accepted => ({ componentId: 'report.form', controls: [{ controlId: 'report.subject', state: 4, completionAccepted: accepted }] });
+    f.context.updateComponent('form', snapshot('true'));
+    const first = f.collect();
+    assert.equal(first.completedControlIds.length, 0);
+    f.context.updateComponent('form', snapshot(true));
+    const accepted = f.collect();
+    assert.notEqual(first.contextStamp, accepted.contextStamp);
+    f.context.updateComponent('form', snapshot(false));
+    assert.equal(f.collect().completedControlIds.length, 0);
+});
