@@ -54,6 +54,7 @@ public sealed class CaseWorkspaceGatewayClient(
             .OrderBy(pair => pair.Row.UpdatedAtUtc, query.Sort == CaseWorkspaceSort.UpdatedNewestFirst
                 ? Comparer<DateTimeOffset>.Create((left, right) => right.CompareTo(left))
                 : Comparer<DateTimeOffset>.Default)
+            .ThenBy(pair => pair.Row.CaseId)
             .ToArray();
         var pageItems = matching
             .Skip((int)Math.Min((long)(query.Page.PageNumber - 1) * query.Page.PageSize, matching.Length))

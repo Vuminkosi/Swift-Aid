@@ -38,6 +38,7 @@ public sealed class MobileCaseWorkspaceClient(ICaseQueueClient caseQueueClient) 
                     query.Sort == CaseWorkspaceSort.UpdatedNewestFirst
                         ? Comparer<DateTimeOffset>.Create((left, right) => right.CompareTo(left))
                         : Comparer<DateTimeOffset>.Default)
+                .ThenBy(item => item.CaseId)
                 .ToArray();
             var rows = matching
                 .Skip((int)Math.Min((long)(query.Page.PageNumber - 1) * query.Page.PageSize, matching.Length))

@@ -8,6 +8,25 @@ namespace SwiftAid.Integration.Tests;
 
 public sealed class CaseWorkspaceGatewayTests
 {
+    [Theory]
+    [InlineData(CaseWorkspaceSort.UpdatedNewestFirst)]
+    [InlineData(CaseWorkspaceSort.UpdatedOldestFirst)]
+    public async Task EqualTimestampsKeepStablePageMembershipAcrossQueueReordering(CaseWorkspaceSort sort)
+    {
+        var first = Row("HumanHealth", "Recorded") with { CaseId = Guid.Parse("00000000-0000-0000-0000-000000000001") };
+        var second = first with { CaseId = Guid.Parse("00000000-0000-0000-0000-000000000002") };
+        foreach (var rows in new[] { new[] { second, first }, new[] { first, second } })
+        {
+            var client = new CaseWorkspaceGatewayClient(new Queue(CaseQueueAccess.Allowed, rows), new Metadata());
+            var pageOne = await client.ListAsync(new(new PageRequest(1, 1), Sort: sort));
+            var pageTwo = await client.ListAsync(new(new PageRequest(2, 1), Sort: sort));
+            Assert.Equal(first.CaseId, Assert.Single(pageOne.Value!.Items).CaseId);
+            Assert.Equal(second.CaseId, Assert.Single(pageTwo.Value!.Items).CaseId);
+            Assert.True(pageOne.Value.HasMore);
+            Assert.False(pageTwo.Value.HasMore);
+        }
+    }
+
     [Fact]
     public async Task LargePageCannotOverflowBackToFirstRows()
     {
