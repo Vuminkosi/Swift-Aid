@@ -430,3 +430,7 @@ Read-only contract inventory recorded in [SW-01-004 contract map](SW-01-004-CONT
 ## SW-01-005 authoritative write-path audit - 2 November 2026
 
 Source/configuration review in [SW-01-005 audit](SW-01-005-AUTHORITATIVE-WRITES.md) found managed case command routing through Gateway/application processing and constrained runtime-role grant scripts. Compose supplies the same PostgreSQL variable names to Gateway and migration runner; effective role grants were not queried. Classification worker has explicit dedicated NATS credentials and no explicit DB/Qdrant settings, but optional env file/effective runtime environment were not inspected. Kept SW-01-005 partial; evidence EV-020. No database or deployment changes.
+
+## SW-01-006 durability and replay audit - 2 November 2026
+
+Read-only inventory in [durability audit](SW-01-006-DURABILITY-AUDIT.md) found stable command IDs/receipts/version checks in the managed case path and multiple purpose-specific outboxes and worker lease implementations. Universal durable inbox, ACK-after-commit, stale-lease rejection, dead-letter and reconciliation evidence across all lanes remains NOT VERIFIED. No tests or source changes were made. Kept SW-01-006 partial pending lane-by-lane mapping and ownership confirmation (BL-005); EV-021.

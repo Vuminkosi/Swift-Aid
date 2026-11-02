@@ -30,6 +30,7 @@ The master orchestrator owns checklist status, evidence linking and regression c
 | EV-018 | `npm ls --package-lock-only --depth=0` (repository root) | PASS; four declared direct packages present in the lock. Playwright absent. | SW-01-003 / BL-003, [pin audit](SW-01-003-PIN-AUDIT.md) |
 | EV-019 | Read-only source trace for SW-01-004 | PARTIAL: mapped command/event/job/outbox/audio/UI registry/public projection surfaces; no complete cross-contract coverage or runtime compatibility claim. | SW-01-004, [contract inventory](SW-01-004-CONTRACT-MAP.md) |
 | EV-020 | Read-only source/configuration trace for SW-01-005 | PARTIAL: Gateway case command path and restricted-role SQL scripts found; Compose reuses DB variables for Gateway/migration runner; classification worker has explicit NATS credentials and no explicit DB/Qdrant settings. Effective runtime credentials/grants and optional env file NOT VERIFIED. | SW-01-005, [write-path audit](SW-01-005-AUTHORITATIVE-WRITES.md) |
+| EV-021 | Read-only source trace for SW-01-006 | PARTIAL: managed case command receipts/version checks, purpose-specific outboxes and worker leases exist; universal durable inbox, ACK ordering, dead-letter and reconciliation evidence NOT VERIFIED. No tests run for this audit. | SW-01-006, [durability audit](SW-01-006-DURABILITY-AUDIT.md) |
 
 ## Active regression and blocker ownership
 
