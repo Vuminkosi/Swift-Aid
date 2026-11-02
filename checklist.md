@@ -64,7 +64,7 @@
 
 **Exit gate:** Evidence for all applicable checks below; blockers and conditional gates explicitly accounted for.
 
-- [ ] **SW-02-001** — Implement or verify guest entry and private intake on mobile/web without an account; never require social-login consent.
+- [ ] **SW-02-001** — Implement or verify guest entry and private intake on mobile/web without an account; never require social-login consent. Partial source evidence: anonymous Gateway routes and encrypted/local-only Mobile guest path exist; live web submission and Android/browser journeys NOT VERIFIED; [audit](docs/SW-02-001-GUEST-ENTRY-AUDIT.md), BL-003.
 - [ ] **SW-02-002** — Verify registration, login, account verification, password reset, profile completion, logout, session expiry and account switching on both clients.
 - [ ] **SW-02-003** — Validate Google, Facebook and allowlisted organization OIDC login using real configured provider callbacks; label unprovisioned integrations blocked.
 - [ ] **SW-02-004** — Use provider/issuer+subject identity, PKCE/state/nonce, secure native token storage and server-backed sessions; no automatic account merge by email.
