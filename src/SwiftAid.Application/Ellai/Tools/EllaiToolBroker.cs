@@ -744,6 +744,14 @@ public sealed class EllaiToolBroker
             new UiRegistryQuery(feature, goalTags, limit),
             new HashSet<string>(StringComparer.Ordinal) { feature },
             authority.Capabilities);
+        var unmatchedGoal = goalTags.Length > 0 && snapshot.Descriptors.Count == 0;
+        if (unmatchedGoal)
+        {
+            // Goal tags are discovery hints, not permissions. An unfamiliar
+            // phrase must not hide the eligible feature or imply access denial.
+            snapshot = _uiRegistry.GetSnapshot(new UiRegistryQuery(feature, [], limit),
+                new HashSet<string>(StringComparer.Ordinal) { feature }, authority.Capabilities);
+        }
         var items = snapshot.Descriptors.Take(limit).ToList();
         if (items.Count == 0)
         {
@@ -754,13 +762,15 @@ public sealed class EllaiToolBroker
             $"control {d.ControlId} · {d.ElementKind} · v{d.DescriptorVersion} · risk {d.RiskClass}" +
             (d.ObjectiveId is null ? string.Empty : $" · objective {d.ObjectiveId}") +
             $"; feature {d.FeatureId}; navigation {d.NavigationId}; purpose {d.Semantics?.Purpose}" +
-            $"; human confirmation {d.HumanConfirmationRequired}");
+            $"; human confirmation {d.HumanConfirmationRequired}; goal tags {string.Join(",", d.GoalTags)}");
         var evidence = items.Select(d => new EvidenceRef(
             "UiCatalogue", d.ControlId, d.DescriptorVersion.ToString(
                 System.Globalization.CultureInfo.InvariantCulture), null, d.ControlId)).ToList();
         var summary = $"Semantic catalogue {snapshot.CatalogueVersion} " +
             $"contract {snapshot.UiContractVersion}: {items.Count} entitled control(s)" +
-            (snapshot.Truncated ? " (truncated)." : ".") + "\n" + string.Join("\n", lines);
+            (snapshot.Truncated ? " (truncated)." : ".") +
+            (unmatchedGoal ? " No exact goal tag matched; showing the bounded entitled feature catalogue instead." : string.Empty) +
+            "\n" + string.Join("\n", lines);
         return new EllaiToolResult(request.ToolName, true, null, evidence,
             summary, items.Count, snapshot.Truncated, EllaiToolReasonCodes.Ok);
     }

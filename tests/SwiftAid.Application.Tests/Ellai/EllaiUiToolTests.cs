@@ -144,6 +144,19 @@ public sealed class EllaiUiToolTests
     }
 
     [Fact]
+    public async Task UnknownGoalDoesNotMisreportMissingEntitlement()
+    {
+        var result = await GrantedBroker(SeededRegistry()).InvokeAsync(Context,
+            new(EllaiToolNames.UiCatalogue, Args(("goal", "explain this screen"))), CancellationToken.None);
+        Assert.True(result.Allowed);
+        Assert.Equal(2, result.ItemCount);
+        Assert.Contains("No exact goal tag matched", result.ResultSummary);
+        Assert.Contains("view-summary", result.ResultSummary);
+        Assert.DoesNotContain("cases.refunds", result.ResultSummary);
+        Assert.DoesNotContain("billing.overview", result.ResultSummary);
+    }
+
+    [Fact]
     public async Task CatalogueGoalFilterNarrowsToTag()
     {
         var broker = GrantedBroker(SeededRegistry());
