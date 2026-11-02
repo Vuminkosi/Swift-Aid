@@ -18,6 +18,7 @@ public sealed class EllaiMemoryProjectionWorker(IServiceScopeFactory scopes,
         var offset = 0;
         while (!stoppingToken.IsCancellationRequested)
         {
+            var stage = "resolve-services";
             try
             {
                 await using var scope = scopes.CreateAsyncScope();
@@ -25,8 +26,10 @@ public sealed class EllaiMemoryProjectionWorker(IServiceScopeFactory scopes,
                 var db = scope.ServiceProvider.GetRequiredService<SwiftAidDbContext>();
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                 timeout.CancelAfter(TimeSpan.FromSeconds(15));
+                stage = "ensure-collection";
                 if (!await index.EnsureExactCollectionAsync(timeout.Token).ConfigureAwait(false))
                     throw new InvalidOperationException("Derived collection is unavailable.");
+                stage = "read-source";
                 var since = DateTimeOffset.UtcNow.AddHours(-24);
                 var rows = await (from topic in db.Set<EllaiTopicEntity>().AsNoTracking()
                                   join session in db.Set<EllaiSessionEntity>().AsNoTracking() on topic.SessionId equals session.SessionId
@@ -36,6 +39,7 @@ public sealed class EllaiMemoryProjectionWorker(IServiceScopeFactory scopes,
                                   select new { Topic = topic, session.OwnerActorId, session.ScopeEpoch })
                     .Skip(offset).Take(50).ToListAsync(timeout.Token).ConfigureAwait(false);
                 var written = 0;
+                stage = "write-reference";
                 foreach (var row in rows)
                 {
                     var reference = CreateReference(row.Topic, row.OwnerActorId, row.ScopeEpoch);
@@ -52,7 +56,8 @@ public sealed class EllaiMemoryProjectionWorker(IServiceScopeFactory scopes,
             catch (Exception error) when (error is not OutOfMemoryException)
             {
                 // Revisit the durable source page; no source work is discarded on failure.
-                logger.LogWarning("Ellai exact memory projection will retry: {FailureType}.", error.GetType().Name);
+                logger.LogWarning("Ellai exact memory projection will retry at {Stage}: {FailureType}, {Method}.",
+                    stage, error.GetType().Name, error.TargetSite?.Name);
                 await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
             }
         }

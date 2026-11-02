@@ -213,10 +213,8 @@ builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiTrainingVerifier>();
     {
         var endpoint = qdrantEndpoint;
         var key = qdrantKey ?? string.Empty;
-        builder.Services.AddHttpClient<SwiftAid.Infrastructure.Memory.EllaiMemoryIndex>(
-            (services, http) => new SwiftAid.Infrastructure.Memory.EllaiMemoryIndex(http, endpoint, key, "ellai-memory"));
-        builder.Services.AddScoped<SwiftAid.Application.Ellai.IEllaiExactReferenceIndex>(services =>
-            services.GetRequiredService<SwiftAid.Infrastructure.Memory.EllaiMemoryIndex>());
+        SwiftAid.Infrastructure.Memory.EllaiMemoryServiceCollectionExtensions.AddEllaiReferenceIndex(
+            builder.Services, endpoint, key);
         builder.Services.AddHostedService<SwiftAid.Gateway.Ellai.EllaiMemoryProjectionWorker>();
     }
 }

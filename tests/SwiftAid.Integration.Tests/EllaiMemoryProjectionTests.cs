@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
+using SwiftAid.Infrastructure.Memory;
 using SwiftAid.Application.Ellai;
 using SwiftAid.Gateway.Ellai;
 using SwiftAid.Infrastructure.Persistence.Ellai;
@@ -7,6 +9,17 @@ namespace SwiftAid.Integration.Tests;
 
 public sealed class EllaiMemoryProjectionTests
 {
+    [Fact]
+    public void ConfiguredIndexResolvesThroughDependencyInjection()
+    {
+        var services = new ServiceCollection();
+        services.AddEllaiReferenceIndex("http://localhost:6333", "test-only");
+        using var provider = services.BuildServiceProvider();
+        Assert.NotNull(provider.GetRequiredService<EllaiMemoryIndex>());
+        using var scope = provider.CreateScope();
+        Assert.IsType<EllaiMemoryIndex>(scope.ServiceProvider.GetRequiredService<IEllaiExactReferenceIndex>());
+    }
+
     [Theory]
     [InlineData("owner", "scope", 1, true)]
     [InlineData("other", "scope", 1, false)]
