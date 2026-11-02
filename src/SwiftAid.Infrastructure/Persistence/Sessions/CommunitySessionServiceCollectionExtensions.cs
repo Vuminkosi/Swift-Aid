@@ -20,6 +20,8 @@ public static class CommunitySessionServiceCollectionExtensions
         services.AddSingleton(TimeProvider.System);
         services.AddScoped<IEventSubscriptionService, EventSubscriptionService>();
         services.AddScoped<ISessionReminderDeliveryStore, PostgresSessionReminderDeliveryStore>();
+        services.AddScoped<ISessionReminderChannelSender, SessionReminderChannelSender>();
+        services.AddScoped<SessionReminderDeliveryDispatcher>();
         return services;
     }
 }

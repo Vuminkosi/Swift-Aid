@@ -151,6 +151,7 @@ public sealed class EventSubscriptionEndpointTests
             CancellationToken cancellationToken) => throw new NotSupportedException();
 
         public Task<bool> CanDispatchReminderAsync(Guid sessionId, string accountId, long sessionVersion,
-            string consentReference, string channel, CancellationToken cancellationToken) => Task.FromResult(false);
+            string consentReference, string channel, CancellationToken cancellationToken,
+            long? expectedSubscriptionVersion = null) => Task.FromResult(false);
     }
 }

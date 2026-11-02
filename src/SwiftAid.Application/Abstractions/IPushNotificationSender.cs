@@ -4,7 +4,8 @@ namespace SwiftAid.Application.Abstractions;
 
 public enum PushNotificationKind
 {
-    CaseUpdateAvailable
+    CaseUpdateAvailable,
+    PublicSessionReminder
 }
 
 /// <summary>

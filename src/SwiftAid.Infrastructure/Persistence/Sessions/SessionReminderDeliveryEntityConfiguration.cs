@@ -11,7 +11,7 @@ public sealed class SessionReminderDeliveryEntityConfiguration : IEntityTypeConf
         {
             table.HasCheckConstraint("ck_session_reminder_deliveries_channel", "channel IN ('Email', 'MobilePush')");
             table.HasCheckConstraint("ck_session_reminder_deliveries_status",
-                "status IN ('Pending', 'Submitted', 'Suppressed', 'OutcomeUnknown')");
+                "status IN ('Pending', 'InProgress', 'Submitted', 'Suppressed', 'OutcomeUnknown')");
             table.HasCheckConstraint("ck_session_reminder_deliveries_versions",
                 "session_version > 0 AND subscription_version > 0 AND attempt_count >= 0");
             table.HasCheckConstraint("ck_session_reminder_deliveries_lease",

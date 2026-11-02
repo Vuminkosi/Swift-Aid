@@ -4220,7 +4220,7 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("ck_session_reminder_deliveries_lease", "(lease_id IS NULL) = (lease_until_utc IS NULL)");
 
-                            t.HasCheckConstraint("ck_session_reminder_deliveries_status", "status IN ('Pending', 'Submitted', 'Suppressed', 'OutcomeUnknown')");
+                            t.HasCheckConstraint("ck_session_reminder_deliveries_status", "status IN ('Pending', 'InProgress', 'Submitted', 'Suppressed', 'OutcomeUnknown')");
 
                             t.HasCheckConstraint("ck_session_reminder_deliveries_versions", "session_version > 0 AND subscription_version > 0 AND attempt_count >= 0");
                         });

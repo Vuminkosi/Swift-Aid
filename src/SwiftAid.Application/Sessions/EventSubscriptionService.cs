@@ -54,7 +54,8 @@ public interface IEventSubscriptionService
         long sessionVersion,
         string consentReference,
         string channel,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        long? expectedSubscriptionVersion = null);
 }
 
 /// <summary>Own-account-only subscription state. It never grants attendance or organization access.</summary>
@@ -178,7 +179,8 @@ public sealed class EventSubscriptionService(
         long sessionVersion,
         string consentReference,
         string channel,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        long? expectedSubscriptionVersion = null)
     {
         RequireIdentity(sessionId, accountId);
         if (!Channels.Contains(channel, StringComparer.Ordinal) ||
@@ -193,6 +195,7 @@ public sealed class EventSubscriptionService(
 
         var subscription = await _store.GetAsync(sessionId, accountId, cancellationToken).ConfigureAwait(false);
         return subscription is { Status: EventSubscriptionStatus.Active } &&
+            (expectedSubscriptionVersion is null || subscription.Version == expectedSubscriptionVersion) &&
             string.Equals(subscription.ConsentReference, consentReference, StringComparison.Ordinal) &&
             subscription.Channels.Contains(channel, StringComparer.Ordinal);
     }

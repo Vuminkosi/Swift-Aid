@@ -147,6 +147,14 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
                         .SetProperty(item => item.LeaseUntilUtc, (DateTimeOffset?)null)
                         .SetProperty(item => item.UpdatedAtUtc, recordedAtUtc), ct)
                     .ConfigureAwait(false);
+                await _dbContext.SessionReminderDeliveries
+                    .Where(item => item.SessionId == session.SessionId && item.Status == "InProgress")
+                    .ExecuteUpdateAsync(update => update
+                        .SetProperty(item => item.Status, "OutcomeUnknown")
+                        .SetProperty(item => item.LeaseId, (Guid?)null)
+                        .SetProperty(item => item.LeaseUntilUtc, (DateTimeOffset?)null)
+                        .SetProperty(item => item.UpdatedAtUtc, recordedAtUtc), ct)
+                    .ConfigureAwait(false);
                 var stale = await reminders
                     .Where(item => item.SessionId == session.SessionId && item.Status != "Sent")
                     .ToListAsync(ct)
@@ -171,6 +179,14 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
                     .Where(item => item.SessionId == session.SessionId && item.Status == "Pending")
                     .ExecuteUpdateAsync(update => update
                         .SetProperty(item => item.Status, "Suppressed")
+                        .SetProperty(item => item.LeaseId, (Guid?)null)
+                        .SetProperty(item => item.LeaseUntilUtc, (DateTimeOffset?)null)
+                        .SetProperty(item => item.UpdatedAtUtc, recordedAtUtc), ct)
+                    .ConfigureAwait(false);
+                await _dbContext.SessionReminderDeliveries
+                    .Where(item => item.SessionId == session.SessionId && item.Status == "InProgress")
+                    .ExecuteUpdateAsync(update => update
+                        .SetProperty(item => item.Status, "OutcomeUnknown")
                         .SetProperty(item => item.LeaseId, (Guid?)null)
                         .SetProperty(item => item.LeaseUntilUtc, (DateTimeOffset?)null)
                         .SetProperty(item => item.UpdatedAtUtc, recordedAtUtc), ct)

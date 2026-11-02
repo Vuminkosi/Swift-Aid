@@ -39,7 +39,9 @@ public sealed class EventSubscriptionServiceTests
         Assert.Equal(EventSubscriptionStatus.Active, first.Status);
         Assert.Equal(first.Version, duplicate.Version);
         Assert.True(await service.CanDispatchReminderAsync(SessionId, AccountId, options.SessionVersion,
-            options.ConsentReference, "Email", default));
+            options.ConsentReference, "Email", default, first.Version));
+        Assert.False(await service.CanDispatchReminderAsync(SessionId, AccountId, options.SessionVersion,
+            options.ConsentReference, "Email", default, first.Version + 1));
         Assert.False(await service.CanDispatchReminderAsync(SessionId, AccountId, options.SessionVersion,
             options.ConsentReference, "MobilePush", default));
 

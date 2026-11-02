@@ -56,14 +56,28 @@ public sealed class PostgresSessionReminderDeliveryStore(SwiftAidDbContext dbCon
         DateTimeOffset nowUtc,
         TimeSpan leaseDuration,
         int limit,
+        IReadOnlyCollection<string> allowedChannels,
         CancellationToken cancellationToken)
     {
         ValidateBatch(limit);
+        ArgumentNullException.ThrowIfNull(allowedChannels);
+        var channels = allowedChannels.Where(channel => channel is "Email" or "MobilePush")
+            .Distinct(StringComparer.Ordinal).ToArray();
+        if (channels.Length == 0) return [];
         if (leaseDuration <= TimeSpan.Zero || leaseDuration > TimeSpan.FromMinutes(10))
             throw new ArgumentOutOfRangeException(nameof(leaseDuration));
 
         var now = nowUtc.ToUniversalTime();
         var leaseUntil = now + leaseDuration;
+        await _dbContext.SessionReminderDeliveries
+            .Where(item => item.Status == "InProgress" && item.LeaseUntilUtc <= now)
+            .ExecuteUpdateAsync(update => update
+                .SetProperty(item => item.Status, "OutcomeUnknown")
+                .SetProperty(item => item.LeaseId, (Guid?)null)
+                .SetProperty(item => item.LeaseUntilUtc, (DateTimeOffset?)null)
+                .SetProperty(item => item.UpdatedAtUtc, now), cancellationToken)
+            .ConfigureAwait(false);
+
         var claimed = await _dbContext.SessionReminderDeliveries
             .FromSqlInterpolated($"""
                 WITH due AS (
@@ -71,13 +85,13 @@ public sealed class PostgresSessionReminderDeliveryStore(SwiftAidDbContext dbCon
                     FROM public.session_reminder_deliveries
                     WHERE status = 'Pending'
                       AND available_at_utc <= {now}
-                      AND (lease_until_utc IS NULL OR lease_until_utc <= {now})
+                      AND channel = ANY({channels})
                     ORDER BY available_at_utc, delivery_id
                     LIMIT {limit}
                     FOR UPDATE SKIP LOCKED
                 )
                 UPDATE public.session_reminder_deliveries AS delivery
-                SET lease_id = gen_random_uuid(), lease_until_utc = {leaseUntil},
+                SET status = 'InProgress', lease_id = gen_random_uuid(), lease_until_utc = {leaseUntil},
                     attempt_count = delivery.attempt_count + 1, updated_at_utc = {now}
                 FROM due
                 WHERE delivery.delivery_id = due.delivery_id
@@ -102,6 +116,11 @@ public sealed class PostgresSessionReminderDeliveryStore(SwiftAidDbContext dbCon
             .ToArray();
     }
 
+    public Task<bool> IsLeaseCurrentAsync(Guid deliveryId, Guid leaseId, CancellationToken cancellationToken) =>
+        _dbContext.SessionReminderDeliveries.AsNoTracking().AnyAsync(item =>
+            item.DeliveryId == deliveryId && item.Status == "InProgress" && item.LeaseId == leaseId,
+            cancellationToken);
+
     public async Task<bool> CompleteAsync(
         Guid deliveryId,
         Guid leaseId,
@@ -110,12 +129,12 @@ public sealed class PostgresSessionReminderDeliveryStore(SwiftAidDbContext dbCon
         CancellationToken cancellationToken)
     {
         if (deliveryId == Guid.Empty || leaseId == Guid.Empty ||
-            status is SessionReminderDeliveryStatus.Pending)
+            status is SessionReminderDeliveryStatus.Pending || !Enum.IsDefined(status))
             throw new ArgumentException("A terminal reminder-delivery outcome and valid lease are required.");
 
         var now = nowUtc.ToUniversalTime();
         var affected = await _dbContext.SessionReminderDeliveries
-            .Where(item => item.DeliveryId == deliveryId && item.LeaseId == leaseId && item.Status == "Pending")
+            .Where(item => item.DeliveryId == deliveryId && item.LeaseId == leaseId && item.Status == "InProgress")
             .ExecuteUpdateAsync(update => update
                 .SetProperty(item => item.Status, status.ToString())
                 .SetProperty(item => item.LeaseId, (Guid?)null)
@@ -138,8 +157,9 @@ public sealed class PostgresSessionReminderDeliveryStore(SwiftAidDbContext dbCon
         var now = nowUtc.ToUniversalTime();
         var availableAt = availableAtUtc.ToUniversalTime();
         var affected = await _dbContext.SessionReminderDeliveries
-            .Where(item => item.DeliveryId == deliveryId && item.LeaseId == leaseId && item.Status == "Pending")
+            .Where(item => item.DeliveryId == deliveryId && item.LeaseId == leaseId && item.Status == "InProgress")
             .ExecuteUpdateAsync(update => update
+                .SetProperty(item => item.Status, "Pending")
                 .SetProperty(item => item.AvailableAtUtc, availableAt)
                 .SetProperty(item => item.LeaseId, (Guid?)null)
                 .SetProperty(item => item.LeaseUntilUtc, (DateTimeOffset?)null)

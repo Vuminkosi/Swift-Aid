@@ -55,6 +55,13 @@ public sealed class SmtpEmailSender(
             $"Your SwiftAid verification code is: {code} It expires in 10 minutes. If you did not request this, ignore this message.",
             cancellationToken);
 
+    public Task SendSessionReminderAsync(string email, CancellationToken cancellationToken) =>
+        SendAsync(
+            email,
+            "SwiftAid session reminder",
+            "A public session you follow is approaching. Open SwiftAid and find it in your sessions.",
+            cancellationToken);
+
     private async Task SendAsync(string toEmail, string subject, string body, CancellationToken cancellationToken = default)
     {
         var smtp = _options;

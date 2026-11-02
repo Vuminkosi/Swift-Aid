@@ -36,6 +36,18 @@ public sealed class FcmPushNotificationSender : IPushNotificationSender
                 FailureCode: "invalid-notification");
         }
 
+        var title = request.Kind switch
+        {
+            PushNotificationKind.CaseUpdateAvailable => "SwiftAid update",
+            PushNotificationKind.PublicSessionReminder => "SwiftAid session reminder",
+            _ => "SwiftAid update"
+        };
+        var body = request.Kind switch
+        {
+            PushNotificationKind.CaseUpdateAvailable => "Open SwiftAid to view an update.",
+            PushNotificationKind.PublicSessionReminder => "A public session you follow is approaching. Open SwiftAid to view it.",
+            _ => "Open SwiftAid to view an update."
+        };
         var message = new Message
         {
 #pragma warning disable CS0618 // The approved port carries an FCM registration token, not a Firebase Installation ID.
@@ -52,8 +64,8 @@ public sealed class FcmPushNotificationSender : IPushNotificationSender
                     Priority = Priority.Normal,
                     Notification = new AndroidNotification
                     {
-                        Title = "SwiftAid update",
-                        Body = "Open SwiftAid to view an update.",
+                        Title = title,
+                        Body = body,
                         ChannelId = request.SoundEnabled
                             ? "swiftaid_notifications_gentle_v1"
                             : "swiftaid_notifications_quiet_v1",
@@ -73,8 +85,8 @@ public sealed class FcmPushNotificationSender : IPushNotificationSender
                     {
                         Alert = new ApsAlert
                         {
-                            Title = "SwiftAid update",
-                            Body = "Open SwiftAid to view an update."
+                            Title = title,
+                            Body = body
                         },
                         Sound = request.SoundEnabled ? "swiftaid_gentle_notification.wav" : null,
                         ContentAvailable = true
