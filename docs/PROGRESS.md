@@ -510,3 +510,7 @@ Source audit in [SW-03-004 fallback audit](SW-03-004-LOCATION-FALLBACK-AUDIT.md)
 ## SW-03-005/006 coordinate semantics and GPS audit - 2 November 2026
 
 LocationContext distinguishes reporter/device/geocoder and exact/approximate/unknown. However the catalogue does not identify coordinate kind (place reference vs verified occurrence point), so SW-03-005 is partial. SW-03-006 passes at source level: manual/unknown report mappings keep coordinates null, validator rejects invalid device/exact coordinate claims, and no Mobile/UI/client geolocation permission API was found. Device behavior NOT VERIFIED; EV-040.
+
+## SW-03-007 location selector reuse audit - 2 November 2026
+
+Corrected source inventory in [SW-03-007 reuse audit](SW-03-007-LOCATION-REUSE-AUDIT.md): direct shared SwiftAidLocationPicker usage is found only in GuidedReportStepper. Mobile guest report implements separate geo lookup/mapping; Gateway report/surveillance and organizations/sessions/filters/analytics shared-selector reuse was not found. SW-03-007 remains partial; EV-041.
