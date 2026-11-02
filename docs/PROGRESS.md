@@ -458,3 +458,7 @@ Source audit in [SW-01-010 transport/storage audit](SW-01-010-TRANSPORT-STORAGE-
 ## SW-02-001 guest entry and private intake audit - 2 November 2026
 
 Source audit in [guest entry audit](SW-02-001-GUEST-ENTRY-AUDIT.md) found anonymous Gateway intake routes and encrypted local Mobile guest storage. Mobile submission transport is currently unavailable/local-only, so no live server receipt is implied. Browser, Android-device and end-to-end receipt/access-boundary journeys remain NOT VERIFIED (BL-003 for browser). No tests run; EV-027.
+
+## SW-02-002 identity lifecycle audit - 2 November 2026
+
+Source map in [identity lifecycle audit](SW-02-002-IDENTITY-LIFECYCLE-AUDIT.md) found Gateway password registration/login/change/reset, email OTP/status, provider link/logout and profile routes, plus Mobile native session/secure-store/logout services. Full lifecycle on web/Android, real provider/email delivery, expiry and account switching remain NOT VERIFIED. No identity mutation or tests run; EV-028.
