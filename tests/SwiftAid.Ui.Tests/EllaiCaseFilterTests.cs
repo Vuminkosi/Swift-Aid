@@ -35,6 +35,24 @@ public sealed class EllaiCaseFilterTests
     }
 
     [Theory]
+    [InlineData("Human", OperationsCaseQueue.SectorKind.Human)]
+    [InlineData("human", OperationsCaseQueue.SectorKind.Human)]
+    [InlineData("Animal", OperationsCaseQueue.SectorKind.Animal)]
+    [InlineData("animal", OperationsCaseQueue.SectorKind.Animal)]
+    [InlineData("Unknown", OperationsCaseQueue.SectorKind.Unknown)]
+    public async Task SectorOptionsPreserveExplicitUnknownAndAcceptClientKeyCasing(string key, OperationsCaseQueue.SectorKind expected)
+    {
+        OperationsCaseQueue.FilterRequestView? observed = null;
+        using var component = Create(query => { observed = query; return Task.CompletedTask; });
+        Set(component, nameof(component.FilterOptions), component.FilterOptions! with
+        { Sectors = [new(key, "Selected sector")] });
+        Set(component, nameof(component.Query), component.Query with { PageNumber = 3 });
+        Assert.True(await component.ApplyEllaiFilterAsync(Proposal("sector", key), CancellationToken.None));
+        Assert.Equal(expected, observed!.Sector);
+        Assert.Equal(1, observed.PageNumber);
+    }
+
+    [Theory]
     [InlineData("country", "Zimbabwe")]
     [InlineData("assignee", "invented-person")]
     [InlineData("status", "invented-status")]

@@ -489,10 +489,11 @@
         builder.CloseElement();
     };
 
-    private static SectorKind? ParseSector(string key) => key switch
+    private static SectorKind? ParseSector(string key) => key.ToLowerInvariant() switch
     {
         "human" => SectorKind.Human,
         "animal" => SectorKind.Animal,
+        "unknown" => SectorKind.Unknown,
         _ => null
     };
 

@@ -35,7 +35,7 @@ public partial class OperationsCaseQueue
             case "sector":
                 if (!ResolveOption(FilterOptions?.Sectors, value, out option)) return false;
                 if (option is null) query = query with { Sector = null };
-                else if (Enum.TryParse<SectorKind>(option, true, out var sector) && sector is SectorKind.Human or SectorKind.Animal)
+                else if (ParseSector(option) is { } sector)
                     query = query with { Sector = sector };
                 else return false;
                 break;
