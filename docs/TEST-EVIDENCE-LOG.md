@@ -34,6 +34,7 @@ The master orchestrator owns checklist status, evidence linking and regression c
 | EV-022 | Read-only source trace for SW-01-007 | PARTIAL: separate outbox, command receipt, projection, media, AI and notification states mapped; complete UI/API transition semantics and browser/device journeys NOT VERIFIED. | SW-01-007, [status audit](SW-01-007-STATUS-SEPARATION.md) |
 | EV-023 | Read-only existing-test inventory for SW-01-008 | PARTIAL: selected command replay, event ordering, job schema and outbox/restart test sources exist; no tests run for this inventory, no general live broker recovery proven; Gateway Compose restart failure remains BL-009. | SW-01-008, [recovery coverage audit](SW-01-008-RECOVERY-COVERAGE.md) |
 | EV-024 | Owner-directed repository source/rights inventory | PARTIAL: current spec/implementation pair and 25 design Markdown files inventoried; checklist's claimed 16-item set has no matching manifest. Folder search found requirements/ledgers but no speaker-consent register or asset creator/license/redistribution proof. | SW-00-002 / BL-001; SW-00-008 / BL-008, [source comparison](SW-00-002-SOURCE-COMPARISON.md) |
+| EV-025 | Read-only SW-01-009 source audit | PARTIAL: selected bounded metrics/traces, request limits, session token budget and Facebook login limiter found; no broad exporter/correlation/rate-limit/quota/redaction proof. No tests run. | SW-01-009 / BL-011, [observability audit](SW-01-009-OBSERVABILITY-AUDIT.md) |
 
 ## Active regression and blocker ownership
 

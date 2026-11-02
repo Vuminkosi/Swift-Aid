@@ -446,3 +446,7 @@ Existing-test inventory in [SW-01-008 recovery audit](SW-01-008-RECOVERY-COVERAG
 ## SW-00-002 source and rights reconciliation - 2 November 2026
 
 Following owner direction, compared the current authority pair (spec.md v1.5, implementation.md v2.5) with the repository design source set. Inventory found 25 Markdown files under designs/, while the checklist claims 16; the original 16-item manifest is unavailable, so SW-00-002 is PARTIAL and BL-001 remains open for exact set reconciliation. Existing source/decision ledgers continue to govern stale v1.4/v2.4 references and unresolved owner choices. Repository search across designs/docs/fixtures/resources/product assets found consent requirements and rights ledgers, but no speaker-consent register or creator/license/redistribution evidence for the recorded notification/UI assets. SW-00-008 remains blocked/partial under BL-008. Details: [source comparison](SW-00-002-SOURCE-COMPARISON.md), [rights review](RIGHTS-REVIEW-2026-11-02.md).
+
+## SW-01-009 observability and abuse-control audit - 2 November 2026
+
+Source audit in [SW-01-009 observability audit](SW-01-009-OBSERVABILITY-AUDIT.md) found bounded voice/inference metrics, ingestion traces/counters, job correlation IDs, request-size limits, an Ellai session token budget and Redis-backed Facebook login limiter. General telemetry exporter/correlation, broad rate-limit/quota policies, complete structured-log redaction and provider budget reconciliation remain NOT VERIFIED. No tests run; EV-025, BL-011.
