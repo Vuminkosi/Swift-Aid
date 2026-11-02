@@ -94,3 +94,9 @@ Scheduling now validates the proposed assignee inside the command lease. The pro
 - NOT VERIFIED — rendered search/select interaction, browser-to-Gateway-to-PostgreSQL journey, physical Android interaction, routine case-fact reuse and factual clarification limited to three questions.
 
 The master item remains unchecked because those required workflow and context acceptance gaps remain.
+
+## Active follow-up assignee workflow update - 2 November 2026
+
+The case-detail Follow-ups workflow is mounted through `OperationsWorkManagementSurface`; `CaseCommandPanel` is unused. The mounted surface now performs follow-up-only candidate search, safe-label selection, required purpose capture, and command mapping. Backend schedule-time authorization remains authoritative and independently verifies an active same-scope recipient grant containing ReadCase and ManageFollowUp. Candidate discovery excludes the caller/case owner and includes already-shared recipients only when they also hold both operations in scope.
+
+PASS: fresh disposable PostgreSQL candidate/HTTP/recipient-denial tests 3/3 after 53 migrations; Infrastructure and Integration.Tests builds; client 17/17; focused UI candidate selection 1/1; full UI.Tests 543/543. NOT VERIFIED: rendered browser-to-Gateway-to-PostgreSQL lifecycle, physical Android, case-fact reuse, and factual clarification capped at three. SW-05-007 remains unchecked.

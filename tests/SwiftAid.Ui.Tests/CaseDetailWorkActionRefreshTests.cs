@@ -19,6 +19,51 @@ namespace SwiftAid.Ui.Tests;
 public sealed class CaseDetailWorkActionRefreshTests
 {
     [Fact]
+    public async Task FollowUpSchedule_UsesAuthorizedCandidateAndSubmitsItsActorReference()
+    {
+        var caseId = Guid.NewGuid();
+        const string actorId = "eligible-follow-up-actor";
+        var candidates = new FakeFollowUpCandidateClient();
+        OperationsWorkManagementSurface.OperationsWorkActionRequest? captured = null;
+        var component = new OperationsWorkManagementSurface();
+        var item = new OperationsWorkManagementSurface.OperationsWorkItem(
+            caseId, "follow-up:synthetic", 2, "Case follow-up", OperationsWorkManagementSurface.OperationsWorkKind.FollowUp,
+            OperationsWorkManagementSurface.OperationsWorkStatus.Open, OperationsWorkManagementSurface.OperationsAssignmentStatus.AssignedToYou,
+            "Synthetic follow-up context", DateTimeOffset.UtcNow, null,
+            [OperationsWorkManagementSurface.OperationsWorkAction.ScheduleFollowUp], []);
+        SetParameter(component, nameof(OperationsWorkManagementSurface.Items), new[] { item });
+        SetParameter(component, nameof(OperationsWorkManagementSurface.CandidatesClient), candidates);
+        SetParameter(component, nameof(OperationsWorkManagementSurface.OnAction),
+            EventCallback.Factory.Create<OperationsWorkManagementSurface.OperationsWorkActionRequest>(
+                new object(), request => captured = request));
+        SetPrivateField(component, "_selectedWorkKey", $"{caseId:N}|{item.WorkKey}");
+
+        var setAction = (Task)typeof(OperationsWorkManagementSurface)
+            .GetMethod("SetActionAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(component, [OperationsWorkManagementSurface.OperationsWorkAction.ScheduleFollowUp])!;
+        await setAction;
+        typeof(OperationsWorkManagementSurface).GetMethod("SetFollowUpAssignee", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(component, [actorId]);
+        SetPrivateField(component, "_followUpDate", new DateTime(2026, 11, 5));
+        SetPrivateField(component, "_followUpTime", new TimeSpan(9, 0, 0));
+        SetPrivateField(component, "_timeZoneId", TimeZoneInfo.Utc.Id);
+        SetPrivateField(component, "_details", "Revisit the reported site and record observations.");
+
+        typeof(OperationsWorkManagementSurface).GetMethod("ReviewAction", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(component, [item]);
+        Assert.True((bool)GetPrivateField(component, "_reviewing")!, (string?)GetPrivateField(component, "_validationMessage"));
+        await InvokePrivateWithArgumentAsync(component, "ConfirmActionAsync", item);
+
+        Assert.Equal(caseId, candidates.CaseId);
+        Assert.True(candidates.FollowUpAssigneesOnly);
+        Assert.NotNull(captured);
+        Assert.Equal(OperationsWorkManagementSurface.OperationsWorkAction.ScheduleFollowUp, captured!.Action);
+        Assert.Equal(actorId, captured.WorkerKey);
+        Assert.Equal("Revisit the reported site and record observations.", captured.Details);
+        Assert.Equal(new DateTimeOffset(2026, 11, 5, 9, 0, 0, TimeSpan.Zero), captured.DueAtUtc);
+    }
+
+    [Fact]
     public async Task AssistanceRequest_UsesCurrentVersionAndStableRequestIdentity()
     {
         var caseId = Guid.NewGuid();
@@ -214,6 +259,9 @@ public sealed class CaseDetailWorkActionRefreshTests
     private static void SetPrivateField(object target, string name, object? value) =>
         target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(target, value);
 
+    private static object? GetPrivateField(object target, string name) =>
+        target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(target);
+
     private static void SetParameter(object target, string name, object? value) =>
         target.GetType().GetProperty(name, BindingFlags.Instance | BindingFlags.Public)!.SetValue(target, value);
 
@@ -222,6 +270,28 @@ public sealed class CaseDetailWorkActionRefreshTests
         var operation = (Task)target.GetType().GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!
             .Invoke(target, null)!;
         await operation;
+    }
+
+    private static async Task InvokePrivateWithArgumentAsync(object target, string name, object argument)
+    {
+        var operation = (Task)target.GetType().GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(target, [argument])!;
+        await operation;
+    }
+
+    private sealed class FakeFollowUpCandidateClient : ICaseCollaboratorCandidatesClient
+    {
+        private readonly CaseCollaboratorCandidatePage _page = new(
+            [new("scope-1", "eligible-follow-up-actor", "Synthetic colleague", ["ReadCase", "ManageFollowUp"])], null);
+        public Guid CaseId { get; private set; }
+        public bool FollowUpAssigneesOnly { get; private set; }
+        public Task<CaseCollaboratorCandidatePage?> GetAsync(Guid caseId, string? search, string? after,
+            CancellationToken cancellationToken = default, bool followUpAssignees = false)
+        {
+            CaseId = caseId;
+            FollowUpAssigneesOnly = followUpAssignees;
+            return Task.FromResult<CaseCollaboratorCandidatePage?>(_page);
+        }
     }
 
     private static (ServiceProvider Services, TestRenderer Renderer) CreateRenderer(FakeWorkManagementClient workClient, bool optionalProviders = true)

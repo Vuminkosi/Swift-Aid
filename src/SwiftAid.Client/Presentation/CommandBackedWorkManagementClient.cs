@@ -411,7 +411,9 @@ public sealed class CommandBackedWorkManagementClient(
             new CaseCommandInput(
                 "ScheduleFollowUp", null, WorkspaceReason("Scheduled"), null, null, null,
                 command.ExpectedVersion, FollowUpId: Guid.NewGuid(),
-                Purpose: "Follow-up scheduled from the case workspace.",
+                Purpose: string.IsNullOrWhiteSpace(command.Details)
+                    ? "Follow-up scheduled from the case workspace."
+                    : command.Details.Trim(),
                 AssigneeActorId: assignee,
                 DueAtUtc: due),
         WorkManagementAction.AcknowledgeFollowUp when TryFollowUpId(command.WorkKey, out var acknowledgeFollowUpId) =>

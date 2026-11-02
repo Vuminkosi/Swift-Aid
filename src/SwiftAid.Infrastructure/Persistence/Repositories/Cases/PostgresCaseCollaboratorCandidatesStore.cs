@@ -20,7 +20,7 @@ public sealed class PostgresCaseCollaboratorCandidatesStore(SwiftAidDbContext db
                          join profile in db.UserProfiles.AsNoTracking() on actor.ActorId equals profile.UserId into profiles
                          from profile in profiles.DefaultIfEmpty()
                          where item.CaseId == caseId && item.Workflow != CaseWorkflow.Resolved
-                             && (followUpAssignees || item.AccountableOwnerActorId != actor.ActorId)
+                             && item.AccountableOwnerActorId != actor.ActorId
                              && grant.WorkspaceId == item.WorkspaceId && grant.CountryCode == item.CountryCode
                              && grant.Sector == item.Sector && grant.SensitivityCode == item.SensitivityCode
                              && grant.Status == PersistentGrantStatus.Active && grant.ValidFromUtc <= now && grant.ExpiresAtUtc > now
@@ -30,8 +30,8 @@ public sealed class PostgresCaseCollaboratorCandidatesStore(SwiftAidDbContext db
                              && actor.Status == PersistentActorStatus.Active && (actor.ExpiresAtUtc == null || actor.ExpiresAtUtc > now)
                              && db.AccessGrantOperations.Any(operation => operation.GrantGroupId == grant.GrantGroupId && operation.Operation == CaseOperation.ReadCase)
                              && (!followUpAssignees || db.AccessGrantOperations.Any(operation => operation.GrantGroupId == grant.GrantGroupId && operation.Operation == CaseOperation.ManageFollowUp))
-                             && !db.CaseShares.Any(share => share.CaseId == caseId && share.ActorId == actor.ActorId && share.IsActive
-                                 && (share.ExpiresAtUtc == null || share.ExpiresAtUtc > now))
+                             && (followUpAssignees || !db.CaseShares.Any(share => share.CaseId == caseId && share.ActorId == actor.ActorId && share.IsActive
+                                 && (share.ExpiresAtUtc == null || share.ExpiresAtUtc > now)))
                              && (term == "" || (profile != null && profile.DisplayName != null && profile.DisplayName.ToLower().Contains(term)))
                          select new { grant.GrantGroupId, actor.ActorId, DisplayName = profile == null ? null : profile.DisplayName };
         if (!string.IsNullOrEmpty(after)) candidates = candidates.Where(item => string.Compare(item.GrantGroupId, after) > 0);

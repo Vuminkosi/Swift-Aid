@@ -208,7 +208,9 @@ public sealed record WorkManagementCommand(
             AssistanceReceiptConfirmed && HasText(Details, 300) && HasText(ReceiptMethod, 120) && HasText(ReceiptContext, 300) &&
             IsEmptyExcept(nameof(AssistanceReceiptConfirmed), nameof(Details), nameof(ReceiptMethod), nameof(ReceiptContext)),
         WorkManagementAction.ScheduleFollowUp =>
-            HasUtc(DueAtUtc) && HasLocalSchedule() && IsEmptyExcept(nameof(DueAtUtc), nameof(LocalTimeZoneId), nameof(LocalOffset)),
+            HasUtc(DueAtUtc) && HasLocalSchedule() &&
+            (WorkerKey is null || HasText(WorkerKey, 200)) && (Details is null || HasText(Details, 300)) &&
+            IsEmptyExcept(nameof(DueAtUtc), nameof(LocalTimeZoneId), nameof(LocalOffset), nameof(WorkerKey), nameof(Details)),
         WorkManagementAction.RescheduleFollowUp =>
             HasUtc(DueAtUtc) && HasUtc(NewDueAtUtc) && HasLocalSchedule() && IsEmptyExcept(nameof(DueAtUtc), nameof(NewDueAtUtc), nameof(LocalTimeZoneId), nameof(LocalOffset)),
         WorkManagementAction.CancelFollowUp =>

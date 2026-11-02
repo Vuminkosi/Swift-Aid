@@ -118,6 +118,9 @@ public sealed partial class CaseCommandProcessingPostgresTests
         source.ExpiresAtUtc = DateTimeOffset.UtcNow.AddHours(1);
         await context.SaveChangesAsync();
         Assert.Single((await store.GetAsync(fixture.CaseId, "", null, 25, CancellationToken.None)).Items);
+        second.Status = PersistentGrantStatus.Active;
+        second.ExpiresAtUtc = DateTimeOffset.UtcNow.AddHours(1);
+        await context.SaveChangesAsync();
         context.CaseShares.Add(new CaseShareEntity
         {
             CaseId = fixture.CaseId, ActorId = fixture.NewOwnerActorId, GrantedByActorId = fixture.ActorId,
@@ -125,6 +128,7 @@ public sealed partial class CaseCommandProcessingPostgresTests
         });
         await context.SaveChangesAsync();
         Assert.Empty((await store.GetAsync(fixture.CaseId, "", null, 25, CancellationToken.None)).Items);
+        Assert.Single((await store.GetAsync(fixture.CaseId, "", null, 25, CancellationToken.None, followUpAssignees: true)).Items);
         // All altered/extra grants and the share are rolled back before fixture cleanup.
     }
 }

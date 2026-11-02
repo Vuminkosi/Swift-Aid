@@ -251,6 +251,31 @@ public sealed class CommandBackedWorkManagementClientTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_ScheduleFollowUp_UsesSelectedAssigneeAndPurpose()
+    {
+        var commands = new StubCommandClient();
+        var client = new CommandBackedWorkManagementClient(
+            commands, new StubMonitoringClient(), new StubTimelineClient());
+        var command = new WorkManagementCommand(
+            CaseId,
+            "new",
+            WorkManagementAction.ScheduleFollowUp,
+            ExpectedVersion: 7,
+            WorkerKey: "eligible-staff-1",
+            Details: "Revisit the reported site.",
+            DueAtUtc: new DateTimeOffset(2026, 11, 5, 9, 0, 0, TimeSpan.Zero),
+            LocalTimeZoneId: "UTC",
+            LocalOffset: TimeSpan.Zero);
+
+        var result = await client.ExecuteAsync(command, new WorkManagementQuery(new PageRequest(1, 25)));
+
+        Assert.Equal(UiCapabilityResultCode.Success, result.Code);
+        var sent = Assert.Single(commands.Sent);
+        Assert.Equal("eligible-staff-1", sent.Input.AssigneeActorId);
+        Assert.Equal("Revisit the reported site.", sent.Input.Purpose);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_UnsupportedAction_StaysFailClosedWithoutSending()
     {
         var commands = new StubCommandClient();

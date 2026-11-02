@@ -1,5 +1,8 @@
 @using SwiftAid.UI.Components.Theme
+@using SwiftAid.Contracts.Cases
+@using Microsoft.Extensions.DependencyInjection
 @using System.Globalization
+@inject IServiceProvider Services
 
 <section class="operations-work-management" aria-labelledby="work-management-title">
     <header class="operations-work-management__header">
@@ -132,7 +135,7 @@
                         {
                             <MudDivider Class="my-3" />
                             <MudText Typo="Typo.subtitle1" HtmlTag="h3">Available action</MudText>
-                            <MudSelect T="OperationsWorkAction?" Value="@_selectedAction" ValueChanged="SetAction" Label="Choose an available action" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" Clearable="true" Disabled="@IsBusy">
+                            <MudSelect T="OperationsWorkAction?" Value="@_selectedAction" ValueChanged="SetActionAsync" Label="Choose an available action" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" Clearable="true" Disabled="@IsBusy">
                                 @foreach (var action in AvailableActions(item))
                                 {
                                     <MudSelectItem T="OperationsWorkAction?" Value="@((OperationsWorkAction?)action)">@ActionLabel(action)</MudSelectItem>
@@ -170,6 +173,28 @@
 
                                 @if (action is OperationsWorkAction.ScheduleFollowUp or OperationsWorkAction.RescheduleFollowUp)
                                 {
+                                    @if (action == OperationsWorkAction.ScheduleFollowUp)
+                                    {
+                                        <MudTextField T="string" Value="@_followUpAssigneeSearch" ValueChanged="SetFollowUpAssigneeSearch" Label="Search eligible staff" HelperText="Staff must have case read and follow-up access." Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" Disabled="@(_loadingFollowUpAssignees || IsBusy)" />
+                                        <MudButton Variant="Variant.Outlined" Disabled="@(_loadingFollowUpAssignees || IsBusy)" OnClick="LoadFollowUpAssigneesAsync">Search eligible staff</MudButton>
+                                        @if (_loadingFollowUpAssignees) { <MudText Typo="Typo.caption" role="status">Loading eligible staff…</MudText> }
+                                        @if (_followUpAssigneeCandidates.Count > 0)
+                                        {
+                                            <MudSelect T="string" Value="@_followUpAssigneeActorId" ValueChanged="SetFollowUpAssignee" Label="Responsible staff member" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" Disabled="@IsBusy">
+                                                @foreach (var candidate in _followUpAssigneeCandidates)
+                                                {
+                                                    if (candidate.SafeDisplayLabel is not null)
+                                                    {
+                                                        <MudSelectItem Value="@candidate.ActorId">@candidate.SafeDisplayLabel</MudSelectItem>
+                                                    }
+                                                }
+                                            </MudSelect>
+                                        }
+                                        else if (_followUpAssigneeSearchLoaded && !_loadingFollowUpAssignees)
+                                        {
+                                            <MudText Typo="Typo.caption">No eligible staff were found for this case.</MudText>
+                                        }
+                                    }
                                     <MudText Typo="Typo.caption" Color="Color.Secondary">Enter the local follow-up date and time, then choose the time zone. UTC is calculated only after you confirm.</MudText>
                                     @if (action == OperationsWorkAction.RescheduleFollowUp)
                                     {
@@ -296,6 +321,7 @@
     [Parameter] public string? StatusMessage { get; set; }
     [Parameter] public bool StatusIsError { get; set; }
     [Parameter] public EventCallback<OperationsWorkActionRequest> OnAction { get; set; }
+    [Parameter] public ICaseCollaboratorCandidatesClient? CandidatesClient { get; set; }
     [Parameter] public EventCallback<WorkFilter> OnFilterChanged { get; set; }
     [Parameter] public EventCallback OnRetry { get; set; }
 
@@ -305,6 +331,11 @@
     private int? _workerOptionIndex;
     private AssistanceNeed? _assistanceNeed;
     private string? _details;
+    private string _followUpAssigneeSearch = "";
+    private string? _followUpAssigneeActorId;
+    private readonly List<CaseCollaboratorCandidate> _followUpAssigneeCandidates = [];
+    private bool _loadingFollowUpAssignees;
+    private bool _followUpAssigneeSearchLoaded;
     private DateTime? _followUpDate;
     private TimeSpan? _followUpTime;
     private string? _timeZoneId;
@@ -429,6 +460,11 @@
         ? WorkerOptions(item).ElementAtOrDefault(index)
         : null;
 
+    private CaseCollaboratorCandidate? SelectedFollowUpAssignee => _followUpAssigneeActorId is null
+        ? null
+        : _followUpAssigneeCandidates.FirstOrDefault(candidate =>
+            candidate.ActorId == _followUpAssigneeActorId && candidate.SafeDisplayLabel is not null);
+
     private void SelectWork(OperationsWorkItem item)
     {
         _selectedWorkKey = ItemKey(item);
@@ -437,15 +473,48 @@
         ResetForm();
     }
 
-    private void SetAction(OperationsWorkAction? action)
+    private async Task SetActionAsync(OperationsWorkAction? action)
     {
         _selectedAction = action;
         ResetForm();
+        if (action == OperationsWorkAction.ScheduleFollowUp)
+        {
+            await LoadFollowUpAssigneesAsync();
+        }
     }
 
     private void SetWorker(int? index) { _workerOptionIndex = index; _reviewing = false; _validationMessage = null; }
     private void SetAssistanceNeed(AssistanceNeed? need) { _assistanceNeed = need; _reviewing = false; _validationMessage = null; }
     private void SetDetails(string? details) { _details = details; _reviewing = false; _validationMessage = null; }
+    private void SetFollowUpAssigneeSearch(string? search) { _followUpAssigneeSearch = search ?? ""; _reviewing = false; _validationMessage = null; }
+    private void SetFollowUpAssignee(string? actorId) { _followUpAssigneeActorId = actorId; _reviewing = false; _validationMessage = null; }
+
+    private async Task LoadFollowUpAssigneesAsync()
+    {
+        var item = SelectedItem;
+        if (_loadingFollowUpAssignees || item is null) return;
+        _loadingFollowUpAssignees = true;
+        _followUpAssigneeSearchLoaded = false;
+        _followUpAssigneeCandidates.Clear();
+        _followUpAssigneeActorId = null;
+        _validationMessage = null;
+        try
+        {
+            var client = CandidatesClient ?? Services.GetService<ICaseCollaboratorCandidatesClient>();
+            if (client is null) throw new InvalidOperationException();
+            var page = await client.GetAsync(item.CaseId, _followUpAssigneeSearch, null, followUpAssignees: true);
+            if (page is not null)
+            {
+                _followUpAssigneeCandidates.AddRange(page.Items.Where(candidate => candidate.SafeDisplayLabel is not null));
+                _followUpAssigneeSearchLoaded = true;
+            }
+        }
+        catch (Exception)
+        {
+            _validationMessage = "Eligible staff could not be loaded. Check your connection and try again.";
+        }
+        finally { _loadingFollowUpAssignees = false; }
+    }
     private void SetFollowUpDate(DateTime? date) { _followUpDate = date; _selectedUtcOffset = null; _reviewing = false; _validationMessage = null; }
     private void SetFollowUpTime(TimeSpan? time) { _followUpTime = time; _selectedUtcOffset = null; _reviewing = false; _validationMessage = null; }
     private void SetTimeZone(string? timeZoneId) { _timeZoneId = timeZoneId; _selectedUtcOffset = null; _reviewing = false; _validationMessage = null; }
@@ -482,6 +551,12 @@
         if (NeedsDetails(action) && string.IsNullOrWhiteSpace(_details))
         {
             _validationMessage = $"Enter {DetailsLabel(action).ToLowerInvariant()} before reviewing.";
+            return;
+        }
+
+        if (action == OperationsWorkAction.ScheduleFollowUp && SelectedFollowUpAssignee is null)
+        {
+            _validationMessage = "Choose an eligible staff member before reviewing the schedule.";
             return;
         }
 
@@ -617,7 +692,7 @@
             item.WorkKey,
             item.Version,
             action,
-            SelectedWorker(item)?.Key,
+            action == OperationsWorkAction.ScheduleFollowUp ? SelectedFollowUpAssignee?.ActorId : SelectedWorker(item)?.Key,
             _assistanceNeed,
             _details?.Trim(),
             _followUpOutcome,
@@ -649,6 +724,10 @@
         _workerOptionIndex = null;
         _assistanceNeed = null;
         _details = null;
+        _followUpAssigneeSearch = "";
+        _followUpAssigneeActorId = null;
+        _followUpAssigneeCandidates.Clear();
+        _followUpAssigneeSearchLoaded = false;
         _followUpDate = null;
         _followUpTime = null;
         _timeZoneId = null;
@@ -694,6 +773,7 @@
     }
 
     private static bool NeedsDetails(OperationsWorkAction action) => action is
+        OperationsWorkAction.ScheduleFollowUp or
         OperationsWorkAction.RequestAssistance or
         OperationsWorkAction.AcceptAssistance or
         OperationsWorkAction.RecordAssistanceProgress or
@@ -706,6 +786,7 @@
 
     private static string DetailsLabel(OperationsWorkAction action) => action switch
     {
+        OperationsWorkAction.ScheduleFollowUp => "What this follow-up is for",
         OperationsWorkAction.RequestAssistance => "Describe the requested assistance",
         OperationsWorkAction.AcceptAssistance => "Describe the acceptance of responsibility",
         OperationsWorkAction.RecordAssistanceProgress => "Describe the progress made",
@@ -732,6 +813,10 @@
                 message += action == OperationsWorkAction.RescheduleFollowUp
                     ? $" Current due time: {FormatInTimeZone(item.DueAtUtc!.Value, zone)}. New due time: {newLocal.Value:g} {selectedOffsetText} ({zone.DisplayName})."
                     : $" Due time: {newLocal.Value:g} {selectedOffsetText} ({zone.DisplayName}).";
+            }
+            if (action == OperationsWorkAction.ScheduleFollowUp)
+            {
+                message += $" Assigned to {SelectedFollowUpAssignee?.SafeDisplayLabel ?? "no eligible staff selected"}.";
             }
         }
         else if (action == OperationsWorkAction.CancelFollowUp)
