@@ -11,7 +11,7 @@ public enum MobileHomeWorkCountKind
     /// <summary>Open follow-ups past their due time; this is a subset of DueFollowUps.</summary>
     OverdueFollowUps,
 
-    /// <summary>Assistance requests assigned to the worker that have not been resolved.</summary>
+    /// <summary>Unresolved assistance requests visible in the officer's authorized open-work scope.</summary>
     UnresolvedAssistanceRequests,
 
     /// <summary>Escalations assigned to the worker that have not been resolved.</summary>

@@ -8,8 +8,8 @@ using SwiftAid.Domain.Cases;
 namespace SwiftAid.Application.Tests;
 
 /// <summary>
-/// Home overview: assigned counts, follow-up consistency, assistance as not
-/// collected, and recent activity ordering.
+/// Home overview: assigned counts, follow-up consistency, unresolved assistance,
+/// and recent activity ordering.
 /// </summary>
 public sealed class HomeOverviewQueryTests
 {
@@ -41,7 +41,12 @@ public sealed class HomeOverviewQueryTests
                     caseId, MonitoringQueueKind.FollowUp, Guid.NewGuid(), "Visit", "officer-1",
                     Now.AddDays(1), "Scheduled", false, Now.AddDays(-1), 3)
             ],
-            open: []);
+            open:
+            [
+                new MonitoringQueueItem(
+                    caseId, MonitoringQueueKind.Assistance, Guid.NewGuid(), "Transport support", "officer-1",
+                    null, "Provided", false, Now.AddHours(-2), 5)
+            ]);
         var store = new StubHomeStore(
             shares: [new HomeOverviewShare(Guid.NewGuid(), Now.AddDays(-1))],
             organizations: ["org-1"],
@@ -61,8 +66,8 @@ public sealed class HomeOverviewQueryTests
         Assert.Equal(1, byKind[HomeOverviewCountKind.AssignedCases].Value);
         Assert.Equal(1, byKind[HomeOverviewCountKind.DueFollowUps].Value);
         Assert.Equal(0, byKind[HomeOverviewCountKind.OverdueFollowUps].Value);
-        Assert.Null(byKind[HomeOverviewCountKind.UnresolvedAssistanceRequests].Value);
-        Assert.Equal(HomeOverviewCountReason.NotCollected, byKind[HomeOverviewCountKind.UnresolvedAssistanceRequests].Reason);
+        Assert.Equal(1, byKind[HomeOverviewCountKind.UnresolvedAssistanceRequests].Value);
+        Assert.Null(byKind[HomeOverviewCountKind.UnresolvedAssistanceRequests].Reason);
         Assert.Equal(0, byKind[HomeOverviewCountKind.UnresolvedEscalations].Value);
         Assert.Equal(2, payload.Activities.Count);
         Assert.True(payload.Activities[0].OccurredAtUtc >= payload.Activities[1].OccurredAtUtc);

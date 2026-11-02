@@ -109,6 +109,9 @@ public sealed class HomeOverviewQuery(
         var escalations = open.Access == CaseQueueAccess.Allowed
             ? open.Items.Where(item => item.Kind == MonitoringQueueKind.Escalation).ToList()
             : null;
+        var assistance = open.Access == CaseQueueAccess.Allowed
+            ? open.Items.Where(item => item.Kind == MonitoringQueueKind.Assistance).ToList()
+            : null;
 
         var counts = new List<HomeOverviewCount>
         {
@@ -119,17 +122,16 @@ public sealed class HomeOverviewQuery(
             followUps is null
                 ? new(HomeOverviewCountKind.OverdueFollowUps, null, HomeOverviewCountReason.SourceUnavailable)
                 : new(HomeOverviewCountKind.OverdueFollowUps, followUps.Count(item => item.IsOverdue), null),
-            new(
-                HomeOverviewCountKind.UnresolvedAssistanceRequests,
-                null,
-                HomeOverviewCountReason.NotCollected),
+            assistance is null
+                ? new(HomeOverviewCountKind.UnresolvedAssistanceRequests, null, HomeOverviewCountReason.SourceUnavailable)
+                : new(HomeOverviewCountKind.UnresolvedAssistanceRequests, assistance.Count, null),
             escalations is null
                 ? new(HomeOverviewCountKind.UnresolvedEscalations, null, HomeOverviewCountReason.SourceUnavailable)
                 : new(HomeOverviewCountKind.UnresolvedEscalations, escalations.Count, null)
         };
 
         var activities = BuildActivities(owned, shares, escalations, now, recentActivityLimit);
-        var partial = aggregate.Truncated || followUps is null || escalations is null;
+        var partial = aggregate.Truncated || followUps is null || escalations is null || assistance is null;
 
         return new HomeOverviewResult(
             HomeOverviewAccess.Allowed,

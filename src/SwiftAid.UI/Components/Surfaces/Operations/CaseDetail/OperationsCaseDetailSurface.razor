@@ -149,6 +149,9 @@
             <OperationsWorkManagementSurface Title="Follow-ups" Description="Schedule visits, manage deadlines, and record completion outcomes." State="WorkState" Items="FollowUpItems" IsBusy="WorkIsBusy" StatusMessage="@WorkStatusMessage" StatusIsError="WorkStatusIsError" OnAction="HandleWorkActionAsync" OnRetry="OnWorkRetry" />
         </MudTabPanel>
         <MudTabPanel Text="Assistance" data-ellai-control="case-detail.assistance" data-bonboarding-anchor="ellai-case-detail-assistance" Icon="@Icons.Material.Outlined.VolunteerActivism">
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" role="status" aria-label="Referral directory status">
+                Referral contact not configured.
+            </MudAlert>
             <section class="case-detail__section" aria-label="Request assistance">
                 @if (!_showAssistanceRequest)
                 {

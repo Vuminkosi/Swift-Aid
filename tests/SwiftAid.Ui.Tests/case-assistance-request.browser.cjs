@@ -27,6 +27,7 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             await page.goto(`${base}/case-assistance-fixture`);
             await page.waitForFunction(() => document.querySelector('#fixture-ready')?.textContent === 'True');
             await page.getByRole('tab', { name: 'Assistance', exact: true }).click();
+            await page.getByRole('status', { name: 'Referral directory status' }).getByText('Referral contact not configured.', { exact: true }).waitFor();
             await page.getByRole('button', { name: 'Request assistance', exact: true }).press('Enter');
             await page.getByRole('button', { name: 'Submit request', exact: true }).click();
             await page.getByRole('alert').getByText('Select the support type and describe the requested assistance.', { exact: true }).waitFor();
@@ -47,6 +48,7 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             await page.goto(`${base}/case-assistance-receipt-fixture?Receipt=true`);
             await page.waitForFunction(() => document.querySelector('#fixture-ready')?.textContent === 'True');
             await page.getByRole('tab', { name: 'Assistance', exact: true }).click();
+            await page.getByRole('status', { name: 'Referral directory status' }).getByText('Referral contact not configured.', { exact: true }).waitFor();
             await page.getByLabel('Choose an available action', { exact: true }).click();
             await page.getByRole('option', { name: 'Confirm assistance received', exact: true }).click();
             await page.getByLabel('Describe the receipt confirmation', { exact: true }).fill('Recipient confirmed the support arrived');
@@ -72,6 +74,7 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             await page.goto(`${base}/case-assistance-fixture?Unfulfilled=true`);
             await page.waitForFunction(() => document.querySelector('#fixture-ready')?.textContent === 'True');
             await page.getByRole('tab', { name: 'Assistance', exact: true }).click();
+            await page.getByRole('status', { name: 'Referral directory status' }).getByText('Referral contact not configured.', { exact: true }).waitFor();
             const details = page.getByLabel('Selected work details');
             await details.getByText('Assistance not fulfilled', { exact: true }).waitFor();
             assert(await details.getByText('Transport support - Unfulfilled: No eligible provider was available', { exact: true }).isVisible());
