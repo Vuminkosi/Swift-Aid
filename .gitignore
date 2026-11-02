@@ -498,3 +498,4 @@ src/SwiftAid.Contracts/packages.lock.json
 src/SwiftAid.Domain/packages.lock.json
 src/SwiftAid.GuestIntake/packages.lock.json
 src/SwiftAid.Intelligence/packages.lock.json
+checklist.md
