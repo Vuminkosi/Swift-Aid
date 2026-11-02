@@ -462,3 +462,7 @@ Source audit in [guest entry audit](SW-02-001-GUEST-ENTRY-AUDIT.md) found anonym
 ## SW-02-002 identity lifecycle audit - 2 November 2026
 
 Source map in [identity lifecycle audit](SW-02-002-IDENTITY-LIFECYCLE-AUDIT.md) found Gateway password registration/login/change/reset, email OTP/status, provider link/logout and profile routes, plus Mobile native session/secure-store/logout services. Full lifecycle on web/Android, real provider/email delivery, expiry and account switching remain NOT VERIFIED. No identity mutation or tests run; EV-028.
+
+## SW-02-003 external provider callback audit - 2 November 2026
+
+Source audit in [SW-02-003 provider audit](SW-02-003-PROVIDER-CALLBACK-AUDIT.md) found Google/Facebook/org OIDC configuration and explicit CallbackVerified gates plus selected contract tests. No real provider registration, consent or callback was run, and secret values were not inspected. SW-02-003 remains partial/blocked under BL-004; EV-029.
