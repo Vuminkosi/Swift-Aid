@@ -374,7 +374,7 @@ public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext) : IEl
             .Take(100)
             .Select(turn => new EllaiConversationTurn(turn.SessionId, turn.ClientUtteranceId,
                 turn.Sequence, turn.UserText, turn.AssistantText, turn.Outcome,
-                turn.AttemptCount, turn.CompletedAtUtc))
+                turn.AttemptCount, turn.CompletedAtUtc) { UiProposalsJson = turn.UiProposalsJson })
             .ToListAsync(ct).ConfigureAwait(false);
         rows.Reverse();
         return rows;
@@ -406,6 +406,7 @@ public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext) : IEl
             .ExecuteUpdateAsync(update => update
                 .SetProperty(turn => turn.Outcome, resolution.Outcome)
                 .SetProperty(turn => turn.AssistantText, resolution.AssistantText)
+                .SetProperty(turn => turn.UiProposalsJson, resolution.UiProposalsJson)
                 .SetProperty(turn => turn.WorkPayloadJson, (string?)null)
                 .SetProperty(turn => turn.LeaseExpiresAtUtc, (DateTimeOffset?)null)
                 .SetProperty(turn => turn.CompletedAtUtc, completedAtUtc), ct).ConfigureAwait(false);

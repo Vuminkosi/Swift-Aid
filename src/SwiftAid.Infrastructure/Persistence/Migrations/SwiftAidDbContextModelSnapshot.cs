@@ -2080,6 +2080,10 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("sequence");
 
+                    b.Property<string>("UiProposalsJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("ui_proposals_json");
+
                     b.Property<string>("UserText")
                         .HasColumnType("text")
                         .HasColumnName("user_text");

@@ -45,6 +45,12 @@ public static class EllaiDecisionValidator
             errors.Add("At most 3 UI intents per decision.");
         }
 
+        if (decision.UiIntents is not null)
+        {
+            try { _ = EllaiUiProposalPayload.Serialize(decision.UiIntents); }
+            catch (ArgumentException) { errors.Add("UI proposals must have a valid bounded shape."); }
+        }
+
         if (decision.Questions is null)
         {
             errors.Add("Questions must be an array.");

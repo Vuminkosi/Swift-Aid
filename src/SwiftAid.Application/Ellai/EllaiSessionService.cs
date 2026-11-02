@@ -251,7 +251,7 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
                 .OrderByDescending(pair => pair.Value.Sequence).Take(100).Reverse()
                 .Select(pair => new EllaiConversationTurn(sessionId, pair.Key.ClientUtteranceId,
                     pair.Value.Sequence, pair.Value.UserText, pair.Value.AssistantText,
-                    pair.Value.Outcome, pair.Value.AttemptCount, pair.Value.CompletedAtUtc)).ToArray());
+                    pair.Value.Outcome, pair.Value.AttemptCount, pair.Value.CompletedAtUtc) { UiProposalsJson = pair.Value.UiProposalsJson }).ToArray());
         }
     }
 
@@ -280,7 +280,7 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
                 _utterances[key] = item with
                 {
                     PayloadJson = null, LeaseExpiresAtUtc = null, CompletedAtUtc = completedAtUtc,
-                    Outcome = resolution.Outcome, AssistantText = resolution.AssistantText,
+                    Outcome = resolution.Outcome, AssistantText = resolution.AssistantText, UiProposalsJson = resolution.UiProposalsJson,
                 };
                 return Task.FromResult<EllaiUtteranceResolution?>(resolution);
             }
@@ -318,6 +318,7 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
         public long Sequence { get; init; }
         public string? UserText { get; init; }
         public string? AssistantText { get; init; }
+        public string? UiProposalsJson { get; init; }
         public string Outcome { get; init; } = "Queued";
     }
 

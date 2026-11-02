@@ -3,6 +3,9 @@ namespace SwiftAid.Application.Ellai;
 /// <summary>A terminal processing result, separate from queue delivery acknowledgement.</summary>
 public sealed record EllaiUtteranceResolution(string Outcome, string? AssistantText, long? ExpectedInteractionEpoch)
 {
+    /// <summary>Bounded model proposals retained for later authorization; never executable receipts.</summary>
+    public string? UiProposalsJson { get; init; }
+
     public static EllaiUtteranceResolution Completed(string text, long epoch)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
@@ -14,6 +17,11 @@ public sealed record EllaiUtteranceResolution(string Outcome, string? AssistantT
 
     public void Validate()
     {
+        if (UiProposalsJson is not null)
+        {
+            if (Outcome != "Completed") throw new ArgumentException("Only completed decisions may retain UI proposals.");
+            _ = EllaiUiProposalPayload.Deserialize(UiProposalsJson);
+        }
         if (Outcome is not ("Completed" or "TerminalFailure" or "Cancelled")
             || (Outcome == "Completed" && (string.IsNullOrWhiteSpace(AssistantText)
                 || ExpectedInteractionEpoch is null))
@@ -26,4 +34,7 @@ public sealed record EllaiUtteranceResolution(string Outcome, string? AssistantT
 
 public sealed record EllaiConversationTurn(
     string SessionId, string ClientUtteranceId, long Sequence, string? UserText,
-    string? AssistantText, string Outcome, int AttemptCount, DateTimeOffset? CompletedAtUtc);
+    string? AssistantText, string Outcome, int AttemptCount, DateTimeOffset? CompletedAtUtc)
+{
+    public string? UiProposalsJson { get; init; }
+}

@@ -82,7 +82,11 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         Assert.Null(await first.CompleteAsync(id, "u-1", claim.AttemptCount, now, CancellationToken.None,
             EllaiUtteranceResolution.Completed("Stale response", 1)));
         Assert.NotNull(await second.CompleteAsync(id, "u-1", retry.AttemptCount, now, CancellationToken.None,
-            EllaiUtteranceResolution.Completed("Validated synthetic response", 1)));
+            EllaiUtteranceResolution.Completed("Validated synthetic response", 1) with
+            {
+                UiProposalsJson = EllaiUiProposalPayload.Serialize([new(UiIntentKind.StartGuidance, "report", null, null,
+                    new Dictionary<string, string> { ["objective"] = "Create a report" })])
+            }));
 
         await using var restartedDb = CreateDbContext();
         var restarted = new PostgresEllaiSessionStore(restartedDb);
@@ -90,6 +94,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         Assert.Equal("Completed", turn.Outcome);
         Assert.Equal("Synthetic question", turn.UserText);
         Assert.Equal("Validated synthetic response", turn.AssistantText);
+        Assert.Equal(UiIntentKind.StartGuidance, Assert.Single(EllaiUiProposalPayload.Deserialize(turn.UiProposalsJson!)).Kind);
         Assert.Empty(await restarted.ReadConversationAsync(id, "wrong-owner", CancellationToken.None));
         var row = await restartedDb.Set<EllaiUtteranceEntity>().SingleAsync(turn => turn.SessionId == id);
         Assert.Null(row.WorkPayloadJson);

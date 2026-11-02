@@ -122,7 +122,10 @@ public sealed class EllaiUtteranceWorker(
             }
             var resolution = outcome.Completed && !string.IsNullOrWhiteSpace(outcome.DisplayText)
                 && EllaiResponsePublicationPolicy.CanPublish(work)
-                ? EllaiUtteranceResolution.Completed(outcome.DisplayText, work.ControllerEpoch)
+                ? EllaiUtteranceResolution.Completed(outcome.DisplayText, work.ControllerEpoch) with
+                {
+                    UiProposalsJson = EllaiUiProposalPayload.Serialize(outcome.Decision?.UiIntents ?? [])
+                }
                 : EllaiUtteranceResolution.Failed with { ExpectedInteractionEpoch = work.ControllerEpoch };
             var providerElapsed = started.Elapsed.TotalMilliseconds;
             var committed = await outbox.CompleteAsync(item.SessionId, item.ClientUtteranceId, item.AttemptCount,

@@ -27,10 +27,15 @@ public sealed class EllaiUtteranceOutboxTests
             CancellationToken.None, EllaiUtteranceResolution.Completed("stale answer", 2));
         Assert.Null(Assert.Single(await store.ReadConversationAsync(item.SessionId, "actor-one", CancellationToken.None)).AssistantText);
         await store.CompleteAsync(retry.SessionId, retry.ClientUtteranceId, retry.AttemptCount, now,
-            CancellationToken.None, EllaiUtteranceResolution.Completed("Hello back", 2));
+            CancellationToken.None, EllaiUtteranceResolution.Completed("Hello back", 2) with
+            {
+                UiProposalsJson = EllaiUiProposalPayload.Serialize([new(UiIntentKind.StartGuidance, "report", null, null,
+                    new Dictionary<string, string> { ["objective"] = "Create a report" })])
+            });
         var completed = Assert.Single(await store.ReadConversationAsync(item.SessionId, "actor-one", CancellationToken.None));
         Assert.Equal("Hello", completed.UserText);
         Assert.Equal("Hello back", completed.AssistantText);
+        Assert.Equal(UiIntentKind.StartGuidance, Assert.Single(EllaiUiProposalPayload.Deserialize(completed.UiProposalsJson!)).Kind);
         Assert.Equal("Completed", completed.Outcome);
         Assert.Empty(await store.ReadConversationAsync(item.SessionId, "another-owner", CancellationToken.None));
     }

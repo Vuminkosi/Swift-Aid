@@ -72,6 +72,7 @@ public sealed class EllaiUtteranceEntityConfiguration : IEntityTypeConfiguration
         builder.Property(entity => entity.WorkPayloadJson).HasColumnName("work_payload_json").HasColumnType("jsonb");
         builder.Property(entity => entity.Sequence).HasColumnName("sequence");
         builder.Property(entity => entity.UserText).HasColumnName("user_text").HasColumnType("text");
+        builder.Property(entity => entity.UiProposalsJson).HasColumnName("ui_proposals_json").HasColumnType("jsonb");
         builder.Property(entity => entity.AssistantText).HasColumnName("assistant_text").HasColumnType("text");
         builder.Property(entity => entity.Outcome).HasColumnName("outcome").HasColumnType("text").HasDefaultValue("Queued");
         builder.Property(entity => entity.LeaseExpiresAtUtc).HasColumnName("lease_expires_at_utc").HasColumnType("timestamp with time zone");
