@@ -23,9 +23,13 @@ public sealed class EllaiSilenceGate(long epoch, long initialPosition = 0) : IDi
         if (pcm.Length == 0 || pcm.Length > EllaiSpeechEvent.MaximumPcmBytes || (pcm.Length & 1) != 0
             || !float.IsFinite(probability) || probability is < 0 or > 1)
             throw new ArgumentException("Invalid Silero frame.");
+        var sampleCount = pcm.Length / 2;
+        if (Position < 0 || sampleCount > EllaiSpeechEvent.MaximumPosition
+            || Position > EllaiSpeechEvent.MaximumPosition - sampleCount)
+            throw new InvalidDataException("Voice capture exceeded the segmented-audio position limit.");
         var packets = new List<byte[]>();
         var start = Position;
-        Position += pcm.Length / 2;
+        Position += sampleCount;
         var positive = probability >= (_speaking ? 0.25f : 0.5f);
         if (!_speaking)
         {

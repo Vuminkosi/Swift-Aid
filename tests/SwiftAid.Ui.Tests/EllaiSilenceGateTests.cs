@@ -58,4 +58,18 @@ public sealed class EllaiSilenceGateTests
         Assert.Throws<InvalidDataException>(() => new EllaiSpeechEvent(EllaiSpeechEventKind.Audio, 1, 0, 1).Encode(new byte[3]));
         Assert.Throws<InvalidDataException>(() => new EllaiSpeechEvent(EllaiSpeechEventKind.Heartbeat, 1, -1, 1).Encode());
     }
+
+    [Fact]
+    public void CaptureRejectsFramesPastProtocolPositionLimitWithoutAdvancing()
+    {
+        using var gate = new EllaiSilenceGate(1, EllaiSpeechEvent.MaximumPosition - 768);
+        var pcm = new byte[1536];
+
+        Assert.Empty(gate.Push(pcm, 0));
+        Assert.Equal(EllaiSpeechEvent.MaximumPosition, gate.Position);
+        Assert.Equal(EllaiSpeechEvent.MaximumPosition, EllaiSpeechEvent.Decode(gate.Heartbeat()).SamplePosition);
+
+        Assert.Throws<InvalidDataException>(() => gate.Push(pcm, 0));
+        Assert.Equal(EllaiSpeechEvent.MaximumPosition, gate.Position);
+    }
 }

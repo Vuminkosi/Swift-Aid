@@ -141,3 +141,7 @@ PASS: `uv run --project workers python -m pytest workers/tests/integration/test_
 ## EV-071 - SW-01-004 segmented-audio position bounds - 3 November 2026
 
 PASS: focused `EllaiSpeechEventContractTests` (4 passed); `dotnet test tests/SwiftAid.Ui.Tests/SwiftAid.Ui.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter FullyQualifiedName~EllaiSilenceGateTests --logger 'console;verbosity=minimal'` (4 passed); `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter FullyQualifiedName~EllaiSegmentedAudioTests --logger 'console;verbosity=minimal'` (6 passed); `git diff --check`. Covers valid maximum boundary, overflow encode, and malformed overflow decode. Does not prove real microphone capture, live speech provider, or deployment behavior.
+
+## EV-072 - SW-01-004 C# audio producer position bound - 3 November 2026
+
+PASS: `dotnet test tests/SwiftAid.Ui.Tests/SwiftAid.Ui.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter FullyQualifiedName~EllaiSilenceGateTests --logger 'console;verbosity=minimal'` (5 passed, including last-valid-frame acceptance, heartbeat at the limit, and rejection without position advancement); `git diff --check`. Verifies the shared C# capture gate against the ESV1 ten-minute position cap. Browser JavaScript gate parity, actual microphone duration and recovery/UX after the cap are NOT VERIFIED.
