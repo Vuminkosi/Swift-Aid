@@ -4,14 +4,17 @@
 @using SwiftAid.UI.Components.Surfaces.Operations.CaseDetail
 @using SwiftAid.UI.Components.Surfaces.Operations.WorkManagement
 @using SwiftAid.UI.Components.Theme
+@using SwiftAid.Contracts.Cases
 @using static SwiftAid.UI.Components.Surfaces.Operations.WorkManagement.OperationsWorkManagementSurface
+@inject ICaseTimelineClient TimelineClient
 
 <SwiftAidThemeProvider />
 <MudPopoverProvider />
+<MudDialogProvider />
 <output id="fixture-ready">@_ready</output>
 <output id="request-result">@_requestResult</output>
 <OperationsCaseDetailSurface CaseId="CaseId" WorkVersion="7" WorkState="OperationsSurfaceState.Populated"
-                             WorkItems="_items" OnWorkAction="RecordRequest" />
+                             WorkItems="_items" OnWorkAction="RecordRequest" TimelineClient="TimelineClient" />
 
 @code {
     private static readonly Guid CaseId = Guid.Parse("b2210000-2222-4222-8222-222222222222");

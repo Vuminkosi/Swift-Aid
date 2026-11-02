@@ -169,7 +169,12 @@
 }
 
 @media (max-width: 599px) {
-    .case-timeline__toolbar { grid-template-columns: minmax(0, 1fr); }
+    .case-timeline__toolbar {
+        grid-template-columns: minmax(0, 1fr);
+        /* Mud input end-adornment buttons retain a 48px touch target and extend
+           12px past the input edge. Reserve that target inside the viewport. */
+        padding-inline-end: 0.75rem;
+    }
 
     .case-timeline__entry-heading {
         flex-direction: column;

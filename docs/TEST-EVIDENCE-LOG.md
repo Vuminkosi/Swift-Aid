@@ -149,3 +149,7 @@ PASS: `dotnet test tests/SwiftAid.Ui.Tests/SwiftAid.Ui.Tests.csproj --no-restore
 ## EV-073 - SW-01-004 browser audio producer position bound - 3 November 2026
 
 PASS: `node --test tests/voice/ellai-segmented-audio.test.mjs` (5 passed, including final permitted frame, heartbeat at the cap, rejection without position advancement, and invalid initial position/epoch). `git diff --check` passed. This is a JavaScript module test with no browser microphone or Gateway connection; post-limit recovery/UX remains NOT VERIFIED.
+
+## EV-074 - SW-05-006 rendered assistance timeline - 3 November 2026
+
+Extended the synthetic CaseDetail browser fixture with all seven assistance journal event types. PASS: TestHost build (0 warnings/errors); Chromium scenario at 390px and 1280px opens History, verifies distinct Requested/Accepted/InProgress/Provided (receipt unconfirmed)/ReceiptConfirmed/Unfulfilled/Cancelled labels, opens event details, verifies safe actor attribution and sealed-content notice, and reports no page errors or horizontal overflow. The run exposed 12px mobile overflow from MudBlazor date-field end-adornment touch targets; reserved 12px within the narrow toolbar and reran successfully. The fixture uses a synthetic timeline client; live Gateway/PostgreSQL, real case history and physical Android remain NOT VERIFIED.

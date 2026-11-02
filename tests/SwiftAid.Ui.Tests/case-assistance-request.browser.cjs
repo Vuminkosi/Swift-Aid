@@ -98,7 +98,34 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `unfulfilled horizontal overflow at ${width}px`);
             assert.deepEqual(errors, [], `unfulfilled browser errors at ${width}px`);
         }
-        console.log('PASS synthetic assistance request, receipt, unmet-need, and follow-up acknowledgement at 390px and 1280px');
+        for (const width of [390, 1280]) {
+            await page.setViewportSize({ width, height: 900 });
+            await page.goto(`${base}/case-assistance-fixture`);
+            await page.waitForFunction(() => document.querySelector('#fixture-ready')?.textContent === 'True');
+            await page.getByRole('tab', { name: 'History', exact: true }).click();
+            const titles = page.locator('.case-timeline__entry-title');
+            await titles.getByText('Assistance requested', { exact: true }).waitFor();
+            for (const label of [
+                'Assistance requested',
+                'Assistance responsibility accepted',
+                'Assistance progress recorded',
+                'Assistance provided; receipt unconfirmed',
+                'Assistance receipt confirmed',
+                'Assistance not fulfilled',
+                'Assistance request cancelled'
+            ]) {
+                assert.equal(await titles.getByText(label, { exact: true }).count(), 1, `${label} visible at ${width}px`);
+            }
+            await page.getByRole('button', { name: /View details for Assistance provided; receipt unconfirmed/ }).click();
+            const details = page.locator('.case-timeline__event-drawer');
+            await details.getByText('Assistance provided; receipt unconfirmed', { exact: true }).waitFor();
+            await details.getByText('Synthetic reviewer', { exact: true }).waitFor();
+            await details.getByText('This record is read-only. Sealed reasons and report content are not shown here.', { exact: true }).waitFor();
+            assert.doesNotMatch(await details.innerText(), /synthetic-actor-id/);
+            assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `history horizontal overflow at ${width}px`);
+            assert.deepEqual(errors, [], `history browser errors at ${width}px`);
+        }
+        console.log('PASS synthetic assistance request, receipt, unmet-need, follow-up acknowledgement, and seven-event timeline at 390px and 1280px');
     } finally {
         await browser?.close();
         host.kill();
