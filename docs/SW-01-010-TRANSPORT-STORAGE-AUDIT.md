@@ -19,3 +19,8 @@ Local Compose source is development-oriented and binds published ports to loopba
 Provide production TLS termination and internal transport-auth configuration; verify secret/certificate provisioning and rotation; define and verify encryption/key management for PostgreSQL, object storage, Qdrant and backups; document coordinated database/object/Data Protection key backup and retention; and complete a disposable restore drill that proves records, original media, outbox state and protected payload access recover consistently. Do not treat loopback-only development ports as production exposure evidence.
 
 No secret values were read, and no deployment, database, storage or restore operation was performed. No test was run for this source/configuration audit.
+
+
+## Refreshed active Gateway role finding - 3 November 2026
+
+Read-only inspection of the running Gateway container extracted its configured database username without exposing the connection string or password. PostgreSQL reported role `swiftaid_dev` with superuser, create-database, create-role, replication and row-security-bypass attributes; a privilege query counted INSERT/UPDATE/DELETE on all 34 public tables. This confirms the current local Development Gateway does not use a least-privilege application identity. No database role or grant was modified. Treat this as a release blocker until a separately provisioned non-superuser application role has reviewed minimum grants and the deployed configuration is verified. Production TLS, encryption-at-rest, backup and restore evidence also remain absent.

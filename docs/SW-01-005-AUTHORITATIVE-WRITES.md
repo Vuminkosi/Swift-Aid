@@ -22,3 +22,10 @@ Source/configuration review is partial. The managed case API routes through Gate
 - Trace all managed-record write routes to authorized Gateway application commands and check worker database access independently.
 
 No database, deployment, credential, contract, or configuration was changed. No database query was issued in this source/configuration audit. Ownership and deployment handoff remain required under BL-005; no destructive or active scan was run.
+
+
+## Refreshed runtime boundary evidence - 3 November 2026
+
+Read-only `docker inspect` of the stopped `swiftaid-classification-worker-1` reported state `exited` (255), a `/models` mount, and network mode referencing Gateway container ID `4e0815a599e9d84dbc2d9fcfcaa6f91197774e4e1ea47adddd5c0328c09e30c3`; the current Gateway ID was `c1d828ebe046dae509728dcf3f2a44b16ad7b329e80aac9f7e90f872015858e2`, so the namespace does not match. The worker's stored environment variable *names* include NATS credentials, a Gateway worker token, and classification settings; no PostgreSQL connection or Qdrant endpoint/key variable name was present. Values were not printed. Since the worker is stopped and its namespace is stale, this does not prove its running network access or actual token scope.
+
+The live Gateway container configuration was inspected in memory to extract only the database username (`swiftaid_dev`), without printing its connection string or password. A read-only query against PostgreSQL `pg_roles` reported `rolsuper`, `rolcreatedb`, `rolcreaterole`, `rolreplication`, and `rolbypassrls` all true. `has_table_privilege` counts showed INSERT, UPDATE and DELETE privileges on all 34 public tables. This is a confirmed local Development configuration finding; no role or grant was modified. SW-01-005 remains partial, and production authorization/least-privilege closure is blocked under BL-013.
