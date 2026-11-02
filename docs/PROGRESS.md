@@ -546,3 +546,7 @@ Focused GuestIntakeTests command PASS 16/16, exit 0. The in-process suite covers
 ## SW-04-009 intake routing/promotion verification - 2 November 2026
 
 Focused IntakePromotionProcessorTests PASS 19/19, exit 0. Source distinguishes explicit eligible catchments from ambiguous/no coverage and promotion uses stable IDs/workspace resolution; tests use stubs. Live catchments, authorized PostgreSQL atomic evidence linkage and competing reviewer behavior remain NOT VERIFIED. EV-050, [audit](SW-04-009-INTAKE-ROUTING-PROMOTION-AUDIT.md).
+
+## SW-04-010 media lifecycle audit - 2 November 2026
+
+Source audit in [SW-04-010 media audit](SW-04-010-MEDIA-LIFECYCLE-AUDIT.md) found local/encrypted guest audio and an explicit IAttachmentService prohibition on guest upload before P2.4 upload-proof. Server binding expects previously uploaded submission-bound media. PostgreSQL-gated tests were not run; guest pending upload/no-ASR journey remains NOT VERIFIED. EV-051.
