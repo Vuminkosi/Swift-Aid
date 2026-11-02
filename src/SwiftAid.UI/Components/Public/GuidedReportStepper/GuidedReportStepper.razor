@@ -7,7 +7,7 @@
 @implements IDisposable
 
 <section class="guided-report" aria-labelledby="guided-report-title">
-    <MudText id="guided-report-title" Typo="Typo.h5" HtmlTag="h1">Report a concern</MudText>
+    <MudText id="guided-report-title" data-ellai-control="report.entry" Typo="Typo.h5" HtmlTag="h1">Report a concern</MudText>
     @if (_step == 0)
     {
         <MudText Typo="Typo.body2" Class="guided-report__intro">
@@ -56,7 +56,7 @@
         @if (_step == 0)
         {
             <section class="guided-report__panel" aria-labelledby="report-type-title">
-                <h2 id="report-type-title" class="mud-typography mud-typography-h6 guided-report__step-heading" tabindex="-1" @ref="_stepHeading">Who or what is the concern about?</h2>
+                <h2 id="report-type-title" data-ellai-control="report.subject" class="mud-typography mud-typography-h6 guided-report__step-heading" tabindex="-1" @ref="_stepHeading">Who or what is the concern about?</h2>
                 <div class="guided-report__subject-selector">
                     <MudRadioGroup T="ReportSubjectCategory?" Value="_subjectCategory" ValueChanged="SubjectCategoryChangedAsync" Class="guided-report__subject-group" aria-label="Report subject">
                         <div class="guided-report__choices">
@@ -115,7 +115,7 @@
         else if (_step == 1)
         {
             <section class="guided-report__panel" aria-labelledby="report-details-title">
-                <h2 id="report-details-title" class="mud-typography mud-typography-h6 guided-report__step-heading" tabindex="-1" @ref="_stepHeading">What did you notice?</h2>
+                <h2 id="report-details-title" data-ellai-control="report.narrative" class="mud-typography mud-typography-h6 guided-report__step-heading" tabindex="-1" @ref="_stepHeading">What did you notice?</h2>
                 @DetailsLeadContent
                 <MudTextField T="string" Label="Describe what happened" Variant="Variant.Outlined" Lines="4" MaxLength="6000"
                               @bind-Value="Draft.Narrative" For="@(() => Draft.Narrative)" />
@@ -214,7 +214,7 @@
                     </div>
                 }
 
-                <MudSelect T="string" id="guided-report-country" Label="Country where the event happened" Variant="Variant.Outlined"
+                <MudSelect T="string" id="guided-report-country" data-ellai-control="report.time-location" Label="Country where the event happened" Variant="Variant.Outlined"
                            Value="Draft.CountryCode" ValueChanged="CountryChangedAsync" Disabled="@(!HasCountryCatalogue)" Clearable="true">
                     @foreach (var country in Countries)
                     {
@@ -284,7 +284,7 @@
         else
         {
             <section class="guided-report__panel" aria-labelledby="report-review-title">
-                <h2 id="report-review-title" class="mud-typography mud-typography-h6 guided-report__step-heading" tabindex="-1" @ref="_stepHeading">Review your report</h2>
+                <h2 id="report-review-title" data-ellai-control="report.review" class="mud-typography mud-typography-h6 guided-report__step-heading" tabindex="-1" @ref="_stepHeading">Review your report</h2>
                 <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
                     Check the details you entered. Nothing has been added, rewritten, or diagnosed for you. Use Back to make changes; unknowns remain unknown.
                 </MudAlert>
@@ -331,7 +331,7 @@
                     {
                         <MudLink Href="@ProcessingPolicyReference" Target="_blank" rel="noopener noreferrer">Read how this report is handled</MudLink>
                     }
-                    <MudCheckBox T="bool" Label="@ProcessingAcknowledgementLabel" @bind-Value="Draft.ProcessingConfirmed"
+                    <MudCheckBox T="bool" data-ellai-control="report.confirmations" Label="@ProcessingAcknowledgementLabel" @bind-Value="Draft.ProcessingConfirmed"
                                  Color="Color.Primary" />
                 }
                 else
@@ -371,7 +371,7 @@
                         @(_saving ? DraftSavingLabel : DraftSaveButtonLabel)
                     </MudButton>
                 }
-                <MudButton id="report-submit" ButtonType="ButtonType.Button" Color="Color.Primary" Variant="Variant.Text" Disabled="@(!CanSubmit || _submitting)" OnClick="SubmitAsync" StartIcon="@Icons.Material.Filled.Cancel">
+                <MudButton id="report-submit" data-ellai-control="report.submit" ButtonType="ButtonType.Button" Color="Color.Primary" Variant="Variant.Text" Disabled="@(!CanSubmit || _submitting)" OnClick="SubmitAsync" StartIcon="@Icons.Material.Filled.Cancel">
                     @(_submitting ? SubmitProgressLabel : SubmitButtonLabel)
                 </MudButton>
                 @if (!CanSubmit)

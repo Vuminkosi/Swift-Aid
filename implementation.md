@@ -3810,3 +3810,34 @@ Verification: `dotnet build src/SwiftAid.UI/SwiftAid.UI.csproj --no-restore --ve
 ### Ellai tool progress contract (2026-11-01)
 
 Tool acknowledgements are Gateway-managed transient interaction events, triggered before a registered tool invocation and delivered through the existing response feed with `includeProgress=true`. They are not model-authored answers, canonical history, or approval receipts. One initial acknowledgement is permitted per stable user-turn ID; replay, retry, cancellation and final-response priority are fenced. Independent read tools may run concurrently only with separate service/persistence scopes, bounded to four. Sequential reasoning dependencies and explicit action approval remain unchanged. Spoken progress uses the existing MMS-TTS path and the user's listening setting. English remains the approved fallback until siSwati/Shona translations and voices are validated. The canonical implementation/evidence record is `docs/ellai-voice-processing-progress.md`, including failed and unverified scenarios.
+
+## Interactive Ellai implementation audit (2 November 2026)
+
+Requirement source: `designs/ellai/interative-ellai-requirements.md`. Conversation examples in `designs/ellai/conversation-test-cases.md` are reference material, not the current acceptance suite. Baseline: `a8e0b49`, branch `interactive-ellai`. Status: PARTIAL; inspection evidence only, no new runtime acceptance claims.
+
+### Confirmed reusable paths and gaps
+
+- `EllaiUiRegistry` already provides bounded, capability-filtered descriptor snapshots. Gateway registration currently seeds only `EllaiReportGuidanceDescriptors`. There is no component-owned context-provider lifecycle. Extend this registry and its existing contracts rather than introducing a parallel catalogue.
+- `IEllaiUiDiscoveryService` already distinguishes ready, disabled, hidden, ambiguous, unknown and unmounted controls. `ellai-ui-observations.js` duplicates report bindings in a handwritten array; replace that dependency with component-owned semantic registration and disposal while keeping server authorization authoritative.
+- `EllaiModelGuidancePlanner` already calls the routed completion client and validates the returned draft. The deterministic planner also remains registered. Audit the actual broker and response-consumer paths before removing either implementation.
+- `EllaiGuidanceSessionCoordinator` already owns guidance commands and versions. Reuse the existing persistent Ellai conversation and evidence handling; establish restoration and execution call paths before claiming durable guidance.
+- `EllaiBonboardingCompiler` currently compiles anchor targets at plan creation and falls back to a centered target for missing bindings. It does not yet compile the required navigation, validation or completion gates.
+- Installed `Bit.Bonboarding` is 10.7.0. Its local XML API documentation confirms `BonboardingStepTarget.Dynamic`, `CanAdvance`, `AdvanceOnSignal`, and missing-target wait/failure options. Official dynamic-target documentation was reviewed at https://bonboarding.bitplatform.dev/dynamic; remaining linked guides and signatures must be checked before using their APIs.
+- `EllaiGuidanceHost` is shared by web/mobile and has an existing observation reporting path. Voice capture, segmented transport, the 700ms pause baseline and tool acknowledgements remain frozen. Guidance changes must not recreate the conversation, capture session, or speech engine.
+
+### Delivery and verification sequence
+
+1. Extend semantic metadata and lifecycle registration, with tests for duplicate instances, disposal, hidden/disabled state, redaction and bounded permission-filtered discovery.
+2. Connect static route capabilities and live snapshots to the existing broker/model planner; validate registered navigation and record scope. Keep navigation separate from writes.
+3. Compile dynamic Bonboarding targets and evidence-gated steps; integrate with the existing guidance coordinator, response feed, cancellation and restoration.
+4. Migrate shell, dashboard, cases, reporting, detail tabs, community sessions, surveillance, investigations/alerts and authorized administration using shared semantic wrappers/adapters. Do not rewrite working screens.
+5. Exercise the real report-creation guidance journey, navigation, refresh, failure and security scenarios. Submission completion requires the existing server receipt, never a click or model assertion. Mobile interactive testing remains user-owned.
+6. Update `spec.md`, this file and `designs/ellai/ui-tour-nav.md` with actual contracts, measured results and remaining limitations; commit independently verified slices on the active branch without pushing.
+
+Security invariants: component metadata does not authorize operations; no sensitive field values, unrestricted URLs/selectors or executable model-generated code; permission and country/organization checks remain server-side; restoration never replays committed writes. Observable acceptance requires one ongoing conversation, component-driven discovery, rendered Bonboarding guidance and application-confirmed completion. A successful build or isolated service test does not establish browser or device acceptance.
+
+### Component-owned observation slice
+
+Report components now declare `data-ellai-control` identities directly. The existing observation module discovers those declarations, reports duplicate identities as ambiguous, drops disposed elements and caps each report at 20 controls. Only identity and presentation state leave the browser; input values and labels are not collected. Report processing confirmation is observed on its actual checkbox instead of inferred from the review heading. The existing Gateway descriptor/capability checks remain authoritative. This is the live-observation foundation, not completion of the full semantic provider or guidance requirements.
+
+Verification: `node --test tests/voice/ellai-ui-observations.test.mjs` failed 4/4 before implementation and passed 4/4 afterward. `node tests/SwiftAid.Ui.Tests/ellai-observations.browser.cjs` passed using the cached Playwright package through `SWIFTAID_PLAYWRIGHT_PACKAGE`; it exercises the shipped module in a synthetic Chromium DOM, not a deployed Blazor journey. The initial invocation without that environment variable failed because Playwright is not a root dependency. `dotnet build src/SwiftAid.UI/SwiftAid.UI.csproj --no-restore -m:1 -nr:false` passed with zero warnings/errors. Full report submission, provider planning and mobile runtime remain NOT VERIFIED for this slice.

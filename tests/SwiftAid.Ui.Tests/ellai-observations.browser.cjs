@@ -10,7 +10,7 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
         // Synthetic DOM fixture exercising the actual shipped browser module.
         await page.route('http://localhost/**', route => route.fulfill(route.request().url().endsWith('/observe.js')
             ? { contentType: 'text/javascript', body: script }
-            : { contentType: 'text/html', body: '<h1 id="guided-report-title">Report</h1><button id="report-submit">Submit</button><input value="sensitive text must not be collected">' }));
+            : { contentType: 'text/html', body: '<h1 id="guided-report-title" data-ellai-control="report.entry">Report</h1><button id="report-submit" data-ellai-control="report.submit">Submit</button><input value="sensitive text must not be collected">' }));
         await page.goto('http://localhost/');
         const collect = () => page.evaluate(async () => (await import('/observe.js')).collect());
         const first = await collect();

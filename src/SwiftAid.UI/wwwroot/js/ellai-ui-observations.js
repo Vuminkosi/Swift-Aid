@@ -1,16 +1,8 @@
 // Trusted presentation bindings. No user-entered values, text, URLs or selectors
 // supplied by the model are collected or executed.
-const reportBindings = [
-    ["report.entry", "guided-report-title"],
-    ["report.subject", "report-type-title"],
-    ["report.narrative", "report-details-title"],
-    ["report.time-location", "guided-report-country"],
-    ["report.voice-note", "public-report-voice-title"],
-    ["report.review", "report-review-title"],
-    ["report.confirmations", "report-review-title"],
-    ["report.submit", "report-submit"],
-    ["report.receipt", "public-receipt-title"]
-];
+// Components own their semantic identity. DOM presence is presentation evidence,
+// never authorization; the Gateway filters these IDs against trusted descriptors.
+const semanticId = /^[a-z][a-z0-9.-]{0,119}$/;
 
 let viewInstanceId = crypto.randomUUID();
 let previousPath = location.pathname;
@@ -24,9 +16,15 @@ export function collect() {
         contextStamp = crypto.randomUUID();
     }
     const controlStates = [];
-    for (const [controlId, id] of reportBindings) {
-        const elements = document.querySelectorAll(`[id="${id}"]`);
-        if (!elements.length) continue;
+    const registrations = new Map();
+    for (const element of document.querySelectorAll('[data-ellai-control]')) {
+        const controlId = element.getAttribute('data-ellai-control');
+        if (!semanticId.test(controlId ?? '')) continue;
+        if (!registrations.has(controlId)) registrations.set(controlId, []);
+        registrations.get(controlId).push(element);
+    }
+    // Bound the wire snapshot, retaining every duplicate for ambiguity detection.
+    for (const [controlId, elements] of [...registrations.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(0, 20)) {
         let state = 4; // UiObservationState.Ready
         if (elements.length !== 1) state = 5; // UiObservationState.Ambiguous
         else {
