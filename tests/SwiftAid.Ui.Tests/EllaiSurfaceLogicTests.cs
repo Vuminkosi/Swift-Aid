@@ -19,7 +19,7 @@ namespace SwiftAid.Ui.Tests;
 
 [Trait("Feature", "Ellai")]
 [Trait("Task", "ELL-T13")]
-public sealed class EllaiSurfaceLogicTests
+public sealed partial class EllaiSurfaceLogicTests
 {
     private static EllaiConversationTurnDto GuidanceTurn() => new("guide-turn", 1, "Show the report form", "Let me show you.", "Completed", 1, DateTimeOffset.UtcNow)
     {

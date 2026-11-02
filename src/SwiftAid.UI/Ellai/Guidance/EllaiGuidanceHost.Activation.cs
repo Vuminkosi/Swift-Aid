@@ -13,6 +13,7 @@ public partial class EllaiGuidanceHost
     private string? _pendingGuidanceTurn;
     private string? _lastGuidanceControlProposalId;
     private string? _lastTabSelectionProposalId;
+    private string? _lastCaseNavigationProposalId;
     private string? _guidanceNotice;
     private bool _preparingGuidance;
     private IBonboardingTourSession? _generatedTour;
@@ -92,6 +93,17 @@ public partial class EllaiGuidanceHost
         if (turn.Outcome != "Completed") return;
         newlyCompleted |= _pendingGuidanceTurn == turn.ClientUtteranceId;
         _pendingGuidanceTurn = null;
+        var recordProposals = turn.UiProposals.Where(item => item.Proposal.Kind == UiIntentKind.OpenAuthorizedRecord).Take(2).ToArray();
+        if (recordProposals.Length > 0)
+        {
+            if (recordProposals.Length == 1 && newlyCompleted && recordProposals[0].ProposalId != _lastCaseNavigationProposalId &&
+                EllaiCaseNavigationProposal.ReadCaseId(recordProposals[0].Proposal) is not null)
+            {
+                _lastCaseNavigationProposalId = recordProposals[0].ProposalId;
+                _ = OpenAuthorizedCaseAsync(turn.ClientUtteranceId, recordProposals[0].ProposalId, recordProposals[0].Proposal);
+            }
+            return;
+        }
         var tabProposals = turn.UiProposals.Where(item => item.Proposal.Kind == UiIntentKind.SelectTab).Take(2).ToArray();
         if (tabProposals.Length > 0)
         {
@@ -126,6 +138,31 @@ public partial class EllaiGuidanceHost
         _guidanceFeatureId = proposal.Proposal.Arguments.GetValueOrDefault("feature");
         // Conversation restoration offers an explicit action; only the currently awaited turn auto-starts.
         if (newlyCompleted) _ = StartProposedGuidanceAsync();
+    }
+
+    private async Task OpenAuthorizedCaseAsync(string turnId, string proposalId, UiIntentProposal proposal)
+    {
+        if (_sessionView is not { Status: "Active" } session) return;
+        var originalUri = Navigation.Uri;
+        bool IsCurrent() => !_uiObservationLifetime.IsCancellationRequested && Navigation.Uri == originalUri &&
+            _sessionView?.SessionId == session.SessionId && _sessionView.Status == "Active" &&
+            _lastDurableTurn is { Outcome: "Completed" } current && current.ClientUtteranceId == turnId &&
+            _lastCaseNavigationProposalId == proposalId;
+        try
+        {
+            if (!IsCurrent()) return;
+            var client = Services.GetService(typeof(SwiftAid.Contracts.Cases.ICaseTimelineClient)) as SwiftAid.Contracts.Cases.ICaseTimelineClient;
+            var route = client is null ? null : await EllaiAuthorizedCaseNavigation.ResolveAsync(proposal, client, _uiObservationLifetime.Token);
+            if (!IsCurrent()) return;
+            if (route is null) _guidanceNotice = "That case could not be opened with your current access.";
+            else Navigation.NavigateTo(route);
+        }
+        catch (OperationCanceledException) { }
+        catch (HttpRequestException)
+        {
+            if (IsCurrent()) _guidanceNotice = "The case could not be opened. Try again.";
+        }
+        if (IsCurrent()) await InvokeAsync(StateHasChanged);
     }
 
     private async Task SelectCurrentCaseTabAsync(string turnId, string proposalId, string tab)

@@ -162,6 +162,9 @@ public sealed class EllaiReasoningLoop(
                 "For stop speaking while keeping guidance, use command=stop-speech; never cancel the tour for a speech-only interruption. " +
                 "For an explicit request to skip a guidance step, use command=skip. The Gateway permits only optional explanation; skipping never proves an input, approval or submission. For an explicit request to revisit the previous guidance step, use command=back. This revisits guidance, never undoes application actions. For an explicit request to advance the current guidance step, use command=next. This requests evidence-checked advancement, " +
                 "never completion of a field, submission, or approval. Do not claim advancement until application evidence confirms it. " +
+                "For an explicit request to open a case, use the exact case ID from authorized tool results or the user's supplied case ID; never invent one. " +
+                "Propose OpenAuthorizedRecord with featureId=case-detail, resourceId=the canonical case GUID, controlId=null and empty arguments. " +
+                "The application rechecks case access before navigation. Do not claim it opened until application confirmation. Do not combine it with other navigation or guidance controls. " +
                 "For an explicit request to select a tab in the currently open case detail, discover case-detail first, then propose SelectTab " +
                 "with featureId=case-detail, controlId=case-detail.tabs, resourceId=null and exactly one argument tab=" +
                 "overview, history, follow-ups, assistance, discussion, attachments or observations. This does not open another record, " +
