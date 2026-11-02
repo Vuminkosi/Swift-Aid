@@ -25,6 +25,9 @@ The master orchestrator owns checklist status, evidence linking and regression c
 | EV-013 | `dotnet test tests/SwiftAid.Ui.Tests/SwiftAid.Ui.Tests.csproj --no-restore -m:1 -nr:false --logger 'console;verbosity=minimal'` | PASS: UI suite 527/527 after focused test-fixture corrections. | Commit `b97f87c` |
 | EV-014 | Local Compose service readiness requests before/after Gateway restart | PASS for Gateway liveness, PostgreSQL readiness, MinIO, NATS, Redis, and Gateway links to language/TTS/Qdrant; see exact commands in [runtime record](SW-01-002-RUNTIME.md). These checks do not establish provider inference or full workflows. | SW-01-002 |
 | EV-015 | `docker compose -f infra/compose.yml restart gateway` | FAIL, exit 1: Gateway restarted and became healthy; Compose then failed restarting the stopped optional classification worker due to a missing Gateway network namespace. Worker remains stopped. | BL-009, [runtime record](SW-01-002-RUNTIME.md) |
+| EV-016 | `dotnet package list --project SwiftAid.sln --vulnerable --include-transitive --no-restore --format json` | PASS, exit 0; 16 projects enumerated, no vulnerable packages listed. Snapshot scope only; full supply-chain/license review NOT VERIFIED. | SW-01-003, [pin audit](SW-01-003-PIN-AUDIT.md) |
+| EV-017 | `uv lock --check` (working directory `workers/`) | PASS; resolved 54 packages, lock consistent. | SW-01-003, [pin audit](SW-01-003-PIN-AUDIT.md) |
+| EV-018 | `npm ls --package-lock-only --depth=0` (repository root) | PASS; four declared direct packages present in the lock. Playwright absent. | SW-01-003 / BL-003, [pin audit](SW-01-003-PIN-AUDIT.md) |
 
 ## Active regression and blocker ownership
 

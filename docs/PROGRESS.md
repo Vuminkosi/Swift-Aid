@@ -418,3 +418,7 @@ Sign-in status: web federation is live (Google challenge reachable once the oper
 ## SW-01-002 runtime check - 2 November 2026
 
 Local Compose readiness checks passed for Gateway liveness, PostgreSQL listener, MinIO, NATS, Redis, and Gateway network access to language, TTS, and Qdrant readiness endpoints. A Gateway-only Compose restart returned exit 1 after Gateway recovered because the stopped optional classification worker has a missing Gateway network namespace. The worker remains stopped; no services were recreated. Full commands and limits: [SW-01-002 runtime record](SW-01-002-RUNTIME.md).
+
+## SW-01-003 dependency pin audit - 2 November 2026
+
+Read-only audit recorded in [SW-01-003 pin audit](SW-01-003-PIN-AUDIT.md). Locked .NET restore, 16-project vulnerability query (exit 0, no listed findings), Python uv lock --check, and root npm lock inventory passed. Several external images remain mutable or lack digests; complete image vulnerability, license and SBOM review plus model/data/asset rights remain NOT VERIFIED. Kept SW-01-003 unchecked and added BL-010; no shared dependency/image files changed pending current path ownership (BL-005). Evidence EV-016 through EV-018.
