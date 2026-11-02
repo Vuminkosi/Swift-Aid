@@ -4,13 +4,24 @@ param()
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $composeFile = Join-Path $repositoryRoot 'infra/testing/compose.yml'
-$environmentTemplate = Join-Path $repositoryRoot '.env.example'
 $resultsRoot = Join-Path $repositoryRoot 'artifacts/backend-tests'
 $runId = '{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), ([Guid]::NewGuid().ToString('N'))
 $resultsDirectory = Join-Path $resultsRoot $runId
 $projectName = "swiftaid-backend-tests-$($runId.Replace('-', '').ToLowerInvariant())"
 
-foreach ($requiredPath in @($composeFile, $environmentTemplate, (Join-Path $repositoryRoot 'global.json'))) {
+function Invoke-FixtureCompose {
+    param([string[]]$ComposeArgs)
+    # Windows PowerShell treats native stderr progress as error records when the
+    # caller redirects output. Docker's exit code, not its progress stream,
+    # determines success (including cleanup).
+    $ErrorActionPreference = 'Continue'
+    & docker compose @ComposeArgs 2>&1 | ForEach-Object { Write-Host "$_" }
+    if ($LASTEXITCODE -ne 0) {
+        throw "Fixture Docker Compose failed with exit code $LASTEXITCODE."
+    }
+}
+
+foreach ($requiredPath in @($composeFile, (Join-Path $repositoryRoot 'global.json'))) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
         throw "Required Docker backend test input is missing: $requiredPath"
     }
@@ -42,7 +53,6 @@ $previousResultsDirectory = [Environment]::GetEnvironmentVariable('SWIFTAID_BACK
 
 $composeArguments = @(
     '--project-name', $projectName,
-    '--env-file', $environmentTemplate,
     '--file', $composeFile
 )
 
@@ -52,16 +62,13 @@ try {
         throw 'A reachable Docker Engine is required to run the isolated backend fixtures.'
     }
 
-    docker compose @composeArguments config --quiet
+    Invoke-FixtureCompose -ComposeArgs ($composeArguments + @('config', '--quiet'))
     if ($LASTEXITCODE -ne 0) {
         throw 'The isolated Docker backend test Compose configuration is invalid.'
     }
 
     Write-Host "Running locked backend tests with .NET SDK $sdkVersion in isolated PostgreSQL, Redis, and NATS fixtures."
-    docker compose @composeArguments up `
-        --build `
-        --abort-on-container-exit `
-        --exit-code-from backend-tests
+    Invoke-FixtureCompose -ComposeArgs ($composeArguments + @('up', '--build', '--abort-on-container-exit', '--exit-code-from', 'backend-tests'))
     if ($LASTEXITCODE -ne 0) {
         throw "Docker backend tests failed with exit code $LASTEXITCODE. Results: $resultsDirectory"
     }
@@ -70,7 +77,7 @@ try {
 }
 finally {
     try {
-        docker compose @composeArguments down --remove-orphans
+        Invoke-FixtureCompose -ComposeArgs ($composeArguments + @('down', '--remove-orphans', '--volumes'))
         $cleanupExitCode = $LASTEXITCODE
     }
     catch {

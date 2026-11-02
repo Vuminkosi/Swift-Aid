@@ -218,7 +218,7 @@ public sealed class ProviderServicesFixture : IAsyncLifetime
 {
     public const long MaximumObjectBytes = 1024;
     public const string EventStream = "SWIFTAID_TEST_EVENTS";
-    public const string NotificationStream = "SWIFTAID_TEST_NOTIFICATIONS";
+    public const string NotificationStream = "SWIFTAID_NOTIFICATIONS";
 
     private const string MinioImage = "swiftaid/minio:RELEASE.2025-10-15T17-29-55Z-source";
     private const string RedisImage = "redis:8.4.7-alpine3.22";

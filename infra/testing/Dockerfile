@@ -27,11 +27,12 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0.403 AS backend-test-runner
 WORKDIR /workspace
 
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends socat \
+    && apt-get install --yes --no-install-recommends socat postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=package-fetch /workspace /workspace
 COPY --from=package-fetch /package-assets /package-assets
+COPY --from=package-fetch /root/.nuget/packages /root/.nuget/packages
 COPY infra/testing/run-backend-tests.sh /usr/local/bin/run-swiftaid-backend-tests
 RUN chmod 0555 /usr/local/bin/run-swiftaid-backend-tests
 

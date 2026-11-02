@@ -65,7 +65,7 @@ def test_engine_rejects_invalid_pcm_before_loading_models(tmp_path):
     import pytest
     from fastapi import HTTPException
     from pathlib import Path
-    engine = language_app.LanguageEngine(tmp_path, Path('../../scripts/ellai/native-models.lock.json'))
+    engine = language_app.LanguageEngine(tmp_path, Path(__file__).resolve().parents[3] / 'scripts/ellai/native-models.lock.json')
     request = language_app.TranscriptionRequest(requestId='turn', language='sna', pcmBase64='!!!!', sampleRate=16000)
     with pytest.raises(HTTPException) as error:
         engine.transcribe(request)
@@ -76,7 +76,7 @@ def test_engine_rejects_invalid_pcm_before_loading_models(tmp_path):
 def test_engine_lock_rejects_overlapping_inference_and_releases_on_error(tmp_path):
     import pytest
     from pathlib import Path
-    engine = language_app.LanguageEngine(tmp_path, Path('../../scripts/ellai/native-models.lock.json'))
+    engine = language_app.LanguageEngine(tmp_path, Path(__file__).resolve().parents[3] / 'scripts/ellai/native-models.lock.json')
     engine.lock.acquire()
     try:
         with pytest.raises(language_app.ModelBusy):
