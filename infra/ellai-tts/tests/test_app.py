@@ -115,3 +115,21 @@ def test_synthesis_uses_native_calm_speaking_rate(monkeypatch):
     assert len(response.content) == 3 * 2
     assert response.headers["x-swiftaid-speaking-rate"] == "0.95"
     assert response.headers["x-swiftaid-sample-rate"] == "16000"
+
+
+def test_processing_is_once_before_encoding_and_bypass_is_original(monkeypatch):
+    from audio_processing import ClarityProfile, process
+    monkeypatch.setenv("ELLAI_TTS_CLARITY_PROFILES", '{"eng":{"enabled":true}}')
+    with client(monkeypatch) as test_client:
+        payload = {"text": "Synthetic test.", "requestId": "clarity-1"}
+        headers = {"Authorization": "Bearer test-only-key"}
+        processed = test_client.post("/v1/synthesize", headers=headers, json=payload)
+        payload["bypassProcessing"] = True
+        original = test_client.post("/v1/synthesize", headers=headers, json=payload)
+    waveform = np.array([0, .5, -.5], dtype=np.float32)
+    expected = (process(waveform, 16000, ClarityProfile(enabled=True)) * 32767).astype("<i2").tobytes()
+    assert processed.status_code == original.status_code == 200
+    assert processed.content == expected
+    assert original.content == (waveform * 32767).astype("<i2").tobytes()
+    assert processed.headers["x-swiftaid-audio-processing"] == "clarity-v1"
+    assert original.headers["x-swiftaid-audio-processing"] == "bypass"

@@ -12,7 +12,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY --from=uv /uv /uvx /bin/
 COPY pyproject.toml uv.lock ./
-COPY app.py voice_pool.py ./
+COPY app.py voice_pool.py audio_processing.py ./
 
 RUN addgroup --system swiftaid \
     && adduser --system --ingroup swiftaid swiftaid \

@@ -247,6 +247,7 @@ services:
     environment:
       ELLAI_TTS_MODEL_PATH: /models
       ELLAI_TTS_INTERNAL_KEY: ${ELLAI_TTS_INTERNAL_KEY:-}
+      ELLAI_TTS_CLARITY_PROFILES: ${ELLAI_TTS_CLARITY_PROFILES:-{}}
     volumes:
       - ellai-tts-model-data:/models:ro
     healthcheck:

@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from transformers import VitsModel, VitsTokenizer
 from voice_pool import VoiceProfile, VoicePool, VoiceBusy, read_profiles
+from audio_processing import ClarityProfile, process, read_profiles as read_clarity_profiles
 
 
 EXPECTED_MODEL_ID = "facebook/mms-tts-eng"
@@ -40,6 +41,7 @@ class SynthesisRequest(BaseModel):
     voice_id: str = Field(default=VOICE_ID, min_length=1, max_length=80, alias="voiceId")
     request_id: str = Field(min_length=1, max_length=120, alias="requestId")
     language: str = Field(default="eng", min_length=3, max_length=3)
+    bypass_processing: bool = Field(default=False, strict=True, alias="bypassProcessing")
 
 
 def load_voice(model_dir: Path, expected_sha256: str = EXPECTED_MODEL_SHA256) -> LoadedVoice:
@@ -68,6 +70,7 @@ def load_voice(model_dir: Path, expected_sha256: str = EXPECTED_MODEL_SHA256) ->
 
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> Iterator[None]:
+    application.state.clarity_profiles = read_clarity_profiles(os.environ.get("ELLAI_TTS_CLARITY_PROFILES", "{}"))
     model_path = Path(os.environ.get("ELLAI_TTS_MODEL_PATH", "/models/mms-tts-eng"))
     english = VoiceProfile(VOICE_ID, "eng", EXPECTED_MODEL_ID, EXPECTED_REVISION, EXPECTED_MODEL_SHA256, model_path)
     profiles = read_profiles(os.environ.get("ELLAI_TTS_NATIVE_PROFILES", "[]"), english)
@@ -132,6 +135,13 @@ def synthesize(
     waveform = np.asarray(waveform, dtype=np.float32)
     if waveform.ndim != 1 or waveform.size == 0 or waveform.size > MAX_SAMPLE_COUNT:
         raise HTTPException(status_code=422, detail="The synthesized audio exceeds its limit.")
+    clarity = app.state.clarity_profiles.get(profile.language, ClarityProfile())
+    if request.bypass_processing:
+        clarity = ClarityProfile()
+    try:
+        waveform = process(waveform, voice.sample_rate, clarity)
+    except ValueError:
+        raise HTTPException(status_code=503, detail="The synthesized audio is unavailable.")
     pcm = (np.clip(waveform, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
     return StreamingResponse(
         _frames(pcm),
@@ -140,6 +150,7 @@ def synthesize(
             "X-SwiftAid-Voice-Id": profile.voice_id,
             "X-SwiftAid-Sample-Rate": str(voice.sample_rate),
             "X-SwiftAid-Speaking-Rate": str(SPEAKING_RATE),
+            "X-SwiftAid-Audio-Processing": "clarity-v1" if clarity.enabled else "bypass",
             "X-SwiftAid-Channels": "1",
             "X-SwiftAid-Sample-Format": "s16le",
             "X-SwiftAid-Model-Id": profile.model_id,

@@ -10,9 +10,36 @@ The cache bound limits model count, not bytes or VRAM. Inference currently remai
 
 Run `.venv/Scripts/python.exe -m pytest -q -p no:cacheprovider` on Windows. Tests use synthetic models for routing, PCM, authorization, cache, eviction, failure and contention behavior. Actual native checkpoint inference and Gateway/client language routing are separate acceptance gates and are not established by these tests.
 
-Ellai's default speaking rate is **0.95**, applied through the installed MMS/VITS model's native `speaking_rate` parameter during synthesis. PCM remains 16 kHz for the English checkpoint; clients do not slow playback or resample audio. The response identifies this setting with `X-SwiftAid-Speaking-Rate`. No extra punctuation pauses, trailing silence, or other output processing is applied.
+Ellai's default speaking rate is **0.95**, applied through the installed MMS/VITS model's native `speaking_rate` parameter during synthesis. PCM remains 16 kHz for the English checkpoint; clients do not slow playback or resample audio. The response identifies this setting with `X-SwiftAid-Speaking-Rate`. No extra punctuation pauses or trailing silence are applied. Optional clarity processing is described below.
 
 2026-11-02 verification: the new parameter regression failed before implementation and passed afterward; `tests/test_app.py` plus `tests/test_voice_pool.py` passed 10 tests and four subtests. The real rebuilt Compose MMS-TTS worker returned HTTP 200, rate 0.92, 16 kHz, and 97,280 PCM bytes for a synthetic sentence in 714 ms. This checks actual inference and metadata, not subjective voice quality. The existing torch deprecation and Compose model-volume provenance warnings remain. No model was replaced and no mobile tests ran.
 
 
 2026-11-02 pace adjustment: default native MMS speaking rate is now **0.95**. The worker was rebuilt and recreated through `infra/compose.yml`, preserving the existing internal authentication key and model volume. Real local inference returned HTTP 200, rate 0.95, 16 kHz, 104,448 PCM bytes in 626 ms for a synthetic sentence. Worker health is healthy. The full worker suite passed 18 tests and four subtests; the updated synthesis suite then passed six tests, including a punctuation-containing input whose output remains exactly the model's three synthetic samples. No punctuation/trailing PCM padding is introduced. Model-generated natural pauses remain; this is not a claim that MMS output has no silence. Existing torch deprecation and model-volume provenance warnings remain unchanged.
+# Optional synthesis clarity processing
+
+Processing is off by default. Set `ELLAI_TTS_CLARITY_PROFILES` to a JSON language map,
+for example `{"eng":{"enabled":true},"sna":{"enabled":false}}`. Each profile accepts
+`high_pass_hz` (80), `low_shelf_hz` (180), `low_shelf_db` (-3), `presence_hz` (3000),
+`presence_db` (1.5), and `ceiling_db` (-1). The internal authenticated synthesis
+request accepts `bypassProcessing: true` for an unprocessed comparison. No client EQ
+is added. Speaking rate remains 0.95; sample rate, duration and sample count remain unchanged.
+
+The worker applies a second-order Butterworth high-pass, shelf slope 1 and presence
+Q 1 using float64 SciPy SOS filtering once to the model waveform before s16le encoding.
+Coefficients follow the [W3C Audio EQ Cookbook](https://www.w3.org/TR/audio-eq-cookbook/).
+Filter frequencies must be below Nyquist. A constant attenuation caps the sample
+peak at -1 dBFS without upward normalization or limiter pumping. This is a digital
+sample-peak ceiling, not a true-peak certification. No silence is appended and no
+punctuation pauses are inserted. Invalid/nonfinite waveforms are rejected.
+
+Source audit: web uses AudioBuffer at the received sample rate; Android AudioTrack
+and iOS AVAudioFormat likewise use the supplied rate. None applies another EQ or
+playback-speed change. Native voice-communication routing remains unchanged and may
+affect the physical output. Microphone enhancements are not synthesis filters.
+
+Verification: `python -m pytest infra/ellai-tts/tests -q -p no:cacheprovider` passed
+27 tests and 4 subtests; `node --test tests/voice/ellai-audio-playback.test.mjs` passed
+4 tests. Filter response was checked at 8, 16, 22.05 and 48 kHz. Real listening,
+same-waveform model A/B, deployed latency and mobile playback remain NOT VERIFIED.
+Do not enable the profile by default until those checks are assessed.
