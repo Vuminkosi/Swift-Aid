@@ -467,6 +467,7 @@ public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext) : IEl
         entity.OwnerActorId = record.OwnerActorId;
         entity.ActiveInvestigationId = record.ActiveInvestigationId;
         entity.PendingCheckpointId = record.PendingCheckpointId;
+        entity.GuidanceJson = record.GuidanceJson;
         entity.UpdatedAtUtc = record.UpdatedAtUtc;
     }
 
@@ -484,7 +485,7 @@ public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext) : IEl
         entity.ScopeEpoch,
         entity.ActiveInvestigationId,
         entity.PendingCheckpointId,
-        entity.UpdatedAtUtc);
+        entity.UpdatedAtUtc) { GuidanceJson = entity.GuidanceJson };
 
     private async Task<EllaiSessionRecord?> LoadSessionAsync(string sessionId, CancellationToken ct)
     {
@@ -538,6 +539,7 @@ public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext) : IEl
         ScopeEpoch = record.ScopeEpoch,
         ActiveInvestigationId = record.ActiveInvestigationId,
         PendingCheckpointId = record.PendingCheckpointId,
+        GuidanceJson = record.GuidanceJson,
         UpdatedAtUtc = record.UpdatedAtUtc,
     };
 }

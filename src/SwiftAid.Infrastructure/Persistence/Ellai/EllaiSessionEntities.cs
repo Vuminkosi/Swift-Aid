@@ -17,6 +17,7 @@ public sealed class EllaiSessionEntity
     public string ScopeEpoch { get; set; } = "";
     public string? ActiveInvestigationId { get; set; }
     public string? PendingCheckpointId { get; set; }
+    public string? GuidanceJson { get; set; }
     public DateTimeOffset UpdatedAtUtc { get; set; }
 }
 

@@ -71,6 +71,76 @@ public sealed class EllaiGuidanceProposalAdmissionTests
         Assert.Equal(15, (await usage.TotalsAsync("session", default)).TotalTokens);
     }
 
+    [Fact]
+    public async Task ConcurrentPlanningUsesOneDurableLeaseAndCompletedPlanIsReused()
+    {
+        var (service, store, observations, id) = await Fixture();
+        await observations.RecordAsync(new("session", "view", "context", "web", ["report.entry"], DateTimeOffset.UtcNow,
+            [new("report.entry", UiObservationState.Ready)]), default);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        var planner = new EllaiModelGuidancePlanner(new PlannerCompletion(async () =>
+        {
+            Interlocked.Increment(ref calls);
+            started.TrySetResult();
+            await release.Task;
+        }));
+        var registry = new EllaiUiRegistry();
+        EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        var usage = new InMemoryEllaiUsageStore();
+        var authority = new EllaiUiEntitlements("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>());
+        Task<EllaiGuidancePlanningResult> Run() => service.PlanAsync("session", id, authority, planner,
+            new EllaiUiDiscoveryService(), new EllaiGuidancePlanValidator(registry), new EllaiUsageLedger(), usage, default);
+        var first = Run();
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var duplicate = Run();
+        try
+        {
+            Assert.Equal("Generating", (await duplicate.WaitAsync(TimeSpan.FromSeconds(2))).Status);
+        }
+        finally { release.TrySetResult(); }
+        var accepted = await first;
+        Assert.Equal("Ready", accepted.Status);
+        var replay = await Run();
+        Assert.Equal(accepted.Plan!.PlanId, replay.Plan!.PlanId);
+        Assert.Equal(1, calls);
+        Assert.Equal(15, (await usage.TotalsAsync("session", default)).TotalTokens);
+        var durable = EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("session", default))!.GuidanceJson)!;
+        Assert.Equal("Ready", durable.Status);
+        Assert.Equal(accepted.Plan.Steps[0].StepKey, durable.CurrentStepId);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CancelledParentOrProviderFailureCannotLeaveAnActivatablePlan(bool providerFailure)
+    {
+        var (service, store, observations, id) = await Fixture();
+        await observations.RecordAsync(new("session", "view", "context", "web", ["report.entry"], DateTimeOffset.UtcNow,
+            [new("report.entry", UiObservationState.Ready)]), default);
+        var planner = new EllaiModelGuidancePlanner(new PlannerCompletion(async () =>
+        {
+            if (providerFailure) throw new InvalidOperationException("Synthetic failure");
+            var current = (await store.GetAsync("session", default))!;
+            await store.TryUpdateAsync(current with { SessionVersion = current.SessionVersion + 1, Status = "Cancelled" },
+                current.SessionVersion, default);
+        }));
+        var registry = new EllaiUiRegistry();
+        EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        var operation = service.PlanAsync("session", id,
+            new("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>()), planner,
+            new EllaiUiDiscoveryService(), new EllaiGuidancePlanValidator(registry), new EllaiUsageLedger(),
+            new InMemoryEllaiUsageStore(), default);
+        if (providerFailure) await Assert.ThrowsAsync<InvalidOperationException>(() => operation);
+        else Assert.Equal("Stale", (await operation).Status);
+        var session = (await store.GetAsync("session", default))!;
+        var checkpoint = EllaiGuidanceCheckpoint.Deserialize(session.GuidanceJson)!;
+        Assert.Null(checkpoint.Plan);
+        if (providerFailure) Assert.Equal("Failed", checkpoint.Status);
+        else Assert.Equal("Cancelled", session.Status);
+    }
+
     private sealed class PlannerCompletion(Func<Task> beforeReturn) : IEllaiTurnCompletionClient
     {
         public async Task<EllaiTurnCompletion> CompleteAsync(IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct)

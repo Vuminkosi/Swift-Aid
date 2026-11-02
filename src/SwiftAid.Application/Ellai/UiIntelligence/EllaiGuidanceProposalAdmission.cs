@@ -16,9 +16,98 @@ public sealed class EllaiGuidanceProposalAdmission(
     IEllaiSessionStore sessions, IEllaiUtteranceOutboxStore outbox,
     EllaiUiRegistry registry, IEllaiUiObservationStore observations, TimeProvider? clock = null)
 {
-    /// <summary>Generates through the existing planner, charges usage, then rechecks the durable
-    /// proposal and current UI context. The result still requires durable activation.</summary>
+    /// <summary>Leases generation inside the existing durable session and saves only
+    /// a freshly validated plan. Retries reuse an accepted plan; concurrent calls do not bill twice.</summary>
     public async Task<EllaiGuidancePlanningResult> PlanAsync(string sessionId, string proposalId,
+        EllaiUiEntitlements authority, EllaiModelGuidancePlanner planner,
+        IEllaiUiDiscoveryService discovery, EllaiGuidancePlanValidator validator,
+        EllaiUsageLedger ledger, IEllaiUsageStore usage, CancellationToken ct)
+    {
+        var admitted = await AdmitAsync(sessionId, proposalId, authority, ct).ConfigureAwait(false);
+        if (admitted.Status != "Ready" || admitted.Observation is null || admitted.Catalogue is null)
+            return new(admitted.Status);
+        var session = await sessions.GetAsync(sessionId, ct).ConfigureAwait(false);
+        if (session is null || session.Status != "Active" || session.OwnerActorId != authority.OwnerActorId
+            || session.ScopeEpoch != authority.ScopeEpoch || session.InteractionEpoch != admitted.InteractionEpoch)
+            return new("Stale");
+        var previous = EllaiGuidanceCheckpoint.Deserialize(session.GuidanceJson);
+        var sameProposal = previous?.ProposalId == proposalId && previous.ScopeEpoch == authority.ScopeEpoch
+            && previous.InteractionEpoch == admitted.InteractionEpoch;
+        var sameContext = sameProposal && previous!.ContextStamp == admitted.Observation.ContextStamp;
+        var now = (clock ?? TimeProvider.System).GetUtcNow();
+        if (sameContext && previous!.Status == "Generating" && previous.LeaseExpiresAtUtc > now)
+            return new("Generating");
+        if (sameContext && previous!.Status is "Cancelled" or "Completed")
+            return new(previous.Status);
+        if (sameContext && previous!.Status is "Ready" or "Paused" && previous.Plan is { } existing)
+        {
+            var observed = discovery.Observe(admitted.Catalogue,
+                admitted.Observation.MountedControlIds.ToHashSet(StringComparer.Ordinal),
+                admitted.Observation.ViewInstanceId, admitted.Observation.ContextStamp,
+                admitted.Observation.Platform, admitted.Observation.ReceivedAtUtc, admitted.Observation.ControlStates);
+            var draft = new EllaiGuidancePlanDraft(1, GuidancePlanStatus.Ready, admitted.Objective!,
+                GuidanceMode.Navigation, existing.Steps, [], null);
+            var accepted = validator.ValidateObserved(draft, new(admitted.Catalogue.Descriptors[0].FeatureId, [], 20),
+                authority.Features, authority.Capabilities, observed, admitted.Observation.ViewInstanceId,
+                admitted.Observation.ContextStamp, now, existing.PlanId);
+            if (accepted.Plan is not null && existing.CatalogueVersion == admitted.Catalogue.CatalogueVersion
+                && existing.UiContractVersion == admitted.Catalogue.UiContractVersion)
+                return new(previous.Status, existing);
+        }
+        var attempt = sameProposal ? previous!.GenerationAttempt + 1 : 1;
+        if (attempt > EllaiGuidancePlanValidator.MaxReplanDispatches) return new("ReplanLimit");
+        var checkpoint = new EllaiGuidanceCheckpoint(proposalId, admitted.Observation.ContextStamp,
+            authority.ScopeEpoch, admitted.InteractionEpoch, (previous?.Version ?? 0) + 1,
+            Guid.NewGuid().ToString("N"), "Generating", now.AddMinutes(2), null, null, [], [],
+            admitted.Catalogue.Descriptors[0].NavigationId) { GenerationAttempt = attempt };
+        var claimed = await sessions.TryUpdateAsync(session with
+        {
+            SessionVersion = session.SessionVersion + 1,
+            GuidanceJson = EllaiGuidanceCheckpoint.Serialize(checkpoint),
+            UpdatedAtUtc = now,
+        }, session.SessionVersion, ct).ConfigureAwait(false);
+        if (claimed is null) return new("Conflict");
+
+        EllaiGuidancePlanningResult generated;
+        try
+        {
+            using var generation = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            generation.CancelAfter(TimeSpan.FromSeconds(90));
+            generated = await GeneratePlanAsync(sessionId, proposalId, authority, planner, discovery,
+                validator, ledger, usage, generation.Token).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Release only this lease. Never overwrite a later user command or generation.
+            using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await sessions.TryUpdateAsync(claimed with
+            {
+                SessionVersion = claimed.SessionVersion + 1,
+                GuidanceJson = EllaiGuidanceCheckpoint.Serialize(checkpoint with
+                {
+                    Version = checkpoint.Version + 1, Status = "Failed",
+                }),
+            }, claimed.SessionVersion, cleanup.Token).ConfigureAwait(false);
+            throw;
+        }
+
+        var next = checkpoint with
+        {
+            Version = checkpoint.Version + 1,
+            Status = generated.Plan is null ? "Failed" : "Ready",
+            Plan = generated.Plan,
+            CurrentStepId = generated.Plan?.Steps[0].StepKey,
+        };
+        var saved = await sessions.TryUpdateAsync(claimed with
+        {
+            SessionVersion = claimed.SessionVersion + 1,
+            GuidanceJson = EllaiGuidanceCheckpoint.Serialize(next),
+            UpdatedAtUtc = (clock ?? TimeProvider.System).GetUtcNow(),
+        }, claimed.SessionVersion, ct).ConfigureAwait(false);
+        return saved is null ? new("Stale") : generated;
+    }
+
+    private async Task<EllaiGuidancePlanningResult> GeneratePlanAsync(string sessionId, string proposalId,
         EllaiUiEntitlements authority, EllaiModelGuidancePlanner planner,
         IEllaiUiDiscoveryService discovery, EllaiGuidancePlanValidator validator,
         EllaiUsageLedger ledger, IEllaiUsageStore usage, CancellationToken ct)

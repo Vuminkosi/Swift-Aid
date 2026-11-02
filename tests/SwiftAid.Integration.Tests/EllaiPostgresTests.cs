@@ -35,6 +35,44 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
     public Task InitializeAsync() => Task.CompletedTask;
 
     [EllaiPostgresFact]
+    public async Task GuidanceCheckpointSurvivesFreshContextAndRejectsStaleConcurrentUpdate()
+    {
+        var id = $"guidance-{Guid.NewGuid():N}";
+        _sessionIds.Add(id);
+        var checkpoint = new EllaiGuidanceCheckpoint("proposal", "context", "scope", 1, 1,
+            "generation", "Generating", DateTimeOffset.UtcNow.AddMinutes(2), null, null, [], [], "report");
+        var session = new EllaiSessionRecord(id, EllaiMode.Ask, "Active", 1, 1, 1, 1, 0, 12,
+            "guidance-owner", "scope", null, null, DateTimeOffset.UtcNow)
+        {
+            GuidanceJson = EllaiGuidanceCheckpoint.Serialize(checkpoint),
+        };
+        await using (var createDb = CreateDbContext())
+            await new PostgresEllaiSessionStore(createDb).CreateAsync(session, CancellationToken.None);
+
+        await using var firstDb = CreateDbContext();
+        await using var staleDb = CreateDbContext();
+        var first = new PostgresEllaiSessionStore(firstDb);
+        var stale = new PostgresEllaiSessionStore(staleDb);
+        var loaded = (await first.GetAsync(id, CancellationToken.None))!;
+        Assert.Equal("Generating", EllaiGuidanceCheckpoint.Deserialize(loaded.GuidanceJson)!.Status);
+        var staleRecord = (await stale.GetAsync(id, CancellationToken.None))!;
+        Assert.NotNull(await first.TryUpdateAsync(loaded with
+        {
+            SessionVersion = 2,
+            GuidanceJson = EllaiGuidanceCheckpoint.Serialize(checkpoint with { Version = 2, Status = "Cancelled" }),
+        }, 1, CancellationToken.None));
+        Assert.Null(await stale.TryUpdateAsync(staleRecord with { SessionVersion = 2 }, 1, CancellationToken.None));
+
+        await using var recoveredDb = CreateDbContext();
+        var recovered = new PostgresEllaiSessionStore(recoveredDb);
+        var ownerRows = await recovered.ListOwnedAsync("guidance-owner", 0, 20, CancellationToken.None);
+        var restored = EllaiGuidanceCheckpoint.Deserialize(Assert.Single(ownerRows).GuidanceJson)!;
+        Assert.Equal("Cancelled", restored.Status);
+        Assert.Equal(2, restored.Version);
+        Assert.Empty(await recovered.ListOwnedAsync("foreign-owner", 0, 20, CancellationToken.None));
+    }
+
+    [EllaiPostgresFact]
     public async Task SessionHistorySurvivesNewContextAndPagesOnlyOwnedRows()
     {
         var owner = $"history-owner-{Guid.NewGuid():N}";

@@ -10,6 +10,8 @@ public sealed class EllaiSessionEntityConfiguration : IEntityTypeConfiguration<E
         builder.ToTable("ellai_sessions", table =>
         {
             table.HasCheckConstraint("ck_ellai_sessions_version", "version > 0");
+            table.HasCheckConstraint("ck_ellai_sessions_guidance_size",
+                "guidance_json IS NULL OR octet_length(guidance_json::text) <= 131072");
             table.HasCheckConstraint("ck_ellai_sessions_status", "status IN ('Active', 'Completed', 'Cancelled')");
             table.HasCheckConstraint("ck_ellai_sessions_cycles", "cycles_used >= 0 AND cycles_allowed >= 1");
             table.HasCheckConstraint(
@@ -32,6 +34,7 @@ public sealed class EllaiSessionEntityConfiguration : IEntityTypeConfiguration<E
         builder.Property(entity => entity.ScopeEpoch).HasColumnName("scope_epoch").HasColumnType("text");
         builder.Property(entity => entity.ActiveInvestigationId).HasColumnName("active_investigation_id").HasColumnType("text");
         builder.Property(entity => entity.PendingCheckpointId).HasColumnName("pending_checkpoint_id").HasColumnType("text");
+        builder.Property(entity => entity.GuidanceJson).HasColumnName("guidance_json").HasColumnType("jsonb");
         builder.Property(entity => entity.UpdatedAtUtc).HasColumnName("updated_at_utc").HasColumnType("timestamp with time zone");
     }
 }

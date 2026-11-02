@@ -22,6 +22,9 @@ public sealed record EllaiSessionRecord(
     /// <summary>Read-only history projection; not part of session mutation or reasoning state.</summary>
     public string? HistoryPreview { get; init; }
     public int? HistoryTurnCount { get; init; }
+
+    /// <summary>Server-owned guidance checkpoint; never bound from client session updates.</summary>
+    public string? GuidanceJson { get; init; }
 }
 
 /// <summary>Accepted-turn checkpoint linkage.</summary>

@@ -1882,6 +1882,10 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("cycles_used");
 
+                    b.Property<string>("GuidanceJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("guidance_json");
+
                     b.Property<long>("InteractionEpoch")
                         .HasColumnType("bigint")
                         .HasColumnName("interaction_epoch");
@@ -1931,6 +1935,8 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                     b.ToTable("ellai_sessions", null, t =>
                         {
                             t.HasCheckConstraint("ck_ellai_sessions_cycles", "cycles_used >= 0 AND cycles_allowed >= 1");
+
+                            t.HasCheckConstraint("ck_ellai_sessions_guidance_size", "guidance_json IS NULL OR octet_length(guidance_json::text) <= 131072");
 
                             t.HasCheckConstraint("ck_ellai_sessions_ids_nonempty", "length(btrim(session_id)) > 0 AND length(btrim(scope_epoch)) > 0");
 
