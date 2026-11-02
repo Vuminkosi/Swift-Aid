@@ -27,6 +27,20 @@
     width: 100%;
 }
 
+.operations-case-queue__filter-toggle {
+    display: none;
+}
+
+@media (max-width: 1279.98px) {
+    .operations-case-queue__filter-toggle {
+        display: block;
+    }
+
+    .operations-case-queue__filters:not(.operations-case-queue__filters--expanded) {
+        display: none;
+    }
+}
+
 .operations-case-queue__mobile-filters {
     display: grid;
     gap: 0.6rem;

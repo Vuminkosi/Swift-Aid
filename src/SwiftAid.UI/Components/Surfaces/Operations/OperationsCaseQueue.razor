@@ -15,8 +15,14 @@
         <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">@Actions</MudStack>
     </div>
 
-    <MudHidden Breakpoint="Breakpoint.MdAndDown">
-    <div class="operations-case-queue__filters" role="group" aria-label="Filter cases">
+    <div class="operations-case-queue__filter-toggle">
+        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.FilterList"
+                   OnClick="ToggleAdvancedFilters" aria-expanded="@(_showAdvancedFilters ? "true" : "false")"
+                   aria-controls="case-queue-advanced-filters">
+            @(_showAdvancedFilters ? "Hide filters" : "More filters")
+        </MudButton>
+    </div>
+    <div id="case-queue-advanced-filters" class="operations-case-queue__filters @(_showAdvancedFilters ? "operations-case-queue__filters--expanded" : null)" role="group" aria-label="Filter cases">
         @if (FilterOptions?.CanFilterSearch != false)
         {
             <MudTextField T="string" Value="@Query.Search" ValueChanged="SearchChangedAsync" Immediate="true"
@@ -103,8 +109,6 @@
                            aria-label="Refresh case queue" data-ellai-control="case-list.refresh" data-bonboarding-anchor="ellai-case-list-refresh" />
         }
     </div>
-    </MudHidden>
-
     <MudHidden Breakpoint="Breakpoint.MdAndDown" Invert="true">
         <div class="operations-case-queue__mobile-filters">
             @if (FilterOptions?.CanFilterSearch != false)
@@ -298,6 +302,8 @@
         string? ObservationPreview = null);
 
     private string? _copyStatus;
+    private bool _showAdvancedFilters;
+    private void ToggleAdvancedFilters() => _showAdvancedFilters = !_showAdvancedFilters;
     private bool _copySucceeded;
 
     [Parameter] public string Title { get; set; } = "Case management";
