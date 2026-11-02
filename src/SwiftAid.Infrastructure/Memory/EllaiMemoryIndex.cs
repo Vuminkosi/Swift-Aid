@@ -21,7 +21,7 @@ public sealed record EllaiMemoryPoint(
 /// is never authorization and must be rechecked against PostgreSQL before
 /// use. Vectors are caller-supplied (no encoder here); without an encoder
 /// the index still supports exact-ID lookup. Keys travel in headers only.</summary>
-public sealed class EllaiMemoryIndex(HttpClient http, string endpoint, string apiKey, string collection)
+public sealed partial class EllaiMemoryIndex(HttpClient http, string endpoint, string apiKey, string collection)
 {
     public const int DefaultVectorSize = 128;
 

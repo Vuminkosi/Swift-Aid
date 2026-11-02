@@ -112,6 +112,63 @@ public sealed class EllaiMemoryIndexTests
     }
 
     [Fact]
+    public async Task ExactWritesContainNoEmbeddingOrNarrative()
+    {
+        var handler = new CaptureHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.OK));
+        var index = Index(handler);
+        Assert.True(await index.EnsureExactCollectionAsync(CancellationToken.None));
+        Assert.True(await index.UpsertExactAsync(new("m", "s", "e", "t", "v1", DateTimeOffset.UtcNow.AddMinutes(5)), CancellationToken.None));
+        using var collection = System.Text.Json.JsonDocument.Parse(handler.Seen[0].Body);
+        Assert.Empty(collection.RootElement.GetProperty("vectors").EnumerateObject());
+        using var point = System.Text.Json.JsonDocument.Parse(handler.Seen[1].Body);
+        Assert.Empty(point.RootElement.GetProperty("points")[0].GetProperty("vector").EnumerateObject());
+        Assert.DoesNotContain("summary", handler.Seen[1].Body);
+        Assert.All(handler.Seen, request => Assert.True(request.HasKey));
+    }
+
+    [Fact]
+    public async Task ExactLookupRejectsMismatchedRemotePayload()
+    {
+        var handler = new CaptureHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"result":{"points":[{"payload":{"memory_id":"m","session_id":"another","scope_epoch":"e","encoding":"exact/1"}}]}}""")
+        });
+        Assert.Null(await Index(handler).FindExactAsync("m", "s", "e", CancellationToken.None));
+        Assert.Contains("expires_at", Assert.Single(handler.Seen).Body);
+    }
+
+    [LiveFact]
+    public async Task LiveExactRoundTripUsesNoVectorsAndIsolatesScope()
+    {
+        var endpoint = Environment.GetEnvironmentVariable("QDRANT_TEST_ENDPOINT")!;
+        var key = Environment.GetEnvironmentVariable("QDRANT_TEST_API_KEY") ?? "";
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        var collection = "ellai-exact-test-" + Guid.NewGuid().ToString("N");
+        var index = new EllaiMemoryIndex(http, endpoint, key, collection);
+        try
+        {
+            Assert.True(await index.EnsureExactCollectionAsync(CancellationToken.None));
+            var reference = new EllaiExactMemoryReference("m", "s", "e", "topic", "version-1", DateTimeOffset.UtcNow.AddMinutes(5));
+            Assert.True(await index.UpsertExactAsync(reference, CancellationToken.None));
+            Assert.Equal("version-1", (await index.FindExactAsync("m", "s", "e", CancellationToken.None))?.SourceVersion);
+            Assert.Null(await index.FindExactAsync("m", "other", "e", CancellationToken.None));
+            Assert.Null(await index.FindExactAsync("m", "s", "other", CancellationToken.None));
+            Assert.True(await index.UpsertExactAsync(reference with { SessionId = "other", SourceVersion = "other-version" }, CancellationToken.None));
+            Assert.Equal("version-1", (await index.FindExactAsync("m", "s", "e", CancellationToken.None))?.SourceVersion);
+            Assert.True(await index.UpsertExactAsync(reference with { SourceVersion = "version-2" }, CancellationToken.None));
+            Assert.Equal("version-2", (await index.FindExactAsync("m", "s", "e", CancellationToken.None))?.SourceVersion);
+            Assert.False(await index.UpsertExactAsync(reference with { ExpiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(-1) }, CancellationToken.None));
+        }
+        finally
+        {
+            using var delete = new HttpRequestMessage(HttpMethod.Delete, endpoint.TrimEnd('/') + "/collections/" + collection + "-exact");
+            delete.Headers.TryAddWithoutValidation("api-key", key);
+            using var result = await http.SendAsync(delete);
+            Assert.True(result.IsSuccessStatusCode);
+        }
+    }
+
+    [Fact]
     public async Task MissingEndpointDisablesWithoutCalling()
     {
         var handler = new CaptureHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.OK));
