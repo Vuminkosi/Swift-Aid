@@ -1,8 +1,10 @@
 # Requirement and scenario traceability snapshot
 
-Source of truth: [spec.md](../spec.md) v1.4 and [implementation.md](../implementation.md) v2.4. The current pair contains 365 unique SA-* requirements, 76 AT-* scenarios, and 44 implementation tasks. This ledger has not executed those scenarios. See the source §22 crosswalk for all existing families and owners.
+Current authority is spec v1.5 and implementation v2.5. The 365 SA / 76 AT / 44 task totals are unreconciled historical counts from the older v1.4/v2.4 snapshot; do not treat them as current totals or evidence that any scenario passed.
 
-Operative current-pair labels have been aligned to v1.4/v2.4; historical source-basis references remain identified as historical. The metadata-only correction is recorded in [SPEC-ALIGNMENT.md](SPEC-ALIGNMENT.md) and did not change the requirement crosswalk.
+Source of truth: [spec.md](../spec.md) v1.5 and [implementation.md](../implementation.md) v2.5. The older requirement and task totals have not been reconciled to this pair. This ledger has not executed those scenarios.
+
+The source-alignment note below describes the older v1.4/v2.4 snapshot and is retained as history; requirement crosswalk status remains unverified until reconciled to v1.5/v2.5.
 
 ## Added requirement-family ownership
 

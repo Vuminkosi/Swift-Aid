@@ -1,6 +1,8 @@
 # Task ownership snapshot
 
-Source contract: [implementation.md](../implementation.md) v2.4; product criteria: [spec.md](../spec.md) v1.4. Snapshot: 27 October 2026. The master orchestrator retains global task, contract, and integration authority. Assignment rows below are a status snapshot, not exclusive path reservations; implementation lane must maintain active path ownership in its handoffs. No ownership is inferred for future work.
+Current authority is spec v1.5 and implementation v2.5. The dated owner assignments below are historical and require reconciliation against current handoffs; do not use them to reserve shared paths.
+
+Source contract: [implementation.md](../implementation.md) v2.5; product criteria: [spec.md](../spec.md) v1.5. Snapshot: 27 October 2026. The master orchestrator retains global task, contract, and integration authority. Assignment rows below are a status snapshot, not exclusive path reservations; implementation lane must maintain active path ownership in its handoffs. No ownership is inferred for future work.
 
 P0.1, P0.3, P1.1, and P1.2/P1.2A have observed implementation assignments or results in the current snapshot. Other source tasks have no observed implementation owner recorded here. This table is not an exclusive path reservation; update exact paths from current lane handoffs. The documentation lane owns docs/ records for this task; it does not own code or the source documents.
 

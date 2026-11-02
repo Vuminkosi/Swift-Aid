@@ -1,10 +1,28 @@
 # Product acceptance register
 
-Source of truth: spec.md v1.4, §§26–27; implementation.md v2.4, §18.4 and task contracts. Snapshot: 26 October 2026. The 76 scenarios below are defined in the product specification; this ledger records no execution evidence yet.
+Current authority is spec v1.5 and implementation v2.5. The scenario inventory below is retained pending reconciliation to this pair; the prior 76-scenario count belongs to v1.4/v2.4.
 
-Operative current-pair labels have been aligned to v1.4/v2.4; historical source-basis references remain identified as historical. The metadata-only correction is recorded in [SPEC-ALIGNMENT.md](SPEC-ALIGNMENT.md) and did not change product acceptance scope.
+Source of truth: spec.md v1.5, sections 26-27; implementation.md v2.5, section 18.4 and task contracts. Snapshot: 2 November 2026. The current product specification defines scenarios through AT-86; existing status entries do not constitute execution evidence.
+
+The source-alignment note below is historical v1.4/v2.4 context; acceptance scope is governed by the current v1.5/v2.5 source pair.
 
 **Evidence rule:** each result must name the test/device/provider, command or procedure, source revision, output/evidence path, and verdict. A mock or OFF-gate result cannot stand in for live provider, Android, licensing, rights, professional, or positive optional-feature evidence.
+
+## Current baseline run
+
+Repository baseline `865964dbe9664a557fd0f0e303af03e115f22839`, branch `interactive-ellai`; focused endpoint correction committed as `5489f2c20ef62d8b9033d901358b943baf4de4a4`. Full commands and limitations are recorded in [BASELINE-AUDIT.md](BASELINE-AUDIT.md).
+
+| Check | Result |
+|---|---|
+| Domain/Application/Client suites | PASS in the solution baseline: Domain 83, Application 867 passed and 3 skipped, Client 293. |
+| Full Integration suite after correction | PASS: 602 passed, 0 failed, 226 skipped. |
+| Focused Ellai authorization suite after commit | PASS: 20 passed, 0 failed, 0 skipped. |
+| UI suite | FAIL: 520 passed, 7 failed; three display assertions and four renderer exceptions remain open. |
+| Android Release build | PASS: 0 warnings, 0 errors; device execution NOT VERIFIED. |
+| Python worker suite | PASS: 59 passed, 3 skipped. |
+| Compose configuration | PASS: parse only; provider workflows NOT VERIFIED. |
+| Full solution / iOS | FAIL: missing local GoogleDataTransport package assets (`MSB3030`). |
+| Browser guest-storage harness | NOT VERIFIED: local Playwright package unavailable. |
 
 | ID | Scenario | Status |
 |---|---|---|
@@ -84,6 +102,16 @@ Operative current-pair labels have been aligned to v1.4/v2.4; historical source-
 | AT-74 | Interruption, restart and stale context | NOT RUN |
 | AT-75 | Approval/receipt and loop budget | NOT RUN |
 | AT-76 | Memory and tenant isolation across turns | NOT RUN |
+| AT-77 | Microphone denied | NOT RUN |
+| AT-78 | Voice Q&A and duplicate finalized turns | NOT RUN |
+| AT-79 | Barge-in and checkpoint revisit | NOT RUN |
+| AT-80 | Cancellation with queued audio | NOT RUN |
+| AT-81 | Authentication or consent revoked mid-speech | NOT RUN |
+| AT-82 | Speech provider, network, or budget outage | NOT RUN |
+| AT-83 | TTS checkpoint rights gate | NOT RUN |
+| AT-84 | Web/Android PCM conformance | NOT RUN |
+| AT-85 | Speech is not action proof | NOT RUN |
+| AT-86 | Accessible conversation | NOT RUN |
 
 P8.6 evidence remains NOT VERIFIED for AT-73–AT-76. The source requires separate model turns, durable checkpoint/restart behavior, stale/version and permission checks, approval/receipt idempotency, tenant-scoped memory, bounded cycles, and one real supported Meta multi-turn smoke with synthetic case data. Simulated calls and real provider calls must be identified separately. No P8.6 smoke or behavioral test result is recorded here.
 ## Mandatory release boundaries
