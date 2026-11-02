@@ -5,6 +5,31 @@ namespace SwiftAid.Application.Tests.Ellai;
 
 public sealed class EllaiObservedGuidanceTests
 {
+    [Fact]
+    public void CapturePlanCarriesAllInputsForItsSectionsIncludingConditionalFields()
+    {
+        var (registry, _, _) = Create();
+        var ids = new[] { "report.subject", "report.narrative", "report.time-location", "report.confirmations" };
+        var steps = ids.Select((id, index) =>
+        {
+            var control = EllaiReportUiManifest.All.Single(item => item.ControlId == id);
+            return new GuidancePlanStep("s" + index, id, control.ObjectiveId!, PlanStepBehavior.GuideHuman,
+                null, null, [], [], "Complete the applicable section inputs.", index + 1 < ids.Length ? "s" + (index + 1) : null);
+        }).ToArray();
+        var draft = new EllaiGuidancePlanDraft(1, GuidancePlanStatus.Ready, "Capture report", GuidanceMode.Navigation, steps, [], null);
+        var result = new EllaiGuidancePlanValidator(registry).Validate(draft, new("report", [], 20),
+            new HashSet<string> { "report" }, new HashSet<string>(), "plan", 1, 0, 0);
+        Assert.NotNull(result.Plan);
+        var fields = result.Plan.InputsByStep.Values.SelectMany(inputs => inputs).ToArray();
+        Assert.Equal(17, fields.Length);
+        Assert.Equal(fields.Length, fields.Select(field => field.InputId).Distinct().Count());
+        Assert.Contains(fields, field => field.InputId == "report.animal-scope" && field.Required && field.ApplicableWhen.Contains("Animal"));
+        Assert.Contains(fields, field => field.InputId == "report.utc-offset" && field.Required && field.ApplicableWhen.Contains("Exact"));
+        Assert.Contains(fields, field => field.InputId == "report.other-observations" && !field.Required);
+        Assert.Equal(3, result.Plan.InputsByStep["s3"].Count);
+        Assert.Equal(steps.Length, result.Plan.Steps.Count); // Inventory does not invent extra steps or validation gates.
+    }
+
     [Theory]
     [InlineData("report.entry", "open-report-form", "alternative", true)]
     [InlineData("unregistered", "open-report-form", "alternative", false)]

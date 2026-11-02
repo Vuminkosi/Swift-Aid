@@ -244,6 +244,29 @@ public sealed partial class EllaiSurfaceLogicTests
     }
 
     [Fact]
+    public async Task NewGuidanceRequestDuringPlanningIsNotLostWhenOlderPlanFinishes()
+    {
+        var pending = new TaskCompletionSource<EllaiGuidancePlanDto?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        var client = new FakeReviewClient { GuidancePlanHandler = () => ++calls == 1
+            ? pending.Task : Task.FromResult<EllaiGuidancePlanDto?>(new("NeedsObservation")) };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        await InvokeAsync(host, "ObserveGuidanceProposal", GuidanceTurn(), true);
+        var replacement = GuidanceTurn() with { ClientUtteranceId = "new-turn", Sequence = 2,
+            UiProposals = [GuidanceTurn().UiProposals[0] with { ProposalId = "proposal-2" }] };
+        await InvokeAsync(host, "ObserveGuidanceProposal", replacement, true);
+        Assert.Equal(1, client.GuidancePlanCalls);
+        pending.SetResult(new("NeedsObservation"));
+        for (var attempt = 0; attempt < 30 && client.GuidancePlanCalls < 2; attempt++)
+        {
+            await Task.Delay(10);
+            await host.Dispatcher.InvokeAsync(() => Task.CompletedTask);
+        }
+        Assert.Equal(2, client.GuidancePlanCalls);
+        Assert.Equal("proposal-2", GetField<string?>(host, "_guidanceProposalId"));
+    }
+
+    [Fact]
     public async Task ActiveGuidanceSurvivesAnOrdinaryFollowupButNewGuidanceReplacesIt()
     {
         using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), string.Empty);

@@ -55,8 +55,44 @@ public static class EllaiReportUiManifest
                 Purpose(controlId), elementKind == "Input" ? "report-field" : null,
                 controlId == "report.submit" ? ["Report validation and processing confirmation must succeed."] : [],
                 controlId is "report.subject" or "report.narrative" or "report.time-location" ? ["proof-ui-validated"] :
-                    proofPolicyId is null ? [] : [proofPolicyId])
+                    proofPolicyId is null ? [] : [proofPolicyId]) { Inputs = InputsFor(controlId) }
         };
+
+    private static IReadOnlyList<EllaiUiInputDescriptor> InputsFor(string controlId) => controlId switch
+    {
+        "report.subject" =>
+        [
+            new("report.subject-kind", "Human health or animal health", "selection", true, "Always", "Choose one concern type."),
+            new("report.animal-scope", "Individual, herd, flock or other group", "selection", true, "Animal health selected", "Choose the reported animal scope; do not infer it.")
+        ],
+        "report.narrative" =>
+        [
+            new("report.original-statement", "Describe what happened", "multiline-text", false, "Details page", "At most 6000 characters; a narrative or at least one observation is required."),
+            new("report.observation-choices", "Reported observation choices", "multiple-selection", false, "Human or animal choices follow the selected subject", "Select only reported observations. Unselected does not mean absent."),
+            new("report.other-observations", "Add other observations", "multiline-text", false, "Details page", "At most 20000 characters, 20 observations and 1000 characters per observation; a narrative or observation is required.")
+        ],
+        "report.time-location" =>
+        [
+            new("report.time-precision", "When did this happen?", "selection", true, "Details page", "Unknown, approximate date, date only or exact time; preserve uncertainty."),
+            new("report.occurrence-date", "Reported date", "date", true, "Time precision is not Unknown", "Provide the reported date."),
+            new("report.occurrence-time", "Reported time", "time", true, "Time precision is Exact", "A valid time and UTC offset are required together."),
+            new("report.utc-offset", "Time difference from UTC", "text", true, "Time precision is Exact", "Provide a valid UTC offset, such as +02:00, matching the reported time."),
+            new("report.occurrence-country", "Country where the event happened", "selection", true, "Details page", "Select a country from the current application catalogue."),
+            new("report.place-search", "Search for the place", "place-selection", false, "The place registry is available", "Select a reported place; do not infer device location."),
+            new("report.region", "Region", "text", false, "Manual place fields are shown", "At most 200 characters; leave unknown names blank."),
+            new("report.area", "Area or district", "text", false, "Manual place fields are shown", "At most 200 characters; leave unknown names blank."),
+            new("report.locality", "Locality", "text", false, "Manual place fields are shown", "At most 200 characters; leave unknown names blank.")
+        ],
+        "report.confirmations" =>
+        [
+            new("report.review-confirmed", "Review the original statement and details", "checkbox", true, "Review page", "The user must explicitly confirm the review."),
+            new("report.country-confirmed", "Confirm the event country", "checkbox", true, "Review page with a supported country", "The user must explicitly confirm the country."),
+            new("report.processing-confirmed", "Confirm report-handling terms", "checkbox", true, "Current processing policy is available", "The user must explicitly acknowledge the current terms; speech and countdowns are not confirmation.")
+        ],
+        "report.voice-note" =>
+        [new("report.original-voice-note", "Original voice note", "audio-attachment", false, "The existing attachment control is available", "Use the existing attachment workflow and its limits; do not infer attachment completion.")],
+        _ => []
+    };
 
     private static string Purpose(string controlId) => controlId switch
     {

@@ -17,6 +17,25 @@ public sealed record ParsedModelTurn(EllaiModelTurn? Turn, string? Error);
 /// still pass <see cref="EllaiDecisionValidator"/> in the runner.</summary>
 public static class EllaiModelTurnParser
 {
+    /// <summary>Bounded diagnostics: never include model-supplied tool names, IDs or arguments in logs.</summary>
+    public static string DiagnosticCode(string? error) => error switch
+    {
+        "The reply was empty." => "empty",
+        "The reply was not a JSON object." => "invalid-json",
+        "The reply must be one JSON object." => "invalid-root",
+        "The reply must contain exactly one of tool_calls or final_decision." => "turn-envelope",
+        "tool_calls must be an array." => "tool-array",
+        "Each tool call must be an object." => "tool-object",
+        "Each tool call needs an id of 1..64 characters." => "tool-id",
+        "Each tool call needs a name." => "tool-name",
+        _ when error?.StartsWith("Unknown tool '", StringComparison.Ordinal) == true => "unregistered-tool",
+        _ when error?.StartsWith("Duplicate tool call id '", StringComparison.Ordinal) == true => "duplicate-tool-id",
+        _ when error?.EndsWith("must be a string.", StringComparison.Ordinal) == true => "tool-argument-type",
+        _ when error?.Contains("arguments", StringComparison.Ordinal) == true => "tool-arguments",
+        _ when error?.StartsWith("final_decision", StringComparison.Ordinal) == true => "decision-shape",
+        _ => "invalid-contract"
+    };
+
     private static readonly JsonSerializerOptions Json = CreateOptions();
 
     private static JsonSerializerOptions CreateOptions()

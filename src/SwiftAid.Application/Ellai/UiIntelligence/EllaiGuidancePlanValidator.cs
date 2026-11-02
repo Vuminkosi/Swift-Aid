@@ -154,7 +154,12 @@ public sealed class EllaiGuidancePlanValidator(EllaiUiRegistry registry)
             draft.Steps.Select(s => s.StepKey).ToList(),
             Array.Empty<string>(), Array.Empty<string>(), steps,
             Array.Empty<string>(),
-            UiRegistrySnapshotCatalogue(snapshot), snapshot.UiContractVersion) { Suggestions = draft.Suggestions };
+            UiRegistrySnapshotCatalogue(snapshot), snapshot.UiContractVersion)
+        {
+            Suggestions = draft.Suggestions,
+            InputsByStep = steps.ToDictionary(step => step.StepKey,
+                step => byId[step.ControlId].Semantics?.Inputs ?? (IReadOnlyList<EllaiUiInputDescriptor>)[])
+        };
         return (plan, errors);
     }
 

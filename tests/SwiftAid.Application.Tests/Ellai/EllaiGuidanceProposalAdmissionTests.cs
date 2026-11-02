@@ -346,6 +346,10 @@ public sealed class EllaiGuidanceProposalAdmissionTests
     {
         public async Task<EllaiTurnCompletion> CompleteAsync(IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct)
         {
+            var context = string.Join("\n", messages.Select(message => message.Content));
+            Assert.Contains("report.utc-offset", context);
+            Assert.Contains("report.other-observations", context);
+            Assert.Contains("report.country-confirmed", context);
             await beforeReturn();
             return new("""
                 {"schemaVersion":1,"status":"Ready","objective":"Create a report","mode":"Navigation",

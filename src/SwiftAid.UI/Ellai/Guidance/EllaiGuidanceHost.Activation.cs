@@ -19,6 +19,7 @@ public partial class EllaiGuidanceHost
     private readonly EllaiNavigationTrail _navigationTrail = new();
     private string? _guidanceNotice;
     private bool _preparingGuidance;
+    private string? _queuedGuidanceProposalId;
     private IBonboardingTourSession? _generatedTour;
     private ValidatedGuidancePlan? _generatedPlan;
     private bool _advancingValidatedInput;
@@ -402,7 +403,14 @@ public partial class EllaiGuidanceHost
 
     private async Task StartProposedGuidanceAsync()
     {
-        if (_preparingGuidance || _sessionView is not { Status: "Active" } session ||
+        if (_preparingGuidance)
+        {
+            // Preserve the latest explicit start while the prior provider request settles.
+            // Never replay an obsolete proposal or start concurrent planning requests.
+            _queuedGuidanceProposalId = _guidanceProposalId;
+            return;
+        }
+        if (_sessionView is not { Status: "Active" } session ||
             _guidanceProposalId is not { } proposalId || _generatedTour is not null) return;
         _preparingGuidance = true;
         _guidanceNotice = null;
@@ -655,7 +663,15 @@ public partial class EllaiGuidanceHost
         finally
         {
             _preparingGuidance = false;
-            if (!_uiObservationLifetime.IsCancellationRequested) await InvokeAsync(StateHasChanged);
+            var queued = _queuedGuidanceProposalId;
+            _queuedGuidanceProposalId = null;
+            if (!_uiObservationLifetime.IsCancellationRequested)
+            {
+                await InvokeAsync(StateHasChanged);
+                if (queued is not null && queued != proposalId && queued == _guidanceProposalId &&
+                    _sessionView?.SessionId == session.SessionId)
+                    await StartProposedGuidanceAsync();
+            }
         }
     }
 }

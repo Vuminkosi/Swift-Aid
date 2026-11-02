@@ -174,4 +174,6 @@ public sealed record ValidatedGuidancePlan(
     string UiContractVersion)
 {
     public IReadOnlyDictionary<string, GuidanceStepSuggestion> Suggestions { get; init; } = new Dictionary<string, GuidanceStepSuggestion>();
+    public IReadOnlyDictionary<string, IReadOnlyList<EllaiUiInputDescriptor>> InputsByStep { get; init; }
+        = new Dictionary<string, IReadOnlyList<EllaiUiInputDescriptor>>();
 }

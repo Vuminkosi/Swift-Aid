@@ -55,8 +55,11 @@ public sealed partial class EllaiGuidanceProposalAdmission(
             if (accepted.Plan is not null && existing.CatalogueVersion == admitted.Catalogue.CatalogueVersion
                 && existing.UiContractVersion == admitted.Catalogue.UiContractVersion)
             {
-                var normalized = existing with { Steps = accepted.Plan.Steps };
-                if (!sameContext || !existing.Steps.SequenceEqual(normalized.Steps))
+                var normalized = existing with { Steps = accepted.Plan.Steps, InputsByStep = accepted.Plan.InputsByStep };
+                var sameInputs = existing.InputsByStep.Count == normalized.InputsByStep.Count &&
+                    normalized.InputsByStep.All(pair => existing.InputsByStep.TryGetValue(pair.Key, out var inputs) &&
+                        inputs.SequenceEqual(pair.Value));
+                if (!sameContext || !existing.Steps.SequenceEqual(normalized.Steps) || !sameInputs)
                 {
                     var rebound = previous with { ContextStamp = admitted.Observation.ContextStamp,
                         InteractionEpoch = admitted.InteractionEpoch, Version = previous.Version + 1, Plan = normalized };

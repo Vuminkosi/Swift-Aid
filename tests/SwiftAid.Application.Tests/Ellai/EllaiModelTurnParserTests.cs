@@ -7,6 +7,16 @@ namespace SwiftAid.Application.Tests.Ellai;
 [Trait("Task", "ELL-T06")]
 public sealed class EllaiModelTurnParserTests
 {
+    [Theory]
+    [InlineData("Unknown tool 'private-model-value'.", "unregistered-tool")]
+    [InlineData("Tool call 'private-id' argument 'private-field' must be a string.", "tool-argument-type")]
+    [InlineData("The reply must contain exactly one of tool_calls or final_decision.", "turn-envelope")]
+    [InlineData("The reply was not a JSON object.", "invalid-json")]
+    public void DiagnosticsAreBoundedAndDoNotEchoProviderValues(string error, string expected)
+    {
+        Assert.Equal(expected, EllaiModelTurnParser.DiagnosticCode(error));
+    }
+
     private const string DecisionJson = """
         {"schemaVersion":2,"kind":"Answer","displayText":"Queue reviewed.","spokenText":"Done.",
          "claims":[{"claimId":"c1","text":"Queue has 3 items.","kind":"Observed",

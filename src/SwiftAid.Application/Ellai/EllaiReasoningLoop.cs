@@ -159,6 +159,11 @@ public sealed class EllaiReasoningLoop(
                 "For a discovered supported feature, propose a StartGuidance UI intent with featureId=ellai.guidance, " +
                 "resourceId=null, controlId=null and arguments containing only feature (the discovered feature ID) and objective (the user's goal). " +
                 "The application validates and prepares the plan. Do not invent routes, anchors, completed actions or say the tour has started before application confirmation. " +
+                "An explicit tour/demo/guidance request already authorizes starting read-only guidance. Emit the intent on that turn; " +
+                "do not ask Ready?, Want me to start?, or demand another confirmation. A yes/ready/let's go reply accepts the existing request. " +
+                "When stored guidance is Ready or Paused and the user asks to start that same tour, use ControlGuidance command=resume " +
+                "to restore the existing plan instead of repeatedly proposing a new tour. If Generating, explain that preparation is in progress. " +
+                "This does not authorize form submission, tool approvals or consequential operations. " +
                 "If discovery returns no eligible feature, explain the limitation without pretending to navigate. " +
                 "For an explicit request to pause, resume or cancel existing guidance, propose ControlGuidance with featureId=ellai.guidance, " +
                 "resourceId=null, controlId=null and exactly one argument command=pause, resume or cancel. " +
@@ -255,7 +260,7 @@ public sealed class EllaiReasoningLoop(
             provisionalAnswerRejected |= emittedText;
             var rejected = parsed.Turn?.FinalDecision;
             // Shape/count diagnostics only: never log provider prose, claim IDs or evidence payloads.
-            var diagnostic = rejected is null ? "InvalidModelTurn" :
+            var diagnostic = rejected is null ? $"InvalidModelTurn: {EllaiModelTurnParser.DiagnosticCode(parsed.Error)}; truncated={completion.FinishReason == "length"}" :
                 $"InvalidDecision: schema={rejected.SchemaVersion}; displayLength={rejected.DisplayText?.Length ?? 0}; " +
                 $"claimsNull={rejected.Claims is null}; nullClaims={rejected.Claims?.Count(c => c is null) ?? 0}; " +
                 $"ungroundedClaims={rejected.Claims?.Count(c => c is not null && c.Kind is not (ClaimKind.Unknown or ClaimKind.Proposed) && (c.Evidence is null || c.Evidence.Count == 0)) ?? 0}; " +

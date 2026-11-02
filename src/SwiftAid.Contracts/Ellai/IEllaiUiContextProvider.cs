@@ -13,7 +13,14 @@ public sealed record EllaiUiSemantics(
     string Purpose,
     string? InputType,
     IReadOnlyList<string> ValidationRequirements,
-    IReadOnlyList<string> CompletionSignals);
+    IReadOnlyList<string> CompletionSignals)
+{
+    public IReadOnlyList<EllaiUiInputDescriptor> Inputs { get; init; } = [];
+}
+
+/// <summary>Static input inventory for planning. Contains no entered values or completion claims.</summary>
+public sealed record EllaiUiInputDescriptor(string InputId, string Label, string InputType,
+    bool Required, string ApplicableWhen, string Validation);
 
 /// <summary>Static capabilities shared by the owning component and trusted server catalogue.</summary>
 public sealed record EllaiUiManifest(
