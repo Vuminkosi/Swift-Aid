@@ -347,6 +347,11 @@ public sealed class CommunitySessionEndpointTests
         var session = JsonSerializer.Deserialize<PublicSessionView>(body, JsonOptions);
         Assert.NotNull(session);
         Assert.Equal("Dry-season holding hygiene", session!.Title);
+        using var document = JsonDocument.Parse(body);
+        Assert.False(document.RootElement.TryGetProperty("createdByActorId", out _));
+        Assert.False(document.RootElement.TryGetProperty("reviewedByActorId", out _));
+        Assert.False(document.RootElement.TryGetProperty("selfReviewAcknowledged", out _));
+        Assert.False(document.RootElement.TryGetProperty("attendees", out _));
     }
 
     [Fact]

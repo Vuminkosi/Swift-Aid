@@ -120,13 +120,23 @@ The shared C# and browser JavaScript capture gates reject a frame that would exc
 
 Source anchors: `src/SwiftAid.Application/Ellai/Tools/EllaiToolBroker.cs` (`EllaiToolNames`, `TryResolveCanonical`, `ToolDescriptions`, `InvokeAsync`); `src/SwiftAid.Application/Ellai/UiIntelligence/EllaiUiRegistry.cs`; `src/SwiftAid.Infrastructure/Persistence/Ellai/` (durable session/topic/receipt stores). The catalog exposes a concrete crosswalk for the broker surface, while remaining gaps include formal per-tool argument/result schemas, exhaustive test mapping, and source-to-consumer/persistence linkage for every evidence reference. These gaps keep SW-01-004 partial.
 
+## Public and recipient-scoped projections - 3 November 2026
+
+| Projection | Route / producer | Contract and privacy boundary | Evidence |
+|---|---|---|---|
+| Public community session | Anonymous `GET /public/v1/sessions` and `/{sessionId}` in `PublicSessionEndpoints` | `PublicSessionView`; separate from staff `CommunitySessionView`. It excludes creator/reviewer actor IDs, self-review acknowledgement, attendee data and staff audit fields. Calendar and invitation routes render only service-approved public sessions. | `CommunitySessionEndpointTests` covers anonymous list/detail/calendar/invitation, unknown-session 404 and disabled-pipeline behavior. The serialized detail test now explicitly asserts staff-only and attendee fields are absent. |
+| Notification feed | Authenticated `GET /api/v1/notifications` in `NotificationsController` | Recipient-authorized `NotificationFeedPage` containing `NotificationItemView`; display text is derived from a closed notification kind. It carries no subject, condition, location or media details; opaque resource reference remains a minimized navigation reference. This is private staff API data, not an anonymous public projection. | Source inspection confirms staff policy, current actor extraction, bounded page size and the minimized DTO; route-level runtime serialization was not exercised in this slice. |
+| Surveillance area aggregate | Authenticated `GET /api/v1/surveillance/area-aggregates` in `MapAggregateEndpoints` | `SurveillanceAggregateResult` / `SurveillanceAggregateArea`; route requires staff authorization. Area rows contain aggregate counts only, no case/observation identifiers or coordinates. Suppressed rows must have null counts and denominator plus a reason; caller-readable cases only. | `MapAggregateEndpointTests` covers authorization, anonymous rejection, disabled service, filters and response; serialized test now asserts case/observation identifiers and coordinates are absent. Application/PostgreSQL aggregate query evidence remains in its focused suites. |
+
+PASS - `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter "FullyQualifiedName~CommunitySessionEndpointTests|FullyQualifiedName~MapAggregateEndpointTests" --logger 'console;verbosity=minimal'` - 46 passed, 0 skipped. This covers these session and aggregate endpoint scenarios, not every public Gateway projection. Public intake, additional endpoint DTOs and full notification wire/privacy behavior remain to be catalogued or verified.
+
 ## Gaps and follow-up
 
 - Build a generated or maintained crosswalk of every command/event/job/tool/audio/UI/public-projection type to schema version, authoritative owner, producer, consumer, persistence form, compatibility policy and relevant tests.
 - Reconcile event enum members and serializer registrations against the versioned event list required by `implementation.md` section 8; source mapping alone does not prove the required event families are fully implemented.
 - Document the worker job type registry and distinguish envelope validation from execution, durable acknowledgement and retry behavior.
 - Trace each audio/session version from client capture through Gateway, storage, response preparation and cancellation/error paths.
-- Verify projection contracts and serialization/privacy boundaries against their routes and consumers.
+- Complete the public intake and remaining endpoint projection inventory; add focused serialization/privacy assertions where route tests do not currently prove the DTO boundary.
 - Add formal per-tool argument/result schemas and map each tool to focused authorization, denial, truncation, and persistence tests; the source registry/dispatch inventory above is not a substitute for those checks.
 
 The v1 event schema was changed in this reconciliation; no migration or package change was needed. Current ownership for broader shared contract/schema work remains to be confirmed from active handoffs (BL-005).

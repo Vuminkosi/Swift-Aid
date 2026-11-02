@@ -60,6 +60,12 @@ public sealed class MapAggregateEndpointTests
         var area = Assert.Single(result.Areas);
         Assert.Equal("SZ", area.AreaCode);
         Assert.True(area.IsValid);
+        using var document = JsonDocument.Parse(body);
+        var serializedArea = Assert.Single(document.RootElement.GetProperty("areas").EnumerateArray());
+        Assert.False(serializedArea.TryGetProperty("caseId", out _));
+        Assert.False(serializedArea.TryGetProperty("latitude", out _));
+        Assert.False(serializedArea.TryGetProperty("longitude", out _));
+        Assert.False(serializedArea.TryGetProperty("observationId", out _));
         Assert.Equal(TimeSpan.FromDays(30), host.Service.LastWindow);
         Assert.Null(host.Service.LastRegionCode);
     }
