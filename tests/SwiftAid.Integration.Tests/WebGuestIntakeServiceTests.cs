@@ -1,4 +1,5 @@
 using SwiftAid.Application.Intake;
+using Microsoft.Extensions.DependencyInjection;
 using SwiftAid.Contracts.Geography;
 using SwiftAid.Contracts.Intake;
 using SwiftAid.Gateway.Intake;
@@ -7,6 +8,57 @@ namespace SwiftAid.Integration.Tests;
 
 public sealed class WebGuestIntakeServiceTests
 {
+    private sealed class ScopedLifetime : IDisposable
+    {
+        public bool Disposed { get; private set; }
+        public void Dispose() => Disposed = true;
+    }
+
+    [Fact]
+    public async Task ProductionScopeFactorySeparatesAndDisposesEachOperation()
+    {
+        var lifetimes = new List<ScopedLifetime>();
+        var sessions = new List<FakeSessionEndpointService>();
+        var services = new ServiceCollection();
+        services.AddScoped<ScopedLifetime>(_ =>
+        {
+            var value = new ScopedLifetime(); lifetimes.Add(value); return value;
+        });
+        services.AddScoped<IIntakeSessionEndpointService>(provider =>
+        {
+            _ = provider.GetRequiredService<ScopedLifetime>();
+            var value = new FakeSessionEndpointService(); sessions.Add(value); return value;
+        });
+        services.AddScoped<IIntakeService>(_ => new FakeIntakeService());
+        await using var provider = services.BuildServiceProvider();
+        var service = new WebGuestIntakeService(provider.GetRequiredService<IServiceScopeFactory>());
+        await service.SubmitAsync(GuestSubmissionSamples.Human());
+        await service.SubmitAsync(GuestSubmissionSamples.Human());
+        Assert.Equal(2, sessions.Count);
+        Assert.Equal(1, sessions[0].CreateCalls);
+        Assert.Equal(0, sessions[1].CreateCalls);
+        Assert.Equal(sessions[0].LastProof, sessions[1].LastProof);
+        Assert.Equal(2, lifetimes.Count);
+        Assert.All(lifetimes, lifetime => Assert.True(lifetime.Disposed));
+    }
+
+    [Fact]
+    public async Task OverlappingOperationCanCancelWithoutSharingActiveDependencies()
+    {
+        var release = new TaskCompletionSource<IntakeReceipt>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var intake = new FakeIntakeService { Pending = release.Task };
+        var service = new WebGuestIntakeService(new FakeSessionEndpointService(), intake);
+        var first = service.SubmitAsync(GuestSubmissionSamples.Human());
+        using var cancellation = new CancellationTokenSource();
+        var second = service.SubmitAsync(GuestSubmissionSamples.Human(), cancellation.Token);
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => second);
+        Assert.Equal(1, intake.SubmitCalls);
+        release.SetResult(new IntakeReceipt(Guid.NewGuid(), Guid.NewGuid(), IntakeStatus.ReceivedUnverified,
+            IntakeRoutingStatus.NeedsRouting, DateTimeOffset.UtcNow));
+        await first;
+    }
+
     [Fact]
     public async Task Submit_FirstTime_CreatesSessionResolvesAndSubmits()
     {
@@ -232,6 +284,7 @@ public sealed class WebGuestIntakeServiceTests
 
     private sealed class FakeIntakeService : IIntakeService
     {
+        public Task<IntakeReceipt>? Pending { get; set; }
         public int SubmitCalls { get; private set; }
 
         public IntakeCapability? LastCapability { get; private set; }
@@ -249,7 +302,7 @@ public sealed class WebGuestIntakeServiceTests
         {
             SubmitCalls++;
             LastCapability = capability;
-            return Task.FromResult(Submit(command, capability));
+            return Pending ?? Task.FromResult(Submit(command, capability));
         }
 
         public Task<IntakeDecisionResult> DecideAsync(

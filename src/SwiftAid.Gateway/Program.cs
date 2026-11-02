@@ -92,7 +92,8 @@ GatewayAuthenticationRegistration.ConfigurePersistentCookieDataProtection(builde
 builder.Services.AddScoped<SwiftAid.Application.Authorization.IScopeService,
     SwiftAid.Application.Authorization.ScopeService>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiSessionScopeResolver>();
-builder.Services.AddScoped<WebGuestIntakeService>();
+builder.Services.AddScoped<WebGuestIntakeService>(services =>
+    new WebGuestIntakeService(services.GetRequiredService<IServiceScopeFactory>()));
 builder.Services.AddScoped<IPublicIntakeSubmissionClient, WebPublicIntakeSubmissionClient>();
 builder.Services.AddScoped<IPublicIntakeMetadataClient, WebPublicIntakeMetadataClient>();
 builder.Services.AddScoped<IPublicCommunitySessionClient, WebPublicCommunitySessionClient>();

@@ -14,53 +14,75 @@ namespace SwiftAid.Gateway.Intake;
 /// expiry; anything else surfaces as an <see cref="IntakeSubmissionException"/> the page
 /// turns into an honest message.
 /// </summary>
-public sealed class WebGuestIntakeService(
-    IIntakeSessionEndpointService sessions,
-    IIntakeService intake)
+public sealed class WebGuestIntakeService
 {
+    private readonly IServiceScopeFactory? _scopes;
+    private readonly IIntakeSessionEndpointService? _sessions;
+    private readonly IIntakeService? _intake;
+    private readonly SemaphoreSlim _operation = new(1, 1);
+
+    public WebGuestIntakeService(IServiceScopeFactory scopes) => _scopes = scopes;
+
+    public WebGuestIntakeService(IIntakeSessionEndpointService sessions, IIntakeService intake)
+    {
+        _sessions = sessions;
+        _intake = intake;
+    }
+
+    private async Task<T> InOperationAsync<T>(
+        Func<IIntakeSessionEndpointService, IIntakeService, IServiceProvider?, Task<T>> action, CancellationToken ct)
+    {
+        await _operation.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (_scopes is null) return await action(_sessions!, _intake!, null).ConfigureAwait(false);
+            await using var scope = _scopes.CreateAsyncScope();
+            return await action(scope.ServiceProvider.GetRequiredService<IIntakeSessionEndpointService>(),
+                scope.ServiceProvider.GetRequiredService<IIntakeService>(), scope.ServiceProvider).ConfigureAwait(false);
+        }
+        finally { _operation.Release(); }
+    }
     private Guid? _sessionId;
     private byte[]? _proof;
     private string? _opaqueCapability;
 
-    public async Task<IntakeReceipt> SubmitAsync(IntakeSubmission submission, CancellationToken ct = default)
+    public Task<IntakeReceipt> SubmitAsync(IntakeSubmission submission, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(submission);
-
-        var capability = await EnsureCapabilityAsync(ct).ConfigureAwait(false);
-        try
+        return InOperationAsync(async (sessions, intake, _) =>
         {
-            return await intake.SubmitAsync(submission, capability, ct).ConfigureAwait(false);
-        }
-        catch (IntakeSubmissionException exception) when (exception.Code == IntakeErrorCode.CapabilityInvalid)
-        {
-            Reset();
-            var renewed = await EnsureCapabilityAsync(ct).ConfigureAwait(false);
-            return await intake.SubmitAsync(submission, renewed, ct).ConfigureAwait(false);
-        }
+            var capability = await EnsureCapabilityAsync(sessions, ct).ConfigureAwait(false);
+            try { return await intake.SubmitAsync(submission, capability, ct).ConfigureAwait(false); }
+            catch (IntakeSubmissionException exception) when (exception.Code == IntakeErrorCode.CapabilityInvalid)
+            {
+                Reset();
+                var renewed = await EnsureCapabilityAsync(sessions, ct).ConfigureAwait(false);
+                return await intake.SubmitAsync(submission, renewed, ct).ConfigureAwait(false);
+            }
+        }, ct);
     }
 
-    public async Task<IntakeReceipt?> GetReceiptAsync(Guid receiptId, CancellationToken ct = default)
-    {
-        if (_proof is null)
-        {
-            return null;
-        }
+    public Task<IntakeReceipt?> GetReceiptAsync(Guid receiptId, CancellationToken ct = default) =>
+        InOperationAsync<IntakeReceipt?>(async (sessions, _, _) => _proof is null ? null :
+            await sessions.GetReceiptAsync(receiptId, _proof, ct).ConfigureAwait(false), ct);
 
-        return await sessions.GetReceiptAsync(receiptId, _proof, ct).ConfigureAwait(false);
-    }
-
-    public async Task<EllaiGuidanceProgressDto?> CompleteGuidanceReceiptAsync(string ellaiSessionId,
+    public Task<EllaiGuidanceProgressDto?> CompleteGuidanceReceiptAsync(string ellaiSessionId,
         EllaiGuidanceReceiptRequest request, EllaiUiEntitlements authority,
-        EllaiGuidanceProposalAdmission admission, CancellationToken ct)
-    {
-        if (_proof is null) return null;
-        // Keep the circuit-held proof private and isolate it from concurrent renewal.
-        var proof = _proof.ToArray();
-        try { return await admission.CompleteReceiptStepAsync(ellaiSessionId, request, proof, authority, sessions, ct).ConfigureAwait(false); }
-        finally { CryptographicOperations.ZeroMemory(proof); }
-    }
+        EllaiGuidanceProposalAdmission admission, CancellationToken ct) =>
+        InOperationAsync<EllaiGuidanceProgressDto?>(async (sessions, _, provider) =>
+        {
+            if (_proof is null) return null;
+            var proof = _proof.ToArray();
+            try
+            {
+                var operationAdmission = provider?.GetRequiredService<EllaiGuidanceProposalAdmission>() ?? admission;
+                return await operationAdmission.CompleteReceiptStepAsync(
+                    ellaiSessionId, request, proof, authority, sessions, ct).ConfigureAwait(false);
+            }
+            finally { CryptographicOperations.ZeroMemory(proof); }
+        }, ct);
 
-    private async Task<IntakeCapability> EnsureCapabilityAsync(CancellationToken ct)
+    private async Task<IntakeCapability> EnsureCapabilityAsync(IIntakeSessionEndpointService sessions, CancellationToken ct)
     {
         if (_sessionId is { } sessionId && _proof is { } proof && _opaqueCapability is { } opaque)
         {
