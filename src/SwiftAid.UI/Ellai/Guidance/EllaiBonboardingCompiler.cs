@@ -23,7 +23,8 @@ public sealed class EllaiBonboardingCompiler
             Id = $"ellai-generated-{plan.PlanId}-r{plan.Revision}",
             Title = "Ellai guidance",
             Steps = EllaiGuidanceSequence.Order(plan.Steps).Select(s => ToStep(
-                s.StepKey, s.Explanation, ResolveTarget(s.ControlId, anchorByControlId), verifyCompletion, ResolveRoute(s))).ToList()
+                s.StepKey, s.Explanation, ResolveTarget(s.ControlId, anchorByControlId), verifyCompletion, ResolveRoute(s),
+                BonboardingInteractionMode.Free)).ToList()
         };
     }
 
@@ -44,13 +45,15 @@ public sealed class EllaiBonboardingCompiler
     }
 
     private static BonboardingStepDefinition ToStep(string id, string text, BonboardingStepTarget target,
-        Func<string, CancellationToken, ValueTask<bool>>? verifyCompletion, string? route = null) =>
+        Func<string, CancellationToken, ValueTask<bool>>? verifyCompletion, string? route = null,
+        BonboardingInteractionMode? interaction = null) =>
         new()
         {
             Id = id,
             Title = text,
             Target = target,
             Route = route,
+            Interaction = interaction,
             MissingTarget = BonboardingMissingTargetBehavior.Wait,
             WaitTimeout = TimeSpan.FromSeconds(30),
             WaitTimeoutBehavior = BonboardingMissingTargetBehavior.Fail,

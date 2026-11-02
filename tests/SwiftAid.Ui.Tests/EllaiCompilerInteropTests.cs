@@ -22,6 +22,14 @@ public sealed class EllaiCompilerInteropTests
         Array.Empty<string>(), "ellai-catalogue/1.0", "ellai-uicontract/1.0");
 
     [Fact]
+    public void GeneratedGuidanceKeepsFormAndComposerInteractive()
+    {
+        var definition = new EllaiBonboardingCompiler().Compile(Plan(), new Dictionary<string, string>());
+        Assert.All(definition.Steps, step => Assert.Equal(BonboardingInteractionMode.Free, step.Interaction));
+        Assert.All(definition.Steps, step => Assert.NotNull(step.CanAdvance));
+    }
+
+    [Fact]
     public void CompilerFollowsValidatedLinksForNextAndPreviousPresentation()
     {
         var first = Plan().Steps[0] with { NextStepKey = "s3" };
