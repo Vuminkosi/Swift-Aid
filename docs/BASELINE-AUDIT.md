@@ -24,7 +24,10 @@ All commands below ran from the canonical checkout on .NET SDK 10.0.403 unless s
 
 | Command | Result |
 |---|---|
-| `dotnet test SwiftAid.sln --no-restore -m:1 -nr:false --verbosity quiet` | Partial/fail: Domain 83 passed; Application 867 passed, 3 skipped; Integration initially 20 failed at Gateway host startup; Client 293 passed; UI 520 passed, 7 failed. The solution then reported missing `GoogleDataTransport` iOS package files (`MSB3030`). |
+| `dotnet restore SwiftAid.sln --locked-mode -m:1 -nr:false` | PASS: all solution projects restored using locked dependencies. This resolved the earlier local `GoogleDataTransport` package-file failure. |
+| `dotnet test SwiftAid.sln --no-build --no-restore -m:1 -nr:false --verbosity quiet` | PASS, exit 0: Domain 83; Application 867 passed / 3 skipped; Integration 602 passed / 226 skipped; Client 293; UI 527. Total 2,372 passed / 229 skipped / 0 failed. |
+| Initial `dotnet test SwiftAid.sln --no-restore -m:1 -nr:false --verbosity quiet` | Historical partial/fail before test-harness corrections: Domain 83 passed; Application 867 passed, 3 skipped; Integration initially 20 failed at Gateway host startup; Client 293 passed; UI 520 passed, 7 failed. The initial run also lacked local `GoogleDataTransport` iOS package files (`MSB3030`). |
+| `dotnet test tests/SwiftAid.Ui.Tests/SwiftAid.Ui.Tests.csproj --no-restore -m:1 -nr:false --logger 'console;verbosity=minimal'` | PASS after test-fixture repair: 527 passed, 0 failed. Focused display/renderer cases passed 9/9. |
 | `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false --logger 'console;verbosity=minimal'` | After endpoint correction: 602 passed, 0 failed, 226 skipped. |
 | `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-build --no-restore -m:1 -nr:false --filter 'FullyQualifiedName~EllaiPrivilegedRouteAuthorizationTests' --logger 'console;verbosity=minimal'` | Post-commit: 20 passed, 0 failed, 0 skipped. |
 | `dotnet build src/SwiftAid.Mobile/SwiftAid.Mobile.csproj -c Release -f net10.0-android --no-restore -m:1 -nr:false -p:EmbedAssembliesIntoApk=true --verbosity quiet` | PASS: 0 warnings, 0 errors. No Android device install or interaction was performed. |
@@ -32,7 +35,7 @@ All commands below ran from the canonical checkout on .NET SDK 10.0.403 unless s
 | `docker compose --profile local-bootstrap -f infra/compose.yml config --format json` | PASS: configuration parsed; no workflow claim. |
 | `node tests/SwiftAid.Browser.Tests/guest-storage.browser.cjs` | NOT VERIFIED: the local Node environment lacks the `playwright` module. |
 
-The seven UI failures are retained: three `CaseReportDisplayTests` assertions target output that differs from current `CaseReportEvidence.razor` wording/format; four `CaseDetailWorkActionRefreshTests` fail in the test renderer with `ArgumentNullException` for `jsObjectReference`. These require separate diagnosis; they were not changed as part of the endpoint correction.
+The three display failures were stale assertions for distance units, locality wording and capitalization; they now assert the current accessible output. Four renderer failures came from the test `IJSRuntime` returning null for `IJSObjectReference`; its no-op reference now supports the MudBlazor rendering path. The UI suite and full solution test run passed after this test-only correction. Browser guest-storage remains NOT VERIFIED because Playwright is not installed.
 
 ## Supplied-document reconciliation
 
@@ -42,7 +45,7 @@ The supplied attachment directory contains the two execution-directive text file
 
 - `SW-00-001`: Passed — repository, source versions, runtime, branch, commit, worktree, migration count and route-source inventory recorded.
 - `SW-00-002`: Blocked — missing 16 supplied source documents; remaining repository-wide stale records still require reconciliation.
-- `SW-00-004`: Failed/partial — see exact baseline results above.
+- `SW-00-004`: Partial — locked restore and all .NET test assemblies pass; Python, Android Release and Compose checks pass as recorded; browser harness remains NOT VERIFIED because Playwright is unavailable.
 - `SW-01-004`: In progress — the focused Gateway audio route binding defect is corrected; the complete versioned command/event/audio schema inventory remains open.
 
 ## Evidence sources

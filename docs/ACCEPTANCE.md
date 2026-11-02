@@ -15,13 +15,14 @@ Repository baseline `865964dbe9664a557fd0f0e303af03e115f22839`, branch `interact
 | Check | Result |
 |---|---|
 | Domain/Application/Client suites | PASS in the solution baseline: Domain 83, Application 867 passed and 3 skipped, Client 293. |
+| Full solution test run | PASS, exit 0 with `--no-build --no-restore`: 2,372 passed, 229 skipped, 0 failed across Domain, Application, Integration, Client and UI. |
 | Full Integration suite after correction | PASS: 602 passed, 0 failed, 226 skipped. |
 | Focused Ellai authorization suite after commit | PASS: 20 passed, 0 failed, 0 skipped. |
-| UI suite | FAIL: 520 passed, 7 failed; three display assertions and four renderer exceptions remain open. |
+| UI suite after test-fixture repair | PASS: 527 passed, 0 failed. |
 | Android Release build | PASS: 0 warnings, 0 errors; device execution NOT VERIFIED. |
 | Python worker suite | PASS: 59 passed, 3 skipped. |
 | Compose configuration | PASS: parse only; provider workflows NOT VERIFIED. |
-| Full solution / iOS | FAIL: missing local GoogleDataTransport package assets (`MSB3030`). |
+| Locked solution restore | PASS: `dotnet restore SwiftAid.sln --locked-mode -m:1 -nr:false`; earlier missing iOS package files resolved. |
 | Browser guest-storage harness | NOT VERIFIED: local Playwright package unavailable. |
 
 | ID | Scenario | Status |

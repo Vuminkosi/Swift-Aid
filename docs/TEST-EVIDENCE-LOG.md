@@ -20,6 +20,9 @@ The master orchestrator owns checklist status, evidence linking and regression c
 | EV-008 | `git diff --check`, source hash/byte recomputation, JSON parse, SA-ID coverage comparison | PASS for documentation slices: JSON parses; 379 unique source SA IDs map to 379 checklist rows; hashes/byte counts recorded in `DOCUMENT-INTEGRITY.md`. | Commit `50093ad` |
 | EV-009 | Source policy/gate inspection for SW-00-006/007 | PASS for source-level policy/defaults only. Deployed configuration, rendered UI and end-to-end runtime enforcement NOT VERIFIED. | [safety audit](SAFETY-POLICY-AUDIT.md), [inference gate audit](INFERENCE-GATE-AUDIT.md) |
 | EV-010 | Official model-card and tracked-asset inventory review for SW-00-008 | PARTIAL/BLOCKED: model-card restrictions recorded; consent and several asset/source rights remain unresolved. | BL-008, [rights review](RIGHTS-REVIEW-2026-11-02.md) |
+| EV-011 | `dotnet restore SwiftAid.sln --locked-mode -m:1 -nr:false` | PASS: all solution projects restored from locked dependencies; previous local iOS package-file failure no longer reproduces. | SW-00-004, [baseline audit](BASELINE-AUDIT.md) |
+| EV-012 | `dotnet test SwiftAid.sln --no-build --no-restore -m:1 -nr:false --verbosity quiet` | PASS, exit 0: Domain 83, Application 867/3 skipped, Integration 602/226 skipped, Client 293, UI 527; 2,372 passed / 229 skipped / 0 failed. | SW-00-004, [acceptance](ACCEPTANCE.md) |
+| EV-013 | `dotnet test tests/SwiftAid.Ui.Tests/SwiftAid.Ui.Tests.csproj --no-restore -m:1 -nr:false --logger 'console;verbosity=minimal'` | PASS: UI suite 527/527 after focused test-fixture corrections. | Commit `b97f87c` |
 
 ## Active regression and blocker ownership
 
