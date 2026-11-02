@@ -40,6 +40,7 @@ The master orchestrator owns checklist status, evidence linking and regression c
 | EV-028 | Read-only SW-02-002 identity lifecycle source audit | PARTIAL: Gateway password/email/reset/profile/provider/logout routes and Mobile native secure-session services found; no provider/email/device lifecycle journey run. | SW-02-002, [identity lifecycle audit](SW-02-002-IDENTITY-LIFECYCLE-AUDIT.md) |
 | EV-029 | Read-only SW-02-003 provider configuration audit | PARTIAL/BLOCKED: provider callback options and explicit verification flags exist; real Google/Facebook/organization OIDC registration and callback NOT VERIFIED. No provider call made. | SW-02-003 / BL-004, [provider audit](SW-02-003-PROVIDER-CALLBACK-AUDIT.md) |
 | EV-030 | Read-only SW-02-004 identity security source audit | PARTIAL: OpenIddict PKCE requirement, provider/issuer/subject mapping, Duende OIDC client, MAUI SecureStorage and callback URI checks found; real callback and device storage NOT VERIFIED. | SW-02-004, [identity security audit](SW-02-004-IDENTITY-SECURITY-AUDIT.md) |
+| EV-031 | Read-only SW-02-005 membership/provisioning audit | PARTIAL: organization/workspace membership and pending request states are distinct; service test sources exist; full jurisdiction/sector/sensitivity enforcement and end-to-end provisioning NOT VERIFIED. No tests run. | SW-02-005, [membership audit](SW-02-005-MEMBERSHIP-PROVISIONING-AUDIT.md) |
 
 ## Active regression and blocker ownership
 

@@ -470,3 +470,7 @@ Source audit in [SW-02-003 provider audit](SW-02-003-PROVIDER-CALLBACK-AUDIT.md)
 ## SW-02-004 identity security source audit - 2 November 2026
 
 Source review in [SW-02-004 identity security audit](SW-02-004-IDENTITY-SECURITY-AUDIT.md) found OpenIddict authorization-code PKCE enforcement, Duende OIDC native client, provider/issuer/subject identity mapping, MAUI SecureStorage and callback URI checks. Real provider state/nonce/callback and Android secure-store behavior remain NOT VERIFIED. No provider/device tests run; EV-030.
+
+## SW-02-005 membership provisioning audit - 2 November 2026
+
+Source audit in [SW-02-005 membership audit](SW-02-005-MEMBERSHIP-PROVISIONING-AUDIT.md) found organization/workspace membership records separate from pending join requests, with validity and expiry fields. Existing seeded service-test sources were reviewed but not run. Creator visibility and full sector/jurisdiction/sensitivity intersection across protected surfaces remain NOT VERIFIED; EV-031.
