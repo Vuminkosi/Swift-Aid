@@ -15,6 +15,8 @@ public partial class EllaiGuidanceHost
     private string? _lastTabSelectionProposalId;
     private string? _lastCaseNavigationProposalId;
     private string? _lastCaseFilterProposalId;
+    private string? _lastFeatureNavigationProposalId;
+    private readonly EllaiNavigationTrail _navigationTrail = new();
     private string? _guidanceNotice;
     private bool _preparingGuidance;
     private IBonboardingTourSession? _generatedTour;
@@ -94,6 +96,17 @@ public partial class EllaiGuidanceHost
         if (turn.Outcome != "Completed") return;
         newlyCompleted |= _pendingGuidanceTurn == turn.ClientUtteranceId;
         _pendingGuidanceTurn = null;
+        var navigationProposals = turn.UiProposals.Where(item => item.Proposal.Kind == UiIntentKind.NavigateFeature).Take(2).ToArray();
+        if (navigationProposals.Length > 0)
+        {
+            if (navigationProposals.Length == 1 && newlyCompleted && navigationProposals[0].ProposalId != _lastFeatureNavigationProposalId &&
+                EllaiFeatureNavigationProposal.IsValid(navigationProposals[0].Proposal))
+            {
+                _lastFeatureNavigationProposalId = navigationProposals[0].ProposalId;
+                _ = NavigateFeatureAsync(turn.ClientUtteranceId, navigationProposals[0].ProposalId, navigationProposals[0].Proposal);
+            }
+            return;
+        }
         var filterProposals = turn.UiProposals.Where(item => item.Proposal.Kind == UiIntentKind.SetPermittedFilter).Take(2).ToArray();
         if (filterProposals.Length > 0)
         {
@@ -150,6 +163,75 @@ public partial class EllaiGuidanceHost
         _guidanceFeatureId = proposal.Proposal.Arguments.GetValueOrDefault("feature");
         // Conversation restoration offers an explicit action; only the currently awaited turn auto-starts.
         if (newlyCompleted) _ = StartProposedGuidanceAsync();
+    }
+
+    private void TrackNavigation(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs args)
+    {
+        try { _navigationTrail.Record(Navigation.ToBaseRelativePath(args.Location)); }
+        catch (ArgumentException) { _navigationTrail.Record(string.Empty); }
+    }
+
+    private async Task NavigateFeatureAsync(string turnId, string proposalId, UiIntentProposal proposal)
+    {
+        if (_sessionView is not { Status: "Active" } session || !EllaiFeatureNavigationProposal.IsValid(proposal)) return;
+        var originalUri = Navigation.Uri;
+        var back = EllaiFeatureNavigationProposal.IsBack(proposal);
+        var route = back ? _navigationTrail.Previous : EllaiFeatureNavigationProposal.Destination(proposal)?.Route;
+        bool IsCurrent() => !_uiObservationLifetime.IsCancellationRequested && Navigation.Uri == originalUri &&
+            _sessionView?.SessionId == session.SessionId && _sessionView.Status == "Active" &&
+            _lastDurableTurn is { Outcome: "Completed" } current && current.ClientUtteranceId == turnId &&
+            _lastFeatureNavigationProposalId == proposalId;
+        try
+        {
+            if (!IsCurrent()) return;
+            var auth = Services.GetService(typeof(Microsoft.AspNetCore.Components.Authorization.AuthenticationStateProvider))
+                as Microsoft.AspNetCore.Components.Authorization.AuthenticationStateProvider;
+            var signedIn = auth is not null && (await auth.GetAuthenticationStateAsync()).User.Identity?.IsAuthenticated == true;
+            if (!IsCurrent()) return;
+            if (!signedIn || route is null)
+            {
+                _guidanceNotice = back ? "No previous available page to return to." : "That page is not available with your current access.";
+            }
+            else if (route.StartsWith("/case/", StringComparison.Ordinal))
+            {
+                var client = Services.GetService(typeof(SwiftAid.Contracts.Cases.ICaseTimelineClient)) as SwiftAid.Contracts.Cases.ICaseTimelineClient;
+                var target = new UiIntentProposal(UiIntentKind.OpenAuthorizedRecord, "case-detail", route[6..], null, new Dictionary<string, string>());
+                var authorizedRoute = client is null ? null : await EllaiAuthorizedCaseNavigation.ResolveAsync(target, client, _uiObservationLifetime.Token);
+                if (!IsCurrent()) return;
+                if (authorizedRoute is null) _guidanceNotice = "That case could not be opened with your current access.";
+                else Navigation.NavigateTo(authorizedRoute);
+            }
+            else
+            {
+                await ReportUiForFeatureAsync(EllaiNavigationManifest.FeatureId, _uiObservationLifetime.Token);
+                if (!IsCurrent()) return;
+                var destination = EllaiNavigationManifest.Destinations.Single(item => item.Route == route);
+                // A collapsed menu may be hidden; disabled, absent or ambiguous targets cannot navigate.
+                bool TargetAvailable() => _latestGuidanceObservation?.ControlStates?.Count(control => control.ControlId == destination.ControlId &&
+                    control.State is UiObservationState.Ready or UiObservationState.Hidden) == 1;
+                if (!TargetAvailable() && RevealNavigation.HasDelegate)
+                {
+                    await RevealNavigation.InvokeAsync();
+                    for (var attempt = 0; attempt < 10 && IsCurrent() && !TargetAvailable(); attempt++)
+                    {
+                        await Task.Delay(100, _uiObservationLifetime.Token);
+                        await ReportUiForFeatureAsync(EllaiNavigationManifest.FeatureId, _uiObservationLifetime.Token);
+                    }
+                }
+                if (!IsCurrent()) return;
+                var available = TargetAvailable();
+                var stillSignedIn = auth is not null && (await auth.GetAuthenticationStateAsync()).User.Identity?.IsAuthenticated == true;
+                if (!IsCurrent()) return;
+                if (available && stillSignedIn) Navigation.NavigateTo(route);
+                else _guidanceNotice = "That page is not available right now.";
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception) when (exception is HttpRequestException or Microsoft.JSInterop.JSException)
+        {
+            if (IsCurrent()) _guidanceNotice = "The page could not be opened. Try again.";
+        }
+        if (IsCurrent()) await InvokeAsync(StateHasChanged);
     }
 
     private async Task ApplyCaseFilterAsync(string turnId, string proposalId, UiIntentProposal proposal)

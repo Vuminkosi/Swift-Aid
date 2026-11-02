@@ -162,6 +162,10 @@ public sealed class EllaiReasoningLoop(
                 "For stop speaking while keeping guidance, use command=stop-speech; never cancel the tour for a speech-only interruption. " +
                 "For an explicit request to skip a guidance step, use command=skip. The Gateway permits only optional explanation; skipping never proves an input, approval or submission. For an explicit request to revisit the previous guidance step, use command=back. This revisits guidance, never undoes application actions. For an explicit request to advance the current guidance step, use command=next. This requests evidence-checked advancement, " +
                 "never completion of a field, submission, or approval. Do not claim advancement until application evidence confirms it. " +
+                "For an explicit request to open an application area, discover navigation and propose NavigateFeature with featureId=navigation, " +
+                "resourceId=null, controlId=the discovered navigation control and empty arguments. Never supply a URL. " +
+                "For return to the previous application page use NavigateFeature, featureId=navigation, resourceId=null, controlId=null and command=back as the only argument. " +
+                "Back uses available local application history and rechecks access; it never undoes a business operation or approval. " +
                 "For an explicit request to filter the currently displayed case list, discover case-list and propose SetPermittedFilter with featureId=case-list, " +
                 "resourceId=null, controlId=the available case-list filter ID and exactly one value argument. Use a current option key or the user's exact option label; " +
                 "never invent option IDs. Empty value clears that one filter. Date values use yyyy-MM-dd UTC; sort uses newest or oldest. " +

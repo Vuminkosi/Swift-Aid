@@ -23,6 +23,12 @@
                           ShowAppChrome="@ShowAppChrome"
                           HiddenChromeClass="@(IsActivePublicReportWizard ? "swiftaid-app-shell--report" : "swiftaid-app-shell--focused")">
     <HeaderActions>
+        @if (_authenticationResolved && _signedIn)
+        {
+            <MudIconButton Icon="@Icons.Material.Filled.Menu" OnClick="ToggleNavigation"
+                           aria-label="Open navigation" aria-controls="mobile-workspace-navigation"
+                           aria-expanded="@(_navigationOpen ? "true" : "false")" />
+        }
         <MudBadge Content="@_unreadNotificationCount" Visible="@(_unreadNotificationCount > 0)"
                   Color="Color.Primary" Overlap="true">
             <MudIconButton Icon="@Icons.Material.Outlined.NotificationsNone"
@@ -58,6 +64,13 @@
     <ChildContent>
         <MobileConnectivityReconnect />
         <MudLayout>
+            @if (_authenticationResolved && _signedIn)
+            {
+                <MudDrawer id="mobile-workspace-navigation" Open="_navigationOpen" OpenChanged="NavigationDrawerChanged"
+                           Anchor="Anchor.Start" Variant="DrawerVariant.Temporary" Elevation="0" Width="min(88vw, 20rem)">
+                    <SwiftAid.UI.Components.Layout.SwiftAidNavMenu RevealVersion="_navigationRevealVersion" IsNavigationVisible="_navigationOpen" />
+                </MudDrawer>
+            }
             <MudDrawer id="mobile-notification-drawer"
                        Open="_notificationsOpen"
                        OpenChanged="NotificationDrawerChanged"
@@ -100,11 +113,22 @@
 
 @if (ShouldShowEllai)
 {
-    <EllaiGuidanceHost />
+    <EllaiGuidanceHost RevealNavigation="RevealNavigationAsync" />
     <EllaiLauncherMenu PublicHelpOnly="true" OnModeSelected="RequestEllaiMode" />
 }
 
 @code {
+    private bool _navigationOpen;
+    private long _navigationRevealVersion;
+    private void ToggleNavigation() => _navigationOpen = !_navigationOpen;
+    private void NavigationDrawerChanged(bool open) => _navigationOpen = open;
+    private Task RevealNavigationAsync() => InvokeAsync(() =>
+    {
+        if (!_authenticationResolved || !_signedIn) return;
+        _navigationOpen = true;
+        _navigationRevealVersion++;
+        StateHasChanged();
+    });
     private bool _notificationsOpen;
     private int _unreadNotificationCount;
     private bool _signedIn;

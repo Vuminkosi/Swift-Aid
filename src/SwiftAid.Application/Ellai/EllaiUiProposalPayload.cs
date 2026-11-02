@@ -41,12 +41,14 @@ public static class EllaiUiProposalPayload
             proposal.Arguments is null || proposal.Arguments.Count > 12 || proposal.Arguments.Any(argument =>
                 string.IsNullOrWhiteSpace(argument.Key) || argument.Key.Length > 120 || argument.Value is null || argument.Value.Length > 2000)))
             throw new ArgumentException("UI proposal shape is invalid.");
+        if (proposals.Any(proposal => proposal.Kind == UiIntentKind.NavigateFeature && !EllaiFeatureNavigationProposal.IsValid(proposal)))
+            throw new ArgumentException("Feature navigation requires one registered destination or local back command.");
         if (proposals.Any(proposal => proposal.Kind == UiIntentKind.SetPermittedFilter && !EllaiCaseFilterProposal.IsValid(proposal)))
             throw new ArgumentException("Case filtering requires one bounded registered filter and no resource or authority arguments.");
         if (proposals.Any(proposal => proposal.Kind == UiIntentKind.OpenAuthorizedRecord && EllaiCaseNavigationProposal.ReadCaseId(proposal) is null))
             throw new ArgumentException("Case navigation requires a canonical case identifier and no authority or route arguments.");
         if (proposals.Any(proposal => proposal.Kind == UiIntentKind.SelectTab && EllaiCaseDetailUiManifest.ReadTab(proposal) is null) ||
-            proposals.Count(proposal => proposal.Kind is UiIntentKind.StartGuidance or UiIntentKind.ControlGuidance or UiIntentKind.SelectTab or UiIntentKind.OpenAuthorizedRecord or UiIntentKind.SetPermittedFilter) > 1)
+            proposals.Count(proposal => proposal.Kind is UiIntentKind.StartGuidance or UiIntentKind.ControlGuidance or UiIntentKind.SelectTab or UiIntentKind.OpenAuthorizedRecord or UiIntentKind.SetPermittedFilter or UiIntentKind.NavigateFeature) > 1)
             throw new ArgumentException("Navigation requires one registered presentation target and cannot be combined with guidance controls.");
         if (proposals.Count(proposal => proposal.Kind is UiIntentKind.StartGuidance or UiIntentKind.ControlGuidance) > 1 ||
             proposals.Any(proposal => proposal.Kind == UiIntentKind.ControlGuidance && EllaiGuidanceControlProposal.ReadCommand(proposal) is null))

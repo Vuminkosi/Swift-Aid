@@ -247,6 +247,8 @@
 
     protected override void OnInitialized()
     {
+        _navigationTrail.Record(Navigation.ToBaseRelativePath(Navigation.Uri));
+        Navigation.LocationChanged += TrackNavigation;
         Launcher.Requested += OnLauncherRequested;
         EventPoller.ApprovalRequired += OnApprovalRequired;
         EventPoller.SessionCancelled += OnSessionCancelled;
@@ -3042,6 +3044,7 @@
 
     public void Dispose()
     {
+        Navigation.LocationChanged -= TrackNavigation;
         _uiObservationLifetime.Cancel();
         _ = CancelGeneratedGuidanceAsync();
         if (_sessionContinuity is not null) _ = _sessionContinuity.DisposeAsync();

@@ -195,6 +195,17 @@ Edit / Reject / Cancel); text or voice consent is never approval.
 
 ## 5. Dynamic UI Intelligence and surface
 
+Direct `NavigateFeature` proposals use the shared menu registry, never a model URL.
+The host refreshes authentication and observes the destination before navigating;
+a collapsed but available menu is permitted, whereas disabled, absent or ambiguous
+targets are rejected. The existing reveal callback may mount a menu before a bounded
+re-observation. Mobile exposes the shared menu in a signed-in drawer for this and
+system tours. A local back command uses at most 20 canonical registered-page/case
+locations; queries and fragments are not retained, unknown locations clear the
+trail, and back to a case repeats its server-authorized read. This trail is not
+persisted across refresh or layout replacement and never undoes a domain action.
+Destination pages retain their own data and action authorization.
+
 Interactive case presentation reuses the shared case pages. `OpenAuthorizedRecord`
 accepts only a canonical case GUID and obtains a fresh `ICaseTimelineClient` read
 before generating the fixed local route; the destination rechecks access.
