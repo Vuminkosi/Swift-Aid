@@ -91,7 +91,7 @@ blocks always. The per-iteration gate (`EllaiReauthorization`) carries a
 budget/denied detail for honest terminal status. Tool requests carry a
 model-assigned call id (`EllaiToolRequest.CallId`) that survives
 validation/execution for next-turn correlation. The `EllaiUsageLedger` enforces a
-200,000-token budget plus a $70 per-envelope and $70 total spend cap
+2,000,000-token cumulative session budget plus a $70 per-envelope and $70 total spend cap
 (dollar caps stay inert until real Meta rates are configured). Usage samples
 persist per provider call in PostgreSQL `ellai_usage_samples` with priced
 costs; the worker hydrates durable totals into the ledger before each run,
@@ -101,6 +101,11 @@ instances by maximum, never double-count.
 3 iterations / 4 calls / 1 repair per cycle; the owner previously directed
 the highest possible ceilings to avoid frustration, so the raised ceilings
 stand and that handoff item is recorded as owner-deferred, not implemented.
+The current owner-approved limits are 12 reasoning iterations, 4,000 tool
+calls per request and two schema repairs. The tool-count limit is shared
+by model-turn parsing, the reasoning prompt and execution accounting;
+parallel execution remains bounded to four tools at once. A higher session
+budget does not enlarge the bounded conversation context sent to the model.
 
 ## 4. Sessions, approvals, receipts
 

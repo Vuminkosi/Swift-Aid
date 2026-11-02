@@ -26,7 +26,7 @@ public sealed record EllaiModelTurn(
 public sealed record EllaiReauthorization(bool Permitted, string BlockedDetail);
 
 /// <summary>Bounded multi-turn cycle runner. Each utterance is limited to
-/// 12 model iterations, 24 model-visible tool calls, and 2 model-only schema
+/// 12 model iterations, 4,000 model-visible tool calls, and 2 model-only schema
 /// repairs so an unproductive provider loop cannot consume the session
 /// budget. The $70/token budgets in <see cref="EllaiUsageLedger"/> remain
 /// the hard spend governors.
@@ -37,7 +37,7 @@ public sealed class EllaiCycleRunner(EllaiToolBroker broker)
 {
     public const int MaxIterations = 12;
 
-    public const int MaxToolCalls = 24;
+    public const int MaxToolCalls = 4_000;
 
     public const int MaxRepairAttempts = 2;
 

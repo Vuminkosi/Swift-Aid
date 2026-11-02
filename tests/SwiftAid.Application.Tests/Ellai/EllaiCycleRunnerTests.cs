@@ -85,8 +85,23 @@ public sealed class EllaiCycleRunnerTests
         null, Array.Empty<string>(), null, null);
 
     [Fact]
+    public async Task InvestigationCanCompleteAfterMoreThanTwentyFourToolCalls()
+    {
+        var runner = new EllaiCycleRunner(GrantedBroker());
+        var outcome = await runner.RunAsync(Context,
+            iteration => Task.FromResult(iteration == 1
+                ? new EllaiModelTurn(Enumerable.Range(0, 30).Select(_ =>
+                    new EllaiToolRequest(EllaiToolNames.Now, new Dictionary<string, string>())).ToArray(), null)
+                : new EllaiModelTurn(Array.Empty<EllaiToolRequest>(), ValidDecision())),
+            d => EllaiDecisionValidator.Validate(d), CancellationToken.None);
+        Assert.True(outcome.Completed, outcome.StopReason);
+        Assert.Equal(30, outcome.ToolCallsUsed);
+    }
+
+    [Fact]
     public async Task GenerousCeilingsStillTerminateRunawayTurns()
     {
+        Assert.Equal(4_000, EllaiCycleRunner.MaxToolCalls);
         var broker = GrantedBroker();
         var runner = new EllaiCycleRunner(broker);
         var calls = 0;
@@ -97,12 +112,8 @@ public sealed class EllaiCycleRunnerTests
             {
                 calls++;
                 return Task.FromResult(new EllaiModelTurn(
-                    new[]
-                    {
-                        new EllaiToolRequest(EllaiToolNames.State, new Dictionary<string, string>()),
-                        new EllaiToolRequest(EllaiToolNames.Capabilities, new Dictionary<string, string>()),
-                        new EllaiToolRequest(EllaiToolNames.Now, new Dictionary<string, string>()),
-                    },
+                    Enumerable.Range(0, 1_000).Select(_ =>
+                        new EllaiToolRequest(EllaiToolNames.Now, new Dictionary<string, string>())).ToArray(),
                     null));
             },
             d => EllaiDecisionValidator.Validate(d),
@@ -111,8 +122,8 @@ public sealed class EllaiCycleRunnerTests
         Assert.False(outcome.Completed);
         Assert.Contains("budget exhausted", outcome.StopReason ?? string.Empty, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(EllaiCycleRunner.MaxToolCalls, outcome.ToolCallsUsed);
-        Assert.Equal((EllaiCycleRunner.MaxToolCalls / 3) + 1, outcome.IterationsUsed);
-        Assert.Equal((EllaiCycleRunner.MaxToolCalls / 3) + 1, calls);
+        Assert.Equal(5, outcome.IterationsUsed);
+        Assert.Equal(5, calls);
     }
 
     [Fact]

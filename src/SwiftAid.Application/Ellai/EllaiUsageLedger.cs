@@ -48,7 +48,7 @@ public sealed class EllaiUsageLedger(
     decimal totalSpendCap = EllaiUsageLedger.DefaultTotalSpendCap,
     EllaiPriceTable? prices = null)
 {
-    public const int DefaultSessionTokenBudget = 200_000;
+    public const int DefaultSessionTokenBudget = 2_000_000;
 
     public const decimal DefaultEnvelopeSpendCap = 70.00m;
 

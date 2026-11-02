@@ -7,6 +7,18 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiUsageLedgerTests
 {
     [Fact]
+    public void DefaultSessionAllowsTwoMillionTokensAndStillStopsAtTheBoundary()
+    {
+        var ledger = new EllaiUsageLedger();
+        ledger.Record(new EllaiUsageSample("long-session", 160_050, 8_931));
+        Assert.True(ledger.TryReserve("long-session", 40_000));
+        Assert.Equal(2_000_000, ledger.SessionTokenBudget);
+        ledger.Record(new EllaiUsageSample("long-session", 1_831_018, 0));
+        Assert.True(ledger.TryReserve("long-session", 1));
+        Assert.False(ledger.TryReserve("long-session", 2));
+    }
+
+    [Fact]
     public void ReserveFailsClosedWhenBudgetExhausted()
     {
         var ledger = new EllaiUsageLedger(sessionTokenBudget: 100);
