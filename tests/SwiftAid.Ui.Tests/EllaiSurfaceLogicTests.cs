@@ -989,6 +989,8 @@ public sealed partial class EllaiSurfaceLogicTests
         {
             LiveTranscriptionHandler = (_, _) => Task.FromResult<EllaiVoiceTranscriptionResult?>(null),
             VoiceTranscriptionHandler = (_, _, _, _) => Task.FromResult<EllaiVoiceTranscriptionResult?>(null),
+            // Supply authoritative recovery status so the fixture can evaluate the final turn outcome.
+            VoiceTurnStatusHandler = (_, _) => Task.FromResult<EllaiVoiceTurnStatusDto?>(new("Recovering", 1, 0, 0, null, [], "session-1")),
         };
         using var host = await CreateHost(client, CreateSession(version: 1), "draft");
         SetField(host, "_capturedPcm", new MemoryStream());
@@ -1109,8 +1111,8 @@ public sealed partial class EllaiSurfaceLogicTests
         Assert.Equal(2, client.LiveTranscriptionCalls);
         var completedStream = Assert.Single(streams.Skip(1));
         Assert.Equal(new byte[] { 10, 0, 11, 0, 12, 0 }, completedStream[..6]);
-        Assert.Equal(6 + (22 * 512 * 3), completedStream.Length);
-        Assert.All(completedStream[6..], sample => Assert.Equal(0, sample));
+        // Segmented capture forwards real samples; the client must not synthesize trailing silence.
+        Assert.Equal(6, completedStream.Length);
         Assert.Empty(client.Submissions);
     }
 
@@ -1140,6 +1142,8 @@ public sealed partial class EllaiSurfaceLogicTests
         await InvokeAsync(host, "OnVoiceConnectivityChanged", false);
         await InvokeAsync(host, "OnVoiceConnectivityChanged", true);
         await InvokeAsync(host, "ReceiveVoicePcmChunk", new[] { 23 });
+        // Explicitly simulate the failed reconnect signal. A null final reply alone is not a transport failure.
+        SetField(host, "_liveVoiceReconnectRequired", true);
         await InvokeAsync(host, "StopVoiceCaptureAsync");
 
         var upload = Assert.Single(client.VoiceTranscriptions);

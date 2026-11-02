@@ -513,6 +513,17 @@ public sealed class CaseCorrectionWorkflowTests
         public void Dispose() => renderer.Unmount(componentId);
     }
 
+    private sealed class RecordingModule(System.Collections.Concurrent.ConcurrentQueue<string> calls) : IJSObjectReference
+    {
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) => InvokeAsync<TValue>(identifier, CancellationToken.None, args);
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args)
+        {
+            calls.Enqueue(identifier);
+            return ValueTask.FromResult(default(TValue)!);
+        }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
     private sealed class RecordingJsRuntime : IJSRuntime
     {
         private readonly System.Collections.Concurrent.ConcurrentQueue<string> _calls = new();
@@ -521,11 +532,15 @@ public sealed class CaseCorrectionWorkflowTests
         public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args)
         {
             _calls.Enqueue(identifier);
+            if (identifier == "import" && typeof(TValue) == typeof(IJSObjectReference))
+                return ValueTask.FromResult((TValue)(object)new RecordingModule(_calls));
             return ValueTask.FromResult(default(TValue)!);
         }
         public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args)
         {
             _calls.Enqueue(identifier);
+            if (identifier == "import" && typeof(TValue) == typeof(IJSObjectReference))
+                return ValueTask.FromResult((TValue)(object)new RecordingModule(_calls));
             return ValueTask.FromResult(default(TValue)!);
         }
     }
