@@ -28,6 +28,7 @@ public sealed class EllaiUiAuthorityResolverTests
         Assert.Equal(allowed, authority.Features.Contains(EllaiCaseListUiManifest.FeatureId));
         Assert.Equal(allowed, authority.Features.Contains(EllaiCaseDetailUiManifest.FeatureId));
         Assert.Equal(allowed, authority.Features.Contains(EllaiSurveillanceUiManifest.FeatureId));
+        Assert.Equal(allowed, authority.Features.Contains(EllaiInvestigationUiManifest.FeatureId));
         Assert.Equal(allowed, authority.Capabilities.Contains(EllaiNavigationManifest.Capability));
         Assert.Contains(EllaiReportUiManifest.FeatureId, authority.Features);
         Assert.Equal("owner", authority.OwnerActorId);
@@ -54,13 +55,14 @@ public sealed class EllaiUiAuthorityResolverTests
     [InlineData("case-list", 18)]
     [InlineData("case-detail", 10)]
     [InlineData("surveillance-map", 9)]
+    [InlineData("investigations", 16)]
     public async Task BrokerRechecksRevocationInsteadOfTrustingSessionFeatureOrEarlierCatalogue(string feature, int count)
     {
         var now = DateTimeOffset.UtcNow;
         var scopes = new MutableScopes(new([new("grant", now.AddMinutes(-1), now.AddMinutes(1),
             ["organization"], ["workspace"], [], ["SZ"], [], [], [], ["ReadCase"], false)], 7, now.AddMinutes(1)));
         var registry = new EllaiUiRegistry();
-        foreach (var control in EllaiNavigationManifest.Controls.Concat(EllaiDashboardUiManifest.Controls).Concat(EllaiCaseListUiManifest.Controls).Concat(EllaiCaseDetailUiManifest.Controls).Concat(EllaiSurveillanceUiManifest.Controls)) registry.Register(control);
+        foreach (var control in EllaiNavigationManifest.Controls.Concat(EllaiDashboardUiManifest.Controls).Concat(EllaiCaseListUiManifest.Controls).Concat(EllaiCaseDetailUiManifest.Controls).Concat(EllaiSurveillanceUiManifest.Controls).Concat(EllaiInvestigationUiManifest.Controls)) registry.Register(control);
         var broker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService(), uiRegistry: registry,
             uiAuthority: new EllaiUiAuthorityResolver(scopes));
         var context = new EllaiToolContext("session", "scope", "public.product-help", null, 4, true,

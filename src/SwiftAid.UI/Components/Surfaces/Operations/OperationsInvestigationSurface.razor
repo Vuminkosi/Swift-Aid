@@ -1,3 +1,6 @@
+@using SwiftAid.Contracts.Ellai
+@implements IEllaiUiContextProvider
+<SwiftAid.UI.Ellai.Guidance.EllaiSemanticContext Provider="this" />
 @using SwiftAid.UI.Components.Theme
 @using SwiftAid.UI.Components.Surfaces.Operations
 
@@ -5,7 +8,7 @@
     <div class="operations-investigation__heading">
         <div>
             <MudText Typo="Typo.overline" Color="Color.Secondary">Administrative review</MudText>
-            <MudText Typo="Typo.h4" HtmlTag="h1" id="investigation-title">Investigations</MudText>
+            <MudText Typo="Typo.h4" HtmlTag="h1" id="investigation-title" data-ellai-control="investigations.overview" data-bonboarding-anchor="ellai-investigation-overview">Investigations</MudText>
             <MudText Typo="Typo.body2" Color="Color.Secondary">Organize referenced information, request factual clarification, and track human review and verification.</MudText>
         </div>
         <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" OnClick="OnRefreshList" Disabled="Busy">Refresh</MudButton>
@@ -16,7 +19,7 @@
     }
     <MudGrid Spacing="3">
         <MudItem xs="12" lg="4">
-            <section class="operations-investigation__panel" aria-labelledby="work-list-title">
+            <section class="operations-investigation__panel" aria-labelledby="work-list-title" data-ellai-control="investigations.list" data-bonboarding-anchor="ellai-investigation-list">
                 <div class="operations-investigation__summary">
                     <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="work-list-title">Investigation work</MudText>
                     <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" OnClick="OnRefreshList" Disabled="Busy">Refresh list</MudButton>
@@ -45,15 +48,15 @@
             <section class="operations-investigation__panel" aria-labelledby="start-title">
                 <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="start-title">Start an investigation</MudText>
                 <MudText Typo="Typo.body2" Color="Color.Secondary">Use administrative records only. This tool does not assess health or provide advice.</MudText>
-                <MudTextField T="string" Label="Title" @bind-Value="_startTitle" MaxLength="120" Disabled="Busy" />
-                <MudTextField T="string" Label="Administrative objective" @bind-Value="_startObjective" Lines="3" MaxLength="1000" Disabled="Busy" />
-                <MudButton Class="mt-2" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.PlayArrow" Color="Color.Primary" Disabled="@(!CanStart)" OnClick="StartAsync">Start investigation</MudButton>
+                <MudTextField T="string" Label="Title" data-ellai-control="investigations.title" data-bonboarding-anchor="ellai-investigation-title" @bind-Value="_startTitle" MaxLength="120" Disabled="Busy" />
+                <MudTextField T="string" Label="Administrative objective" data-ellai-control="investigations.objective" data-bonboarding-anchor="ellai-investigation-objective" @bind-Value="_startObjective" Lines="3" MaxLength="1000" Disabled="Busy" />
+                <MudButton Class="mt-2" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.PlayArrow" Color="Color.Primary" Disabled="@(!CanStart)" OnClick="StartAsync" data-ellai-control="investigations.start" data-bonboarding-anchor="ellai-investigation-start">Start investigation</MudButton>
             </section>
         </MudItem>
         <MudItem xs="12" lg="8">
             @if (Snapshot is null)
             {
-                <section class="operations-investigation__panel" aria-labelledby="detail-title">
+                <section class="operations-investigation__panel" aria-labelledby="detail-title" data-ellai-control="investigations.detail" data-bonboarding-anchor="ellai-investigation-detail">
                     <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="detail-title">Investigation details</MudText>
                     @if (DetailState != OperationsSurfaceState.Empty)
                     {
@@ -67,7 +70,7 @@
             }
             else
             {
-                <section class="operations-investigation__panel" aria-labelledby="detail-title">
+                <section class="operations-investigation__panel" aria-labelledby="detail-title" data-ellai-control="investigations.detail" data-bonboarding-anchor="ellai-investigation-detail">
                     <div class="operations-investigation__summary">
                         <div>
                             <MudText Typo="Typo.subtitle1" HtmlTag="h2" id="detail-title">@Snapshot.Title</MudText>
@@ -79,17 +82,17 @@
                     <MudStack Row="true" Spacing="1" Class="mt-2" AlignItems="AlignItems.Center">
                         @if (CanPause)
                         {
-                            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Pause" Disabled="Busy" OnClick="PauseAsync">Pause</MudButton>
+                            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Pause" Disabled="Busy" OnClick="PauseAsync" data-ellai-control="investigations.pause" data-bonboarding-anchor="ellai-investigation-pause">Pause</MudButton>
                         }
                         @if (CanResume)
                         {
-                            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.PlayArrow" Disabled="Busy" OnClick="ResumeAsync">Resume</MudButton>
+                            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.PlayArrow" Disabled="Busy" OnClick="ResumeAsync" data-ellai-control="investigations.resume" data-bonboarding-anchor="ellai-investigation-resume">Resume</MudButton>
                         }
                     </MudStack>
                 </section>
                 <MudGrid Spacing="3">
                     <MudItem xs="12" md="6">
-                        <section class="operations-investigation__panel" aria-labelledby="evidence-title">
+                        <section class="operations-investigation__panel" aria-labelledby="evidence-title" data-ellai-control="investigations.evidence" data-bonboarding-anchor="ellai-investigation-evidence">
                             <MudText Typo="Typo.subtitle1" HtmlTag="h3" id="evidence-title">Evidence references</MudText>
                             @if (Snapshot.EvidenceReferences.Count == 0)
                             {
@@ -108,7 +111,7 @@
                         </section>
                     </MudItem>
                     <MudItem xs="12" md="6">
-                        <section class="operations-investigation__panel" aria-labelledby="clarifications-title">
+                        <section class="operations-investigation__panel" aria-labelledby="clarifications-title" data-ellai-control="investigations.clarifications" data-bonboarding-anchor="ellai-investigation-clarifications">
                             <MudText Typo="Typo.subtitle1" HtmlTag="h3" id="clarifications-title">Factual clarifications</MudText>
                             @if (Snapshot.Clarifications.Count == 0)
                             {
@@ -135,13 +138,13 @@
                         </section>
                     </MudItem>
                     <MudItem xs="12" md="6">
-                        <section class="operations-investigation__panel" aria-labelledby="proposal-title">
+                        <section class="operations-investigation__panel" aria-labelledby="proposal-title" data-ellai-control="investigations.proposal" data-bonboarding-anchor="ellai-investigation-proposal">
                             <MudText Typo="Typo.subtitle1" HtmlTag="h3" id="proposal-title">Administrative proposal</MudText>
                             @if (Snapshot.Proposal is null)
                             {
                                 <MudText Typo="Typo.body2" Color="Color.Secondary">No proposal has been prepared.</MudText>
                                 <MudTextField T="string" Label="Proposal summary" @bind-Value="_proposalSummary" Lines="3" MaxLength="800" Disabled="Busy" />
-                                <MudButton Class="mt-2" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Lightbulb" Disabled="@(!CanPropose)" OnClick="ProposeAsync">Prepare proposal</MudButton>
+                                <MudButton Class="mt-2" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Lightbulb" Disabled="@(!CanPropose)" OnClick="ProposeAsync" data-ellai-control="investigations.prepare" data-bonboarding-anchor="ellai-investigation-prepare">Prepare proposal</MudButton>
                             }
                             else
                             {
@@ -154,10 +157,10 @@
                                 @if (Snapshot.Proposal.RequiresHumanApproval && string.Equals(Snapshot.Proposal.ReviewStatus, "Pending", StringComparison.OrdinalIgnoreCase))
                                 {
                                     <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">An authorized person must review this proposal. Review does not confirm that an external action was carried out.</MudAlert>
-                                    <MudTextField T="string" Label="Review reason" @bind-Value="_reviewReason" MaxLength="500" Disabled="Busy" />
+                                    <MudTextField T="string" Label="Review reason" data-ellai-control="investigations.review-reason" data-bonboarding-anchor="ellai-investigation-review-reason" @bind-Value="_reviewReason" MaxLength="500" Disabled="Busy" />
                                     <MudStack Row="true" Spacing="1" Class="mt-2" AlignItems="AlignItems.Center">
-                                        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ThumbUp" Color="Color.Primary" Disabled="@(!CanReview)" OnClick="@(() => ReviewAsync(true))">Approve proposal</MudButton>
-                                        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ThumbDown" Color="Color.Error" Disabled="@(!CanReview)" OnClick="@(() => ReviewAsync(false))">Decline proposal</MudButton>
+                                        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ThumbUp" Color="Color.Primary" Disabled="@(!CanReview)" OnClick="@(() => ReviewAsync(true))" data-ellai-control="investigations.approve" data-bonboarding-anchor="ellai-investigation-approve">Approve proposal</MudButton>
+                                        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ThumbDown" Color="Color.Error" Disabled="@(!CanReview)" OnClick="@(() => ReviewAsync(false))" data-ellai-control="investigations.decline" data-bonboarding-anchor="ellai-investigation-decline">Decline proposal</MudButton>
                                     </MudStack>
                                 }
                             }
@@ -168,7 +171,7 @@
                         </section>
                     </MudItem>
                     <MudItem xs="12" md="6">
-                        <section class="operations-investigation__panel" aria-labelledby="execution-title">
+                        <section class="operations-investigation__panel" aria-labelledby="execution-title" data-ellai-control="investigations.execution" data-bonboarding-anchor="ellai-investigation-execution">
                             <div class="operations-investigation__summary">
                                 <MudText Typo="Typo.subtitle1" HtmlTag="h3" id="execution-title">Execution and verification</MudText>
                                 <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@(!CanInteract || !OnRefreshExecution.HasDelegate)" OnClick="OnRefreshExecution">Refresh status</MudButton>
@@ -209,6 +212,29 @@
 </section>
 
 @code {
+    public string ComponentId => EllaiInvestigationUiManifest.Definition.ComponentId;
+    public EllaiUiManifest Describe() => EllaiInvestigationUiManifest.Definition;
+    public EllaiUiState GetState() => new(ComponentId, Busy || ListState == OperationsSurfaceState.Loading,
+        ListState == OperationsSurfaceState.Error || DetailState == OperationsSurfaceState.Error,
+        EllaiInvestigationUiManifest.Controls.Select(control => new UiControlState(control.ControlId, ControlState(control.ControlId))).ToArray());
+    private UiObservationState ControlState(string id)
+    {
+        var reviewing = Snapshot?.Proposal is { RequiresHumanApproval: true } proposal &&
+            string.Equals(proposal.ReviewStatus, "Pending", StringComparison.OrdinalIgnoreCase);
+        return id switch
+        {
+            "investigations.title" or "investigations.objective" => Busy ? UiObservationState.Disabled : UiObservationState.Ready,
+            "investigations.start" => CanStart ? UiObservationState.Ready : UiObservationState.Disabled,
+            "investigations.pause" => CanPause ? UiObservationState.Ready : UiObservationState.Unmounted,
+            "investigations.resume" => CanResume ? UiObservationState.Ready : UiObservationState.Unmounted,
+            "investigations.prepare" => Snapshot is null || Snapshot.Proposal is not null ? UiObservationState.Unmounted : CanPropose ? UiObservationState.Ready : UiObservationState.Disabled,
+            "investigations.review-reason" => !reviewing ? UiObservationState.Unmounted : Busy ? UiObservationState.Disabled : UiObservationState.Ready,
+            "investigations.approve" or "investigations.decline" => !reviewing ? UiObservationState.Unmounted : CanReview ? UiObservationState.Ready : UiObservationState.Disabled,
+            "investigations.evidence" or "investigations.clarifications" or "investigations.proposal" or "investigations.execution" => Snapshot is null ? UiObservationState.Unmounted : UiObservationState.Ready,
+            _ => UiObservationState.Ready,
+        };
+    }
+
     private string _startTitle = string.Empty;
     private string _startObjective = string.Empty;
     private string _proposalSummary = string.Empty;
