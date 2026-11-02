@@ -14,7 +14,7 @@ Source inventory for versioned commands, case events, outbox, worker jobs, AI to
 | Gateway ingestion outbox | `src/SwiftAid.Application/Abstractions/IIngestionOutbox.cs`; `src/SwiftAid.Infrastructure/Persistence/Processing/PostgresIngestionOutbox.cs`; `src/SwiftAid.Gateway/Ingestion/IngestionOutboxWorker.cs` | Durable ingestion dispatch uses a separate outbox and worker. It is distinct from the case-command and classification outboxes. |
 | Worker jobs | `src/SwiftAid.Contracts/Jobs/JobEnvelope.cs`; `workers/src/swiftaid_workers/jobs/consumer.py`; classification consumer under `workers/src/swiftaid_workers/classification/` | .NET envelope declares schema version 1; Python validates the same eight camelCase fields, seven `JobType` values, byte limit, UTC timestamp and canonical organization ID. Organization-ID rules are regression-tested across implementations. Generic `jobs/consumer.py` validates an envelope only; the classification worker has its own notice path. This does not claim general job execution/ACK behavior. |
 | AI tools and plans | `src/SwiftAid.Application/Ellai/Tools/`; `src/SwiftAid.Application/Ellai/UiIntelligence/`; `src/SwiftAid.Contracts/Ellai/` | Tool broker mediates constrained actions; guidance drafts and admissions carry schema/catalogue/contract-version checks. This map is not a full per-tool input/output/error catalog. |
-| Audio and Ellai sessions | `src/SwiftAid.Contracts/Ellai/EllaiSessionContracts.cs`; `src/SwiftAid.Contracts/Ellai/EllaiSegmentedAudio.cs`; `src/SwiftAid.Gateway/Ellai/`; `src/SwiftAid.Application/Ellai/` | Session request/view and audio-segment contracts are distinct from managed case commands. Gateway includes a WebSocket voice endpoint and application session services. Transport, persistence, prepared audio and client capture contracts need a complete field/version crosswalk. |
+| Audio and Ellai sessions | `src/SwiftAid.Contracts/Ellai/EllaiSessionContracts.cs`; `src/SwiftAid.Contracts/Ellai/EllaiSegmentedAudio.cs`; `src/SwiftAid.Gateway/Ellai/`; `src/SwiftAid.Application/Ellai/` | Session request/view and audio-segment contracts are distinct from managed case commands. Segmented voice packets use `swiftaid.voice.segmented.v1` with 32-byte little-endian ESV1 headers and 24 kHz sample positions; gateway validates and streams them to the transcription path. Packet position validation is overflow-safe and capped at 10 minutes. Transport, persistence, prepared audio and client capture contracts need a complete field/version crosswalk. |
 | UI registry | `src/SwiftAid.Application/Ellai/UiIntelligence/EllaiUiRegistry.cs`; `src/SwiftAid.Contracts/Ellai/` | Registry snapshots include catalogue and UI contract versions; admission validates against the observed snapshot. |
 | Public projections | `src/SwiftAid.Contracts/Sessions/CommunitySessionContracts.cs`; `src/SwiftAid.Contracts/Notifications/NotificationItemView.cs`; `src/SwiftAid.Contracts/Surveillance/`; Gateway public/session endpoints | Separate public/session and minimized view contracts exist. This inventory does not demonstrate a complete projection schema catalogue or verify privacy across all serializers/routes. |
 
@@ -48,6 +48,16 @@ The C# publisher contract and Python envelope validator both use schema v1, the 
 - PASS - `git diff --check`.
 
 Worker execution/result schema, producer-to-broker runtime, ACK/retry lifecycle and all other SW-01-004 surfaces remain open.
+
+## Segmented audio frame bounds - 3 November 2026
+
+`EllaiSpeechEvent.Validate` previously checked `SamplePosition + pcmSamples > MaximumPosition`. With unchecked `long` arithmetic, a malicious `long.MaxValue` position plus an audio sample could wrap negative and pass validation. The check now compares `SamplePosition > MaximumPosition - pcmSamples`, rejecting overflow before encoding or gateway decoding.
+
+- PASS - focused `EllaiSpeechEventContractTests` 4/4, including last-valid-sample, position-at-limit, `long.MaxValue` encode and malformed decode.
+- PASS - `dotnet test tests/SwiftAid.Ui.Tests/SwiftAid.Ui.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter FullyQualifiedName~EllaiSilenceGateTests --logger 'console;verbosity=minimal'` - 4 passed.
+- PASS - `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter FullyQualifiedName~EllaiSegmentedAudioTests --logger 'console;verbosity=minimal'` - 6 passed.
+
+This verifies packet validation and local consumer regressions, not microphone/device, WebSocket provider, or deployed voice behavior.
 
 ## Gaps and follow-up
 

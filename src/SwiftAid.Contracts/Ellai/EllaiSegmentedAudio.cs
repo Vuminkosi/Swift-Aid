@@ -42,7 +42,7 @@ public readonly record struct EllaiSpeechEvent(
     private void Validate(int pcmBytes)
     {
         if (!Enum.IsDefined(Kind) || Sequence < 1 || StreamEpoch < 1 || SamplePosition < 0
-            || SamplePosition + pcmBytes / 2 > MaximumPosition || pcmBytes > MaximumPcmBytes
+            || SamplePosition > MaximumPosition - pcmBytes / 2 || pcmBytes > MaximumPcmBytes
             || (pcmBytes & 1) != 0 || (Kind == EllaiSpeechEventKind.Audio ? pcmBytes == 0 : pcmBytes != 0))
             throw new InvalidDataException("Invalid voice frame metadata.");
     }

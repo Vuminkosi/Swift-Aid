@@ -259,3 +259,5 @@ SW-01-004 event schema reconciliation (3 November 2026): PASS 37/37 focused seri
 SW-01-004 EF model constraint check: PASS focused `CaseEventJournalReaderTests` 35/35, including equality between the EF design-time `ck_case_events_type` values and v1 schema enum. This verifies source model metadata only; applied PostgreSQL constraint/runtime storage remain NOT VERIFIED.
 
 SW-01-004 worker envelope parity (3 November 2026): PASS worker delivery/envelope tests 51/51 with repository `uv` environment and C# `JobEnvelopeTests` 12/12. Both implementations now reject padded, over-200 UTF-16-unit and control-character organization identifiers and accept the 200-unit boundary. This is schema validation, not job execution, ACK, NATS runtime or persistence evidence.
+
+SW-01-004 segmented-audio protocol bound: PASS contract boundary tests 4/4, UI silence-gate regressions 4/4, Gateway segmented-audio tests 6/6. Overflow-safe validation rejects out-of-range `long.MaxValue` sample positions and accepts the last valid audio sample. Microphone/device, live-provider and deployed WebSocket behavior remain NOT VERIFIED.
