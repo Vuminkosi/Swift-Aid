@@ -204,7 +204,7 @@ public sealed class CaseCommandProcessingPostgresTests
     }
 
     [CaseAuthorityPostgresFact]
-    public async Task Approved_assignment_requires_prospective_target_scope_and_increments_both_owner_epochs()
+    public async Task Approved_assignment_requires_prospective_target_scope_and_preserves_existing_follow_up_owner()
     {
         await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync().ConfigureAwait(false);
         await using var cleanup = new CaseCommandProcessingCleanup(fixture);
@@ -212,7 +212,8 @@ public sealed class CaseCommandProcessingPostgresTests
         [
             CaseOperation.RequestProtectedAction,
             CaseOperation.ReviewProtectedAction,
-            CaseOperation.AssignCase
+            CaseOperation.AssignCase,
+            CaseOperation.ManageFollowUp
         ]).ConfigureAwait(false);
         var targetGrantGroupId = await AddEligibleTargetGrantAsync(fixture).ConfigureAwait(false);
         cleanup.TrackTargetGrant(targetGrantGroupId);
@@ -223,31 +224,48 @@ public sealed class CaseCommandProcessingPostgresTests
         await SeedInitialJournalAsync(fixture, keyRing.CreateOptions(), provider).ConfigureAwait(false);
 
         var actor = fixture.CreateActor();
+        var followUpId = Guid.NewGuid();
+        var dueAt = new DateTimeOffset(2027, 1, 5, 9, 0, 0, TimeSpan.Zero);
+        var schedule = new ScheduleFollowUpCommand(Guid.NewGuid(), 2, followUpId,
+            "Synthetic follow-up", fixture.ActorId, dueAt, "Synthetic schedule before transfer", null, DateTimeOffset.UtcNow);
+        var scheduled = await ProcessCommandAsync(fixture, actor, schedule, keyRing.CreateOptions(), provider);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, scheduled.Status);
+        Assert.Equal(3, scheduled.AggregateVersion);
         var requestId = Guid.NewGuid();
         var request = new RequestCaseActionCommand(
-            Guid.NewGuid(), 2, requestId, CaseAction.Reassign, "synthetic assignment request", [],
+            Guid.NewGuid(), 3, requestId, CaseAction.Reassign, "synthetic assignment request", [],
             fixture.NewOwnerActorId, null, DateTimeOffset.UtcNow);
         var requestResult = await ProcessCommandAsync(fixture, actor, request, keyRing.CreateOptions(), provider)
             .ConfigureAwait(false);
         Assert.Equal(CaseCommandProcessingStatus.Accepted, requestResult.Status);
-        Assert.Equal(3, requestResult.AggregateVersion);
+        Assert.Equal(4, requestResult.AggregateVersion);
 
         var review = new ReviewCaseActionRequestCommand(
-            Guid.NewGuid(), 3, requestId, CaseActionReviewOutcome.Approved,
+            Guid.NewGuid(), 4, requestId, CaseActionReviewOutcome.Approved,
             fixture.NewOwnerActorId, "synthetic approved assignment", null, DateTimeOffset.UtcNow);
         var reviewResult = await ProcessCommandAsync(fixture, actor, review, keyRing.CreateOptions(), provider)
             .ConfigureAwait(false);
 
         Assert.Equal(CaseCommandProcessingStatus.Accepted, reviewResult.Status);
-        Assert.Equal(5, reviewResult.AggregateVersion);
+        Assert.Equal(6, reviewResult.AggregateVersion);
         Assert.Equal(2, reviewResult.EventIds.Length);
         await using (var verifyContext = fixture.CreateDbContext())
         {
             var projection = await verifyContext.ManagedCases.AsNoTracking()
                 .SingleAsync(entity => entity.CaseId == fixture.CaseId).ConfigureAwait(false);
             Assert.Equal(fixture.NewOwnerActorId, projection.AccountableOwnerActorId);
-            Assert.Equal(5, projection.AggregateVersion);
-            Assert.Equal(3, projection.ResourceVersion);
+            Assert.Equal(6, projection.AggregateVersion);
+            Assert.Equal(4, projection.ResourceVersion);
+
+            var followUp = await verifyContext.ManagedCaseFollowUps.AsNoTracking()
+                .SingleAsync(item => item.FollowUpId == followUpId);
+            Assert.Equal(fixture.ActorId, followUp.AssigneeActorId);
+            Assert.Equal(dueAt, followUp.DueAtUtc);
+            Assert.Equal(FollowUpStatus.Scheduled, followUp.Status);
+            Assert.Equal(3, followUp.ScheduledVersion);
+            Assert.Null(followUp.OutcomeVersion);
+            Assert.False(await verifyContext.CaseEvents.AnyAsync(item => item.CaseId == fixture.CaseId &&
+                item.EventType == "CaseFollowUpOutcomeRecorded"));
 
             var ownerEpochs = await verifyContext.ActorAccessStates.AsNoTracking()
                 .Where(entity => entity.ActorId == fixture.ActorId || entity.ActorId == fixture.NewOwnerActorId)
@@ -577,6 +595,8 @@ public sealed class CaseCommandProcessingPostgresTests
         await dbContext.NotificationItems.Where(entity => entity.ResourceId == fixture.CaseId)
             .ExecuteDeleteAsync().ConfigureAwait(false);
         await dbContext.DomainOutbox.Where(entity => eventIds.Contains(entity.EventId))
+            .ExecuteDeleteAsync().ConfigureAwait(false);
+        await dbContext.ManagedCaseFollowUps.Where(entity => entity.CaseId == fixture.CaseId)
             .ExecuteDeleteAsync().ConfigureAwait(false);
         await dbContext.CaseEvents.Where(entity => entity.CaseId == fixture.CaseId)
             .ExecuteDeleteAsync().ConfigureAwait(false);
