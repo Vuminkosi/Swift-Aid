@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using SwiftAid.Gateway.Ellai;
 using SwiftAid.Application.Ellai;
 using SwiftAid.Gateway.Endpoints;
@@ -12,17 +13,20 @@ public sealed class EllaiResponseSpeechCoordinatorTests
     [Fact]
     public async Task FastFinalResponsePreventsObsoleteAcknowledgementSynthesis()
     {
-        var responses = new EllaiSessionResponseStore();
+        var speech = new SentenceSpeechSynthesisClient();
+        using var prepared = new EllaiPreparedResponseAudio(speech, NullLogger<EllaiPreparedResponseAudio>.Instance);
+        var responses = new EllaiSessionResponseStore(audioPreparation: prepared);
         var progress = new EllaiToolProgressPublisher(responses, "fast", "turn", 1, 1);
         progress.Observe(new("fast", 1, 1, EllaiActivityKind.ToolStarted, "cycle", "read",
             DateTimeOffset.UtcNow, EllaiToolNames.Now));
         var ack = Assert.Single(responses.ReadSince("fast", 0).Responses);
         responses.Reconcile("fast", "turn", EllaiUtteranceResolution.Completed("It is ready.", 1));
-        var speech = new SentenceSpeechSynthesisClient();
+        await prepared.StartAsync(CancellationToken.None);
         var result = await EllaiGuestEndpoints.StreamResponseAudioAsync("fast", ack.Sequence,
-            new DefaultHttpContext(), responses, speech, new(), new(), Guid.NewGuid());
+            new DefaultHttpContext(), responses, prepared, new(), new(), Guid.NewGuid());
         Assert.Equal(404, Assert.IsAssignableFrom<IStatusCodeHttpResult>(result).StatusCode);
-        Assert.Empty(speech.Texts);
+        await prepared.StopAsync(CancellationToken.None);
+        Assert.DoesNotContain(ack.Text, speech.Texts);
     }
 
     [Fact]
@@ -74,18 +78,20 @@ public sealed class EllaiResponseSpeechCoordinatorTests
         const string sessionId = "session-1";
         const long sequence = 1;
         var playbackId = Guid.NewGuid();
-        var responses = new EllaiSessionResponseStore();
-        responses.Publish(sessionId, "turn-1", "A response");
         var speechStream = new BlockingReadStream();
         var speech = new BlockingSpeechSynthesisClient(speechStream);
-        var coordinator = new EllaiResponseSpeechCoordinator();
+        using var prepared = new EllaiPreparedResponseAudio(speech, NullLogger<EllaiPreparedResponseAudio>.Instance);
+        await prepared.StartAsync(CancellationToken.None);
+        var responses = new EllaiSessionResponseStore(audioPreparation: prepared);
+        responses.Publish(sessionId, "turn-1", "A response");
+        var coordinator = new EllaiResponseSpeechCoordinator(preparedAudio: prepared);
         var turnCoordinator = new EllaiVoiceTurnCoordinator();
         var output = new MemoryStream();
         var http = new DefaultHttpContext();
         http.Response.Body = output;
 
         var result = await EllaiGuestEndpoints.StreamResponseAudioAsync(
-            sessionId, sequence, http, responses, speech, coordinator, turnCoordinator, playbackId);
+            sessionId, sequence, http, responses, prepared, coordinator, turnCoordinator, playbackId);
         var execution = result.ExecuteAsync(http);
         await speechStream.ReadStarted.WaitAsync(TimeSpan.FromSeconds(2));
 
@@ -95,6 +101,7 @@ public sealed class EllaiResponseSpeechCoordinatorTests
 
         Assert.Equal(StatusCodes.Status204NoContent, Assert.IsAssignableFrom<IStatusCodeHttpResult>(interruption).StatusCode);
         Assert.True(speech.SynthesisToken.IsCancellationRequested);
+        await prepared.StopAsync(CancellationToken.None);
         Assert.Equal(0, output.Length);
         Assert.Equal(EllaiVoiceTurnState.Interrupted, turnCoordinator.GetSnapshot(sessionId).State);
     }
@@ -105,9 +112,11 @@ public sealed class EllaiResponseSpeechCoordinatorTests
         const string sessionId = "session-sentence-stream";
         const long sequence = 1;
         var playbackId = Guid.NewGuid();
-        var responses = new EllaiSessionResponseStore();
-        responses.Publish(sessionId, "turn-sentences", "First sentence. Second sentence!");
         var speech = new SentenceSpeechSynthesisClient();
+        using var prepared = new EllaiPreparedResponseAudio(speech, NullLogger<EllaiPreparedResponseAudio>.Instance);
+        await prepared.StartAsync(CancellationToken.None);
+        var responses = new EllaiSessionResponseStore(audioPreparation: prepared);
+        responses.Publish(sessionId, "turn-sentences", "First sentence. Second sentence!");
         var playbackCoordinator = new EllaiResponseSpeechCoordinator();
         var turnCoordinator = new EllaiVoiceTurnCoordinator();
         var http = new DefaultHttpContext();
@@ -115,14 +124,15 @@ public sealed class EllaiResponseSpeechCoordinatorTests
         http.Response.Body = output;
 
         var result = await EllaiGuestEndpoints.StreamResponseAudioAsync(
-            sessionId, sequence, http, responses, speech, playbackCoordinator, turnCoordinator, playbackId);
-        Assert.Equal(["First sentence."], speech.Texts);
+            sessionId, sequence, http, responses, prepared, playbackCoordinator, turnCoordinator, playbackId);
+
 
         await result.ExecuteAsync(http);
 
         Assert.Equal(["First sentence.", "Second sentence!"], speech.Texts);
         Assert.Equal(["session-sentence-stream-1-0", "session-sentence-stream-1-1"], speech.RequestIds);
         Assert.Equal(new byte[] { 1, 2, 3, 4 }, output.ToArray());
+        await prepared.StopAsync(CancellationToken.None);
     }
 
     [Fact]
@@ -132,18 +142,20 @@ public sealed class EllaiResponseSpeechCoordinatorTests
         const long sequence = 1;
         var playbackId = Guid.NewGuid();
         var interruptionTurnId = Guid.NewGuid();
-        var responses = new EllaiSessionResponseStore();
-        responses.Publish(sessionId, "turn-3", "Assigned cases");
         var speechStream = new BlockingReadStream();
         var speech = new BlockingSpeechSynthesisClient(speechStream);
-        var speechCoordinator = new EllaiResponseSpeechCoordinator();
+        using var prepared = new EllaiPreparedResponseAudio(speech, NullLogger<EllaiPreparedResponseAudio>.Instance);
+        await prepared.StartAsync(CancellationToken.None);
+        var responses = new EllaiSessionResponseStore(audioPreparation: prepared);
+        responses.Publish(sessionId, "turn-3", "Assigned cases");
+        var speechCoordinator = new EllaiResponseSpeechCoordinator(preparedAudio: prepared);
         var turnCoordinator = new EllaiVoiceTurnCoordinator();
         var voiceStream = turnCoordinator.BeginStream(sessionId, CancellationToken.None);
         var http = new DefaultHttpContext();
         http.Response.Body = new MemoryStream();
 
         var audio = await EllaiGuestEndpoints.StreamResponseAudioAsync(
-            sessionId, sequence, http, responses, speech, speechCoordinator, turnCoordinator, playbackId);
+            sessionId, sequence, http, responses, prepared, speechCoordinator, turnCoordinator, playbackId);
         var execution = audio.ExecuteAsync(http);
         await speechStream.ReadStarted.WaitAsync(TimeSpan.FromSeconds(2));
 
@@ -170,6 +182,7 @@ public sealed class EllaiResponseSpeechCoordinatorTests
             confirmed.SessionId, confirmed.ResponseSequence, confirmed.PlaybackId));
         await execution.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.True(speech.SynthesisToken.IsCancellationRequested);
+        await prepared.StopAsync(CancellationToken.None);
         Assert.Equal(EllaiVoiceTurnState.UserSpeaking, turnCoordinator.GetSnapshot(sessionId).State);
     }
 

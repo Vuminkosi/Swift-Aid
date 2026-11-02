@@ -4,7 +4,7 @@ namespace SwiftAid.Gateway.Ellai;
 
 /// <summary>Coordinates cancellation for one synthesized response playback.
 /// It deliberately has no connection to session utterances or tool work.</summary>
-public sealed class EllaiResponseSpeechCoordinator(TimeProvider? timeProvider = null)
+public sealed class EllaiResponseSpeechCoordinator(TimeProvider? timeProvider = null, EllaiPreparedResponseAudio? preparedAudio = null)
 {
     private static readonly TimeSpan CancellationRetention = TimeSpan.FromMinutes(10);
     private const int MaximumCanceledPlaybacks = 4096;
@@ -64,6 +64,7 @@ public sealed class EllaiResponseSpeechCoordinator(TimeProvider? timeProvider = 
             }
 
             lease.Cancel();
+            preparedAudio?.Interrupt(sessionId, sequence);
             return true;
         }
     }

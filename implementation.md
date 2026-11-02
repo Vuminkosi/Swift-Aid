@@ -3911,3 +3911,7 @@ Verification: three shared-client tests passed for guest/staff routing, query en
 Verification: 11 admission/planning tests passed, including successful deterministic-provider planning, usage accounting, and a page change during the provider call that produces Stale with no accepted plan. No live Muse request or rendered tour was exercised.
 
 Owner steering: Gateway-triggered MMS-TTS synthesis as eligible response sentences arrive is now explicitly requested. The current client-triggered synthesis behavior is not the target. Implement eager preparation with bounded buffering, deduplication, ordered playback, supersession/cancellation and failure handling; preserve the frozen microphone/transcription path. No synthesis behavior has changed yet.
+
+### Gateway response synthesis correction (2026-11-02)
+
+The authorized eager-speech correction is implemented: `EllaiSessionResponseStore` notifies the Gateway's bounded audio preparation service at publication, independently of client retrieval. Response audio endpoints consume prepared/in-flight replay buffers and cannot initiate MMS-TTS requests. Existing greeting activation and frozen capture/transcription remain unchanged. See `docs/ellai-voice-processing-progress.md` for limits, cancellation/reconciliation behavior, regression evidence and live-validation limitations. This completes the source correction, not the broader interactive-guidance goal or live voice acceptance.

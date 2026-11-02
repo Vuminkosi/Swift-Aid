@@ -5,7 +5,7 @@ namespace SwiftAid.Application.Ellai;
 /// <summary>Short-lived, session-bound current-turn display output. Outputs
 /// are intentionally in memory only: this store is not a conversation-history
 /// or evidence store and is cleared on session cancellation.</summary>
-public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null)
+public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null, IEllaiResponseAudioPreparation? audioPreparation = null)
 {
     public const int MaximumTextLength = 2000;
     public const int MaximumResponsesPerSession = 64;
@@ -36,6 +36,7 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null)
             session.Items.AddLast(response);
             session.LastUpdatedAtUtc = response.CreatedAtUtc;
             while (session.Items.Count > MaximumResponsesPerSession) session.Items.RemoveFirst();
+            audioPreparation?.Published(response);
             return response;
         }
     }
@@ -78,6 +79,7 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null)
                 session.Items.RemoveFirst();
             }
 
+            audioPreparation?.Published(response);
             return response;
         }
     }
@@ -151,6 +153,7 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null)
             {
                 session.Items.RemoveFirst();
             }
+            audioPreparation?.Published(response);
             return response;
         }
     }
@@ -189,6 +192,7 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null)
             session.Items.AddLast(response);
             session.LastUpdatedAtUtc = response.CreatedAtUtc;
             while (session.Items.Count > MaximumResponsesPerSession) session.Items.RemoveFirst();
+            audioPreparation?.Published(response);
             return response;
         }
     }
@@ -222,6 +226,7 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null)
             {
                 session.Items.RemoveFirst();
             }
+            audioPreparation?.Published(response);
             return response;
         }
     }
@@ -253,6 +258,7 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null)
         lock (_gate)
         {
             _sessions.Remove(sessionId);
+            audioPreparation?.Clear(sessionId);
         }
     }
 
@@ -263,6 +269,7 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null)
                      .Select(pair => pair.Key).ToArray())
         {
             _sessions.Remove(key);
+            audioPreparation?.Clear(key);
         }
     }
 

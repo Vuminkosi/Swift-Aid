@@ -23,6 +23,7 @@ public sealed class EllaiEndpointMetadataTests
         builder.Services.AddSingleton<EllaiConsentService>();
         builder.Services.AddSingleton<EllaiVoiceTurnCoordinator>();
         builder.Services.AddSingleton<EllaiResponseSpeechCoordinator>();
+        builder.Services.AddSingleton<EllaiPreparedResponseAudio>();
         builder.Services.AddScoped<EllaiVoiceTranscriptionService>();
         builder.Services.AddSingleton<SwiftAid.Intelligence.Meta.EllaiOptions>();
         builder.Services.AddSingleton<EllaiSessionResponseStore>();

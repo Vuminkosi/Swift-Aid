@@ -21,7 +21,10 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
     public async Task ToolWorkStartsBeforeSpeechAndPublishesProgressThenDurableOutcome(bool fail, bool superseded)
     {
         var store = new InMemoryEllaiSessionStore();
-        var responses = new EllaiSessionResponseStore();
+        var speech = new NarrationSpeech();
+        using var prepared = new EllaiPreparedResponseAudio(speech, NullLogger<EllaiPreparedResponseAudio>.Instance);
+        await prepared.StartAsync(CancellationToken.None);
+        var responses = new EllaiSessionResponseStore(audioPreparation: prepared);
         var actor = ActorContext.FromValidatedPrincipal(new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim(ClaimTypes.NameIdentifier, "tool-test"), new Claim(ActorContext.AccessEpochClaimType, "1")], "test")));
         var session = new EllaiSessionRecord("tool-session", EllaiMode.Ask, "Active", 1, 1, 1, 1,
@@ -54,11 +57,10 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
                 row => row.Progress?.State == "Acknowledgement");
             Assert.Equal("Processing", Assert.Single(await store.ReadConversationAsync(session.SessionId, actor.ActorId, CancellationToken.None)).Outcome);
             // The real Gateway PCM endpoint consumes the same transient narration while the tool is held open.
-            var speech = new NarrationSpeech();
             var http = new DefaultHttpContext();
             http.Response.Body = new MemoryStream();
             var audio = await EllaiGuestEndpoints.StreamResponseAudioAsync(session.SessionId, ack.Sequence,
-                http, responses, speech, new(), new(), Guid.NewGuid());
+                http, responses, prepared, new(), new(), Guid.NewGuid());
             await audio.ExecuteAsync(http);
             Assert.Equal("Let me check the records.", speech.Text);
             Assert.False(queue.Release.Task.IsCompleted);
@@ -90,6 +92,7 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
         {
             queue.Release.TrySetResult();
             await worker.StopAsync(CancellationToken.None);
+            await prepared.StopAsync(CancellationToken.None);
         }
     }
 

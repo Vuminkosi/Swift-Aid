@@ -424,7 +424,7 @@ public static class EllaiGuestEndpoints
         long sequence,
         HttpContext http,
         EllaiSessionResponseStore responses,
-        IEllaiSpeechSynthesisClient speech,
+        EllaiPreparedResponseAudio preparedAudio,
         EllaiResponseSpeechCoordinator speechCoordinator,
         EllaiVoiceTurnCoordinator turnCoordinator,
         Guid? playbackId = null)
@@ -442,7 +442,7 @@ public static class EllaiGuestEndpoints
             return Results.NotFound();
         }
 
-        if (!speech.IsConfigured || response.Language != "eng")
+        if (response.Language != "eng")
         {
             return Results.Problem(
                 statusCode: StatusCodes.Status503ServiceUnavailable,
@@ -457,12 +457,10 @@ public static class EllaiGuestEndpoints
             turnCoordinator.SetAssistantPlayback(sessionId, sequence, activePlaybackId, isPlaying: true);
         }
         var synthesisCancellation = playback?.Token ?? http.RequestAborted;
-        var speechSentences = EllaiSpeechSentenceChunker.Split(response.Text);
         HttpResponseMessage upstream;
         try
         {
-            upstream = await speech.SynthesizeAsync(
-                $"{sessionId}-{sequence}-0", speechSentences[0], synthesisCancellation).ConfigureAwait(false);
+            upstream = await preparedAudio.OpenAsync(sessionId, sequence, synthesisCancellation).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested)
         {
@@ -481,6 +479,13 @@ public static class EllaiGuestEndpoints
                 turnCoordinator.SetAssistantPlayback(sessionId, sequence, stoppedPlaybackId, isPlaying: false);
             }
             return Results.Empty;
+        }
+        catch (OperationCanceledException)
+        {
+            playback?.Dispose();
+            if (playbackId is Guid stoppedPlaybackId)
+                turnCoordinator.SetAssistantPlayback(sessionId, sequence, stoppedPlaybackId, isPlaying: false);
+            return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Ellai speech is temporarily unavailable.");
         }
         catch (HttpRequestException)
         {
@@ -542,8 +547,7 @@ public static class EllaiGuestEndpoints
         Stream audioStream;
         try
         {
-            audioStream = new EllaiSentencePcmStream(
-                speech, speechSentences, upstream, $"{sessionId}-{sequence}", synthesisCancellation);
+            audioStream = await upstream.Content.ReadAsStreamAsync(synthesisCancellation).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (synthesisCancellation.IsCancellationRequested)
         {
@@ -764,6 +768,11 @@ internal sealed class EllaiResponseAudioStreamResult(
                 catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
                 {
                     // An explicit playback stop or disconnected client ends only this response stream.
+                }
+                catch (IOException)
+                {
+                    // Do not turn a truncated/invalidated prepared response into a successful PCM EOF.
+                    httpContext.Abort();
                 }
             }
         }

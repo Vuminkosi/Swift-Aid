@@ -129,6 +129,9 @@ builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiApprovedActionService
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiApprovalService>();
 builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiApprovalDialogCoordinator>();
 builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiSessionEventJournal>();
+builder.Services.AddSingleton<SwiftAid.Gateway.Ellai.EllaiPreparedResponseAudio>();
+builder.Services.AddSingleton<SwiftAid.Application.Ellai.IEllaiResponseAudioPreparation>(services => services.GetRequiredService<SwiftAid.Gateway.Ellai.EllaiPreparedResponseAudio>());
+builder.Services.AddHostedService(services => services.GetRequiredService<SwiftAid.Gateway.Ellai.EllaiPreparedResponseAudio>());
 builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiSessionResponseStore>();
 builder.Services.AddSingleton<SwiftAid.Gateway.Ellai.EllaiResponseSpeechCoordinator>();
 builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiActivityStatusCoordinator>();
