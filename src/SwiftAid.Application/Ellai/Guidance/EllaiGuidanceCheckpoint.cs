@@ -23,6 +23,8 @@ public sealed record EllaiGuidanceCheckpoint(
     IReadOnlyList<string> PendingActionIds,
     string? NavigationId)
 {
+    public string? FeatureId { get; init; }
+
     public int SchemaVersion { get; init; } = 1;
     public int GenerationAttempt { get; init; } = 1;
     public const int MaximumPayloadBytes = 96 * 1024;
@@ -56,7 +58,7 @@ public sealed record EllaiGuidanceCheckpoint(
 
     private void Validate()
     {
-        if (SchemaVersion != 1 || InteractionEpoch < 1 || Version < 1 || GenerationAttempt is < 1 or > 3
+        if ((FeatureId is not null && !Bounded(FeatureId, 120)) || SchemaVersion != 1 || InteractionEpoch < 1 || Version < 1 || GenerationAttempt is < 1 or > 3
             || !Bounded(ProposalId, 512) || !Bounded(ContextStamp, 512) || !Bounded(ScopeEpoch, 512)
             || !Bounded(GenerationId, 120)
             || Status is not ("Generating" or "Ready" or "Paused" or "Completed" or "Cancelled" or "Failed")

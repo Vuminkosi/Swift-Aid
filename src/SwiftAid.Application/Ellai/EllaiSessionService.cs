@@ -529,5 +529,16 @@ public sealed class EllaiSessionService(IEllaiSessionStore store, EllaiConsentSe
         record.SessionId, record.Mode, record.ActiveInvestigationId, record.Status,
         record.ScopeEpoch, consent?.VersionLabel(record.SessionId) ?? "consent/1", "caps/1",
         record.CyclesUsed, record.CyclesAllowed,
-        null, 0, record.SessionVersion);
+        null, 0, record.SessionVersion) { Guidance = ResumeMetadata(record) };
+
+    private static EllaiGuidanceResumeDto? ResumeMetadata(EllaiSessionRecord record)
+    {
+        if (record.Status != "Active") return null;
+        var checkpoint = EllaiGuidanceCheckpoint.Deserialize(record.GuidanceJson);
+        if (checkpoint?.Plan is not { } plan || checkpoint.Status is not ("Ready" or "Paused") ||
+            checkpoint.ScopeEpoch != record.ScopeEpoch || checkpoint.InteractionEpoch > record.InteractionEpoch) return null;
+        var feature = checkpoint.FeatureId ?? EllaiReportUiManifest.All.Concat(EllaiNavigationManifest.Controls)
+            .FirstOrDefault(control => control.ControlId == plan.Steps[0].ControlId)?.FeatureId;
+        return feature is null ? null : new(checkpoint.ProposalId, plan.PlanId, feature, checkpoint.Status, checkpoint.Version);
+    }
 }

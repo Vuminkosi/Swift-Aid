@@ -63,7 +63,13 @@ public sealed record EllaiSessionView(
     int CyclesAllowed,
     string? ControlOwner,
     long LastEventSequence,
-    long SessionVersion);
+    long SessionVersion)
+{
+    /// <summary>Owner-only resume metadata, never permission to execute a plan.</summary>
+    public EllaiGuidanceResumeDto? Guidance { get; init; }
+}
+
+public sealed record EllaiGuidanceResumeDto(string ProposalId, string PlanId, string FeatureId, string Status, long Version);
 
 /// <summary>Finalized user utterance submission. Optional
 /// <c>FeatureId</c>/<c>ResourceId</c> scope background reasoning to the

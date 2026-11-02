@@ -6,6 +6,7 @@ namespace SwiftAid.UI.Ellai.Guidance;
 public partial class EllaiGuidanceHost
 {
     private string? _guidanceProposalId;
+    private bool _guidanceProposalIsAccepted;
     private string? _guidanceFeatureId;
     private string? _guidanceProposalTurn;
     private string? _pendingGuidanceTurn;
@@ -49,7 +50,7 @@ public partial class EllaiGuidanceHost
 
     private void ObserveGuidanceProposal(EllaiConversationTurnDto turn, bool newlyCompleted)
     {
-        if (_guidanceProposalTurn != turn.ClientUtteranceId && _generatedTour is null)
+        if (_guidanceProposalTurn != turn.ClientUtteranceId && _generatedTour is null && !_guidanceProposalIsAccepted)
         {
             _guidanceProposalId = null;
             _guidanceFeatureId = null;
@@ -80,9 +81,19 @@ public partial class EllaiGuidanceHost
         _ = CancelGeneratedGuidanceAsync();
         _guidanceProposalTurn = turn.ClientUtteranceId;
         _guidanceProposalId = proposal.ProposalId;
+        _guidanceProposalIsAccepted = false;
         _guidanceFeatureId = proposal.Proposal.Arguments.GetValueOrDefault("feature");
         // Conversation restoration offers an explicit action; only the currently awaited turn auto-starts.
         if (newlyCompleted) _ = StartProposedGuidanceAsync();
+    }
+
+    private void OfferSavedGuidance(EllaiSessionView session)
+    {
+        if (session.Status != "Active" || session.Guidance is not { Status: "Ready" or "Paused" } saved || _generatedTour is not null) return;
+        _guidanceProposalId = saved.ProposalId;
+        _guidanceFeatureId = saved.FeatureId;
+        _guidanceProposalTurn = _lastDurableTurn?.ClientUtteranceId;
+        _guidanceProposalIsAccepted = true;
     }
 
     private async Task DispatchConversationalGuidanceControlAsync(string command)
@@ -91,7 +102,31 @@ public partial class EllaiGuidanceHost
         {
             if (_generatedTour is null)
             {
-                _guidanceNotice = "Open guidance before using this control.";
+                if (_sessionView is not { Status: "Active" } session) return;
+                var controlId = _lastGuidanceControlProposalId;
+                var fresh = await ReviewClient.ResumeSessionAsync(session.SessionId, _uiObservationLifetime.Token);
+                if (_sessionView?.SessionId != session.SessionId || controlId != _lastGuidanceControlProposalId) return;
+                if (fresh.Status != EllaiClientOperationStatus.Accepted || fresh.Session?.SessionId != session.SessionId ||
+                    fresh.Session.Status != "Active" || fresh.Session.Guidance is not { } saved)
+                {
+                    _guidanceNotice = "There is no saved guidance to continue.";
+                    return;
+                }
+                OfferSavedGuidance(fresh.Session);
+                if (command == "resume") await StartProposedGuidanceAsync();
+                else
+                {
+                    var progress = await ReviewClient.ControlGuidanceAsync(session.SessionId,
+                        new(saved.ProposalId, saved.PlanId, saved.Version, command), _uiObservationLifetime.Token);
+                    if (_sessionView?.SessionId != session.SessionId || controlId != _lastGuidanceControlProposalId) return;
+                    if (progress?.Status == "Cancelled")
+                    {
+                        _guidanceProposalId = null;
+                        _guidanceFeatureId = null;
+                        _guidanceProposalIsAccepted = false;
+                    }
+                    else if (progress?.Status != "Paused") _guidanceNotice = "Guidance could not be updated. Try again.";
+                }
                 return;
             }
             await ControlGeneratedTourAsync(command);
@@ -124,6 +159,7 @@ public partial class EllaiGuidanceHost
             _guidanceProposalId is not { } proposalId || _generatedTour is not null) return;
         _preparingGuidance = true;
         _guidanceNotice = null;
+        if (_guidanceProposalIsAccepted) _guidanceProposalTurn = _lastDurableTurn?.ClientUtteranceId;
         var turnId = _guidanceProposalTurn;
         var activated = false;
         bool IsCurrent() => !_uiObservationLifetime.IsCancellationRequested &&
@@ -175,6 +211,7 @@ public partial class EllaiGuidanceHost
             if (result?.Status is "Cancelled" or "Completed")
             {
                 _guidanceProposalId = null;
+                _guidanceProposalIsAccepted = false;
                 _guidanceFeatureId = null;
                 _guidanceNotice = null;
                 return;
@@ -193,6 +230,7 @@ public partial class EllaiGuidanceHost
                 _guidanceNotice = "This guidance is not available on the current page.";
                 return;
             }
+            _guidanceProposalIsAccepted = true;
             var progressVersion = result.ProgressVersion;
             var durableStatus = result.Status;
             var progressGate = new SemaphoreSlim(1, 1);
@@ -283,6 +321,7 @@ public partial class EllaiGuidanceHost
                             _generatedPlan = null;
                             _controlGeneratedTour = null;
                             _guidanceProposalId = null;
+                            _guidanceProposalIsAccepted = false;
                             _guidanceFeatureId = null;
                         }
                     }

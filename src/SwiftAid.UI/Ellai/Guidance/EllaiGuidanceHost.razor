@@ -342,6 +342,7 @@
             if (result.Status == EllaiClientOperationStatus.Accepted && result.Session is { Status: "Active" } session)
             {
                 _sessionView = session;
+                OfferSavedGuidance(session);
                 ShowComposer = true;
                 StatusText = "Ready";
                 TrackSession(sessionId);
@@ -2680,6 +2681,7 @@
     private void CancelPriorSession()
     {
         _guidanceProposalId = null;
+        _guidanceProposalIsAccepted = false;
         _guidanceFeatureId = null;
         _guidanceProposalTurn = null;
         _pendingGuidanceTurn = null;

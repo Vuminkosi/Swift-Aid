@@ -14,6 +14,39 @@ public sealed class EllaiSessionServiceTests
         [new Claim(ClaimTypes.NameIdentifier, "test-actor"), new Claim(ActorContext.AccessEpochClaimType, "1")], "test"));
     private static ActorContext Actor => ActorContext.FromValidatedPrincipal(Principal);
 
+    [Theory]
+    [InlineData("Ready", true, true)]
+    [InlineData("Paused", true, true)]
+    [InlineData("Completed", true, false)]
+    [InlineData("Cancelled", true, false)]
+    [InlineData("Ready", false, false)]
+    public async Task OwnedSessionExposesOnlyResumableCurrentScopeGuidance(string status, bool currentScope, bool visible)
+    {
+        var store = new InMemoryEllaiSessionStore();
+        var service = new EllaiSessionService(store);
+        var view = await service.StartAsync(new StartSessionRequest(EllaiMode.Ask, "resume", null, null, null, null), Principal, default);
+        var session = (await store.GetAsync(view.SessionId, default))!;
+        var checkpoint = EllaiGuidanceCheckpointTests.Sample() with
+        {
+            ScopeEpoch = currentScope ? session.ScopeEpoch : "stale-scope", InteractionEpoch = session.InteractionEpoch,
+            Status = status, FeatureId = "report",
+        };
+        await store.TryUpdateAsync(session with { SessionVersion = session.SessionVersion + 1,
+            GuidanceJson = EllaiGuidanceCheckpoint.Serialize(checkpoint) }, session.SessionVersion, default);
+        var restored = await service.GetOwnedViewAsync(view.SessionId, Principal, default);
+        Assert.Equal(visible, restored!.Guidance is not null);
+        if (visible)
+        {
+            Assert.Equal(checkpoint.ProposalId, restored.Guidance!.ProposalId);
+            Assert.Equal(checkpoint.Plan!.PlanId, restored.Guidance.PlanId);
+            Assert.Equal(checkpoint.Version, restored.Guidance.Version);
+            Assert.Equal("report", restored.Guidance.FeatureId);
+        }
+        var foreign = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "someone-else"),
+            new Claim(ActorContext.AccessEpochClaimType, "1")], "test"));
+        Assert.Null(await service.GetOwnedViewAsync(view.SessionId, foreign, default));
+    }
+
     [Fact]
     public async Task StartWithCurrentScopeBindsSessionToTheActorAccessEpoch()
     {

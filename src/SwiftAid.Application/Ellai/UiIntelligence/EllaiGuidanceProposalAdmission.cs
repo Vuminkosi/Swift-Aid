@@ -75,7 +75,7 @@ public sealed class EllaiGuidanceProposalAdmission(
         var checkpoint = new EllaiGuidanceCheckpoint(proposalId, admitted.Observation.ContextStamp,
             authority.ScopeEpoch, admitted.InteractionEpoch, (previous?.Version ?? 0) + 1,
             Guid.NewGuid().ToString("N"), "Generating", now.AddMinutes(2), null, null, [], [],
-            admitted.Catalogue.Descriptors[0].NavigationId) { GenerationAttempt = attempt };
+            admitted.Catalogue.Descriptors[0].NavigationId) { GenerationAttempt = attempt, FeatureId = admitted.Catalogue.Descriptors[0].FeatureId };
         var claimed = await sessions.TryUpdateAsync(session with
         {
             SessionVersion = session.SessionVersion + 1,

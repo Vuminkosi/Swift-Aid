@@ -27,6 +27,55 @@ public sealed class EllaiSurfaceLogicTests
             new Dictionary<string, string> { ["feature"] = "report", ["objective"] = "Open report form" }))]
     };
 
+    [Fact]
+    public async Task SavedGuidanceIsOfferedWithoutExecutionAndSurvivesRestoredConversationHistory()
+    {
+        var client = new FakeReviewClient();
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        var view = CreateSession(1) with { Guidance = new("saved-proposal", "saved-plan", "report", "Paused", 4) };
+        await InvokeAsync(host, "OfferSavedGuidance", view);
+        Assert.Equal("saved-proposal", GetField<string?>(host, "_guidanceProposalId"));
+        Assert.True(GetField<bool>(host, "_guidanceProposalIsAccepted"));
+        Assert.Equal(0, client.GuidancePlanCalls);
+        await InvokeAsync(host, "ObserveGuidanceProposal", new EllaiConversationTurnDto("followup", 2,
+            "A follow-up question", "An explanation", "Completed", 1, DateTimeOffset.UtcNow), false);
+        Assert.Equal("saved-proposal", GetField<string?>(host, "_guidanceProposalId"));
+        Assert.Equal(0, client.GuidancePlanCalls);
+        await InvokeAsync(host, "ObserveGuidanceProposal", GuidanceTurn(), false);
+        Assert.Equal("proposal-1", GetField<string?>(host, "_guidanceProposalId"));
+        Assert.False(GetField<bool>(host, "_guidanceProposalIsAccepted"));
+    }
+
+    [Theory]
+    [InlineData("resume", 1)]
+    [InlineData("pause", 0)]
+    [InlineData("cancel", 0)]
+    public async Task DetachedGuidanceControlsUseFreshOwnedCheckpoint(string command, int planCalls)
+    {
+        var client = new FakeReviewClient
+        {
+            ResumeResult = new(EllaiClientOperationStatus.Accepted,
+                CreateSession(1) with { Guidance = new("saved-proposal", "saved-plan", "report", "Paused", 4) })
+        };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        await InvokeAsync(host, "DispatchConversationalGuidanceControlAsync", command);
+        Assert.Equal(planCalls, client.GuidancePlanCalls);
+        if (command == "resume") Assert.Empty(client.GuidanceControls);
+        else Assert.Equal(new EllaiGuidanceControlRequest("saved-proposal", "saved-plan", 4, command),
+            Assert.Single(client.GuidanceControls));
+        if (command == "cancel") Assert.Null(GetField<string?>(host, "_guidanceProposalId"));
+    }
+
+    [Fact]
+    public async Task DetachedGuidanceDoesNotExecuteWithoutOwnedResumeMetadata()
+    {
+        var client = new FakeReviewClient();
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        await InvokeAsync(host, "DispatchConversationalGuidanceControlAsync", "resume");
+        Assert.Equal(0, client.GuidancePlanCalls);
+        Assert.Empty(client.GuidanceControls);
+    }
+
     [Theory]
     [InlineData("report.subject", PlanStepBehavior.GuideHuman, BonboardingTourStatus.Running, true, true)]
     [InlineData("report.narrative", PlanStepBehavior.GuideHuman, BonboardingTourStatus.Waiting, true, true)]
@@ -1929,6 +1978,17 @@ public sealed class EllaiSurfaceLogicTests
         : IEllaiReviewClient
     {
         public int GuidancePlanCalls { get; private set; }
+        public EllaiSessionStartResult ResumeResult { get; init; } = new(EllaiClientOperationStatus.Unavailable);
+        public Task<EllaiSessionStartResult> ResumeSessionAsync(string sessionId, CancellationToken cancellationToken) =>
+            Task.FromResult(ResumeResult);
+        public List<EllaiGuidanceControlRequest> GuidanceControls { get; } = [];
+        public Task<EllaiGuidanceProgressDto?> ControlGuidanceAsync(
+            string sessionId, EllaiGuidanceControlRequest request, CancellationToken cancellationToken)
+        {
+            GuidanceControls.Add(request);
+            return Task.FromResult<EllaiGuidanceProgressDto?>(new(request.Command == "cancel" ? "Cancelled" : "Paused"));
+        }
+
         public Func<Task<EllaiGuidancePlanDto?>>? GuidancePlanHandler { get; init; }
         public Task<EllaiGuidancePlanDto?> PrepareGuidancePlanAsync(string sessionId, string proposalId, CancellationToken cancellationToken)
         {
