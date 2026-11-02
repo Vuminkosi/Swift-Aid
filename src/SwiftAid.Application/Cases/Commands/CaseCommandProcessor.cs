@@ -367,6 +367,7 @@ public sealed class CaseCommandProcessor : ICaseCommandProcessor
 
     private static CaseOperation GetPreliminaryOperation(CaseCommand command) => command switch
     {
+        AcknowledgeAssignmentCommand => CaseOperation.AcknowledgeAssignment,
         CorrectReportCommand => CaseOperation.CorrectReport,
         RequestCaseActionCommand => CaseOperation.RequestProtectedAction,
         ReviewCaseActionRequestCommand => CaseOperation.ReviewProtectedAction,
@@ -395,6 +396,7 @@ public sealed class CaseCommandProcessor : ICaseCommandProcessor
 
     private static CaseCommand WithServerRecordedAt(CaseCommand command, DateTimeOffset databaseNow) => command switch
     {
+        AcknowledgeAssignmentCommand acknowledgement => acknowledgement with { RecordedAtUtc = databaseNow },
         CorrectReportCommand correction => correction with { RecordedAtUtc = databaseNow },
         RequestCaseActionCommand request => request with { RecordedAtUtc = databaseNow },
         ReviewCaseActionRequestCommand review => review with { RecordedAtUtc = databaseNow },

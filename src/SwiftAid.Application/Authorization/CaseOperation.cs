@@ -35,5 +35,7 @@ public enum CaseOperation
     /// <summary>Schedules follow-up work and records its outcome on an active managed case.</summary>
     ManageFollowUp = 17,
     /// <summary>Raises, acknowledges, and closes staff-owned escalations on an active managed case.</summary>
-    ManageEscalation = 18
+    ManageEscalation = 18,
+    /// <summary>Records the accountable owner's acknowledgement of the current assignment.</summary>
+    AcknowledgeAssignment = 19
 }

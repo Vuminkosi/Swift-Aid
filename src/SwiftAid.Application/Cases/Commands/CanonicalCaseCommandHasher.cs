@@ -91,7 +91,7 @@ public static class CanonicalCaseCommandHasher
 
         if (command is not (CorrectReportCommand or RequestCaseActionCommand or ReviewCaseActionRequestCommand or ResolveCaseCommand or ReopenCaseCommand
             or RecordObservationCommand or ScheduleFollowUpCommand or RecordFollowUpOutcomeCommand
-            or RaiseEscalationCommand or AcknowledgeEscalationCommand or CloseEscalationCommand))
+            or RaiseEscalationCommand or AcknowledgeEscalationCommand or CloseEscalationCommand or AcknowledgeAssignmentCommand))
         {
             throw new NotSupportedException($"Command type {command.GetType().Name} is not supported by canonical hash protocol v1.");
         }
@@ -102,6 +102,16 @@ public static class CanonicalCaseCommandHasher
     {
         switch (command)
         {
+            case AcknowledgeAssignmentCommand assignment:
+                ArgumentOutOfRangeException.ThrowIfNegativeOrZero(assignment.AssignmentVersion);
+                var assignmentSnapshot = assignment with { OccurredAtUtc = Normalize(assignment.OccurredAtUtc) };
+                return (assignmentSnapshot, "AcknowledgeAssignment", "Assignment acknowledged", writer =>
+                {
+                    writer.WriteStartObject();
+                    writer.WriteNumber("assignmentVersion", assignmentSnapshot.AssignmentVersion);
+                    writer.WriteEndObject();
+                });
+
             case CorrectReportCommand correction:
                 RequireText(correction.CorrectedNarrative, nameof(correction.CorrectedNarrative));
                 RequireText(correction.Reason, nameof(correction.Reason));

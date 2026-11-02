@@ -7,6 +7,16 @@ namespace SwiftAid.Application.Tests;
 
 public sealed class CaseCommandAuthorizationMapTests
 {
+    [Fact]
+    public void Assignment_acknowledgement_maps_only_to_its_dedicated_permission()
+    {
+        var requirement = CaseCommandAuthorizationMap.Resolve(
+            new AcknowledgeAssignmentCommand(Guid.NewGuid(), 3, 2, null, Now), CreateAggregate(CaseAction.Reassign));
+
+        Assert.Equal([CaseOperation.AcknowledgeAssignment], requirement.RequiredOperations);
+        Assert.Equal(CaseCapability.AcknowledgeAssignment, requirement.RequiredCapabilities);
+    }
+
     private static readonly DateTimeOffset Now = new(2026, 10, 27, 12, 0, 0, TimeSpan.Zero);
     private static readonly Guid CaseId = Guid.Parse("379cd4d8-9bea-47fa-bb6a-b159e9378d70");
     private static readonly Guid RequestId = Guid.Parse("f3fdbb8d-6928-4c9c-beb3-30e96a02ee8c");

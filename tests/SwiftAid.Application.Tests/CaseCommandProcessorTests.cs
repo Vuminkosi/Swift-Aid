@@ -9,6 +9,49 @@ namespace SwiftAid.Application.Tests;
 
 public sealed class CaseCommandProcessorTests
 {
+    [Fact]
+    public async Task Assignment_acknowledgement_requires_its_own_permission_before_reading_history()
+    {
+        var command = new AcknowledgeAssignmentCommand(CommandId, 2, 2, SourceOccurredAt, CallerRecordedAt);
+        var scenario = CreateScenario(command);
+        scenario.AccessPolicy.Decisions.Enqueue(Denied(AccessDecisionCode.GrantMissing));
+
+        var result = await scenario.Processor.ProcessAsync(scenario.Actor, CaseId, 1, command, CancellationToken.None);
+
+        Assert.Equal(CaseCommandProcessingStatus.Denied, result.Status);
+        Assert.Equal([CaseOperation.ReadCase, CaseOperation.AcknowledgeAssignment], Assert.Single(scenario.AccessPolicy.Calls));
+        Assert.Equal(["denied-audit"], scenario.Persistence.Calls);
+    }
+
+    [Fact]
+    public async Task Assignment_acknowledgement_records_database_time_and_replays_the_receipt_without_another_event()
+    {
+        var command = new AcknowledgeAssignmentCommand(CommandId, 2, 2, SourceOccurredAt, CallerRecordedAt);
+        var scenario = CreateScenario(command);
+        scenario.AccessPolicy.Decisions.Enqueue(Allowed());
+        scenario.AccessPolicy.Decisions.Enqueue(Allowed());
+
+        var result = await scenario.Processor.ProcessAsync(scenario.Actor, CaseId, 1, command, CancellationToken.None);
+
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, result.Status);
+        var append = Assert.Single(scenario.Persistence.Appends);
+        var acknowledgement = Assert.IsType<CaseAssignmentAcknowledged>(Assert.Single(append.Events));
+        Assert.Equal(DatabaseNow, acknowledgement.RecordedAtUtc);
+        Assert.Equal(SourceOccurredAt, acknowledgement.OccurredAtUtc);
+        Assert.Equal(2, acknowledgement.AssignmentVersion);
+        Assert.All(scenario.AccessPolicy.Calls, operations =>
+            Assert.Equal([CaseOperation.ReadCase, CaseOperation.AcknowledgeAssignment], operations));
+
+        var retry = CreateScenario(command, aggregateVersion: 3);
+        retry.AccessPolicy.Decisions.Enqueue(Allowed());
+        retry.AccessPolicy.Decisions.Enqueue(Allowed());
+        retry.Persistence.Receipt = ReceiptFor(retry.Actor, command, [Guid.NewGuid()], 3);
+        var replay = await retry.Processor.ProcessAsync(retry.Actor, CaseId, 1, command, CancellationToken.None);
+        Assert.Equal(CaseCommandProcessingStatus.Replayed, replay.Status);
+        Assert.Empty(retry.Persistence.Appends);
+        Assert.DoesNotContain("database-clock", retry.Persistence.Calls);
+    }
+
     private static readonly Guid CaseId = Guid.Parse("2e999189-7530-4859-8da7-15f14309ee31");
     private static readonly Guid CommandId = Guid.Parse("f3f322c5-cafd-47db-9667-3273067544ad");
     private static readonly DateTimeOffset DatabaseNow = new(2026, 10, 27, 12, 30, 0, TimeSpan.Zero);

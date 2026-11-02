@@ -9,6 +9,19 @@ namespace SwiftAid.Application.Tests;
 
 public sealed class CanonicalCaseCommandHasherTests
 {
+    [Fact]
+    public void Assignment_acknowledgement_hash_binds_assignment_version_but_excludes_server_recorded_time()
+    {
+        var actor = CreateActor("worker-a");
+        var command = new AcknowledgeAssignmentCommand(CommandId, 4, 2, Now, Now);
+        var hash = CreateSnapshot(actor, CaseId, command).CanonicalPayloadHash;
+
+        Assert.Equal(hash, CreateSnapshot(actor, CaseId, command with { RecordedAtUtc = Now.AddHours(1) }).CanonicalPayloadHash);
+        Assert.NotEqual(hash, CreateSnapshot(actor, CaseId, command with { AssignmentVersion = 3 }).CanonicalPayloadHash);
+        Assert.Throws<ArgumentOutOfRangeException>(() => CreateSnapshot(actor, CaseId, command with { AssignmentVersion = 0 }));
+        Assert.Throws<ArgumentOutOfRangeException>(() => CreateSnapshot(actor, CaseId, command with { AssignmentVersion = -1 }));
+    }
+
     private static readonly DateTimeOffset Now = new(2026, 10, 27, 12, 0, 0, TimeSpan.Zero);
     private static readonly Guid CaseId = Guid.Parse("14aa194b-15ca-42fe-857b-465fcd0e2f33");
     private static readonly Guid CommandId = Guid.Parse("b08c5c48-3a85-4bc5-9f92-222ac4abf9b4");
