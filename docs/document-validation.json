@@ -1,12 +1,12 @@
 {
   "currentRevision": {
-    "snapshotDate": "2026-10-31",
+    "snapshotDate": "2026-11-02",
     "specVersion": "1.5",
     "implementationVersion": "2.5",
-    "specSha256": "0c880c09765ca4825aaa7ff66ecc899c8ac6c93868d99b7f88b3c37e8513afd8",
-    "specBytes": 225147,
-    "implementationSha256": "9111258db75419b4a7f3f6fb2bdf2f5aad21bec868bb6785e4e0aac5e0215426",
-    "implementationBytes": 443503,
+    "specSha256": "67cea198bad51abbb1b457a4a869e088a8b206521e6b67c430d0c2b8733ed365",
+    "specBytes": 227969,
+    "implementationSha256": "887f78cb23afb07f41ea6222a179db609bbd36f348a85782a6a3656bb48fe5dc",
+    "implementationBytes": 603169,
     "uniqueRequirementCount": 379,
     "requirementOwnerRows": 379,
     "acceptanceScenarioCount": 86,
@@ -16,12 +16,12 @@
       {
         "check": "paired versions and inventory",
         "result": "PASS",
-        "evidence": "Root handoffs identify spec v1.5 / implementation v2.5; static extraction found 379 unique SA IDs, 379 individual owner rows, 86 AT definitions, 86 scenario-owner rows, and 45 task headings."
+        "evidence": "Root handoffs identify spec v1.5 / implementation v2.5; static extraction found 379 unique SA IDs, 379 priority-coded checklist rows, 86 AT definitions, 86 scenario-owner rows, and 45 task headings."
       },
       {
         "check": "source hash and byte-length extraction",
         "result": "PASS",
-        "evidence": "Recomputed from root source bytes on 2026-10-31; values match this record and docs/DOCUMENT-INTEGRITY.md."
+        "evidence": "Recomputed from root source bytes on 2026-11-02; values match this record and docs/DOCUMENT-INTEGRITY.md."
       },
       {
         "check": "application, provider, and device verification for speech",

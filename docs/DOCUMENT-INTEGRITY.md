@@ -1,13 +1,13 @@
 # Paired-document integrity snapshot
 
-## Current pair: 31 October 2026 — spec v1.5 / implementation v2.5
+## Current pair: 2 November 2026 — spec v1.5 / implementation v2.5
 
 | Path | Version | Bytes | SHA-256 |
 |---|---:|---:|---|
-| `spec.md` | 1.5 | 225147 | `0c880c09765ca4825aaa7ff66ecc899c8ac6c93868d99b7f88b3c37e8513afd8` |
-| `implementation.md` | 2.5 | 443503 | `9111258db75419b4a7f3f6fb2bdf2f5aad21bec868bb6785e4e0aac5e0215426` |
+| `spec.md` | 1.5 | 227969 | `67cea198bad51abbb1b457a4a869e088a8b206521e6b67c430d0c2b8733ed365` |
+| `implementation.md` | 2.5 | 603169 | `887f78cb23afb07f41ea6222a179db609bbd36f348a85782a6a3656bb48fe5dc` |
 
-Static extraction found 379 unique `SA-*` identifiers and 379 individual owner rows, 86 acceptance scenarios and 86 scenario-owner rows, and 45 implementation task headings. The counts are 37 original task IDs plus eight additions. These are document-structure checks; they do not verify application behavior, provider calls, device playback, rights, or deployment.
+Static extraction found 379 unique `SA-*` identifiers and 379 individual priority-coded checklist rows, 86 acceptance scenarios and 86 scenario-owner rows, and 45 implementation task headings. All 379 source requirement IDs map to exactly one checklist row. The current pair's byte lengths and hashes were recomputed from root source files on 2 November 2026. These are document-structure checks; they do not verify application behavior, provider calls, device playback, rights, or deployment.
 
 ## Historical pair: 26 October 2026 — spec v1.4 / implementation v2.4
 
