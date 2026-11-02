@@ -30,3 +30,9 @@ Result: FAIL as a Compose operation (exit 1). Docker reported that Gateway resta
 ## Status
 
 `SW-01-002` is **Partial / Blocked**: local service/readiness endpoints and Gateway-to-provider-service network reachability passed, but the Compose dependency restart did not complete and no external-provider or end-to-end workflow was exercised. Follow up under `BL-009` in `docs/BLOCKERS.md`. No claims are made about a general service recovery or restart guarantee.
+
+## Refreshed read-only readiness snapshot - 3 November 2026
+
+Command `docker compose -f infra/compose.yml ps --all` showed Gateway, PostgreSQL, MinIO, NATS, Redis, Ellai language and Ellai TTS healthy/up. Qdrant was up without a Compose health status. The classification worker remained exited (255); bootstrap and migration containers were exited successfully as one-shot jobs.
+
+PASS: Gateway `GET /health/live` returned 200; PostgreSQL `pg_isready` accepted connections; MinIO `/minio/health/ready` returned 200; NATS `/healthz` returned `{"status":"ok"}`; Redis `PING` returned `PONG`; Gateway-to-language `/health/ready`, Gateway-to-TTS `/health/ready`, and Gateway-to-Qdrant `/readyz` each returned HTTP 200. These are listener/readiness/network checks only. No migration, application database query, object read/write, JetStream publish/consume, Qdrant collection operation, model inference, external provider call or service restart was performed. The earlier Compose restart failure remains unresolved. Source-to-running-image equivalence is NOT VERIFIED.
