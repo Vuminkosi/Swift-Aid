@@ -566,3 +566,5 @@ Source inspection recorded in [SW-05-002 case workspace audit](SW-05-002-CASE-WO
 ## SW-05-003 case detail audit - 2 November 2026
 
 The shared case detail surface declares all seven requested tabs, and Gateway/Mobile routes integrate it. Scope authorization/mutations, dedicated escalation panels and rendered/device journeys remain NOT VERIFIED; see [SW-05-003 audit](SW-05-003-CASE-DETAIL-AUDIT.md). No new tests run. EV-056.
+
+SW-05-002 implementation follow-up: Mobile preserves recorded sector/classification and filters before pagination using authorized queue fields. Unknown sectors remain Unknown. Focused MobileCaseWorkspaceTests PASS 7/7; full Client suite PASS 300/300, zero skipped. See docs/SW-05-002-CASE-WORKSPACE-AUDIT.md for commands. Browser/Android and live authorization NOT VERIFIED; checklist remains partial.

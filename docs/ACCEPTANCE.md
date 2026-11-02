@@ -122,3 +122,5 @@ P8.6 evidence remains NOT VERIFIED for AT-73–AT-76. The source requires separa
 - Clinical/veterinary diagnosis, triage, treatment advice, and generated health teaching remain excluded.
 - Cross-sector inference remains off until its separate product decision and validation are recorded.
 - Before any release claim, resolve applicable privacy/security, real device, integration, source-rights, accessibility, and independent review evidence in the root specification and plan.
+
+SW-05-002 implementation follow-up: Mobile preserves recorded sector/classification and filters before pagination using authorized queue fields. Unknown sectors remain Unknown. Focused MobileCaseWorkspaceTests PASS 7/7; full Client suite PASS 300/300, zero skipped. See docs/SW-05-002-CASE-WORKSPACE-AUDIT.md for commands. Browser/Android and live authorization NOT VERIFIED; checklist remains partial.

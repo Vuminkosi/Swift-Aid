@@ -75,20 +75,21 @@ public sealed class MobileCaseWorkspaceClient(ICaseQueueClient caseQueueClient) 
                 return Unavailable<CaseWorkspaceFilterOptions>("Complete filter choices are not available for this case list.");
 
             var options = new CaseWorkspaceFilterOptions(
-                Sectors: [],
+                Sectors: result.Items.Select(item => ToSector(item.Sector)).Distinct()
+                    .Select(sector => new CaseWorkspaceOption(sector.ToString(), sector.ToString())).ToArray(),
                 Workflows: ToOptions(result.Items.Select(item => item.Workflow)),
                 Countries: ToOptions(result.Items.Select(item => item.CountryCode)),
                 Regions: [],
                 Assignees: [],
-                ReportedCategories: [],
+                ReportedCategories: ToOptions(result.Items.Select(item => item.Classification).OfType<string>()),
                 Capabilities: new CaseWorkspaceFilterCapabilities(
                     Search: true,
-                    Sector: false,
+                    Sector: true,
                     Workflow: true,
                     Country: true,
                     Region: false,
                     Assignee: false,
-                    ReportedCategory: false,
+                    ReportedCategory: true,
                     UpdatedDate: true));
             return Success(options);
         }
@@ -103,13 +104,16 @@ public sealed class MobileCaseWorkspaceClient(ICaseQueueClient caseQueueClient) 
     }
 
     private static bool HasUnsupportedFilter(CaseWorkspaceQuery query) =>
-        query.Sector is not null and not CaseWorkspaceSector.Unknown ||
         !string.IsNullOrWhiteSpace(query.RegionKey) ||
-        !string.IsNullOrWhiteSpace(query.AssigneeKey) ||
-        !string.IsNullOrWhiteSpace(query.ReportedCategoryKey);
+        !string.IsNullOrWhiteSpace(query.AssigneeKey);
 
     private static bool Matches(CaseQueueItem item, CaseWorkspaceQuery query)
     {
+        if (query.Sector is { } sector && ToSector(item.Sector) != sector)
+            return false;
+        if (query.ReportedCategoryKey is { } category &&
+            !string.Equals(item.Classification, category, StringComparison.OrdinalIgnoreCase))
+            return false;
         if (query.Workflow is { } workflow &&
             !string.Equals(item.Workflow, workflow, StringComparison.OrdinalIgnoreCase))
             return false;
@@ -131,13 +135,20 @@ public sealed class MobileCaseWorkspaceClient(ICaseQueueClient caseQueueClient) 
         PublicReference: null,
         item.Workflow,
         CountryLabel: item.CountryCode,
-        CaseWorkspaceSector.Unknown,
+        ToSector(item.Sector),
         RegionLabel: null,
         AssigneeLabel: null,
-        ReportedCategoryLabel: null,
+        ReportedCategoryLabel: item.Classification,
         item.UpdatedAtUtc,
         item.AggregateVersion,
         [CaseWorkspaceAction.Open]);
+
+    private static CaseWorkspaceSector ToSector(string? sector) => sector switch
+    {
+        "HumanHealth" => CaseWorkspaceSector.Human,
+        "AnimalHealth" => CaseWorkspaceSector.Animal,
+        _ => CaseWorkspaceSector.Unknown
+    };
 
     private static IReadOnlyList<CaseWorkspaceOption> ToOptions(IEnumerable<string> values) => values
         .Where(value => !string.IsNullOrWhiteSpace(value))

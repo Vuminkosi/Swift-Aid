@@ -27,4 +27,6 @@ Source inspection only. No new test command was run for this audit. Existing pri
 
 ## Conclusion
 
+Implementation follow-up: Mobile now projects recorded sector/classification and supports both filters before pagination. Choices derive only from the authorized queue; unknown source sectors stay Unknown. Seven focused MobileCaseWorkspaceTests passed, and the full SwiftAid.Client.Tests suite passed 300/300 with no skips. Commands: `dotnet test tests/SwiftAid.Client.Tests/SwiftAid.Client.Tests.csproj --no-restore -m:1 -nr:false --filter FullyQualifiedName~MobileCaseWorkspaceTests --verbosity quiet`; `dotnet test tests/SwiftAid.Client.Tests/SwiftAid.Client.Tests.csproj --no-build --no-restore -m:1 -nr:false --verbosity quiet`. This supersedes the earlier Mobile sector/category gaps above. Android rendering and live authorization remain NOT VERIFIED.
+
 Keep SW-05-002 unchecked and PARTIAL. Close with focused authorized-scope and pagination tests, complete mobile field/action projection, and browser/device acceptance for both list surfaces.

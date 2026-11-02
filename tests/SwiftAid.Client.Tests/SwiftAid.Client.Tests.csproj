@@ -21,6 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\src\SwiftAid.Mobile\Services\Presentation\MobileCaseWorkspaceClient.cs" Link="Linked\Mobile\MobileCaseWorkspaceClient.cs" />
     <Compile Include="..\..\src\SwiftAid.Mobile\Services\Intake\IGuestInstallKeyStore.cs" Link="Linked\Mobile\IGuestInstallKeyStore.cs" />
     <Compile Include="..\..\src\SwiftAid.Mobile\Services\Intake\EncryptedGuestSubmissionStore.cs" Link="Linked\Mobile\EncryptedGuestSubmissionStore.cs" />
     <Compile Include="..\..\src\SwiftAid.Mobile\Services\Intake\EncryptedGuestAudioStore.cs" Link="Linked\Mobile\EncryptedGuestAudioStore.cs" />

@@ -177,3 +177,5 @@ NOT RUN means no evidence was supplied in this documentation snapshot. Gate-off 
 - VERIFIED: required checks ran against a named revision and their scope/results are recorded.
 - COMMITTED: canonical active-branch SHA is recorded; this does not mean released.
 - RELEASED: release evidence is recorded. No rows are promoted to these states without evidence.
+
+SW-05-002 implementation follow-up: Mobile preserves recorded sector/classification and filters before pagination using authorized queue fields. Unknown sectors remain Unknown. Focused MobileCaseWorkspaceTests PASS 7/7; full Client suite PASS 300/300, zero skipped. See docs/SW-05-002-CASE-WORKSPACE-AUDIT.md for commands. Browser/Android and live authorization NOT VERIFIED; checklist remains partial.
