@@ -51,7 +51,8 @@ internal sealed class EllaiVoiceTurnAdmission(
                 var request = new SubmitUtteranceRequest(utteranceId, sessionId, session.SessionVersion,
                     transcript, null, "typed", session.SessionVersion);
                 var result = await scope.ServiceProvider.GetRequiredService<EllaiUtteranceSubmissionService>()
-                    .SubmitAsync(sessionId, request, principal, timeout.Token).ConfigureAwait(false);
+                    .SubmitAsync(sessionId, request, principal, timeout.Token,
+                        coordinator is null ? "recorded-voice" : "live-voice").ConfigureAwait(false);
                 if (result.Status != EllaiClientOperationStatus.Conflict) return result;
             }
         }

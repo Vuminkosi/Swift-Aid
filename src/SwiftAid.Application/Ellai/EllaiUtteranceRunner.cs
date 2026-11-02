@@ -101,7 +101,7 @@ public static class EllaiUtteranceRunner
             context, reasoningText, ForMode(work.Mode),
             EllaiToolBroker.DescribeCatalogue(work.AllowedTools), maxTokensPerTurn,
             work.CycleId, work.ControllerEpoch,
-            EllaiConversationContext.Build(conversation, work.ClientUtteranceId), work.ActivePage);
+            EllaiConversationContext.Build(conversation, work.ClientUtteranceId), work.ActivePage, work.InteractionMode);
 
         async Task<bool> IsExecutionCurrentAsync(CancellationToken fenceCt)
         {

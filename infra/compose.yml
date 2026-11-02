@@ -197,7 +197,7 @@ services:
       EllaiLanguage__Endpoint: "http://ellai-language:8091/"
       EllaiLanguage__InternalKey: "${ELLAI_LANGUAGE_INTERNAL_KEY:-}"
       Ellai__Policy__Path: "/etc/swiftaid/policy/ellai-system-instruction.md"
-      Ellai__Policy__Version: "${Ellai__Policy__Version:-1.5}"
+      Ellai__Policy__Version: "${Ellai__Policy__Version:-1.6}"
       Ellai__ReasoningBackend: "${Ellai__ReasoningBackend:-meta}"
       Ellai__Pricing__SpendingCap: "${Ellai__Pricing__SpendingCap:-70.00}"
       Ellai__Pricing__InputPer1K: "${Ellai__Pricing__InputPer1K:-}"

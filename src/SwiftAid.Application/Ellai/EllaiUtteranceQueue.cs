@@ -25,7 +25,8 @@ public sealed record EllaiUtteranceWork(
     string ConsentPurpose = EllaiToolBroker.ToolReadPurpose,
     string ClientUtteranceId = "",
     EllaiLanguagePreferences? Languages = null,
-    string? ActivePage = null);
+    string? ActivePage = null,
+    string InteractionMode = "typed");
 
 /// <summary>Single-flight utterance handoff: at most one queued-or-running
 /// work item per session, latest utterance wins. A newer utterance submitted

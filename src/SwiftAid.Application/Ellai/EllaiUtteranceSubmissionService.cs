@@ -21,7 +21,8 @@ public sealed class EllaiUtteranceSubmissionService(
         string routeSessionId,
         SubmitUtteranceRequest? request,
         ClaimsPrincipal principal,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string interactionMode = "typed")
     {
         ArgumentNullException.ThrowIfNull(principal);
         using var admission = EllaiPipelineMetrics.Measure("submission_to_admission");
@@ -36,7 +37,7 @@ public sealed class EllaiUtteranceSubmissionService(
             return new(EllaiClientOperationStatus.Unauthorized, null);
         }
 
-        if (!IsValid(routeSessionId, request))
+        if (!IsValid(routeSessionId, request) || !EllaiInteractionContext.IsValid(interactionMode))
         {
             return new(EllaiClientOperationStatus.InvalidRequest, null);
         }
@@ -79,7 +80,7 @@ public sealed class EllaiUtteranceSubmissionService(
             EllaiConsentService.PublicProductHelpPurpose,
             request.ClientUtteranceId,
             request.Languages,
-            EllaiPageContext.DisplayName(request.ActivePage) is null ? null : request.ActivePage);
+            EllaiPageContext.DisplayName(request.ActivePage) is null ? null : request.ActivePage, interactionMode);
         var payload = EllaiUtteranceWorkEnvelope.Serialize(work, request.ClientUtteranceId);
         var safeRequest = request with
         {

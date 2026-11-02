@@ -52,6 +52,19 @@ public sealed class EllaiReasoningLoopTests
          "topicRefs":[],"resumeSuggestion":null,"stopReason":null}}
         """;
 
+    [Theory]
+    [InlineData("typed", "typed message")]
+    [InlineData("live-voice", "Live Speak")]
+    [InlineData("recorded-voice", "recorded voice")]
+    public async Task ProviderReceivesInteractionModeAsStyleOnly(string mode, string expected)
+    {
+        var completions = new ScriptedCompletions(DecisionTurn);
+        await Loop(completions).RunAsync(Request() with { InteractionMode = mode }, CancellationToken.None);
+        var system = Assert.Single(completions.Threads[0], message => message.Role == "system").Content;
+        Assert.Contains("Interaction mode: " + expected, system);
+        Assert.Contains("does not constitute approval", system);
+    }
+
     [Fact]
     public async Task ProviderReceivesNestedDecisionSchemaAndReturnedEvidenceReferences()
     {

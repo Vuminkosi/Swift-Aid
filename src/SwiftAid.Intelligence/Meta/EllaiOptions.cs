@@ -80,7 +80,7 @@ public sealed class EllaiOptions
 
     /// <summary>Pinned approved policy version. Guarded calls stamp and
     /// verify this label alongside the file hash.</summary>
-    public string PolicyVersion { get; init; } = "1.5";
+    public string PolicyVersion { get; init; } = "1.6";
 
     public bool HasReasoningRoute =>
         Enabled && !string.IsNullOrWhiteSpace(ApiKey)
@@ -189,7 +189,7 @@ public sealed class EllaiOptions
             PricingOutputPer1KTokens = DecimalSetting("Pricing:OutputPer1K", "Ellai__Pricing__OutputPer1K") ?? 0,
             PricingAudioPerMinute = DecimalSetting("Pricing:AudioPerMinute", "Ellai__Pricing__AudioPerMinute") ?? 0,
             PolicyPath = Setting("Policy:Path", "Ellai__Policy__Path") ?? "docs/ellai/ellai-system-instruction.md",
-            PolicyVersion = Setting("Policy:Version", "Ellai__Policy__Version") ?? "1.5",
+            PolicyVersion = Setting("Policy:Version", "Ellai__Policy__Version") ?? "1.6",
         };
     }
 

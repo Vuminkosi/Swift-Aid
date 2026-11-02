@@ -27,7 +27,8 @@ public sealed record EllaiUtteranceWorkEnvelope(
     string ConsentPurpose,
     string[] AllowedTools,
     SwiftAid.Contracts.Ellai.EllaiLanguagePreferences? Languages = null,
-    string? ActivePage = null)
+    string? ActivePage = null,
+    string InteractionMode = "typed")
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -60,13 +61,14 @@ public sealed record EllaiUtteranceWorkEnvelope(
             work.ConsentPurpose,
             work.AllowedTools?.Order(StringComparer.Ordinal).ToArray() ?? [],
             work.Languages,
-            work.ActivePage);
+            work.ActivePage, work.InteractionMode);
         return JsonSerializer.Serialize(envelope, Json);
     }
 
     public EllaiUtteranceWork ToWork()
     {
-        if (SchemaVersion != 1
+        if (!EllaiInteractionContext.IsValid(InteractionMode)
+            || SchemaVersion != 1
             || string.IsNullOrWhiteSpace(SessionId)
             || string.IsNullOrWhiteSpace(ClientUtteranceId)
             || string.IsNullOrWhiteSpace(ScopeEpoch)
@@ -116,7 +118,7 @@ public sealed record EllaiUtteranceWorkEnvelope(
             ConsentPurpose,
             ClientUtteranceId,
             Languages,
-            ActivePage);
+            ActivePage, InteractionMode);
     }
 
     public static EllaiUtteranceWorkEnvelope Deserialize(string payloadJson)

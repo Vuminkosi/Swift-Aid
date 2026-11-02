@@ -10,6 +10,27 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiUtteranceSubmissionServiceTests
 {
     [Theory]
+    [InlineData("typed")]
+    [InlineData("live-voice")]
+    [InlineData("recorded-voice")]
+    public async Task InteractionModeSurvivesDurableAdmissionAndRecovery(string mode)
+    {
+        var store = new InMemoryEllaiSessionStore();
+        var service = new EllaiUtteranceSubmissionService(store, new EllaiConsentService());
+        var principal = AuthenticatedPrincipal("actor-one");
+        var session = await StartSessionAsync(store, principal);
+        var result = await service.SubmitAsync(session.SessionId, Request(session, "mode-turn"),
+            principal, CancellationToken.None, mode);
+        Assert.Equal(EllaiClientOperationStatus.Accepted, result.Status);
+        var item = await store.ClaimNextAsync(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(1), CancellationToken.None);
+        var work = EllaiUtteranceWorkEnvelope.Deserialize(item!.PayloadJson).ToWork();
+        Assert.Equal(mode, work.InteractionMode);
+        Assert.Equal(mode, EllaiUtteranceWorkEnvelope.Deserialize(
+            EllaiUtteranceWorkEnvelope.Serialize(work, work.ClientUtteranceId)).ToWork().InteractionMode);
+        Assert.DoesNotContain(EllaiToolNames.State, work.AllowedTools!);
+    }
+
+    [Theory]
     [InlineData("hello")]
     [InlineData("show my assigned cases")]
     [InlineData("unclassifiable arbitrary text")]
