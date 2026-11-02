@@ -25,6 +25,74 @@ namespace SwiftAid.Integration.Tests;
 public sealed class CaseCommandProcessingPostgresTests
 {
     [CaseAuthorityPostgresFact]
+    public async Task Collaborator_eligibility_requires_locked_current_scope_and_all_actions()
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(makeCurrentActorOwner: false);
+        using var keyRing = SyntheticPayloadKeyRing.Create();
+        using var provider = ProtectedPayloadDataProtectionProviderFactory.Create(
+            keyRing.CreateOptions(), new TestHostEnvironment(Environments.Production));
+        await using var context = fixture.CreateDbContext();
+        var unit = new PostgresCaseCommandUnitOfWork(context);
+        var payloads = new PostgresProtectedCaseEventPayloadStore(context, unit, keyRing.CreateOptions(), provider);
+        var persistence = new PostgresCaseCommandPersistence(context, unit, payloads, new CaseEventSerializer());
+        await using var lease = await unit.BeginCaseAsync(fixture.CreateActor(), fixture.CaseId, [], CaseLeaseMode.Write, CancellationToken.None);
+        var header = Assert.IsType<CaseCommandCaseHeader>(await persistence.ReadCaseHeaderAsync(lease, CancellationToken.None));
+        async Task<bool> Eligible(CaseCollaborationActions actions) => await persistence.IsEligibleCollaboratorAsync(
+            lease, fixture.ActorId, actions, header, CancellationToken.None);
+
+        // Eligibility is prospective: this actor has neither ownership nor a share.
+        Assert.True(await Eligible(CaseCollaborationActions.ReadCase));
+        var requested = CaseCollaborationActions.ReadCase | CaseCollaborationActions.ManageFollowUp;
+        Assert.False(await Eligible(requested));
+        var group = await context.AccessGrantGroups.SingleAsync(item => item.GrantGroupId == fixture.GrantGroupId);
+        var separateGroup = (AccessGrantGroupEntity)context.Entry(group).CurrentValues.ToObject();
+        separateGroup.GrantGroupId = $"split-{Guid.NewGuid():N}";
+        context.AccessGrantGroups.Add(separateGroup);
+        context.AccessGrantOperations.Add(new AccessGrantOperationEntity
+        {
+            GrantGroupId = separateGroup.GrantGroupId, Operation = CaseOperation.ManageFollowUp
+        });
+        await context.SaveChangesAsync();
+        Assert.False(await Eligible(requested)); // Actions from separate groups cannot be combined.
+        context.AccessGrantOperations.Add(new AccessGrantOperationEntity
+        {
+            GrantGroupId = fixture.GrantGroupId, Operation = CaseOperation.ManageFollowUp
+        });
+        await context.SaveChangesAsync();
+        Assert.True(await Eligible(requested));
+
+        var originalSector = group.Sector;
+        group.Sector = Sector.AnimalHealth;
+        await context.SaveChangesAsync();
+        Assert.False(await Eligible(requested));
+        group.Sector = originalSector;
+        var originalSensitivity = group.SensitivityCode;
+        group.SensitivityCode = "sens-other";
+        await context.SaveChangesAsync();
+        Assert.False(await Eligible(requested));
+        group.SensitivityCode = originalSensitivity;
+        var originalCountry = group.CountryCode;
+        group.CountryCode = "ZA";
+        await context.SaveChangesAsync();
+        Assert.False(await Eligible(requested));
+        group.CountryCode = originalCountry;
+        var originalExpiry = group.ExpiresAtUtc;
+        group.ExpiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(-1);
+        await context.SaveChangesAsync();
+        Assert.False(await Eligible(requested));
+        group.ExpiresAtUtc = originalExpiry;
+        await context.SaveChangesAsync();
+        Assert.True(await Eligible(requested));
+        Assert.False(await persistence.IsEligibleCollaboratorAsync(lease, fixture.ActorId, requested,
+            header with { ResourceVersion = header.ResourceVersion + 1 }, CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+            await Eligible(CaseCollaborationActions.ManageFollowUp));
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await persistence.IsEligibleCollaboratorAsync(lease, "unlocked-recipient", requested, header, CancellationToken.None));
+        // Disposal rolls back the synthetic scope mutations.
+    }
+
+    [CaseAuthorityPostgresFact]
     public async Task Bounded_share_final_write_guard_rolls_back_narrowed_scope_and_accepts_permitted_retry()
     {
         await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(makeCurrentActorOwner: false, createActiveShare: true);

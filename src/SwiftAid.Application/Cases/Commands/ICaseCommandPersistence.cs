@@ -1,4 +1,5 @@
 using SwiftAid.Application.Authorization;
+using SwiftAid.Contracts.Commands;
 using SwiftAid.Domain.Cases;
 
 namespace SwiftAid.Application.Cases.Commands;
@@ -43,6 +44,14 @@ public interface ICaseCommandPersistence
     ValueTask<bool> IsEligibleAssignmentTargetAsync(
         ICaseCommandLease lease,
         string targetActorId,
+        CaseCommandCaseHeader caseHeader,
+        CancellationToken cancellationToken);
+
+    /// <summary>Checks a locked collaborator against the case scope and all requested actions in one active grant group.</summary>
+    ValueTask<bool> IsEligibleCollaboratorAsync(
+        ICaseCommandLease lease,
+        string targetActorId,
+        CaseCollaborationActions actions,
         CaseCommandCaseHeader caseHeader,
         CancellationToken cancellationToken);
 

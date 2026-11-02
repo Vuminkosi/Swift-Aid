@@ -255,14 +255,46 @@ public sealed class PostgresCaseCommandPersistence : ICaseCommandPersistence
         };
     }
 
-    public async ValueTask<bool> IsEligibleAssignmentTargetAsync(
+    public ValueTask<bool> IsEligibleAssignmentTargetAsync(
         ICaseCommandLease lease,
         string targetActorId,
+        CaseCommandCaseHeader caseHeader,
+        CancellationToken cancellationToken) =>
+        IsEligibleTargetAsync(lease, targetActorId, [nameof(CaseOperation.ReadCase)], caseHeader, cancellationToken);
+
+    public ValueTask<bool> IsEligibleCollaboratorAsync(
+        ICaseCommandLease lease,
+        string targetActorId,
+        CaseCollaborationActions actions,
+        CaseCommandCaseHeader caseHeader,
+        CancellationToken cancellationToken)
+    {
+        const CaseCollaborationActions supported = CaseCollaborationActions.ReadCase | CaseCollaborationActions.ReadAttachment |
+            CaseCollaborationActions.Synchronize | CaseCollaborationActions.RecordObservation |
+            CaseCollaborationActions.ManageFollowUp | CaseCollaborationActions.ManageEscalation;
+        if (!actions.HasFlag(CaseCollaborationActions.ReadCase) || (actions & ~supported) != 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(actions));
+        }
+
+        return IsEligibleTargetAsync(lease, targetActorId,
+            Enum.GetValues<CaseCollaborationActions>().Where(action => actions.HasFlag(action))
+                .Select(action => action.ToString()).ToArray(), caseHeader, cancellationToken);
+    }
+
+    private async ValueTask<bool> IsEligibleTargetAsync(
+        ICaseCommandLease lease,
+        string targetActorId,
+        string[] requiredOperations,
         CaseCommandCaseHeader caseHeader,
         CancellationToken cancellationToken)
     {
         var current = RequireLease(lease, CaseLeaseMode.Write);
         RequireCanonicalActor(targetActorId);
+        if (!current.LockedActorIds.Contains(targetActorId, StringComparer.Ordinal))
+        {
+            throw new InvalidOperationException("The target actor is not locked by the active case lease.");
+        }
         ArgumentNullException.ThrowIfNull(caseHeader);
         if (caseHeader.CaseId != current.CaseId)
         {
@@ -302,12 +334,19 @@ public sealed class PostgresCaseCommandPersistence : ICaseCommandPersistence
                   AND (member.expires_at_utc IS NULL OR member.expires_at_utc > clock_timestamp())
                   AND grant_group.status = 'Active'
                   AND grant_group.valid_from_utc <= clock_timestamp()
-                  AND grant_group.expires_at_utc > clock_timestamp())
+                  AND grant_group.expires_at_utc > clock_timestamp()
+                  AND NOT EXISTS (
+                      SELECT 1 FROM unnest(@required_operations::text[]) AS required(operation)
+                      WHERE NOT EXISTS (
+                          SELECT 1 FROM public.access_grant_group_operations AS permitted
+                          WHERE permitted.grant_group_id = grant_group.grant_group_id
+                            AND permitted.operation = required.operation)))
             """;
 
         await using var command = CreateCommand(current, sql,
             ("target_actor_id", targetActorId),
             ("case_id", current.CaseId),
+            ("required_operations", requiredOperations),
             ("resource_version", caseHeader.ResourceVersion));
         return (bool)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException("The assignment target check returned no result."));

@@ -10,6 +10,31 @@ namespace SwiftAid.Application.Tests;
 public sealed class CaseCommandProcessorTests
 {
     [Fact]
+    public async Task Ineligible_collaborator_is_denied_before_append_but_receipt_replay_does_not_recheck_recipient()
+    {
+        var command = new GrantCaseCollaboratorCommand(CommandId, 2, Guid.NewGuid(), "worker",
+            CaseCollaborationActions.ReadCase | CaseCollaborationActions.ManageFollowUp,
+            DatabaseNow.AddHours(1), "Synthetic grant", null, CallerRecordedAt);
+        var scenario = CreateScenario(command);
+        scenario.UnitOfWork.LockAdditionalHints = true;
+        scenario.Persistence.TargetEligible = false;
+        var denied = await scenario.Processor.ProcessAsync(scenario.Actor, CaseId, 1, command, CancellationToken.None);
+        Assert.Equal(CaseCommandProcessingStatus.Denied, denied.Status);
+        Assert.Empty(scenario.Persistence.Appends);
+        Assert.Single(scenario.Persistence.DeniedAudits);
+        Assert.Single(scenario.Persistence.CollaboratorChecks);
+        Assert.Equal(2, scenario.UnitOfWork.BeginCount);
+
+        var retry = CreateScenario(command);
+        retry.Persistence.TargetEligible = false;
+        retry.Persistence.Receipt = ReceiptFor(retry.Actor, command, [Guid.NewGuid()], 3);
+        var replay = await retry.Processor.ProcessAsync(retry.Actor, CaseId, 1, command, CancellationToken.None);
+        Assert.Equal(CaseCommandProcessingStatus.Replayed, replay.Status);
+        Assert.Empty(retry.Persistence.CollaboratorChecks);
+        Assert.Empty(Assert.Single(retry.UnitOfWork.BeginHints));
+    }
+
+    [Fact]
     public async Task Collaborator_revocation_uses_dedicated_permission_and_server_timestamp()
     {
         var aggregate = CreateAggregate();
@@ -42,6 +67,7 @@ public sealed class CaseCommandProcessorTests
         Assert.Equal(["denied-audit"], denied.Persistence.Calls);
 
         var allowed = CreateScenario(command);
+        allowed.UnitOfWork.LockAdditionalHints = true;
         allowed.AccessPolicy.Decisions.Enqueue(Allowed());
         allowed.AccessPolicy.Decisions.Enqueue(Allowed());
         var accepted = await allowed.Processor.ProcessAsync(allowed.Actor, CaseId, 1, command, CancellationToken.None);
@@ -49,6 +75,8 @@ public sealed class CaseCommandProcessorTests
         var grant = Assert.IsType<CaseCollaboratorGranted>(Assert.Single(Assert.Single(allowed.Persistence.Appends).Events));
         Assert.Equal(DatabaseNow, grant.RecordedAtUtc);
         Assert.Equal(command.ExpiresAtUtc, grant.ExpiresAtUtc);
+        Assert.Equal(["worker"], allowed.UnitOfWork.BeginHints[1].ToArray());
+        Assert.Equal(command.Actions, Assert.Single(allowed.Persistence.CollaboratorChecks));
 
         var expiredCommand = command with { ExpiresAtUtc = DatabaseNow.AddMinutes(-1) };
         var expired = CreateScenario(expiredCommand);
@@ -618,6 +646,15 @@ public sealed class CaseCommandProcessorTests
         public CaseCommandReceipt? Receipt { get; set; }
         public DateTimeOffset DatabaseNow { get; set; } = CaseCommandProcessorTests.DatabaseNow;
         public bool TargetEligible { get; set; } = true;
+        public List<CaseCollaborationActions> CollaboratorChecks { get; } = [];
+
+        public ValueTask<bool> IsEligibleCollaboratorAsync(ICaseCommandLease lease, string targetActorId,
+            CaseCollaborationActions actions, CaseCommandCaseHeader caseHeader, CancellationToken cancellationToken)
+        {
+            Assert.Contains(targetActorId, lease.LockedActorIds);
+            CollaboratorChecks.Add(actions);
+            return ValueTask.FromResult(TargetEligible);
+        }
         public CaseCommandAppendOutcome? AppendOutcomeOverride { get; set; }
         public int TargetChecks { get; private set; }
         public int HeaderReadsBeforeRace { get; set; }

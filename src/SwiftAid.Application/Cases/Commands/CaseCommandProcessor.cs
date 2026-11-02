@@ -249,6 +249,21 @@ public sealed class CaseCommandProcessor : ICaseCommandProcessor
             }
         }
 
+        if (commandForDecision is GrantCaseCollaboratorCommand collaborator)
+        {
+            if (!lease.LockedActorIds.Contains(collaborator.CollaboratorActorId, StringComparer.Ordinal))
+            {
+                throw new CaseLeaseDiscoveryChangedException(caseId, actorHints.Add(collaborator.CollaboratorActorId));
+            }
+
+            if (!await _persistence.IsEligibleCollaboratorAsync(lease, collaborator.CollaboratorActorId,
+                    collaborator.Actions, header, cancellationToken).ConfigureAwait(false))
+            {
+                return await DenyAndCommitAuditAsync(lease, actor, caseId, commandId,
+                    AccessDecisionCode.OperationNotGranted, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
         var authorization = new CaseCommandAuthorizationSnapshot(
             actor.ActorId,
             actor.AccessEpoch,

@@ -288,6 +288,7 @@ public sealed class CaseCorrectionReadQueryTests
         public ValueTask<CaseCommandReceipt?> FindReceiptAsync(ICaseCommandLease lease, string actorId, Guid commandId, CancellationToken cancellationToken) => throw new NotSupportedException();
         public ValueTask<DateTimeOffset> GetDatabaseUtcNowAsync(ICaseCommandLease lease, CancellationToken cancellationToken) => throw new NotSupportedException();
         public ValueTask<bool> IsEligibleAssignmentTargetAsync(ICaseCommandLease lease, string targetActorId, CaseCommandCaseHeader caseHeader, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask<bool> IsEligibleCollaboratorAsync(ICaseCommandLease lease, string targetActorId, CaseCollaborationActions actions, CaseCommandCaseHeader caseHeader, CancellationToken cancellationToken) => throw new NotSupportedException();
         public ValueTask<CaseCommandAppendOutcome> StageAcceptedCommandAsync(ICaseCommandLease lease, CaseCommandAppendRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public ValueTask StageDeniedAuditAsync(ICaseCommandLease lease, CaseCommandDenialAudit audit, CancellationToken cancellationToken) => throw new NotSupportedException();
     }
