@@ -16,6 +16,7 @@
 | SW-00-009 | Passed | [Test evidence log](docs/TEST-EVIDENCE-LOG.md) indexes baseline commands/results and assigns stable blocker IDs; regression coordination and active code-path ownership boundaries are stated. |
 | SW-00-010 | Passed | [Change control](docs/CHANGE-CONTROL.md) records the active canonical branch/worktree and shared-path ownership, no-push, and non-destructive rules; per-path owners still require live handoff confirmation. |
 | SW-01-001 | Passed | [Topology audit](docs/TOPOLOGY-AUDIT.md) maps MAUI, Gateway/web, .NET layers, PostgreSQL/PostGIS, retained services and the optional Python classification-worker profile; runtime health remains separate. |
+| SW-01-002 | Partial / blocked | [Runtime checks](docs/SW-01-002-RUNTIME.md): local service readiness and Gateway-to-service links passed; Compose Gateway restart returned exit 1 because of the stale optional classification-worker network namespace. No external-provider call or full workflow was run. |
 | SW-01-004 | In progress | Corrected one Gateway audio endpoint service-binding defect; focused authorization integration suite passes. Broader command/event/audio contract inventory remains. |
 
 ## Usage and release accounting
@@ -49,7 +50,7 @@
 **Exit gate:** Evidence for all applicable checks below; blockers and conditional gates explicitly accounted for.
 
 - [x] **SW-01-001** — Confirm .NET MAUI Blazor Hybrid Android, responsive Blazor/Gateway, .NET domain/application, Python worker and retained service topology. Evidence: [topology audit](docs/TOPOLOGY-AUDIT.md); source mapping only, service health and runtime journeys remain NOT VERIFIED.
-- [ ] **SW-01-002** — Validate actual PostgreSQL/PostGIS, MinIO/S3, NATS JetStream, Qdrant, Gateway, Muse/provider and worker connections, health/readiness and restart behavior.
+- [ ] **SW-01-002** — Validate actual PostgreSQL/PostGIS, MinIO/S3, NATS JetStream, Qdrant, Gateway, Muse/provider and worker connections, health/readiness and restart behavior. Partial / blocked: [runtime evidence](docs/SW-01-002-RUNTIME.md); local readiness checks passed, external providers and end-to-end service flows remain NOT VERIFIED, and Compose restart failed on the stale optional worker namespace (BL-009).
 - [ ] **SW-01-003** — Pin compatible SDK/package/model versions, license/digests, container images and lockfiles; do not assume inherited candidate versions are installed.
 - [ ] **SW-01-004** — Map versioned commands, cases, events, outbox, worker jobs, AI tools, audio sessions, UI registry and public projection schemas.
 - [ ] **SW-01-005** — Ensure authoritative changes pass Gateway application commands; workers do not write privileged case tables or receive global DB/Qdrant credentials.

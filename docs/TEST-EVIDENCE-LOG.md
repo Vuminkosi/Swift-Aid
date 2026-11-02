@@ -23,6 +23,8 @@ The master orchestrator owns checklist status, evidence linking and regression c
 | EV-011 | `dotnet restore SwiftAid.sln --locked-mode -m:1 -nr:false` | PASS: all solution projects restored from locked dependencies; previous local iOS package-file failure no longer reproduces. | SW-00-004, [baseline audit](BASELINE-AUDIT.md) |
 | EV-012 | `dotnet test SwiftAid.sln --no-build --no-restore -m:1 -nr:false --verbosity quiet` | PASS, exit 0: Domain 83, Application 867/3 skipped, Integration 602/226 skipped, Client 293, UI 527; 2,372 passed / 229 skipped / 0 failed. | SW-00-004, [acceptance](ACCEPTANCE.md) |
 | EV-013 | `dotnet test tests/SwiftAid.Ui.Tests/SwiftAid.Ui.Tests.csproj --no-restore -m:1 -nr:false --logger 'console;verbosity=minimal'` | PASS: UI suite 527/527 after focused test-fixture corrections. | Commit `b97f87c` |
+| EV-014 | Local Compose service readiness requests before/after Gateway restart | PASS for Gateway liveness, PostgreSQL readiness, MinIO, NATS, Redis, and Gateway links to language/TTS/Qdrant; see exact commands in [runtime record](SW-01-002-RUNTIME.md). These checks do not establish provider inference or full workflows. | SW-01-002 |
+| EV-015 | `docker compose -f infra/compose.yml restart gateway` | FAIL, exit 1: Gateway restarted and became healthy; Compose then failed restarting the stopped optional classification worker due to a missing Gateway network namespace. Worker remains stopped. | BL-009, [runtime record](SW-01-002-RUNTIME.md) |
 
 ## Active regression and blocker ownership
 
