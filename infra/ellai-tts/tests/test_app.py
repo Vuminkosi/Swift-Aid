@@ -107,9 +107,11 @@ def test_synthesis_uses_native_calm_speaking_rate(monkeypatch):
         response = test_client.post(
             "/v1/synthesize",
             headers={"Authorization": "Bearer test-only-key"},
-            json={"text": "Take your time. I am here to help.", "requestId": "calm-1"},
+            json={"text": "Take your time, please. Ready? Let us begin!", "requestId": "calm-1"},
         )
     assert response.status_code == 200
-    assert calls == [0.92]
-    assert response.headers["x-swiftaid-speaking-rate"] == "0.92"
+    assert calls == [0.95]
+    # Three model samples remain three PCM samples: no punctuation or trailing padding.
+    assert len(response.content) == 3 * 2
+    assert response.headers["x-swiftaid-speaking-rate"] == "0.95"
     assert response.headers["x-swiftaid-sample-rate"] == "16000"

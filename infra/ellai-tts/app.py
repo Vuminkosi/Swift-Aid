@@ -24,7 +24,7 @@ VOICE_ID = "swiftaid-mms-english-v1"
 MAX_TEXT_LENGTH = 2000
 MAX_SAMPLE_COUNT = 16_000 * 60 * 2
 FRAME_BYTES = 32 * 1024
-SPEAKING_RATE = 0.92
+SPEAKING_RATE = 0.95
 _MARKUP = re.compile(r"<[^>]*>")
 
 
