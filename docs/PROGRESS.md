@@ -466,3 +466,7 @@ Source map in [identity lifecycle audit](SW-02-002-IDENTITY-LIFECYCLE-AUDIT.md) 
 ## SW-02-003 external provider callback audit - 2 November 2026
 
 Source audit in [SW-02-003 provider audit](SW-02-003-PROVIDER-CALLBACK-AUDIT.md) found Google/Facebook/org OIDC configuration and explicit CallbackVerified gates plus selected contract tests. No real provider registration, consent or callback was run, and secret values were not inspected. SW-02-003 remains partial/blocked under BL-004; EV-029.
+
+## SW-02-004 identity security source audit - 2 November 2026
+
+Source review in [SW-02-004 identity security audit](SW-02-004-IDENTITY-SECURITY-AUDIT.md) found OpenIddict authorization-code PKCE enforcement, Duende OIDC native client, provider/issuer/subject identity mapping, MAUI SecureStorage and callback URI checks. Real provider state/nonce/callback and Android secure-store behavior remain NOT VERIFIED. No provider/device tests run; EV-030.

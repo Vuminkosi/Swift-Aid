@@ -39,6 +39,7 @@ The master orchestrator owns checklist status, evidence linking and regression c
 | EV-027 | Read-only SW-02-001 guest-entry source audit | PARTIAL: anonymous Gateway intake routes and encrypted/local-only Mobile guest path found; Mobile transport is unavailable, and browser/device/live submission acceptance NOT VERIFIED. No tests run. | SW-02-001 / BL-003, [guest entry audit](SW-02-001-GUEST-ENTRY-AUDIT.md) |
 | EV-028 | Read-only SW-02-002 identity lifecycle source audit | PARTIAL: Gateway password/email/reset/profile/provider/logout routes and Mobile native secure-session services found; no provider/email/device lifecycle journey run. | SW-02-002, [identity lifecycle audit](SW-02-002-IDENTITY-LIFECYCLE-AUDIT.md) |
 | EV-029 | Read-only SW-02-003 provider configuration audit | PARTIAL/BLOCKED: provider callback options and explicit verification flags exist; real Google/Facebook/organization OIDC registration and callback NOT VERIFIED. No provider call made. | SW-02-003 / BL-004, [provider audit](SW-02-003-PROVIDER-CALLBACK-AUDIT.md) |
+| EV-030 | Read-only SW-02-004 identity security source audit | PARTIAL: OpenIddict PKCE requirement, provider/issuer/subject mapping, Duende OIDC client, MAUI SecureStorage and callback URI checks found; real callback and device storage NOT VERIFIED. | SW-02-004, [identity security audit](SW-02-004-IDENTITY-SECURITY-AUDIT.md) |
 
 ## Active regression and blocker ownership
 
