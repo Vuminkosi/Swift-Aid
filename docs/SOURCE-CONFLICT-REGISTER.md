@@ -16,7 +16,7 @@ Static coverage check: the spec contains 379 unique `SA-*` identifiers, and the 
 
 ## Supplied-document comparison
 
-`SW-00-002` remains blocked: the task attachment directory contains the two execution directives, but not the 16 source documents the checklist says must be compared. No missing document content or approvals were reconstructed from inference. Resume that comparison when the source documents are supplied.
+`SW-00-002` is partial. The owner identified the repository `spec.md`, `implementation.md` and `designs/` as the source locations. The authoritative pair is present; a current inventory found 25 Markdown files under `designs/`, not the 16 documents stated by the checklist. Existing conflict/decision registers were reconciled with the current authority pair, including historical v1.4/v2.4 references and explicit safety/rights conditions. The exact original 16-document manifest is unavailable, so this does not claim exact item-for-item comparison. See [SW-00-002 source comparison](SW-00-002-SOURCE-COMPARISON.md).
 
 ## Verification boundary
 

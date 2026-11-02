@@ -33,12 +33,13 @@ The master orchestrator owns checklist status, evidence linking and regression c
 | EV-021 | Read-only source trace for SW-01-006 | PARTIAL: managed case command receipts/version checks, purpose-specific outboxes and worker leases exist; universal durable inbox, ACK ordering, dead-letter and reconciliation evidence NOT VERIFIED. No tests run for this audit. | SW-01-006, [durability audit](SW-01-006-DURABILITY-AUDIT.md) |
 | EV-022 | Read-only source trace for SW-01-007 | PARTIAL: separate outbox, command receipt, projection, media, AI and notification states mapped; complete UI/API transition semantics and browser/device journeys NOT VERIFIED. | SW-01-007, [status audit](SW-01-007-STATUS-SEPARATION.md) |
 | EV-023 | Read-only existing-test inventory for SW-01-008 | PARTIAL: selected command replay, event ordering, job schema and outbox/restart test sources exist; no tests run for this inventory, no general live broker recovery proven; Gateway Compose restart failure remains BL-009. | SW-01-008, [recovery coverage audit](SW-01-008-RECOVERY-COVERAGE.md) |
+| EV-024 | Owner-directed repository source/rights inventory | PARTIAL: current spec/implementation pair and 25 design Markdown files inventoried; checklist's claimed 16-item set has no matching manifest. Folder search found requirements/ledgers but no speaker-consent register or asset creator/license/redistribution proof. | SW-00-002 / BL-001; SW-00-008 / BL-008, [source comparison](SW-00-002-SOURCE-COMPARISON.md) |
 
 ## Active regression and blocker ownership
 
 | Issue | Failure / gap | Current owner | Reopen/closure evidence |
 |---|---|---|---|
-| BL-001 | 16 source attachments unavailable for comparison | User/source provider for missing material; orchestrator tracks | Supply the source documents, then complete SW-00-002 comparison |
+| BL-001 | Checklist cites 16 inputs but repository source set contains 25 design Markdown files | Orchestrator tracks source manifest reconciliation | Identify the exact 16-item manifest or confirm the 25-file repository source set is the intended complete set; see `SW-00-002-SOURCE-COMPARISON.md` |
 | BL-002 | Seven UI baseline failures and missing iOS NuGet assets | Unassigned; confirm from current handoff before code edits | Repair package cache/restore; diagnose UI cases; rerun focused suites and full baseline |
 | BL-003 | Browser harness cannot load Playwright | Unassigned; confirm package/test ownership | Provision approved browser-test environment and run guest-storage workflow |
 | BL-008 | Recording consent plus model/data/asset rights incomplete | Rights owner not recorded; orchestrator tracks evidence | Add source, license, provenance and consent/approval evidence per `RIGHTS-REGISTER.md` |

@@ -2,7 +2,7 @@
 
 | ID | Checklist / scope | Status | Evidence and resumption condition |
 |---|---|---|---|
-| BL-001 | SW-00-002 supplied-document comparison | Blocked | The provided attachment directory contains only the two execution directives; the 16 source documents claimed by the checklist are absent. Resume the comparison when those source documents are present. |
+| BL-001 | SW-00-002 exact source manifest reconciliation | Partial | Owner identified repository `spec.md`, `implementation.md` and `designs/` as inputs. Current inventory has 25 design Markdown files; the checklist says 16 and no original 16-item manifest was found. Authority/conflict comparison is recorded, but exact item mapping remains open. See [source comparison](SW-00-002-SOURCE-COMPARISON.md). |
 | BL-002 | SW-00-004 full .NET baseline | Resolved for current host test scope (2 Nov 2026) | Locked restore passed; full solution `--no-build --no-restore` passed with exit 0 (2,372 passed, 229 skipped); UI passed 527/527 after correcting stale display assertions and the no-op JS-module fixture. Android device and browser acceptance remain separate; see [baseline audit](BASELINE-AUDIT.md). |
 | BL-003 | Browser guest-storage acceptance | Not verified | `node tests/SwiftAid.Browser.Tests/guest-storage.browser.cjs` cannot load because `playwright` is absent from the local Node environment. Use an already approved provisioned browser-test environment or add the dependency through the package owner after confirming repository conventions. |
 | BL-004 | SW-01-002 live provider readiness | Not verified | Compose lists SwiftAid dependencies running; Qdrant has no reported health status and this audit did not execute provider-specific readiness, restart, persistence or integration workflows. |

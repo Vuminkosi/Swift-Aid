@@ -442,3 +442,7 @@ Source map in [SW-01-007 status audit](SW-01-007-STATUS-SEPARATION.md) distingui
 ## SW-01-008 recovery coverage audit - 2 November 2026
 
 Existing-test inventory in [SW-01-008 recovery audit](SW-01-008-RECOVERY-COVERAGE.md) found selected case replay/event ordering/job schema/outbox test sources and a live NATS redelivery scenario. No tests were run for this inventory. The Gateway Compose restart failed under BL-009; lane-wide fault matrix and live recovery remain NOT VERIFIED. Evidence EV-023.
+
+## SW-00-002 source and rights reconciliation - 2 November 2026
+
+Following owner direction, compared the current authority pair (spec.md v1.5, implementation.md v2.5) with the repository design source set. Inventory found 25 Markdown files under designs/, while the checklist claims 16; the original 16-item manifest is unavailable, so SW-00-002 is PARTIAL and BL-001 remains open for exact set reconciliation. Existing source/decision ledgers continue to govern stale v1.4/v2.4 references and unresolved owner choices. Repository search across designs/docs/fixtures/resources/product assets found consent requirements and rights ledgers, but no speaker-consent register or creator/license/redistribution evidence for the recorded notification/UI assets. SW-00-008 remains blocked/partial under BL-008. Details: [source comparison](SW-00-002-SOURCE-COMPARISON.md), [rights review](RIGHTS-REVIEW-2026-11-02.md).
