@@ -4,6 +4,7 @@ using SwiftAid.Application.Serialization;
 using SwiftAid.Contracts.Commands;
 using SwiftAid.Domain.Cases;
 using SwiftAid.Contracts.Geography;
+using SwiftAid.Contracts.Events;
 
 namespace SwiftAid.Application.Tests;
 
@@ -93,6 +94,84 @@ public sealed class CaseEventSerializationTests
             CaseId, 5, 1, Guid.Parse("20000000-0000-0000-0000-000000000014"), "officer-1", null,
             RecordedAtUtc, Guid.Parse("40000000-0000-0000-0000-000000000003"), "supervisor visited holding", "resolved"),
             "case-escalation-closed.v1.json"];
+    }
+
+    public static IEnumerable<object[]> AssistanceEvents()
+    {
+        var assistanceId = Guid.Parse("40000000-0000-0000-0000-000000000099");
+        var commandId = Guid.Parse("20000000-0000-0000-0000-000000000099");
+        yield return [new AssistanceRequested(CaseId, 2, 1, commandId, "worker-1", OccurredAtUtc, RecordedAtUtc,
+            assistanceId, "Transport", "worker-2", new DateTimeOffset(2026, 10, 30, 8, 0, 0, TimeSpan.Zero)), "AssistanceRequested"];
+        yield return [new AssistanceAccepted(CaseId, 3, 1, commandId, "worker-2", OccurredAtUtc, RecordedAtUtc, assistanceId, "Accepted request"), "AssistanceAccepted"];
+        yield return [new AssistanceProgressRecorded(CaseId, 3, 1, commandId, "worker-2", OccurredAtUtc, RecordedAtUtc, assistanceId, "Coordinating transport"), "AssistanceProgressRecorded"];
+        yield return [new AssistanceProvided(CaseId, 3, 1, commandId, "worker-2", OccurredAtUtc, RecordedAtUtc, assistanceId, "Transport arranged"), "AssistanceProvided"];
+        yield return [new AssistanceReceiptConfirmed(CaseId, 4, 1, commandId, "worker-1", OccurredAtUtc, RecordedAtUtc,
+            assistanceId, "Recipient confirmed delivery", "Phone confirmation", "Called the assigned recipient"), "AssistanceReceiptConfirmed"];
+        yield return [new AssistanceUnfulfilled(CaseId, 4, 1, commandId, "worker-2", OccurredAtUtc, RecordedAtUtc, assistanceId, "No vehicle was available"), "AssistanceUnfulfilled"];
+        yield return [new AssistanceCancelled(CaseId, 4, 1, commandId, "worker-1", OccurredAtUtc, RecordedAtUtc, assistanceId, "Request no longer needed"), "AssistanceCancelled"];
+    }
+
+    public static IEnumerable<object[]> AdditionalV1Events()
+    {
+        var commandId = Guid.Parse("20000000-0000-0000-0000-000000000098");
+        var grantId = Guid.Parse("40000000-0000-0000-0000-000000000098");
+        yield return [new CaseAssignmentAcknowledged(CaseId, 3, 1, commandId, "worker-1", OccurredAtUtc, RecordedAtUtc, 2), "CaseAssignmentAcknowledged", "assignmentVersion"];
+        yield return [new CaseCollaboratorGranted(CaseId, 3, 1, commandId, "officer-1", OccurredAtUtc, RecordedAtUtc,
+            grantId, "worker-2", CaseCollaborationActions.ReadCase | CaseCollaborationActions.ManageFollowUp, RecordedAtUtc.AddDays(2), "Follow-up coverage"), "CaseCollaboratorGranted", "actions"];
+        yield return [new CaseCollaboratorRevoked(CaseId, 4, 1, commandId, "officer-1", OccurredAtUtc, RecordedAtUtc,
+            grantId, "Coverage ended"), "CaseCollaboratorRevoked", "reason"];
+    }
+
+    [Theory]
+    [MemberData(nameof(AssistanceEvents))]
+    public void AssistanceEvents_UseVersionOneContractAndExpectedPayload(CaseEvent @event, string eventType)
+    {
+        var serialized = Serializer.SerializeToUtf8Bytes(@event);
+        using var document = JsonDocument.Parse(serialized);
+        var root = document.RootElement;
+        var payload = root.GetProperty("payload");
+
+        Assert.Equal(1, Serializer.GetSchemaVersion(@event));
+        Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(eventType, root.GetProperty("eventType").GetString());
+        Assert.Equal("40000000-0000-0000-0000-000000000099", payload.GetProperty("assistanceId").GetString());
+        if (@event is AssistanceRequested)
+        {
+            Assert.Equal("Transport", payload.GetProperty("need").GetString());
+            Assert.Equal("worker-2", payload.GetProperty("responsibleActorId").GetString());
+        }
+        else if (@event is AssistanceReceiptConfirmed)
+        {
+            Assert.Equal("Phone confirmation", payload.GetProperty("receiptMethod").GetString());
+            Assert.Equal("Called the assigned recipient", payload.GetProperty("receiptContext").GetString());
+        }
+        else if (@event is AssistanceActivityRecorded)
+        {
+            Assert.True(payload.TryGetProperty("note", out _));
+            Assert.False(payload.TryGetProperty("receiptMethod", out _));
+            Assert.False(payload.TryGetProperty("receiptContext", out _));
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(AdditionalV1Events))]
+    public void AdditionalV1Events_UseVersionOneContractAndExpectedPayload(CaseEvent @event, string eventType, string payloadProperty)
+    {
+        using var document = JsonDocument.Parse(Serializer.SerializeToUtf8Bytes(@event));
+        var root = document.RootElement;
+        var payload = root.GetProperty("payload");
+
+        Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(eventType, root.GetProperty("eventType").GetString());
+        Assert.True(payload.TryGetProperty(payloadProperty, out _));
+        if (@event is CaseCollaboratorGranted)
+        {
+            var schemaPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../contracts/events/case-event.v1.schema.json"));
+            using var schema = JsonDocument.Parse(File.ReadAllBytes(schemaPath));
+            var actionsPattern = schema.RootElement.GetProperty("$defs").GetProperty("collaboratorGranted")
+                .GetProperty("properties").GetProperty("actions").GetProperty("pattern").GetString()!;
+            Assert.Matches(actionsPattern, payload.GetProperty("actions").GetString()!);
+        }
     }
 
     [Theory]
@@ -282,6 +361,29 @@ public sealed class CaseEventSerializationTests
         Assert.Equal(new[] { "value", "localDate", "rangeStart", "rangeEnd", "originalOffset", "zoneId", "precision" },
             reportedTime.GetProperty("required").EnumerateArray().Select(value => value.GetString()).ToArray());
         Assert.Equal(4, reportedTime.GetProperty("allOf").GetArrayLength());
+    }
+
+    [Fact]
+    public void V1Schema_EventTypeVocabularyMatchesEveryCaseEventType()
+    {
+        var schemaPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../contracts/events/case-event.v1.schema.json"));
+        using var schema = JsonDocument.Parse(File.ReadAllBytes(schemaPath));
+        var schemaEventTypes = schema.RootElement.GetProperty("properties").GetProperty("eventType")
+            .GetProperty("enum").EnumerateArray().Select(value => value.GetString()).OrderBy(value => value, StringComparer.Ordinal).ToArray();
+        var contractEventTypes = Enum.GetNames<CaseEventType>().OrderBy(value => value, StringComparer.Ordinal).ToArray();
+        var mappedEventTypes = schema.RootElement.GetProperty("allOf").EnumerateArray()
+            .Select(condition => condition.GetProperty("if").GetProperty("properties").GetProperty("eventType"))
+            .SelectMany(eventType => eventType.TryGetProperty("const", out var constant)
+                ? [constant.GetString()]
+                : eventType.GetProperty("enum").EnumerateArray().Select(value => value.GetString()))
+            .OrderBy(value => value, StringComparer.Ordinal).ToArray();
+        var payloadDefinitions = schema.RootElement.GetProperty("$defs").EnumerateObject().Select(definition => definition.Name).ToHashSet(StringComparer.Ordinal);
+        var payloadReferences = schema.RootElement.GetProperty("properties").GetProperty("payload").GetProperty("oneOf")
+            .EnumerateArray().Select(reference => reference.GetProperty("$ref").GetString()!.Replace("#/$defs/", "", StringComparison.Ordinal));
+
+        Assert.Equal(contractEventTypes, schemaEventTypes);
+        Assert.Equal(contractEventTypes, mappedEventTypes);
+        Assert.All(payloadReferences, reference => Assert.Contains(reference, payloadDefinitions));
     }
 
     [Fact]

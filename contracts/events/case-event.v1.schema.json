@@ -8,7 +8,7 @@
   "properties": {
     "schemaVersion": { "const": 1 },
     "eventId": { "type": "string", "format": "uuid" },
-    "eventType": { "enum": ["CaseReported", "CaseAssigned", "CaseReportCorrected", "CaseActionRequested", "CaseActionRequestReviewed", "CaseResolved", "CaseReopened", "CaseObservationRecorded", "CaseFollowUpScheduled", "CaseFollowUpAcknowledged", "CaseFollowUpOutcomeRecorded", "CaseEscalationRaised", "CaseEscalationAcknowledged", "CaseEscalationClosed"] },
+    "eventType": { "enum": ["CaseReported", "CaseAssigned", "CaseReportCorrected", "CaseActionRequested", "CaseActionRequestReviewed", "CaseResolved", "CaseReopened", "CaseObservationRecorded", "CaseFollowUpScheduled", "CaseFollowUpAcknowledged", "CaseFollowUpOutcomeRecorded", "CaseEscalationRaised", "CaseEscalationAcknowledged", "CaseEscalationClosed", "CaseAssignmentAcknowledged", "CaseCollaboratorGranted", "CaseCollaboratorRevoked", "AssistanceRequested", "AssistanceAccepted", "AssistanceProgressRecorded", "AssistanceProvided", "AssistanceReceiptConfirmed", "AssistanceUnfulfilled", "AssistanceCancelled"] },
     "caseId": { "type": "string", "format": "uuid" },
     "aggregateVersion": { "type": "integer", "minimum": 1 },
     "reportRevision": { "type": "integer", "minimum": 1 },
@@ -31,7 +31,13 @@
         { "$ref": "#/$defs/followUpOutcomeRecorded" },
         { "$ref": "#/$defs/escalationRaised" },
         { "$ref": "#/$defs/escalationAcknowledged" },
-        { "$ref": "#/$defs/escalationClosed" }
+        { "$ref": "#/$defs/escalationClosed" },
+        { "$ref": "#/$defs/assignmentAcknowledged" },
+        { "$ref": "#/$defs/collaboratorGranted" },
+        { "$ref": "#/$defs/collaboratorRevoked" },
+        { "$ref": "#/$defs/assistanceRequested" },
+        { "$ref": "#/$defs/assistanceActivity" },
+        { "$ref": "#/$defs/assistanceReceipt" }
       ]
     }
   },
@@ -49,9 +55,49 @@
     { "if": { "properties": { "eventType": { "const": "CaseFollowUpOutcomeRecorded" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/followUpOutcomeRecorded" } } } },
     { "if": { "properties": { "eventType": { "const": "CaseEscalationRaised" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/escalationRaised" } } } },
     { "if": { "properties": { "eventType": { "const": "CaseEscalationAcknowledged" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/escalationAcknowledged" } } } },
-    { "if": { "properties": { "eventType": { "const": "CaseEscalationClosed" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/escalationClosed" } } } }
+    { "if": { "properties": { "eventType": { "const": "CaseEscalationClosed" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/escalationClosed" } } } },
+    { "if": { "properties": { "eventType": { "const": "CaseAssignmentAcknowledged" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/assignmentAcknowledged" } } } },
+    { "if": { "properties": { "eventType": { "const": "CaseCollaboratorGranted" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/collaboratorGranted" } } } },
+    { "if": { "properties": { "eventType": { "const": "CaseCollaboratorRevoked" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/collaboratorRevoked" } } } },
+    { "if": { "properties": { "eventType": { "const": "AssistanceRequested" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/assistanceRequested" } } } },
+    { "if": { "properties": { "eventType": { "enum": ["AssistanceAccepted", "AssistanceProgressRecorded", "AssistanceProvided", "AssistanceUnfulfilled", "AssistanceCancelled"] } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/assistanceActivity" } } } },
+    { "if": { "properties": { "eventType": { "const": "AssistanceReceiptConfirmed" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/assistanceReceipt" } } } }
   ],
   "$defs": {
+    "assignmentAcknowledged": { "type": "object", "additionalProperties": false, "required": ["assignmentVersion"], "properties": { "assignmentVersion": { "type": "integer", "minimum": 1 } } },
+    "collaboratorGranted": {
+      "type": "object", "additionalProperties": false,
+      "required": ["grantId", "collaboratorActorId", "actions", "expiresAtUtc", "reason"],
+      "properties": {
+        "grantId": { "type": "string", "format": "uuid" },
+        "collaboratorActorId": { "type": "string", "minLength": 1 },
+        "actions": { "type": "string", "pattern": "^(ReadCase|ReadAttachment|Synchronize|RecordObservation|ManageFollowUp|ManageEscalation)(, (ReadCase|ReadAttachment|Synchronize|RecordObservation|ManageFollowUp|ManageEscalation))*$" },
+        "expiresAtUtc": { "type": "string", "format": "date-time" },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "collaboratorRevoked": { "type": "object", "additionalProperties": false, "required": ["grantId", "reason"], "properties": { "grantId": { "type": "string", "format": "uuid" }, "reason": { "type": "string", "minLength": 1 } } },
+    "assistanceRequested": {
+      "type": "object", "additionalProperties": false,
+      "required": ["assistanceId", "need", "responsibleActorId", "dueAtUtc"],
+      "properties": {
+        "assistanceId": { "type": "string", "format": "uuid" },
+        "need": { "type": "string", "minLength": 1 },
+        "responsibleActorId": { "type": "string", "minLength": 1 },
+        "dueAtUtc": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "assistanceActivity": { "type": "object", "additionalProperties": false, "required": ["assistanceId", "note"], "properties": { "assistanceId": { "type": "string", "format": "uuid" }, "note": { "type": "string", "minLength": 1 } } },
+    "assistanceReceipt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["assistanceId", "note", "receiptMethod", "receiptContext"],
+      "properties": {
+        "assistanceId": { "type": "string", "format": "uuid" },
+        "note": { "type": "string", "minLength": 1 },
+        "receiptMethod": { "type": "string", "minLength": 1 },
+        "receiptContext": { "type": "string", "minLength": 1 }
+      }
+    },
     "report": {
       "type": "object", "additionalProperties": false,
       "required": ["workspaceId", "report"],

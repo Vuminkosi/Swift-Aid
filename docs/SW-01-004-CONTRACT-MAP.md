@@ -28,6 +28,17 @@ Source inventory for versioned commands, case events, outbox, worker jobs, AI to
 
 During this crosswalk review, one duplicate `CaseFollowUpAcknowledged` replay arm was found and removed in commit `af2a6ed`; the post-commit `CaseEventJournalReaderTests` suite passes 34/34 and source inspection confirms one replay arm. Assistance event enum formatting was normalized in the same fix.
 
+## Schema-to-event reconciliation - 3 November 2026
+
+The contract enum, serializer, strict journal reader and `contracts/events/case-event.v1.schema.json` were compared by event name. The v1 schema initially omitted 10 of 24 `CaseEventType` values even though the serializer emitted them and the reader accepted them: `CaseAssignmentAcknowledged`, `CaseCollaboratorGranted`, `CaseCollaboratorRevoked`, and the seven assistance event types. The schema now includes every enum value, payload definition and event-to-payload mapping. The serializer test suite checks that the schema enum matches the contract enum, all enum values have a conditional payload mapping, all `oneOf` references resolve, and added event families serialize with schema version 1.
+
+- PASS - `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj --no-restore -m:1 -nr:false --filter FullyQualifiedName~CaseEventSerializationTests --logger 'console;verbosity=minimal'` - 37 passed, 0 failed, 0 skipped.
+- PASS - full Application.Tests - 909 passed, 3 skipped, 0 failed; skipped cases are live provider probes.
+- PASS - `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter FullyQualifiedName~CaseEventJournalReaderTests --logger 'console;verbosity=minimal'` - 34 passed, 0 failed, 0 skipped.
+- FAIL then PASS - the first integration test invocation attempted a WebAssembly native link and failed because `emcc` was not on PATH; the scoped rerun with `WasmBuildNative=false` passed.
+
+This closes the schema vocabulary/mapping gap only. It does not establish persistence/readback for every event, DB constraint alignment, all producer/consumer coverage, or compatibility for every public contract; SW-01-004 remains partial.
+
 ## Gaps and follow-up
 
 - Build a generated or maintained crosswalk of every command/event/job/tool/audio/UI/public-projection type to schema version, authoritative owner, producer, consumer, persistence form, compatibility policy and relevant tests.
@@ -36,4 +47,4 @@ During this crosswalk review, one duplicate `CaseFollowUpAcknowledged` replay ar
 - Trace each audio/session version from client capture through Gateway, storage, response preparation and cancellation/error paths.
 - Verify projection contracts and serialization/privacy boundaries against their routes and consumers.
 
-No contract, migration, package or generated file was changed. Current ownership for shared contract/schema edits remains to be confirmed from active handoffs (BL-005); no migration is proposed by this inventory.
+The v1 event schema was changed in this reconciliation; no migration or package change was needed. Current ownership for broader shared contract/schema work remains to be confirmed from active handoffs (BL-005).
