@@ -27,6 +27,38 @@ public sealed class EllaiSurfaceLogicTests
             new Dictionary<string, string> { ["feature"] = "report", ["objective"] = "Open report form" }))]
     };
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task OnlyServerAcceptedUiObservationBecomesGuidanceEvidence(bool accepted)
+    {
+        var client = new FakeReviewClient { ObservationHandler = () => Task.FromResult(accepted) };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        SetField(host, "_uiObservationModule", new ObservationJsModule());
+        await InvokeAsync(host, "ReportCurrentUiAsync", CancellationToken.None);
+        Assert.Equal(accepted, GetField<UiObservationReport?>(host, "_latestGuidanceObservation") is not null);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GuidanceObserverRecoversAfterTransportFailureOrTimeout(bool timeout)
+    {
+        var calls = 0;
+        var client = new FakeReviewClient { ObservationHandler = () =>
+        {
+            if (++calls == 1) return Task.FromException<bool>(timeout ? new TaskCanceledException() : new HttpRequestException());
+            return Task.FromResult(true);
+        } };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        SetField(host, "_uiObservationModule", new ObservationJsModule());
+        await InvokeAsync(host, "ObserveGuidanceIterationAsync", CancellationToken.None);
+        Assert.Null(GetField<UiObservationReport?>(host, "_latestGuidanceObservation"));
+        await InvokeAsync(host, "ObserveGuidanceIterationAsync", CancellationToken.None);
+        Assert.NotNull(GetField<UiObservationReport?>(host, "_latestGuidanceObservation"));
+        Assert.Equal(2, calls);
+    }
+
     [Fact]
     public async Task SavedGuidanceIsOfferedWithoutExecutionAndSurvivesRestoredConversationHistory()
     {
@@ -1900,6 +1932,16 @@ public sealed class EllaiSurfaceLogicTests
         }
     }
 
+    private sealed class ObservationJsModule : IJSObjectReference
+    {
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
+            InvokeAsync<TValue>(identifier, CancellationToken.None, args);
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args) =>
+            ValueTask.FromResult((TValue)(object)new UiObservationReport("view", "context", "web", ["report.entry"],
+                [new("report.entry", UiObservationState.Ready)]));
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
     private sealed class NoOpJsModule : IJSObjectReference
     {
         public static List<string> Invocations { get; } = [];
@@ -2190,10 +2232,11 @@ public sealed class EllaiSurfaceLogicTests
             return Task.FromResult(ActiveReview);
         }
 
+        public Func<Task<bool>>? ObservationHandler { get; init; }
         public Task<bool> ReportUiObservationAsync(
             string sessionId,
             UiObservationReport report,
-            CancellationToken cancellationToken) => Task.FromResult(false);
+            CancellationToken cancellationToken) => ObservationHandler?.Invoke() ?? Task.FromResult(false);
 
         public Task<IReadOnlyList<EllaiApprovedReceiptDto>?> ListReceiptsAsync(
             string sessionId,

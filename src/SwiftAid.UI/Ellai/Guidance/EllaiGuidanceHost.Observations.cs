@@ -18,11 +18,7 @@ public partial class EllaiGuidanceHost
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
             do
             {
-                await InvokeAsync(async () =>
-                {
-                    await ReportCurrentUiAsync(token);
-                    await AdvanceValidatedInputAsync(token);
-                });
+                await InvokeAsync(() => ObserveGuidanceIterationAsync(token));
                 timer.Period = _generatedTour is null ? TimeSpan.FromSeconds(10) : TimeSpan.FromSeconds(1);
             } while (await timer.WaitForNextTickAsync(token));
         }
@@ -36,6 +32,28 @@ public partial class EllaiGuidanceHost
             }
             catch (JSDisconnectedException) { }
             finally { _uiObservationGate.Release(); }
+        }
+    }
+
+    private async Task ObserveGuidanceIterationAsync(CancellationToken token)
+    {
+        try
+        {
+            await ReportCurrentUiAsync(token);
+            await AdvanceValidatedInputAsync(token);
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
+        {
+            // An individual transport timeout must not end the parent observer.
+            _latestGuidanceObservation = null;
+        }
+        catch (HttpRequestException)
+        {
+            _latestGuidanceObservation = null;
+        }
+        catch (JSException)
+        {
+            _latestGuidanceObservation = null;
         }
     }
 
@@ -63,8 +81,9 @@ public partial class EllaiGuidanceHost
             report = report with { Platform = OperatingSystem.IsAndroid() ? "android" : OperatingSystem.IsIOS() ? "ios" : "web" };
             if (report.IsValid() && _sessionView?.SessionId == session.SessionId)
             {
-                await ReviewClient.ReportUiObservationAsync(session.SessionId, report, token);
-                if (_sessionView?.SessionId == session.SessionId) _latestGuidanceObservation = report;
+                var accepted = await ReviewClient.ReportUiObservationAsync(session.SessionId, report, token);
+                if (accepted && _sessionView?.SessionId == session.SessionId && _sessionView.Status == "Active")
+                    _latestGuidanceObservation = report;
             }
         }
         catch (JSException) { /* Missing observations prevent guidance admission; text submission remains available. */ }
