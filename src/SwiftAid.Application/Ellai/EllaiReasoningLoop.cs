@@ -57,7 +57,8 @@ public sealed record EllaiLoopRequest(
     long ControllerEpoch,
     IReadOnlyList<EllaiChatMessage>? Conversation = null,
     string? ActivePage = null,
-    string InteractionMode = "typed");
+    string InteractionMode = "typed",
+    string? GuidanceState = null);
 
 /// <summary>Multi-turn reasoning loop (Task 6): drives the bounded cycle
 /// runner with a routed text provider. Each model text turn parses to typed
@@ -138,6 +139,8 @@ public sealed class EllaiReasoningLoop(
             ". Client-reported page: " + (EllaiPageContext.DisplayName(request.ActivePage) ?? "Unknown") +
             ". Page context is advisory; it grants no record access or tool authority. Do not infer a local time zone." +
             "\n" + EllaiInteractionContext.Describe(request.InteractionMode) +
+            "\nStored guidance state: " + (request.GuidanceState is "Ready" or "Paused" or "Cancelled" or "Completed" or "Generating" or "Failed"
+                ? request.GuidanceState : "Unavailable") + ". This is server state, not proof that an overlay is visible." +
             "\n## Turn protocol\n" + TurnProtocol +
             "\n## Final decision JSON schema\n" + DecisionSchema +
             "\nThe schema describes data shape, not permission. Claims must cite exact evidence objects returned by permitted tools. " +
@@ -151,7 +154,11 @@ public sealed class EllaiReasoningLoop(
                 "For a discovered supported feature, propose a StartGuidance UI intent with featureId=ellai.guidance, " +
                 "resourceId=null, controlId=null and arguments containing only feature (the discovered feature ID) and objective (the user's goal). " +
                 "The application validates and prepares the plan. Do not invent routes, anchors, completed actions or say the tour has started before application confirmation. " +
-                "If discovery returns no eligible feature, explain the limitation without pretending to navigate.";
+                "If discovery returns no eligible feature, explain the limitation without pretending to navigate. " +
+                "For an explicit request to pause, resume or cancel existing guidance, propose ControlGuidance with featureId=ellai.guidance, " +
+                "resourceId=null, controlId=null and exactly one argument command=pause, resume or cancel. " +
+                "For stop speaking while keeping guidance, use command=stop-speech; never cancel the tour for a speech-only interruption. " +
+                "Emit at most one guidance intent per turn. These are requested controls, not evidence that the client executed them.";
         }
         var thread = new List<EllaiChatMessage>(request.Conversation ?? []);
         thread.Add(new("user", request.Utterance));

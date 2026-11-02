@@ -5,6 +5,26 @@ namespace SwiftAid.Application.Tests.Ellai;
 
 public sealed class EllaiUiProposalPayloadTests
 {
+    [Theory]
+    [InlineData("pause", true)]
+    [InlineData("resume", true)]
+    [InlineData("cancel", true)]
+    [InlineData("stop-speech", true)]
+    [InlineData("approve", false)]
+    [InlineData("complete", false)]
+    public void GuidanceControlAllowsOnlyBoundedNonBusinessCommands(string command, bool valid)
+    {
+        var proposal = new UiIntentProposal(UiIntentKind.ControlGuidance, "ellai.guidance", null, null,
+            new Dictionary<string, string> { ["command"] = command });
+        if (valid) Assert.NotNull(EllaiUiProposalPayload.Serialize([proposal]));
+        else Assert.Throws<ArgumentException>(() => EllaiUiProposalPayload.Serialize([proposal]));
+        Assert.Throws<ArgumentException>(() => EllaiUiProposalPayload.Serialize([proposal with { ResourceId = "private-case" }]));
+        Assert.Throws<ArgumentException>(() => EllaiUiProposalPayload.Serialize([proposal with
+        {
+            Arguments = new Dictionary<string, string> { ["command"] = "pause", ["approval"] = "granted" },
+        }]));
+    }
+
     [Fact]
     public void BoundedProposalsRoundTripWithoutBecomingReceipts()
     {

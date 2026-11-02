@@ -84,6 +84,41 @@ public sealed class EllaiSurfaceLogicTests
         Assert.Equal("proposal-2", GetField<string?>(host, "_guidanceProposalId"));
     }
 
+    [Theory]
+    [InlineData("pause", true, true, "PauseAsync")]
+    [InlineData("resume", true, true, "ResumeAsync")]
+    [InlineData("cancel", true, true, "CancelAsync")]
+    [InlineData("pause", false, true, null)]
+    [InlineData("pause", true, false, null)]
+    [InlineData("approve", true, true, null)]
+    [InlineData("stop-speech", true, true, null)]
+    public async Task ConversationalGuidanceControlUsesDurableBoundaryAndNeverReplaysHistory(
+        string command, bool fresh, bool persisted, string? expectedMethod)
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), string.Empty);
+        await InvokeAsync(host, "ObserveGuidanceProposal", GuidanceTurn(), false);
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        SetField(host, "_generatedTour", tour);
+        var commands = new List<string>();
+        SetField(host, "_controlGeneratedTour", (Func<string, Task<bool>>)(value =>
+        {
+            commands.Add(value);
+            return Task.FromResult(persisted);
+        }));
+        var turn = new EllaiConversationTurnDto("control-turn", 2, "Control guidance", "Requested", "Completed", 1, DateTimeOffset.UtcNow)
+        {
+            UiProposals = [new("control-proposal", new(UiIntentKind.ControlGuidance, "ellai.guidance", null, null,
+                new Dictionary<string, string> { ["command"] = command }))],
+        };
+        await InvokeAsync(host, "ObserveGuidanceProposal", turn, fresh);
+        await InvokeAsync(host, "ObserveGuidanceProposal", turn, fresh);
+        if (expectedMethod is null) Assert.Empty(proxy.Calls);
+        else Assert.Equal(expectedMethod, Assert.Single(proxy.Calls));
+        Assert.Equal(fresh && command is "pause" or "resume" or "cancel" ? 1 : 0, commands.Count);
+        Assert.Same(tour, GetField<IBonboardingTourSession?>(host, "_generatedTour"));
+    }
+
     [Fact]
     public async Task NewerTurnInvalidatesPendingGuidanceProposal()
     {
@@ -2058,14 +2093,18 @@ public sealed class EllaiSurfaceLogicTests
 
     public class NoOpBonboardingServiceProxy : DispatchProxy
     {
-        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args) =>
-            targetMethod?.ReturnType == typeof(void)
+        public List<string> Calls { get; } = [];
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod?.Name is "PauseAsync" or "ResumeAsync" or "CancelAsync") Calls.Add(targetMethod.Name);
+            return targetMethod?.ReturnType == typeof(void)
                 ? null
                 : targetMethod?.ReturnType == typeof(Task)
                     ? Task.CompletedTask
                 : targetMethod?.ReturnType.IsValueType == true
                     ? Activator.CreateInstance(targetMethod.ReturnType)
                     : null;
+        }
     }
 
     public class NoOpGuidanceControlProxy : DispatchProxy

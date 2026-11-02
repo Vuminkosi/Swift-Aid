@@ -8,6 +8,30 @@ namespace SwiftAid.Application.Tests.Ellai;
 [Trait("Task", "ELL-T06")]
 public sealed class EllaiUtteranceRunnerTests
 {
+    [Theory]
+    [InlineData("epoch-1", "Paused")]
+    [InlineData("old-scope", "Unavailable")]
+    public async Task ReasoningReceivesOnlyCurrentScopeGuidanceState(string checkpointScope, string expected)
+    {
+        var store = new InMemoryEllaiSessionStore();
+        await store.CreateAsync(new EllaiSessionRecord("session-1", EllaiMode.Ask, "Active", 1, 0, 1, 0, 1, 12,
+            "officer-1", "epoch-1", null, null, DateTimeOffset.UtcNow)
+        {
+            GuidanceJson = EllaiGuidanceCheckpoint.Serialize(EllaiGuidanceCheckpointTests.Sample() with
+            {
+                ScopeEpoch = checkpointScope, Status = "Paused",
+            }),
+        }, default);
+        var completions = new ScriptedCompletions(DecisionTurn);
+        var (consent, loop) = Services(completions, grant: true);
+        var outcome = await EllaiUtteranceRunner.RunOneAsync(Work(), new(loop, null, null, consent, Sessions: store), 256, default);
+        Assert.True(outcome.Completed);
+        var system = completions.Threads[0][0].Content;
+        Assert.Contains("Stored guidance state: " + expected, system);
+        Assert.Contains("not proof that an overlay is visible", system);
+        Assert.DoesNotContain("plan-1", system);
+    }
+
     [Fact]
     public async Task StructuredUiProposalSurvivesTheUtteranceBoundary()
     {

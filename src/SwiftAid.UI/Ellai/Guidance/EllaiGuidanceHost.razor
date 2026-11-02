@@ -45,6 +45,10 @@
             }
         </MudStack>
     }
+    @if (_guidanceNotice is not null && _generatedTour is null && _guidanceProposalId is null)
+    {
+        <MudText Typo="Typo.caption" role="status">@_guidanceNotice</MudText>
+    }
     @if (_showStartFailure)
     {
         <MudAlert Severity="@(_startOutcomeUnknown ? Severity.Warning : Severity.Info)"
@@ -2675,6 +2679,7 @@
         _guidanceProposalId = null;
         _guidanceProposalTurn = null;
         _pendingGuidanceTurn = null;
+        _lastGuidanceControlProposalId = null;
         _guidanceNotice = null;
         _ = CancelGeneratedGuidanceAsync();
         _toolActivityText = null;

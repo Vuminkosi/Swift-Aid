@@ -41,5 +41,8 @@ public static class EllaiUiProposalPayload
             proposal.Arguments is null || proposal.Arguments.Count > 12 || proposal.Arguments.Any(argument =>
                 string.IsNullOrWhiteSpace(argument.Key) || argument.Key.Length > 120 || argument.Value is null || argument.Value.Length > 2000)))
             throw new ArgumentException("UI proposal shape is invalid.");
+        if (proposals.Count(proposal => proposal.Kind is UiIntentKind.StartGuidance or UiIntentKind.ControlGuidance) > 1 ||
+            proposals.Any(proposal => proposal.Kind == UiIntentKind.ControlGuidance && EllaiGuidanceControlProposal.ReadCommand(proposal) is null))
+            throw new ArgumentException("Guidance controls require one bounded command and no target or authority arguments.");
     }
 }

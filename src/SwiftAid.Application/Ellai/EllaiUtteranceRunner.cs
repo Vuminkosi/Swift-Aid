@@ -97,11 +97,23 @@ public static class EllaiUtteranceRunner
         }
         if (languages.OutputLanguage != "eng" && services.Languages?.IsConfigured != true)
             return new(false, false, "Translation is unavailable.", FailureCode: "TranslationUnavailable");
+        string? guidanceState = null;
+        if (services.Sessions is not null)
+        {
+            var session = await services.Sessions.GetAsync(work.SessionId, ct).ConfigureAwait(false);
+            if (session is { Status: "Active" } && session.OwnerActorId == work.Actor.ActorId &&
+                session.ScopeEpoch == work.ScopeEpoch && session.InteractionEpoch == work.ControllerEpoch)
+            {
+                var checkpoint = EllaiGuidanceCheckpoint.Deserialize(session.GuidanceJson);
+                if (checkpoint?.ScopeEpoch == work.ScopeEpoch && checkpoint.InteractionEpoch <= work.ControllerEpoch)
+                    guidanceState = checkpoint.Status;
+            }
+        }
         var request = new EllaiLoopRequest(
             context, reasoningText, ForMode(work.Mode),
             EllaiToolBroker.DescribeCatalogue(work.AllowedTools), maxTokensPerTurn,
             work.CycleId, work.ControllerEpoch,
-            EllaiConversationContext.Build(conversation, work.ClientUtteranceId), work.ActivePage, work.InteractionMode);
+            EllaiConversationContext.Build(conversation, work.ClientUtteranceId), work.ActivePage, work.InteractionMode, guidanceState);
 
         async Task<bool> IsExecutionCurrentAsync(CancellationToken fenceCt)
         {

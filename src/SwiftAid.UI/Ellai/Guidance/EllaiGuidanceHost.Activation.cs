@@ -8,6 +8,7 @@ public partial class EllaiGuidanceHost
     private string? _guidanceProposalId;
     private string? _guidanceProposalTurn;
     private string? _pendingGuidanceTurn;
+    private string? _lastGuidanceControlProposalId;
     private string? _guidanceNotice;
     private bool _preparingGuidance;
     private IBonboardingTourSession? _generatedTour;
@@ -38,6 +39,20 @@ public partial class EllaiGuidanceHost
         if (turn.Outcome != "Completed") return;
         newlyCompleted |= _pendingGuidanceTurn == turn.ClientUtteranceId;
         _pendingGuidanceTurn = null;
+        var controls = turn.UiProposals.Where(p => p.Proposal.Kind == UiIntentKind.ControlGuidance).Take(2).ToArray();
+        if (controls.Length > 1) return;
+        var control = controls.SingleOrDefault();
+        if (control is not null)
+        {
+            if (newlyCompleted && control.ProposalId != _lastGuidanceControlProposalId &&
+                EllaiGuidanceControlProposal.ReadCommand(control.Proposal) is { } command)
+            {
+                _lastGuidanceControlProposalId = control.ProposalId;
+                if (command == "stop-speech") StopResponseAudio();
+                else _ = DispatchConversationalGuidanceControlAsync(command);
+            }
+            return;
+        }
         var proposal = turn.UiProposals.FirstOrDefault(p => p.Proposal.Kind == UiIntentKind.StartGuidance);
         if (proposal is null || _guidanceProposalId == proposal.ProposalId) return;
         _ = CancelGeneratedGuidanceAsync();
@@ -45,6 +60,25 @@ public partial class EllaiGuidanceHost
         _guidanceProposalId = proposal.ProposalId;
         // Conversation restoration offers an explicit action; only the currently awaited turn auto-starts.
         if (newlyCompleted) _ = StartProposedGuidanceAsync();
+    }
+
+    private async Task DispatchConversationalGuidanceControlAsync(string command)
+    {
+        try
+        {
+            if (_generatedTour is null)
+            {
+                _guidanceNotice = "Open guidance before using this control.";
+                return;
+            }
+            await ControlGeneratedTourAsync(command);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception) when (exception is HttpRequestException or Microsoft.JSInterop.JSException)
+        {
+            _guidanceNotice = "Guidance could not be updated. Try again.";
+        }
+        finally { if (!_uiObservationLifetime.IsCancellationRequested) await InvokeAsync(StateHasChanged); }
     }
 
     private async Task CancelGeneratedGuidanceAsync()
