@@ -100,3 +100,9 @@ The master item remains unchecked because those required workflow and context ac
 The case-detail Follow-ups workflow is mounted through `OperationsWorkManagementSurface`; `CaseCommandPanel` is unused. The mounted surface now performs follow-up-only candidate search, safe-label selection, required purpose capture, and command mapping. Backend schedule-time authorization remains authoritative and independently verifies an active same-scope recipient grant containing ReadCase and ManageFollowUp. Candidate discovery excludes the caller/case owner and includes already-shared recipients only when they also hold both operations in scope.
 
 PASS: fresh disposable PostgreSQL candidate/HTTP/recipient-denial tests 3/3 after 53 migrations; Infrastructure and Integration.Tests builds; client 17/17; focused UI candidate selection 1/1; full UI.Tests 543/543. NOT VERIFIED: rendered browser-to-Gateway-to-PostgreSQL lifecycle, physical Android, case-fact reuse, and factual clarification capped at three. SW-05-007 remains unchecked.
+
+
+
+## Rendered assignee selection update - 2 November 2026
+
+Synthetic Chromium coverage now exercises the mounted Follow-ups form at 390px and 1280px. It verifies safe-label candidate selection, required purpose, missing-recipient and missing-date validation, and no overflow/page errors. The fixture uses a synthetic candidate client and does not submit through Gateway or PostgreSQL. Browser date selection/submission, live chained persistence, Android, case-fact reuse, and bounded factual clarification remain NOT VERIFIED. The master item remains unchecked.

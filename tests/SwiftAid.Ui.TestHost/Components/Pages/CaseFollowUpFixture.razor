@@ -1,4 +1,5 @@
 @page "/case-follow-up-fixture"
+@using SwiftAid.Contracts.Cases
 @using SwiftAid.UI.Components.Surfaces.Operations
 @using SwiftAid.UI.Components.Surfaces.Operations.WorkManagement
 @using static SwiftAid.UI.Components.Surfaces.Operations.WorkManagement.OperationsWorkManagementSurface
@@ -8,13 +9,23 @@
 <output id="fixture-ready">@_ready</output>
 <output id="request-result">@_result</output>
 <OperationsWorkManagementSurface Title="Follow-ups" Description="Synthetic follow-up acknowledgement scenario."
-                                 State="OperationsSurfaceState.Populated" Items="_items" OnAction="RecordAction" />
+                                 State="OperationsSurfaceState.Populated" Items="Items" CandidatesClient="_candidateClient" OnAction="RecordAction" />
 
 @code {
     private static readonly Guid CaseId = Guid.Parse("b2210000-2222-4222-8222-222222222222");
     private static readonly Guid FollowUpId = Guid.Parse("f4410000-4444-4444-8444-444444444444");
+    [SupplyParameterFromQuery(Name = "Schedule")] public bool ScheduleMode { get; set; }
     private bool _ready;
     private string _result = "Scheduled";
+    private readonly ICaseCollaboratorCandidatesClient _candidateClient = new SyntheticCandidateClient();
+    private IReadOnlyList<OperationsWorkItem> Items => ScheduleMode
+        ?
+        [
+            new OperationsWorkItem(CaseId, "new", 7, "SYNTHETIC-CASE", OperationsWorkKind.FollowUp,
+                OperationsWorkStatus.Scheduled, OperationsAssignmentStatus.AssignedToYou, "Call reporting worker",
+                DateTimeOffset.UtcNow, null, [OperationsWorkAction.ScheduleFollowUp], [], null)
+        ]
+        : _items;
     private IReadOnlyList<OperationsWorkItem> _items =
     [
         new OperationsWorkItem(CaseId, $"fu:{FollowUpId:D}", 7, "SYNTHETIC-CASE", OperationsWorkKind.FollowUp,
@@ -41,5 +52,18 @@
                 DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(1),
                 [OperationsWorkAction.RescheduleFollowUp, OperationsWorkAction.RecordFollowUpOutcome, OperationsWorkAction.CancelFollowUp], [], null)
         ];
+    }
+
+    private sealed class SyntheticCandidateClient : ICaseCollaboratorCandidatesClient
+    {
+        public Task<CaseCollaboratorCandidatePage?> GetAsync(Guid caseId, string? search, string? after,
+            CancellationToken cancellationToken = default, bool followUpAssignees = false)
+        {
+            IReadOnlyList<CaseCollaboratorCandidate> candidates = followUpAssignees &&
+                (string.IsNullOrWhiteSpace(search) || "Synthetic colleague".Contains(search, StringComparison.OrdinalIgnoreCase))
+                ? [new("synthetic-grant", "synthetic-follow-up-worker", "Synthetic colleague", ["ReadCase", "ManageFollowUp"])]
+                : [];
+            return Task.FromResult<CaseCollaboratorCandidatePage?>(new(candidates, null));
+        }
     }
 }
