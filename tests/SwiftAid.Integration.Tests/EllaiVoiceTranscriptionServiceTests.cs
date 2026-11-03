@@ -52,11 +52,27 @@ public sealed class EllaiVoiceTranscriptionServiceTests
     [LiveMuseSpeechFact]
     public Task RecordedVoiceUsesLiveMuseAndSpeech() => RunRecordedFrameworkVoiceAsync(true, liveModel: true);
 
-    private static async Task RunRecordedFrameworkVoiceAsync(bool liveSpeech, bool liveModel = false)
+    private sealed class LiveVoicePipelineFactAttribute : FactAttribute
+    {
+        public LiveVoicePipelineFactAttribute()
+        {
+            if (Environment.GetEnvironmentVariable("SWIFTAID_TEST_LIVE_ASR") != "1" ||
+                Environment.GetEnvironmentVariable("SWIFTAID_TEST_LIVE_SPEECH") != "1" ||
+                Environment.GetEnvironmentVariable("ELLAI_LIVE") != "1")
+                Skip = "Requires explicitly configured live transcription, Muse and local speech fixtures.";
+        }
+    }
+
+    [LiveVoicePipelineFact]
+    public Task SyntheticSpeechFlowsThroughLiveTranscriptionMuseAndSpeech() =>
+        RunRecordedFrameworkVoiceAsync(true, liveModel: true, liveAsr: true);
+
+    private static async Task RunRecordedFrameworkVoiceAsync(bool liveSpeech, bool liveModel = false, bool liveAsr = false)
     {
         const string sessionId = "framework-recorded-voice";
-        var options = new EllaiOptions { Enabled = true, ApiKey = "synthetic", AsrModel = "fixture",
-            AsrTranscriptionUrl = "https://transcription.test/v1/transcribe" };
+        var options = liveAsr ? EllaiOptions.Bind(Environment.GetEnvironmentVariable) :
+            new EllaiOptions { Enabled = true, ApiKey = "synthetic", AsrModel = "fixture",
+                AsrTranscriptionUrl = "https://transcription.test/v1/transcribe" };
         var principal = new ClaimsPrincipal(new ClaimsIdentity([
             new Claim(ClaimTypes.NameIdentifier, "voice-owner"), new Claim(ActorContext.AccessEpochClaimType, "1")], "test"));
         var store = new InMemoryEllaiSessionStore();
@@ -77,7 +93,7 @@ public sealed class EllaiVoiceTranscriptionServiceTests
         using var prepared = new EllaiPreparedResponseAudio(speech, NullLogger<EllaiPreparedResponseAudio>.Instance);
         await prepared.StartAsync(default);
         var responses = new EllaiSessionResponseStore(audioPreparation: prepared);
-        using var http = new HttpClient(new StubAsrHandler());
+        using var http = liveAsr ? new HttpClient { Timeout = TimeSpan.FromSeconds(90) } : new HttpClient(new StubAsrHandler());
         using var model = new VoiceFrameworkClient();
         var registrations = new ServiceCollection();
         registrations.AddSingleton(consent).AddSingleton<IEllaiSessionStore>(store).AddSingleton<IEllaiUtteranceOutboxStore>(store);
@@ -94,9 +110,41 @@ public sealed class EllaiVoiceTranscriptionServiceTests
         await using var provider = registrations.BuildServiceProvider();
         var voice = new EllaiVoiceTranscriptionService(consent, new InMemoryEllaiConsentStore(), options, provider);
         await voice.GrantVoiceConsentAsync(sessionId, default);
-        var wave = new byte[44];
-        "RIFF"u8.CopyTo(wave);
-        "WAVE"u8.CopyTo(wave.AsSpan(8));
+        byte[] wave;
+        if (liveAsr)
+        {
+            using var generated = await speech.SynthesizeAsync("synthetic-input", "Hello, what can SwiftAid do?", "eng", "af_heart", default);
+            generated.EnsureSuccessStatusCode();
+            Assert.Equal("s16le", Assert.Single(generated.Headers.GetValues("X-SwiftAid-Sample-Format")));
+            var sampleRate = int.Parse(Assert.Single(generated.Headers.GetValues("X-SwiftAid-Sample-Rate")), System.Globalization.CultureInfo.InvariantCulture);
+            var inputPcm = await generated.Content.ReadAsByteArrayAsync();
+            Assert.True(inputPcm.Length > 100);
+            using var output = new MemoryStream();
+            using (var writer = new BinaryWriter(output, Encoding.UTF8, leaveOpen: true))
+            {
+                writer.Write("RIFF"u8);
+                writer.Write(36 + inputPcm.Length);
+                writer.Write("WAVE"u8);
+                writer.Write("fmt "u8);
+                writer.Write(16);
+                writer.Write((short)1);
+                writer.Write((short)1);
+                writer.Write(sampleRate);
+                writer.Write(sampleRate * 2);
+                writer.Write((short)2);
+                writer.Write((short)16);
+                writer.Write("data"u8);
+                writer.Write(inputPcm.Length);
+                writer.Write(inputPcm);
+            }
+            wave = output.ToArray();
+        }
+        else
+        {
+            wave = new byte[44];
+            "RIFF"u8.CopyTo(wave);
+            "WAVE"u8.CopyTo(wave.AsSpan(8));
+        }
         using var worker = new EllaiUtteranceWorker(provider, NullLogger<EllaiUtteranceWorker>.Instance);
         await worker.StartAsync(default);
         try
@@ -113,7 +161,8 @@ public sealed class EllaiVoiceTranscriptionServiceTests
                 turn = Assert.Single(await store.ReadConversationAsync(sessionId, "voice-owner", timeout.Token));
             } while (turn.CompletedAtUtc is null);
             Assert.Equal("Completed", turn.Outcome);
-            Assert.Equal("recognized fallback words", turn.UserText);
+            if (liveAsr) Assert.Contains("hello", turn.UserText, StringComparison.OrdinalIgnoreCase);
+            else Assert.Equal("recognized fallback words", turn.UserText);
             if (!liveModel) Assert.Contains("recognized fallback words", model.Messages);
             var chunk = responses.ReadSince(sessionId, 0).Responses.First(
                 item => !item.IsFinal && item.Progress is null && !string.IsNullOrWhiteSpace(item.Text));
