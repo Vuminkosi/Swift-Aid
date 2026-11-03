@@ -15,13 +15,14 @@ namespace SwiftAid.Application.Sessions;
 /// Reminder dispatch/execution is OUT of scope (P6.3 durable-reminder lane); this
 /// service only (re)computes occurrence rows and suppresses them on cancel.
 /// </summary>
-public sealed class CommunitySessionService(ICommunitySessionStore store, ISessionMaterialEligibility? materialEligibility = null) : ICommunitySessionService
+public sealed class CommunitySessionService(ICommunitySessionStore store, ISessionMaterialEligibility? materialEligibility = null, TimeProvider? timeProvider = null) : ICommunitySessionService
 {
     public const int DefaultPublicLimit = 50;
     public const int MaxPublicLimit = 100;
 
     private readonly ICommunitySessionStore _store = store ?? throw new ArgumentNullException(nameof(store));
     private readonly ISessionMaterialEligibility? _materialEligibility = materialEligibility;
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     public async Task<SessionCommandResult> ExecuteAsync(SessionCommand command, string actorId, CancellationToken ct)
     {
@@ -30,6 +31,10 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
         {
             throw new ArgumentException("A staff actor id is required.", nameof(actorId));
         }
+
+        // Record acceptance and make time-dependent lifecycle decisions against
+        // the service clock, not a timestamp supplied by an internal caller.
+        command = command with { RecordedAtUtc = _timeProvider.GetUtcNow() };
 
         if (command is CreateSessionDraftCommand create)
         {

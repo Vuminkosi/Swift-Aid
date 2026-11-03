@@ -26,17 +26,19 @@ public sealed class SessionSchedulingTests
         var now = DateTimeOffset.UtcNow;
         var start = now.AddHours(2);
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
-        var service = new CommunitySessionService(new PostgresCommunitySessionStore(db), new FixtureMaterialEligibility());
+        var clock = new TestClock(now.AddDays(-2));
+        var service = new CommunitySessionService(new PostgresCommunitySessionStore(db), new FixtureMaterialEligibility(), clock);
         try
         {
             await service.ExecuteAsync(CreateDraft(id, "officer-1") with { StartUtc = start.AddHours(1), RecordedAtUtc = now.AddDays(-2) }, "officer-1", CancellationToken.None);
             await service.ExecuteAsync(new ReviewSessionCommand(id, 1, false, "review", now.AddDays(-2)), "officer-2", CancellationToken.None);
             await service.ExecuteAsync(new ScheduleSessionCommand(id, 2, "schedule", now.AddDays(-2)), "officer-2", CancellationToken.None);
+            clock.UtcNow = now;
             await service.ExecuteAsync(UpdateDraft(id, 3, "Malaria prevention talk") with
             {
                 StartUtc = start,
                 DurationMinutes = 60,
-                RecordedAtUtc = now
+                RecordedAtUtc = now.AddDays(-10)
             }, "officer-2", CancellationToken.None);
 
             var pending = await db.SessionReminderOccurrences.AsNoTracking()
@@ -45,6 +47,9 @@ public sealed class SessionSchedulingTests
             Assert.Equal(1, occurrence.LeadHours);
             Assert.True(occurrence.RemindAtUtc > now);
             Assert.Equal(4, occurrence.Version);
+            var revision = await db.Set<CommunitySessionRevisionEntity>().AsNoTracking()
+                .SingleAsync(row => row.SessionId == id && row.Version == 4);
+            Assert.Equal(now.ToUnixTimeMilliseconds(), revision.RecordedAtUtc.ToUnixTimeMilliseconds());
         }
         finally
         {
@@ -113,11 +118,13 @@ public sealed class SessionSchedulingTests
         var marker = $"completed-{Guid.NewGuid():N}";
         var start = DateTimeOffset.UtcNow.AddDays(5);
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
-        var service = new CommunitySessionService(new PostgresCommunitySessionStore(db), new FixtureMaterialEligibility());
+        var clock = new TestClock(DateTimeOffset.UtcNow);
+        var service = new CommunitySessionService(new PostgresCommunitySessionStore(db), new FixtureMaterialEligibility(), clock);
         try
         {
             for (var index = 0; index < ids.Length; index++)
             {
+                clock.UtcNow = DateTimeOffset.UtcNow;
                 var draft = CreateDraft(ids[index], "officer-1") with
                 {
                     Title = marker,
@@ -127,6 +134,7 @@ public sealed class SessionSchedulingTests
                 await service.ExecuteAsync(draft, "officer-1", CancellationToken.None);
                 await service.ExecuteAsync(new ReviewSessionCommand(ids[index], 1, false, "review", DateTimeOffset.UtcNow), "officer-2", CancellationToken.None);
                 await service.ExecuteAsync(new ScheduleSessionCommand(ids[index], 2, "publish", DateTimeOffset.UtcNow), "officer-2", CancellationToken.None);
+                clock.UtcNow = start.AddHours(1);
                 await service.ExecuteAsync(new CompleteSessionCommand(ids[index], 3, "complete", start.AddHours(1)), "officer-2", CancellationToken.None);
             }
 
@@ -1136,6 +1144,12 @@ public sealed class SessionSchedulingTests
     }
 
     // Synthetic fixture only: production does not have an eligibility authority wired.
+    private sealed class TestClock(DateTimeOffset utcNow) : TimeProvider
+    {
+        public DateTimeOffset UtcNow { get; set; } = utcNow;
+        public override DateTimeOffset GetUtcNow() => UtcNow;
+    }
+
     private sealed class FixtureMaterialEligibility : ISessionMaterialEligibility
     {
         public Task<bool> AreEligibleAsync(SessionMaterialEligibilityRequest request, CancellationToken cancellationToken)

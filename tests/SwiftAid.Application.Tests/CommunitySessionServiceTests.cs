@@ -116,6 +116,7 @@ public sealed class CommunitySessionServiceTests
         var internalId = Guid.NewGuid();
         await PublishAsync(services.Service, publicId, SessionVisibility.Public);
         await PublishAsync(services.Service, internalId, SessionVisibility.Internal);
+        services.Clock.UtcNow = Start.AddHours(1);
         await services.Service.ExecuteAsync(new CompleteSessionCommand(publicId, 3, "completed", Start.AddHours(1)), "officer-2", CancellationToken.None);
         await services.Service.ExecuteAsync(new CompleteSessionCommand(internalId, 3, "completed", Start.AddHours(1)), "officer-2", CancellationToken.None);
 
@@ -170,7 +171,7 @@ public sealed class CommunitySessionServiceTests
     {
         var store = new FakeSessionStore();
         var eligibility = new FixtureMaterialEligibility();
-        var service = new CommunitySessionService(store, eligibility);
+        var service = new CommunitySessionService(store, eligibility, new TestClock(Now));
         var id = Guid.NewGuid();
         await service.ExecuteAsync(CreateDraft(id), "officer-1", CancellationToken.None);
         await service.ExecuteAsync(new ReviewSessionCommand(id, 1, false, "review", Now), "officer-2", CancellationToken.None);
@@ -189,7 +190,7 @@ public sealed class CommunitySessionServiceTests
     {
         var store = new FakeSessionStore();
         var eligibility = new FixtureMaterialEligibility();
-        var service = new CommunitySessionService(store, eligibility);
+        var service = new CommunitySessionService(store, eligibility, new TestClock(Now));
         var id = Guid.NewGuid();
         await PublishAsync(service, id, SessionVisibility.Public);
         Assert.Equal("harare", eligibility.LastRequest!.RegionId);
@@ -236,6 +237,7 @@ public sealed class CommunitySessionServiceTests
         var id = Guid.NewGuid();
         await PublishAsync(services.Service, id, SessionVisibility.Public);
         var revisionTime = Start.AddHours(-2);
+        services.Clock.UtcNow = revisionTime;
         await services.Service.ExecuteAsync(UpdateDraft(id, 3) with
         {
             Title = "Malaria prevention talk",
@@ -249,11 +251,29 @@ public sealed class CommunitySessionServiceTests
     }
 
     [Fact]
+    public async Task CallerTimestampCannotBypassScheduleOrCompletionTimeChecks()
+    {
+        var services = CreateServices();
+        var id = Guid.NewGuid();
+        await services.Service.ExecuteAsync(CreateDraft(id), "officer-1", CancellationToken.None);
+        await services.Service.ExecuteAsync(new ReviewSessionCommand(id, 1, false, "review", Now), "officer-2", CancellationToken.None);
+        services.Clock.UtcNow = Start.AddMinutes(1);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => services.Service.ExecuteAsync(
+            new ScheduleSessionCommand(id, 2, "schedule", Now), "officer-2", CancellationToken.None));
+
+        services.Clock.UtcNow = Now;
+        await services.Service.ExecuteAsync(new ScheduleSessionCommand(id, 2, "schedule", Now), "officer-2", CancellationToken.None);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => services.Service.ExecuteAsync(
+            new CompleteSessionCommand(id, 3, "complete", Start.AddDays(1)), "officer-2", CancellationToken.None));
+        Assert.Equal(3, (await services.Service.GetStaffAsync(id, "officer-2", CancellationToken.None))!.Version);
+    }
+
+    [Fact]
     public async Task SchedulingFailsClosedWithoutMaterialEligibilityAuthority()
     {
         var store = new FakeSessionStore();
-        var service = new CommunitySessionService(store);
-        var approvedFixture = new CommunitySessionService(store, new FixtureMaterialEligibility());
+        var service = new CommunitySessionService(store, timeProvider: new TestClock(Now));
+        var approvedFixture = new CommunitySessionService(store, new FixtureMaterialEligibility(), new TestClock(Now));
         var id = Guid.NewGuid();
         await service.ExecuteAsync(CreateDraft(id), "officer-1", CancellationToken.None);
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
@@ -482,10 +502,17 @@ public sealed class CommunitySessionServiceTests
             new PublicSessionQuery(Limit: 101), CancellationToken.None));
     }
 
-    private static (CommunitySessionService Service, FakeSessionStore Store) CreateServices()
+    private static (CommunitySessionService Service, FakeSessionStore Store, TestClock Clock) CreateServices()
     {
         var store = new FakeSessionStore();
-        return (new CommunitySessionService(store, new FixtureMaterialEligibility()), store);
+        var clock = new TestClock(Now);
+        return (new CommunitySessionService(store, new FixtureMaterialEligibility(), clock), store, clock);
+    }
+
+    private sealed class TestClock(DateTimeOffset utcNow) : TimeProvider
+    {
+        public DateTimeOffset UtcNow { get; set; } = utcNow;
+        public override DateTimeOffset GetUtcNow() => UtcNow;
     }
 
     private sealed class FixtureMaterialEligibility : ISessionMaterialEligibility
