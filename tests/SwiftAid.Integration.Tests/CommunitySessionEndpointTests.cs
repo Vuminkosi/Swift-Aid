@@ -657,6 +657,18 @@ public sealed class CommunitySessionEndpointTests
     }
 
     [Fact]
+    public void ScheduleRequestIsStampedByTheServerMapper()
+    {
+        var before = DateTimeOffset.UtcNow;
+        var command = Assert.IsType<ScheduleSessionCommand>(CommunitySessionEndpoints.MapScheduleRequest(
+            KnownSessionId, new ScheduleSessionApiRequest(2, "schedule")));
+        var after = DateTimeOffset.UtcNow;
+
+        Assert.InRange(command.RecordedAtUtc, before, after);
+        Assert.Equal(2, command.ExpectedVersion);
+    }
+
+    [Fact]
     public void MapCreateRequest_BlankTitle_IsRejectedBeforeCommandCreation()
     {
         var request = ValidCreateRequest() with { Title = " " };

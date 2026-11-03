@@ -155,7 +155,11 @@ public sealed class SessionGatewayClient(
 
         try
         {
-            var result = await service.ExecuteAsync(command, actor.ActorId, cancellationToken).ConfigureAwait(false);
+            // The editor can spend time checking access after creating a command.
+            // Stamp it again at the trusted server boundary so that lifecycle and
+            // reminder decisions do not use that earlier time.
+            var acceptedCommand = command with { RecordedAtUtc = DateTimeOffset.UtcNow };
+            var result = await service.ExecuteAsync(acceptedCommand, actor.ActorId, cancellationToken).ConfigureAwait(false);
             if (result.SessionId == Guid.Empty)
             {
                 return new SessionStaffOutcome(
