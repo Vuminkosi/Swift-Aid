@@ -193,6 +193,18 @@ production Gateway process or a real provider/device test. The enclosing
 --no-build --no-restore -m:1 -nr:false --filter
 FullyQualifiedName~EllaiPrivilegedRouteAuthorizationTests --verbosity quiet`.
 
+`GuestHttpConversationRecoversAfterTestHostRestartWithPostgres` passed against
+a disposable PostgreSQL database after 60 migrations. It starts a guest session
+and completes a turn through the HTTP endpoints and framework worker, disposes
+the TestServer host, and starts a new host using the same database and shared
+in-memory test data-protection provider. The existing guest cookie retrieves the
+durable response after a stale feed cursor, a request without the cookie is
+rejected, and a follow-up reaches the framework with the earlier exchange. The
+full endpoint authorization fixture passed 22/22, zero skipped, with
+`SWIFTAID_RUN_FRAMEWORK_POSTGRES_FIXTURES=1` and its dedicated loopback database.
+Both hosts ran in one test process with a synthetic model; actual Gateway
+process restart, deployed key storage and live Muse remain **NOT VERIFIED**.
+
 `FrameworkWorkerRecallsAuthorizedCaseFromPostgresAndQdrant` passed 1/1 using
 the actual outbox worker, scoped broker, PostgreSQL session/topic stores and
 case authorization, plus a disposable Qdrant exact collection. With a
