@@ -3147,6 +3147,21 @@ after a successful check can still race bytes already in flight. Deployed
 Gateway, independent security review, and physical voice-device behavior
 remain NOT VERIFIED.
 
+### Grounded audio timing probe — 2026-11-03
+
+PASS: `SWIFTAID_RUN_LIVE_ELLAI=1 SWIFTAID_REQUIRE_AUDIO_BEFORE_COMPLETION=1
+node tests/SwiftAid.Ui.Tests/ellai-grounded-playback.browser.cjs` in headless
+Chromium against the isolated local Gateway, disposable PostgreSQL and NATS,
+the configured live Muse model and local Kokoro. For a synthetic receipt prompt,
+the exact grounded segment was published before durable completion, its audio
+request returned 200, and a nonzero Web Audio buffer reached its scheduled
+playback time while a subsequent feed read still showed the turn incomplete.
+Ten buffers started and ended. This is one observed ordering, not a latency
+guarantee, a physical speaker check, or evidence for other model responses.
+The fixture's notification change consumer reported `NatsJSApiException`;
+notification delivery was outside this check. The isolated Gateway was stopped
+and the three disposable containers removed after the run.
+
 ### Evidence-backed live model streaming — 2026-11-03
 
 The framework streaming instructions previously included an example with an

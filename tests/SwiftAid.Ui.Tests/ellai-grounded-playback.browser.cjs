@@ -9,8 +9,8 @@ async function main() {
     const errors = [], audio = [];
     let feed, early;
     const prompt = "Use ellai_productfacts with topic receipt. Copy the complete receipt fact exactly, cite its matching evidence, and stream that exact fact.";
-    await page.addInitScript(() => {
-        window.ellaiGroundedPlayback = { started: 0, ended: 0, currentSequence: null, starts: [] };
+    await page.addInitScript(probePrompt => {
+        window.ellaiGroundedPlayback = { started: 0, ended: 0, currentSequence: null, starts: [], checks: [] };
         const fetchOriginal = window.fetch.bind(window);
         window.fetch = async (...args) => {
             const response = await fetchOriginal(...args);
@@ -33,15 +33,31 @@ async function main() {
         AudioContext.prototype.createBufferSource = function (...args) {
             const source = create.apply(this, args), start = source.start;
             source.start = function (...values) {
+                const result = start.apply(this, values);
                 window.ellaiGroundedPlayback.started++;
-                window.ellaiGroundedPlayback.starts.push({ sequence: window.ellaiGroundedPlayback.currentSequence,
-                    peak: source.buffer ? source.buffer.getChannelData(0).reduce((value, sample) => Math.max(value, Math.abs(sample)), 0) : 0 });
-                return start.apply(this, values);
+                const entry = { sequence: window.ellaiGroundedPlayback.currentSequence,
+                    peak: source.buffer ? source.buffer.getChannelData(0).reduce((value, sample) => Math.max(value, Math.abs(sample)), 0) : 0 };
+                window.ellaiGroundedPlayback.starts.push(entry);
+                const session = localStorage.getItem("swiftaid.ellai.session");
+                if (session && entry.sequence != null) {
+                    const startAt = values[0] ?? 0;
+                    const delay = Math.max(0, (startAt - source.context.currentTime) * 1000) + 20;
+                    const check = new Promise(resolve => setTimeout(resolve, delay)).then(async () => {
+                        entry.timelineReached = source.context.state === "running" && source.context.currentTime >= startAt;
+                        const response = await fetchOriginal(`/api/v1/ellai/guest/sessions/${encodeURIComponent(session)}/responses?cursor=0`);
+                        if (!response.ok) throw new Error(`Feed returned ${response.status}`);
+                        const feed = await response.json();
+                        const turn = feed.conversation?.find(item => item.userText === probePrompt);
+                        entry.incompleteAtRead = turn ? !turn.completedAtUtc : null;
+                    }).catch(error => { entry.checkError = error.message; });
+                    window.ellaiGroundedPlayback.checks.push(check);
+                }
+                return result;
             };
             source.addEventListener("ended", () => window.ellaiGroundedPlayback.ended++);
             return source;
         };
-    });
+    }, prompt);
     page.on("pageerror", error => errors.push(error.message));
     page.on("response", async response => {
         try {
@@ -87,8 +103,17 @@ async function main() {
         await page.waitForFunction(sequence => window.ellaiGroundedPlayback.starts.some(item => item.sequence === sequence && item.peak > 0) &&
             window.ellaiGroundedPlayback.started === window.ellaiGroundedPlayback.ended, early.sequence, { timeout: 60000 });
         assert.deepEqual(errors, []);
-        console.log(JSON.stringify({ result: "PASS", earlySequence: early.sequence, audio,
-            playback: await page.evaluate(() => window.ellaiGroundedPlayback) }));
+        const playback = await page.evaluate(async () => {
+            await Promise.all(window.ellaiGroundedPlayback.checks);
+            const { checks, ...result } = window.ellaiGroundedPlayback;
+            return result;
+        });
+        const playbackBeforeCompletion = playback.starts.some(item => item.sequence === early.sequence &&
+            item.peak > 0 && item.timelineReached && item.incompleteAtRead === true);
+        console.log(JSON.stringify({ earlySequence: early.sequence, playbackBeforeCompletion, audio, playback }));
+        if (process.env.SWIFTAID_REQUIRE_AUDIO_BEFORE_COMPLETION === "1")
+            assert.ok(playbackBeforeCompletion, "Grounded audio playback was not observed before durable completion.");
+        console.log("PASS: grounded playback checks completed.");
     } finally { await browser.close(); }
 }
 
