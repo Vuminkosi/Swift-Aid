@@ -95,6 +95,29 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
         }
         assert(await containsTarget('ellai-report-occurrence-date'), 'Next validation highlight must cover the missing date');
         console.log('PASS: compiled tour retargets from narrative to date using real report validation');
+        await page.goto(base + '/ellai-report-fixture');
+        await page.waitForSelector('[data-fixture-ready=true]');
+        await page.getByRole('button', { name: 'Continue to details' }).click();
+        await page.getByLabel('Describe what happened').fill('Synthetic observation');
+        for (const label of ['Region', 'Area or district', 'Locality']) {
+            await page.getByLabel(label, { exact: true }).fill('x'.repeat(201));
+            await page.getByLabel(label, { exact: true }).press('Tab');
+        }
+        await page.getByRole('button', { name: 'Review report', exact: true }).click();
+        await page.getByRole('button', { name: 'Guide report details' }).click();
+        await page.locator('.bit-bonboarding-popover').waitFor({ state: 'visible' });
+        for (const [label, anchor] of [['Region', 'ellai-report-region'], ['Area or district', 'ellai-report-area'], ['Locality', 'ellai-report-locality']]) {
+            await page.getByRole('button', { name: 'Refresh validation target' }).click();
+            await page.waitForFunction(anchorName => {
+                const target = document.querySelector(`[data-bonboarding-anchor="${anchorName}"]`)?.getBoundingClientRect();
+                const spot = document.querySelector('.bit-bonboarding-spotlight')?.getBoundingClientRect();
+                return target && spot && spot.left <= target.left && spot.top <= target.top && spot.right >= target.right && spot.bottom >= target.bottom;
+            }, anchor);
+            await page.getByLabel(label, { exact: true }).fill('Synthetic place');
+            await page.getByLabel(label, { exact: true }).press('Tab');
+        }
+        assert.equal(await page.locator('#submission-count').textContent(), '0');
+        console.log('PASS: oversized place fields are highlighted in order without submitting');
         assert.deepEqual(errors, []);
         assert(!output.includes('Unhandled exception'), output);
     } finally {
