@@ -1,5 +1,11 @@
 using SwiftAid.Infrastructure.Memory;
 using SwiftAid.Application.Ellai;
+using SwiftAid.Application.Authorization;
+using SwiftAid.Application.Cases;
+using SwiftAid.Contracts.Cases;
+using SwiftAid.Intelligence.Meta;
+using Microsoft.Extensions.AI;
+using System.Security.Claims;
 
 namespace SwiftAid.Integration.Tests;
 
@@ -144,6 +150,93 @@ public sealed class EllaiMemoryIndexTests
         });
         Assert.Null(await Index(handler).FindExactAsync("m", "s", "e", CancellationToken.None));
         Assert.Contains("expires_at", Assert.Single(handler.Seen).Body);
+    }
+
+    [LiveFact]
+    public async Task FrameworkRecallUsesLiveExactIndexAndRechecksCurrentCaseAccess()
+    {
+        var endpoint = Environment.GetEnvironmentVariable("QDRANT_TEST_ENDPOINT")!;
+        var uri = new Uri(endpoint);
+        Assert.True(uri.IsLoopback, "The framework fixture requires a disposable loopback Qdrant instance.");
+        var key = Environment.GetEnvironmentVariable("QDRANT_TEST_API_KEY") ?? "";
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        var collection = "ellai-framework-test-" + Guid.NewGuid().ToString("N");
+        var index = new EllaiMemoryIndex(http, endpoint, key, collection);
+        try
+        {
+            Assert.True(await index.EnsureExactCollectionAsync(CancellationToken.None));
+            var topicsStore = new InMemoryEllaiTopicStore();
+            var topics = new EllaiTopicService(topicsStore);
+            var actor = ActorContext.FromValidatedPrincipal(new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim(ClaimTypes.NameIdentifier, "fixture-owner"), new Claim(ActorContext.AccessEpochClaimType, "1")], "test")));
+            var row = new CaseQueueItem(Guid.NewGuid(), "UnderReview", "SZ", "fixture-owner", 1, DateTimeOffset.UtcNow);
+            var queue = new FixtureQueue(row);
+            var context = new EllaiToolContext("fixture-session", "fixture-epoch", "cases", null, 4, true,
+                "consent/1", EllaiProcessingClassification.SyntheticDemo, Actor: actor,
+                AllowedTools: new HashSet<string> { EllaiToolNames.Topic });
+            await new EllaiCaseResultMemory(topics, queue).RememberAsync(context, [row], CancellationToken.None);
+            var topic = Assert.Single(await topicsStore.ListAsync(context.SessionId, CancellationToken.None));
+            var reference = new EllaiExactMemoryReference("case-results", context.SessionId, context.ScopeEpoch,
+                topic.TopicId, EllaiCaseResultMemory.SourceVersion(topic.EntityRef!), DateTimeOffset.UtcNow.AddMinutes(5));
+            Assert.True(await index.UpsertExactAsync(reference, CancellationToken.None));
+            Assert.NotNull(await index.FindExactAsync(reference.Id, reference.SessionId, reference.ScopeEpoch, CancellationToken.None));
+
+            var consent = new EllaiConsentService();
+            consent.Grant(context.SessionId, EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+                EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
+            var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue, topics: topics, referenceIndex: index);
+            async Task<string> RecallAsync()
+            {
+                using var client = new RecallClient();
+                var agent = new EllaiFrameworkAgent(client);
+                var decision = await agent.RunAsync(context, "Synthetic policy", [new ChatMessage(ChatRole.User, "recall")], 300,
+                    _ => Task.FromResult(true), broker.InvokeAsync,
+                    new EllaiFrameworkUsage(context.SessionId, new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None);
+                Assert.NotNull(decision);
+                return client.Observation;
+            }
+
+            Assert.Contains(row.CaseId.ToString("D"), await RecallAsync());
+            queue.Permitted = false;
+            Assert.DoesNotContain(row.CaseId.ToString("D"), await RecallAsync());
+            queue.Permitted = true;
+            Assert.True(await index.UpsertExactAsync(reference with { SourceVersion = "stale" }, CancellationToken.None));
+            Assert.Contains(row.CaseId.ToString("D"), await RecallAsync());
+        }
+        finally
+        {
+            using var delete = new HttpRequestMessage(HttpMethod.Delete, endpoint.TrimEnd('/') + "/collections/" + collection + "-exact");
+            if (!string.IsNullOrWhiteSpace(key)) delete.Headers.TryAddWithoutValidation("api-key", key);
+            using var result = await http.SendAsync(delete);
+            Assert.True(result.IsSuccessStatusCode);
+        }
+    }
+
+    private sealed class FixtureQueue(CaseQueueItem row) : ICaseQueueQuery
+    {
+        public bool Permitted { get; set; } = true;
+        public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CancellationToken ct) =>
+            Task.FromResult(new CaseQueueResult(CaseQueueAccess.Allowed, Permitted ? [row] : []));
+        public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CaseQueueFilter filter, CancellationToken ct) =>
+            GetMineAsync(actor, limit, ct);
+    }
+
+    private sealed class RecallClient : IChatClient
+    {
+        private int _calls;
+        public string Observation { get; private set; } = "";
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            if (++_calls == 1)
+                return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                    [new FunctionCallContent("call", EllaiToolNames.Topic, new Dictionary<string, object?> { ["ref"] = "case-results" })])));
+            Observation = string.Join(" ", messages.SelectMany(message => message.Contents).OfType<FunctionResultContent>().Select(content => content.Result?.ToString()));
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                """{"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Done.","spokenText":"Done.","claims":[],"questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}""")));
+        }
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
     }
 
     [LiveFact]

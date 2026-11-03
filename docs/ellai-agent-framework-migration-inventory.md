@@ -143,6 +143,21 @@ worker restart within one test process; a Gateway process restart, live Muse,
 serialized `AgentSession` restoration and real multi-instance behavior remain
 **NOT VERIFIED**.
 
+**Disposable Qdrant framework evidence:** `FrameworkRecallUsesLiveExactIndexAndRechecksCurrentCaseAccess`
+passed 1/1 against a task-owned loopback Qdrant container using a uniquely
+named exact collection. The framework invoked the existing broker with a
+synthetic model, retrieved an indexed case reference, omitted the case when
+the fixture queue revoked it, and fell back to the topic store when the index
+source version was stale. The collection was deleted by the fixture. The
+topic store and case queue in this test are in-memory fixtures, so this does
+not prove PostgreSQL authorization, live provider execution, real service
+outage behavior, or the full Gateway cutover gate. Run with
+`ELLAI_LIVE_QDRANT=1`, `QDRANT_TEST_ENDPOINT` set to the disposable loopback
+endpoint, and `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+FullyQualifiedName~FrameworkRecallUsesLiveExactIndexAndRechecksCurrentCaseAccess
+--verbosity quiet`.
+
 **Evidence this audit:** `EllaiLiveQueueReadTests` passed 24/24, including
 four framework/broker cases for exact hit, stale reference, index outage and
 wrong epoch, with a fake index and synthetic queue. The focused integration
