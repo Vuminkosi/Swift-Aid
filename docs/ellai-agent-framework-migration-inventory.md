@@ -524,6 +524,17 @@ and progress remain unchanged. The framework contract suite passed 29/29 via
 --verbosity quiet`. Non-cooperative dependencies can still hold their scope
 open, and this synthetic check is not a live service-outage test.
 
+The framework now checks the execution fence immediately before final
+publication and again before returning a successful decision. If the fence
+changes, it returns a policy denial instead of reporting completion. Focused
+tests cover a fence becoming stale after count revalidation but before the
+callback, and becoming stale during a callback. The latter test confirms that
+an already delivered chunk cannot be retracted; this is not an atomic
+authorization-and-publication guarantee. The framework contract suite passed
+31/31, and the guest-route and voice integration suites passed 39 tests with
+six opt-in tests skipped. These are synthetic fence transitions, not a live
+distributed grant-revocation test.
+
 An opt-in Gateway execution selection has been added; its default remains the
 existing loop. Invalid selection and unconfigured or unsupported framework
 provider routes fail closed. The registration and worker fixtures passed 6/6

@@ -153,16 +153,30 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
                 Claims = [new GroundedClaim("owned-case-count", countResult.ResultSummary, ClaimKind.Observed, countResult.Evidence)],
                 Questions = [], UiIntents = [], PlanProposal = null, TopicRefs = [], ResumeSuggestion = null, StopReason = null
             };
-            if (onTextDelta is not null && await isCurrent(ct).ConfigureAwait(false))
+            if (!await isCurrent(ct).ConfigureAwait(false))
+            {
+                LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
+                return null;
+            }
+            if (onTextDelta is not null)
                 await onTextDelta(decision.DisplayText, ct).ConfigureAwait(false);
+            if (!await isCurrent(ct).ConfigureAwait(false))
+            {
+                LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
+                return null;
+            }
             return decision;
         }
-        if (bufferForCount && onTextDelta is not null && await isCurrent(ct).ConfigureAwait(false))
+        if (!await isCurrent(ct).ConfigureAwait(false))
+        {
+            LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
+            return null;
+        }
+        if (bufferForCount && onTextDelta is not null)
         {
             await onTextDelta(decision.DisplayText, ct).ConfigureAwait(false);
-            return decision;
         }
-        if (parser is not null && onTextDelta is not null)
+        else if (parser is not null && onTextDelta is not null)
         {
             var remainder = parser.FlushVerified(decision.DisplayText);
             if (remainder.Length > 0 && await isCurrent(ct).ConfigureAwait(false))
@@ -170,6 +184,11 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
         }
         else if (!emittedProvisional && onTextDelta is not null && await isCurrent(ct).ConfigureAwait(false))
             await onTextDelta(decision.DisplayText, ct).ConfigureAwait(false);
+        if (!await isCurrent(ct).ConfigureAwait(false))
+        {
+            LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
+            return null;
+        }
         return decision;
     }
 

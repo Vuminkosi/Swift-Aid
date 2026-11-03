@@ -171,6 +171,49 @@ public sealed class EllaiAgentFrameworkContractTests
     }
 
     [Fact]
+    public async Task CountDoesNotReturnSuccessWhenExecutionBecomesStaleBeforePublication()
+    {
+        using var client = new CountStreamingClient();
+        var agent = new EllaiFrameworkAgent(client);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.OwnedCaseCount });
+        var revalidated = false;
+        var postRevalidationChecks = 0;
+        var chunks = new List<string>();
+        var reference = new EvidenceRef("DashboardAggregate", "owned-cases", "v1", null, "proof");
+        Task<EllaiToolResult> Read(EllaiToolRequest request) => Task.FromResult(new EllaiToolResult(request.ToolName,
+            true, null, [reference], "2 managed case(s) in scope.", 1, false));
+        var result = await agent.RunAsync(context, "Test policy", [new ChatMessage(ChatRole.User, "Count")], 100,
+            _ => Task.FromResult(!revalidated || ++postRevalidationChecks == 1),
+            (_, request, _) => Read(request),
+            new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default,
+            (text, _) => { chunks.Add(text); return ValueTask.CompletedTask; },
+            (_, request, _) => { revalidated = true; return Read(request); });
+        Assert.Null(result);
+        Assert.Equal(EllaiToolReasonCodes.DeniedByPolicy, agent.LastFailureCode);
+        Assert.Empty(chunks);
+        Assert.Equal(2, postRevalidationChecks);
+    }
+
+    [Fact]
+    public async Task ExecutionThatBecomesStaleDuringPublicationDoesNotReturnSuccess()
+    {
+        using var client = new StreamingClient();
+        var agent = new EllaiFrameworkAgent(client);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.OwnedCaseCount });
+        var current = true;
+        var chunks = new List<string>();
+        var result = await agent.RunAsync(context, "Test policy", [new ChatMessage(ChatRole.User, "Hello")], 100,
+            _ => Task.FromResult(current), (_, _, _) => throw new InvalidOperationException("No tool call expected."),
+            new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default,
+            (text, _) => { chunks.Add(text); current = false; return ValueTask.CompletedTask; });
+        Assert.Null(result);
+        Assert.Equal(EllaiToolReasonCodes.DeniedByPolicy, agent.LastFailureCode);
+        Assert.Equal("Done.", string.Concat(chunks));
+    }
+
+    [Fact]
     public async Task CountMixedWithAnotherToolDoesNotPublishUnverifiedAnswer()
     {
         using var client = new CountStreamingClient(mixed: true);
