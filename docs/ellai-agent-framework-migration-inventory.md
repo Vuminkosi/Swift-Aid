@@ -20,6 +20,10 @@ migration or live-provider acceptance has passed. Baseline: `12e6d7a` on
   usage, validates final decisions and checks claim references against observed
   tool evidence. Its custom model/tool iteration must be replaced, while these
   safety and output contracts require equivalent enforcement.
+- `EllaiExecutionPromptBuilder` now shares that trusted policy, contextual and
+  guidance construction. Its framework variant instructs native function
+  calling while retaining the final-decision schema and evidence rules. The
+  framework executor has not yet been wired to this builder in the Gateway.
 - `src/SwiftAid.Application/Ellai/EllaiCycleRunner.cs` controls iterations,
   tool-call and repair limits, reauthorization, cancellation, activity and
   tool observations. Framework execution must retain the relevant limits,

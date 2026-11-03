@@ -53,6 +53,19 @@ public sealed class EllaiReasoningLoopTests
         """;
 
     [Fact]
+    public void FrameworkPromptRetainsPolicyAndGuidanceButUsesNativeToolProtocol()
+    {
+        var prompt = new EllaiExecutionPromptBuilder(new EllaiPromptBuilder("Policy text.", "v-test"))
+            .Build(Request(), frameworkNative: true);
+        Assert.Contains("Policy text.", prompt);
+        Assert.Contains("## Interactive guidance", prompt);
+        Assert.Contains("Use the registered function tools", prompt);
+        Assert.Contains("## Final decision JSON schema", prompt);
+        Assert.DoesNotContain(EllaiReasoningLoop.TurnProtocol, prompt);
+        Assert.Contains("Claims must cite exact evidence", prompt);
+    }
+
+    [Fact]
     public async Task OrdinaryConversationDiscoversReportAndProducesGuidanceProposalThroughExistingLoop()
     {
         var registry = new EllaiUiRegistry();
