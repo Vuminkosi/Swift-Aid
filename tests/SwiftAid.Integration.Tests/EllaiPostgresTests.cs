@@ -123,8 +123,9 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
             var projected = EllaiConversationProjection.ToClient(completed);
             var proposalId = Assert.Single(projected.UiProposals).ProposalId;
             var observations = new InMemoryEllaiUiObservationStore();
-            await observations.RecordAsync(new(id, "view", "context", "web", ["report.entry"], DateTimeOffset.UtcNow,
-                [new("report.entry", UiObservationState.Ready)]), default);
+            Task ObserveAsync(CancellationToken ct) => observations.RecordAsync(new(id, "view", "context", "web",
+                ["report.entry"], DateTimeOffset.UtcNow, [new("report.entry", UiObservationState.Ready)]), ct);
+            await ObserveAsync(default);
             var store = new PostgresEllaiSessionStore(verifyDb);
             var admission = new EllaiGuidanceProposalAdmission(store, store, registry, observations);
             var options = EllaiOptions.Bind(Environment.GetEnvironmentVariable);
@@ -133,11 +134,31 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
                 new OllamaEllaiReasoningProvider(http, options), new ServerlessEllaiReasoningProvider(http, options));
             var planner = new EllaiModelGuidancePlanner(new EllaiProviderTurnClient(router));
             var authority = new EllaiUiEntitlements(Actor.ActorId, "scope-test", new HashSet<string> { "report" }, new HashSet<string>());
-            var plan = await admission.PlanAsync(id, proposalId, authority, planner, new EllaiUiDiscoveryService(),
-                new EllaiGuidancePlanValidator(registry), new EllaiUsageLedger(), new InMemoryEllaiUsageStore(), default);
-            Assert.Equal("Ready", plan.Status);
-            Assert.NotEmpty(plan.Plan!.Steps);
-            Assert.NotNull(EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync(id, default))!.GuidanceJson)?.Plan);
+            using var heartbeatCancellation = new CancellationTokenSource();
+            async Task RefreshObservationAsync()
+            {
+                try
+                {
+                    using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
+                    while (await timer.WaitForNextTickAsync(heartbeatCancellation.Token))
+                        await ObserveAsync(heartbeatCancellation.Token);
+                }
+                catch (OperationCanceledException) when (heartbeatCancellation.IsCancellationRequested) { }
+            }
+            var heartbeat = RefreshObservationAsync();
+            try
+            {
+                var plan = await admission.PlanAsync(id, proposalId, authority, planner, new EllaiUiDiscoveryService(),
+                    new EllaiGuidancePlanValidator(registry), new EllaiUsageLedger(), new InMemoryEllaiUsageStore(), default);
+                Assert.True(plan.Status == "Ready", $"Guidance planning returned {plan.Status} ({plan.DiagnosticCode ?? "no diagnostic"}).");
+                Assert.NotEmpty(plan.Plan!.Steps);
+                Assert.NotNull(EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync(id, default))!.GuidanceJson)?.Plan);
+            }
+            finally
+            {
+                heartbeatCancellation.Cancel();
+                await heartbeat;
+            }
         }
     }
 
