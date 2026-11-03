@@ -43,7 +43,7 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
             new EllaiPromptBuilder("Synthetic test policy", "v-test"), completion);
         await using var services = new ServiceCollection()
             .AddSingleton<IEllaiSessionStore>(store).AddSingleton<IEllaiUtteranceOutboxStore>(store)
-            .AddSingleton(responses).AddSingleton(consent).AddSingleton(loop)
+            .AddSingleton(responses).AddSingleton(consent).AddSingleton<IEllaiReasoningExecutor>(loop)
             .AddScoped(_ => new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue)).BuildServiceProvider();
         using var worker = new EllaiUtteranceWorker(services, NullLogger<EllaiUtteranceWorker>.Instance);
         await worker.StartAsync(CancellationToken.None);
@@ -173,7 +173,7 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
                 } : null));
         await using var services = new ServiceCollection()
             .AddSingleton<IEllaiSessionStore>(store).AddSingleton<IEllaiUtteranceOutboxStore>(store)
-            .AddSingleton(responses).AddSingleton(consent).AddSingleton(loop).BuildServiceProvider();
+            .AddSingleton(responses).AddSingleton(consent).AddSingleton<IEllaiReasoningExecutor>(loop).BuildServiceProvider();
         using var worker = new EllaiUtteranceWorker(services, NullLogger<EllaiUtteranceWorker>.Instance);
         await worker.StartAsync(CancellationToken.None);
         try

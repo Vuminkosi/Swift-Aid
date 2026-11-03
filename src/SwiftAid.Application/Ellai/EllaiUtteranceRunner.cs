@@ -16,7 +16,7 @@ public sealed record EllaiUtteranceOutcome(
 /// <summary>Dependencies for one background run, resolved per scope by the
 /// hosting worker. Null activity/journal degrades to local-only progress.</summary>
 public sealed record EllaiUtteranceServices(
-    EllaiReasoningLoop Loop,
+    IEllaiReasoningExecutor Loop,
     EllaiActivityStatusCoordinator? Activity,
     EllaiSessionEventJournal? Journal,
     EllaiConsentService Consent,

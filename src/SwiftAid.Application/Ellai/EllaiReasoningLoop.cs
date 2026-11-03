@@ -63,6 +63,20 @@ public sealed record EllaiLoopRequest(
     string InteractionMode = "typed",
     string? GuidanceState = null);
 
+/// <summary>Execution boundary for a single authorized utterance.</summary>
+public interface IEllaiReasoningExecutor
+{
+    Task<EllaiCycleOutcome> RunAsync(
+        EllaiLoopRequest request, CancellationToken ct,
+        Func<int, CancellationToken, Task<bool>>? reauthorizeAsync = null,
+        EllaiActivityStatusCoordinator? activity = null,
+        EllaiSessionEventJournal? journal = null,
+        Func<CancellationToken, Task<bool>>? isExecutionCurrentAsync = null,
+        Func<string, CancellationToken, ValueTask>? onTextDelta = null,
+        Action<EllaiActivityEvent>? onActivity = null,
+        Func<EllaiToolContext, EllaiToolRequest, CancellationToken, Task<EllaiToolResult>>? invokeToolAsync = null);
+}
+
 /// <summary>Multi-turn reasoning loop (Task 6): drives the bounded cycle
 /// runner with a routed text provider. Each model text turn parses to typed
 /// tool calls or a validated final decision; accepted tool results re-enter
@@ -79,7 +93,7 @@ public sealed class EllaiReasoningLoop(
     EllaiPromptBuilder prompts,
     IEllaiTurnCompletionClient completions,
     EllaiUsageLedger? ledger = null,
-    IEllaiUsageStore? usageStore = null)
+    IEllaiUsageStore? usageStore = null) : IEllaiReasoningExecutor
 {
     public const string TurnProtocol =
         "Reply with exactly one JSON object and no other text. " +

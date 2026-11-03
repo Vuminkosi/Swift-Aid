@@ -202,7 +202,7 @@ public sealed class EllaiUtteranceWorker(
         }
 
         var dependencies = new EllaiUtteranceServices(
-            scopedServices.GetRequiredService<EllaiReasoningLoop>(),
+            scopedServices.GetRequiredService<IEllaiReasoningExecutor>(),
             scopedServices.GetService<EllaiActivityStatusCoordinator>(),
             scopedServices.GetService<EllaiSessionEventJournal>(),
             consent,

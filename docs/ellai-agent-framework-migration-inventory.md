@@ -7,7 +7,9 @@ migration or live-provider acceptance has passed. Baseline: `12e6d7a` on
 ## Current execution boundary
 
 - `src/SwiftAid.Gateway/Ellai/EllaiUtteranceWorker.cs` resolves the scoped
-  `EllaiReasoningLoop` and supplies its dependencies to `EllaiUtteranceRunner`.
+  `IEllaiReasoningExecutor` and supplies its dependencies to `EllaiUtteranceRunner`.
+  Gateway currently registers the existing `EllaiReasoningLoop` for that
+  interface; the framework implementation is not yet registered.
   The worker claims and completes outbox work, checks the session, hydrates
   consent and usage, and publishes correlated response chunks.
 - `src/SwiftAid.Application/Ellai/EllaiUtteranceRunner.cs` obtains the

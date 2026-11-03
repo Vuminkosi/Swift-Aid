@@ -197,6 +197,8 @@ builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiTrainingVerifier>();
         builder.Services.AddSingleton(runtimePolicy);
         builder.Services.AddScoped(sp => new SwiftAid.Application.Ellai.EllaiPromptBuilder(runtimePolicy.Text, runtimePolicy.Version));
         builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiReasoningLoop>();
+        builder.Services.AddScoped<SwiftAid.Application.Ellai.IEllaiReasoningExecutor>(sp =>
+            sp.GetRequiredService<SwiftAid.Application.Ellai.EllaiReasoningLoop>());
     }
 
     if (ellai.HasUploadAsrRoute)
