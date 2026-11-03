@@ -80,7 +80,10 @@ not recorded, so the precise rejection cause is unknown; this result does not
 establish that all structured schemas, forced tool choices, context sizes or
 streaming tool-call deltas are supported. A framework agent also invoked a
 synthetic function through the live provider and used the result in its final
-answer. A separate live framework-agent probe invoked the real `ellai_now`
+answer. A separate live synthetic multi-turn probe passed a randomly generated
+value from one framework function result into a second function and received
+its verification; this exercised dependent model/tool turns, not a fixed script.
+A separate live framework-agent probe invoked the real `ellai_now`
 broker tool through the admitted framework catalogue, with a synthetic session,
 one-tool allowlist and consent; the broker returned an allowed result. It did
 not exercise case data or the Gateway worker. The opt-in tests are in
@@ -205,6 +208,11 @@ session. A second deterministic worker case invokes the real scoped
 The framework model-call guard rejects named tool calls outside the advertised
 catalogue; malformed partial streaming call handling still requires additional
 provider-level verification.
+Deterministic framework tests also cover two dependent tool calls with exact
+evidence validation and concurrent session history isolation. The old loop's
+two model-only decision-repair attempts are not yet implemented in the framework
+executor; a malformed final decision currently fails closed. Multi-turn
+reasoning, recovery and repair parity remain cutover acceptance requirements.
 Its non-streaming provider calls recheck the supplied currency callback and
 use `EllaiFrameworkUsage` to estimate the prompt and tool-schema budget against
 the existing ledger, then record provider usage through `IEllaiUsageStore`.

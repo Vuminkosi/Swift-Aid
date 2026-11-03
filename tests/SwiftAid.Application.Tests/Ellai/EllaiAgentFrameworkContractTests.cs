@@ -3,6 +3,8 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using SwiftAid.Application.Ellai;
 using SwiftAid.Intelligence.Meta;
+using EvidenceRef = SwiftAid.Contracts.Ellai.EvidenceRef;
+using EllaiDecision = SwiftAid.Contracts.Ellai.EllaiDecision;
 
 namespace SwiftAid.Application.Tests.Ellai;
 
@@ -13,6 +15,57 @@ public sealed class EllaiAgentFrameworkContractTests
          "spokenText":"Done.","claims":[],"questions":[],"uiIntents":[],"planProposal":null,
          "topicRefs":[],"resumeSuggestion":null,"stopReason":null}}
         """;
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task FrameworkReasonsAcrossDependentToolCallsAndRejectsUnobservedEvidence(bool citeRealEvidence)
+    {
+        using var client = new DependentToolClient(citeRealEvidence);
+        var agent = new EllaiFrameworkAgent(client);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.Now, EllaiToolNames.DocsGet });
+        var calls = new List<string>();
+        var evidence = new EvidenceRef("Document", "safe", "v1", null, "proof-1");
+        var decision = await agent.RunAsync(context, "Test instructions", [new ChatMessage(ChatRole.User, "test")], 300,
+            _ => Task.FromResult(true), (_, request, _) =>
+            {
+                calls.Add(request.ToolName);
+                return Task.FromResult(request.ToolName == EllaiToolNames.Now
+                    ? new EllaiToolResult(request.ToolName, true, null, [], "Use section safe", 1, false)
+                    : new EllaiToolResult(request.ToolName, true, null, [evidence], "Verified observation", 1, false));
+            }, new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None);
+
+        Assert.Equal(new[] { EllaiToolNames.Now, EllaiToolNames.DocsGet }, calls);
+        Assert.Equal(3, client.Calls);
+        Assert.Contains("Use section safe", client.FirstObservation);
+        Assert.Contains("Verified observation", client.SecondObservation);
+        Assert.Equal(citeRealEvidence, decision is not null);
+    }
+
+    [Fact]
+    public async Task ConcurrentFrameworkSessionsDoNotShareConversationContext()
+    {
+        using var client = new HistoryCaptureClient();
+        async Task<EllaiDecision?> Run(string id, string secret)
+        {
+            var agent = new EllaiFrameworkAgent(client);
+            var context = new EllaiToolContext(id, "epoch", "cases", null, 4, true,
+                AllowedTools: new HashSet<string>(StringComparer.Ordinal));
+            return await agent.RunAsync(context, "Test instructions",
+                [new ChatMessage(ChatRole.User, secret), new ChatMessage(ChatRole.Assistant, "prior answer"),
+                 new ChatMessage(ChatRole.User, "follow-up")], 100, _ => Task.FromResult(true),
+                (_, _, _) => throw new InvalidOperationException(),
+                new EllaiFrameworkUsage(id, new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None);
+        }
+
+        var outcomes = await Task.WhenAll(Run("session-a", "only-a"), Run("session-b", "only-b"));
+        Assert.All(outcomes, outcome => Assert.NotNull(outcome));
+        var histories = client.Histories.ToArray();
+        Assert.Equal(2, histories.Length);
+        Assert.Single(histories, history => history.Contains("only-a") && !history.Contains("only-b"));
+        Assert.Single(histories, history => history.Contains("only-b") && !history.Contains("only-a"));
+    }
 
     [Fact]
     public async Task FrameworkExecutorReportsBrokerDenialWithoutAcceptingAnswer()
@@ -291,6 +344,56 @@ public sealed class EllaiAgentFrameworkContractTests
                 [new UsageContent(new UsageDetails { InputTokenCount = 3, OutputTokenCount = 2 })]);
         }
 
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    private sealed class DependentToolClient(bool citeRealEvidence) : IChatClient
+    {
+        public int Calls { get; private set; }
+        public string FirstObservation { get; private set; } = string.Empty;
+        public string SecondObservation { get; private set; } = string.Empty;
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            var results = messages.SelectMany(message => message.Contents).OfType<FunctionResultContent>()
+                .Select(item => item.Result?.ToString() ?? string.Empty).ToArray();
+            if (Calls == 1)
+                return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                    [new FunctionCallContent("first", EllaiToolNames.Now, new Dictionary<string, object?>())])));
+            if (Calls == 2)
+            {
+                FirstObservation = Assert.Single(results);
+                return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                    [new FunctionCallContent("second", EllaiToolNames.DocsGet, new Dictionary<string, object?> { ["section"] = "safe" })])));
+            }
+            SecondObservation = results.Last();
+            var evidenceId = citeRealEvidence ? "proof-1" : "invented";
+            var json = """
+                {"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Observed.","spokenText":"Observed.",
+                "claims":[{"claimId":"c1","text":"Observed.","kind":"Observed","evidence":[{"sourceKind":"Document","resourceId":"safe","version":"v1","fieldPath":null,"evidenceId":"PLACEHOLDER"}]}],
+                "questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}
+                """.Replace("PLACEHOLDER", evidenceId, StringComparison.Ordinal);
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, json)));
+        }
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    private sealed class HistoryCaptureClient : IChatClient
+    {
+        public System.Collections.Concurrent.ConcurrentBag<string[]> Histories { get; } = [];
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            Histories.Add(messages.Select(message => message.Text).ToArray());
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, ValidDecision)));
+        }
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
         public void Dispose() { }
     }

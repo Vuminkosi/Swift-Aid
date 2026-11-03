@@ -115,6 +115,40 @@ public sealed class EllaiLiveProbeTests
     }
 
     [LiveFact]
+    public async Task LiveFrameworkAgentReasonsAcrossDependentToolCalls()
+    {
+        var options = LiveOptions();
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
+        using var client = EllaiMuseChatClientFactory.Create(options, http);
+        var secretCode = "fixture-" + Guid.NewGuid().ToString("N")[..8];
+        var firstCalls = 0;
+        var acceptedSecondCalls = 0;
+        var getCode = AIFunctionFactory.Create(() =>
+        {
+            firstCalls++;
+            return secretCode;
+        }, "get_fixture_code", "Get the synthetic code needed by verify_fixture_code.");
+        var verifyCode = AIFunctionFactory.Create((string code) =>
+        {
+            if (code == secretCode) { acceptedSecondCalls++; return "verified"; }
+            return "invalid";
+        }, "verify_fixture_code", "Verify the exact code returned by get_fixture_code.");
+        AIAgent agent = client.AsAIAgent(name: "EllaiMultiTurnProbe", tools: [getCode, verifyCode]);
+        var session = await agent.CreateSessionAsync();
+        try
+        {
+            var response = await agent.RunAsync("Get the fixture code, pass it exactly to verify_fixture_code, then report whether it was verified.", session);
+            Assert.True(firstCalls > 0);
+            Assert.True(acceptedSecondCalls > 0);
+            Assert.Contains("verif", response.Text, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (System.ClientModel.ClientResultException error)
+        {
+            throw new InvalidOperationException($"Provider rejected the multi-turn probe (HTTP {error.Status}).");
+        }
+    }
+
+    [LiveFact]
     public async Task LiveFrameworkAgentInvokesBrokeredTool()
     {
         var options = LiveOptions();
