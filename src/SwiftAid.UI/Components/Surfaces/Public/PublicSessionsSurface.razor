@@ -497,13 +497,16 @@
     private long _monthGeneration;
 
     private static IReadOnlyList<string> CalendarWeekdays => Enumerable.Range(0, 7)
-        .Select(day => CultureInfo.CurrentCulture.DateTimeFormat.GetAbbreviatedDayName((DayOfWeek)day)).ToArray();
+        .Select(day => CultureInfo.CurrentCulture.DateTimeFormat.GetAbbreviatedDayName(
+            (DayOfWeek)(((int)CultureInfo.CurrentCulture.DateTimeFormat.FirstDayOfWeek + day) % 7))).ToArray();
 
     private IEnumerable<DateTime> CalendarDays
     {
         get
         {
-            var first = _calendarMonth.AddDays(-(int)_calendarMonth.DayOfWeek);
+            var firstDay = CultureInfo.CurrentCulture.DateTimeFormat.FirstDayOfWeek;
+            var offset = ((int)_calendarMonth.DayOfWeek - (int)firstDay + 7) % 7;
+            var first = _calendarMonth.AddDays(-offset);
             return Enumerable.Range(0, 42).Select(day => first.AddDays(day));
         }
     }

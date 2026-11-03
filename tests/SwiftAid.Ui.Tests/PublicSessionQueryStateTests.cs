@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Globalization;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Http;
@@ -14,6 +15,33 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed class PublicSessionQueryStateTests
 {
+    [Theory]
+    [InlineData("en-US", "Sun", 11, 1)]
+    [InlineData("en-GB", "Mon", 10, 26)]
+    public void CalendarWeekHeadingsAndGridUseTheSameLocaleFirstDay(string cultureName, string firstHeading, int firstMonth, int firstDate)
+    {
+        var previous = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(cultureName);
+            var component = new PublicSessionsSurface();
+            typeof(PublicSessionsSurface).GetField("_calendarMonth", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(component, new DateTime(2026, 11, 1));
+            var headings = (IReadOnlyList<string>)typeof(PublicSessionsSurface)
+                .GetProperty("CalendarWeekdays", BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!;
+            var days = Property<IEnumerable<DateTime>>(component, "CalendarDays").ToArray();
+
+            Assert.Equal(firstHeading, headings[0]);
+            Assert.Equal(new DateTime(2026, firstMonth, firstDate), days[0]);
+            Assert.Equal(42, days.Length);
+            Assert.Equal(CultureInfo.CurrentCulture.DateTimeFormat.FirstDayOfWeek, days[0].DayOfWeek);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previous;
+        }
+    }
+
     [Fact]
     public async Task CompletedSessionIsLabeledAndDoesNotOfferNewInvitations()
     {
