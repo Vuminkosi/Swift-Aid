@@ -52,11 +52,37 @@ public sealed class EllaiLiveQueueReadTests
     {
         public string RegionId { get; set; } = "region-1";
         public Guid? UnavailableCaseId { get; set; }
+        public Guid? DeniedCaseId { get; set; }
         public Task<CaseOccurrenceLocationResult> GetLocationAsync(ActorContext actor, Guid caseId, CancellationToken ct) =>
             Task.FromResult(caseId == UnavailableCaseId
                 ? new CaseOccurrenceLocationResult(CaseOccurrenceLocationAccess.Unavailable, null, null)
+                : caseId == DeniedCaseId
+                ? new CaseOccurrenceLocationResult(CaseOccurrenceLocationAccess.NotFoundOrNotAuthorized, null, null)
                 : new CaseOccurrenceLocationResult(CaseOccurrenceLocationAccess.Allowed, 1,
                     new("US", "Synthetic", "Area", "Locality", RegionId, "area-1", "locality-1")));
+    }
+
+    [Fact]
+    public async Task LostLocationAccessRemainsIncompleteWhenSearchIsRecalled()
+    {
+        var first = Row("01", 7); var denied = Row("02", 8);
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [first, denied]) };
+        var consent = new EllaiConsentService();
+        consent.Grant("session-1", EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue, topics: new EllaiTopicService(),
+            occurrenceLocations: new OccurrenceLocation { DeniedCaseId = denied.CaseId });
+        var context = Context with { Actor = TestActor() };
+        var search = await broker.InvokeAsync(context, new(EllaiToolNames.State,
+            Args(("projection", "queue"), ("country", "US"), ("sort", "latest-reported"), ("place_id", "region-1"))), default);
+        var recalled = await broker.InvokeAsync(context, new(EllaiToolNames.Evidence, Args(("ref", "case-results"))), default);
+
+        Assert.True(search.Allowed);
+        Assert.True(search.Truncated);
+        Assert.True(recalled.Truncated);
+        Assert.Equal(first.CaseId.ToString("D"), Assert.Single(recalled.Evidence).ResourceId);
+        Assert.DoesNotContain(denied.CaseId.ToString("D"), search.ResultSummary);
+        Assert.DoesNotContain(denied.CaseId.ToString("D"), recalled.ResultSummary);
     }
 
     [Fact]

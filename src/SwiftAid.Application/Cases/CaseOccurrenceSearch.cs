@@ -23,6 +23,7 @@ public sealed class CaseOccurrenceSearch(ICaseQueueQuery queue, ICaseOccurrenceL
         var seenCases = new HashSet<Guid>();
         var seenCursors = new HashSet<string>(StringComparer.Ordinal);
         var unknown = false;
+        var incomplete = false;
         string? cursor = null;
         var scanned = 0;
         var filter = new CaseQueueFilter(country, NewestReportedFirst: true);
@@ -44,7 +45,13 @@ public sealed class CaseOccurrenceSearch(ICaseQueueQuery queue, ICaseOccurrenceL
                         return matches.Count == 0
                             ? new(CaseQueueAccess.Unavailable, [], false, false)
                             : new(CaseQueueAccess.Allowed, matches, true, unknown, LocationReadUnavailable: true);
-                    if (location.Access != CaseOccurrenceLocationAccess.Allowed) continue;
+                    if (location.Access != CaseOccurrenceLocationAccess.Allowed)
+                    {
+                        // Access or existence can change between the queue and report reads.
+                        // Omit the record without presenting the scan as complete.
+                        incomplete = true;
+                        continue;
+                    }
                     if (location.Location is null) { unknown = true; continue; }
                     var place = location.Location;
                     if (place.CountryCode != country) { unknown = true; continue; }
@@ -64,7 +71,7 @@ public sealed class CaseOccurrenceSearch(ICaseQueueQuery queue, ICaseOccurrenceL
                 if (cursor is not null && (page.Items.Count == 0 || !seenCursors.Add(cursor)))
                     return new(CaseQueueAccess.Unavailable, [], false, false);
             } while (cursor is not null && scanned < MaximumCandidates);
-            return new(CaseQueueAccess.Allowed, matches, cursor is not null, unknown);
+            return new(CaseQueueAccess.Allowed, matches, cursor is not null || incomplete, unknown);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception error) when (error is not OutOfMemoryException)

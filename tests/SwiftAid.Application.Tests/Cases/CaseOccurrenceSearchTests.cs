@@ -64,6 +64,28 @@ public sealed class CaseOccurrenceSearchTests
         Assert.Empty(result.Items);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LostCaseAccessDuringLocationReadMarksResultsIncomplete(bool includeMatch)
+    {
+        var lost = Row(1);
+        var match = Row(2);
+        var locations = new Locations();
+        locations.Results[lost.CaseId] = new(CaseOccurrenceLocationAccess.NotFoundOrNotAuthorized, null, null);
+        locations.Results[match.CaseId] = new(CaseOccurrenceLocationAccess.Allowed, 1,
+            new("SZ", "Manzini", "Area", "Locality", "region-1", "area-1", "locality-1"));
+        var rows = includeMatch ? new[] { lost, match } : new[] { lost };
+
+        var result = await new CaseOccurrenceSearch(new Queue(new CaseQueueResult(CaseQueueAccess.Allowed, rows)), locations)
+            .SearchAsync(Actor(), "SZ", "region-1", 5, default);
+
+        Assert.Equal(CaseQueueAccess.Allowed, result.Access);
+        Assert.True(result.Truncated);
+        Assert.False(result.UnknownLocations);
+        Assert.Equal(includeMatch ? new[] { match.CaseId } : Array.Empty<Guid>(), result.Items.Select(item => item.Case.CaseId));
+    }
+
     [Fact]
     public async Task LaterLocationFailureReturnsOnlyVerifiedMatchesAndMarksTheScanIncomplete()
     {
