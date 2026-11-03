@@ -72,6 +72,59 @@ public sealed class FrameworkPostgresLiveMuseFactAttribute : FactAttribute
 public sealed class EllaiPostgresTests : IAsyncLifetime
 {
     [FrameworkPostgresFact]
+    public async Task PartialCaseConversationRevalidatesAfterPostgresTopicIsReopened()
+    {
+        var sessionId = $"partial-history-{Guid.NewGuid():N}";
+        await using var initDb = CreateFrameworkDbContext();
+        await initDb.Database.MigrateAsync();
+        var caseId = Guid.NewGuid();
+        var queue = new MutableHistoryQueue { Rows = [caseId] };
+        var consent = new EllaiConsentService();
+        consent.Grant(sessionId, EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
+        var context = new EllaiToolContext(sessionId, "scope-test", "cases", null, 4, true,
+            Actor: Actor, DataClassification: EllaiProcessingClassification.SyntheticDemo,
+            AllowedTools: new HashSet<string> { EllaiToolNames.Evidence });
+        var request = new EllaiToolRequest(EllaiToolNames.Evidence,
+            new Dictionary<string, string> { ["ref"] = "case-results" });
+        try
+        {
+            string? trace;
+            await using (var db = CreateFrameworkDbContext())
+            {
+                var topics = new EllaiTopicService(new PostgresEllaiTopicStore(db));
+                var row = new SwiftAid.Contracts.Cases.CaseQueueItem(caseId, "Reported", "SZ", Actor.ActorId, 1, DateTimeOffset.UtcNow);
+                await new EllaiCaseResultMemory(topics, queue).RememberAsync(context, [row], default, searchIncomplete: true);
+                var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue, topics: topics);
+                var result = await broker.InvokeAsync(context, request, default);
+                Assert.True(result.Truncated);
+                trace = EllaiToolTrace.SerializeFlattened([EllaiObservedToolResult.From(request, result)], false, []);
+                Assert.NotNull(trace);
+            }
+            var turns = new[]
+            {
+                new EllaiConversationTurn(sessionId, "prior", 1, "cases?", "partial result", "Completed", 1, DateTimeOffset.UtcNow) { ToolTraceJson = trace },
+                new EllaiConversationTurn(sessionId, "current", 2, "continue", null, "Queued", 1, null)
+            };
+            await using (var db = CreateFrameworkDbContext())
+            {
+                var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue,
+                    topics: new EllaiTopicService(new PostgresEllaiTopicStore(db)));
+                async Task<bool> Retained() => (await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor,
+                    queue, default, toolContext: context, invokeTool: broker.InvokeAsync)).Messages.Any(message => message.Content == "partial result");
+                Assert.True(await Retained());
+                queue.Rows = [];
+                Assert.False(await Retained());
+            }
+        }
+        finally
+        {
+            await using var cleanupDb = CreateFrameworkDbContext();
+            await cleanupDb.Set<EllaiTopicEntity>().Where(topic => topic.SessionId == sessionId).ExecuteDeleteAsync();
+        }
+    }
+
+    [FrameworkPostgresFact]
     public async Task CaseResultToolsRestoreOriginalAfterNewSearchAndRecheckAccess()
     {
         var sessionId = $"case-history-tools-{Guid.NewGuid():N}";
