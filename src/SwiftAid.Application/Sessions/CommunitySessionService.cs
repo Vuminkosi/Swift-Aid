@@ -122,6 +122,87 @@ public sealed class CommunitySessionService(ICommunitySessionStore store) : ICom
             .ToList();
     }
 
+    public async Task<PublicSessionPage> QueryPublicAsync(PublicSessionQuery query, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        if (query.Limit is < 1 or > MaxPublicLimit ||
+            query.AfterStartUtc.HasValue != query.AfterSessionId.HasValue ||
+            query.AfterSessionId == Guid.Empty ||
+            query.StartFromUtc >= query.StartBeforeUtc ||
+            query.LocalDateFrom > query.LocalDateTo ||
+            new[] { query.Search, query.CountryCode, query.RegionId, query.Sector, query.Language, query.Topic, query.Category }
+                .Any(value => value is { Length: > 120 }))
+        {
+            throw new ArgumentException("The public session query is invalid.", nameof(query));
+        }
+
+        var normalized = query with
+        {
+            Search = Normalize(query.Search),
+            CountryCode = Normalize(query.CountryCode),
+            RegionId = Normalize(query.RegionId),
+            Sector = Normalize(query.Sector),
+            Language = Normalize(query.Language),
+            Topic = Normalize(query.Topic),
+            Category = Normalize(query.Category),
+            StartFromUtc = query.StartFromUtc?.ToUniversalTime(),
+            StartBeforeUtc = query.StartBeforeUtc?.ToUniversalTime(),
+            AfterStartUtc = query.AfterStartUtc?.ToUniversalTime()
+        };
+
+        var items = new List<PublicSessionView>(query.Limit);
+        const int scanLimit = 1000;
+        var scanned = 0;
+        while (scanned < scanLimit)
+        {
+            var batchSize = Math.Min(101, scanLimit - scanned);
+            var candidates = await _store.QueryPublicAsync(normalized, batchSize + 1, ct).ConfigureAwait(false);
+            var hasMoreCandidates = candidates.Count > batchSize;
+            CommunitySession? lastScanned = null;
+            foreach (var candidate in candidates.Take(batchSize))
+            {
+                scanned++;
+                lastScanned = candidate;
+                if (!IsListedPublicly(candidate) || !MatchesLocalDates(candidate, query.LocalDateFrom, query.LocalDateTo))
+                    continue;
+                if (items.Count == query.Limit)
+                {
+                    var last = items[^1];
+                    return new PublicSessionPage(items, new PublicSessionPosition(last.StartUtc, last.SessionId));
+                }
+                items.Add(ToPublicView(candidate));
+            }
+
+            if (!hasMoreCandidates || lastScanned is null)
+                return new PublicSessionPage(items, null);
+            if (scanned == scanLimit)
+                return new PublicSessionPage(items, new PublicSessionPosition(lastScanned.StartUtc, lastScanned.SessionId));
+            normalized = normalized with { AfterStartUtc = lastScanned.StartUtc, AfterSessionId = lastScanned.SessionId };
+        }
+        return new PublicSessionPage(items, null);
+    }
+
+    private static bool MatchesLocalDates(CommunitySession session, DateOnly? from, DateOnly? to)
+    {
+        if (from is null && to is null)
+            return true;
+        DateOnly date;
+        try
+        {
+            var zone = TimeZoneInfo.FindSystemTimeZoneById(session.TimeZoneId);
+            date = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(session.StartUtc, zone).DateTime);
+        }
+        catch (Exception exception) when (exception is TimeZoneNotFoundException or InvalidTimeZoneException or ArgumentException)
+        {
+            // A UTC calendar date is not a substitute for an unknown local date.
+            return false;
+        }
+        return (from is null || date >= from) && (to is null || date <= to);
+    }
+
+    private static string? Normalize(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
     public async Task<PublicSessionView?> GetPublicAsync(Guid sessionId, CancellationToken ct)
     {
         var session = await _store.LoadAsync(sessionId, ct).ConfigureAwait(false);
@@ -225,7 +306,9 @@ public sealed class CommunitySessionService(ICommunitySessionStore store) : ICom
         session.AudienceDescription, session.TopicTags.ToArray(),
         session.CountryCode, session.RegionId, session.Sector, session.Presenter, session.Language,
         session.StartUtc, session.TimeZoneId, session.DurationMinutes, session.Capacity,
-        session.Materials.Select(ToStoredMaterial).ToArray(),
+        // No authoritative public-rights and withdrawal lookup is wired here.
+        // Preserve staff references, but do not serialize unverified references publicly.
+        Array.Empty<StoredSessionMaterial>(),
         ToContractChannel(session.ChannelType), session.ChannelLink,
         session.Status.ToString(), session.CancellationReason, session.IcsSequence);
 

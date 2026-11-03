@@ -160,6 +160,100 @@ public sealed class CommunitySessionServiceTests
             services.Service.GetStaffAsync(Guid.NewGuid(), "", CancellationToken.None));
     }
 
+    [Fact]
+    public async Task PublicOutputsDoNotExposeUnverifiedMaterialReferences()
+    {
+        var services = CreateServices();
+        var id = Guid.NewGuid();
+        await PublishAsync(services.Service, id, SessionVisibility.Public);
+
+        var staff = await services.Service.GetStaffAsync(id, "officer-1", CancellationToken.None);
+        var publicView = await services.Service.GetPublicAsync(id, CancellationToken.None);
+        var list = await services.Service.ListPublicAsync(null, CancellationToken.None);
+        var page = await services.Service.QueryPublicAsync(new PublicSessionQuery(), CancellationToken.None);
+        var calendar = await services.Service.GetIcsAsync(id, Now, CancellationToken.None);
+        var invitation = await services.Service.GetInvitationTextAsync(id, CancellationToken.None);
+
+        var material = Assert.Single(staff!.Materials);
+        Assert.Empty(publicView!.Materials);
+        Assert.Empty(Assert.Single(list).Materials);
+        Assert.Empty(Assert.Single(page.Items).Materials);
+        Assert.DoesNotContain(material.MaterialId, calendar!, StringComparison.Ordinal);
+        Assert.DoesNotContain(material.MaterialId, invitation!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Local_date_query_can_continue_after_bounded_scan_with_no_matches()
+    {
+        var services = CreateServices();
+        for (var index = 0; index < 1001; index++)
+        {
+            var id = Guid.Parse($"00000000-0000-0000-0000-{index + 1:D12}");
+            await PublishAsync(services.Service, id, SessionVisibility.Public);
+        }
+        var query = new PublicSessionQuery(LocalDateFrom: new DateOnly(2026, 11, 1), LocalDateTo: new DateOnly(2026, 11, 1));
+        var first = await services.Service.QueryPublicAsync(query, CancellationToken.None);
+        Assert.Empty(first.Items);
+        Assert.NotNull(first.Next);
+        var second = await services.Service.QueryPublicAsync(query with
+        {
+            AfterStartUtc = first.Next.StartUtc,
+            AfterSessionId = first.Next.SessionId
+        }, CancellationToken.None);
+        Assert.Empty(second.Items);
+        Assert.Null(second.Next);
+    }
+
+    [Fact]
+    public async Task Public_query_uses_each_session_local_date_before_paging()
+    {
+        var services = CreateServices();
+        var localPreviousDay = Guid.NewGuid();
+        var localRequestedDay = Guid.NewGuid();
+        foreach (var (id, start) in new[]
+        {
+            (localPreviousDay, new DateTimeOffset(2026, 11, 1, 3, 30, 0, TimeSpan.Zero)),
+            (localRequestedDay, new DateTimeOffset(2026, 11, 1, 5, 30, 0, TimeSpan.Zero))
+        })
+        {
+            await services.Service.ExecuteAsync(CreateDraft(id) with { StartUtc = start, TimeZoneId = "America/New_York" }, "officer-1", CancellationToken.None);
+            await services.Service.ExecuteAsync(new ReviewSessionCommand(id, 1, false, "review", Now), "officer-2", CancellationToken.None);
+            await services.Service.ExecuteAsync(new ScheduleSessionCommand(id, 2, "publish", Now), "officer-2", CancellationToken.None);
+        }
+
+        var page = await services.Service.QueryPublicAsync(new PublicSessionQuery(
+            LocalDateFrom: new DateOnly(2026, 11, 1), LocalDateTo: new DateOnly(2026, 11, 1), Limit: 1), CancellationToken.None);
+        Assert.Equal(localRequestedDay, Assert.Single(page.Items).SessionId);
+        Assert.Null(page.Next);
+        await Assert.ThrowsAsync<ArgumentException>(() => services.Service.QueryPublicAsync(new PublicSessionQuery(
+            LocalDateFrom: new DateOnly(2026, 11, 2), LocalDateTo: new DateOnly(2026, 11, 1)), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Public_query_pages_only_published_public_sessions_and_validates_positions()
+    {
+        var services = CreateServices();
+        var firstId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var secondId = Guid.Parse("00000000-0000-0000-0000-000000000002");
+        await PublishAsync(services.Service, firstId, SessionVisibility.Public);
+        await PublishAsync(services.Service, secondId, SessionVisibility.Public);
+        await PublishAsync(services.Service, Guid.NewGuid(), SessionVisibility.Internal);
+        await services.Service.ExecuteAsync(CreateDraft(Guid.NewGuid()), "officer-1", CancellationToken.None);
+
+        var first = await services.Service.QueryPublicAsync(new PublicSessionQuery(Limit: 1), CancellationToken.None);
+        Assert.Equal(firstId, Assert.Single(first.Items).SessionId);
+        Assert.NotNull(first.Next);
+        var second = await services.Service.QueryPublicAsync(new PublicSessionQuery(
+            AfterStartUtc: first.Next.StartUtc, AfterSessionId: first.Next.SessionId, Limit: 1), CancellationToken.None);
+        Assert.Equal(secondId, Assert.Single(second.Items).SessionId);
+        Assert.Null(second.Next);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => services.Service.QueryPublicAsync(
+            new PublicSessionQuery(AfterSessionId: firstId), CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(() => services.Service.QueryPublicAsync(
+            new PublicSessionQuery(Limit: 101), CancellationToken.None));
+    }
+
     private static (CommunitySessionService Service, FakeSessionStore Store) CreateServices()
     {
         var store = new FakeSessionStore();
@@ -285,6 +379,16 @@ public sealed class CommunitySessionServiceTests
 
         public Task<IReadOnlyList<DomainSessions.CommunitySession>> ListPublicAsync(int take, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<DomainSessions.CommunitySession>>(_sessions.Values.Take(take).ToList());
+
+        public Task<IReadOnlyList<DomainSessions.CommunitySession>> QueryPublicAsync(PublicSessionQuery query, int take, CancellationToken ct)
+        {
+            var results = _sessions.Values.Where(item => item.Visibility == DomainSessions.SessionVisibility.Public &&
+                (item.Status == DomainSessions.CommunitySessionStatus.Scheduled || item.Status == DomainSessions.CommunitySessionStatus.Cancelled));
+            if (query.AfterStartUtc is { } after && query.AfterSessionId is { } afterId)
+                results = results.Where(item => item.StartUtc > after || item.StartUtc == after && item.SessionId.CompareTo(afterId) > 0);
+            return Task.FromResult<IReadOnlyList<DomainSessions.CommunitySession>>(results
+                .OrderBy(item => item.StartUtc).ThenBy(item => item.SessionId).Take(take).ToList());
+        }
 
         public Task<int> CountRevisionsAsync(Guid sessionId, CancellationToken ct) => Task.FromResult(Revisions);
 

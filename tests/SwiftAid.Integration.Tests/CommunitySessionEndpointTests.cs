@@ -633,6 +633,9 @@ public sealed class CommunitySessionEndpointTests
                     ? CommunitySessionEndpointTests.PublishedView()
                     : null);
 
+        public Task<PublicSessionPage> QueryPublicAsync(PublicSessionQuery query, CancellationToken ct) =>
+            Task.FromResult(new PublicSessionPage(WithPublished ? [PublishedView()] : [], null));
+
         public Task<string?> GetIcsAsync(Guid sessionId, DateTimeOffset generatedAtUtc, CancellationToken ct) =>
             Task.FromResult<string?>(
                 WithPublished && sessionId == CommunitySessionEndpointTests.KnownSessionId

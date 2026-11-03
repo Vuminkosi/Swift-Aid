@@ -1,4 +1,5 @@
 using SwiftAid.Domain.Sessions;
+using SwiftAid.Contracts.Sessions;
 
 namespace SwiftAid.Application.Sessions;
 
@@ -51,6 +52,9 @@ public interface ICommunitySessionStore
         CancellationToken ct);
 
     Task<IReadOnlyList<CommunitySession>> ListPublicAsync(int take, CancellationToken ct);
+
+    /// <summary>Filters public sessions before applying the bounded continuation and limit.</summary>
+    Task<IReadOnlyList<CommunitySession>> QueryPublicAsync(PublicSessionQuery query, int take, CancellationToken ct);
 
     Task<int> CountRevisionsAsync(Guid sessionId, CancellationToken ct);
 

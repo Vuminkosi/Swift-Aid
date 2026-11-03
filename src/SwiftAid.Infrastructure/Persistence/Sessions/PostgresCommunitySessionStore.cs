@@ -4,6 +4,8 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using SwiftAid.Application.Sessions;
 using SwiftAid.Domain.Sessions;
+using DomainSessionVisibility = SwiftAid.Domain.Sessions.SessionVisibility;
+using PublicSessionQuery = SwiftAid.Contracts.Sessions.PublicSessionQuery;
 
 namespace SwiftAid.Infrastructure.Persistence.Sessions;
 
@@ -82,7 +84,7 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
     public async Task<IReadOnlyList<CommunitySession>> ListPublicAsync(int take, CancellationToken ct)
     {
         var entities = await Entities().AsNoTracking()
-            .Where(item => item.Visibility == nameof(SessionVisibility.Public) &&
+            .Where(item => item.Visibility == nameof(DomainSessionVisibility.Public) &&
                 item.PublishedVersion > 0 && item.ScheduledAtUtc != null &&
                 (item.Status == nameof(CommunitySessionStatus.Scheduled) ||
                  item.Status == nameof(CommunitySessionStatus.Cancelled)))
@@ -91,6 +93,69 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
             .Take(Math.Max(1, take))
             .ToListAsync(ct)
             .ConfigureAwait(false);
+        return entities.Select(Rehydrate).ToList();
+    }
+
+    public async Task<IReadOnlyList<CommunitySession>> QueryPublicAsync(PublicSessionQuery query, int take, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        var rows = Entities().AsNoTracking()
+            .Where(item => item.Visibility == nameof(DomainSessionVisibility.Public) &&
+                item.PublishedVersion > 0 && item.ScheduledAtUtc != null &&
+                (item.Status == nameof(CommunitySessionStatus.Scheduled) ||
+                 item.Status == nameof(CommunitySessionStatus.Cancelled)));
+
+        if (query.Search is { } search)
+        {
+            var term = search.ToLowerInvariant();
+            var exactTopic = JsonSerializer.Serialize(new[] { search });
+            rows = rows.Where(item => item.Title.ToLower().Contains(term) ||
+                item.Summary.ToLower().Contains(term) || item.Presenter.ToLower().Contains(term) ||
+                item.CountryCode.ToLower().Contains(term) || item.RegionId.ToLower().Contains(term) ||
+                item.Language.ToLower().Contains(term) || EF.Functions.JsonContains(item.TopicTagsJson, exactTopic));
+        }
+
+        if (query.CountryCode is { } country)
+            rows = rows.Where(item => item.CountryCode.ToLower() == country.ToLower());
+        if (query.RegionId is { } region)
+            rows = rows.Where(item => item.RegionId.ToLower() == region.ToLower());
+        if (query.Sector is { } sector)
+            rows = rows.Where(item => item.Sector.ToLower() == sector.ToLower());
+        if (query.Language is { } language)
+            rows = rows.Where(item => item.Language.ToLower() == language.ToLower());
+        if (query.Category is { } category)
+        {
+            var exactCategory = JsonSerializer.Serialize(new[] { category });
+            rows = rows.Where(item => item.Sector.ToLower() == category.ToLower() ||
+                EF.Functions.JsonContains(item.TopicTagsJson, exactCategory));
+        }
+        if (query.Topic is { } topic)
+        {
+            var exactTopic = JsonSerializer.Serialize(new[] { topic });
+            rows = rows.Where(item => EF.Functions.JsonContains(item.TopicTagsJson, exactTopic));
+        }
+        if (query.StartFromUtc is { } from)
+            rows = rows.Where(item => item.StartUtc >= from);
+        if (query.StartBeforeUtc is { } before)
+            rows = rows.Where(item => item.StartUtc < before);
+        // Every TimeZoneInfo UTC offset is within +/-14 hours. These broad UTC
+        // bounds reduce scanning; the application applies the exact local date.
+        if (query.LocalDateFrom is { } localFrom && localFrom > DateOnly.MinValue)
+        {
+            var earliest = new DateTimeOffset(localFrom.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc)).AddHours(-14);
+            rows = rows.Where(item => item.StartUtc >= earliest);
+        }
+        if (query.LocalDateTo is { } localTo && localTo < DateOnly.MaxValue.AddDays(-1))
+        {
+            var latest = new DateTimeOffset(localTo.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc)).AddHours(14);
+            rows = rows.Where(item => item.StartUtc < latest);
+        }
+        if (query.AfterStartUtc is { } after && query.AfterSessionId is { } afterId)
+            rows = rows.Where(item => item.StartUtc > after ||
+                item.StartUtc == after && item.SessionId.CompareTo(afterId) > 0);
+
+        var entities = await rows.OrderBy(item => item.StartUtc).ThenBy(item => item.SessionId)
+            .Take(take).ToListAsync(ct).ConfigureAwait(false);
         return entities.Select(Rehydrate).ToList();
     }
 

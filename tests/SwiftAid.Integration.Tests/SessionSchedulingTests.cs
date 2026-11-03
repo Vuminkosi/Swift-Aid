@@ -14,6 +14,90 @@ namespace SwiftAid.Integration.Tests;
 public sealed class SessionSchedulingTests
 {
     [IntakePostgresFact]
+    public async Task Public_query_filters_local_dates_before_paging_across_midnight()
+    {
+        var ids = new[] { Guid.NewGuid(), Guid.NewGuid() };
+        var day = DateTimeOffset.UtcNow.AddDays(14).UtcDateTime.Date;
+        var utcMidnight = new DateTimeOffset(day, TimeSpan.Zero);
+        var marker = $"local-date-{Guid.NewGuid():N}";
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var service = new CommunitySessionService(new PostgresCommunitySessionStore(db));
+        try
+        {
+            for (var index = 0; index < ids.Length; index++)
+            {
+                var draft = CreateDraft(ids[index], "officer-1") with
+                {
+                    Title = marker,
+                    StartUtc = utcMidnight.AddHours(index == 0 ? 1 : 8),
+                    TimeZoneId = "America/New_York"
+                };
+                await service.ExecuteAsync(draft, "officer-1", CancellationToken.None);
+                await service.ExecuteAsync(new ReviewSessionCommand(ids[index], 1, false, "review", DateTimeOffset.UtcNow), "officer-2", CancellationToken.None);
+                await service.ExecuteAsync(new ScheduleSessionCommand(ids[index], 2, "publish", DateTimeOffset.UtcNow), "officer-2", CancellationToken.None);
+            }
+            var localDay = DateOnly.FromDateTime(day);
+            var page = await service.QueryPublicAsync(new PublicSessionQuery(
+                Search: marker, LocalDateFrom: localDay, LocalDateTo: localDay, Limit: 1), CancellationToken.None);
+            Assert.Equal(ids[1], Assert.Single(page.Items).SessionId);
+            Assert.Null(page.Next);
+        }
+        finally
+        {
+            await CleanupAsync(ids);
+        }
+    }
+
+    [IntakePostgresFact]
+    public async Task Public_query_filters_before_keyset_pagination_and_hides_unpublished_cancellation()
+    {
+        var ids = Enumerable.Range(0, 4).Select(_ => Guid.NewGuid()).ToArray();
+        var marker = $"session-{Guid.NewGuid():N}";
+        var start = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddDays(10).ToUnixTimeSeconds());
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var service = new CommunitySessionService(new PostgresCommunitySessionStore(db));
+        try
+        {
+            for (var index = 0; index < ids.Length; index++)
+            {
+                var draft = CreateDraft(ids[index], "officer-1") with
+                {
+                    Title = marker,
+                    StartUtc = start,
+                    Visibility = index == 2 ? SessionVisibility.Internal : SessionVisibility.Public
+                };
+                await service.ExecuteAsync(draft, "officer-1", CancellationToken.None);
+                await service.ExecuteAsync(new ReviewSessionCommand(ids[index], 1, false, "review", DateTimeOffset.UtcNow), "officer-2", CancellationToken.None);
+                if (index == 3)
+                    await service.ExecuteAsync(new CancelSessionCommand(ids[index], 2, "cancelled", "cancel", DateTimeOffset.UtcNow), "officer-2", CancellationToken.None);
+                else
+                    await service.ExecuteAsync(new ScheduleSessionCommand(ids[index], 2, "publish", DateTimeOffset.UtcNow), "officer-2", CancellationToken.None);
+            }
+
+            var query = new PublicSessionQuery(Search: marker, CountryCode: "zw", Category: "malaria", Language: "EN", Limit: 1);
+            var first = await service.QueryPublicAsync(query, CancellationToken.None);
+            Assert.Single(first.Items);
+            Assert.NotNull(first.Next);
+            var second = await service.QueryPublicAsync(query with
+            {
+                AfterStartUtc = first.Next.StartUtc,
+                AfterSessionId = first.Next.SessionId
+            }, CancellationToken.None);
+            Assert.Single(second.Items);
+            Assert.Null(second.Next);
+            Assert.Equal(ids.Take(2).Order().ToArray(), first.Items.Concat(second.Items).Select(item => item.SessionId).Order().ToArray());
+            Assert.Empty((await service.QueryPublicAsync(query with { Language = "not-a-language" }, CancellationToken.None)).Items);
+            Assert.NotEmpty((await service.QueryPublicAsync(query with { Category = "humanhealth" }, CancellationToken.None)).Items);
+            Assert.Null(await service.GetPublicAsync(ids[3], CancellationToken.None));
+            Assert.DoesNotContain(await service.ListPublicAsync(null, CancellationToken.None), item => item.SessionId == ids[3]);
+        }
+        finally
+        {
+            await CleanupAsync(ids);
+        }
+    }
+
+    [IntakePostgresFact]
     public async Task Create_persists_draft_and_revision()
     {
         var sessionId = Guid.NewGuid();

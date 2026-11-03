@@ -178,6 +178,8 @@ public sealed class EventSubscriptionServiceTests
             Task.FromResult(PublicSession?.SessionId == sessionId ? PublicSession : null);
         public Task<IReadOnlyList<PublicSessionView>> ListPublicAsync(int? limit, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<PublicSessionView>>(PublicSession is null ? [] : [PublicSession]);
+        public Task<PublicSessionPage> QueryPublicAsync(PublicSessionQuery query, CancellationToken ct) =>
+            throw new NotSupportedException();
         public Task<SessionCommandResult> ExecuteAsync(SessionCommand command, string actorId, CancellationToken ct) =>
             throw new NotSupportedException();
         public Task<CommunitySessionView?> GetStaffAsync(Guid sessionId, string actorId, CancellationToken ct) =>
