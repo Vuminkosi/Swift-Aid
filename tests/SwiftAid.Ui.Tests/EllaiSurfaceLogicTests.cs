@@ -382,6 +382,24 @@ public sealed partial class EllaiSurfaceLogicTests
         Assert.False(GetField<bool>(host, "_readResponsesAloud"));
         Assert.Same(tour, GetField<IBonboardingTourSession?>(host, "_generatedTour"));
         Assert.Empty(proxy.Calls);
+        await InvokeAsync(host, "BeginGuidanceSpeech");
+        Assert.False(GetField<bool>(host, "_readResponsesAloud"));
+    }
+
+    [Fact]
+    public async Task GuidanceEnablesSpeechTemporarilyAndPreservesAnExplicitVoiceChoice()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), string.Empty);
+        Assert.False(GetField<bool>(host, "_readResponsesAloud"));
+        await InvokeAsync(host, "BeginGuidanceSpeech");
+        Assert.True(GetField<bool>(host, "_readResponsesAloud"));
+        await InvokeAsync(host, "EndGuidanceSpeech");
+        Assert.False(GetField<bool>(host, "_readResponsesAloud"));
+
+        await InvokeAsync(host, "ToggleResponseAudioAsync");
+        await InvokeAsync(host, "BeginGuidanceSpeech");
+        await InvokeAsync(host, "EndGuidanceSpeech");
+        Assert.True(GetField<bool>(host, "_readResponsesAloud"));
     }
 
     [Theory]

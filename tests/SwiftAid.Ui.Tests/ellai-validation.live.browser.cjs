@@ -55,7 +55,7 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE);
         await waitFor(() => plans.some(plan => plan.status === 'Ready'), 'No ready guidance plan');
         const popup = page.locator('.bit-bonboarding-popover');
         await popup.waitFor({ state: 'visible' });
-        await page.getByRole('button', { name: 'Listen to Ellai', exact: true }).click();
+        await page.getByRole('button', { name: 'Turn off Ellai voice', exact: true }).waitFor({ state: 'visible' });
         if (plans.at(-1).plan.steps[0].controlId === 'report.entry')
             await popup.getByRole('button', { name: 'Next', exact: true }).click();
         await page.getByText('Human health', { exact: true }).click();
@@ -82,7 +82,7 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE);
         await page.getByLabel('Describe what happened').press('Tab');
         await verifyIssue('report.occurrence-date', 'ellai-report-occurrence-date', 'reported date');
         assert.deepEqual(errors, []);
-        console.log('PASS: live guidance highlighted and delivered spoken validation for narrative then date; no report was submitted.');
+        console.log('PASS: guidance enabled speech and delivered validation for narrative then date; no report was submitted.');
     } catch (error) {
         console.error('Synthetic validation diagnostics:', JSON.stringify({
             narration: narration.map(item => ({ inputId: item.inputId, sequence: item.response.sequence })), audio, audioCaptureErrors, errors

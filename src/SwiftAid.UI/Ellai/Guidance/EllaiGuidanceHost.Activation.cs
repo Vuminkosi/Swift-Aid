@@ -395,6 +395,7 @@ public partial class EllaiGuidanceHost
     private async Task CancelGeneratedGuidanceAsync()
     {
         EndGuidanceNarration();
+        EndGuidanceSpeech();
         var tour = _generatedTour;
         _generatedTour = null;
         _generatedPlan = null;
@@ -672,6 +673,7 @@ public partial class EllaiGuidanceHost
                 activated = true;
                 ShowComposer = true;
                 _generatedTour = started;
+                BeginGuidanceSpeech();
                 _generatedPlan = plan;
                 _guidanceAnchors = anchors;
                 _narrateValidation = async (inputId, contextStamp, ct) =>
@@ -698,6 +700,7 @@ public partial class EllaiGuidanceHost
                         if (!IsCurrent() || !ReferenceEquals(started, _generatedTour)) return;
                         if (durableStatus is "Completed" or "Cancelled")
                         {
+                            EndGuidanceSpeech();
                             started.Changed -= _generatedTourChanged;
                             _generatedTourChanged = null;
                             _generatedTour = null;
