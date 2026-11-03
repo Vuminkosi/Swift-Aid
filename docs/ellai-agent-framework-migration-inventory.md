@@ -3225,3 +3225,34 @@ tests\SwiftAid.Integration.Tests\SwiftAid.Integration.Tests.csproj --no-build
 --no-restore -m:1 -nr:false -p:WasmBuildNative=false --logger
 'console;verbosity=minimal'`. Skipped opt-in database, live-provider, and browser
 fixtures are not counted as verified by this run.
+
+### Current rendered guest conversation — 2026-11-03
+
+PASS: the current source at `f922c62` was published with `dotnet publish
+src\SwiftAid.Gateway\SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false
+-p:WasmBuildNative=false -o <task-candidate> --verbosity quiet`. A separate
+loopback Gateway used live Muse, synthetic prompts, a newly migrated disposable
+PostGIS 17 database and a task-owned NATS server. The command `node
+tests\SwiftAid.Ui.Tests\ellai-conversation.browser.cjs` passed twice in
+headless Chromium, with `SWIFTAID_RUN_LIVE_ELLAI=1` and the candidate URL. The
+second run additionally set a synthetic word prompt and a follow-up, and
+verified that the word was recalled. Both runs checked the rendered answer,
+refresh restoration, the 390-pixel thinking indicator and reduced motion; no
+page errors were observed. The fixture used a temporary module shim to the
+locally installed Playwright Core package.
+
+The first candidate startup lacked its case-processing configuration; a later
+startup lacked a valid isolated NATS configuration; and a temporary key-ring
+directory failed filesystem security validation. These failed starts preceded
+the working isolated setup. The running candidate logged an unavailable NATS
+notification consumer; this browser check does not validate notifications. An
+end-session request was observed as HTTP 499 during browser teardown, so this
+run does not establish completed cancellation. A response-feed timing sample
+arrived after the script recorded completion, showing that its asynchronous
+measurement is not reliable evidence of model-time streaming. Physical voice,
+production data protection and deployed behavior remain NOT VERIFIED.
+
+The candidate process and both task-owned containers were stopped. The
+candidate publish and task-owned temporary key and module directories were
+retained; automated cleanup of the latter directories was rejected by the
+execution policy.
