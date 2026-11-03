@@ -83,6 +83,13 @@ deterministic `IChatClient` to verify that the framework sends a function
 schema, invokes the function and returns its result to the client. It passed
 1/1 with `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj --no-restore -m:1 -nr:false --filter FullyQualifiedName~EllaiAgentFrameworkContractTests`.
 This fixture does not invoke SwiftAid tools or establish production execution.
+`EllaiFrameworkTool` adapts canonical argument schemas to framework functions,
+validates string arguments and calls a server-supplied invocation delegate.
+`EllaiFrameworkToolTests` cover schema parity, a real broker consent denial,
+malformed arguments and cancellation before invocation. This adapter is not
+registered in the Gateway. The production caller must still provide admitted
+tools, current-scope checks, bounded execution, denial termination, evidence
+collection, progress and audit handling before it can be used safely.
 `dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false` passed. The default build failed at native WebAssembly linking because `emcc` was unavailable (exit 9009).
 
 ## Rollback and outstanding work
