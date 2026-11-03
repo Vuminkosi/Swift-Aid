@@ -250,6 +250,13 @@ public sealed class CommunitySession
         ChannelType = channelType;
         ChannelLink = CheckChannelLink(channelType, channelLink);
         ReminderLeadHours = CheckReminderLeads(reminderLeadHours);
+        if (Status == CommunitySessionStatus.Reviewed)
+        {
+            Status = CommunitySessionStatus.Draft;
+            ReviewedByActorId = null;
+            ReviewedAtUtc = null;
+            SelfReviewAcknowledged = false;
+        }
         Version++;
     }
 

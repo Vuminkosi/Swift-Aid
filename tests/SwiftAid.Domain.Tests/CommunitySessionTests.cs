@@ -63,6 +63,26 @@ public sealed class CommunitySessionTests
     }
 
     [Fact]
+    public void EditingAReviewedDraftRequiresANewReviewBeforeScheduling()
+    {
+        var session = CreateDraft();
+        session.Review("officer-2", false, CreatedAt.AddHours(1));
+        session.UpdateDetails(
+            "Revised title", session.Summary, session.AudienceDescription, [.. session.TopicTags],
+            session.Presenter, session.Language, session.StartUtc, session.DurationMinutes, session.Capacity,
+            [.. session.Materials.Select(material => new SessionMaterialRef(material.MaterialId, material.SourceVersion))],
+            session.Visibility, session.ChannelType, session.ChannelLink, [.. session.ReminderLeadHours], CreatedAt.AddHours(2));
+
+        Assert.Equal(CommunitySessionStatus.Draft, session.Status);
+        Assert.Null(session.ReviewedByActorId);
+        Assert.Null(session.ReviewedAtUtc);
+        Assert.Throws<InvalidOperationException>(() => session.Schedule("officer-2", CreatedAt.AddHours(3)));
+        session.Review("officer-2", false, CreatedAt.AddHours(4));
+        session.Schedule("officer-2", CreatedAt.AddHours(5));
+        Assert.Equal(CommunitySessionStatus.Scheduled, session.Status);
+    }
+
+    [Fact]
     public void Update_OnScheduledSession_BumpsIcsSequence()
     {
         var session = CreateDraft();
