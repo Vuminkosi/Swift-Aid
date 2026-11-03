@@ -28,11 +28,12 @@ public sealed record EllaiObservedToolResult(
     string? ClockVersion = null, EllaiCountReplayScope? CountReplayScope = null,
     EllaiUiCatalogueReplayScope? UiCatalogueReplayScope = null, string? CapabilityVersion = null,
     string? ReceiptListDigest = null, string? ReceiptLookupId = null, string? CaseListDigest = null,
-    EllaiRetainedClassificationFilter? RetainedClassificationFilter = null)
+    EllaiRetainedClassificationFilter? RetainedClassificationFilter = null, string? QueueProjectionVersion = null)
 {
     public const string CurrentStaticFeatureVersion = "state-feature/1";
     public const string CurrentClockVersion = "server-clock/1";
     public const string CurrentCapabilityVersion = "capability-descriptor/1";
+    public const string CurrentQueueProjectionVersion = "state-queue/2";
     public static EllaiObservedToolResult From(EllaiToolRequest request, EllaiToolResult result)
     {
         EllaiImportListScope? scope = null;
@@ -98,7 +99,8 @@ public sealed record EllaiObservedToolResult(
                 request.Arguments.TryGetValue("classification_filter", out var retainedFilter) &&
                 retainedFilter is "Classified" or "Unclassified" &&
                 request.Arguments.GetValueOrDefault("field") is null or "classification"
-                    ? new EllaiRetainedClassificationFilter(retainedFilter, CaseListFingerprint(result)) : null);
+                    ? new EllaiRetainedClassificationFilter(retainedFilter, CaseListFingerprint(result)) : null,
+            caseQuery is not null ? CurrentQueueProjectionVersion : null);
     }
 
     public static bool IsCanonicalReceiptId(string? value) => value is { Length: 37 } &&

@@ -52,6 +52,8 @@ public sealed record EllaiToolTrace(int Version, bool HistoryIncluded, IReadOnly
                     item.Evidence.All(reference => reference is not null) &&
                     (item.ImportListScope is null || item.ToolName == EllaiToolNames.Imports && item.ImportListScope.IsValid()) &&
                     (item.CaseListQuery is null || item.ToolName == EllaiToolNames.State && item.CaseListQuery.IsValid()) &&
+                    (item.QueueProjectionVersion is null || item.CaseListQuery is not null &&
+                        item.QueueProjectionVersion == EllaiObservedToolResult.CurrentQueueProjectionVersion) &&
                     (item.CaseListDigest is null || item.CaseListQuery?.PlaceId is not null &&
                         item.CaseListDigest is { Length: 64 } &&
                         item.CaseListDigest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F')) &&

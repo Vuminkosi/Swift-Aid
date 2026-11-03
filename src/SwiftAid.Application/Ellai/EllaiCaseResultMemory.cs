@@ -45,6 +45,9 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
             field is not (null or "classification")))
             return new(EllaiToolNames.Topic, false, "Unsupported case-result classification filter.", [], "", 0, false,
                 EllaiToolReasonCodes.InvalidArguments);
+        if (field == "classification" || classificationFilter is not null)
+            return new(EllaiToolNames.Topic, false, "Case classification is unavailable for this reasoning route.", [], "", 0, false,
+                EllaiToolReasonCodes.Unavailable);
         if (context.Actor is null) return Unavailable();
         EllaiTopicEntry? indexedTopic = null;
         if (index is not null)

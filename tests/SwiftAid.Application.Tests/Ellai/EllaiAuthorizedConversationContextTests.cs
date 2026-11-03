@@ -763,7 +763,7 @@ public sealed class EllaiAuthorizedConversationContextTests
         var id = Guid.NewGuid();
         var evidence = new EvidenceRef("CaseQueue", id.ToString("D"), "3", null, id.ToString("D"));
         var query = new EllaiCaseListQuery(10, "ZW", "Reported", "latest-reported");
-        var trace = EllaiToolTrace.SerializeFlattened([new(EllaiToolNames.State, true, "Ok", [evidence], false, CaseListQuery: query)], false, []);
+        var trace = EllaiToolTrace.SerializeFlattened([new(EllaiToolNames.State, true, "Ok", [evidence], false, CaseListQuery: query, QueueProjectionVersion: EllaiObservedToolResult.CurrentQueueProjectionVersion)], false, []);
         var turns = new[] { Turn("prior", 1, "list cases", "One case was listed.", trace), Turn("current", 2, "what now?", null, null) };
         var queue = new ListQueue(id);
         var unchanged = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), queue, default);
@@ -783,7 +783,7 @@ public sealed class EllaiAuthorizedConversationContextTests
         var id = Guid.NewGuid();
         var evidence = new EvidenceRef("CaseQueue", id.ToString("D"), "3", null, id.ToString("D"));
         var query = new EllaiCaseListQuery(1, "ZW", "Reported", "latest-reported");
-        var trace = EllaiToolTrace.SerializeFlattened([new(EllaiToolNames.State, true, "Ok", [evidence], false, CaseListQuery: query)], false, []);
+        var trace = EllaiToolTrace.SerializeFlattened([new(EllaiToolNames.State, true, "Ok", [evidence], false, CaseListQuery: query, QueueProjectionVersion: EllaiObservedToolResult.CurrentQueueProjectionVersion)], false, []);
         var turns = new[] { Turn("prior", 1, "list cases", "One case was listed.", trace), Turn("current", 2, "what now?", null, null) };
         var queue = new ListQueue(id);
 
@@ -800,7 +800,7 @@ public sealed class EllaiAuthorizedConversationContextTests
         var id = Guid.NewGuid();
         var evidence = new EvidenceRef("CaseQueue", id.ToString("D"), "3", null, id.ToString("D"));
         var query = new EllaiCaseListQuery(1, "ZW", "Reported", "latest-reported");
-        var trace = EllaiToolTrace.SerializeFlattened([new(EllaiToolNames.State, true, "Ok", [evidence], true, CaseListQuery: query)], false, []);
+        var trace = EllaiToolTrace.SerializeFlattened([new(EllaiToolNames.State, true, "Ok", [evidence], true, CaseListQuery: query, QueueProjectionVersion: EllaiObservedToolResult.CurrentQueueProjectionVersion)], false, []);
         var turns = new[] { Turn("prior", 1, "latest case", "First case.", trace), Turn("current", 2, "next", null, null) };
         var queue = new ListQueue(id) { NextCursor = "next" };
         var unchanged = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), queue, default);
@@ -808,6 +808,23 @@ public sealed class EllaiAuthorizedConversationContextTests
         queue.NextCursor = null;
         var complete = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), queue, default);
         Assert.DoesNotContain(complete.Messages, item => item.Content == "First case.");
+    }
+
+    [Fact]
+    public async Task LegacyCaseOutputsAndClinicalFieldEvidenceCannotBeReplayedToTheModel()
+    {
+        var id = Guid.NewGuid();
+        var evidence = new EvidenceRef("CaseQueue", id.ToString("D"), "3", null, id.ToString("D"));
+        var legacyList = EllaiToolTrace.SerializeFlattened([new(EllaiToolNames.State, true, "Ok", [evidence], false,
+            CaseListQuery: new EllaiCaseListQuery(10, "ZW", "Reported", "latest-reported"))], false, []);
+        var clinical = EllaiToolTrace.SerializeFlattened([new(EllaiToolNames.Evidence, true, "Ok",
+            [evidence with { FieldPath = "classification" }], false, CaseSnapshotExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(5))], false, []);
+        foreach (var trace in new[] { legacyList, clinical })
+        {
+            var turns = new[] { Turn("prior", 1, "question", "sensitive old answer", trace), Turn("current", 2, "next", null, null) };
+            var result = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), new ListQueue(id), default);
+            Assert.DoesNotContain(result.Messages, item => item.Content == "sensitive old answer");
+        }
     }
 
     [Fact]

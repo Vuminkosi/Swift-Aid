@@ -536,7 +536,7 @@ public sealed class CaseImportPostgresTests
         var evidence = before.Items.Select(item => new EvidenceRef("CaseQueue", item.CaseId.ToString("D"),
             item.AggregateVersion.ToString(System.Globalization.CultureInfo.InvariantCulture), null, item.CaseId.ToString("D"))).ToArray();
         var trace = EllaiToolTrace.SerializeFlattened([new(EllaiToolNames.State, true, "Ok", evidence, false,
-            CaseListQuery: new EllaiCaseListQuery(20, null, null, null))], false, []);
+            CaseListQuery: new EllaiCaseListQuery(20, null, null, null), QueueProjectionVersion: EllaiObservedToolResult.CurrentQueueProjectionVersion)], false, []);
         var turns = new[] { new EllaiConversationTurn("session", "prior", 1, "list cases", "Prior case list.", "Completed", 1, DateTimeOffset.UtcNow) { ToolTraceJson = trace },
             new EllaiConversationTurn("session", "current", 2, "what now?", null, "Queued", 0, null) };
         var unchanged = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor, queue, default);

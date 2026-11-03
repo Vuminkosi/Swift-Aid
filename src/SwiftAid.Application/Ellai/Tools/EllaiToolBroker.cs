@@ -186,7 +186,7 @@ public sealed class EllaiToolBroker
     private static readonly string[] ToolDescriptions =
     {
         $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, country?, workflow?, sort?, place_id?) — permitted feature or owned-case queue. country is an uppercase two-letter code (Zimbabwe=ZW, Eswatini=SZ); workflow is Reported, UnderReview, Active, AwaitingFollowUp or Resolved; sort=latest-reported or latest-updated. For an occurrence-place search, select an exact registry ID using ellai_locations and supply country, place_id and sort=latest-reported; workflow is not supported with place_id. Unknown locations and incomplete scans cannot establish a complete list. Reported is a recorded workflow, not proof that no human reviewed a case. Classification review status is not supplied; clarify ambiguous unreviewed requests.",
-        $"{EllaiToolNames.Evidence}(ref=case-results, field=[country|workflow|classification]?, classification_filter=[Classified|Unclassified]?) — re-read retained case queue references under current access. A classification filter applies only to that retained set and does not replace it; omit the filter to return to the full set. Classification is a recorded clinical status, not BART output or a new diagnosis; clarify which classification the user means.",
+        $"{EllaiToolNames.Evidence}(ref=case-results, field=[country|workflow]?) — re-read retained case queue references under current access. Case classification is unavailable for this reasoning route.",
         $"{EllaiToolNames.Topic}(ref) — session topic candidates with checkpoints. Use ref=case-results to recall the last retained case list with fresh authorization; never invent a remembered result set.",
         $"{EllaiToolNames.Capabilities}(feature?) — capability readiness, no credentials.",
         $"{EllaiToolNames.Receipts}(receipt?) — durable receipts, session-bound.",
@@ -202,7 +202,7 @@ public sealed class EllaiToolBroker
         $"{EllaiToolNames.ImportDestinations}() — current authorized organization/workspace/country destinations for Workspace imports; staff only.",
         $"{EllaiToolNames.Imports}(workspace_id, organization_id, country) — the current user's recent imports in one permitted destination; staff only.",
         $"{EllaiToolNames.ImportStatus}(import_id) — the current user's durable import state and saved/rejected/retry counts; no case contents and no submission.",
-        $"{EllaiToolNames.ClassificationEvidence}(case_id) — persisted semantic classification evidence for an authorized current case revision; no inference, diagnosis or clinical probability.",
+        $"{EllaiToolNames.ClassificationEvidence}(case_id) — unavailable for this reasoning route until source-specific processing approval is verified.",
         $"{EllaiToolNames.OwnedCaseCount}(window_days) — count current-actor owned, readable managed cases created within 1..365 days; rejects incomplete results. This is a case count, not a diagnosis, incidence or animal count.",
     };
 
@@ -526,23 +526,15 @@ public sealed class EllaiToolBroker
         }
     }
 
-    private async Task<EllaiToolResult> ReadClassificationAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
+    private Task<EllaiToolResult> ReadClassificationAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
     {
-        if (context.Actor is null) return Deny(request.ToolName, "Current staff case access is required.", EllaiToolReasonCodes.DeniedByPolicy);
-        if (request.Arguments.Count != 1 || !request.Arguments.TryGetValue("case_id", out var value) || !Guid.TryParse(value, out var caseId))
-            return Deny(request.ToolName, "Supply one case_id.", EllaiToolReasonCodes.InvalidArguments);
-        if (_classification is null) return Deny(request.ToolName, "Classification evidence is unavailable.", EllaiToolReasonCodes.Unavailable);
-        try
-        {
-            var items = await _classification.GetAsync(context.Actor, caseId, ct).ConfigureAwait(false);
-            var signals = items is not null && _signals?.Enabled == true
-                ? await _signals.ForCaseAsync(context.Actor, caseId, ct).ConfigureAwait(false) : null;
-            return items is null ? Deny(request.ToolName, "That case is unavailable.", EllaiToolReasonCodes.DeniedByPolicy) :
-                new(request.ToolName, true, null, [], JsonSerializer.Serialize(new { items, signals,
-                    interpretation = "Uncalibrated semantic patterns in reported evidence. Not clinical classification, diagnosis, urgency or outbreak confirmation. No new inference was performed." }), 1, false);
-        }
-        catch (Exception error) when (error is not OperationCanceledException and not OutOfMemoryException)
-        { return Deny(request.ToolName, "Classification evidence is unavailable.", EllaiToolReasonCodes.Unavailable); }
+        ct.ThrowIfCancellationRequested();
+        if (context.Actor is null) return Task.FromResult(Deny(request.ToolName, "Current staff case access is required.", EllaiToolReasonCodes.DeniedByPolicy));
+        if (request.Arguments.Count != 1 || !request.Arguments.TryGetValue("case_id", out var value) || !Guid.TryParse(value, out _))
+            return Task.FromResult(Deny(request.ToolName, "Supply one case_id.", EllaiToolReasonCodes.InvalidArguments));
+        // A user-message processing label is not provenance for case-derived evidence.
+        // No source-specific provider approval is currently available at this boundary.
+        return Task.FromResult(Deny(request.ToolName, "Classification evidence is unavailable for this reasoning route.", EllaiToolReasonCodes.Unavailable));
     }
 
     private async Task<EllaiToolResult> ReadImportsAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
@@ -718,7 +710,7 @@ public sealed class EllaiToolBroker
             }
             var foundEvidence = foundItems.Select(item => new EvidenceRef("CaseQueue", item.CaseId.ToString("D"),
                 item.AggregateVersion.ToString(System.Globalization.CultureInfo.InvariantCulture), null, item.CaseId.ToString("D"))).ToArray();
-            var foundLines = foundItems.Select(item => $"case {item.CaseId:D}; workflow {item.Workflow}; country {item.CountryCode}; recorded clinical classification {EllaiCaseResultMemory.RecordedClassification(item.Classification)}; v{item.AggregateVersion}");
+            var foundLines = foundItems.Select(item => $"case {item.CaseId:D}; workflow {item.Workflow}; country {item.CountryCode}; v{item.AggregateVersion}");
             return new(request.ToolName, true, null, foundEvidence,
                 "Owned readable cases matching the recorded occurrence place. " +
                 (found.UnknownLocations ? "Some readable cases have unknown or incomplete locations. " : "") +
@@ -775,7 +767,7 @@ public sealed class EllaiToolBroker
             }
         }
         var lines = items.Select(item =>
-            $"case {item.CaseId:D} · workflow {item.Workflow}; country {item.CountryCode}; recorded clinical classification {EllaiCaseResultMemory.RecordedClassification(item.Classification)} · v{item.AggregateVersion} · updated {item.UpdatedAtUtc:O}");
+            $"case {item.CaseId:D} · workflow {item.Workflow}; country {item.CountryCode} · v{item.AggregateVersion} · updated {item.UpdatedAtUtc:O}");
         var evidence = items.Select(item => new EvidenceRef(
             "CaseQueue", item.CaseId.ToString("D"), item.AggregateVersion.ToString(System.Globalization.CultureInfo.InvariantCulture), null,
             item.CaseId.ToString("D"))).ToList();

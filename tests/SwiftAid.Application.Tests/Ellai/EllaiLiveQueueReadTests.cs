@@ -56,6 +56,36 @@ public sealed class EllaiLiveQueueReadTests
                 new("US", "Synthetic", "Area", "Locality", RegionId, "area-1", "locality-1")));
     }
 
+    private sealed class CountingClassificationQuery : SwiftAid.Application.Classification.ICaseClassificationQuery
+    {
+        public int Calls { get; private set; }
+        public Task<IReadOnlyList<SwiftAid.Application.Classification.CaseClassificationEvidence>?> GetAsync(
+            ActorContext actor, Guid caseId, CancellationToken ct)
+        {
+            Calls++;
+            throw new InvalidOperationException("Case evidence must not be read for this route.");
+        }
+    }
+
+    [Theory]
+    [InlineData(EllaiProcessingClassification.SyntheticDemo)]
+    [InlineData(EllaiProcessingClassification.UserProvidedNonSensitive)]
+    public async Task MessageClassificationDoesNotAuthorizeSendingCaseClassification(string messageClassification)
+    {
+        var source = new CountingClassificationQuery();
+        var consent = new EllaiConsentService();
+        consent.Grant("session-1", EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            messageClassification, TimeSpan.FromHours(1));
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, classification: source);
+        var context = Context with { Actor = TestActor(), DataClassification = messageClassification };
+        var result = await broker.InvokeAsync(context, new(EllaiToolNames.ClassificationEvidence,
+            Args(("case_id", Row("01", 7).CaseId.ToString("D")))), default);
+        Assert.False(result.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, result.ReasonCode);
+        Assert.Empty(result.Evidence);
+        Assert.Equal(0, source.Calls);
+    }
+
     [Fact]
     public async Task PlaceSearchUsesOccurrenceLocationAndRevalidatesTheSameScope()
     {
@@ -138,11 +168,10 @@ public sealed class EllaiLiveQueueReadTests
         var request = new EllaiToolRequest(EllaiToolNames.State, Args(("projection", "queue"), ("limit", "1"),
             ("country", "US"), ("sort", "latest-reported"), ("place_id", "region-1")));
         var first = await broker.InvokeAsync(context, request, default);
-        Assert.Contains("recorded clinical classification Unclassified", first.ResultSummary);
+        Assert.DoesNotContain("Unclassified", first.ResultSummary);
         var recalled = await broker.InvokeAsync(context, new(EllaiToolNames.Evidence,
-            Args(("ref", "case-results"), ("field", "classification"))), default);
-        Assert.Contains("recorded clinical classification Unclassified", recalled.ResultSummary);
-        Assert.Equal("classification", Assert.Single(recalled.Evidence).FieldPath);
+            Args(("ref", "case-results"), ("field", "workflow"))), default);
+        Assert.Equal("workflow", Assert.Single(recalled.Evidence).FieldPath);
 
         await broker.InvokeAsync(context, new(EllaiToolNames.State, Args(("projection", "queue"))), default);
         var observation = EllaiObservedToolResult.From(request, first);
@@ -156,78 +185,28 @@ public sealed class EllaiLiveQueueReadTests
             toolContext: context, invokeTool: broker.InvokeAsync);
         Assert.Contains(history.Messages, item => item.Content == "first case");
         var latest = await broker.InvokeAsync(context, new(EllaiToolNames.Evidence,
-            Args(("ref", "case-results"), ("field", "classification"))), default);
+            Args(("ref", "case-results"), ("field", "workflow"))), default);
         Assert.Equal(2, latest.ItemCount);
-        Assert.Contains("recorded clinical classification Confirmed", latest.ResultSummary);
+        Assert.DoesNotContain("Confirmed", latest.ResultSummary);
     }
 
-    [Fact]
-    public async Task ClassificationFilterKeepsOriginalSetAndRevalidatesExcludedMembership()
-    {
-        var first = Row("01", 7) with { Classification = "Unclassified" };
-        var second = Row("02", 8) with { Classification = "Confirmed" };
-        var third = Row("03", 9) with { Classification = null };
-        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [first, second, third]) };
-        var topics = new EllaiTopicService();
-        var broker = GrantedBroker(queue, topics);
-        var context = Context with { Actor = TestActor() };
-        await broker.InvokeAsync(context, new(EllaiToolNames.State, Args(("projection", "queue"))), default);
-        var filter = new EllaiToolRequest(EllaiToolNames.Evidence,
-            Args(("ref", "case-results"), ("classification_filter", "Unclassified")));
-        var filtered = await broker.InvokeAsync(context, filter, default);
-        Assert.True(filtered.Allowed);
-        Assert.Equal(first.CaseId.ToString("D"), Assert.Single(filtered.Evidence).ResourceId);
-        Assert.Contains("unknown classification are excluded", filtered.ResultSummary);
-        var original = await broker.InvokeAsync(context, new(EllaiToolNames.Evidence,
-            Args(("ref", "case-results"), ("field", "classification"))), default);
-        Assert.Equal(3, original.ItemCount);
-        var observation = EllaiObservedToolResult.From(filter, filtered);
-        Assert.NotNull(observation.RetainedClassificationFilter);
-        var turns = new[]
-        {
-            new EllaiConversationTurn("session-1", "previous", 1, "filter", "one unclassified", "Completed", 1, DateTimeOffset.UtcNow)
-                { ToolTraceJson = EllaiToolTrace.SerializeFlattened([observation], false, []) },
-            new EllaiConversationTurn("session-1", "current", 2, "next", null, "Queued", 1, null)
-        };
-        async Task<EllaiAuthorizedConversationContext.Result> Read() =>
-            await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", context.Actor!, queue, default,
-                toolContext: context, invokeTool: broker.InvokeAsync);
-        Assert.Contains((await Read()).Messages, item => item.Content == "one unclassified");
-        queue.Result = new(CaseQueueAccess.Allowed, [first, second with { Classification = "Unclassified", AggregateVersion = 9 }, third]);
-        Assert.DoesNotContain((await Read()).Messages, item => item.Content == "one unclassified");
-        var full = await broker.InvokeAsync(context, new(EllaiToolNames.Evidence, Args(("ref", "case-results"))), default);
-        Assert.Equal(3, full.ItemCount);
-        queue.Result = new(CaseQueueAccess.Allowed, [second, third]);
-        var afterRevocation = await broker.InvokeAsync(context, filter, default);
-        Assert.Empty(afterRevocation.Evidence);
-        Assert.DoesNotContain(first.CaseId.ToString("D"), afterRevocation.ResultSummary);
-    }
-
-    [Fact]
-    public async Task EmptyClassificationFilterIsRecheckedBeforeHistoryIsReused()
+    [Theory]
+    [InlineData("field", "classification")]
+    [InlineData("classification_filter", "Unclassified")]
+    public async Task ClinicalCaseDataIsUnavailableWithoutSourceSpecificProcessingApproval(string key, string value)
     {
         var row = Row("01", 7) with { Classification = "Confirmed" };
         var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [row]) };
         var broker = GrantedBroker(queue, new EllaiTopicService());
         var context = Context with { Actor = TestActor() };
-        await broker.InvokeAsync(context, new(EllaiToolNames.State, Args(("projection", "queue"))), default);
-        var request = new EllaiToolRequest(EllaiToolNames.Evidence,
-            Args(("ref", "case-results"), ("classification_filter", "Unclassified")));
-        var result = await broker.InvokeAsync(context, request, default);
+        var initial = await broker.InvokeAsync(context, new(EllaiToolNames.State, Args(("projection", "queue"))), default);
+        Assert.DoesNotContain("Confirmed", initial.ResultSummary);
+        var result = await broker.InvokeAsync(context, new(EllaiToolNames.Evidence,
+            Args(("ref", "case-results"), (key, value))), default);
+        Assert.False(result.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, result.ReasonCode);
         Assert.Empty(result.Evidence);
-        var observation = EllaiObservedToolResult.From(request, result);
-        var turns = new[]
-        {
-            new EllaiConversationTurn("session-1", "previous", 1, "filter", "none unclassified", "Completed", 1, DateTimeOffset.UtcNow)
-                { ToolTraceJson = EllaiToolTrace.SerializeFlattened([observation], false, []) },
-            new EllaiConversationTurn("session-1", "current", 2, "next", null, "Queued", 1, null)
-        };
-        async Task<EllaiAuthorizedConversationContext.Result> Read() =>
-            await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", context.Actor!, queue, default,
-                toolContext: context, invokeTool: broker.InvokeAsync);
-        Assert.Contains((await Read()).Messages, item => item.Content == "none unclassified");
-        queue.Result = new(CaseQueueAccess.Allowed, [row with { Classification = "Unclassified", AggregateVersion = 8 }]);
-        Assert.DoesNotContain((await Read()).Messages, item => item.Content == "none unclassified");
+        Assert.DoesNotContain("Confirmed", result.ResultSummary);
     }
 
     private sealed class FakeIndex(EllaiExactMemoryReference? hit, bool fail = false) : IEllaiExactReferenceIndex
