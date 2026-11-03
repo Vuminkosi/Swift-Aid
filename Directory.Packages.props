@@ -3,6 +3,7 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
+    <PackageVersion Include="Microsoft.Agents.AI" Version="1.27.0" />
     <PackageVersion Include="Bit.Bonboarding" Version="10.7.0" />
     <PackageVersion Include="MudBlazor" Version="9.11.0" />
     <PackageVersion Include="MudX.MudBlazor.Extension" Version="9.10.0" />

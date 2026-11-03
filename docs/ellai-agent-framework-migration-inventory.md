@@ -53,9 +53,10 @@ provider-specific investigation and live compatibility evidence. Do not copy
 credentials into this document or tests. The supplied guide's Baseten model
 alias is host-specific (`implementation.md` section 14.9).
 
-Microsoft's `Microsoft.Agents.AI` NuGet listing reported version `1.27.0`
-on 3 November 2026. This is a candidate, not an installed or compatibility-
-tested dependency. Microsoft documents `ChatClientAgent` over `IChatClient`,
+The official NuGet feed resolved `Microsoft.Agents.AI` version `1.27.0` on
+3 November 2026. The Intelligence project references this version; the
+Gateway's non-native WebAssembly build succeeds with it. Microsoft documents
+`ChatClientAgent` over `IChatClient`,
 native streaming and serializable `AgentSession`; its documentation states that
 tools are invoked without user approval by default. SwiftAid authorization and
 approval cannot be delegated to that default.
@@ -77,10 +78,17 @@ disposable PostgreSQL fixture. Live Muse and end-to-end text and voice tests
 remain separate acceptance gates. Verify actual case results and aggregations
 against authorized synthetic records, not mock prose.
 
+`EllaiAgentFrameworkContractTests` uses the real framework agent and a
+deterministic `IChatClient` to verify that the framework sends a function
+schema, invokes the function and returns its result to the client. It passed
+1/1 with `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj --no-restore -m:1 -nr:false --filter FullyQualifiedName~EllaiAgentFrameworkContractTests`.
+This fixture does not invoke SwiftAid tools or establish production execution.
+`dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false` passed. The default build failed at native WebAssembly linking because `emcc` was unavailable (exit 9009).
+
 ## Rollback and outstanding work
 
-No runtime or schema changes have been made in this inventory slice. Keep the
-current execution path available until the framework path and its safety,
+No runtime path or schema changes have been made. Keep the current execution
+path available until the framework path and its safety,
 persistence and client acceptance tests pass. No obsolete orchestration has
-been removed. Framework-controlled execution, package restore, provider
+been removed. Production framework-controlled execution, provider
 compatibility, acceptance tests and deployment are **NOT VERIFIED**.
