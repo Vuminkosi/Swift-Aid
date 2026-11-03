@@ -21,8 +21,24 @@
     @if (_deferredProposal is not null)
     {
         <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
-            An update could not be confirmed. Reopen the session when access returns to compare your submitted changes. This temporary copy lasts only while this page remains open.
+            An update could not be confirmed. Check access again to compare your submitted changes. This temporary copy lasts only while this page remains open.
+            <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="RetryDeferredProposalAsync" Disabled="_busy">Check access again</MudButton>
+            @if (!_confirmingDeferredDiscard)
+            {
+                <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="() => _confirmingDeferredDiscard = true" Disabled="_busy">Discard temporary copy…</MudButton>
+            }
+            else
+            {
+                <MudText Typo="Typo.caption">Discard the unconfirmed update copy?</MudText>
+                <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="ClearDeferredProposal" Disabled="_busy">Yes, discard copy</MudButton>
+                <MudButton Variant="Variant.Text" OnClick="() => _confirmingDeferredDiscard = false" Disabled="_busy">Keep copy</MudButton>
+            }
         </MudAlert>
+    }
+    @if (_conflictProposal is { } proposal && _staffView is { } current &&
+         _managementCapabilities.CanEdit && CanRenderEditor(_managementCapabilities))
+    {
+        <SessionConflictReview Proposal="proposal" Current="current" OutcomeUnknown="_proposalOutcomeUnknown" OnDismiss="DismissConflictProposal" />
     }
     <PublicSessionsSurface @key="(RequestedSessionId, IsCalendarRoute, InitialRemindersView)" Sessions="_sessions"
                            Loading="_loadingList"
@@ -45,10 +61,6 @@
             @if (CanRenderEditor(capability))
             {
                 var editorGeneration = _editorGeneration;
-                @if (_conflictProposal is { } proposal && _staffView is { } current)
-                {
-                    <SessionConflictReview Proposal="proposal" Current="current" OutcomeUnknown="_proposalOutcomeUnknown" OnDismiss="DismissConflictProposal" />
-                }
                 <SessionEditor @ref="_sessionEditor" @key="(_editorGeneration, _editingVersion)"
                            ManagementCapabilities="capability"
                            SessionId="_editingSessionId"
@@ -92,6 +104,7 @@
     private bool _proposalOutcomeUnknown;
     private SessionUpdateSubmission? _deferredProposal;
     private string? _deferredProposalActor;
+    private bool _confirmingDeferredDiscard;
     private SessionEditor? _sessionEditor;
     private bool HasPendingEditorInput() => _sessionEditor?.HasPendingInput == true;
     private Guid? _loadedRequestId;
@@ -467,6 +480,13 @@
     {
         _deferredProposal = null;
         _deferredProposalActor = null;
+        _confirmingDeferredDiscard = false;
+    }
+
+    private async Task RetryDeferredProposalAsync()
+    {
+        if (_busy || _deferredProposal is not { } proposal) return;
+        await LoadStaffSessionAsync(proposal.SessionId);
     }
 
     private async Task LoadListAsync()
@@ -786,6 +806,11 @@
 
     private async Task RunCommandAsync(SessionCommand command, SessionUpdateSubmission? proposal = null)
     {
+        if (command is UpdateSessionCommand && _deferredProposal is not null)
+        {
+            _serverError = "Check access to the unconfirmed update or discard its temporary copy before submitting another update.";
+            return;
+        }
         var isCreate = command is CreateSessionDraftCommand;
         var originalActorId = _actorId;
         if (!await RefreshStaffAccessAsync(isCreate ? null : command.SessionId,

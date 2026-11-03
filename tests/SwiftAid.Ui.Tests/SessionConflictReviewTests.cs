@@ -36,11 +36,29 @@ public sealed class SessionConflictReviewTests
 
         client.ReadUnavailable = false;
         client.ActorId = sameActor ? "officer" : "another-officer";
-        await (Task)type.GetMethod("LoadStaffSessionAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page, [id])!;
+        await (Task)type.GetMethod("RetryDeferredProposalAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page, null)!;
         var restored = type.GetField("_conflictProposal", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page);
         if (sameActor) Assert.Same(proposal, restored);
         else Assert.Null(restored);
         Assert.Null(type.GetField("_deferredProposal", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
+    }
+
+    [Fact]
+    public async Task AnotherUpdateCannotReplaceAnUnconfirmedProposal()
+    {
+        var id = Guid.NewGuid();
+        var start = DateTimeOffset.UtcNow.AddDays(1);
+        var input = new UpdateSessionInput("Proposal", "Summary", "Community", [], "Presenter", "en", start, 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
+        var proposal = new SessionUpdateSubmission(id, 3, input, "reason");
+        var page = new SwiftAid.Gateway.Components.Pages.Sessions();
+        var type = page.GetType();
+        type.GetField("_deferredProposal", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, proposal);
+
+        await (Task)type.GetMethod("RunCommandAsync", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(page, [input.ToCommand(Guid.NewGuid(), 3, "reason", DateTimeOffset.UtcNow), proposal])!;
+
+        Assert.Same(proposal, type.GetField("_deferredProposal", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
+        Assert.Contains("unconfirmed update", (string)type.GetField("_serverError", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page)!, StringComparison.Ordinal);
     }
 
     [Fact]
