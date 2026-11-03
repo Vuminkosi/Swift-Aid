@@ -93,12 +93,25 @@ async function main() {
             console.log(JSON.stringify({ followupOutcome: followup.outcome,
                 syntheticDetailRecalled: process.env.SWIFTAID_EXPECT_SECOND_TEXT ? true : null }));
         }
+        // Wait for the server before closing the browser: click completion alone
+        // does not mean the asynchronous cancellation request has finished.
+        const cancellation = page.waitForResponse(response =>
+            response.request().method() === "POST" &&
+            new URL(response.url()).pathname === `/api/v1/ellai/guest/sessions/${originalSession}/cancel`);
+        await page.getByRole("button", { name: "End Ellai session", exact: true }).click();
+        const cancelled = await cancellation;
+        assert.equal(cancelled.status(), 200, `Cancellation HTTP status: ${cancelled.status()}`);
+        const durableSession = await page.evaluate(async id => {
+            const response = await fetch(`/api/v1/ellai/guest/sessions/${id}`);
+            if (!response.ok) throw new Error(`Session read failed: ${response.status}`);
+            return response.json();
+        }, originalSession);
+        assert.equal(durableSession.status, "Cancelled");
         console.log(JSON.stringify({ result: "PASS", sessionId: originalSession,
             firstChunkMs: firstChunkAt ? firstChunkAt - started : null, completedMs,
             outcome: turn.outcome, restoredAfterRefresh: true, thinkingAnimation: true,
-            reducedMotion: true, mobileStatusVisible: true, pageErrors: errors.length }));
-        // End only this synthetic test conversation through the regular user control.
-        await page.getByRole("button", { name: "End Ellai session", exact: true }).click();
+            reducedMotion: true, mobileStatusVisible: true, pageErrors: errors.length,
+            cancellationStatus: durableSession.status }));
     } finally {
         await context.close();
         await browser.close();

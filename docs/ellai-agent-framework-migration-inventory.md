@@ -3256,3 +3256,21 @@ The candidate process and both task-owned containers were stopped. The
 candidate publish and task-owned temporary key and module directories were
 retained; automated cleanup of the latter directories was rejected by the
 execution policy.
+
+### Rendered end-session acknowledgement — 2026-11-03
+
+The browser conversation test now waits for the end-session POST response
+and reads the durable session before closing the browser. This prevents the
+test's own teardown from interrupting the request and avoids reporting PASS
+before cancellation is confirmed.
+
+PASS: `node tests\SwiftAid.Ui.Tests\ellai-conversation.browser.cjs` passed
+twice against the previously published `f922c62` loopback Gateway, live Muse,
+a newly migrated disposable PostgreSQL database and task-owned NATS. One run
+included a second turn that recalled a synthetic word; both observed HTTP 200
+for End and read the session back with status `Cancelled`. The second run
+also exercised the final test output after the assertion. The local NATS
+notification consumer reported unavailable; notifications, cancellation while
+the model is still running, actual devices and deployed behavior were not
+verified by these browser runs. The test-owned Gateway and containers stopped;
+the previously retained candidate and key/module directories remain.
