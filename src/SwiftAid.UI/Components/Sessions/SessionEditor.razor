@@ -260,6 +260,8 @@
 
     [Parameter] public CommunitySessionView? InitialSession { get; set; }
 
+    [Parameter] public SessionCreateSubmission? InitialDraft { get; set; }
+
     [Parameter] public SessionManagementPresentation? ManagementCapabilities { get; set; }
 
     [Parameter] public bool Busy { get; set; }
@@ -304,6 +306,7 @@
     private bool _confirmingCancel;
     private Guid? _loadedForSessionId;
     private string?[]? _savedFields;
+    private bool _draftRestored;
     private bool _storedTimeZoneUnavailable;
     private bool _confirmingLeave;
     private string? _approvedLocation;
@@ -344,6 +347,34 @@
         else if (InitialSession is null && _savedFields is null)
         {
             _savedFields = CaptureFields();
+        }
+        if (IsNew && InitialSession is null && InitialDraft is { } draft && !_draftRestored)
+        {
+            _draftRestored = true;
+            var input = draft.Input;
+            _title = input.Title;
+            _summary = input.Summary;
+            _audience = input.AudienceDescription;
+            _country = input.CountryCode;
+            _region = input.RegionId;
+            _sector = input.Sector;
+            _presenter = input.Presenter;
+            _language = input.Language;
+            _topicTagsText = string.Join(", ", input.TopicTags);
+            _timeZone = input.TimeZoneId;
+            _startLocal = ToWallClock(input.StartUtc, input.TimeZoneId);
+            _storedTimeZoneUnavailable = _startLocal is null;
+            _ambiguousOffsetMinutes = GetStoredAmbiguousOffset(input.StartUtc, input.TimeZoneId);
+            _durationText = input.DurationMinutes.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            _capacityText = input.Capacity?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+            _visibility = input.Visibility.ToString();
+            _channelType = input.ChannelType.ToString();
+            _channelLink = input.ChannelLink;
+            _reminderLeadsText = string.Join(", ", input.ReminderLeadHours);
+            _materials.Clear();
+            foreach (var material in input.Materials)
+                _materials.Add(new MaterialRow { MaterialId = material.MaterialId, SourceVersion = material.SourceVersion });
+            _reason = draft.Reason;
         }
     }
 

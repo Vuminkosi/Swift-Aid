@@ -17,6 +17,34 @@ public sealed class SessionConflictReviewTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
+    public async Task FailedCreatePreflightRestoresDraftOnlyForOriginalAuthorizedActor(bool sameActor)
+    {
+        var id = Guid.NewGuid();
+        var start = DateTimeOffset.UtcNow.AddDays(1);
+        var current = new CommunitySessionView(id, 3, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
+        var input = new CreateSessionInput("Draft", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
+        var page = new SwiftAid.Gateway.Components.Pages.Sessions();
+        var type = page.GetType();
+        var client = new StaffClient(current, true) { IdentityUnavailable = true };
+        type.GetProperty("StaffSessionEditor", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, client);
+        type.GetField("_actorId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, "officer");
+
+        await (Task)type.GetMethod("RunCommandAsync", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(page, [input.ToCommand(Guid.NewGuid(), "reason", DateTimeOffset.UtcNow), null])!;
+        Assert.NotNull(type.GetField("_deferredCreate", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
+        client.IdentityUnavailable = false;
+        client.ActorId = sameActor ? "officer" : "another-officer";
+        await (Task)type.GetMethod("ManageSessionAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page, [null])!;
+
+        var restored = (SessionCreateSubmission?)type.GetField("_recoveredCreate", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page);
+        if (sameActor) Assert.Equal("Draft", Assert.IsType<SessionCreateSubmission>(restored).Input.Title);
+        else Assert.Null(restored);
+        Assert.Null(type.GetField("_deferredCreate", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
     public async Task SaveConfirmationRequiresMatchingResultEvenWhenRefreshFails(bool matchingResult)
     {
         var id = Guid.NewGuid();
@@ -352,7 +380,9 @@ public sealed class SessionConflictReviewTests
         public Task<UiCapabilityResult<CommunitySessionView>> GetStaffAsync(Guid sessionId, CancellationToken cancellationToken = default) =>
             Task.FromResult(ReadUnavailable ? UiCapabilityResults.Unavailable<CommunitySessionView>("editor") : Success(current));
         public Task<UiCapabilityResult<StaffSessionManagementCapabilities>> GetManagementCapabilitiesAsync(Guid? sessionId, long? expectedVersion, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Success(new StaffSessionManagementCapabilities(false, canEdit, false, false, false, false, current.SessionId, current.Version, current.Status, true)));
+            Task.FromResult(Success(sessionId is null
+                ? new StaffSessionManagementCapabilities(true, false, false, false, false, false, null, null, null, true)
+                : new StaffSessionManagementCapabilities(false, canEdit, false, false, false, false, current.SessionId, current.Version, current.Status, true)));
         public Task<UiCapabilityResult<SessionCommandResult>> ExecuteAsync(SessionCommand command, CancellationToken cancellationToken = default) =>
             Execution?.Task ?? throw new NotSupportedException();
     }

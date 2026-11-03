@@ -28,10 +28,26 @@
     {
         <MudPaper Class="pa-4 mb-4" Elevation="0" role="alertdialog" aria-modal="true" aria-label="Unconfirmed session update">
             <MudText Typo="Typo.subtitle1">Leave without keeping your session changes?</MudText>
-            <MudText Typo="Typo.body2">The temporary update copy and any unsaved session edits will be lost.</MudText>
+            <MudText Typo="Typo.body2">The temporary copy and any unsaved session edits will be lost.</MudText>
             <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="StayWithRetainedProposal">Stay on this page</MudButton>
             <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="LeaveWithRetainedProposal">Leave without saving</MudButton>
         </MudPaper>
+    }
+    @if (_deferredCreate is not null)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+            The new session draft was not submitted. When access returns, choose Schedule session to restore it. This temporary copy lasts only while this page remains open.
+            @if (!_confirmingCreateDiscard)
+            {
+                <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="() => _confirmingCreateDiscard = true">Discard temporary copy…</MudButton>
+            }
+            else
+            {
+                <MudText Typo="Typo.caption">Discard the temporary draft?</MudText>
+                <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="ClearDeferredCreate">Yes, discard copy</MudButton>
+                <MudButton Variant="Variant.Text" OnClick="() => _confirmingCreateDiscard = false">Keep copy</MudButton>
+            }
+        </MudAlert>
     }
     @if (_deferredProposal is not null)
     {
@@ -85,6 +101,7 @@
                            CreatedByActorId="@_editingCreatedBy"
                            CurrentActorId="@_actorId"
                            InitialSession="_staffView"
+                           InitialDraft="_recoveredCreate"
                            Busy="_busy"
                            SuppressNavigationPrompt="HasRetainedProposal"
                            ServerError="@_serverError"
@@ -127,10 +144,14 @@
     private string? _deferredProposalActor;
     private bool _deferredNotSubmitted;
     private bool _confirmingDeferredDiscard;
+    private SessionCreateSubmission? _deferredCreate;
+    private SessionCreateSubmission? _recoveredCreate;
+    private string? _deferredCreateActor;
+    private bool _confirmingCreateDiscard;
     private bool _confirmingRetainedLeave;
     private string? _retainedLeaveTarget;
     private string? _approvedRetainedLeaveTarget;
-    private bool HasRetainedProposal => _deferredProposal is not null || _conflictProposal is not null;
+    private bool HasRetainedProposal => _deferredProposal is not null || _conflictProposal is not null || _deferredCreate is not null;
     private SessionEditor? _sessionEditor;
     private bool HasPendingEditorInput() => _sessionEditor?.HasPendingInput == true || _conflictProposal is not null;
     private Guid? _loadedRequestId;
@@ -188,6 +209,8 @@
                 _actorId = result.Value;
                 if (_deferredProposalActor is not null && !string.Equals(_deferredProposalActor, _actorId, StringComparison.Ordinal))
                     ClearDeferredProposal();
+                if (_deferredCreateActor is not null && !string.Equals(_deferredCreateActor, _actorId, StringComparison.Ordinal))
+                    ClearDeferredCreate();
                 if (!string.Equals(previousActorId, _actorId, StringComparison.Ordinal))
                 {
                     _managementCapabilities = SessionManagementPresentation.Unavailable();
@@ -197,7 +220,11 @@
                 return true;
             }
 
-            if (result.Code == UiCapabilityResultCode.Denied) ClearDeferredProposal();
+            if (result.Code == UiCapabilityResultCode.Denied)
+            {
+                ClearDeferredProposal();
+                ClearDeferredCreate();
+            }
             _actorId = null;
             _canManageSessions = false;
             _managementCapabilities = SessionManagementPresentation.Unavailable();
@@ -361,10 +388,13 @@
             _editingStatus = null;
             _editingCreatedBy = _actorId;
             _staffView = null;
+            _recoveredCreate = string.Equals(_deferredCreateActor, _actorId, StringComparison.Ordinal) ? _deferredCreate : null;
+            ClearDeferredCreate();
             Interlocked.Increment(ref _editorGeneration);
             return;
         }
 
+        _recoveredCreate = null;
         Interlocked.Increment(ref _editorGeneration);
         await LoadStaffSessionAsync(sessionId.Value);
     }
@@ -487,6 +517,7 @@
         _editingStatus = null;
         _editingCreatedBy = null;
         _staffView = null;
+        _recoveredCreate = null;
         Interlocked.Increment(ref _editorGeneration);
         _busy = false;
     }
@@ -501,6 +532,7 @@
         {
             if (!IsCurrentIdentityEpoch(authEpoch)) return;
             ClearDeferredProposal();
+            ClearDeferredCreate();
             ClearEditorState();
             _actorId = null;
             _commandNotice = null;
@@ -524,10 +556,18 @@
         Interlocked.Increment(ref _capabilityRequestGeneration);
         Interlocked.Increment(ref _staffLoadGeneration);
         ClearDeferredProposal();
+        ClearDeferredCreate();
         AuthenticationState.AuthenticationStateChanged -= OnAuthenticationStateChanged;
     }
 
     private bool IsCurrentIdentityEpoch(long epoch) => !_disposed && epoch == Volatile.Read(ref _identityEpoch);
+
+    private void ClearDeferredCreate()
+    {
+        _deferredCreate = null;
+        _deferredCreateActor = null;
+        _confirmingCreateDiscard = false;
+    }
 
     private void ClearDeferredProposal()
     {
@@ -896,6 +936,11 @@
             _serverError = "Check access to the unconfirmed update or discard its temporary copy before submitting another update.";
             return;
         }
+        if (command is CreateSessionDraftCommand && _deferredCreate is not null)
+        {
+            _serverError = "Restore or discard the temporary draft before submitting another session.";
+            return;
+        }
         var isCreate = command is CreateSessionDraftCommand;
         var originalActorId = _actorId;
         var identityEpoch = Volatile.Read(ref _identityEpoch);
@@ -910,6 +955,17 @@
                 _deferredProposal = proposal;
                 _deferredProposalActor = originalActorId;
                 _deferredNotSubmitted = true;
+            }
+            if (command is CreateSessionDraftCommand create && !string.IsNullOrWhiteSpace(originalActorId) &&
+                (_actorId is null || string.Equals(_actorId, originalActorId, StringComparison.Ordinal)))
+            {
+                _deferredCreate = new SessionCreateSubmission(new CreateSessionInput(
+                    create.Title, create.Summary, create.AudienceDescription, create.TopicTags,
+                    create.CountryCode, create.RegionId, create.Sector, create.Presenter, create.Language,
+                    create.StartUtc, create.TimeZoneId, create.DurationMinutes, create.Capacity,
+                    create.Materials.Select(m => new SessionMaterialInput(m.MaterialId, m.SourceVersion)).ToArray(),
+                    create.Visibility, create.ChannelType, create.ChannelLink, create.ReminderLeadHours), create.Reason);
+                _deferredCreateActor = originalActorId;
             }
             ClearEditorState();
             _serverError ??= "Session management is unavailable for this account.";

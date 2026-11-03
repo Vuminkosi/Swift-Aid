@@ -9,6 +9,26 @@ namespace SwiftAid.Ui.Tests;
 public sealed class SessionEditorTimeTests
 {
     [Fact]
+    public void RestoredDraftRemainsUnsavedAndIsNotOverwrittenOnRerender()
+    {
+        var input = new CreateSessionInput("Draft", "Summary", "Community", ["topic"], "SZ", "region",
+            "education", "Presenter", "en", new DateTimeOffset(2026, 11, 4, 12, 0, 0, TimeSpan.Zero),
+            "UTC", 60, 20, [new SessionMaterialInput("card", "1")], SessionVisibility.Public,
+            SessionChannelType.None, null, [24]);
+        var editor = new SessionEditor();
+        typeof(SessionEditor).GetProperty(nameof(SessionEditor.InitialDraft))!.SetValue(editor, new SessionCreateSubmission(input, "reason"));
+        Invoke(editor, "OnParametersSet");
+        Assert.True(editor.HasPendingInput);
+        var restored = Assert.IsType<CreateSessionInput>(Invoke(editor, "BuildCreateInput"));
+        Assert.Equal(input.Title, restored.Title);
+        Assert.Equal(input.StartUtc, restored.StartUtc);
+        Assert.Equal(input.Materials, restored.Materials);
+        Set(editor, "_title", "Further edit");
+        Invoke(editor, "OnParametersSet");
+        Assert.Equal("Further edit", Assert.IsType<CreateSessionInput>(Invoke(editor, "BuildCreateInput")).Title);
+    }
+
+    [Fact]
     public async Task NavigationIsStoppedWhileDraftHasUnsavedInput()
     {
         var editor = new SessionEditor();
