@@ -676,5 +676,6 @@ public sealed class GuestDraftStore(
         item.ClientSubmissionId,
         item.State,
         item.CreatedAtUtc,
-        item.Receipt);
+        item.Receipt,
+        item.FormSnapshot is not null);
 }

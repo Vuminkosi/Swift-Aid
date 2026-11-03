@@ -23,6 +23,7 @@
                          GeoCountries="GeoCountries"
                          OnSaveDraft="OnSaveDraft"
                          DraftSavingAvailable="DraftSavingAvailable"
+                         EditableDraftSnapshotsSupported="EditableDraftSnapshotsSupported"
                          SubmitButtonLabel="Send report"
                          SubmitProgressLabel="Sending…"
                          DraftSaveButtonLabel="Save draft on this device"
@@ -165,6 +166,7 @@
     [Parameter] public Guid? CurrentDraftId { get; set; }
     [Parameter, EditorRequired] public PublicReportDraft Draft { get; set; } = default!;
     [Parameter] public EventCallback<PublicReportSaveRequest> OnSaveDraft { get; set; }
+    [Parameter] public bool EditableDraftSnapshotsSupported { get; set; }
     [Parameter] public EventCallback<IntakeSubmission> OnSendReport { get; set; }
     [Parameter] public string? Feedback { get; set; }
     [Parameter] public bool FeedbackIsError { get; set; }

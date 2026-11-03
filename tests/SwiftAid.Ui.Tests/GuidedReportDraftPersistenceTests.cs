@@ -109,6 +109,61 @@ public sealed partial class GuidedReportDraftPersistenceTests
     }
 
     [Fact]
+    public async Task SupportedEditableDraftSavesAndRestoresIncompleteTimeWithoutQueuableCarrier()
+    {
+        var draft = CreateDraft("Synthetic private entry");
+        draft.OccurrencePrecision = ReportedTimePrecision.Exact;
+        draft.OccurrenceDate = null;
+        draft.OccurrenceTime = "unfinished";
+        draft.OccurrenceOffset = "+02:";
+        PublicReportSaveRequest? saved = null;
+        var component = CreateStepper(draft, request =>
+        {
+            saved = request;
+            request.ConfirmPersisted(Guid.NewGuid(), formSnapshotPersisted: true);
+            return Task.CompletedTask;
+        });
+        component.EditableDraftSnapshotsSupported = true;
+        await InvokeSaveDraftAsync(component);
+
+        Assert.Equal("Saved", GetSaveState(component));
+        Assert.NotNull(saved?.FormSnapshot);
+        Assert.Null(saved.Submission.Narrative);
+        Assert.False(saved.Submission.Confirmations.ReportReviewConfirmed);
+        var restored = PublicReportDraft.FromFormSnapshot(saved.FormSnapshot);
+        Assert.Equal("Synthetic private entry", restored.Narrative);
+        Assert.Equal("unfinished", restored.OccurrenceTime);
+        Assert.Equal("+02:", restored.OccurrenceOffset);
+        Assert.Null(restored.OccurrenceDate);
+        Assert.Contains(component.GetState().ValidationIssues, issue => issue.InputId == "report.occurrence-time");
+    }
+
+    [Fact]
+    public async Task SnapshotSaveRequiresExplicitSnapshotPersistenceConfirmation()
+    {
+        var draft = CreateDraft("Synthetic report");
+        draft.OccurrencePrecision = ReportedTimePrecision.Exact;
+        draft.OccurrenceTime = "unfinished";
+        var component = CreateStepper(draft, request =>
+        {
+            request.ConfirmPersisted(Guid.NewGuid());
+            return Task.CompletedTask;
+        });
+        component.EditableDraftSnapshotsSupported = true;
+        await InvokeSaveDraftAsync(component);
+        Assert.Equal("Failed", GetSaveState(component));
+        Assert.False(component.GetState().Controls.Single(control => control.ControlId == "report.save").CompletionAccepted);
+        Assert.Equal("unfinished", draft.OccurrenceTime);
+    }
+
+    [Fact]
+    public void IncompleteOrUnknownSnapshotFieldsFailClosed()
+    {
+        var snapshot = new GuestDraftFormSnapshot(1, "{\"Narrative\":\"synthetic\"}");
+        Assert.Throws<InvalidOperationException>(() => PublicReportDraft.FromFormSnapshot(snapshot));
+    }
+
+    [Fact]
     public async Task InvalidDraftSaveIdentifiesOnlyBlockingTimeFieldsAndKeepsIncompleteReport()
     {
         var draft = CreateDraft(string.Empty);

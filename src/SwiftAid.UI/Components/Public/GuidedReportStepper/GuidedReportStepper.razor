@@ -599,6 +599,9 @@
     public bool DraftSavingAvailable { get; set; } = true;
 
     [Parameter]
+    public bool EditableDraftSnapshotsSupported { get; set; }
+
+    [Parameter]
     public EventCallback<PublicReportDraft> OnContinue { get; set; }
 
     [Parameter]
@@ -1339,6 +1342,7 @@
         try
         {
             IntakeSubmission submission;
+            GuestDraftFormSnapshot? formSnapshot = null;
             try
             {
                 submission = Draft.ToSubmission(
@@ -1360,11 +1364,19 @@
                     _step = 1;
                     _focusStepHeadingAfterRender = true;
                 }
-                _saveState = DraftSaveState.Invalid;
-                return;
+                if (!EditableDraftSnapshotsSupported)
+                {
+                    _saveState = DraftSaveState.Invalid;
+                    return;
+                }
+                formSnapshot = Draft.ToFormSnapshot();
+                // The protected snapshot is authoritative for editing. This empty,
+                // unconfirmed carrier cannot be queued or mistaken for the entered values.
+                var carrier = new PublicReportDraft { SubjectScope = Draft.SubjectScope };
+                submission = carrier.ToSubmission(null, null, null, [], false);
             }
-            _savingSnapshot = PublicReportDraft.FromSubmission(submission);
-            _activeSaveRequest = new PublicReportSaveRequest(CurrentDraftId, submission);
+            _savingSnapshot = formSnapshot is null ? PublicReportDraft.FromSubmission(submission) : sourceSnapshot.Copy();
+            _activeSaveRequest = new PublicReportSaveRequest(CurrentDraftId, submission, formSnapshot);
             await OnSaveDraft.InvokeAsync(_activeSaveRequest);
             var savedId = _activeSaveRequest.PersistedDraftId ?? _savingDraftId;
             var sameReport = ReferenceEquals(Draft, sourceDraft) && (CurrentDraftId == _savingDraftId || CurrentDraftId == savedId)

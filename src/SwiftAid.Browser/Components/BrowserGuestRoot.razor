@@ -118,6 +118,7 @@ else
                                      CurrentDraftId="_activeDraftId"
                                      Receipt="_receivedReceipt"
                                      OnSaveDraft="SaveDraftAsync"
+                                     EditableDraftSnapshotsSupported="true"
                                      OnSendReport="SendReportAsync"
                                      Feedback="@_feedback"
                                      FeedbackIsError="_feedbackIsError" />
@@ -349,10 +350,18 @@ else
         var sourceDraftId = _activeDraftId;
         try
         {
-            var result = request.PreviousDraftId is { } previous
-                ? await SubmissionStore.CreateRevisionAsync(previous, request.Submission)
-                : await SubmissionStore.CreateDraftAsync(request.Submission);
-            request.ConfirmPersisted(result.ClientSubmissionId);
+            var previousEditable = request.PreviousDraftId is { } previousId
+                ? await SubmissionStore.GetEditableDraftAsync(previousId) : null;
+            var result = request.FormSnapshot is { } snapshot
+                ? request.PreviousDraftId is { } previous
+                    ? await SubmissionStore.CreateEditableRevisionAsync(previous, request.Submission, snapshot)
+                    : await SubmissionStore.CreateEditableDraftAsync(request.Submission, snapshot)
+                : request.PreviousDraftId is { } normalPrevious
+                    ? previousEditable is not null
+                        ? await SubmissionStore.CompleteEditableDraftAsync(normalPrevious, request.Submission)
+                        : await SubmissionStore.CreateRevisionAsync(normalPrevious, request.Submission)
+                    : await SubmissionStore.CreateDraftAsync(request.Submission);
+            request.ConfirmPersisted(result.ClientSubmissionId, request.FormSnapshot is not null);
             if (ReferenceEquals(_draft, sourceDraft) && _activeDraftId == sourceDraftId)
             {
                 _activeDraftId = result.ClientSubmissionId;
@@ -377,8 +386,12 @@ else
         _busy = true;
         try
         {
+            var previousEditable = _activeDraftId is { } prior
+                ? await SubmissionStore.GetEditableDraftAsync(prior) : null;
             var saved = _activeDraftId is { } previous
-                ? await SubmissionStore.CreateRevisionAsync(previous, submission)
+                ? previousEditable is not null
+                    ? await SubmissionStore.CompleteEditableDraftAsync(previous, submission)
+                    : await SubmissionStore.CreateRevisionAsync(previous, submission)
                 : await SubmissionStore.CreateDraftAsync(submission);
             _activeDraftId = saved.ClientSubmissionId;
             _draft = PublicReportDraft.FromSubmission(submission with { ClientSubmissionId = saved.ClientSubmissionId });
@@ -416,8 +429,9 @@ else
                     GuestSubmissionLocalState.Received => PublicReportHistorySurface.HistoryState.Received,
                     GuestSubmissionLocalState.NeedsAttention => PublicReportHistorySurface.HistoryState.NeedsAttention,
                     _ => PublicReportHistorySurface.HistoryState.Superseded
-                }, item.CreatedAtUtc, item.Receipt, CanSend && item.State is GuestSubmissionLocalState.Draft or GuestSubmissionLocalState.Queued,
-                SendUnavailableMessage)).ToArray();
+                }, item.CreatedAtUtc, item.Receipt,
+                CanSend && !item.RequiresEditing && item.State is (GuestSubmissionLocalState.Draft or GuestSubmissionLocalState.Queued),
+                item.RequiresEditing ? "Open this draft and finish its details before sending." : SendUnavailableMessage)).ToArray();
             _storageAvailable = true;
         }
         catch (Exception)
@@ -432,10 +446,12 @@ else
     {
         try
         {
-            var draft = await SubmissionStore.GetDraftAsync(id);
-            if (draft is null) { _feedback = "This draft is no longer available on this device."; return; }
+            var editable = await SubmissionStore.GetEditableDraftAsync(id);
+            var draft = editable is null ? await SubmissionStore.GetDraftAsync(id) : null;
+            if (draft is null && editable is null) { _feedback = "This draft is no longer available on this device."; return; }
+            var restored = editable is null ? PublicReportDraft.FromSubmission(draft!.Submission) : PublicReportDraft.FromFormSnapshot(editable.FormSnapshot);
             _activeDraftId = id;
-            _draft = PublicReportDraft.FromSubmission(draft.Submission);
+            _draft = restored;
             _feedback = null;
             Navigation.NavigateTo("/report");
         }

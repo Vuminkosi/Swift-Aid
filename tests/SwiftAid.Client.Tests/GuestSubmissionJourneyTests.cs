@@ -38,6 +38,7 @@ public sealed class GuestSubmissionJourneyTests
         var store = new GuestDraftStore(persistence, transport: transport);
         var firstSnapshot = new GuestDraftFormSnapshot(1, "{\"occurrenceTime\":\"not yet\"}");
         var created = await store.CreateEditableDraftAsync(ValidSubmission(), firstSnapshot);
+        Assert.True(created.RequiresEditing);
         var loaded = await store.GetEditableDraftAsync(created.ClientSubmissionId);
         Assert.Equal(firstSnapshot, loaded!.FormSnapshot);
         Assert.False(loaded.Submission.Confirmations.ReportReviewConfirmed);
@@ -52,6 +53,7 @@ public sealed class GuestSubmissionJourneyTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => store.CreateRevisionAsync(revised.ClientSubmissionId, ValidSubmission()));
 
         var completed = await store.CompleteEditableDraftAsync(revised.ClientSubmissionId, ValidSubmission());
+        Assert.False(completed.RequiresEditing);
         Assert.Null(await store.GetEditableDraftAsync(completed.ClientSubmissionId));
         Assert.NotNull(await store.GetDraftAsync(completed.ClientSubmissionId));
         Assert.Equal(GuestSubmissionLocalState.Queued, (await store.QueueAsync(completed.ClientSubmissionId)).State);

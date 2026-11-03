@@ -9,6 +9,44 @@ public sealed class PublicReportDraft : IValidatableObject
 {
     public PublicReportDraft Copy() => (PublicReportDraft)MemberwiseClone();
 
+    public GuestDraftFormSnapshot ToFormSnapshot()
+    {
+        var snapshot = new GuestDraftFormSnapshot(GuestDraftFormSnapshot.CurrentSchemaVersion,
+            System.Text.Json.JsonSerializer.Serialize(this));
+        if (!snapshot.IsValid()) throw new InvalidOperationException("The editable draft is too large or invalid.");
+        return snapshot;
+    }
+
+    public static PublicReportDraft FromFormSnapshot(GuestDraftFormSnapshot snapshot)
+    {
+        if (snapshot is null || !snapshot.IsValid()) throw new InvalidOperationException("The editable draft is invalid or unsupported.");
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(snapshot.Json);
+            var expected = new HashSet<string>(StringComparer.Ordinal)
+            {
+                nameof(SubjectScope), nameof(Narrative), nameof(ObservationsText), nameof(OccurrencePrecision),
+                nameof(OccurrenceDate), nameof(OccurrenceTime), nameof(OccurrenceOffset), nameof(TimeNote), nameof(CapturedAt),
+                nameof(LocationUnknown), nameof(CountryCode), nameof(CountryConfirmed), nameof(RegionPresence), nameof(Region),
+                nameof(RegionId), nameof(AreaPresence), nameof(Area), nameof(AreaId), nameof(LocalityPresence), nameof(Locality),
+                nameof(LocalityId), nameof(ReportReviewConfirmed), nameof(ProcessingConfirmed)
+            };
+            var names = document.RootElement.EnumerateObject().Select(property => property.Name).ToArray();
+            if (names.Length != expected.Count || names.Distinct(StringComparer.Ordinal).Count() != names.Length ||
+                names.Any(name => !expected.Contains(name)))
+                throw new InvalidOperationException("The editable draft fields are incomplete or unsupported.");
+            var draft = System.Text.Json.JsonSerializer.Deserialize<PublicReportDraft>(snapshot.Json)
+                ?? throw new InvalidOperationException("The editable draft is empty.");
+            if (draft.SubjectScope is null || !Enum.IsDefined(draft.SubjectScope.Value))
+                throw new InvalidOperationException("The editable draft subject is invalid.");
+            return draft;
+        }
+        catch (System.Text.Json.JsonException error)
+        {
+            throw new InvalidOperationException("The editable draft cannot be read.", error);
+        }
+    }
+
     [Required(ErrorMessage = "Choose whether this concern is about a person or an animal.")]
     public IntakeSubjectScope? SubjectScope { get; set; }
 
@@ -364,14 +402,16 @@ public sealed class PublicReportDraft : IValidatableObject
 
 public sealed record PublicCountryOption(string Code, string Name);
 
-public sealed record PublicReportSaveRequest(Guid? PreviousDraftId, IntakeSubmission Submission)
+public sealed record PublicReportSaveRequest(Guid? PreviousDraftId, IntakeSubmission Submission, GuestDraftFormSnapshot? FormSnapshot = null)
 {
     // Set by the storage callback only after persistence succeeds, never by Ellai.
     public Guid? PersistedDraftId { get; private set; }
 
-    public void ConfirmPersisted(Guid draftId)
+    public void ConfirmPersisted(Guid draftId, bool formSnapshotPersisted = false)
     {
         if (draftId == Guid.Empty) throw new ArgumentException("A persisted draft identity is required.", nameof(draftId));
+        if (FormSnapshot is not null && !formSnapshotPersisted)
+            throw new InvalidOperationException("The editable form snapshot was not confirmed as saved.");
         PersistedDraftId = draftId;
     }
 }
