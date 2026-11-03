@@ -77,7 +77,10 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
     [FrameworkPostgresLiveMuseFact]
     public Task LiveMusePersistsReportGuidance() => VerifyReportGuidanceAsync(true);
 
-    private async Task VerifyReportGuidanceAsync(bool liveModel)
+    [FrameworkPostgresLiveMuseFact]
+    public Task LiveMusePlansPersistedReportGuidance() => VerifyReportGuidanceAsync(true, planGuidance: true);
+
+    private async Task VerifyReportGuidanceAsync(bool liveModel, bool planGuidance = false)
     {
         var id = $"framework-fallback-guidance-{Guid.NewGuid():N}";
         _frameworkSessionIds.Add(id);
@@ -115,6 +118,27 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         Assert.Contains(trace!.Observations, observation => observation.ToolName == EllaiToolNames.UiCatalogue &&
             observation.UiCatalogueReplayScope is not null);
         Assert.DoesNotContain("synthetic unfamiliar goal", completed.ToolTraceJson!);
+        if (planGuidance)
+        {
+            var projected = EllaiConversationProjection.ToClient(completed);
+            var proposalId = Assert.Single(projected.UiProposals).ProposalId;
+            var observations = new InMemoryEllaiUiObservationStore();
+            await observations.RecordAsync(new(id, "view", "context", "web", ["report.entry"], DateTimeOffset.UtcNow,
+                [new("report.entry", UiObservationState.Ready)]), default);
+            var store = new PostgresEllaiSessionStore(verifyDb);
+            var admission = new EllaiGuidanceProposalAdmission(store, store, registry, observations);
+            var options = EllaiOptions.Bind(Environment.GetEnvironmentVariable);
+            using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
+            var router = new EllaiReasoningRouter(options, new EllaiReasoningAdapter(http, options),
+                new OllamaEllaiReasoningProvider(http, options), new ServerlessEllaiReasoningProvider(http, options));
+            var planner = new EllaiModelGuidancePlanner(new EllaiProviderTurnClient(router));
+            var authority = new EllaiUiEntitlements(Actor.ActorId, "scope-test", new HashSet<string> { "report" }, new HashSet<string>());
+            var plan = await admission.PlanAsync(id, proposalId, authority, planner, new EllaiUiDiscoveryService(),
+                new EllaiGuidancePlanValidator(registry), new EllaiUsageLedger(), new InMemoryEllaiUsageStore(), default);
+            Assert.Equal("Ready", plan.Status);
+            Assert.NotEmpty(plan.Plan!.Steps);
+            Assert.NotNull(EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync(id, default))!.GuidanceJson)?.Plan);
+        }
     }
 
     private sealed class FallbackGuidanceClient : IChatClient
