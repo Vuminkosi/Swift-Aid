@@ -186,8 +186,8 @@ public sealed class EllaiToolBroker
     private static readonly string[] ToolDescriptions =
     {
         $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, country?, workflow?, sort?, place_id?) — permitted feature or owned-case queue. country is an uppercase two-letter code (Zimbabwe=ZW, Eswatini=SZ); workflow is Reported, UnderReview, Active, AwaitingFollowUp or Resolved; sort=latest-reported or latest-updated. For an occurrence-place search, select an exact registry ID using ellai_locations and supply country, place_id and sort=latest-reported; workflow is not supported with place_id. Unknown locations and incomplete scans cannot establish a complete list. Reported is a recorded workflow, not proof that no human reviewed a case. Classification review status is not supplied; clarify ambiguous unreviewed requests.",
-        $"{EllaiToolNames.Evidence}(ref=case-results, field=[country|workflow]?) — re-read retained case queue references under current access. Case classification is unavailable for this reasoning route.",
-        $"{EllaiToolNames.Topic}(ref) — session topic candidates with checkpoints. Use ref=case-results to recall the last retained case list with fresh authorization; never invent a remembered result set.",
+        $"{EllaiToolNames.Evidence}(ref=[case-results|case-results-original], field=[country|workflow]?) — re-read the latest or first retained case list under current access. The first retained search can precede an interrupted response or an unrelated discussion; use conversation context or ask which set the user means. It can become unavailable. Case classification is unavailable for this reasoning route.",
+        $"{EllaiToolNames.Topic}(ref) — session topic candidates with checkpoints. Use ref=case-results for the latest retained list or case-results-original for the first retained list; never invent a remembered result set.",
         $"{EllaiToolNames.Capabilities}(feature?) — capability readiness, no credentials.",
         $"{EllaiToolNames.Receipts}(receipt?) — durable receipts, session-bound.",
         $"{EllaiToolNames.ProductFacts}(topic?) — versioned nonmedical product facts.",
@@ -484,7 +484,7 @@ public sealed class EllaiToolBroker
     private async Task<EllaiToolResult> ReadEvidenceAsync(
         EllaiToolContext context, EllaiToolRequest request, IEllaiExactReferenceIndex? referenceIndex, CancellationToken ct)
     {
-        if (!string.Equals(request.Arguments["ref"], EllaiCaseResultMemory.Reference, StringComparison.Ordinal))
+        if (request.Arguments["ref"] is not (EllaiCaseResultMemory.Reference or EllaiCaseResultMemory.OriginalReference))
         {
             return Deny(request.ToolName, "Only the current session's retained case-results reference is supported.",
                 EllaiToolReasonCodes.InvalidArguments);
@@ -512,7 +512,8 @@ public sealed class EllaiToolBroker
         try
         {
             var result = await new EllaiCaseResultMemory(_topics, _queue, referenceIndex)
-                .RecallAsync(context, ct, field, request.Arguments.GetValueOrDefault("classification_filter")).ConfigureAwait(false);
+                .RecallAsync(context, ct, field, request.Arguments.GetValueOrDefault("classification_filter"),
+                    original: request.Arguments["ref"] == EllaiCaseResultMemory.OriginalReference).ConfigureAwait(false);
             return result with { ToolName = request.ToolName };
         }
         catch (OperationCanceledException)
@@ -886,12 +887,14 @@ public sealed class EllaiToolBroker
                 EllaiToolReasonCodes.InvalidArguments);
         }
 
-        if (string.Equals(reference.Trim(), EllaiCaseResultMemory.Reference, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(reference.Trim(), EllaiCaseResultMemory.Reference, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(reference.Trim(), EllaiCaseResultMemory.OriginalReference, StringComparison.OrdinalIgnoreCase))
         {
             if (_queue is null) return Deny(request.ToolName, "Case recall is unavailable.", EllaiToolReasonCodes.Unavailable);
             try
             {
-                return await new EllaiCaseResultMemory(_topics, _queue, referenceIndex).RecallAsync(context, ct).ConfigureAwait(false);
+                return await new EllaiCaseResultMemory(_topics, _queue, referenceIndex).RecallAsync(context, ct,
+                    original: string.Equals(reference.Trim(), EllaiCaseResultMemory.OriginalReference, StringComparison.OrdinalIgnoreCase)).ConfigureAwait(false);
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {

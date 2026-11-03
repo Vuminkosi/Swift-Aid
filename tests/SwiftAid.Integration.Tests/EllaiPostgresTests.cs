@@ -72,6 +72,59 @@ public sealed class FrameworkPostgresLiveMuseFactAttribute : FactAttribute
 public sealed class EllaiPostgresTests : IAsyncLifetime
 {
     [FrameworkPostgresFact]
+    public async Task ConcurrentCaseHistoryWritesKeepEachResultInPostgres()
+    {
+        var sessionId = $"case-history-{Guid.NewGuid():N}";
+        await using var initDb = CreateFrameworkDbContext();
+        await initDb.Database.MigrateAsync();
+        var context = new EllaiToolContext(sessionId, "scope-test", "cases", null, 4, true,
+            Actor: Actor, DataClassification: EllaiProcessingClassification.SyntheticDemo);
+        var ids = Enumerable.Range(1, 6).Select(_ => Guid.NewGuid()).ToArray();
+        try
+        {
+            var writes = ids.Select(async id =>
+            {
+                await using var db = CreateFrameworkDbContext();
+                var topics = new EllaiTopicService(new PostgresEllaiTopicStore(db));
+                var memory = new EllaiCaseResultMemory(topics, new HistoryQueue());
+                var row = new SwiftAid.Contracts.Cases.CaseQueueItem(id, "Reported", "SZ", Actor.ActorId, 1, DateTimeOffset.UtcNow);
+                await memory.RememberAsync(context, [row], default);
+            });
+            await Task.WhenAll(writes);
+            await using var verifyDb = CreateFrameworkDbContext();
+            var verifyTopics = new EllaiTopicService(new PostgresEllaiTopicStore(verifyDb));
+            var topic = await verifyTopics.GetByTitleAsync(sessionId, EllaiCaseResultMemory.TopicTitle, default);
+            using var json = System.Text.Json.JsonDocument.Parse(topic!.EntityRef!);
+            Assert.Equal(5, json.RootElement.GetProperty("Previous").GetArrayLength());
+            Assert.False(json.RootElement.GetProperty("HistoryTruncated").GetBoolean());
+            var original = await new EllaiCaseResultMemory(verifyTopics, new HistoryQueue()).RecallAsync(context, default, original: true);
+            var latest = await new EllaiCaseResultMemory(verifyTopics, new HistoryQueue()).RecallAsync(context, default);
+            Assert.True(original.Allowed);
+            Assert.True(latest.Allowed);
+            var originalId = Guid.Parse(Assert.Single(original.Evidence).ResourceId);
+            var latestId = Guid.Parse(Assert.Single(latest.Evidence).ResourceId);
+            Assert.Contains(originalId, ids);
+            Assert.Contains(latestId, ids);
+            Assert.NotEqual(originalId, latestId);
+        }
+        finally
+        {
+            await using var cleanupDb = CreateFrameworkDbContext();
+            await cleanupDb.Set<EllaiTopicEntity>().Where(topic => topic.SessionId == sessionId).ExecuteDeleteAsync();
+        }
+    }
+
+    private sealed class HistoryQueue : SwiftAid.Application.Cases.ICaseQueueQuery
+    {
+        public Task<SwiftAid.Contracts.Cases.CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CancellationToken ct) =>
+            throw new NotSupportedException();
+        public Task<SwiftAid.Contracts.Cases.CaseQueueResult> GetMineAsync(ActorContext actor, int? limit,
+            SwiftAid.Application.Cases.CaseQueueFilter filter, CancellationToken ct) =>
+            Task.FromResult(new SwiftAid.Contracts.Cases.CaseQueueResult(SwiftAid.Contracts.Cases.CaseQueueAccess.Allowed,
+                (filter.CaseIds ?? []).Select(id => new SwiftAid.Contracts.Cases.CaseQueueItem(id, "Reported", "SZ", actor.ActorId, 1, DateTimeOffset.UtcNow)).ToArray()));
+    }
+
+    [FrameworkPostgresFact]
     public async Task AtomicTopicPayloadUpdateFencesConcurrentWritersAcrossContexts()
     {
         var sessionId = $"topic-cas-{Guid.NewGuid():N}";

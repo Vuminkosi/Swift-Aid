@@ -99,6 +99,26 @@ public sealed class PostgresEllaiTopicStore(SwiftAidDbContext dbContext) : IElla
         return changed == 1;
     }
 
+    public async Task<bool> TryCreateAsync(string sessionId, string title, IReadOnlyList<string> aliases,
+        string entityRef, string entityVersion, DateTimeOffset now, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        ArgumentNullException.ThrowIfNull(aliases);
+        ArgumentNullException.ThrowIfNull(entityRef);
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityVersion);
+        var id = InMemoryEllaiTopicStore.StableTopicId(sessionId, title);
+        var aliasesJson = JsonSerializer.Serialize(aliases);
+        var changed = await _dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO ellai_topics (topic_id, session_id, title, aliases_json, entity_ref, entity_version,
+                coverage_state, checkpoint_id, created_at_utc, updated_at_utc)
+            VALUES ({id}, {sessionId}, {title}, {aliasesJson}, {entityRef}, {entityVersion},
+                'Partial', NULL, {now}, {now})
+            ON CONFLICT (topic_id) DO NOTHING
+            """, ct).ConfigureAwait(false);
+        return changed == 1;
+    }
+
     private static EllaiTopicEntry ToEntry(EllaiTopicEntity entity) => new(
         entity.TopicId, entity.SessionId, entity.Title,
         JsonSerializer.Deserialize<List<string>>(entity.AliasesJson) ?? new List<string>(),

@@ -256,6 +256,11 @@ public sealed class EllaiLiveQueueReadTests
     {
         private readonly InMemoryEllaiTopicStore _inner = new();
         public int DirectReads { get; private set; }
+        public Task<bool> TryCreateAsync(string sessionId, string title, IReadOnlyList<string> aliases, string entityRef,
+            string entityVersion, DateTimeOffset now, CancellationToken ct) => _inner.TryCreateAsync(sessionId, title, aliases, entityRef, entityVersion, now, ct);
+        public Task<bool> CompareExchangePayloadAsync(string sessionId, string topicId, string? expectedRef, string? expectedVersion,
+            string newRef, string newVersion, DateTimeOffset now, CancellationToken ct) =>
+            _inner.CompareExchangePayloadAsync(sessionId, topicId, expectedRef, expectedVersion, newRef, newVersion, now, ct);
         public Task<EllaiTopicEntry> RecordAsync(string sessionId, string title, IReadOnlyList<string> aliases,
             string? entityRef, string? entityVersion, string? checkpointId, DateTimeOffset now, CancellationToken ct) =>
             _inner.RecordAsync(sessionId, title, aliases, entityRef, entityVersion, checkpointId, now, ct);
@@ -272,6 +277,12 @@ public sealed class EllaiLiveQueueReadTests
         private readonly InMemoryEllaiTopicStore _inner = new();
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task<bool> TryCreateAsync(string sessionId, string title, IReadOnlyList<string> aliases, string entityRef,
+            string entityVersion, DateTimeOffset now, CancellationToken ct) => _inner.TryCreateAsync(sessionId, title, aliases, entityRef, entityVersion, now, ct);
+        public Task<bool> CompareExchangePayloadAsync(string sessionId, string topicId, string? expectedRef, string? expectedVersion,
+            string newRef, string newVersion, DateTimeOffset now, CancellationToken ct) =>
+            _inner.CompareExchangePayloadAsync(sessionId, topicId, expectedRef, expectedVersion, newRef, newVersion, now, ct);
+        public Task<EllaiTopicEntry?> GetAsync(string sessionId, string topicId, CancellationToken ct) => ((IEllaiTopicStore)_inner).GetAsync(sessionId, topicId, ct);
         public Task<EllaiTopicEntry> RecordAsync(string sessionId, string title, IReadOnlyList<string> aliases,
             string? entityRef, string? entityVersion, string? checkpointId, DateTimeOffset now, CancellationToken ct) =>
             _inner.RecordAsync(sessionId, title, aliases, entityRef, entityVersion, checkpointId, now, ct);
@@ -554,6 +565,8 @@ public sealed class EllaiLiveQueueReadTests
         Assert.False((await memory.RecallAsync(context, default)).Allowed);
         Assert.Null(queue.LastActor);
 
+        await Assert.ThrowsAsync<InvalidOperationException>(() => memory.RememberAsync(context, [row], default));
+        memory = new EllaiCaseResultMemory(new EllaiTopicService(), queue);
         await memory.RememberAsync(context, [row], default);
         queue.Result = new(CaseQueueAccess.Allowed, [row, row]);
         var recalled = await memory.RecallAsync(context, default);
@@ -585,6 +598,87 @@ public sealed class EllaiLiveQueueReadTests
         Assert.DoesNotContain(Row("02", 8).CaseId.ToString(), recalled.ResultSummary);
         Assert.DoesNotContain(Row("03", 1).CaseId.ToString(), recalled.ResultSummary);
         Assert.Equal(new[] { Row("01", 7).CaseId, Row("02", 8).CaseId }, queue.LastFilter!.CaseIds);
+    }
+
+    [Fact]
+    public async Task OriginalAndLatestResultsRemainDistinctAndAreReauthorized()
+    {
+        var first = Row("01", 7); var second = Row("02", 8);
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [first]) };
+        var store = new InMemoryEllaiTopicStore();
+        var topics = new EllaiTopicService(store);
+        var context = Context with { Actor = TestActor() };
+        var broker = GrantedBroker(queue, topics);
+        await broker.InvokeAsync(context, new(EllaiToolNames.State, Args(("projection", "queue"))), default);
+        queue.Result = new(CaseQueueAccess.Allowed, [second]);
+        await broker.InvokeAsync(context, new(EllaiToolNames.State, Args(("projection", "queue"))), default);
+        queue.Result = new(CaseQueueAccess.Allowed, [first, second]);
+        broker = GrantedBroker(queue, new EllaiTopicService(store));
+        var original = await broker.InvokeAsync(context, new(EllaiToolNames.Evidence,
+            Args(("ref", "case-results-original"))), default);
+        var latest = await broker.InvokeAsync(context, new(EllaiToolNames.Evidence,
+            Args(("ref", "case-results"))), default);
+        Assert.Equal(first.CaseId.ToString("D"), Assert.Single(original.Evidence).ResourceId);
+        Assert.Equal(second.CaseId.ToString("D"), Assert.Single(latest.Evidence).ResourceId);
+        queue.Result = new(CaseQueueAccess.Allowed, [second]);
+        var revoked = await broker.InvokeAsync(context, new(EllaiToolNames.Evidence,
+            Args(("ref", "case-results-original"))), default);
+        Assert.True(revoked.Allowed);
+        Assert.Empty(revoked.Evidence);
+        Assert.DoesNotContain(first.CaseId.ToString("D"), revoked.ResultSummary);
+    }
+
+    [Fact]
+    public async Task EvictedOrLegacyOriginalIsNeverReplacedByAnotherSet()
+    {
+        var topics = new EllaiTopicService();
+        var queue = new FakeQueue();
+        var context = Context with { Actor = TestActor() };
+        var memory = new EllaiCaseResultMemory(topics, queue);
+        for (var i = 1; i <= 9; i++) await memory.RememberAsync(context, [Row(i.ToString("D2"), i)], default);
+        var evicted = await memory.RecallAsync(context, default, original: true);
+        Assert.False(evicted.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, evicted.ReasonCode);
+
+        var legacyTopics = new EllaiTopicService();
+        var legacy = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            ActorId = context.Actor!.ActorId, context.ScopeEpoch, ExpiresAtUtc = DateTimeOffset.UtcNow.AddHours(1),
+            Cases = new[] { new { Id = Row("01", 1).CaseId, Version = 1L } }
+        });
+        await legacyTopics.TrackAsync(context.SessionId, EllaiCaseResultMemory.TopicTitle, ["case-results"], legacy, "case-results/1");
+        var legacyMemory = new EllaiCaseResultMemory(legacyTopics, queue);
+        await legacyMemory.RememberAsync(context, [Row("02", 2)], default);
+        Assert.False((await legacyMemory.RecallAsync(context, default, original: true)).Allowed);
+    }
+
+    [Fact]
+    public async Task ConcurrentCaseResultWritesPreserveEveryBoundedSet()
+    {
+        var store = new InMemoryEllaiTopicStore();
+        var topics = new EllaiTopicService(store);
+        var context = Context with { Actor = TestActor() };
+        var writes = Enumerable.Range(1, 6).Select(i => Task.Run(() =>
+            new EllaiCaseResultMemory(topics, new FakeQueue()).RememberAsync(context, [Row(i.ToString("D2"), i)], default)));
+        await Task.WhenAll(writes);
+        var entry = Assert.Single(await store.ListAsync(context.SessionId, default));
+        using var json = System.Text.Json.JsonDocument.Parse(entry.EntityRef!);
+        Assert.Equal(5, json.RootElement.GetProperty("Previous").GetArrayLength());
+        Assert.False(json.RootElement.GetProperty("HistoryTruncated").GetBoolean());
+    }
+
+    [Fact]
+    public async Task FullSizedBoundedHistoryFitsTheAuthoritativeSnapshotLimit()
+    {
+        var store = new InMemoryEllaiTopicStore();
+        var context = Context with { Actor = TestActor() };
+        var memory = new EllaiCaseResultMemory(new EllaiTopicService(store), new FakeQueue());
+        for (var version = 1; version <= 8; version++)
+            await memory.RememberAsync(context, Enumerable.Range(1, 20).Select(i => Row(i.ToString("D2"), version)).ToArray(), default);
+        var entry = Assert.Single(await store.ListAsync(context.SessionId, default));
+        Assert.True(entry.EntityRef!.Length <= 16000);
+        using var json = System.Text.Json.JsonDocument.Parse(entry.EntityRef);
+        Assert.Equal(7, json.RootElement.GetProperty("Previous").GetArrayLength());
     }
 
     [Fact]
@@ -764,10 +858,11 @@ public sealed class EllaiLiveQueueReadTests
         var hit = new EllaiExactMemoryReference("case-results", context.SessionId, context.ScopeEpoch,
             entry.TopicId, EllaiCaseResultMemory.SourceVersion(entry.EntityRef!), DateTimeOffset.UtcNow.AddHours(1));
 
+        var readsBeforeRecall = store.DirectReads;
         var recalled = await new EllaiCaseResultMemory(topics, queue, new LateIndex(hit)).RecallAsync(context, default);
 
         Assert.True(recalled.Allowed);
-        Assert.Equal(0, store.DirectReads);
+        Assert.Equal(readsBeforeRecall, store.DirectReads);
         Assert.Equal(Row("01", 7).CaseId.ToString("D"), Assert.Single(recalled.Evidence).ResourceId);
     }
 

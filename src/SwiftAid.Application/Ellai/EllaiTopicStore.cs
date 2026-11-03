@@ -38,6 +38,10 @@ public interface IEllaiTopicStore
     Task<bool> CompareExchangePayloadAsync(string sessionId, string topicId, string? expectedRef,
         string? expectedVersion, string newRef, string newVersion, DateTimeOffset now, CancellationToken ct) =>
         throw new NotSupportedException("Atomic topic payload updates are unavailable.");
+
+    Task<bool> TryCreateAsync(string sessionId, string title, IReadOnlyList<string> aliases,
+        string entityRef, string entityVersion, DateTimeOffset now, CancellationToken ct) =>
+        throw new NotSupportedException("Atomic topic creation is unavailable.");
 }
 
 /// <summary>Thread-safe in-memory topic store with the same semantics as the
@@ -106,6 +110,25 @@ public sealed class InMemoryEllaiTopicStore : IEllaiTopicStore
                 current.EntityRef != expectedRef || current.EntityVersion != expectedVersion)
                 return Task.FromResult(false);
             _byId[topicId] = current with { EntityRef = newRef, EntityVersion = newVersion, UpdatedAtUtc = now };
+            return Task.FromResult(true);
+        }
+    }
+
+    public Task<bool> TryCreateAsync(string sessionId, string title, IReadOnlyList<string> aliases,
+        string entityRef, string entityVersion, DateTimeOffset now, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        ArgumentNullException.ThrowIfNull(aliases);
+        ArgumentNullException.ThrowIfNull(entityRef);
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityVersion);
+        lock (_gate)
+        {
+            ct.ThrowIfCancellationRequested();
+            var id = StableTopicId(sessionId, title);
+            if (_byId.ContainsKey(id)) return Task.FromResult(false);
+            _byId[id] = new(id, sessionId, title, aliases, entityRef, entityVersion, "Partial", null, now, now);
             return Task.FromResult(true);
         }
     }

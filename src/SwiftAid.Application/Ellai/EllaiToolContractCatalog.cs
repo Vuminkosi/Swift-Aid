@@ -132,7 +132,7 @@ public static class EllaiToolContractCatalog
                 return false;
             }
             if (toolName == EllaiToolNames.Evidence && name == "ref" &&
-                !string.Equals(value, EllaiCaseResultMemory.Reference, StringComparison.Ordinal))
+                value is not (EllaiCaseResultMemory.Reference or EllaiCaseResultMemory.OriginalReference))
             {
                 error = "Argument 'ref' is not a supported evidence reference.";
                 return false;
@@ -166,7 +166,7 @@ public static class EllaiToolContractCatalog
                 if (argument.AllowedValues is { Count: > 0 })
                     property["enum"] = argument.AllowedValues;
                 else if (toolName == EllaiToolNames.Evidence && argument.Name == "ref")
-                    property["enum"] = new[] { EllaiCaseResultMemory.Reference };
+                    property["enum"] = new[] { EllaiCaseResultMemory.Reference, EllaiCaseResultMemory.OriginalReference };
                 return property;
             },
             StringComparer.Ordinal);
