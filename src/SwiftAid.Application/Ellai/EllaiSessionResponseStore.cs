@@ -143,9 +143,11 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null,
             }
 
             var deliveryId = $"{clientUtteranceId}:chunk:{chunkIndex.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
-            if (session.LastClientUtteranceId == deliveryId)
+            if (session.Chunks.TryGetValue(deliveryId, out var existing))
             {
-                return session.Items.Last?.Value;
+                if (session.Items.First is { } first && existing.Sequence >= first.Value.Sequence)
+                    return existing;
+                session.Chunks.Remove(deliveryId);
             }
 
             var response = new EllaiSessionResponseDto(
@@ -154,10 +156,14 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null,
             session.LastUpdatedAtUtc = response.CreatedAtUtc;
             session.LastClientUtteranceId = deliveryId;
             session.Items.AddLast(response);
+            session.Chunks[deliveryId] = response;
             while (session.Items.Count > MaximumResponsesPerSession)
             {
                 session.Items.RemoveFirst();
             }
+            var oldest = session.Items.First!.Value.Sequence;
+            foreach (var key in session.Chunks.Where(item => item.Value.Sequence < oldest).Select(item => item.Key).ToArray())
+                session.Chunks.Remove(key);
             audioPreparation?.Published(response);
             return response;
         }
@@ -285,5 +291,6 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null,
         public string? LastClientUtteranceId { get; set; }
         public DateTimeOffset LastUpdatedAtUtc { get; set; } = createdAtUtc;
         public LinkedList<EllaiSessionResponseDto> Items { get; } = new();
+        public Dictionary<string, EllaiSessionResponseDto> Chunks { get; } = new(StringComparer.Ordinal);
     }
 }

@@ -65,4 +65,33 @@ public sealed class EllaiSessionResponseStoreTests
         Assert.Empty(completed.Text);
         Assert.Equal(3, store.ReadSince("session-1", 0).Responses.Count);
     }
+
+    [Fact]
+    public void ReplayingAnEarlierChunkDoesNotPublishItAgain()
+    {
+        var store = new EllaiSessionResponseStore();
+        var first = store.PublishChunk("session-1", "utterance-1", 1, "First sentence.");
+        store.PublishChunk("session-1", "utterance-1", 2, "Second sentence.");
+        var replay = store.PublishChunk("session-1", "utterance-1", 1, "First sentence.");
+
+        Assert.Equal(first, replay);
+        Assert.Equal(2, store.ReadSince("session-1", 0).Responses.Count);
+        Assert.NotEqual(first, store.PublishChunk("session-2", "utterance-1", 1, "First sentence."));
+    }
+
+    [Fact]
+    public void EvictedChunkCanBePublishedAgain()
+    {
+        var store = new EllaiSessionResponseStore();
+        var first = store.PublishChunk("session-1", "utterance-1", 1, "First.");
+        for (var index = 2; index <= EllaiSessionResponseStore.MaximumResponsesPerSession + 1; index++)
+            store.PublishChunk("session-1", "utterance-1", index, "Later.");
+
+        var replay = store.PublishChunk("session-1", "utterance-1", 1, "First.");
+        Assert.NotNull(first);
+        Assert.NotNull(replay);
+        Assert.True(replay.Sequence > first.Sequence);
+        Assert.Equal(EllaiSessionResponseStore.MaximumResponsesPerSession,
+            store.ReadSince("session-1", 0, EllaiSessionResponseStore.MaximumResponsesPerSession).Responses.Count);
+    }
 }
