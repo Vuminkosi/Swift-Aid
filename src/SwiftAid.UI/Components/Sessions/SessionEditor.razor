@@ -218,6 +218,12 @@
                 }
                 else
                 {
+                    @if (HasUnsavedChanges)
+                    {
+                        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="status">
+                            Cancellation applies to the saved session. Your unsaved changes will not be saved.
+                        </MudAlert>
+                    }
                     <MudTextField T="string" Label="Cancellation reason" @bind-Value="_cancellationReason" Required="true"
                                  Error='@HasError("CancellationReason")' ErrorText='@FieldError("CancellationReason")' />
                     <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="SubmitCancelAsync" Disabled="Busy" StartIcon="@Icons.Material.Filled.Cancel">Yes, cancel this session</MudButton>
@@ -437,18 +443,26 @@
 
     private async Task SubmitCancelAsync()
     {
-        if (!CanCancel || !ValidateForm(requireReason: true, forSchedule: false))
+        if (!CanCancel || Busy)
         {
             return;
         }
 
+        _errors.Clear();
+        if (string.IsNullOrWhiteSpace(_reason))
+        {
+            _errors["Reason"] = "A reason for this change is required.";
+        }
         if (string.IsNullOrWhiteSpace(_cancellationReason))
         {
             _errors["CancellationReason"] = "A cancellation reason is required.";
+        }
+        if (_errors.Count != 0)
+        {
             return;
         }
 
-        await OnCancel.InvokeAsync(new SessionCancelSubmission(_cancellationReason.Trim(), _reason.Trim()));
+        await OnCancel.InvokeAsync(new SessionCancelSubmission(_cancellationReason!.Trim(), _reason.Trim()));
     }
 
     private async Task SubmitCompleteAsync()

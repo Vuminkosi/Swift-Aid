@@ -8,6 +8,32 @@ namespace SwiftAid.Ui.Tests;
 public sealed class SessionEditorTimeTests
 {
     [Fact]
+    public async Task CancellationRequiresItsReasonsButNotEditableSessionFields()
+    {
+        var id = Guid.NewGuid();
+        var editor = new SessionEditor();
+        typeof(SessionEditor).GetProperty(nameof(SessionEditor.SessionId))!.SetValue(editor, id);
+        typeof(SessionEditor).GetProperty(nameof(SessionEditor.ExpectedVersion))!.SetValue(editor, 3L);
+        typeof(SessionEditor).GetProperty(nameof(SessionEditor.Status))!.SetValue(editor, "Scheduled");
+        typeof(SessionEditor).GetProperty(nameof(SessionEditor.ManagementCapabilities))!.SetValue(editor,
+            new SessionManagementPresentation(true, true, id, 3, "Scheduled", false, false, false, false, true, false));
+        SessionCancelSubmission? submission = null;
+        typeof(SessionEditor).GetProperty(nameof(SessionEditor.OnCancel))!.SetValue(editor,
+            EventCallback.Factory.Create<SessionCancelSubmission>(new object(), value => submission = value));
+        Set(editor, "_timeZone", "Unavailable/Zone");
+
+        await (Task)Invoke(editor, "SubmitCancelAsync")!;
+        Assert.Null(submission);
+        Set(editor, "_reason", "  schedule changed  ");
+        Set(editor, "_cancellationReason", "  venue unavailable  ");
+        await (Task)Invoke(editor, "SubmitCancelAsync")!;
+
+        Assert.NotNull(submission);
+        Assert.Equal("venue unavailable", submission.CancellationReason);
+        Assert.Equal("schedule changed", submission.Reason);
+    }
+
+    [Fact]
     public async Task UnsavedEditsCannotBeReviewedOrPublished()
     {
         var id = Guid.NewGuid();
