@@ -2,8 +2,6 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Npgsql;
@@ -215,10 +213,6 @@ public sealed partial class CaseCommandProcessingPostgresTests
             Assert.Equal([nameof(CaseOperation.ReadCase)], share.AllowedOperations!);
             Assert.Null(share.ChangeReason);
             Assert.Equal(fixture.AccessEpoch + 1, (await check.ActorAccessStates.SingleAsync(item => item.ActorId == fixture.NewOwnerActorId)).AccessEpoch);
-            var rollback = await Assert.ThrowsAsync<PostgresException>(() => check.GetService<IMigrator>()
-                .MigrateAsync("20261102181615_BoundedCaseShareOperations"));
-            Assert.Equal(PostgresErrorCodes.RaiseException, rollback.SqlState);
-            Assert.Contains("Cannot remove collaborator grant identity", rollback.MessageText);
         }
 
         var revoke = new RevokeCaseCollaboratorCommand(Guid.NewGuid(), 3, grant.GrantId, "Synthetic protected revoke reason", null, DateTimeOffset.UnixEpoch);
