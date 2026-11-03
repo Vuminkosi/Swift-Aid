@@ -11,17 +11,20 @@ public sealed class CaseQueueHttpClient(HttpClient httpClient) : ICaseQueueClien
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public async Task<CaseQueueResult> GetMineAsync(int? limit, CancellationToken cancellationToken = default)
+        => await GetMineAsync(limit, null, cancellationToken).ConfigureAwait(false);
+
+    public async Task<CaseQueueResult> GetMineAsync(
+        int? limit, string? cursor, CancellationToken cancellationToken = default)
     {
-        if (httpClient.BaseAddress is null || limit is <= 0 or > 100)
+        if (httpClient.BaseAddress is null || limit is <= 0 or > 500 || cursor?.Length > 49)
         {
             return new CaseQueueResult(CaseQueueAccess.Unavailable, []);
         }
 
-        var address = "api/v1/cases/mine";
-        if (limit.HasValue)
-        {
-            address += $"?limit={limit.Value}";
-        }
+        var query = new List<string>();
+        if (limit.HasValue) query.Add($"limit={limit.Value}");
+        if (cursor is not null) query.Add($"cursor={Uri.EscapeDataString(cursor)}");
+        var address = "api/v1/cases/mine" + (query.Count == 0 ? string.Empty : "?" + string.Join('&', query));
 
         try
         {

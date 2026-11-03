@@ -145,6 +145,68 @@ public sealed class CaseQueueTests
     }
 
     [IntakePostgresFact]
+    public async Task CursorPagesReturnOnlyAuthorizedRowsInStableQueueOrder()
+    {
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        await CaseRegistrationBackendTests.SeedRegistrationGrantAsync(db);
+        var olderCaseId = await IntakeDecisionStoreTests.SeedManagedCaseAsync(db);
+        var newerCaseId = await IntakeDecisionStoreTests.SeedManagedCaseAsync(db);
+        await SeedRegionScopeAsync(db, olderCaseId);
+        await SeedRegionScopeAsync(db, newerCaseId);
+        var recordedAt = DateTimeOffset.UtcNow;
+        await SeedEventAsync(db, olderCaseId, 1, "CaseReported", recordedAt);
+        await SeedEventAsync(db, newerCaseId, 1, "CaseReported", recordedAt);
+        var query = CreateQuery(db);
+        var actor = CreateOfficer("officer-1");
+        var filter = new CaseQueueFilter(CaseIds: [olderCaseId, newerCaseId]);
+        var orderedIds = new[] { olderCaseId, newerCaseId }.OrderBy(id => id).ToArray();
+        await Assert.ThrowsAsync<ArgumentException>(() => query.GetMineAsync(
+            actor, 1, filter, "invalid", CancellationToken.None));
+
+        var firstPage = await query.GetMineAsync(actor, 1, filter, null, CancellationToken.None);
+        var firstItem = Assert.Single(firstPage.Items);
+        Assert.Equal(orderedIds[0], firstItem.CaseId);
+        Assert.NotNull(firstPage.NextCursor);
+
+        var secondPage = await query.GetMineAsync(actor, 1, filter, firstPage.NextCursor, CancellationToken.None);
+        Assert.Equal(orderedIds[1], Assert.Single(secondPage.Items).CaseId);
+        Assert.Null(secondPage.NextCursor);
+
+        var reportedFirstFilter = new CaseQueueFilter(NewestReportedFirst: true,
+            CaseIds: [olderCaseId, newerCaseId]);
+        var reportedOrder = await new PostgresCaseQueueStore(db).GetOwnedCasesAsync(
+            "officer-1", 2, reportedFirstFilter, CancellationToken.None);
+        var reportedFirstPage = await query.GetMineAsync(actor, 1, reportedFirstFilter, null, CancellationToken.None);
+        Assert.Equal(reportedOrder[0].CaseId, Assert.Single(reportedFirstPage.Items).CaseId);
+        Assert.NotNull(reportedFirstPage.NextCursor);
+        var reportedSecondPage = await query.GetMineAsync(actor, 1, reportedFirstFilter,
+            reportedFirstPage.NextCursor, CancellationToken.None);
+        Assert.Equal(reportedOrder[1].CaseId, Assert.Single(reportedSecondPage.Items).CaseId);
+        Assert.Null(reportedSecondPage.NextCursor);
+    }
+
+    [IntakePostgresFact]
+    public async Task CursorDoesNotRevealMoreOwnedCasesWhenRemainingRowsAreDenied()
+    {
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        await CaseRegistrationBackendTests.SeedRegistrationGrantAsync(db);
+        var readableCaseId = await IntakeDecisionStoreTests.SeedManagedCaseAsync(db);
+        var deniedCaseId = await IntakeDecisionStoreTests.SeedManagedCaseAsync(db, "org-sz-1");
+        await SeedRegionScopeAsync(db, readableCaseId);
+        var recordedAt = DateTimeOffset.UtcNow;
+        await SeedEventAsync(db, deniedCaseId, 1, "CaseReported", recordedAt);
+        await SeedEventAsync(db, readableCaseId, 1, "CaseReported", recordedAt.AddMinutes(1));
+        var filter = new CaseQueueFilter(CaseIds: [readableCaseId, deniedCaseId]);
+
+        var result = await CreateQuery(db).GetMineAsync(
+            CreateOfficer("officer-1"), 1, filter, null, CancellationToken.None);
+
+        Assert.Equal(CaseQueueAccess.Allowed, result.Access);
+        Assert.Equal(readableCaseId, Assert.Single(result.Items).CaseId);
+        Assert.Null(result.NextCursor);
+    }
+
+    [IntakePostgresFact]
     public async Task ForeignOwnedCase_Excluded()
     {
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
@@ -304,6 +366,35 @@ public sealed class CaseQueueTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(CaseQueueQuery.MaxLimit, host.Service.LastLimit);
+    }
+
+    [Fact]
+    public async Task CursorIsPassedToTheAuthorizedQueueQuery()
+    {
+        await using var host = await TestQueueHost.StartAsync();
+        var cursor = $"{DateTimeOffset.UtcNow.UtcDateTime.Ticks:x}.{Guid.NewGuid():N}";
+        using var request = new HttpRequestMessage(HttpMethod.Get,
+            $"/api/v1/cases/mine?limit=25&cursor={Uri.EscapeDataString(cursor)}");
+        TestAuthenticationHandler.AddCookieAuthentication(request);
+
+        using var response = await host.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(cursor, host.Service.LastCursor);
+    }
+
+    [Fact]
+    public async Task OversizedCursor_IsRejectedBeforeQueueQuery()
+    {
+        await using var host = await TestQueueHost.StartAsync();
+        using var request = new HttpRequestMessage(HttpMethod.Get,
+            $"/api/v1/cases/mine?cursor={new string('a', 50)}");
+        TestAuthenticationHandler.AddCookieAuthentication(request);
+
+        using var response = await host.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, host.Service.Calls);
     }
 
     [Fact]
@@ -549,6 +640,8 @@ internal sealed class TestQueueQuery(
 
     public int? LastLimit { get; private set; }
 
+    public string? LastCursor { get; private set; }
+
     public Task<CaseQueueResult> GetMineAsync(
         ActorContext actor,
         int? limit,
@@ -563,5 +656,15 @@ internal sealed class TestQueueQuery(
         return Task.FromResult(access == CaseQueueAccess.Allowed
             ? new CaseQueueResult(access, entries)
             : new CaseQueueResult(access, []));
+    }
+
+    public Task<CaseQueueResult> GetMineAsync(
+        ActorContext actor,
+        int? limit,
+        string? cursor,
+        CancellationToken ct)
+    {
+        LastCursor = cursor;
+        return GetMineAsync(actor, limit, ct);
     }
 }

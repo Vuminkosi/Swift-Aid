@@ -6,7 +6,7 @@ namespace SwiftAid.Mobile.Services.Presentation;
 /// <summary>Projects only fields supported by the existing authorized Mobile case queue.</summary>
 public sealed class MobileCaseWorkspaceClient(ICaseQueueClient caseQueueClient) : ICaseWorkspaceClient
 {
-    private const int MaximumQueueRows = 500;
+    private const int QueuePageSize = 100;
     private const string Capability = "case-workspace";
     private readonly ICaseQueueClient _caseQueueClient = caseQueueClient ?? throw new ArgumentNullException(nameof(caseQueueClient));
 
@@ -24,13 +24,11 @@ public sealed class MobileCaseWorkspaceClient(ICaseQueueClient caseQueueClient) 
 
         try
         {
-            var result = await _caseQueueClient.GetMineAsync(MaximumQueueRows, cancellationToken).ConfigureAwait(false);
+            var result = await GetCompleteQueueAsync(cancellationToken).ConfigureAwait(false);
             if (result.Access == CaseQueueAccess.Denied)
                 return Denied<Page<CaseWorkspaceRow>>();
             if (result.Access != CaseQueueAccess.Allowed)
                 return Unavailable<Page<CaseWorkspaceRow>>("The authorized case list is unavailable right now.");
-            if (result.Items.Count >= MaximumQueueRows)
-                return Unavailable<Page<CaseWorkspaceRow>>("The case list has reached its current limit; a complete filtered result cannot be confirmed.");
 
             var matching = result.Items
                 .Where(item => Matches(item, query))
@@ -69,10 +67,10 @@ public sealed class MobileCaseWorkspaceClient(ICaseQueueClient caseQueueClient) 
         cancellationToken.ThrowIfCancellationRequested();
         try
         {
-            var result = await _caseQueueClient.GetMineAsync(MaximumQueueRows, cancellationToken).ConfigureAwait(false);
+            var result = await GetCompleteQueueAsync(cancellationToken).ConfigureAwait(false);
             if (result.Access == CaseQueueAccess.Denied)
                 return Denied<CaseWorkspaceFilterOptions>();
-            if (result.Access != CaseQueueAccess.Allowed || result.Items.Count >= MaximumQueueRows)
+            if (result.Access != CaseQueueAccess.Allowed)
                 return Unavailable<CaseWorkspaceFilterOptions>("Complete filter choices are not available for this case list.");
 
             var options = new CaseWorkspaceFilterOptions(
@@ -107,6 +105,23 @@ public sealed class MobileCaseWorkspaceClient(ICaseQueueClient caseQueueClient) 
     private static bool HasUnsupportedFilter(CaseWorkspaceQuery query) =>
         !string.IsNullOrWhiteSpace(query.RegionKey) ||
         !string.IsNullOrWhiteSpace(query.AssigneeKey);
+
+    private async Task<CaseQueueResult> GetCompleteQueueAsync(CancellationToken cancellationToken)
+    {
+        var items = new List<CaseQueueItem>();
+        var seenCursors = new HashSet<string>(StringComparer.Ordinal);
+        string? cursor = null;
+        while (true)
+        {
+            var page = await _caseQueueClient.GetMineAsync(QueuePageSize, cursor, cancellationToken).ConfigureAwait(false);
+            if (page.Access != CaseQueueAccess.Allowed)
+                return new CaseQueueResult(page.Access, []);
+            items.AddRange(page.Items);
+            cursor = page.NextCursor;
+            if (cursor is null) return new CaseQueueResult(CaseQueueAccess.Allowed, items);
+            if (!seenCursors.Add(cursor)) return new CaseQueueResult(CaseQueueAccess.Unavailable, []);
+        }
+    }
 
     private static bool Matches(CaseQueueItem item, CaseWorkspaceQuery query)
     {

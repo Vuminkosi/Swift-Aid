@@ -25,6 +25,12 @@ public sealed class CaseQueueGatewayClient(
     public async Task<CaseQueueResult> GetMineAsync(
         int? limit,
         CancellationToken cancellationToken = default)
+        => await GetMineAsync(limit, null, cancellationToken).ConfigureAwait(false);
+
+    public async Task<CaseQueueResult> GetMineAsync(
+        int? limit,
+        string? cursor,
+        CancellationToken cancellationToken = default)
     {
         var actor = await GetActorAsync().ConfigureAwait(false);
         if (actor is null)
@@ -43,7 +49,7 @@ public sealed class CaseQueueGatewayClient(
 
         try
         {
-            return await queue.GetMineAsync(actor, limit, cancellationToken).ConfigureAwait(false);
+            return await queue.GetMineAsync(actor, limit, cursor, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception)
         {

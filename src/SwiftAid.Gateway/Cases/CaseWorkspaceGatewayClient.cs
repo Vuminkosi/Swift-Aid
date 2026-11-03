@@ -12,7 +12,7 @@ public sealed class CaseWorkspaceGatewayClient(
     IPublicIntakeMetadataClient publicMetadataClient,
     ICaseReportDetailsClient? reportClient = null) : ICaseWorkspaceClient
 {
-    private const int MaximumRows = 100;
+    private const int QueuePageSize = 100;
     private const string Capability = "case-workspace";
 
     private readonly ICaseQueueClient _caseQueueClient = caseQueueClient ?? throw new ArgumentNullException(nameof(caseQueueClient));
@@ -28,7 +28,7 @@ public sealed class CaseWorkspaceGatewayClient(
             return Invalid<Page<CaseWorkspaceRow>>("Review the case filters and try again.");
         }
 
-        var queue = await _caseQueueClient.GetMineAsync(MaximumRows, cancellationToken).ConfigureAwait(false);
+        var queue = await GetCompleteQueueAsync(cancellationToken).ConfigureAwait(false);
         if (queue.Access == CaseQueueAccess.Denied)
         {
             return Denied<Page<CaseWorkspaceRow>>();
@@ -82,15 +82,13 @@ public sealed class CaseWorkspaceGatewayClient(
             matching.Length,
             (long)query.Page.PageNumber * query.Page.PageSize < matching.Length);
 
-        return Success(page, queue.Items.Count == MaximumRows
-            ? "Showing the most recent 100 cases available to this list."
-            : null);
+        return Success(page);
     }
 
     public async Task<UiCapabilityResult<CaseWorkspaceFilterOptions>> GetFilterOptionsAsync(
         CancellationToken cancellationToken = default)
     {
-        var queue = await _caseQueueClient.GetMineAsync(MaximumRows, cancellationToken).ConfigureAwait(false);
+        var queue = await GetCompleteQueueAsync(cancellationToken).ConfigureAwait(false);
         if (queue.Access == CaseQueueAccess.Denied)
         {
             return Denied<CaseWorkspaceFilterOptions>();
@@ -136,6 +134,23 @@ public sealed class CaseWorkspaceGatewayClient(
                 UpdatedDate: true));
 
         return Success(filterOptions, "Some filters are not available for this case list.");
+    }
+
+    private async Task<CaseQueueResult> GetCompleteQueueAsync(CancellationToken cancellationToken)
+    {
+        var items = new List<CaseQueueItem>();
+        var seenCursors = new HashSet<string>(StringComparer.Ordinal);
+        string? cursor = null;
+        while (true)
+        {
+            var page = await _caseQueueClient.GetMineAsync(QueuePageSize, cursor, cancellationToken).ConfigureAwait(false);
+            if (page.Access != CaseQueueAccess.Allowed)
+                return new CaseQueueResult(page.Access, []);
+            items.AddRange(page.Items);
+            cursor = page.NextCursor;
+            if (cursor is null) return new CaseQueueResult(CaseQueueAccess.Allowed, items);
+            if (!seenCursors.Add(cursor)) return new CaseQueueResult(CaseQueueAccess.Unavailable, []);
+        }
     }
 
     private static CaseWorkspaceRow ToRow(CaseQueueItem item, IReadOnlyDictionary<string, string> countryLabels) => new(

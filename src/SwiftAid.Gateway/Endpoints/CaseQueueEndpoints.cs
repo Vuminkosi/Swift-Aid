@@ -90,10 +90,22 @@ public static class CaseQueueEndpoints
             limit = Math.Min(parsed, CaseQueueQuery.MaxLimit);
         }
 
+        string? cursor = null;
+        if (context.Request.Query.TryGetValue("cursor", out var cursorText) && cursorText.Count > 0)
+        {
+            cursor = cursorText[0];
+            if (string.IsNullOrEmpty(cursor) || cursor.Length > 49)
+                return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "The page cursor is invalid.");
+        }
+
         try
         {
-            var result = await query.GetMineAsync(actor, limit, cancellationToken).ConfigureAwait(false);
+            var result = await query.GetMineAsync(actor, limit, cursor, cancellationToken).ConfigureAwait(false);
             return MapResult(result);
+        }
+        catch (ArgumentException)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "The page cursor is invalid.");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

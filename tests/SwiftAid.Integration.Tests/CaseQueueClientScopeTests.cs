@@ -37,6 +37,23 @@ public sealed class CaseQueueClientScopeTests
         Assert.Equal(2, gate.Disposed);
     }
 
+    [Fact]
+    public async Task BlazorQueueClientForwardsCursorToTheFreshScopedQuery()
+    {
+        var query = new RecordingQuery();
+        await using var services = new ServiceCollection()
+            .AddSingleton<ICaseQueueQuery>(query)
+            .BuildServiceProvider();
+        await using var circuit = services.CreateAsyncScope();
+        var client = new CaseQueueGatewayClient(new SignedIn(), circuit.ServiceProvider);
+
+        var result = await client.GetMineAsync(50, "cursor-token");
+
+        Assert.Equal(CaseQueueAccess.Allowed, result.Access);
+        Assert.Equal("cursor-token", query.LastCursor);
+        Assert.Equal(50, query.LastLimit);
+    }
+
     private sealed class ReadGate
     {
         public ConcurrentDictionary<Guid, byte> Instances { get; } = new();
@@ -61,6 +78,25 @@ public sealed class CaseQueueClientScopeTests
         {
             Interlocked.Increment(ref gate.Disposed);
             return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class RecordingQuery : ICaseQueueQuery
+    {
+        public string? LastCursor { get; private set; }
+        public int? LastLimit { get; private set; }
+
+        public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CancellationToken ct)
+        {
+            LastLimit = limit;
+            return Task.FromResult(new CaseQueueResult(CaseQueueAccess.Allowed, []));
+        }
+
+        public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, string? cursor, CancellationToken ct)
+        {
+            LastCursor = cursor;
+            LastLimit = limit;
+            return Task.FromResult(new CaseQueueResult(CaseQueueAccess.Allowed, []));
         }
     }
 

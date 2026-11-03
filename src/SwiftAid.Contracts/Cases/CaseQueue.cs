@@ -25,13 +25,20 @@ public enum CaseQueueAccess
     Unavailable
 }
 
-/// <summary>Officer queue result: newest-first owned cases, or an empty list with a flag.</summary>
+/// <summary>One page of the officer's authorized queue.</summary>
+/// <remarks><see cref="NextCursor"/> is a position only; every subsequent row is authorized again by the server.</remarks>
 public sealed record CaseQueueResult(
     CaseQueueAccess Access,
-    IReadOnlyList<CaseQueueItem> Items);
+    IReadOnlyList<CaseQueueItem> Items,
+    string? NextCursor = null);
 
 /// <summary>Staff "my cases" client. Servers enforce ReadCase per case; clients only render.</summary>
 public interface ICaseQueueClient
 {
     Task<CaseQueueResult> GetMineAsync(int? limit, CancellationToken cancellationToken = default);
+
+    Task<CaseQueueResult> GetMineAsync(int? limit, string? cursor, CancellationToken cancellationToken = default) =>
+        cursor is null
+            ? GetMineAsync(limit, cancellationToken)
+            : Task.FromResult(new CaseQueueResult(CaseQueueAccess.Unavailable, []));
 }

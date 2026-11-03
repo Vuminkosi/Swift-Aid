@@ -60,6 +60,30 @@ public sealed class MobileCaseWorkspaceTests
         Assert.False(result.Value.HasMore);
     }
 
+    [Fact]
+    public async Task MobileLoadsEveryAuthorizedQueuePageBeforeFilteringAndPaging()
+    {
+        var rows = Enumerable.Range(0, 535)
+            .Select(index => Row("HumanHealth", $"Category {index}") with
+            {
+                CaseId = Guid.Parse($"{index + 1:x8}-0000-0000-0000-000000000001"),
+                UpdatedAtUtc = DateTimeOffset.UnixEpoch.AddMinutes(535 - index)
+            })
+            .ToArray();
+        var queue = new PagedQueue(rows);
+        var client = new MobileCaseWorkspaceClient(queue);
+
+        var result = await client.ListAsync(new(new PageRequest(6, 50), Sector: CaseWorkspaceSector.Human));
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(535, result.Value!.TotalCount);
+        Assert.True(result.Value.HasMore);
+        Assert.Equal(rows[250].CaseId, result.Value.Items[0].CaseId);
+        var options = await client.GetFilterOptionsAsync();
+        Assert.Contains(options.Value!.ReportedCategories, option => option.Key == "Category 534");
+        Assert.Equal(12, queue.RequestedCursors.Count);
+    }
+
     [Theory]
     [InlineData("HumanHealth", CaseWorkspaceSector.Human)]
     [InlineData("AnimalHealth", CaseWorkspaceSector.Animal)]
@@ -117,5 +141,24 @@ public sealed class MobileCaseWorkspaceTests
     {
         public Task<CaseQueueResult> GetMineAsync(int? limit, CancellationToken cancellationToken = default) =>
             Task.FromResult(new CaseQueueResult(access, items));
+    }
+
+    private sealed class PagedQueue(IReadOnlyList<CaseQueueItem> items) : ICaseQueueClient
+    {
+        public List<string?> RequestedCursors { get; } = [];
+
+        public Task<CaseQueueResult> GetMineAsync(int? limit, CancellationToken cancellationToken = default) =>
+            GetMineAsync(limit, null, cancellationToken);
+
+        public Task<CaseQueueResult> GetMineAsync(int? limit, string? cursor, CancellationToken cancellationToken = default)
+        {
+            RequestedCursors.Add(cursor);
+            var offset = cursor is null ? 0 : int.Parse(cursor, System.Globalization.CultureInfo.InvariantCulture);
+            var size = limit ?? 100;
+            var page = items.Skip(offset).Take(size).ToArray();
+            var nextOffset = offset + page.Length;
+            var next = nextOffset < items.Count ? nextOffset.ToString(System.Globalization.CultureInfo.InvariantCulture) : null;
+            return Task.FromResult(new CaseQueueResult(CaseQueueAccess.Allowed, page, next));
+        }
     }
 }
