@@ -10,7 +10,7 @@ namespace SwiftAid.Application.Sessions;
 /// </summary>
 public enum SessionReminderSync
 {
-    /// <summary>No reminder change (create, review, complete, read paths).</summary>
+    /// <summary>No reminder change (create, review, read paths).</summary>
     None,
 
     /// <summary>
@@ -20,7 +20,7 @@ public enum SessionReminderSync
     /// </summary>
     Recompute,
 
-    /// <summary>Mark Pending rows Suppressed. Used after cancel. Sent rows stay Sent.</summary>
+    /// <summary>Suppress pending work and mark in-progress deliveries outcome unknown after cancellation or completion. Sent rows stay Sent.</summary>
     SuppressPending,
 }
 

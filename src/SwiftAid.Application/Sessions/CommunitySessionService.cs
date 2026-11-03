@@ -97,7 +97,7 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
             case CompleteSessionCommand:
                 session.Complete(actorId, command.RecordedAtUtc);
                 await _store.UpdateAsync(session, command.ExpectedVersion, actorId, command.Reason,
-                    command.RecordedAtUtc, SessionReminderSync.None, null, ct).ConfigureAwait(false);
+                    command.RecordedAtUtc, SessionReminderSync.SuppressPending, null, ct).ConfigureAwait(false);
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(command), "An unsupported session command was supplied.");

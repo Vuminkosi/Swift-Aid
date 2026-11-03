@@ -118,6 +118,7 @@ public sealed class CommunitySessionServiceTests
         await PublishAsync(services.Service, internalId, SessionVisibility.Internal);
         services.Clock.UtcNow = Start.AddHours(1);
         await services.Service.ExecuteAsync(new CompleteSessionCommand(publicId, 3, "completed", Start.AddHours(1)), "officer-2", CancellationToken.None);
+        Assert.Equal(SessionReminderSync.SuppressPending, services.Store.LastSync);
         await services.Service.ExecuteAsync(new CompleteSessionCommand(internalId, 3, "completed", Start.AddHours(1)), "officer-2", CancellationToken.None);
 
         var detail = await services.Service.GetPublicAsync(publicId, CancellationToken.None);

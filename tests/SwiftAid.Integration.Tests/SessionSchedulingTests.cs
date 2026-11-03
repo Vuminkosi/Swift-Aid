@@ -863,6 +863,56 @@ public sealed class SessionSchedulingTests
     }
 
     [IntakePostgresFact]
+    public async Task CompletingSessionSuppressesPendingRemindersAndInvalidatesInProgressDelivery()
+    {
+        var sessionId = Guid.NewGuid();
+        var first = $"session-complete-{Guid.NewGuid():N}";
+        var second = $"session-complete-{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+        var start = now.AddDays(3);
+        var clock = new TestClock(now);
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var sessionStore = new PostgresCommunitySessionStore(db);
+        var sessions = new CommunitySessionService(sessionStore, new FixtureMaterialEligibility(), clock);
+        var subscriptions = new EventSubscriptionService(new PostgresEventSubscriptionStore(db), sessions, clock);
+        try
+        {
+            await CreateActiveActorAsync(db, first);
+            await CreateActiveActorAsync(db, second);
+            await sessions.ExecuteAsync(CreateDraft(sessionId, "officer-1") with { StartUtc = start }, "officer-1", CancellationToken.None);
+            await sessions.ExecuteAsync(new ReviewSessionCommand(sessionId, 1, false, "review", now), "officer-2", CancellationToken.None);
+            await sessions.ExecuteAsync(new ScheduleSessionCommand(sessionId, 2, "schedule", now), "officer-2", CancellationToken.None);
+            foreach (var account in new[] { first, second })
+            {
+                var options = Assert.IsType<EventSubscriptionOptions>(await subscriptions.GetOptionsAsync(sessionId, account, CancellationToken.None));
+                await subscriptions.SubscribeAsync(sessionId, account, options.SessionVersion, options.ConsentReference, "Email", CancellationToken.None);
+            }
+
+            await db.SessionReminderOccurrences.Where(item => item.SessionId == sessionId).OrderBy(item => item.RemindAtUtc).Take(1)
+                .ExecuteUpdateAsync(update => update.SetProperty(item => item.RemindAtUtc, now.AddMinutes(-1)));
+            var deliveries = new PostgresSessionReminderDeliveryStore(db);
+            await deliveries.MaterializeDueAsync(now, 10, CancellationToken.None);
+            var claim = Assert.Single(await deliveries.ClaimDueAsync(now, TimeSpan.FromMinutes(1), 1, ["Email"], CancellationToken.None));
+            clock.UtcNow = start.AddMinutes(1);
+            await sessions.ExecuteAsync(new CompleteSessionCommand(sessionId, 3, "complete", now), "officer-2", CancellationToken.None);
+
+            var stored = await db.SessionReminderDeliveries.AsNoTracking().Where(item => item.SessionId == sessionId).ToListAsync();
+            Assert.Equal(2, stored.Count);
+            Assert.Equal("OutcomeUnknown", stored.Single(item => item.DeliveryId == claim.DeliveryId).Status);
+            Assert.Equal("Suppressed", stored.Single(item => item.DeliveryId != claim.DeliveryId).Status);
+            Assert.False(await deliveries.IsLeaseCurrentAsync(claim.DeliveryId, claim.LeaseId, CancellationToken.None));
+            Assert.All(await db.SessionReminderOccurrences.AsNoTracking().Where(item => item.SessionId == sessionId).ToListAsync(),
+                occurrence => Assert.NotEqual("Pending", occurrence.Status));
+        }
+        finally
+        {
+            await CleanupAsync(sessionId);
+            await CleanupActorAsync(first);
+            await CleanupActorAsync(second);
+        }
+    }
+
+    [IntakePostgresFact]
     public async Task Due_session_reminder_materializes_once_and_cancellation_invalidates_claim()
     {
         var sessionId = Guid.NewGuid();
