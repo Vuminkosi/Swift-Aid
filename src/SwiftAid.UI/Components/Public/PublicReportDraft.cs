@@ -128,7 +128,8 @@ public sealed class PublicReportDraft : IValidatableObject
         string? processingPolicyReference,
         string? processingPolicyVersion,
         IReadOnlyList<PublicCountryOption> countries,
-        bool countryCatalogueIsCurrent)
+        bool countryCatalogueIsCurrent,
+        bool allowUnverifiedCountryForDraft = false)
     {
         ArgumentNullException.ThrowIfNull(countries);
 
@@ -145,10 +146,12 @@ public sealed class PublicReportDraft : IValidatableObject
                 CountryCode.Trim(),
                 StringComparison.OrdinalIgnoreCase));
 
-        if (!string.IsNullOrWhiteSpace(CountryCode) &&
-            (!countryCatalogueIsCurrent ||
-             string.IsNullOrWhiteSpace(countryCatalogueVersion) ||
-             selectedCountry is null))
+        var hasCurrentCountry = countryCatalogueIsCurrent &&
+            !string.IsNullOrWhiteSpace(countryCatalogueVersion) && selectedCountry is not null;
+        var enteredCountry = CountryCode?.Trim().ToUpperInvariant();
+        var canPreserveUnverifiedCountry = allowUnverifiedCountryForDraft && enteredCountry is { Length: 2 } &&
+            enteredCountry.All(char.IsAsciiLetter);
+        if (!string.IsNullOrWhiteSpace(CountryCode) && !hasCurrentCountry && !canPreserveUnverifiedCountry)
         {
             throw new InvalidOperationException(
                 "The selected country is not in the current country list. Choose a current country or mark the location unknown.");
@@ -212,7 +215,7 @@ public sealed class PublicReportDraft : IValidatableObject
                 LocationPrecision.Unknown,
                 null)
             : new LocationContext(
-                selectedCountry?.Code ?? string.Empty,
+                hasCurrentCountry ? selectedCountry!.Code : canPreserveUnverifiedCountry ? enteredCountry! : string.Empty,
                 ToOptionalPlace(RegionPresence, Region, RegionId),
                 ToOptionalPlace(AreaPresence, Area, AreaId),
                 ToOptionalPlace(LocalityPresence, Locality, LocalityId),
@@ -221,14 +224,14 @@ public sealed class PublicReportDraft : IValidatableObject
                 null,
                 LocationSource.Reporter,
                 LocationPrecision.Approximate,
-                countryCatalogueVersion);
+                hasCurrentCountry ? countryCatalogueVersion : null);
 
         var countryCode = location.CountryCode;
         var confirmations = new IntakeConfirmations(
             ReportReviewConfirmed,
             countryCode,
-            countryCatalogueVersion ?? string.Empty,
-            CountryConfirmed,
+            hasCurrentCountry ? countryCatalogueVersion! : string.Empty,
+            hasCurrentCountry && CountryConfirmed,
             ProcessingConfirmed,
             processingPolicyReference ?? string.Empty,
             processingPolicyVersion ?? string.Empty,

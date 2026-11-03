@@ -131,6 +131,20 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             assert(!JSON.stringify(report).includes('SYNTHETIC-PRIVATE'));
             console.log(`PASS: report form and semantic observations at ${width}px`);
         }
+        await page.goto(base + '/ellai-report-fixture');
+        await page.waitForSelector('[data-fixture-ready=true]');
+        await page.getByRole('button', { name: 'Continue to details', exact: true }).click();
+        await page.getByLabel('Describe what happened').fill('Synthetic offline draft');
+        await page.getByLabel('Describe what happened').press('Tab');
+        await page.getByRole('button', { name: 'Toggle country availability' }).click();
+        await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+        await page.getByRole('button', { name: 'Finish fixture storage', exact: true }).click();
+        await page.waitForFunction(() => {
+            const saved = JSON.parse(localStorage.getItem('swiftaid.synthetic-draft-fixture') || 'null');
+            return saved?.Location?.CountryCode === 'SZ' && saved?.Confirmations?.OccurrenceCountryConfirmed === false;
+        });
+        assert.equal(await page.locator('#submission-count').textContent(), '0');
+        console.log('PASS: draft preserves an unverified country while the catalogue is unavailable');
         assert.deepEqual(errors, []);
         assert(!output.includes('Unhandled exception'), output);
         console.log('PASS: real shared report components in Chromium; synthetic receipt callback only, no Gateway/provider/database/device verification.');

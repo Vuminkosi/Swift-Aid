@@ -109,6 +109,32 @@ public sealed partial class GuidedReportDraftPersistenceTests
     }
 
     [Fact]
+    public async Task DraftSavePreservesCountryWhenCatalogueIsUnavailableWithoutAuthorizingSubmission()
+    {
+        var draft = CreateDraft();
+        draft.CountryCode = "SZ";
+        draft.CountryConfirmed = true;
+        IntakeSubmission? saved = null;
+        var component = CreateStepper(draft, request =>
+        {
+            saved = request.Submission;
+            request.ConfirmPersisted(Guid.NewGuid());
+            return Task.CompletedTask;
+        });
+        component.CountryCatalogueIsCurrent = false;
+        component.Countries = [];
+        await InvokeSaveDraftAsync(component);
+
+        Assert.Equal("Saved", GetSaveState(component));
+        Assert.NotNull(saved);
+        Assert.Equal("SZ", saved.Location.CountryCode);
+        Assert.False(saved.Confirmations.OccurrenceCountryConfirmed);
+        Assert.Null(saved.Location.CatalogueVersion);
+        Assert.Equal("SZ", draft.CountryCode);
+        Assert.False((bool)typeof(GuidedReportStepper).GetProperty("CanSubmit", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(component)!);
+    }
+
+    [Fact]
     public async Task OversizedObservationTextBlocksReviewAndIdentifiesItsField()
     {
         var draft = CreateDraft();

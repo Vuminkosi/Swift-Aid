@@ -1329,7 +1329,8 @@
                 ProcessingPolicyReference,
                 ProcessingPolicyVersion,
                 Countries,
-                CountryCatalogueIsCurrent);
+                CountryCatalogueIsCurrent,
+                allowUnverifiedCountryForDraft: true);
             _savingSnapshot = PublicReportDraft.FromSubmission(submission);
             _activeSaveRequest = new PublicReportSaveRequest(CurrentDraftId, submission);
             await OnSaveDraft.InvokeAsync(_activeSaveRequest);

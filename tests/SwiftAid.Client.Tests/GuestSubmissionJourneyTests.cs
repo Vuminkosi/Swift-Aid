@@ -31,6 +31,32 @@ public sealed class GuestSubmissionJourneyTests
     }
 
     [Fact]
+    public async Task UnverifiedCountryDraftSurvivesAndCannotQueueUntilReconfirmed()
+    {
+        var persistence = new MemorySubmissionPersistence();
+        var store = new GuestDraftStore(persistence, transport: new ScriptedTransport());
+        var original = ValidSubmission();
+        var unverified = original with
+        {
+            Location = original.Location with { CatalogueVersion = null },
+            Confirmations = original.Confirmations with
+            {
+                OccurrenceCountryConfirmed = false,
+                OccurrenceCountryCatalogueVersion = string.Empty
+            }
+        };
+        var saved = await store.CreateDraftAsync(unverified);
+        var loaded = await store.GetDraftAsync(saved.ClientSubmissionId);
+        Assert.Equal(unverified.Location.CountryCode, loaded!.Submission.Location.CountryCode);
+        Assert.False(loaded.Submission.Confirmations.OccurrenceCountryConfirmed);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.QueueAsync(saved.ClientSubmissionId));
+        Assert.Equal(GuestSubmissionLocalState.Draft, (await store.GetAsync(saved.ClientSubmissionId))!.State);
+
+        var reconfirmed = await store.CreateRevisionAsync(saved.ClientSubmissionId, original);
+        Assert.Equal(GuestSubmissionLocalState.Queued, (await store.QueueAsync(reconfirmed.ClientSubmissionId)).State);
+    }
+
+    [Fact]
     public async Task Queue_WhenCountryLeavesCatalogue_ThrowsAndKeepsDraftUntouched()
     {
         var persistence = new MemorySubmissionPersistence();
