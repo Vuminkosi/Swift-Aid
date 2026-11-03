@@ -41,6 +41,7 @@ public sealed class PostgresEventSubscriptionStore(SwiftAidDbContext dbContext) 
         Guid sessionId,
         string accountId,
         long expectedSessionVersion,
+        long expectedSubscriptionVersion,
         string channel,
         string consentReference,
         DateTimeOffset recordedAtUtc,
@@ -53,6 +54,9 @@ public sealed class PostgresEventSubscriptionStore(SwiftAidDbContext dbContext) 
                   AND visibility = 'Public' AND status = 'Scheduled'
                   AND published_version > 0 AND scheduled_at_utc IS NOT NULL
                   AND start_utc > {recordedAtUtc}
+                  AND ({expectedSubscriptionVersion} = 0 OR EXISTS (
+                      SELECT 1 FROM community_session_subscriptions
+                      WHERE session_id = {sessionId} AND account_id = {accountId}))
                 FOR UPDATE
             )
             INSERT INTO community_session_subscriptions
@@ -77,6 +81,10 @@ public sealed class PostgresEventSubscriptionStore(SwiftAidDbContext dbContext) 
                     THEN EXCLUDED.updated_at_utc
                     ELSE community_session_subscriptions.updated_at_utc
                 END
+            WHERE community_session_subscriptions.version = {expectedSubscriptionVersion}
+               OR (community_session_subscriptions.status = 'Active'
+                   AND community_session_subscriptions.channel = EXCLUDED.channel
+                   AND community_session_subscriptions.consent_reference = EXCLUDED.consent_reference)
             """, cancellationToken).ConfigureAwait(false);
 
         if (affected == 0)

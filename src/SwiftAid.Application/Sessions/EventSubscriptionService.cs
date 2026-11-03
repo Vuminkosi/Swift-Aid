@@ -14,6 +14,7 @@ public interface IEventSubscriptionStore
         Guid sessionId,
         string accountId,
         long expectedSessionVersion,
+        long expectedSubscriptionVersion,
         string channel,
         string consentReference,
         DateTimeOffset recordedAtUtc,
@@ -81,7 +82,8 @@ public sealed class EventSubscriptionService(
         var session = await _sessions.GetPublicAsync(sessionId, cancellationToken).ConfigureAwait(false);
         if (!IsSubscribable(session)) return null;
 
-        return new EventSubscriptionOptions(sessionId, session!.Version, ConsentReference(sessionId, session.Version),
+        var current = await _store.GetAsync(sessionId, accountId, cancellationToken).ConfigureAwait(false);
+        return new EventSubscriptionOptions(sessionId, session!.Version, ConsentReference(sessionId, session.Version, current?.Version ?? 0),
             ConsentCopy, Array.AsReadOnly(Channels), IsCurrent: true);
     }
 
@@ -94,8 +96,7 @@ public sealed class EventSubscriptionService(
         var current = await _store.GetAsync(sessionId, accountId, cancellationToken).ConfigureAwait(false);
         if (current is null) return new EventSubscription(sessionId, accountId, EventSubscriptionStatus.Unsubscribed, [], null, 0);
         if (current.Status == EventSubscriptionStatus.Active &&
-            (!IsSubscribable(session) || !string.Equals(current.ConsentReference,
-                ConsentReference(sessionId, session.Version), StringComparison.Ordinal)))
+            (!IsSubscribable(session) || !IsCurrentConsent(current.ConsentReference, sessionId, session.Version)))
         {
             return current with { Status = EventSubscriptionStatus.Unsubscribed, Channels = [], ConsentReference = null };
         }
@@ -120,8 +121,8 @@ public sealed class EventSubscriptionService(
             }
 
             var session = await _sessions.GetPublicAsync(subscription.SessionId, cancellationToken).ConfigureAwait(false);
-            if (!IsSubscribable(session) || !string.Equals(subscription.ConsentReference,
-                    ConsentReference(subscription.SessionId, session!.Version), StringComparison.Ordinal))
+            if (!IsSubscribable(session) || !IsCurrentConsent(subscription.ConsentReference,
+                    subscription.SessionId, session!.Version))
             {
                 results.Add(subscription with
                 {
@@ -153,12 +154,12 @@ public sealed class EventSubscriptionService(
 
         var session = await _sessions.GetPublicAsync(sessionId, cancellationToken).ConfigureAwait(false);
         if (!IsSubscribable(session) || session!.Version != expectedSessionVersion ||
-            !string.Equals(consentReference, ConsentReference(sessionId, session.Version), StringComparison.Ordinal))
+            !TryReadConsentVersion(consentReference, sessionId, session.Version, out var expectedSubscriptionVersion))
         {
             throw new SessionSubscriptionConflictException(sessionId);
         }
 
-        return await _store.SubscribeAsync(sessionId, accountId, expectedSessionVersion, channel, consentReference,
+        return await _store.SubscribeAsync(sessionId, accountId, expectedSessionVersion, expectedSubscriptionVersion, channel, consentReference,
             _timeProvider.GetUtcNow(), cancellationToken).ConfigureAwait(false);
     }
 
@@ -189,7 +190,7 @@ public sealed class EventSubscriptionService(
             return false;
         var session = await _sessions.GetPublicAsync(sessionId, cancellationToken).ConfigureAwait(false);
         if (!IsSubscribable(session) || session!.Version != sessionVersion ||
-            !string.Equals(consentReference, ConsentReference(sessionId, session.Version), StringComparison.Ordinal))
+            !IsCurrentConsent(consentReference, sessionId, session.Version))
         {
             return false;
         }
@@ -204,8 +205,22 @@ public sealed class EventSubscriptionService(
     private bool IsSubscribable(PublicSessionView? session) => session is { Status: "Scheduled" } &&
         session.StartUtc > _timeProvider.GetUtcNow();
 
-    private static string ConsentReference(Guid sessionId, long version) =>
-        $"session-reminder-consent-v1:{sessionId:N}:{version}";
+    private static string ConsentReference(Guid sessionId, long sessionVersion, long subscriptionVersion) =>
+        $"session-reminder-consent-v2:{sessionId:N}:{sessionVersion}:{subscriptionVersion}";
+
+    private static bool IsCurrentConsent(string? reference, Guid sessionId, long sessionVersion) =>
+        string.Equals(reference, $"session-reminder-consent-v1:{sessionId:N}:{sessionVersion}", StringComparison.Ordinal) ||
+        TryReadConsentVersion(reference, sessionId, sessionVersion, out _);
+
+    private static bool TryReadConsentVersion(string? reference, Guid sessionId, long sessionVersion, out long subscriptionVersion)
+    {
+        subscriptionVersion = 0;
+        var prefix = $"session-reminder-consent-v2:{sessionId:N}:{sessionVersion}:";
+        return reference is not null && reference.StartsWith(prefix, StringComparison.Ordinal) &&
+            long.TryParse(reference.AsSpan(prefix.Length), System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out subscriptionVersion) && subscriptionVersion >= 0 &&
+            string.Equals(reference, ConsentReference(sessionId, sessionVersion, subscriptionVersion), StringComparison.Ordinal);
+    }
 
     private static void RequireIdentity(Guid sessionId, string accountId)
     {

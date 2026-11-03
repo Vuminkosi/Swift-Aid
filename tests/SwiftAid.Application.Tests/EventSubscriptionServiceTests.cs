@@ -51,6 +51,12 @@ public sealed class EventSubscriptionServiceTests
             options.ConsentReference, "Email", default));
         Assert.Equal(EventSubscriptionStatus.Unsubscribed,
             (await store.GetAsync(SessionId, AccountId, default))!.Status);
+        await Assert.ThrowsAsync<SessionSubscriptionConflictException>(() => service.SubscribeAsync(SessionId, AccountId,
+            options.SessionVersion, options.ConsentReference, "Email", default));
+        var freshOptions = Assert.IsType<EventSubscriptionOptions>(await service.GetOptionsAsync(SessionId, AccountId, default));
+        var renewed = await service.SubscribeAsync(SessionId, AccountId, freshOptions.SessionVersion,
+            freshOptions.ConsentReference, "Email", default);
+        Assert.Equal(EventSubscriptionStatus.Active, renewed.Status);
     }
 
     [Fact]
@@ -78,6 +84,19 @@ public sealed class EventSubscriptionServiceTests
 
         Assert.False(await service.CanDispatchReminderAsync(SessionId, AccountId, options.SessionVersion,
             options.ConsentReference, "Email", default));
+    }
+
+    [Fact]
+    public async Task ExistingLegacyConsentRemainsValidButCannotBeReplayedAsANewSubscribe()
+    {
+        var (service, _, store) = Create();
+        var legacy = $"session-reminder-consent-v1:{SessionId:N}:4";
+        await store.SubscribeAsync(SessionId, AccountId, 4, 0, "Email", legacy, Now, default);
+
+        Assert.Equal(EventSubscriptionStatus.Active, (await service.GetAsync(SessionId, AccountId, default))!.Status);
+        Assert.True(await service.CanDispatchReminderAsync(SessionId, AccountId, 4, legacy, "Email", default));
+        await Assert.ThrowsAsync<SessionSubscriptionConflictException>(() => service.SubscribeAsync(SessionId, AccountId,
+            4, legacy, "Email", default));
     }
 
     [Fact]
@@ -144,13 +163,15 @@ public sealed class EventSubscriptionServiceTests
                 .OrderBy(item => item.SessionId)
                 .ToArray());
 
-        public Task<EventSubscription> SubscribeAsync(Guid sessionId, string accountId, long expectedSessionVersion, string channel,
+        public Task<EventSubscription> SubscribeAsync(Guid sessionId, string accountId, long expectedSessionVersion, long expectedSubscriptionVersion, string channel,
             string consentReference, DateTimeOffset recordedAtUtc, CancellationToken cancellationToken)
         {
             var key = (sessionId, accountId);
             if (_subscriptions.TryGetValue(key, out var existing) && existing.Status == EventSubscriptionStatus.Active &&
                 existing.Channels.SequenceEqual([channel], StringComparer.Ordinal) && existing.ConsentReference == consentReference)
                 return Task.FromResult(existing);
+            if ((existing?.Version ?? 0) != expectedSubscriptionVersion)
+                throw new SessionSubscriptionConflictException(sessionId);
             var next = new EventSubscription(sessionId, accountId, EventSubscriptionStatus.Active, [channel], consentReference,
                 existing?.Version + 1 ?? 1);
             _subscriptions[key] = next;

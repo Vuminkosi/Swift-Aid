@@ -35,8 +35,11 @@ public sealed class PostgresSessionReminderDeliveryStore(SwiftAidDbContext dbCon
               AND session.version = occurrence.version
               AND session.start_utc > {now}
               AND subscription.status = 'Active'
-              AND subscription.consent_reference =
-                  'session-reminder-consent-v1:' || replace(session.session_id::text, '-', '') || ':' || session.version::text
+              AND (subscription.consent_reference =
+                    'session-reminder-consent-v1:' || replace(session.session_id::text, '-', '') || ':' || session.version::text
+                   OR subscription.consent_reference =
+                    'session-reminder-consent-v2:' || replace(session.session_id::text, '-', '') || ':' ||
+                    session.version::text || ':' || (subscription.version - 1)::text)
               AND actor.status = 'Active'
               AND (actor.expires_at_utc IS NULL OR actor.expires_at_utc > {now})
               AND access_state.access_epoch >= 0

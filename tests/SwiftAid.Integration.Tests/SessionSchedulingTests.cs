@@ -442,32 +442,36 @@ public sealed class SessionSchedulingTests
             Assert.True(await service.CanDispatchReminderAsync(sessionId, accountId, options.SessionVersion,
                 options.ConsentReference, "Email", CancellationToken.None));
 
-            var changed = await service.SubscribeAsync(sessionId, accountId, options.SessionVersion,
-                options.ConsentReference, "MobilePush", CancellationToken.None);
+            var changedOptions = (await service.GetOptionsAsync(sessionId, accountId, CancellationToken.None))!;
+            var changed = await service.SubscribeAsync(sessionId, accountId, changedOptions.SessionVersion,
+                changedOptions.ConsentReference, "MobilePush", CancellationToken.None);
             Assert.Equal(2, changed.Version);
             var actor = await db.Actors.SingleAsync(item => item.ActorId == accountId);
             actor.Status = SwiftAid.Infrastructure.Persistence.PersistentActorStatus.Suspended;
             await db.SaveChangesAsync();
             Assert.False(await service.CanDispatchReminderAsync(sessionId, accountId, options.SessionVersion,
-                options.ConsentReference, "MobilePush", CancellationToken.None));
+                changedOptions.ConsentReference, "MobilePush", CancellationToken.None));
 
             actor.Status = SwiftAid.Infrastructure.Persistence.PersistentActorStatus.Active;
             await db.SaveChangesAsync();
             Assert.True(await service.CanDispatchReminderAsync(sessionId, accountId, options.SessionVersion,
-                options.ConsentReference, "MobilePush", CancellationToken.None));
+                changedOptions.ConsentReference, "MobilePush", CancellationToken.None));
 
             var unsubscribed = await service.UnsubscribeAsync(sessionId, accountId, changed.Version, CancellationToken.None);
             Assert.Equal(EventSubscriptionStatus.Unsubscribed, unsubscribed.Status);
             Assert.Equal(3, unsubscribed.Version);
             Assert.False(await service.CanDispatchReminderAsync(sessionId, accountId, options.SessionVersion,
-                options.ConsentReference, "MobilePush", CancellationToken.None));
+                changedOptions.ConsentReference, "MobilePush", CancellationToken.None));
+            await Assert.ThrowsAsync<SessionSubscriptionConflictException>(() => service.SubscribeAsync(sessionId, accountId,
+                options.SessionVersion, options.ConsentReference, "Email", CancellationToken.None));
+            var renewedOptions = (await service.GetOptionsAsync(sessionId, accountId, CancellationToken.None))!;
             var renewed = await service.SubscribeAsync(sessionId, accountId, options.SessionVersion,
-                options.ConsentReference, "MobilePush", CancellationToken.None);
+                renewedOptions.ConsentReference, "MobilePush", CancellationToken.None);
             Assert.Equal(4, renewed.Version);
             Assert.False(await service.CanDispatchReminderAsync(sessionId, accountId, options.SessionVersion,
-                options.ConsentReference, "MobilePush", CancellationToken.None, changed.Version));
+                changedOptions.ConsentReference, "MobilePush", CancellationToken.None, changed.Version));
             Assert.True(await service.CanDispatchReminderAsync(sessionId, accountId, options.SessionVersion,
-                options.ConsentReference, "MobilePush", CancellationToken.None, renewed.Version));
+                renewedOptions.ConsentReference, "MobilePush", CancellationToken.None, renewed.Version));
         }
         finally
         {
@@ -492,7 +496,7 @@ public sealed class SessionSchedulingTests
                 "officer-2", CancellationToken.None);
 
             await Assert.ThrowsAsync<SessionSubscriptionConflictException>(() => store.SubscribeAsync(
-                sessionId, accountId, 3, "Email", "previously-read-consent", DateTimeOffset.UtcNow, CancellationToken.None));
+                sessionId, accountId, 3, 0, "Email", "previously-read-consent", DateTimeOffset.UtcNow, CancellationToken.None));
             Assert.Null(await store.GetAsync(sessionId, accountId, CancellationToken.None));
         }
         finally
@@ -525,7 +529,7 @@ public sealed class SessionSchedulingTests
                 UPDATE community_sessions SET status = 'Cancelled', version = version + 1 WHERE session_id = {sessionId}
                 """);
             var pending = new PostgresEventSubscriptionStore(subscriberDb).SubscribeAsync(
-                sessionId, accountId, 3, "Email", "previously-read-consent", DateTimeOffset.UtcNow, CancellationToken.None);
+                sessionId, accountId, 3, 0, "Email", "previously-read-consent", DateTimeOffset.UtcNow, CancellationToken.None);
 
             await observerDb.Database.OpenConnectionAsync();
             await using var blockedCommand = observerDb.Database.GetDbConnection().CreateCommand();
