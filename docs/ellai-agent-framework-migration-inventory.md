@@ -530,7 +530,7 @@ they do not establish PostgreSQL persistence or live client tour execution.
 | 7 | Reject unauthorized calls | Framework and PostgreSQL fixtures exercised denied tools and revoked case access. Independent security review and deployed authorization remain open. |
 | 8 | Invalid or unavailable tools | Synthetic malformed-tool tests and disposable stopped-Qdrant tests fail safely or use the existing PostgreSQL fallback. Other provider and service failure modes remain open. |
 | 9 | Timeout and cancellation | Explicitly classified read-only Gateway tools and the state tool's authorized queue-read phase return at cancellation/deadline even if a read ignores cancellation; late results are withheld and at most eight operations can remain active. State reference writes, unclassified tools and direct executor calls remain cooperative. The underlying operation is not forcibly terminated; deployed validation and independent review remain open. |
-| 10 | Existing integration and regression tests | At `f2b46f8` the application suite passed 1,188 with 18 skipped. Four default integration runs produced 806 passed/1 failed/333 skipped, 805 passed/2 failed/333 skipped, then two runs with 807 passed/0 failed/333 skipped. The first failure was a signed-in native WebSocket test that passed in isolation; the second run's failure details were lost to output truncation. Intermittent failures and opt-in skips leave full regression acceptance open. |
+| 10 | Existing integration and regression tests | At `f2b46f8` the application suite passed 1,188 with 18 skipped. Five default integration runs produced 806 passed/1 failed/333 skipped, 805 passed/2 failed/333 skipped, then three runs with 807 passed/0 failed/333 skipped. The first failure was a signed-in native WebSocket test that passed in isolation; the second run's failure details were lost to output truncation. Intermittent failures and opt-in skips leave full regression acceptance open. |
 
 The Gateway runs explicitly classified read-only tools in independently owned
 scopes through a process-wide pool of eight. Cancellation or the existing tool deadline stops
@@ -3784,5 +3784,33 @@ truncation lost those failure names and errors. The third returned 807 passed,
 of both native WebSocket cases passed 2/2. The cause of the first failure was
 not captured; the test uses a one-second HTTP timeout, but load is only a
 possible explanation. A fourth run with the same options and TRX capture also
-passed 807, failed 0 and skipped 333. These inconsistent results and skipped
-fixtures do not establish a stable full regression pass.
+passed 807, failed 0 and skipped 333. A fifth captured run had the same
+807/0/333 result. These inconsistent results and skipped fixtures do not
+establish a stable full regression pass.
+
+### Malformed framework tool-call arguments — 2026-11-04
+
+The framework guard checked tool names but did not check `FunctionCallContent.Exception`.
+Synthetic streaming and non-streaming regressions demonstrated that a call
+with a parse exception reached the broker before the fix, including a no-arg
+tool. The guard now rejects such a call as `InvalidArguments` before framework
+tool invocation; it does not expose the exception text. In a mixed batch it
+rejects the batch before either call is invoked. The SDK describes this
+exception as a mapping error in its [function-call content contract](https://github.com/dotnet/extensions/blob/main/src/Libraries/Microsoft.Extensions.AI.Abstractions/Contents/FunctionCallContent.cs).
+
+PASS: the framework contract and official Muse adapter filters passed 126/126
+using `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj
+--no-restore -m:1 -nr:false --filter
+'FullyQualifiedName~EllaiAgentFrameworkContractTests|FullyQualifiedName~EllaiMuseChatClientTests'
+--logger 'console;verbosity=minimal'`. These include malformed streaming and
+non-streaming HTTP responses through the official adapter and mixed synthetic
+calls delivered in separate streaming updates. PASS: the focused worker outcome
+filter passed 4/4 with `OS=Windows_NT` and `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore
+-m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~WorkerRejectsMalformedToolArgumentsWithoutPublishingAnAnswer|FullyQualifiedName~WorkerAcknowledgesOnlyWithDurableExplicitOutcome'
+--logger 'console;verbosity=minimal'`; the worker recorded terminal failure with
+no answer or tool trace. This does not verify malformed output from live Muse
+or change the separate split-function-name compatibility limitation.
+The complete default application suite also passed 1,194, failed 0 and skipped
+18 after this change using the application test command above without a filter.

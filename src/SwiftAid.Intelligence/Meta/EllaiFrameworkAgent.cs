@@ -522,9 +522,12 @@ public sealed class EllaiFrameworkAgent
 
         private static void ValidateToolCalls(IEnumerable<AIContent> contents, ChatOptions? options)
         {
+            var calls = contents.OfType<FunctionCallContent>().ToArray();
+            if (calls.Any(call => call.Exception is not null))
+                throw new EllaiFrameworkFailureException(EllaiToolReasonCodes.InvalidArguments);
             var allowed = options?.Tools?.OfType<AIFunctionDeclaration>()
                 .Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal) ?? new HashSet<string>(StringComparer.Ordinal);
-            if (contents.OfType<FunctionCallContent>().Any(call => string.IsNullOrWhiteSpace(call.Name) || !allowed.Contains(call.Name)))
+            if (calls.Any(call => string.IsNullOrWhiteSpace(call.Name) || !allowed.Contains(call.Name)))
                 throw new EllaiFrameworkFailureException(EllaiToolReasonCodes.UnregisteredTool);
         }
 

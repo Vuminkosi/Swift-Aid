@@ -719,6 +719,58 @@ public sealed class EllaiAgentFrameworkContractTests
         Assert.Equal(1, client.Calls);
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task FrameworkRejectsToolCallsWithArgumentParsingErrors(bool streaming, bool mixedBatch)
+    {
+        using var client = new MalformedToolClient(mixedBatch);
+        var agent = new EllaiFrameworkAgent(client);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string> { EllaiToolNames.Now });
+        var invoked = false;
+        var caught = await Record.ExceptionAsync(() => agent.RunAsync(context, "policy",
+            [new ChatMessage(ChatRole.User, "test")], 100, _ => Task.FromResult(true), (_, request, _) =>
+            {
+                invoked = true;
+                return Task.FromResult(new EllaiToolResult(request.ToolName, true, null, [], "Synthetic time", 1, false));
+            }, new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default,
+            streaming ? (_, _) => ValueTask.CompletedTask : null));
+        Assert.False(invoked);
+        var error = Assert.IsType<EllaiFrameworkFailureException>(caught);
+        Assert.Equal(EllaiToolReasonCodes.InvalidArguments, error.Code);
+        Assert.Equal(1, client.Calls);
+    }
+
+    private sealed class MalformedToolClient(bool mixedBatch) : IChatClient
+    {
+        public int Calls { get; private set; }
+        private AIContent[] Next()
+        {
+            if (++Calls != 1) return [new TextContent(ValidDecision)];
+            var invalid = new FunctionCallContent("malformed", EllaiToolNames.Now) { Exception = new FormatException("synthetic parse failure") };
+            return mixedBatch ? [new FunctionCallContent("valid", EllaiToolNames.Now), invalid] : [invalid];
+        }
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default) => Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, Next())));
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            var contents = Next();
+            if (mixedBatch && contents.Length == 2)
+            {
+                yield return new ChatResponseUpdate(ChatRole.Assistant, [contents[0]]);
+                yield return new ChatResponseUpdate(ChatRole.Assistant, [contents[1]]);
+            }
+            else yield return new ChatResponseUpdate(ChatRole.Assistant, contents);
+        }
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
     private sealed class NamelessToolClient : IChatClient
     {
         public int Calls { get; private set; }

@@ -717,6 +717,67 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
         public void Dispose() { }
     }
 
+    [Fact]
+    public async Task WorkerRejectsMalformedToolArgumentsWithoutPublishingAnAnswer()
+    {
+        var store = new InMemoryEllaiSessionStore();
+        var responses = new EllaiSessionResponseStore();
+        var actor = ActorContext.FromValidatedPrincipal(new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, "malformed-worker"), new Claim(ActorContext.AccessEpochClaimType, "1")], "test")));
+        var session = new EllaiSessionRecord("malformed-session", EllaiMode.Ask, "Active", 1, 1, 1, 1,
+            0, 12, actor.ActorId, "scope", null, null, DateTimeOffset.UtcNow);
+        await store.CreateAsync(session, default);
+        var work = new EllaiUtteranceWork(session.SessionId, "scope", "What time is it?", "public.product-help", null,
+            EllaiMode.Ask, 1, "cycle", actor, true, "consent/0", EllaiProcessingClassification.UserProvidedNonSensitive,
+            EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string> { EllaiToolNames.Now },
+            EllaiConsentPurposes.PublicProductHelp, "turn");
+        await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 }, 1, work.ClientUtteranceId,
+            default, EllaiUtteranceWorkEnvelope.Serialize(work, work.ClientUtteranceId));
+        var consent = new EllaiConsentService();
+        using var model = new MalformedWorkerClient();
+        var executor = new EllaiFrameworkExecutor(model, new EllaiPromptBuilder("Synthetic policy", "fixture"),
+            new EllaiToolBroker(new EllaiPolicyService(), consent), new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
+        await using var services = new ServiceCollection().AddSingleton<IEllaiSessionStore>(store)
+            .AddSingleton<IEllaiUtteranceOutboxStore>(store).AddSingleton(responses).AddSingleton(consent)
+            .AddSingleton<IEllaiReasoningExecutor>(executor).BuildServiceProvider();
+        using var worker = new EllaiUtteranceWorker(services, NullLogger<EllaiUtteranceWorker>.Instance);
+        await worker.StartAsync(default);
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            EllaiConversationTurn turn;
+            do
+            {
+                await Task.Delay(10, timeout.Token);
+                turn = Assert.Single(await store.ReadConversationAsync(session.SessionId, actor.ActorId, timeout.Token));
+            } while (turn.CompletedAtUtc is null);
+            Assert.Equal("TerminalFailure", turn.Outcome);
+            Assert.Null(turn.AssistantText);
+            Assert.Null(turn.ToolTraceJson);
+            Assert.Equal(1, model.Calls);
+            Assert.DoesNotContain(responses.ReadSince(session.SessionId, 0).Responses,
+                item => item.Progress is null && !string.IsNullOrWhiteSpace(item.Text));
+        }
+        finally { await worker.StopAsync(default); }
+    }
+
+    private sealed class MalformedWorkerClient : IChatClient
+    {
+        public int Calls { get; private set; }
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            Calls++;
+            yield return new ChatResponseUpdate(ChatRole.Assistant,
+                [new FunctionCallContent("malformed", EllaiToolNames.Now) { Exception = new FormatException("synthetic parse failure") }]);
+        }
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
     [Theory]
     [InlineData(null, false, false, false)]
     [InlineData(EllaiToolNames.Now, false, false, false)]

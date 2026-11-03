@@ -79,7 +79,65 @@ public sealed class EllaiMuseChatClientTests
         Assert.Equal("Done.", string.Concat(chunks));
     }
 
-    private sealed class FragmentedToolHandler(bool splitName = false) : HttpMessageHandler
+    [Fact]
+    public async Task FrameworkRejectsMalformedStreamedArgumentsFromOfficialAdapter()
+    {
+        using var handler = new FragmentedToolHandler(malformedArguments: true);
+        using var http = new HttpClient(handler);
+        using var client = EllaiMuseChatClientFactory.Create(new EllaiOptions
+        {
+            Enabled = true, ApiUrl = "https://fixture.invalid/v1", ApiKey = "fixture-key", ReasoningModel = "fixture-model"
+        }, http);
+        var agent = new EllaiFrameworkAgent(client);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string> { EllaiToolNames.Now });
+        var invoked = false;
+        var error = await Assert.ThrowsAsync<EllaiFrameworkFailureException>(() => agent.RunAsync(context, "policy",
+            [new ChatMessage(ChatRole.User, "time?")], 100, _ => Task.FromResult(true), (_, request, _) =>
+            {
+                invoked = true;
+                return Task.FromResult(new EllaiToolResult(request.ToolName, true, null, [], "Synthetic time", 1, false));
+            }, new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default,
+            (_, _) => ValueTask.CompletedTask));
+        Assert.Equal(EllaiToolReasonCodes.InvalidArguments, error.Code);
+        Assert.False(invoked);
+        Assert.Equal(1, handler.Requests);
+    }
+
+    [Fact]
+    public async Task FrameworkRejectsMalformedNonStreamingArgumentsFromOfficialAdapter()
+    {
+        using var http = new HttpClient(new MalformedCompletionHandler());
+        using var client = EllaiMuseChatClientFactory.Create(new EllaiOptions
+        {
+            Enabled = true, ApiUrl = "https://fixture.invalid/v1", ApiKey = "fixture-key", ReasoningModel = "fixture-model"
+        }, http);
+        var agent = new EllaiFrameworkAgent(client);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string> { EllaiToolNames.Now });
+        var invoked = false;
+        var error = await Assert.ThrowsAsync<EllaiFrameworkFailureException>(() => agent.RunAsync(context, "policy",
+            [new ChatMessage(ChatRole.User, "time?")], 100, _ => Task.FromResult(true), (_, request, _) =>
+            {
+                invoked = true;
+                return Task.FromResult(new EllaiToolResult(request.ToolName, true, null, [], "Synthetic time", 1, false));
+            }, new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default));
+        Assert.Equal(EllaiToolReasonCodes.InvalidArguments, error.Code);
+        Assert.False(invoked);
+    }
+
+    private sealed class MalformedCompletionHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""
+                    {"id":"fixture","object":"chat.completion","created":1,"model":"fixture-model","choices":[{"index":0,"message":{"role":"assistant","tool_calls":[{"id":"call-1","type":"function","function":{"name":"ellai_now","arguments":"{invalid}"}}]},"finish_reason":"tool_calls"}]}
+                    """, Encoding.UTF8, "application/json")
+            });
+    }
+
+    private sealed class FragmentedToolHandler(bool splitName = false, bool malformedArguments = false) : HttpMessageHandler
     {
         public int Requests { get; private set; }
         public List<string> Bodies { get; } = [];
@@ -107,6 +165,8 @@ public sealed class EllaiMuseChatClientTests
             if (Requests == 1 && splitName)
                 payload = payload.Replace("\"name\":\"ellai_now\"", "\"name\":\"ellai_\"", StringComparison.Ordinal)
                     .Replace("\"function\":{\"arguments\":\"}\"}", "\"function\":{\"name\":\"now\",\"arguments\":\"}\"}", StringComparison.Ordinal);
+            if (Requests == 1 && malformedArguments)
+                payload = payload.Replace("\"arguments\":\"}\"", "\"arguments\":\"invalid}\"", StringComparison.Ordinal);
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(payload, Encoding.UTF8, "text/event-stream")
