@@ -11,6 +11,39 @@ namespace SwiftAid.Ui.Tests;
 public sealed partial class GuidedReportDraftPersistenceTests
 {
     [Fact]
+    public void ReviewSummaryOmitsPlaceNamesMarkedUnknown()
+    {
+        var draft = CreateDraft();
+        draft.RegionPresence = PresenceState.Known;
+        draft.Region = "Synthetic region";
+        draft.AreaPresence = PresenceState.Unknown;
+        draft.Area = "Old area";
+        draft.LocalityPresence = PresenceState.Unknown;
+        draft.Locality = "Old locality";
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        var property = typeof(GuidedReportStepper).GetProperty("LocationSummary", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        Assert.Equal("Synthetic region", property.GetValue(component));
+        draft.RegionPresence = PresenceState.Unknown;
+        draft.CountryCode = "SZ";
+        Assert.Equal("Unknown", property.GetValue(component));
+    }
+
+    [Fact]
+    public void ReviewCountryMatchesTheAcceptedTrimmedCountryCode()
+    {
+        var draft = CreateDraft();
+        draft.CountryCode = " SZ ";
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        component.Countries = [new("SZ", "Eswatini")];
+        component.CountryCatalogueVersion = "test-v1";
+        component.CountryCatalogueIsCurrent = true;
+        var property = typeof(GuidedReportStepper).GetProperty("CountrySummary", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        Assert.Equal("Eswatini", property.GetValue(component));
+    }
+
+    [Fact]
     public async Task OversizedObservationTextBlocksReviewAndIdentifiesItsField()
     {
         var draft = CreateDraft();

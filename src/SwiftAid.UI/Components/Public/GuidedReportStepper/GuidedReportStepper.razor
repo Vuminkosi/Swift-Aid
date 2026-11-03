@@ -747,7 +747,7 @@
 
     private string CountrySummary => string.IsNullOrWhiteSpace(Draft.CountryCode)
         ? "Unknown"
-        : Countries.FirstOrDefault(country => string.Equals(country.Code, Draft.CountryCode, StringComparison.OrdinalIgnoreCase))?.Name
+        : Countries.FirstOrDefault(country => string.Equals(country.Code, Draft.CountryCode.Trim(), StringComparison.OrdinalIgnoreCase))?.Name
             ?? (HasCountryCatalogue ? "Country choice unavailable — choose again" : "Previously selected; country list unavailable");
 
     private bool HasCountryCatalogue => CountryCatalogueIsCurrent &&
@@ -874,7 +874,12 @@
                 return "Unknown";
             }
 
-            var place = string.Join(", ", new[] { Draft.Locality, Draft.Area, Draft.Region }
+            var place = string.Join(", ", new[]
+            {
+                Draft.LocalityPresence == PresenceState.Known ? Draft.Locality : null,
+                Draft.AreaPresence == PresenceState.Known ? Draft.Area : null,
+                Draft.RegionPresence == PresenceState.Known ? Draft.Region : null
+            }
                 .Where(value => !string.IsNullOrWhiteSpace(value)));
             return string.IsNullOrWhiteSpace(place) ? "Unknown" : place;
         }
