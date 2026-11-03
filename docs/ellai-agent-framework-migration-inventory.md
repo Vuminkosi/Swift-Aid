@@ -3220,6 +3220,23 @@ framework PostgreSQL fixture enabled. The temporary database was removed.
 This demonstrates the tested feed path, not a deployed Gateway, browser
 playback, physical device, or reliable generation for every request.
 
+### Live speech for an early grounded segment — 2026-11-03
+
+PASS: `GuestHttpSpeaksLiveMuseEvidenceSegment` exercised the in-process Gateway
+with live Muse, the real product-facts broker, disposable PostgreSQL and the
+existing local Kokoro service through a task-owned loopback relay. It requested
+audio for the exact evidence-backed segment while the durable turn was still
+incomplete, then received nonzero PCM from the `af_heart` voice. The final turn
+and persisted evidence were also checked. The focused speech test passed 1/1;
+the combined text and speech filter passed 2/2. Both used synthetic guest data
+and public product information. Provider and speech credentials were supplied
+only to the test process.
+
+The test does not measure whether the first PCM byte or audible playback began
+before model completion. Browser playback, microphone capture, deployed Gateway
+and physical-device behavior remain NOT VERIFIED. The loopback relay does not
+change or restart the existing speech service.
+
 ### Exact final-claim misattribution — 2026-11-03
 
 The final decision validator accepted an exact case or product-fact line when
