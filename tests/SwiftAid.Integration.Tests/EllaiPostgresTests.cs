@@ -152,6 +152,9 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
                     new EllaiGuidancePlanValidator(registry), new EllaiUsageLedger(), new InMemoryEllaiUsageStore(), default);
                 Assert.True(plan.Status == "Ready", $"Guidance planning returned {plan.Status} ({plan.DiagnosticCode ?? "no diagnostic"}).");
                 Assert.NotEmpty(plan.Plan!.Steps);
+                Assert.Contains(plan.Plan.Steps, step => step.ControlId == "report.save");
+                Assert.DoesNotContain(plan.Plan.Steps, step => step.ControlId is "report.narrative" or "report.time-location" or
+                    "report.review" or "report.confirmations" or "report.submit");
                 Assert.NotNull(EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync(id, default))!.GuidanceJson)?.Plan);
             }
             finally
