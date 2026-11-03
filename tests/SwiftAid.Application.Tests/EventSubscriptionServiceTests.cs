@@ -144,7 +144,7 @@ public sealed class EventSubscriptionServiceTests
                 .OrderBy(item => item.SessionId)
                 .ToArray());
 
-        public Task<EventSubscription> SubscribeAsync(Guid sessionId, string accountId, string channel,
+        public Task<EventSubscription> SubscribeAsync(Guid sessionId, string accountId, long expectedSessionVersion, string channel,
             string consentReference, DateTimeOffset recordedAtUtc, CancellationToken cancellationToken)
         {
             var key = (sessionId, accountId);

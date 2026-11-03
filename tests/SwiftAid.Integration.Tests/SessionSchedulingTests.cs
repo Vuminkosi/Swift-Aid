@@ -477,6 +477,84 @@ public sealed class SessionSchedulingTests
     }
 
     [IntakePostgresFact]
+    public async Task Subscription_write_rejects_a_session_cancelled_after_options_were_read()
+    {
+        var sessionId = Guid.NewGuid();
+        const string accountId = "subscription-stale-cancellation";
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var store = new PostgresEventSubscriptionStore(db);
+        var setup = CreateService(db);
+        try
+        {
+            await CreateActiveActorAsync(db, accountId);
+            await PublishAsync(setup, sessionId, SessionVisibility.Public);
+            await setup.ExecuteAsync(new CancelSessionCommand(sessionId, 3, "Venue unavailable", "cancel", DateTimeOffset.UtcNow),
+                "officer-2", CancellationToken.None);
+
+            await Assert.ThrowsAsync<SessionSubscriptionConflictException>(() => store.SubscribeAsync(
+                sessionId, accountId, 3, "Email", "previously-read-consent", DateTimeOffset.UtcNow, CancellationToken.None));
+            Assert.Null(await store.GetAsync(sessionId, accountId, CancellationToken.None));
+        }
+        finally
+        {
+            await CleanupAsync(sessionId);
+            await CleanupActorAsync(accountId);
+        }
+    }
+
+    [IntakePostgresFact]
+    public async Task Subscription_waits_for_concurrent_cancellation_and_rejects_stale_version()
+    {
+        var sessionId = Guid.NewGuid();
+        const string accountId = "subscription-concurrent-cancellation";
+        await using var writerDb = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        await using var subscriberDb = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        await using var observerDb = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var setup = CreateService(writerDb);
+        try
+        {
+            await CreateActiveActorAsync(writerDb, accountId);
+            await PublishAsync(setup, sessionId, SessionVisibility.Public);
+            await subscriberDb.Database.OpenConnectionAsync();
+            await using var pidCommand = subscriberDb.Database.GetDbConnection().CreateCommand();
+            pidCommand.CommandText = "SELECT pg_backend_pid()";
+            var subscriberPid = (int)(await pidCommand.ExecuteScalarAsync())!;
+
+            await using var transaction = await writerDb.Database.BeginTransactionAsync();
+            await writerDb.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE community_sessions SET status = 'Cancelled', version = version + 1 WHERE session_id = {sessionId}
+                """);
+            var pending = new PostgresEventSubscriptionStore(subscriberDb).SubscribeAsync(
+                sessionId, accountId, 3, "Email", "previously-read-consent", DateTimeOffset.UtcNow, CancellationToken.None);
+
+            await observerDb.Database.OpenConnectionAsync();
+            await using var blockedCommand = observerDb.Database.GetDbConnection().CreateCommand();
+            blockedCommand.CommandText = "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid = @pid AND wait_event_type = 'Lock')";
+            var parameter = blockedCommand.CreateParameter();
+            parameter.ParameterName = "pid";
+            parameter.Value = subscriberPid;
+            blockedCommand.Parameters.Add(parameter);
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            var blocked = false;
+            while (!blocked && DateTime.UtcNow < deadline)
+            {
+                blocked = (bool)(await blockedCommand.ExecuteScalarAsync())!;
+                if (!blocked) await Task.Delay(25);
+            }
+            await transaction.CommitAsync();
+
+            Assert.True(blocked, "The subscription did not wait on the session row lock.");
+            await Assert.ThrowsAsync<SessionSubscriptionConflictException>(() => pending);
+            Assert.Null(await new PostgresEventSubscriptionStore(subscriberDb).GetAsync(sessionId, accountId, CancellationToken.None));
+        }
+        finally
+        {
+            await CleanupAsync(sessionId);
+            await CleanupActorAsync(accountId);
+        }
+    }
+
+    [IntakePostgresFact]
     public async Task Event_subscription_dispatch_is_suppressed_when_session_is_cancelled()
     {
         var sessionId = Guid.NewGuid();

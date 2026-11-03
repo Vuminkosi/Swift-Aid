@@ -40,15 +40,25 @@ public sealed class PostgresEventSubscriptionStore(SwiftAidDbContext dbContext) 
     public async Task<EventSubscription> SubscribeAsync(
         Guid sessionId,
         string accountId,
+        long expectedSessionVersion,
         string channel,
         string consentReference,
         DateTimeOffset recordedAtUtc,
         CancellationToken cancellationToken)
     {
-        await _dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+        var affected = await _dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+            WITH eligible_session AS (
+                SELECT session_id FROM community_sessions
+                WHERE session_id = {sessionId} AND version = {expectedSessionVersion}
+                  AND visibility = 'Public' AND status = 'Scheduled'
+                  AND published_version > 0 AND scheduled_at_utc IS NOT NULL
+                  AND start_utc > {recordedAtUtc}
+                FOR UPDATE
+            )
             INSERT INTO community_session_subscriptions
                 (session_id, account_id, channel, consent_reference, status, version, updated_at_utc)
-            VALUES ({sessionId}, {accountId}, {channel}, {consentReference}, 'Active', 1, {recordedAtUtc})
+            SELECT session_id, {accountId}, {channel}, {consentReference}, 'Active', 1, {recordedAtUtc}
+            FROM eligible_session
             ON CONFLICT (session_id, account_id) DO UPDATE SET
                 channel = EXCLUDED.channel,
                 consent_reference = EXCLUDED.consent_reference,
@@ -68,6 +78,9 @@ public sealed class PostgresEventSubscriptionStore(SwiftAidDbContext dbContext) 
                     ELSE community_session_subscriptions.updated_at_utc
                 END
             """, cancellationToken).ConfigureAwait(false);
+
+        if (affected == 0)
+            throw new SessionSubscriptionConflictException(sessionId);
 
         var saved = await GetAsync(sessionId, accountId, cancellationToken).ConfigureAwait(false);
         return saved ?? throw new InvalidOperationException("The event subscription was not persisted.");

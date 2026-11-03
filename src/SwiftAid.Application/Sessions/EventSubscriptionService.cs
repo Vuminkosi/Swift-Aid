@@ -13,6 +13,7 @@ public interface IEventSubscriptionStore
     Task<EventSubscription> SubscribeAsync(
         Guid sessionId,
         string accountId,
+        long expectedSessionVersion,
         string channel,
         string consentReference,
         DateTimeOffset recordedAtUtc,
@@ -157,7 +158,7 @@ public sealed class EventSubscriptionService(
             throw new SessionSubscriptionConflictException(sessionId);
         }
 
-        return await _store.SubscribeAsync(sessionId, accountId, channel, consentReference,
+        return await _store.SubscribeAsync(sessionId, accountId, expectedSessionVersion, channel, consentReference,
             _timeProvider.GetUtcNow(), cancellationToken).ConfigureAwait(false);
     }
 
