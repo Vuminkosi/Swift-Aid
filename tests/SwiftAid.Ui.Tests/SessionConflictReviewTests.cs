@@ -14,6 +14,33 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed class SessionConflictReviewTests
 {
+    [Fact]
+    public async Task FailedPreflightRetainsProposalAsNotSubmittedUntilAccessReturns()
+    {
+        var id = Guid.NewGuid();
+        var start = DateTimeOffset.UtcNow.AddDays(1);
+        var current = new CommunitySessionView(id, 3, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
+        var input = new UpdateSessionInput("Proposal", "Summary", "Community", [], "Presenter", "en", start, 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
+        var proposal = new SessionUpdateSubmission(id, 3, input, "reason");
+        var page = new SwiftAid.Gateway.Components.Pages.Sessions();
+        var type = page.GetType();
+        var client = new StaffClient(current, true) { IdentityUnavailable = true };
+        type.GetProperty("StaffSessionEditor", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, client);
+        type.GetField("_actorId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, "officer");
+
+        await (Task)type.GetMethod("RunCommandAsync", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(page, [input.ToCommand(id, 3, "reason", DateTimeOffset.UtcNow), proposal])!;
+        Assert.Same(proposal, type.GetField("_deferredProposal", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
+        Assert.True((bool)type.GetField("_deferredNotSubmitted", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page)!);
+        Assert.Null(type.GetField("_conflictProposal", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
+
+        client.IdentityUnavailable = false;
+        await (Task)type.GetMethod("RetryDeferredProposalAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page, null)!;
+        Assert.Same(proposal, type.GetField("_conflictProposal", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
+        Assert.True((bool)type.GetField("_proposalNotSubmitted", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page)!);
+        Assert.False((bool)type.GetField("_proposalOutcomeUnknown", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page)!);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -232,9 +259,10 @@ public sealed class SessionConflictReviewTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task DisplaysBothVersionsAndEscapesUserContent(bool outcomeUnknown)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task DisplaysBothVersionsAndEscapesUserContent(bool outcomeUnknown, bool notSubmitted)
     {
         var id = Guid.NewGuid();
         var start = new DateTimeOffset(2026, 11, 1, 5, 30, 0, TimeSpan.Zero);
@@ -251,11 +279,11 @@ public sealed class SessionConflictReviewTests
         var markup = await renderer.Dispatcher.InvokeAsync(async () =>
         {
             var component = await renderer.RenderComponentAsync<SessionConflictReview>(ParameterView.FromDictionary(
-                new Dictionary<string, object?> { [nameof(SessionConflictReview.Proposal)] = proposal, [nameof(SessionConflictReview.Current)] = current, [nameof(SessionConflictReview.OutcomeUnknown)] = outcomeUnknown }));
+                new Dictionary<string, object?> { [nameof(SessionConflictReview.Proposal)] = proposal, [nameof(SessionConflictReview.Current)] = current, [nameof(SessionConflictReview.OutcomeUnknown)] = outcomeUnknown, [nameof(SessionConflictReview.NotSubmitted)] = notSubmitted }));
             return component.ToHtmlString();
         });
 
-        Assert.Contains(outcomeUnknown ? "outcome could not be confirmed" : "Your update was not saved", markup, StringComparison.Ordinal);
+        Assert.Contains(notSubmitted ? "update was not submitted" : outcomeUnknown ? "outcome could not be confirmed" : "Your update was not saved", markup, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("&lt;Proposal&gt;", markup, StringComparison.Ordinal);
         Assert.Contains("Current summary", markup, StringComparison.Ordinal);
         Assert.Contains("Schedule changed", markup, StringComparison.Ordinal);

@@ -32,7 +32,8 @@
     @if (_deferredProposal is not null)
     {
         <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
-            An update could not be confirmed. Check access again to compare your submitted changes. This temporary copy lasts only while this page remains open.
+            @(_deferredNotSubmitted ? "An update was not submitted because access could not be confirmed." : "An update could not be confirmed.")
+            Check access again to compare your changes. This temporary copy lasts only while this page remains open.
             <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="RetryDeferredProposalAsync" Disabled="_busy">Check access again</MudButton>
             @if (!_confirmingDeferredDiscard)
             {
@@ -49,7 +50,7 @@
     @if (_conflictProposal is { } proposal && _staffView is { } current &&
          _managementCapabilities.CanEdit && CanRenderEditor(_managementCapabilities))
     {
-        <SessionConflictReview Proposal="proposal" Current="current" OutcomeUnknown="_proposalOutcomeUnknown" OnDismiss="DismissConflictProposal" />
+        <SessionConflictReview Proposal="proposal" Current="current" OutcomeUnknown="_proposalOutcomeUnknown" NotSubmitted="_proposalNotSubmitted" OnDismiss="DismissConflictProposal" />
     }
     <PublicSessionsSurface @key="(RequestedSessionId, IsCalendarRoute, InitialRemindersView)" Sessions="_sessions"
                            Loading="_loadingList"
@@ -116,8 +117,10 @@
     private CommunitySessionView? _staffView;
     private SessionUpdateSubmission? _conflictProposal;
     private bool _proposalOutcomeUnknown;
+    private bool _proposalNotSubmitted;
     private SessionUpdateSubmission? _deferredProposal;
     private string? _deferredProposalActor;
+    private bool _deferredNotSubmitted;
     private bool _confirmingDeferredDiscard;
     private bool _confirmingRetainedLeave;
     private string? _retainedLeaveTarget;
@@ -427,9 +430,12 @@
                     string.Equals(_deferredProposalActor, _actorId, StringComparison.Ordinal))
                 {
                     _conflictProposal = deferred;
-                    _proposalOutcomeUnknown = true;
+                    _proposalNotSubmitted = _deferredNotSubmitted;
+                    _proposalOutcomeUnknown = !_deferredNotSubmitted;
                     ClearDeferredProposal();
-                    _serverError = "The update outcome could not be confirmed. Compare your proposal with the current version below.";
+                    _serverError = _proposalNotSubmitted
+                        ? "The update was not submitted. Compare your proposal with the current version below."
+                        : "The update outcome could not be confirmed. Compare your proposal with the current version below.";
                 }
                 return;
             }
@@ -520,6 +526,7 @@
     {
         _deferredProposal = null;
         _deferredProposalActor = null;
+        _deferredNotSubmitted = false;
         _confirmingDeferredDiscard = false;
     }
 
@@ -856,6 +863,7 @@
         {
             _deferredProposal = proposal;
             _deferredProposalActor = originalActorId;
+            _deferredNotSubmitted = false;
         }
 
         await LoadStaffSessionAsync(proposal.SessionId);
@@ -865,6 +873,7 @@
         {
             _conflictProposal = proposal;
             _proposalOutcomeUnknown = outcomeUnknown;
+            _proposalNotSubmitted = false;
             if (outcomeUnknown) ClearDeferredProposal();
             _serverError = outcomeUnknown
                 ? "The update outcome could not be confirmed. Compare your proposal with the current version below."
@@ -887,9 +896,15 @@
         if (!IsCurrentIdentityEpoch(identityEpoch)) return;
         if (!accessAvailable || !CanPerformCommand(command))
         {
+            if (proposal is not null && !string.IsNullOrWhiteSpace(originalActorId) &&
+                (_actorId is null || string.Equals(_actorId, originalActorId, StringComparison.Ordinal)))
+            {
+                _deferredProposal = proposal;
+                _deferredProposalActor = originalActorId;
+                _deferredNotSubmitted = true;
+            }
             ClearEditorState();
             _serverError ??= "Session management is unavailable for this account.";
-            if (proposal is not null) await RecoverConflictAsync(proposal, originalActorId);
             return;
         }
 
