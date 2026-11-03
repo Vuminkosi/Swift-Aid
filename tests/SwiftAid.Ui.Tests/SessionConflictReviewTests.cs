@@ -14,6 +14,46 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed class SessionConflictReviewTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SaveConfirmationRequiresMatchingResultEvenWhenRefreshFails(bool matchingResult)
+    {
+        var id = Guid.NewGuid();
+        var start = DateTimeOffset.UtcNow.AddDays(1);
+        var current = new CommunitySessionView(id, 3, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
+        var input = new UpdateSessionInput("Proposal", "Summary", "Community", [], "Presenter", "en", start, 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
+        var proposal = new SessionUpdateSubmission(id, 3, input, "reason");
+        var page = new SwiftAid.Gateway.Components.Pages.Sessions();
+        var type = page.GetType();
+        var completion = new TaskCompletionSource<UiCapabilityResult<SessionCommandResult>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        completion.SetResult(new UiCapabilityResult<SessionCommandResult>(UiCapabilityResultCode.Success,
+            new SessionCommandResult(matchingResult ? id : Guid.NewGuid(), 4, "Scheduled"),
+            new UiCapabilityMetadata("editor", "1", UiCapabilityProvenance.LiveService, DateTimeOffset.UtcNow, true)));
+        type.GetProperty("StaffSessionEditor", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page,
+            new StaffClient(current, true) { Execution = completion, ReadUnavailable = true });
+        type.GetField("_actorId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, "officer");
+        type.GetField("_editingSessionId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, id);
+        type.GetField("_editingVersion", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, 3L);
+        type.GetField("_editingStatus", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, "Scheduled");
+
+        await (Task)type.GetMethod("RunCommandAsync", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(page, [input.ToCommand(id, 3, "reason", DateTimeOffset.UtcNow), proposal])!;
+
+        var notice = (string?)type.GetField("_commandNotice", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page);
+        if (matchingResult)
+        {
+            Assert.Contains("was saved", notice, StringComparison.Ordinal);
+            Assert.Contains("could not be refreshed", notice, StringComparison.Ordinal);
+            Assert.Null(type.GetField("_deferredProposal", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
+        }
+        else
+        {
+            Assert.Null(notice);
+            Assert.Same(proposal, type.GetField("_deferredProposal", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
+        }
+    }
+
     [Fact]
     public async Task FailedPreflightRetainsProposalAsNotSubmittedUntilAccessReturns()
     {

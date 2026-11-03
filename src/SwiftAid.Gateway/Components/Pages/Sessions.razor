@@ -20,6 +20,10 @@
 <NavigationLock OnBeforeInternalNavigation="ConfirmRetainedLeave" ConfirmExternalNavigation="@HasRetainedProposal" />
 
 <div class="community-sessions-page">
+    @if (_commandNotice is not null)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">@_commandNotice</MudAlert>
+    }
     @if (_confirmingRetainedLeave)
     {
         <MudPaper Class="pa-4 mb-4" Elevation="0" role="alertdialog" aria-modal="true" aria-label="Unconfirmed session update">
@@ -108,6 +112,7 @@
     private long _capabilityRequestGeneration;
     private long _editorGeneration;
     private string? _serverError;
+    private string? _commandNotice;
     private string? _actorId;
     private SessionManagementPresentation _managementCapabilities = SessionManagementPresentation.Unavailable();
     private Guid? _editingSessionId;
@@ -334,6 +339,7 @@
 
     private async Task ManageSessionAsync(Guid? sessionId)
     {
+        _commandNotice = null;
         _conflictProposal = null;
         if (sessionId is null)
         {
@@ -497,6 +503,7 @@
             ClearDeferredProposal();
             ClearEditorState();
             _actorId = null;
+            _commandNotice = null;
             _ = await authenticationStateTask;
             if (!IsCurrentIdentityEpoch(authEpoch)) return;
             await RefreshStaffAccessAsync(_editingSessionId, _editingSessionId is null ? null : _editingVersion);
@@ -883,6 +890,7 @@
 
     private async Task RunCommandAsync(SessionCommand command, SessionUpdateSubmission? proposal = null)
     {
+        _commandNotice = null;
         if (command is UpdateSessionCommand && _deferredProposal is not null)
         {
             _serverError = "Check access to the unconfirmed update or discard its temporary copy before submitting another update.";
@@ -910,14 +918,27 @@
 
         _busy = true;
         _serverError = null;
+        var commandAccepted = false;
         try
         {
             var outcome = await StaffSessionEditor.ExecuteAsync(command);
             if (!IsCurrentIdentityEpoch(identityEpoch)) return;
             if (outcome.Code == UiCapabilityResultCode.Success && outcome.Metadata.IsAvailable && outcome.Value is { } result)
             {
+                if (result.SessionId != command.SessionId || result.Version <= command.ExpectedVersion || string.IsNullOrWhiteSpace(result.Status))
+                    throw new InvalidOperationException("The session command result could not be verified.");
+                commandAccepted = true;
+                _commandNotice = "The session change was saved.";
                 _conflictProposal = null;
                 await LoadStaffSessionAsync(result.SessionId);
+                if (!IsCurrentIdentityEpoch(identityEpoch)) return;
+                if (_actorId is not null && !string.Equals(_actorId, originalActorId, StringComparison.Ordinal))
+                {
+                    _commandNotice = null;
+                    return;
+                }
+                if (_staffView?.SessionId != result.SessionId || _staffView.Version < result.Version)
+                    _commandNotice = "The session change was saved, but current details could not be refreshed. Check access and reopen the session.";
                 await LoadListAsync();
             }
             else
@@ -944,6 +965,11 @@
         {
             if (!IsCurrentIdentityEpoch(identityEpoch)) return;
             ClearEditorState();
+            if (commandAccepted)
+            {
+                _commandNotice = "The session change was saved, but current details could not be refreshed. Check access and reopen the session.";
+                return;
+            }
             _managementCapabilities = SessionManagementPresentation.Unavailable(
                 "The session change could not be confirmed.");
             _canManageSessions = false;
