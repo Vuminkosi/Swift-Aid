@@ -131,6 +131,7 @@ public sealed class EllaiKnowledgeSpecialistTests
         Assert.Equal("proof-1", Assert.Single(Assert.Single(result.Claims).Evidence).EvidenceId);
         Assert.Equal(1, calls);
         Assert.Equal(4, model.Calls);
+        Assert.Equal(4, agent.LastModelCallCount);
     }
 
     [Fact]
@@ -142,6 +143,25 @@ public sealed class EllaiKnowledgeSpecialistTests
             (_, _, _) => throw new InvalidOperationException(), Usage(), default);
         Assert.NotNull(result);
         Assert.DoesNotContain("ellai_delegate_knowledge", model.AvailableTools);
+    }
+
+    [Fact]
+    public async Task ExecutorIncludesDelegatedCallsAndObservationsInParentOutcome()
+    {
+        using var model = new DelegationClient();
+        var executor = new EllaiFrameworkExecutor(model, new EllaiPromptBuilder("Policy", "test"),
+            new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService()),
+            new EllaiUsageLedger(), new InMemoryEllaiUsageStore(), enableKnowledgeSpecialist: true);
+        var request = new EllaiLoopRequest(Context(), "Find documentation", new EllaiRoleOverlay("ask", "help"),
+            "help", 512, "cycle", 1);
+        var result = await executor.RunAsync(request, default, invokeToolAsync: (_, tool, _) =>
+            Task.FromResult(new EllaiToolResult(tool.ToolName, true, null,
+                [new EvidenceRef("Documentation", "safe", "v1", null, "proof-1")], "Observed.", 1, false)));
+
+        Assert.True(result.Completed);
+        Assert.Equal(4, result.IterationsUsed);
+        Assert.Equal(1, result.ToolCallsUsed);
+        Assert.Equal(EllaiToolNames.DocsGet, Assert.Single(result.ObservedTools!).ToolName);
     }
 
     private static EllaiToolContext Context() => new("session", "epoch", "public.product-help", null, 3, true,

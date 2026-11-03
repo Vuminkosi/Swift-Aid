@@ -118,6 +118,7 @@ public sealed class EllaiFrameworkAgent
             return result;
         }
         var tools = EllaiFrameworkToolCatalog.Create(context, InvokeGuardedTool).ToList();
+        var delegatedModelCalls = 0;
         if (enableKnowledgeSpecialist && context.AllowedTools is { } parentTools &&
             (parentTools.Contains(EllaiToolNames.DocsSearch) || parentTools.Contains(EllaiToolNames.DocsGet)))
         {
@@ -130,7 +131,8 @@ public sealed class EllaiFrameworkAgent
                 try
                 {
                     var result = await new EllaiKnowledgeSpecialist(_client, _agentFactory).RunAsync(task,
-                        instructions, true, context, usage, Current, InvokeGuardedTool, token).ConfigureAwait(false);
+                        instructions, true, context, usage, Current, InvokeGuardedTool, token,
+                        calls => Interlocked.Add(ref delegatedModelCalls, calls)).ConfigureAwait(false);
                     if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
                         return "Knowledge specialist could not verify an answer.";
                     var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
@@ -245,12 +247,12 @@ public sealed class EllaiFrameworkAgent
                 }
             }
         }
-        finally { LastModelCallCount = guardedClient.CallSequence; }
+        finally { LastModelCallCount = guardedClient.CallSequence + Volatile.Read(ref delegatedModelCalls); }
         EllaiDecision? decision = null;
         if (guard.FailureCode is not null) { LastFailureCode = guard.FailureCode; return null; }
         while (countResult is null)
         {
-            LastModelCallCount = guardedClient.CallSequence;
+            LastModelCallCount = guardedClient.CallSequence + Volatile.Read(ref delegatedModelCalls);
             if (guard.FailureCode is not null) { LastFailureCode = guard.FailureCode; return null; }
             if (!await Current(ct).ConfigureAwait(false)) { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
             decision = EllaiModelTurnParser.Parse(guardedClient.LastText).Turn?.FinalDecision;
@@ -270,7 +272,7 @@ public sealed class EllaiFrameworkAgent
                 await agent.RunAsync("The previous decision was invalid. Return only a valid final_decision JSON object using the required schema and observed evidence.",
                     session, cancellationToken: ct).ConfigureAwait(false);
             }
-            finally { LastModelCallCount = guardedClient.CallSequence; }
+            finally { LastModelCallCount = guardedClient.CallSequence + Volatile.Read(ref delegatedModelCalls); }
         }
         if (countResult is not null)
         {

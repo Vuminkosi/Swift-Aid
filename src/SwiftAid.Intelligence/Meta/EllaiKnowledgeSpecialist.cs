@@ -23,7 +23,7 @@ public sealed class EllaiKnowledgeSpecialist(IChatClient client, IEllaiFramework
         bool enabled, EllaiToolContext parent, EllaiFrameworkUsage usage,
         Func<CancellationToken, Task<bool>> isCurrent,
         Func<EllaiToolContext, EllaiToolRequest, CancellationToken, Task<EllaiToolResult>> invoke,
-        CancellationToken ct)
+        CancellationToken ct, Action<int>? onModelCalls = null)
     {
         ArgumentNullException.ThrowIfNull(parent);
         ArgumentNullException.ThrowIfNull(usage);
@@ -39,10 +39,18 @@ public sealed class EllaiKnowledgeSpecialist(IChatClient client, IEllaiFramework
 
         context = context with { RemainingCalls = Math.Min(context.RemainingCalls, 2) };
         var agent = new EllaiFrameworkAgent(client, agentFactory);
-        var decision = await agent.RunAsync(context, trustedPolicy +
-            "\nYou are a bounded knowledge specialist. Use only the supplied approved documentation tools. " +
-            "Return an answer grounded in observed evidence; do not request actions or invent sources.",
-            [new ChatMessage(ChatRole.User, task)], 512, isCurrent, invoke, usage, ct, maxModelCalls: 3).ConfigureAwait(false);
+        EllaiDecision? decision;
+        try
+        {
+            decision = await agent.RunAsync(context, trustedPolicy +
+                "\nYou are a bounded knowledge specialist. Use only the supplied approved documentation tools. " +
+                "Return an answer grounded in observed evidence; do not request actions or invent sources.",
+                [new ChatMessage(ChatRole.User, task)], 512, isCurrent, invoke, usage, ct, maxModelCalls: 3).ConfigureAwait(false);
+        }
+        finally
+        {
+            onModelCalls?.Invoke(agent.LastModelCallCount);
+        }
         if (decision is null || decision.Kind != DecisionKind.Answer || decision.Claims.Count == 0 ||
             decision.UiIntents.Count != 0 || decision.PlanProposal is not null ||
             decision.Claims.Any(claim => claim.Kind is not (ClaimKind.Observed or ClaimKind.ProductFact) ||
