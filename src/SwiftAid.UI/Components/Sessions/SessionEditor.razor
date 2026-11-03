@@ -57,16 +57,29 @@
                          Error='@HasError("Tags")' ErrorText='@FieldError("Tags")' />
         </MudItem>
         <MudItem xs="12" md="6">
-            <MudTextField T="string" Label="Time zone" @bind-Value="_timeZone" Required="true"
+            <MudTextField T="string" Label="Time zone" @bind-Value="_timeZone" @bind-Value:after="ClearAmbiguousOffset" Required="true"
                          HelperText="An IANA time zone, for example Africa/Harare."
                          Error='@HasError("TimeZone")' ErrorText='@FieldError("TimeZone")' />
         </MudItem>
         <MudItem xs="12" md="6">
             <MudTextField T="DateTime?" Format="s" InputType="InputType.DateTimeLocal" Label="Start date and time"
-                         @bind-Value="_startLocal" Required="true"
+                         @bind-Value="_startLocal" @bind-Value:after="ClearAmbiguousOffset" Required="true"
                          HelperText="Wall-clock time in the time zone above."
                          Error='@HasError("Start")' ErrorText='@FieldError("Start")' />
         </MudItem>
+        @if (AmbiguousOffsets.Count > 0)
+        {
+            <MudItem xs="12">
+                <MudSelect T="int?" Label="Which occurrence?" @bind-Value="_ambiguousOffsetMinutes"
+                           HelperText="This local time occurs twice when clocks change. Choose its UTC offset."
+                           Error='@HasError("StartOffset")' ErrorText='@FieldError("StartOffset")'>
+                    @foreach (var offset in AmbiguousOffsets)
+                    {
+                        <MudSelectItem T="int?" Value="@((int?)offset)">UTC@FormatOffset(offset)</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+        }
         <MudItem xs="6" md="3">
             <MudTextField T="string" Label="Duration (minutes)" @bind-Value="_durationText" Required="true" InputType="InputType.Number"
                          Error='@HasError("Duration")' ErrorText='@FieldError("Duration")' />
@@ -231,6 +244,7 @@
     private string _topicTagsText = string.Empty;
     private string _timeZone = "Africa/Harare";
     private DateTime? _startLocal;
+    private int? _ambiguousOffsetMinutes;
     private string _durationText = "60";
     private string _capacityText = string.Empty;
     private string _visibility = "Public";
@@ -287,6 +301,7 @@
         _topicTagsText = string.Join(", ", view.TopicTags);
         _timeZone = view.TimeZoneId;
         _startLocal = ToWallClock(view.StartUtc, view.TimeZoneId);
+        _ambiguousOffsetMinutes = GetStoredAmbiguousOffset(view.StartUtc, view.TimeZoneId);
         _durationText = view.DurationMinutes.ToString(System.Globalization.CultureInfo.InvariantCulture);
         _capacityText = view.Capacity?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
         _visibility = view.Visibility.ToString();
@@ -473,8 +488,16 @@
         {
             try
             {
-                startUtc = new DateTimeOffset(
-                    TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(_startLocal.Value, DateTimeKind.Unspecified), zone));
+                var local = DateTime.SpecifyKind(_startLocal.Value, DateTimeKind.Unspecified);
+                if (zone.IsAmbiguousTime(local) &&
+                    (!_ambiguousOffsetMinutes.HasValue || !zone.GetAmbiguousTimeOffsets(local).Contains(TimeSpan.FromMinutes(_ambiguousOffsetMinutes.Value))))
+                {
+                    _errors["StartOffset"] = "Choose which UTC offset applies to this local time.";
+                }
+                else
+                {
+                    startUtc = ToStartUtc();
+                }
             }
             catch (ArgumentException)
             {
@@ -604,8 +627,63 @@
     private DateTimeOffset ToStartUtc()
     {
         var zone = TimeZoneInfo.FindSystemTimeZoneById(_timeZone.Trim());
-        return new DateTimeOffset(
-            TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(_startLocal!.Value, DateTimeKind.Unspecified), zone));
+        var local = DateTime.SpecifyKind(_startLocal!.Value, DateTimeKind.Unspecified);
+        if (zone.IsAmbiguousTime(local))
+        {
+            if (!_ambiguousOffsetMinutes.HasValue ||
+                !zone.GetAmbiguousTimeOffsets(local).Contains(TimeSpan.FromMinutes(_ambiguousOffsetMinutes.Value)))
+            {
+                throw new InvalidOperationException("An offset must be selected for an ambiguous local time.");
+            }
+
+            return new DateTimeOffset(local, TimeSpan.FromMinutes(_ambiguousOffsetMinutes.Value)).ToUniversalTime();
+        }
+
+        return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(local, zone));
+    }
+
+    private IReadOnlyList<int> AmbiguousOffsets
+    {
+        get
+        {
+            if (_startLocal is null || string.IsNullOrWhiteSpace(_timeZone))
+                return Array.Empty<int>();
+
+            try
+            {
+                var zone = TimeZoneInfo.FindSystemTimeZoneById(_timeZone.Trim());
+                var local = DateTime.SpecifyKind(_startLocal.Value, DateTimeKind.Unspecified);
+                return zone.IsAmbiguousTime(local)
+                    ? zone.GetAmbiguousTimeOffsets(local).Select(offset => (int)offset.TotalMinutes).OrderDescending().ToArray()
+                    : Array.Empty<int>();
+            }
+            catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException or ArgumentException)
+            {
+                return Array.Empty<int>();
+            }
+        }
+    }
+
+    private static int? GetStoredAmbiguousOffset(DateTimeOffset startUtc, string timeZoneId)
+    {
+        try
+        {
+            var zone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+            var local = TimeZoneInfo.ConvertTime(startUtc, zone);
+            return zone.IsAmbiguousTime(local.DateTime) ? (int)local.Offset.TotalMinutes : null;
+        }
+        catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private void ClearAmbiguousOffset() => _ambiguousOffsetMinutes = null;
+
+    private static string FormatOffset(int minutes)
+    {
+        var absolute = Math.Abs(minutes);
+        return $"{(minutes < 0 ? "-" : "+")}{absolute / 60:00}:{absolute % 60:00}";
     }
 
     private sealed class MaterialRow
