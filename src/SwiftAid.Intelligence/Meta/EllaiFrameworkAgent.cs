@@ -287,8 +287,8 @@ public sealed class EllaiFrameworkAgent
             return decision;
         }
         if (decision is null) return null;
-        if (!streamSafeToolObservations && revalidateStreamObservations is not null &&
-            !await revalidateStreamObservations(ct).ConfigureAwait(false))
+        if (!streamSafeToolObservations && (revalidateStreamObservations is null ||
+            !await revalidateStreamObservations(ct).ConfigureAwait(false)))
         {
             LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
             return null;

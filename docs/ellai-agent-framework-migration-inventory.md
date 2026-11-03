@@ -3336,3 +3336,31 @@ the synthetic model supported only streaming. After the fixture gained a
 non-streaming response, that attempt returned `TerminalFailure`: the worker
 also requires the public response-publication policy for completion. The
 runner-level scenario above isolates the final evidence check and passed.
+
+### Missing final evidence revalidator — 2026-11-03
+
+`EllaiFrameworkAgent` previously treated an absent observation revalidator as
+permission to return a buffered final decision after a non-public or otherwise
+non-replay-safe tool result. It now denies that final decision unless the
+callback is present and succeeds. The separate authorized count path still
+performs its own fresh aggregate recheck. The Gateway runner supplies the
+observation callback; direct callers using private tools must supply one too.
+When the executor cannot retain a complete bounded observation trace, the
+callback cannot establish current authorization and the answer fails closed.
+
+The new missing-callback regression first failed (one failed, one passed),
+then passed after the change. The framework, runner and authorization filter
+passed 175/175; synthetic direct-caller tests now explicitly supply their
+revalidation callbacks, and incomplete-provenance cases expect denial. The
+default integration suite passed 795, failed 0 and skipped 328 using `dotnet
+test tests\SwiftAid.Integration.Tests\SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --logger
+'console;verbosity=quiet'`.
+
+With disposable PostgreSQL and Qdrant, the authorized worker and direct
+PostgreSQL authority fixtures passed 2/2; a separate Qdrant-backed direct
+recall fixture passed 1/1. Direct fixtures re-invoke their broker and compare
+the observed summary and evidence. The in-process Gateway live Muse guest
+conversation with product-facts tool use passed 1/1. These runs used synthetic
+records; the stores were removed. Deployed Gateway and independent security
+review remain NOT VERIFIED.

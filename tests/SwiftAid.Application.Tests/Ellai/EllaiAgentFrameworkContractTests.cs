@@ -315,7 +315,8 @@ public sealed class EllaiAgentFrameworkContractTests
                 invoked++;
                 Assert.Empty(request.Arguments);
                 return Task.FromResult(new EllaiToolResult(request.ToolName, true, null, [], "Available", 1, false));
-            }, new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default);
+            }, new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default,
+            revalidateStreamObservations: _ => Task.FromResult(true));
 
         Assert.NotNull(result);
         Assert.Equal(1, invoked);
@@ -366,7 +367,8 @@ public sealed class EllaiAgentFrameworkContractTests
             ConsentPurpose: EllaiConsentService.PublicProductHelpPurpose);
 
         var result = await executor.RunAsync(new EllaiLoopRequest(context, "Show me how to report a concern",
-            new EllaiRoleOverlay("ask", "Be brief."), "report-help", 256, "cycle-1", 1), default);
+            new EllaiRoleOverlay("ask", "Be brief."), "report-help", 256, "cycle-1", 1)
+            { RevalidateStreamObservations = (_, _) => Task.FromResult(true) }, default);
 
         Assert.True(result.Completed);
         var proposal = Assert.Single(result.Decision!.UiIntents);
@@ -456,7 +458,7 @@ public sealed class EllaiAgentFrameworkContractTests
             AllowedTools: new HashSet<string> { EllaiToolNames.Now });
         var calls = 0;
         var outcome = await executor.RunAsync(new EllaiLoopRequest(context, "test", new EllaiRoleOverlay("ask", "help"),
-            "clock", 100, "cycle", 1), default, invokeToolAsync: (_, request, _) =>
+            "clock", 100, "cycle", 1) { RevalidateStreamObservations = (_, _) => Task.FromResult(true) }, default, invokeToolAsync: (_, request, _) =>
             {
                 var evidence = distinctEvidence
                     ? new[] { new EvidenceRef("fixture", Interlocked.Increment(ref calls).ToString(), "v1", null, "proof") }
@@ -464,9 +466,9 @@ public sealed class EllaiAgentFrameworkContractTests
                 return Task.FromResult(new EllaiToolResult(request.ToolName, true, null, evidence, "clock", 1, false)
                 { HistoryReplayVersion = EllaiObservedToolResult.CurrentClockVersion });
             });
-        Assert.True(outcome.Completed);
+        Assert.Equal(retained || !distinctEvidence, outcome.Completed);
         Assert.Equal(count, outcome.ToolCallsUsed);
-        if (!retained) Assert.Null(outcome.ObservedTools);
+        if (!retained) Assert.Equal(EllaiToolReasonCodes.DeniedByPolicy, outcome.FailureCode);
         else if (distinctEvidence)
         {
             Assert.Equal(count, outcome.ObservedTools!.Count);
@@ -512,18 +514,18 @@ public sealed class EllaiAgentFrameworkContractTests
         var expiry = DateTimeOffset.UtcNow.AddHours(1);
         var calls = 0;
         var outcome = await executor.RunAsync(new EllaiLoopRequest(context, "test", new EllaiRoleOverlay("ask", "help"),
-            "cases", 100, "cycle", 1), default, invokeToolAsync: (_, request, _) =>
+            "cases", 100, "cycle", 1) { RevalidateStreamObservations = (_, _) => Task.FromResult(true) }, default, invokeToolAsync: (_, request, _) =>
             {
                 var index = Interlocked.Increment(ref calls) - 1;
                 return Task.FromResult(new EllaiToolResult(request.ToolName, true, null,
                     [new EvidenceRef("CaseQueue", ids[index].ToString("D"), "3", null, "proof")], "cases", 1, false)
                     { HistoryValidUntilUtc = expiry.AddSeconds(differentExpirations ? index : 0) });
             });
-        Assert.True(outcome.Completed);
+        Assert.Equal(!differentExpirations, outcome.Completed);
         Assert.Equal(300, outcome.ToolCallsUsed);
         if (differentExpirations)
         {
-            Assert.Null(outcome.ObservedTools);
+            Assert.Equal(EllaiToolReasonCodes.DeniedByPolicy, outcome.FailureCode);
             return;
         }
         Assert.Equal(expectedObservations, outcome.ObservedTools!.Count);
@@ -1118,7 +1120,8 @@ public sealed class EllaiAgentFrameworkContractTests
                 return Task.FromResult(request.ToolName == EllaiToolNames.Now
                     ? new EllaiToolResult(request.ToolName, true, null, [], "Use section safe", 1, false)
                     : new EllaiToolResult(request.ToolName, true, null, [evidence], "Verified observation", 1, false));
-            }, new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None);
+            }, new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None,
+            revalidateStreamObservations: _ => Task.FromResult(true));
 
         Assert.Equal(new[] { EllaiToolNames.Now, EllaiToolNames.DocsGet }, calls);
         Assert.Equal(new[] { "first", "second" }, callIds);
@@ -1482,7 +1485,8 @@ public sealed class EllaiAgentFrameworkContractTests
             broker, new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
         var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
             AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.Now });
-        var request = new EllaiLoopRequest(context, "time?", new EllaiRoleOverlay("ask", "help"), "clock", 100, "cycle", 1);
+        var request = new EllaiLoopRequest(context, "time?", new EllaiRoleOverlay("ask", "help"), "clock", 100, "cycle", 1)
+            { RevalidateStreamObservations = (_, _) => Task.FromResult(true) };
         var events = new List<EllaiActivityEvent>();
         var evidence = new EvidenceRef("TestSource", "synthetic-reference", "1", null, "proof");
         var outcome = await executor.RunAsync(request, CancellationToken.None, onActivity: events.Add,
@@ -1791,8 +1795,10 @@ public sealed class EllaiAgentFrameworkContractTests
         public void Dispose() { }
     }
 
-    [Fact]
-    public async Task RevokedPrivateEvidenceCannotReachBufferedFinalAnswer()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RevokedPrivateEvidenceCannotReachBufferedFinalAnswer(bool hasRevalidation)
     {
         using var client = new PrivateSegmentStreamingClient(omitSegment: true);
         var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
@@ -1804,7 +1810,7 @@ public sealed class EllaiAgentFrameworkContractTests
                 true, null, [], "fixture", 1, false)),
             new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None,
             onTextDelta: (text, _) => { published.Add(text); return ValueTask.CompletedTask; },
-            revalidateStreamObservations: _ => Task.FromResult(false));
+            revalidateStreamObservations: hasRevalidation ? _ => Task.FromResult(false) : null);
         Assert.Null(result);
         Assert.Empty(published);
         Assert.Equal(EllaiToolReasonCodes.DeniedByPolicy, agent.LastFailureCode);

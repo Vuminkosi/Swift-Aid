@@ -625,9 +625,22 @@ public sealed class EllaiMemoryIndexTests
             {
                 using var client = new RecallClient();
                 var agent = new EllaiFrameworkAgent(client);
+                EllaiToolRequest? invoked = null;
+                EllaiToolResult? observed = null;
                 var decision = await agent.RunAsync(context, "Synthetic policy", [new ChatMessage(ChatRole.User, "recall")], 300,
-                    _ => Task.FromResult(true), broker.InvokeAsync,
-                    new EllaiFrameworkUsage(sessionId, new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None);
+                    _ => Task.FromResult(true), async (toolContext, request, ct) =>
+                    {
+                        invoked = request;
+                        return observed = await broker.InvokeAsync(toolContext, request, ct);
+                    },
+                    new EllaiFrameworkUsage(sessionId, new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None,
+                    revalidateStreamObservations: async ct =>
+                    {
+                        if (invoked is null || observed is null) return false;
+                        var current = await broker.InvokeAsync(context, invoked, ct);
+                        return current.Allowed && current.ResultSummary == observed.ResultSummary &&
+                            current.Evidence.SequenceEqual(observed.Evidence);
+                    });
                 Assert.NotNull(decision);
                 return client.Observation;
             }
@@ -745,9 +758,22 @@ public sealed class EllaiMemoryIndexTests
             {
                 using var client = new RecallClient();
                 var agent = new EllaiFrameworkAgent(client);
+                EllaiToolRequest? invoked = null;
+                EllaiToolResult? observed = null;
                 var decision = await agent.RunAsync(context, "Synthetic policy", [new ChatMessage(ChatRole.User, "recall")], 300,
-                    _ => Task.FromResult(true), broker.InvokeAsync,
-                    new EllaiFrameworkUsage(context.SessionId, new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None);
+                    _ => Task.FromResult(true), async (toolContext, request, ct) =>
+                    {
+                        invoked = request;
+                        return observed = await broker.InvokeAsync(toolContext, request, ct);
+                    },
+                    new EllaiFrameworkUsage(context.SessionId, new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None,
+                    revalidateStreamObservations: async ct =>
+                    {
+                        if (invoked is null || observed is null) return false;
+                        var current = await broker.InvokeAsync(context, invoked, ct);
+                        return current.Allowed && current.ResultSummary == observed.ResultSummary &&
+                            current.Evidence.SequenceEqual(observed.Evidence);
+                    });
                 Assert.NotNull(decision);
                 return client.Observation;
             }
