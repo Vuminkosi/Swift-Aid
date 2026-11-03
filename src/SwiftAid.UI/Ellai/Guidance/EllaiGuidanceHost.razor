@@ -93,6 +93,10 @@
         {
             <p role="status" class="ellai-guided-conversation__validation">@context.ValidationMessage</p>
         }
+        @if (!string.IsNullOrWhiteSpace(_guidanceNotice))
+        {
+            <p role="status" class="ellai-guided-conversation__validation">@_guidanceNotice</p>
+        }
         @if (ShowComposer)
         {
             <div class="ellai-guided-conversation__composer">
@@ -281,6 +285,8 @@
 
     protected override void OnInitialized()
     {
+        if (Services.GetService<EllaiValidationGuidance>() is { } validation)
+            validation.Changed += OnValidationGuidanceChanged;
         _navigationTrail.Record(Navigation.ToBaseRelativePath(Navigation.Uri));
         Navigation.LocationChanged += TrackNavigation;
         Launcher.Requested += OnLauncherRequested;
@@ -1899,7 +1905,7 @@
             {
                 if (progress.State == "Guidance")
                 {
-                    if (progress.EventId != _guidanceNarrationEventId || _generatedTour is null ||
+                    if ((progress.EventId != _guidanceNarrationEventId && progress.EventId != _validationNarrationEventId) || _generatedTour is null ||
                         progress.ExpiresAtUtc <= DateTimeOffset.UtcNow) return;
                     _latestResponseText = response.Text;
                     _latestResponseSequence = response.Sequence;
@@ -1912,7 +1918,7 @@
                         Interlocked.Exchange(ref _stopResponsePlaybackRequested, 0);
                         if (!_responseAudioQueueRunning) _ = PlayQueuedResponseAudioAsync();
                     }
-                    else BeginGuidanceCountdown(response.Sequence);
+                    else if (progress.EventId == _guidanceNarrationEventId) BeginGuidanceCountdown(response.Sequence);
                     StateHasChanged();
                     return;
                 }
@@ -3127,6 +3133,8 @@
 
     public void Dispose()
     {
+        if (Services.GetService<EllaiValidationGuidance>() is { } validation)
+            validation.Changed -= OnValidationGuidanceChanged;
         Navigation.LocationChanged -= TrackNavigation;
         _uiObservationLifetime.Cancel();
         _ = CancelGeneratedGuidanceAsync();

@@ -130,6 +130,8 @@ public sealed class EllaiGuidanceAdmissionHttpTests
         app.MapPost("/sessions/{sessionId}/guidance/control", controlHandler);
         Delegate narrationHandler = (Func<HttpContext, string, EllaiGuidanceNarrationRequest, IServiceProvider, CancellationToken, Task<IResult>>)EllaiGuidanceProposalEndpoint.NarrateAsync;
         app.MapPost("/sessions/{sessionId}/guidance/narration", narrationHandler);
+        Delegate validationNarrationHandler = (Func<HttpContext, string, EllaiValidationNarrationRequest, IServiceProvider, CancellationToken, Task<IResult>>)EllaiGuidanceProposalEndpoint.NarrateValidationAsync;
+        app.MapPost("/sessions/{sessionId}/guidance/validation-narration", validationNarrationHandler);
         await app.StartAsync();
         try
         {
@@ -178,6 +180,15 @@ public sealed class EllaiGuidanceAdmissionHttpTests
             Assert.Equal(narration.Sequence, (await duplicateNarration.Content.ReadFromJsonAsync<EllaiSessionResponseDto>())!.Sequence);
             using var foreignNarration = await client.PostAsJsonAsync("/sessions/foreign/guidance/narration", narrationRequest);
             Assert.Equal(HttpStatusCode.NotFound, foreignNarration.StatusCode);
+            var validationRequest = new EllaiValidationNarrationRequest(proposal.ProposalId, restored.Plan.PlanId,
+                restored.CurrentStepId!, restored.ProgressVersion, "unregistered prompt",
+                DateTimeOffset.UtcNow.ToUnixTimeSeconds() / EllaiValidationNarrationRequest.WindowSeconds);
+            using var invalidValidation = await client.PostAsJsonAsync("/sessions/owned/guidance/validation-narration", validationRequest);
+            Assert.Equal(HttpStatusCode.NotFound, invalidValidation.StatusCode);
+            Assert.True(invalidValidation.Headers.CacheControl?.NoStore);
+            using var foreignValidation = await client.PostAsJsonAsync("/sessions/foreign/guidance/validation-narration",
+                validationRequest with { ValidationCode = "date-required" });
+            Assert.Equal(HttpStatusCode.NotFound, foreignValidation.StatusCode);
             using var pausedResponse = await client.PostAsJsonAsync("/sessions/owned/guidance/control", controlRequest);
             var paused = (await pausedResponse.Content.ReadFromJsonAsync<EllaiGuidanceProgressDto>())!;
             Assert.Equal("Paused", paused.Status);

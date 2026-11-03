@@ -167,13 +167,13 @@ async function main() {
         await report.getByRole("button", { name: "Review report" }).click();
         const emptyReviewAlert = await report.getByRole("alert").innerText();
         const emptyReviewValidation = await report.locator(".guided-report__validation").innerText();
-        assert.match(emptyReviewAlert, /Review the highlighted information before continuing/i);
+        assert.match(emptyReviewAlert, /Describe what happened or add an observation/i);
         assert.match(emptyReviewValidation, /Describe what happened or add an observation/i,
             "The guided report must require an observation before opening review");
-        const validationFocus = await report.locator(".guided-report__validation")
+        const validationFocus = await report.locator("[data-ellai-control='report.narrative']")
             .evaluate(element => ({ focused: document.activeElement === element, tabIndex: element.getAttribute("tabindex") }));
         assert.deepEqual(validationFocus, { focused: true, tabIndex: "-1" },
-            "Invalid review must move focus to the report validation summary");
+            "Invalid review must focus and highlight the first invalid input");
         await report.getByLabel("Describe what happened").fill("What I saw this morning");
         await report.getByLabel("Add other observations (optional)").fill("Two animals were nearby");
         assert.match(await report.getByText("This saved country is no longer on the list. Choose a listed country before sending.").innerText(),

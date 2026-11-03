@@ -49,6 +49,7 @@ if (migrateDatabase)
 }
 
 builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.EllaiDisplayedReceiptContext>();
+builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.EllaiValidationGuidance>();
 builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.EllaiCaseFilterContext>();
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();

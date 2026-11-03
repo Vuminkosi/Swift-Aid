@@ -161,7 +161,7 @@ async function main() {
         await report.getByRole("button", { name: "Review report" }).click();
         const emptyReviewAlert = await report.getByRole("alert").innerText();
         const emptyReviewValidation = await report.locator(".guided-report__validation").innerText();
-        assert.match(emptyReviewAlert, /Review the highlighted information before continuing/i);
+        assert.match(emptyReviewAlert, /Describe what happened or add an observation/i);
         assert.match(emptyReviewValidation, /Describe what happened or add an observation/i,
             "The guided report must require an observation before opening review");
         await report.getByLabel("Describe what happened").fill("What I saw this morning");

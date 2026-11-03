@@ -18,6 +18,7 @@ public partial class EllaiGuidanceHost
     private string? _lastFeatureNavigationProposalId;
     private readonly EllaiNavigationTrail _navigationTrail = new();
     private string? _guidanceNotice;
+    private string? _validationGuidanceText;
     private bool _preparingGuidance;
     private string? _queuedGuidanceProposalId;
     private IBonboardingTourSession? _generatedTour;
@@ -25,6 +26,45 @@ public partial class EllaiGuidanceHost
     private bool _advancingValidatedInput;
     private EventHandler<BonboardingTourSessionChangedEventArgs>? _generatedTourChanged;
     private Func<string, Task<bool>>? _controlGeneratedTour;
+    private Func<string, Task>? _narrateValidation;
+
+    private void OnValidationGuidanceChanged(string? message)
+    {
+        var tour = _generatedTour;
+        if (tour?.Status is not (BonboardingTourStatus.Running or BonboardingTourStatus.Waiting)) return;
+        _ = InvokeAsync(() =>
+        {
+            if (!ReferenceEquals(tour, _generatedTour) ||
+                tour.Status is not (BonboardingTourStatus.Running or BonboardingTourStatus.Waiting)) return;
+            var changed = !string.Equals(_validationGuidanceText, message, StringComparison.Ordinal);
+            if (!changed) return;
+            if (changed) CancelValidationNarration();
+            if (!string.IsNullOrWhiteSpace(message))
+            {
+                CancelGuidanceCountdown();
+                StopResponseAudio();
+                _guidanceNarrationEventId = null;
+                _latestResponseSequence = 0;
+                _latestResponseAudioSequences.Clear();
+                _pendingResponseAudioSequences.Clear();
+                _validationGuidanceText = message;
+                _latestResponseText = message;
+                if (changed && _readResponsesAloud && _narrateValidation is not null)
+                    _ = _narrateValidation(message);
+            }
+            else
+            {
+                StopResponseAudio();
+                _latestResponseSequence = 0;
+                _latestResponseAudioSequences.Clear();
+                _pendingResponseAudioSequences.Clear();
+                if (_latestResponseText == _validationGuidanceText) _latestResponseText = null;
+                _validationGuidanceText = null;
+            }
+            _guidanceNotice = message;
+            StateHasChanged();
+        });
+    }
 
     private async Task AdvanceValidatedInputAsync(CancellationToken ct)
     {
@@ -393,6 +433,7 @@ public partial class EllaiGuidanceHost
         _generatedTour = null;
         _generatedPlan = null;
         _controlGeneratedTour = null;
+        _narrateValidation = null;
         if (tour is null) return;
         if (_generatedTourChanged is not null) tour.Changed -= _generatedTourChanged;
         _generatedTourChanged = null;
@@ -618,6 +659,7 @@ public partial class EllaiGuidanceHost
                 _generatedTour = started;
                 _generatedPlan = plan;
                 _controlGeneratedTour = PersistControl;
+                _narrateValidation = message => NarrateValidationAsync(started, progressVersion, message);
                 _generatedTourChanged = (_, _) => _ = InvokeAsync(async () =>
                 {
                     if (!IsCurrent() || !ReferenceEquals(started, _generatedTour)) return;
@@ -640,6 +682,8 @@ public partial class EllaiGuidanceHost
                             _generatedTour = null;
                             _generatedPlan = null;
                             _controlGeneratedTour = null;
+                            _narrateValidation = null;
+                            CancelValidationNarration();
                             _guidanceProposalId = null;
                             _guidanceProposalIsAccepted = false;
                             _guidanceFeatureId = null;

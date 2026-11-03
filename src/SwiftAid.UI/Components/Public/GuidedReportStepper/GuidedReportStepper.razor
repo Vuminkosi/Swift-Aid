@@ -7,6 +7,7 @@
 @using SwiftAid.UI.Components.Public
 @implements IDisposable
 @implements SwiftAid.Contracts.Ellai.IEllaiUiContextProvider
+@inject IServiceProvider Services
 
 <SwiftAid.UI.Ellai.Guidance.EllaiSemanticContext Provider="this" />
 
@@ -121,7 +122,7 @@
             <section class="guided-report__panel" aria-labelledby="report-details-title">
                 <h2 id="report-details-title" class="mud-typography mud-typography-h6 guided-report__step-heading" tabindex="-1" @ref="_stepHeading">What did you notice?</h2>
                 @DetailsLeadContent
-                <div data-ellai-control="report.narrative" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.narrative")'>
+                <div class="@ValidationClass(nameof(Draft.Narrative))" tabindex="-1" @ref="_narrativeValidationTarget" data-ellai-control="report.narrative" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.narrative")'>
                     <MudTextField T="string" Label="Describe what happened" Variant="Variant.Outlined" Lines="4" MaxLength="6000"
                                   @bind-Value="Draft.Narrative" For="@(() => Draft.Narrative)" />
                 </div>
@@ -194,12 +195,14 @@
                         <MudText Typo="Typo.caption" Color="Color.Error" role="alert">@_observationChoiceMessage</MudText>
                     }
                 </div>
+                <div class="@ValidationClass(nameof(Draft.ObservationsText))" tabindex="-1" @ref="_observationsValidationTarget">
                 <MudTextField @ref="_observationsField" T="string" Label="Add other observations (optional)"
                               HelperText="Selected choices appear here. Add other reported observations one per line."
                               Variant="Variant.Outlined" Lines="3" MaxLength="20000" @bind-Value="Draft.ObservationsText"
                               For="@(() => Draft.ObservationsText)" />
+                </div>
 
-                <MudSelect T="ReportedTimePrecision" Label="When did this happen?" Variant="Variant.Outlined" @bind-Value="Draft.OccurrencePrecision">
+                <MudSelect T="ReportedTimePrecision" Label="When did this happen?" Variant="Variant.Outlined" @bind-Value="Draft.OccurrencePrecision" For="@(() => Draft.OccurrencePrecision)">
                     <MudSelectItem Value="ReportedTimePrecision.Unknown">Unknown</MudSelectItem>
                     <MudSelectItem Value="ReportedTimePrecision.Approximate">Approximate date</MudSelectItem>
                     <MudSelectItem Value="ReportedTimePrecision.DateOnly">Date only</MudSelectItem>
@@ -207,20 +210,26 @@
                 </MudSelect>
                 @if (Draft.OccurrencePrecision != ReportedTimePrecision.Unknown)
                 {
+                    <div class="@ValidationClass(nameof(Draft.OccurrenceDate))" tabindex="-1" @ref="_dateValidationTarget">
                     <MudTextField T="DateTime?" Label="Reported date" InputType="InputType.Date" Variant="Variant.Outlined"
                                   @bind-Value="Draft.OccurrenceDate" For="@(() => Draft.OccurrenceDate)" />
+                    </div>
                 }
                 @if (Draft.OccurrencePrecision == ReportedTimePrecision.Exact)
                 {
                     <div class="guided-report__grid">
+                        <div class="@ValidationClass(nameof(Draft.OccurrenceTime))" tabindex="-1" @ref="_timeValidationTarget">
                         <MudTextField T="string" Label="Reported time" InputType="InputType.Time" Variant="Variant.Outlined"
                                       @bind-Value="Draft.OccurrenceTime" For="@(() => Draft.OccurrenceTime)" />
+                        </div>
+                        <div class="@ValidationClass(nameof(Draft.OccurrenceOffset))" tabindex="-1" @ref="_offsetValidationTarget">
                         <MudTextField T="string" Label="Time difference from UTC" Placeholder="+02:00" HelperText="Enter the time difference that was reported."
                                       Variant="Variant.Outlined" @bind-Value="Draft.OccurrenceOffset" For="@(() => Draft.OccurrenceOffset)" />
+                        </div>
                     </div>
                 }
 
-                <div data-ellai-control="report.time-location" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.time-location")'>
+                <div class="@ValidationClass(string.Empty)" tabindex="-1" @ref="_locationValidationTarget" data-ellai-control="report.time-location" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.time-location")'>
                     <MudSelect T="string" id="guided-report-country" Label="Country where the event happened" Variant="Variant.Outlined"
                                Value="Draft.CountryCode" ValueChanged="CountryChangedAsync" Disabled="@(!HasCountryCatalogue)" Clearable="true">
                         @foreach (var country in Countries)
@@ -259,12 +268,18 @@
                 {
                     <MudText Typo="Typo.subtitle2">Reported place names</MudText>
                     <div class="guided-report__grid">
+                        <div class="@ValidationClass(nameof(Draft.Region))" tabindex="-1" @ref="_regionValidationTarget">
                         <MudTextField T="string" Label="Region" Variant="Variant.Outlined" HelperText="Leave blank when unknown."
                                       Value="Draft.Region" ValueChanged="RegionChangedAsync" For="@(() => Draft.Region)" />
+                        </div>
+                        <div class="@ValidationClass(nameof(Draft.Area))" tabindex="-1" @ref="_areaValidationTarget">
                         <MudTextField T="string" Label="Area or district" Variant="Variant.Outlined" HelperText="Leave blank when unknown."
                                       Value="Draft.Area" ValueChanged="AreaChangedAsync" For="@(() => Draft.Area)" />
+                        </div>
+                        <div class="@ValidationClass(nameof(Draft.Locality))" tabindex="-1" @ref="_localityValidationTarget">
                         <MudTextField T="string" Label="Locality" Variant="Variant.Outlined" HelperText="Leave blank when unknown."
                                       Value="Draft.Locality" ValueChanged="LocalityChangedAsync" For="@(() => Draft.Locality)" />
+                        </div>
                     </div>
                 }
                 <MudText Typo="Typo.caption">Leave uncertain place names unknown. No device location is collected by this form.</MudText>
@@ -430,6 +445,19 @@
     private PublicReportDraft? _observedDraft;
     private ElementReference _stepHeading;
     private ElementReference _validationSummary;
+    private ElementReference _narrativeValidationTarget;
+    private ElementReference _observationsValidationTarget;
+    private ElementReference _dateValidationTarget;
+    private ElementReference _timeValidationTarget;
+    private ElementReference _offsetValidationTarget;
+    private ElementReference _locationValidationTarget;
+    private ElementReference _regionValidationTarget;
+    private ElementReference _areaValidationTarget;
+    private ElementReference _localityValidationTarget;
+    private string? _validationField;
+    private string? _validationMessage;
+    private bool _followValidation;
+    private bool _focusValidationFieldAfterRender;
     private MudTextField<string>? _observationsField;
     private bool _focusStepHeadingAfterRender;
     private bool _focusValidationSummaryAfterRender;
@@ -531,7 +559,24 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (_focusStepHeadingAfterRender)
+        if (_focusValidationFieldAfterRender)
+        {
+            _focusValidationFieldAfterRender = false;
+            var target = _validationField switch
+            {
+                nameof(PublicReportDraft.Narrative) => _narrativeValidationTarget,
+                nameof(PublicReportDraft.ObservationsText) => _observationsValidationTarget,
+                nameof(PublicReportDraft.OccurrenceDate) => _dateValidationTarget,
+                nameof(PublicReportDraft.OccurrenceTime) => _timeValidationTarget,
+                nameof(PublicReportDraft.OccurrenceOffset) => _offsetValidationTarget,
+                nameof(PublicReportDraft.Region) => _regionValidationTarget,
+                nameof(PublicReportDraft.Area) => _areaValidationTarget,
+                nameof(PublicReportDraft.Locality) => _localityValidationTarget,
+                _ => _locationValidationTarget
+            };
+            await target.FocusAsync();
+        }
+        else if (_focusStepHeadingAfterRender)
         {
             _focusStepHeadingAfterRender = false;
             await _stepHeading.FocusAsync();
@@ -545,6 +590,9 @@
 
     private string GetSubjectChoiceClass(ReportSubjectCategory category) =>
         _subjectCategory == category ? "guided-report__choice is-selected" : "guided-report__choice";
+
+    private string? ValidationClass(string field) => _followValidation && _validationField == field
+        ? "guided-report__current-validation" : null;
 
     [Parameter, EditorRequired]
     public PublicReportDraft Draft { get; set; } = default!;
@@ -676,6 +724,11 @@
                 _saveState = DraftSaveState.Unsaved;
             }
             _subjectCategory = GetSubjectCategory(Draft.SubjectScope);
+            _followValidation = false;
+            _validationField = null;
+            _validationMessage = null;
+            _focusValidationFieldAfterRender = false;
+            PublishValidation();
             _stepError = null;
             _submitError = null;
         }
@@ -995,7 +1048,9 @@
         ClearStepValidation();
         if (!ValidateDetails())
         {
-            _focusValidationSummaryAfterRender = true;
+            _followValidation = true;
+            _focusValidationFieldAfterRender = true;
+            PublishValidation();
             return;
         }
 
@@ -1029,6 +1084,8 @@
 
     private bool ValidateDetails()
     {
+        _validationField = null;
+        _validationMessage = null;
         var hasNarrative = !string.IsNullOrWhiteSpace(Draft.Narrative);
         var observations = Draft.GetObservations();
         var isValid = true;
@@ -1059,7 +1116,9 @@
 
         if (Draft.OccurrencePrecision == ReportedTimePrecision.Exact && !HasValidExactTime())
         {
-            AddError(nameof(Draft.OccurrenceTime), "For an exact time, enter the local time and its offset from UTC.");
+            var missingTime = !TimeOnly.TryParse(Draft.OccurrenceTime, out _);
+            AddError(missingTime ? nameof(Draft.OccurrenceTime) : nameof(Draft.OccurrenceOffset),
+                missingTime ? "Enter the reported local time." : "Enter a valid time difference from UTC, such as +02:00.");
             isValid = false;
         }
 
@@ -1067,7 +1126,12 @@
              Draft.AreaPresence == PresenceState.Known && string.IsNullOrWhiteSpace(Draft.Area) ||
              Draft.LocalityPresence == PresenceState.Known && string.IsNullOrWhiteSpace(Draft.Locality))
         {
-            AddError(string.Empty, "Enter each place name marked as known, or leave it unknown.");
+            _showManualPlaces = true;
+            var missingPlace = Draft.RegionPresence == PresenceState.Known && string.IsNullOrWhiteSpace(Draft.Region)
+                ? nameof(Draft.Region) : Draft.AreaPresence == PresenceState.Known && string.IsNullOrWhiteSpace(Draft.Area)
+                    ? nameof(Draft.Area) : nameof(Draft.Locality);
+            var placeLabel = missingPlace == nameof(Draft.Region) ? "region" : missingPlace == nameof(Draft.Area) ? "area or district" : "locality";
+            AddError(missingPlace, $"Enter the {placeLabel}, or mark it unknown.");
             isValid = false;
         }
 
@@ -1083,15 +1147,26 @@
 
         if (!isValid)
         {
-            _stepError = "Review the highlighted information before continuing.";
+            _stepError = _validationMessage ?? "Review the highlighted information before continuing.";
         }
 
         _editContext.NotifyValidationStateChanged();
         return isValid;
     }
 
-    private void AddError(string fieldName, string message) =>
-        _messageStore.Add(new FieldIdentifier(Draft, fieldName), message);
+    private void AddError(string fieldName, string message)
+    {
+        if (_validationMessage is null)
+        {
+            _messageStore.Add(new FieldIdentifier(Draft, fieldName), message);
+            _validationField = fieldName;
+            _validationMessage = message;
+        }
+    }
+
+    private void PublishValidation() =>
+        (Services?.GetService(typeof(SwiftAid.UI.Ellai.Guidance.EllaiValidationGuidance)) as
+            SwiftAid.UI.Ellai.Guidance.EllaiValidationGuidance)?.Publish(_validationMessage);
 
     private bool HasValidExactTime()
     {
@@ -1110,6 +1185,10 @@
 
     private void ClearStepValidation()
     {
+        _followValidation = false;
+        _validationField = null;
+        _validationMessage = null;
+        PublishValidation();
         _messageStore.Clear();
         _stepError = null;
         _editContext.NotifyValidationStateChanged();
@@ -1117,6 +1196,7 @@
 
     private void HandleFieldChanged(object? sender, FieldChangedEventArgs args)
     {
+        var previousValidation = _validationField;
         _messageStore.Clear(args.FieldIdentifier);
         _stepError = null;
         _observationChoiceMessage = null;
@@ -1132,6 +1212,20 @@
         }
 
         _editContext.NotifyValidationStateChanged();
+        if (_followValidation && _step == 1)
+        {
+            _messageStore.Clear();
+            if (ValidateDetails())
+            {
+                _followValidation = false;
+                _validationMessage = null;
+            }
+            else if (_validationField != previousValidation)
+            {
+                _focusValidationFieldAfterRender = true;
+            }
+            PublishValidation();
+        }
     }
 
     private bool IsObservationSelected(string observation) =>
@@ -1390,6 +1484,8 @@
 
     public void Dispose()
     {
+        _validationMessage = null;
+        PublishValidation();
         if (_editContext is not null)
         {
             _editContext.OnFieldChanged -= HandleFieldChanged;

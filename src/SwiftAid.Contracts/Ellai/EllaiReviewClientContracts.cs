@@ -204,6 +204,10 @@ public sealed record EllaiSessionCancelResult(
 /// keeps its cursor and retries; replay never replays commands.</summary>
 public interface IEllaiReviewClient
 {
+    Task<EllaiSessionResponseDto?> PrepareValidationNarrationAsync(
+        string sessionId, EllaiValidationNarrationRequest request, CancellationToken cancellationToken) =>
+        Task.FromResult<EllaiSessionResponseDto?>(null);
+
     Task<EllaiSessionResponseDto?> PrepareGuidanceNarrationAsync(
         string sessionId, EllaiGuidanceNarrationRequest request, CancellationToken cancellationToken) =>
         Task.FromResult<EllaiSessionResponseDto?>(null);
@@ -355,6 +359,12 @@ public sealed record EllaiGuidanceNarrationRequest(string ProposalId, string Pla
     long ExpectedVersion, string EnglishVoiceId = "af_heart")
 {
     public string EventId => $"guidance:{PlanId}:{StepId}:{ExpectedVersion}";
+}
+public sealed record EllaiValidationNarrationRequest(string ProposalId, string PlanId, string StepId,
+    long ExpectedVersion, string ValidationCode, long TimeWindow, string EnglishVoiceId = "af_heart")
+{
+    public const int WindowSeconds = 5;
+    public string EventId => $"validation:{PlanId}:{StepId}:{ExpectedVersion}:{ValidationCode}:{TimeWindow}";
 }
 public sealed record EllaiGuidancePlanDto(string Status, ValidatedGuidancePlan? Plan = null, string? ContextStamp = null, string? NavigationId = null,
     long ProgressVersion = 0, string? CurrentStepId = null, IReadOnlyList<string>? CompletedStepIds = null, IReadOnlyList<string>? SkippedStepIds = null);

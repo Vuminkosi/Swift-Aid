@@ -805,6 +805,21 @@ public sealed class EllaiReviewHttpClient(HttpClient http, bool useGuestRoutes =
         catch (JsonException) { return null; }
     }
 
+    public async Task<EllaiSessionResponseDto?> PrepareValidationNarrationAsync(
+        string sessionId, EllaiValidationNarrationRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await PostAsJsonAsync($"{SessionRoute(sessionId)}/guidance/validation-narration", request, cancellationToken).ConfigureAwait(false);
+            return response.IsSuccessStatusCode
+                ? await response.Content.ReadFromJsonAsync<EllaiSessionResponseDto>(Json, cancellationToken).ConfigureAwait(false)
+                : null;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (HttpRequestException) { return null; }
+        catch (JsonException) { return null; }
+    }
+
     public async Task<EllaiSessionResponseDto?> PrepareGuidanceNarrationAsync(
         string sessionId, EllaiGuidanceNarrationRequest request, CancellationToken cancellationToken)
     {

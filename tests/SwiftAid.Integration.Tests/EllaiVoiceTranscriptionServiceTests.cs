@@ -39,6 +39,40 @@ public sealed class EllaiVoiceTranscriptionServiceTests
     [LiveSpeechFact]
     public Task RecordedVoiceFrameworkResponseUsesLiveSpeech() => RunRecordedFrameworkVoiceAsync(true);
 
+    [LiveSpeechFact]
+    public async Task ValidationPromptProducesInterruptibleLiveSpeech()
+    {
+        var endpoint = Environment.GetEnvironmentVariable("SWIFTAID_TEST_SPEECH_ENDPOINT");
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri) || !uri.IsLoopback)
+            throw new InvalidOperationException("Live speech fixture requires a loopback endpoint.");
+        var settings = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["EllaiTts:Endpoint"] = endpoint,
+            ["EllaiTts:InternalKey"] = Environment.GetEnvironmentVariable("SWIFTAID_TEST_SPEECH_KEY")
+        }).Build();
+        using var http = new HttpClient();
+        using var prepared = new EllaiPreparedResponseAudio(new EllaiSpeechSynthesisClient(http, settings),
+            NullLogger<EllaiPreparedResponseAudio>.Instance);
+        await prepared.StartAsync(default);
+        try
+        {
+            var responses = new EllaiSessionResponseStore(audioPreparation: prepared);
+            var text = EllaiValidationPrompts.Resolve("date-required")!;
+            var response = responses.PublishProgress("validation-fixture", "synthetic-turn", text,
+                new("validation-fixture-event", "Guidance", "Guidance", true, 1, DateTimeOffset.UtcNow.AddMinutes(1)), "af_heart")!;
+            Assert.True(responses.CanSpeakProgress(response));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            using var pcm = await prepared.OpenAsync(response.SessionId, response.Sequence, timeout.Token);
+            var bytes = await pcm.Content.ReadAsByteArrayAsync(timeout.Token);
+            Assert.True(bytes.Length > 100);
+            Assert.Contains(bytes, value => value != 0);
+            Assert.Equal("af_heart", Assert.Single(pcm.Headers.GetValues("X-SwiftAid-Voice-Id")));
+            responses.InterruptProgress(response.SessionId, response.Sequence);
+            Assert.False(responses.CanSpeakProgress(response));
+        }
+        finally { await prepared.StopAsync(default); }
+    }
+
     private sealed class LiveMuseSpeechFactAttribute : FactAttribute
     {
         public LiveMuseSpeechFactAttribute()

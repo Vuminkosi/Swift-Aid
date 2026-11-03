@@ -2,13 +2,60 @@
 using System.Reflection;
 using Microsoft.AspNetCore.Components;
 using SwiftAid.Contracts.Intake;
+using SwiftAid.Contracts.Geography;
 using SwiftAid.UI.Components.Public;
 using SwiftAid.UI.Components.Public.GuidedReportStepper;
+using SwiftAid.UI.Ellai.Guidance;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace SwiftAid.Ui.Tests;
 
 public sealed partial class GuidedReportDraftPersistenceTests
 {
+    [Fact]
+    public async Task ValidationGuidanceMovesToNextInvalidFieldAfterCorrection()
+    {
+        var component = CreateStepper(CreateDraft(string.Empty), _ => Task.CompletedTask);
+        var validation = new EllaiValidationGuidance();
+        var messages = new List<string?>();
+        validation.Changed += messages.Add;
+        using var services = new ServiceCollection().AddSingleton(validation).BuildServiceProvider();
+        typeof(GuidedReportStepper).GetProperty("Services", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .SetValue(component, services);
+        component.Draft.OccurrencePrecision = ReportedTimePrecision.DateOnly;
+        await (Task)Invoke(component, "ContinueFromTypeAsync")!;
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+        Assert.Equal(nameof(PublicReportDraft.Narrative), GetField<string>(component, "_validationField"));
+        Assert.Contains("Describe", GetField<string>(component, "_validationMessage"));
+
+        component.Draft.Narrative = "A synthetic observation.";
+        typeof(GuidedReportStepper).GetMethod("HandleFieldChanged", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(component, [null, new Microsoft.AspNetCore.Components.Forms.FieldChangedEventArgs(
+                new Microsoft.AspNetCore.Components.Forms.FieldIdentifier(component.Draft, nameof(PublicReportDraft.Narrative)))]);
+        Assert.Equal(nameof(PublicReportDraft.OccurrenceDate), GetField<string>(component, "_validationField"));
+        Assert.Contains("date", GetField<string>(component, "_validationMessage"), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(messages, message => message?.Contains("Describe", StringComparison.Ordinal) == true);
+        Assert.Contains(messages, message => message?.Contains("date", StringComparison.OrdinalIgnoreCase) == true);
+        Assert.DoesNotContain(messages, message => message?.Contains("synthetic observation", StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    [Fact]
+    public async Task ValidationGuidanceTargetsEachMissingPlaceSeparately()
+    {
+        var component = CreateStepper(CreateDraft(), _ => Task.CompletedTask);
+        component.Draft.RegionPresence = PresenceState.Known;
+        component.Draft.AreaPresence = PresenceState.Known;
+        await (Task)Invoke(component, "ContinueFromTypeAsync")!;
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+        Assert.Equal(nameof(PublicReportDraft.Region), GetField<string>(component, "_validationField"));
+
+        component.Draft.Region = "Synthetic region";
+        typeof(GuidedReportStepper).GetMethod("HandleFieldChanged", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(component, [null, new Microsoft.AspNetCore.Components.Forms.FieldChangedEventArgs(
+                new Microsoft.AspNetCore.Components.Forms.FieldIdentifier(component.Draft, nameof(PublicReportDraft.Region)))]);
+        Assert.Equal(nameof(PublicReportDraft.Area), GetField<string>(component, "_validationField"));
+        Assert.DoesNotContain("Synthetic region", GetField<string>(component, "_validationMessage"));
+    }
     [Theory]
     [InlineData(nameof(PublicReportDraft.CountryConfirmed), true)]
     [InlineData(nameof(PublicReportDraft.ProcessingConfirmed), true)]
