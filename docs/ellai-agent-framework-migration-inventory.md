@@ -3292,3 +3292,31 @@ the rerun passed. The fixture's NATS notification consumer was unavailable.
 The Gateway and disposable containers were stopped. The previously retained
 candidate and key/module directories remain; physical-device and deployed
 behavior are NOT VERIFIED by this test.
+
+### Final evidence recheck without provisional streaming — 2026-11-03
+
+The utterance runner installed the current-tool-observation authorization
+callback only when a provisional stream callback was present. The framework
+agent also uses that callback before returning a buffered final answer. Thus a
+turn without provisional publication could omit that last observation check,
+even though the ordinary session and historical-context fences still ran. The
+runner now installs the observation check regardless of streaming; provisional
+publication remains conditional on its existing policy and language checks.
+
+The expanded `StreamObservationAuthorizationRechecksCaseAccess` regression
+first failed for `provisionalStreaming=false` because the callback was null;
+the enabled case passed. After the fix, `dotnet test
+tests\SwiftAid.Application.Tests\SwiftAid.Application.Tests.csproj --no-restore
+-m:1 -nr:false --filter 'FullyQualifiedName~EllaiAuthorizedConversationContextTests|FullyQualifiedName~EllaiUtteranceRunnerTests|FullyQualifiedName~EllaiAgentFrameworkContractTests' --logger 'console;verbosity=minimal'`
+passed 174/174. The two runner cases check an authorized case and then an
+expired authorization using a synthetic queue. The existing framework test
+also rejects a buffered final answer when its recheck denies access.
+
+PASS: `dotnet test tests\SwiftAid.Integration.Tests\SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~FrameworkWorkerRecallsAuthorizedCaseFromPostgresAndQdrant'
+--logger 'console;verbosity=minimal'` passed 1/1 using a synthetic model and
+disposable PostgreSQL and Qdrant, including its existing revocation-before-final
+scenario. That worker fixture uses its normal provisional callback; a separate
+no-provisional PostgreSQL revocation run and independent security review remain
+NOT VERIFIED. Both disposable containers were removed.

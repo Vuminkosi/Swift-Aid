@@ -180,8 +180,7 @@ public static class EllaiUtteranceRunner
                     DateTimeOffset.UtcNow));
         }
 
-        if (services.OnVerifiedStreamSegment is not null)
-            request = request with { RevalidateStreamObservations = async (observations, segmentCt) =>
+        request = request with { RevalidateStreamObservations = async (observations, segmentCt) =>
             {
                 var trace = EllaiToolTrace.SerializeFlattened(observations, false, []);
                 if (trace is null) return false;
@@ -193,7 +192,7 @@ public static class EllaiUtteranceRunner
                     currentTurn.ClientUtteranceId, work.Actor, services.CaseQueue, segmentCt, services.TechnicalDocs,
                     services.Imports, services.ImportWorkspaces, services.Dashboard, context, services.InvokeToolAsync).ConfigureAwait(false);
                 return checkedEvidence.RetainedTurnIds.Contains(previous.ClientUtteranceId, StringComparer.Ordinal);
-            }, OnVerifiedStreamSegment = languages.OutputLanguage != "eng" ? null : async (text, segmentCt) =>
+            }, OnVerifiedStreamSegment = services.OnVerifiedStreamSegment is null || languages.OutputLanguage != "eng" ? null : async (text, segmentCt) =>
             {
                 if (await IsExecutionCurrentAsync(segmentCt).ConfigureAwait(false))
                     await services.OnVerifiedStreamSegment(text, segmentCt).ConfigureAwait(false);

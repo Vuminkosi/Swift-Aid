@@ -223,8 +223,10 @@ public sealed class EllaiAuthorizedConversationContextTests
         }
     }
 
-    [Fact]
-    public async Task StreamObservationAuthorizationRechecksCaseAccess()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task StreamObservationAuthorizationRechecksCaseAccess(bool provisionalStreaming)
     {
         var executor = new CapturingExecutor();
         var queue = new BatchQueue();
@@ -239,7 +241,7 @@ public sealed class EllaiAuthorizedConversationContextTests
             ConsentPurpose: EllaiConsentService.PublicProductHelpPurpose, ClientUtteranceId: "current");
         await EllaiUtteranceRunner.RunOneAsync(work,
             new(executor, null, null, new EllaiConsentService(), CaseQueue: queue,
-                OnVerifiedStreamSegment: (_, _) => ValueTask.CompletedTask), 256, default);
+                OnVerifiedStreamSegment: provisionalStreaming ? (_, _) => ValueTask.CompletedTask : null), 256, default);
         var check = Assert.IsType<Func<IReadOnlyList<EllaiObservedToolResult>, CancellationToken, Task<bool>>>(
             executor.Request!.RevalidateStreamObservations);
         Assert.True(await check([observation], default));
