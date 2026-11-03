@@ -98,6 +98,32 @@ public sealed class SessionSchedulingTests
     }
 
     [IntakePostgresFact]
+    public async Task Public_outputs_hide_an_unsafe_destination_from_legacy_storage()
+    {
+        var sessionId = Guid.NewGuid();
+        const string unsafeLink = "https://user:password@example.test/session";
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var setup = CreateService(db);
+        var service = new CommunitySessionService(new PostgresCommunitySessionStore(db), new FixtureMaterialEligibility());
+        try
+        {
+            await PublishAsync(setup, sessionId, SessionVisibility.Public);
+            await db.CommunitySessions.Where(item => item.SessionId == sessionId)
+                .ExecuteUpdateAsync(update => update.SetProperty(item => item.ChannelLink, unsafeLink));
+
+            Assert.Equal(unsafeLink, (await service.GetStaffAsync(sessionId, "officer-1", CancellationToken.None))!.ChannelLink);
+            Assert.Null((await service.GetPublicAsync(sessionId, CancellationToken.None))!.ChannelLink);
+            Assert.Null(Assert.Single((await service.QueryPublicAsync(new PublicSessionQuery(), CancellationToken.None)).Items).ChannelLink);
+            Assert.DoesNotContain("password", (await service.GetIcsAsync(sessionId, DateTimeOffset.UtcNow, CancellationToken.None))!, StringComparison.Ordinal);
+            Assert.DoesNotContain("password", (await service.GetInvitationTextAsync(sessionId, CancellationToken.None))!, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await CleanupAsync(sessionId);
+        }
+    }
+
+    [IntakePostgresFact]
     public async Task Create_persists_draft_and_revision()
     {
         var sessionId = Guid.NewGuid();

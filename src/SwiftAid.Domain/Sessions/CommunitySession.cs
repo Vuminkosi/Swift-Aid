@@ -58,6 +58,9 @@ public sealed class CommunitySession
     public SessionVisibility Visibility { get; private set; }
     public SessionChannelType ChannelType { get; private set; }
     public string? ChannelLink { get; private set; }
+    /// <summary>Safe destination for public projections, including records created before current validation.</summary>
+    public string? PublicChannelLink => ChannelType != SessionChannelType.None && IsSafeChannelLink(ChannelLink)
+        ? ChannelLink : null;
     public IReadOnlyList<int> ReminderLeadHours { get; private set; }
     public CommunitySessionStatus Status { get; private set; }
     public string CreatedByActorId { get; }
@@ -366,12 +369,15 @@ public sealed class CommunitySession
         }
 
         RequireText(channelLink!, nameof(channelLink));
-        if (channelLink!.Any(char.IsControl) || !Uri.TryCreate(channelLink, UriKind.Absolute, out var uri) ||
-            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) || !string.IsNullOrEmpty(uri.UserInfo))
+        if (!IsSafeChannelLink(channelLink))
         {
             throw new ArgumentException("A channel link must be an absolute http(s) URL without credentials or control characters.", nameof(channelLink));
         }
 
         return channelLink;
     }
+
+    private static bool IsSafeChannelLink(string? link) => !string.IsNullOrWhiteSpace(link) &&
+        !link.Any(char.IsControl) && Uri.TryCreate(link, UriKind.Absolute, out var uri) &&
+        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps) && string.IsNullOrEmpty(uri.UserInfo);
 }

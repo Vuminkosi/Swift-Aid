@@ -183,6 +183,25 @@ public sealed class CommunitySessionServiceTests
     }
 
     [Fact]
+    public async Task PublicReadsOmitUnsafeLegacyDestinationButStaffCanInspectIt()
+    {
+        var services = CreateServices();
+        var id = Guid.NewGuid();
+        await PublishAsync(services.Service, id, SessionVisibility.Public);
+        var session = (await services.Store.LoadAsync(id, CancellationToken.None))!;
+        const string unsafeLink = "https://user:password@example.test/session";
+        typeof(DomainSessions.CommunitySession).GetField("<ChannelLink>k__BackingField",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.SetValue(session, unsafeLink);
+
+        Assert.Equal(unsafeLink, (await services.Service.GetStaffAsync(id, "officer-1", CancellationToken.None))!.ChannelLink);
+        Assert.Null((await services.Service.GetPublicAsync(id, CancellationToken.None))!.ChannelLink);
+        Assert.Null(Assert.Single(await services.Service.ListPublicAsync(null, CancellationToken.None)).ChannelLink);
+        Assert.Null(Assert.Single((await services.Service.QueryPublicAsync(new PublicSessionQuery(), CancellationToken.None)).Items).ChannelLink);
+        Assert.DoesNotContain("password", (await services.Service.GetIcsAsync(id, Now, CancellationToken.None))!, StringComparison.Ordinal);
+        Assert.DoesNotContain("password", (await services.Service.GetInvitationTextAsync(id, CancellationToken.None))!, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PublicOutputsDoNotExposeUnverifiedMaterialReferences()
     {
         var services = CreateServices();

@@ -117,6 +117,31 @@ public sealed class CommunitySessionTests
             [.. session.ReminderLeadHours], CreatedAt));
     }
 
+    [Theory]
+    [InlineData("https://user:password@example.test/session")]
+    [InlineData("https://example.test/session\r\nInjected invitation text")]
+    public void LegacyUnsafeDestinationIsOmittedFromCalendarAndInvitation(string link)
+    {
+        var session = CreateDraft();
+        session.UpdateDetails(session.Title, session.Summary, session.AudienceDescription, [.. session.TopicTags],
+            session.Presenter, session.Language, session.StartUtc, session.DurationMinutes, session.Capacity,
+            [.. session.Materials], session.Visibility, SessionChannelType.Other, "https://example.test/session",
+            [.. session.ReminderLeadHours], CreatedAt);
+        session.Review("officer-2", false, CreatedAt.AddHours(1));
+        session.Schedule("officer-2", CreatedAt.AddHours(2));
+        typeof(CommunitySession).GetField("<ChannelLink>k__BackingField",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.SetValue(session, link);
+
+        var calendar = CommunitySessionSharing.BuildIcs(session, CreatedAt.AddHours(3));
+        var invitation = CommunitySessionSharing.BuildInvitationText(session);
+
+        Assert.DoesNotContain("URL:", calendar, StringComparison.Ordinal);
+        Assert.DoesNotContain("Join:", invitation, StringComparison.Ordinal);
+        Assert.DoesNotContain("password", calendar + invitation, StringComparison.Ordinal);
+        Assert.DoesNotContain("Injected invitation text", calendar + invitation, StringComparison.Ordinal);
+        Assert.Contains(session.RegionId, invitation, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Update_OnScheduledSession_BumpsIcsSequence()
     {

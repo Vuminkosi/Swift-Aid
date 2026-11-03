@@ -35,9 +35,9 @@ public static class CommunitySessionSharing
         AppendFolded(builder, "SUMMARY", session.Title);
         AppendFolded(builder, "DESCRIPTION", Describe(session));
         AppendFolded(builder, "LOCATION", Locate(session));
-        if (session.ChannelLink is not null)
+        if (session.PublicChannelLink is { } publicLink)
         {
-            AppendFolded(builder, "URL", session.ChannelLink);
+            AppendFolded(builder, "URL", publicLink);
         }
 
         AppendFolded(builder, "SEQUENCE", session.IcsSequence.ToString(System.Globalization.CultureInfo.InvariantCulture));
@@ -74,9 +74,9 @@ public static class CommunitySessionSharing
         builder.Append("Duration: ").Append(session.DurationMinutes
             .ToString(System.Globalization.CultureInfo.InvariantCulture)).AppendLine(" minutes");
         builder.Append("Presenter: ").AppendLine(session.Presenter);
-        if (session.ChannelLink is not null)
+        if (session.PublicChannelLink is { } publicLink)
         {
-            builder.Append("Join: ").AppendLine(session.ChannelLink);
+            builder.Append("Join: ").AppendLine(publicLink);
         }
         else
         {
@@ -106,7 +106,7 @@ public static class CommunitySessionSharing
     }
 
     private static string Locate(CommunitySession session) =>
-        session.ChannelLink is not null
+        session.PublicChannelLink is not null
             ? $"Online ({session.ChannelType})"
             : $"{session.RegionId}, {session.CountryCode}";
 
