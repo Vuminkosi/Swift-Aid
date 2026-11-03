@@ -104,6 +104,78 @@ public sealed class EllaiAgentFrameworkContractTests
     }
 
     [Fact]
+    public async Task FrameworkToolResultAfterDeadlineIsNotAccepted()
+    {
+        using var client = new ScriptedClient(EllaiToolNames.Now, "unused", "example", ValidDecision, noArguments: true);
+        var executor = new EllaiFrameworkExecutor(client, new EllaiPromptBuilder("Policy text.", "test"),
+            new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService()), new EllaiUsageLedger(),
+            new InMemoryEllaiUsageStore(), TimeSpan.FromMilliseconds(50));
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.Now });
+        var outcome = await executor.RunAsync(new EllaiLoopRequest(context, "time?", new EllaiRoleOverlay("ask", "help"),
+            "clock", 100, "cycle", 1), CancellationToken.None, invokeToolAsync: async (_, tool, _) =>
+            {
+                await Task.Delay(200);
+                return new EllaiToolResult(tool.ToolName, true, null, [], "late observation", 1, false);
+            }).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(outcome.Completed);
+        Assert.Null(outcome.Decision);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, outcome.FailureCode);
+    }
+
+    [Fact]
+    public async Task FrameworkToolDeadlineStopsCooperativeToolAndRejectsFinalAnswer()
+    {
+        using var client = new ScriptedClient(EllaiToolNames.Now, "unused", "example", ValidDecision, noArguments: true);
+        var executor = new EllaiFrameworkExecutor(client, new EllaiPromptBuilder("Policy text.", "test"),
+            new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService()), new EllaiUsageLedger(),
+            new InMemoryEllaiUsageStore(), TimeSpan.FromMilliseconds(100));
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.Now });
+        var stopped = false;
+        var outcome = await executor.RunAsync(new EllaiLoopRequest(context, "time?", new EllaiRoleOverlay("ask", "help"),
+            "clock", 100, "cycle", 1), CancellationToken.None, invokeToolAsync: async (_, _, token) =>
+            {
+                try { await Task.Delay(Timeout.InfiniteTimeSpan, token); }
+                finally { stopped = true; }
+                throw new InvalidOperationException("Unexpected tool completion.");
+            }).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(stopped);
+        Assert.False(outcome.Completed);
+        Assert.Null(outcome.Decision);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, outcome.FailureCode);
+    }
+
+    [Fact]
+    public async Task CancellingFrameworkRunCancelsInFlightToolBeforeFurtherModelCalls()
+    {
+        using var client = new ScriptedClient(EllaiToolNames.Now, "unused", "example", ValidDecision, noArguments: true);
+        var executor = new EllaiFrameworkExecutor(client, new EllaiPromptBuilder("Policy text.", "test"),
+            new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService()), new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.Now });
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cancellation = new CancellationTokenSource();
+        var run = executor.RunAsync(new EllaiLoopRequest(context, "time?", new EllaiRoleOverlay("ask", "help"),
+            "clock", 100, "cycle", 1), cancellation.Token, invokeToolAsync: async (_, _, token) =>
+            {
+                started.TrySetResult();
+                try { await Task.Delay(Timeout.InfiniteTimeSpan, token); }
+                finally { stopped.TrySetResult(); }
+                throw new InvalidOperationException("Unexpected tool completion.");
+            });
+
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run.WaitAsync(TimeSpan.FromSeconds(5)));
+        await stopped.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(1, client.Calls);
+    }
+
+    [Fact]
     public async Task FrameworkExecutorReportsBrokerDenialWithoutAcceptingAnswer()
     {
         using var client = new ScriptedClient(EllaiToolNames.Now, "unused", "example", ValidDecision, noArguments: true);

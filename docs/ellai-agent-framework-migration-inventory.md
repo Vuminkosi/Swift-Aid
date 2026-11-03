@@ -215,8 +215,15 @@ is not Gateway-registered: durable framework sessions and worker-level
 acceptance still require verification. The executor emits pending-tool events,
 maps known authorization and budget denials to safe blocked codes, and
 sanitizes model-provider exceptions while preserving worker retry behavior.
-Focused tests cover denial and synthetic provider failures; live outage,
-timeout and long-running tool progress remain unverified.
+Focused tests cover denial and synthetic provider failures. Framework tool
+execution now requests cancellation after 30 seconds and rejects results
+that arrive after that deadline as unavailable. This new bound addresses the
+migration's timeout acceptance requirement; the prior loop had no general
+tool deadline. It is cooperative: an implementation that ignores cancellation
+can still hold the run and its service scope open, although its late result is
+not accepted. Focused synthetic tests cover cooperative cancellation, deadline
+expiry and a late successful result. Live outage and long-running real tool
+behavior remain unverified.
 An in-memory worker integration fixture now runs this executor with a
 deterministic streaming `IChatClient`, checks the owner-filtered completed
 turn, response chunk, final reconciliation and usage sample. It does not test

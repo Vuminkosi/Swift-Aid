@@ -6,9 +6,12 @@ namespace SwiftAid.Intelligence.Meta;
 /// <summary>Connects the application utterance boundary to one framework agent run.</summary>
 public sealed class EllaiFrameworkExecutor(
     IChatClient client, EllaiPromptBuilder prompts, EllaiToolBroker broker,
-    EllaiUsageLedger ledger, IEllaiUsageStore usageStore) : IEllaiReasoningExecutor
+    EllaiUsageLedger ledger, IEllaiUsageStore usageStore, TimeSpan? toolTimeout = null) : IEllaiReasoningExecutor
 {
     private int _active;
+    private readonly TimeSpan _toolTimeout = toolTimeout is null ? TimeSpan.FromSeconds(30)
+        : toolTimeout > TimeSpan.Zero && toolTimeout <= TimeSpan.FromMinutes(5)
+            ? toolTimeout.Value : throw new ArgumentOutOfRangeException(nameof(toolTimeout));
 
     public async Task<EllaiCycleOutcome> RunAsync(EllaiLoopRequest request, CancellationToken ct,
         Func<int, CancellationToken, Task<bool>>? reauthorizeAsync = null,
@@ -48,7 +51,9 @@ public sealed class EllaiFrameworkExecutor(
                 }
                 Trace(EllaiActivityKind.ToolStarted, "read", tool.ToolName);
                 calls++;
-                var invocation = (invokeToolAsync ?? broker.InvokeAsync)(context, tool, token);
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+                deadline.CancelAfter(_toolTimeout);
+                var invocation = (invokeToolAsync ?? broker.InvokeAsync)(context, tool, deadline.Token);
                 using var pending = CancellationTokenSource.CreateLinkedTokenSource(token);
                 try
                 {
@@ -60,8 +65,14 @@ public sealed class EllaiFrameworkExecutor(
                         Trace(EllaiActivityKind.ToolPending, "read", tool.ToolName);
                     }
                     var result = await invocation.ConfigureAwait(false);
+                    if (deadline.IsCancellationRequested && !token.IsCancellationRequested)
+                        return new(tool.ToolName, false, "Tool execution timed out.", [], string.Empty, 0, false, EllaiToolReasonCodes.Unavailable);
                     if (result.Allowed) Trace(EllaiActivityKind.ToolObservationAccepted);
                     return result;
+                }
+                catch (OperationCanceledException) when (deadline.IsCancellationRequested && !token.IsCancellationRequested)
+                {
+                    return new(tool.ToolName, false, "Tool execution timed out.", [], string.Empty, 0, false, EllaiToolReasonCodes.Unavailable);
                 }
                 finally { await pending.CancelAsync().ConfigureAwait(false); }
             }
