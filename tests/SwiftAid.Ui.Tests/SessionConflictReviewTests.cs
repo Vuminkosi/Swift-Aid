@@ -15,6 +15,29 @@ namespace SwiftAid.Ui.Tests;
 public sealed class SessionConflictReviewTests
 {
     [Fact]
+    public async Task UnconfirmedUpdateRechecksAccessAndKeepsSubmittedProposal()
+    {
+        var id = Guid.NewGuid();
+        var start = DateTimeOffset.UtcNow.AddDays(1);
+        var current = new CommunitySessionView(id, 3, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
+        var input = new UpdateSessionInput("Proposal", "Summary", "Community", [], "Presenter", "en", start, 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
+        var proposal = new SessionUpdateSubmission(id, 3, input, "reason");
+        var page = new SwiftAid.Gateway.Components.Pages.Sessions();
+        var type = page.GetType();
+        type.GetProperty("StaffSessionEditor", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, new StaffClient(current, true));
+        type.GetField("_actorId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, "officer");
+        type.GetField("_editingSessionId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, id);
+        type.GetField("_editingVersion", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, 3L);
+        type.GetField("_editingStatus", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, "Scheduled");
+
+        await (Task)type.GetMethod("RunCommandAsync", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(page, [input.ToCommand(id, 3, "reason", DateTimeOffset.UtcNow), proposal])!;
+
+        Assert.Same(proposal, type.GetField("_conflictProposal", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
+        Assert.True((bool)type.GetField("_proposalOutcomeUnknown", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page)!);
+    }
+
+    [Fact]
     public async Task ReopeningSameSessionReplacesTheEditorEvenWhenVersionIsUnchanged()
     {
         var id = Guid.NewGuid();
@@ -48,14 +71,37 @@ public sealed class SessionConflictReviewTests
         var type = page.GetType();
         type.GetProperty("StaffSessionEditor", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, new StaffClient(current, canEdit));
         type.GetField("_actorId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, "officer");
-        var task = (Task)type.GetMethod("RecoverConflictAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page, [proposal, "officer"])!;
+        var task = (Task)type.GetMethod("RecoverConflictAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page, [proposal, "officer", false])!;
         await task;
         var retained = type.GetField("_conflictProposal", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page);
         Assert.Equal(canEdit, retained is not null);
     }
 
-    [Fact]
-    public async Task DisplaysBothVersionsAndEscapesUserContent()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task UnknownOutcomeRetainsProposalAtSameVersionOnlyWithCurrentEditAccess(bool canEdit)
+    {
+        var id = Guid.NewGuid();
+        var start = DateTimeOffset.UtcNow.AddDays(1);
+        var current = new CommunitySessionView(id, 3, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
+        var input = new UpdateSessionInput("Proposal", "Summary", "Community", [], "Presenter", "en", start, 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
+        var proposal = new SessionUpdateSubmission(id, 3, input, "reason");
+        var page = new SwiftAid.Gateway.Components.Pages.Sessions();
+        var type = page.GetType();
+        type.GetProperty("StaffSessionEditor", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, new StaffClient(current, canEdit));
+        type.GetField("_actorId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, "officer");
+
+        await (Task)type.GetMethod("RecoverConflictAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page, [proposal, "officer", true])!;
+
+        Assert.Equal(canEdit, type.GetField("_conflictProposal", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page) is not null);
+        if (canEdit) Assert.True((bool)type.GetField("_proposalOutcomeUnknown", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page)!);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DisplaysBothVersionsAndEscapesUserContent(bool outcomeUnknown)
     {
         var id = Guid.NewGuid();
         var start = new DateTimeOffset(2026, 11, 1, 5, 30, 0, TimeSpan.Zero);
@@ -72,11 +118,11 @@ public sealed class SessionConflictReviewTests
         var markup = await renderer.Dispatcher.InvokeAsync(async () =>
         {
             var component = await renderer.RenderComponentAsync<SessionConflictReview>(ParameterView.FromDictionary(
-                new Dictionary<string, object?> { [nameof(SessionConflictReview.Proposal)] = proposal, [nameof(SessionConflictReview.Current)] = current }));
+                new Dictionary<string, object?> { [nameof(SessionConflictReview.Proposal)] = proposal, [nameof(SessionConflictReview.Current)] = current, [nameof(SessionConflictReview.OutcomeUnknown)] = outcomeUnknown }));
             return component.ToHtmlString();
         });
 
-        Assert.Contains("Your update was not saved", markup, StringComparison.Ordinal);
+        Assert.Contains(outcomeUnknown ? "outcome could not be confirmed" : "Your update was not saved", markup, StringComparison.Ordinal);
         Assert.Contains("&lt;Proposal&gt;", markup, StringComparison.Ordinal);
         Assert.Contains("Current summary", markup, StringComparison.Ordinal);
         Assert.Contains("Schedule changed", markup, StringComparison.Ordinal);

@@ -1,8 +1,10 @@
 @using SwiftAid.Contracts.Sessions
 
 <MudPaper Class="pa-4 mb-4" Outlined="true" Elevation="0" aria-labelledby="session-conflict-heading">
-    <MudText Typo="Typo.h6" HtmlTag="h2" id="session-conflict-heading">Review the update conflict</MudText>
-    <MudText Typo="Typo.body2">Your update was not saved. Compare your submitted proposal with the current server version, then make the changes you still want in the editor below.</MudText>
+    <MudText Typo="Typo.h6" HtmlTag="h2" id="session-conflict-heading">@(OutcomeUnknown ? "Review the unconfirmed update" : "Review the update conflict")</MudText>
+    <MudText Typo="Typo.body2">@(OutcomeUnknown
+        ? "The update outcome could not be confirmed. Compare your submitted proposal with the current server version before making further changes."
+        : "Your update was not saved. Compare your submitted proposal with the current server version, then make the changes you still want in the editor below.")</MudText>
     <MudText Typo="Typo.caption">Your version: @Proposal.ExpectedVersion · Current version: @Current.Version</MudText>
     <div class="session-conflict-table">
         <table class="mud-table-root" aria-label="Proposed and current session details">
@@ -21,6 +23,7 @@
 @code {
     [Parameter, EditorRequired] public SessionUpdateSubmission Proposal { get; set; } = default!;
     [Parameter, EditorRequired] public CommunitySessionView Current { get; set; } = default!;
+    [Parameter] public bool OutcomeUnknown { get; set; }
     [Parameter] public EventCallback OnDismiss { get; set; }
 
     private IEnumerable<(string Label, string Proposed, string Current)> Rows

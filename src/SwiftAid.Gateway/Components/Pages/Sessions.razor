@@ -41,7 +41,7 @@
                 var editorGeneration = _editorGeneration;
                 @if (_conflictProposal is { } proposal && _staffView is { } current)
                 {
-                    <SessionConflictReview Proposal="proposal" Current="current" OnDismiss="DismissConflictProposal" />
+                    <SessionConflictReview Proposal="proposal" Current="current" OutcomeUnknown="_proposalOutcomeUnknown" OnDismiss="DismissConflictProposal" />
                 }
                 <SessionEditor @ref="_sessionEditor" @key="(_editorGeneration, _editingVersion)"
                            ManagementCapabilities="capability"
@@ -83,6 +83,7 @@
     private string? _editingCreatedBy;
     private CommunitySessionView? _staffView;
     private SessionUpdateSubmission? _conflictProposal;
+    private bool _proposalOutcomeUnknown;
     private SessionEditor? _sessionEditor;
     private bool HasPendingEditorInput() => _sessionEditor?.HasPendingInput == true;
     private Guid? _loadedRequestId;
@@ -727,18 +728,21 @@
 
     private void DismissConflictProposal() => _conflictProposal = null;
 
-    private async Task RecoverConflictAsync(SessionUpdateSubmission proposal, string? originalActorId)
+    private async Task RecoverConflictAsync(SessionUpdateSubmission proposal, string? originalActorId, bool outcomeUnknown = false)
     {
         if (string.IsNullOrWhiteSpace(originalActorId) || !string.Equals(_actorId, originalActorId, StringComparison.Ordinal))
             return;
 
         await LoadStaffSessionAsync(proposal.SessionId);
         if (string.Equals(_actorId, originalActorId, StringComparison.Ordinal) &&
-            _editingSessionId == proposal.SessionId && _editingVersion != proposal.ExpectedVersion &&
+            _editingSessionId == proposal.SessionId && (outcomeUnknown || _editingVersion != proposal.ExpectedVersion) &&
             _staffView is not null && _managementCapabilities.CanEdit && CanRenderEditor(_managementCapabilities))
         {
             _conflictProposal = proposal;
-            _serverError = "The session changed before your update was saved. Compare your proposal with the current version below.";
+            _proposalOutcomeUnknown = outcomeUnknown;
+            _serverError = outcomeUnknown
+                ? "The update outcome could not be confirmed. Compare your proposal with the current version below."
+                : "The session changed before your update was saved. Compare your proposal with the current version below.";
         }
     }
 
@@ -781,6 +785,8 @@
                     ClearEditorState();
                     _managementCapabilities = SessionManagementPresentation.Unavailable(outcome.Message ?? outcome.Metadata.Notice);
                     _canManageSessions = false;
+                    if (outcome.Code == UiCapabilityResultCode.Unavailable && proposal is not null)
+                        await RecoverConflictAsync(proposal, originalActorId, outcomeUnknown: true);
                 }
             }
         }
@@ -791,6 +797,8 @@
                 "The session change could not be confirmed.");
             _canManageSessions = false;
             _serverError = "The session change could not be confirmed. Reload the session before trying again.";
+            if (proposal is not null)
+                await RecoverConflictAsync(proposal, originalActorId, outcomeUnknown: true);
         }
         finally
         {
