@@ -1,0 +1,49 @@
+@page "/community-sessions-fixture"
+@using SwiftAid.Contracts.Sessions
+@using SwiftAid.UI.Components.Surfaces.Public
+
+<PageTitle>Community sessions synthetic fixture</PageTitle>
+<SwiftAidThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<main>
+    <p role="note">UI fixture — synthetic sessions; no live records or effects.</p>
+    <PublicSessionsSurface Sessions="_sessions" QuerySessionsAsync="QueryAsync" />
+</main>
+
+@code {
+    private readonly IReadOnlyList<PublicSessionView> _sessions =
+    [
+        new(Guid.Parse("b90d4f2e-50cf-47b8-95a6-ac332d668751"), 1, "Community workshop",
+            "A synthetic session for layout testing.", "Community members", ["Community"], "SZ", "Example region",
+            "Education", "Fixture presenter", "English", DateTimeOffset.UtcNow.AddDays(7), "Africa/Mbabane",
+            60, null, [], SessionChannelType.None, null, "Scheduled", null, 0),
+        new(Guid.Parse("2f585545-8c3f-4c91-9768-f9c912afc25e"), 1, "Local learning session",
+            "A second synthetic session for layout testing.", "Community members", ["Learning"], "SZ", "Example region",
+            "Education", "Fixture presenter", "English", DateTimeOffset.UtcNow.AddDays(14), "Africa/Mbabane",
+            45, null, [], SessionChannelType.None, null, "Scheduled", null, 0)
+    ];
+
+    private Task<PublicSessionPage?> QueryAsync(PublicSessionQuery query)
+    {
+        var zone = TimeZoneInfo.FindSystemTimeZoneById("Africa/Mbabane");
+        var results = _sessions.Where(session =>
+        {
+            var date = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(session.StartUtc, zone).DateTime);
+            return (string.IsNullOrWhiteSpace(query.Search) || session.Title.Contains(query.Search, StringComparison.OrdinalIgnoreCase)) &&
+                (string.IsNullOrWhiteSpace(query.CountryCode) || string.Equals(session.CountryCode, query.CountryCode, StringComparison.OrdinalIgnoreCase)) &&
+                (string.IsNullOrWhiteSpace(query.RegionId) || string.Equals(session.RegionId, query.RegionId, StringComparison.OrdinalIgnoreCase)) &&
+                (string.IsNullOrWhiteSpace(query.Sector) || string.Equals(session.Sector, query.Sector, StringComparison.OrdinalIgnoreCase)) &&
+                (string.IsNullOrWhiteSpace(query.Language) || string.Equals(session.Language, query.Language, StringComparison.OrdinalIgnoreCase)) &&
+                (string.IsNullOrWhiteSpace(query.Topic) || session.TopicTags.Contains(query.Topic, StringComparer.OrdinalIgnoreCase)) &&
+                (string.IsNullOrWhiteSpace(query.Category) || session.TopicTags.Contains(query.Category, StringComparer.OrdinalIgnoreCase)) &&
+                (query.LocalDateFrom is null || date >= query.LocalDateFrom) &&
+                (query.LocalDateTo is null || date <= query.LocalDateTo) &&
+                (query.StartFromUtc is null || session.StartUtc >= query.StartFromUtc) &&
+                (query.StartBeforeUtc is null || session.StartUtc < query.StartBeforeUtc);
+        }).ToArray();
+        return Task.FromResult<PublicSessionPage?>(new PublicSessionPage(results, null));
+    }
+}
