@@ -121,6 +121,12 @@ collection, progress and audit handling before it can be used safely.
 profile, advertises only registered canonical tools and retains the broker's
 model-facing descriptions. Its invocation delegate must still reach the broker
 and recheck current authorization; catalogue membership is not authorization.
+`EllaiFrameworkToolGuard` provides a per-run shared call budget and serial
+invocation fence, checks execution currency before and after each call, and
+suppresses the result when currency is lost. Its sticky failure code must be
+checked by the future agent runner before accepting any final answer; the guard
+is not registered or wired into the Gateway. It does not itself implement
+model-call budgets, evidence validation, progress, timeout or audit handling.
 The deterministic framework fixture also invokes the real broker's admitted
 public-facts tool and observes its serialized JSON evidence. This is not a live
 provider or managed-case test. The framework and adapter focused tests passed
