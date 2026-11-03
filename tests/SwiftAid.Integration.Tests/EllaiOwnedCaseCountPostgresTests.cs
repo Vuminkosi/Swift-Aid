@@ -1,4 +1,6 @@
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using SwiftAid.Application.Cases;
 using SwiftAid.Application.Authorization;
@@ -7,12 +9,116 @@ using SwiftAid.Contracts.Ellai;
 using SwiftAid.Infrastructure.Authorization;
 using SwiftAid.Infrastructure.Persistence.Repositories.Cases;
 using SwiftAid.Infrastructure.Persistence.Transactions;
+using SwiftAid.Infrastructure.Persistence.Ellai;
+using SwiftAid.Gateway.Ellai;
 using SwiftAid.Intelligence.Meta;
 
 namespace SwiftAid.Integration.Tests;
 
 public sealed class EllaiOwnedCaseCountPostgresTests
 {
+    [FrameworkPostgresFact]
+    public async Task WorkerDoesNotCommitCountWhenPostgresGrantExpiresDuringPublication()
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
+        var sessionId = "count-worker-" + Guid.NewGuid().ToString("N");
+        var actor = fixture.CreateActor();
+        var consent = new EllaiConsentService();
+        var barrier = new AggregatePublicationBarrier();
+        using var model = new CountClient();
+        var services = new ServiceCollection();
+        services.AddScoped(_ => fixture.CreateDbContext());
+        services.AddScoped<PostgresEllaiSessionStore>();
+        services.AddScoped<IEllaiSessionStore>(sp => sp.GetRequiredService<PostgresEllaiSessionStore>());
+        services.AddScoped<IEllaiUtteranceOutboxStore>(sp => sp.GetRequiredService<PostgresEllaiSessionStore>());
+        services.AddScoped<IEllaiUsageStore, PostgresEllaiUsageStore>();
+        services.AddSingleton(consent).AddSingleton<EllaiUsageLedger>().AddSingleton<EllaiSessionResponseStore>();
+        services.AddScoped<IDashboardAggregateQuery>(sp =>
+        {
+            var db = sp.GetRequiredService<SwiftAid.Infrastructure.Persistence.SwiftAidDbContext>();
+            var unit = new PostgresCaseCommandUnitOfWork(db);
+            var query = new DashboardAggregateQuery(new PostgresDashboardAggregateStore(db),
+                new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(db, unit), new PostgresCaseAccessDescriptorStore(db, unit)),
+                unit, TimeProvider.System);
+            return new GatedAggregateQuery(query, barrier);
+        });
+        services.AddScoped(sp => new EllaiToolBroker(new EllaiPolicyService(), consent,
+            dashboard: sp.GetRequiredService<IDashboardAggregateQuery>()));
+        services.AddScoped(_ => new EllaiPromptBuilder("Synthetic policy", "fixture"));
+        services.AddEllaiReasoningExecutor(new EllaiOptions
+        {
+            Enabled = true, ApiKey = "synthetic", ApiUrl = "https://fixture.invalid", ReasoningModel = "fixture"
+        }, "framework");
+        services.AddKeyedSingleton<IChatClient>(EllaiReasoningRegistration.FrameworkClientKey, model);
+        await using var provider = services.BuildServiceProvider();
+        using var worker = new EllaiUtteranceWorker(provider, NullLogger<EllaiUtteranceWorker>.Instance);
+        try
+        {
+            await using (var db = fixture.CreateDbContext())
+            {
+                var session = new EllaiSessionRecord(sessionId, EllaiMode.Ask, "Active", 1, 1, 1, 1, 0, 12,
+                    actor.ActorId, "scope", null, null, DateTimeOffset.UtcNow);
+                var store = new PostgresEllaiSessionStore(db);
+                await store.CreateAsync(session, default);
+                var work = new EllaiUtteranceWork(sessionId, "scope", "Count my cases", "cases", null,
+                    EllaiMode.Ask, 1, "count-cycle", actor, true, "consent/0",
+                    EllaiProcessingClassification.UserProvidedNonSensitive, EllaiProcessingClassification.UserProvidedNonSensitive,
+                    new HashSet<string> { EllaiToolNames.OwnedCaseCount }, EllaiConsentPurposes.PublicProductHelp, "count-turn");
+                Assert.NotNull(await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 }, 1,
+                    work.ClientUtteranceId, default, EllaiUtteranceWorkEnvelope.Serialize(work, work.ClientUtteranceId)));
+            }
+            await worker.StartAsync(default);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            await barrier.Started.Task.WaitAsync(timeout.Token);
+            var responses = provider.GetRequiredService<EllaiSessionResponseStore>();
+            var provisional = responses.ReadSince(sessionId, 0, take: 64).Responses;
+            Assert.DoesNotContain(provisional, item => item.Text.Contains("managed case(s)", StringComparison.Ordinal));
+            await fixture.SetGrantExpiryAsync(DateTimeOffset.UtcNow.AddMinutes(-1));
+            barrier.Release.TrySetResult();
+            EllaiConversationTurn turn;
+            do
+            {
+                await Task.Delay(50, timeout.Token);
+                await using var db = fixture.CreateDbContext();
+                turn = Assert.Single(await new PostgresEllaiSessionStore(db).ReadConversationAsync(sessionId, actor.ActorId, timeout.Token));
+            } while (turn.CompletedAtUtc is null);
+            Assert.NotEqual("Completed", turn.Outcome);
+            Assert.Null(turn.AssistantText);
+            Assert.DoesNotContain(responses.ReadSince(sessionId, 0, take: 64).Responses,
+                item => item.Text.Contains("managed case(s)", StringComparison.Ordinal));
+        }
+        finally
+        {
+            barrier.Release.TrySetResult();
+            await worker.StopAsync(CancellationToken.None);
+            await using var db = fixture.CreateDbContext();
+            await db.Set<EllaiUsageSampleEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+            await db.Set<EllaiUtteranceEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+            await db.Set<EllaiCheckpointEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+            await db.Set<EllaiSessionEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+        }
+    }
+
+    private sealed class AggregatePublicationBarrier
+    {
+        public int Calls;
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    private sealed class GatedAggregateQuery(IDashboardAggregateQuery inner, AggregatePublicationBarrier barrier) : IDashboardAggregateQuery
+    {
+        public async Task<DashboardAggregateResult> GetAsync(ActorContext actor, TimeSpan lookback, CancellationToken ct)
+        {
+            if (Interlocked.Increment(ref barrier.Calls) == 3)
+            {
+                barrier.Started.TrySetResult();
+                await barrier.Release.Task.WaitAsync(ct);
+            }
+            return await inner.GetAsync(actor, lookback, ct);
+        }
+    }
+
     [FrameworkPostgresFact]
     public async Task FrameworkStopsCountPublicationWhenPostgresGrantExpiresAfterFirstChunk()
     {
