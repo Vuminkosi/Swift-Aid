@@ -9,11 +9,80 @@ using SwiftAid.Application.Cases;
 using SwiftAid.Contracts.Cases;
 using Microsoft.AspNetCore.Http;
 using SwiftAid.Gateway.Endpoints;
+using Microsoft.Extensions.AI;
+using SwiftAid.Intelligence.Meta;
+using System.Runtime.CompilerServices;
 
 namespace SwiftAid.Integration.Tests;
 
 public sealed class EllaiUtteranceWorkerOutcomeTests
 {
+    [Fact]
+    public async Task WorkerRunsFrameworkExecutorAndPersistsAndStreamsAnswer()
+    {
+        var store = new InMemoryEllaiSessionStore();
+        var responses = new EllaiSessionResponseStore();
+        var actor = ActorContext.FromValidatedPrincipal(new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, "framework-worker"), new Claim(ActorContext.AccessEpochClaimType, "1")], "test")));
+        var session = new EllaiSessionRecord("framework-session", EllaiMode.Ask, "Active", 1, 1, 1, 1,
+            0, 12, actor.ActorId, "scope", null, null, DateTimeOffset.UtcNow);
+        await store.CreateAsync(session, CancellationToken.None);
+        var work = new EllaiUtteranceWork(session.SessionId, "scope", "Synthetic question", "public.product-help", null,
+            EllaiMode.Ask, 1, "cycle", actor, true, "consent/0",
+            EllaiProcessingClassification.UserProvidedNonSensitive, EllaiProcessingClassification.UserProvidedNonSensitive,
+            new HashSet<string>(), EllaiConsentPurposes.PublicProductHelp, "framework-u");
+        await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 }, 1, "framework-u",
+            CancellationToken.None, EllaiUtteranceWorkEnvelope.Serialize(work, "framework-u"));
+        var consent = new EllaiConsentService();
+        var usage = new InMemoryEllaiUsageStore();
+        using var model = new FrameworkStreamingClient();
+        IEllaiReasoningExecutor executor = new EllaiFrameworkExecutor(model,
+            new EllaiPromptBuilder("Synthetic test policy", "v-test"),
+            new EllaiToolBroker(new EllaiPolicyService(), consent), new EllaiUsageLedger(), usage);
+        await using var services = new ServiceCollection()
+            .AddSingleton<IEllaiSessionStore>(store).AddSingleton<IEllaiUtteranceOutboxStore>(store)
+            .AddSingleton(responses).AddSingleton(consent).AddSingleton(executor).BuildServiceProvider();
+        using var worker = new EllaiUtteranceWorker(services, NullLogger<EllaiUtteranceWorker>.Instance);
+        await worker.StartAsync(CancellationToken.None);
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            EllaiConversationTurn turn;
+            do
+            {
+                await Task.Delay(10, timeout.Token);
+                turn = Assert.Single(await store.ReadConversationAsync(session.SessionId, actor.ActorId, timeout.Token));
+            } while (turn.CompletedAtUtc is null);
+            Assert.Equal("Completed", turn.Outcome);
+            Assert.Equal("Synthetic answer.", turn.AssistantText);
+            var published = responses.ReadSince(session.SessionId, 0).Responses;
+            Assert.Contains(published, item => !item.IsFinal && item.Text.Contains("Synthetic answer."));
+            Assert.Contains(published, item => item.IsReconciliation && item.Text == "Synthetic answer.");
+            Assert.Equal(1, model.Calls);
+            Assert.Equal(1, (await usage.TotalsAsync(session.SessionId, CancellationToken.None)).Calls);
+        }
+        finally { await worker.StopAsync(CancellationToken.None); }
+    }
+
+    private sealed class FrameworkStreamingClient : IChatClient
+    {
+        public int Calls { get; private set; }
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls++;
+            yield return new ChatResponseUpdate(ChatRole.Assistant, Answer);
+            yield return new ChatResponseUpdate(ChatRole.Assistant,
+                [new UsageContent(new UsageDetails { InputTokenCount = 5, OutputTokenCount = 4 })]);
+        }
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]

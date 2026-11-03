@@ -148,6 +148,11 @@ An in-process fixture verifies a successful tool call and activity event. It
 is not Gateway-registered: pending-progress parity, precise blocked failure
 codes, exception sanitization, unknown-tool handling, durable framework
 sessions and worker-level acceptance still require verification.
+An in-memory worker integration fixture now runs this executor with a
+deterministic streaming `IChatClient`, checks the owner-filtered completed
+turn, response chunk, final reconciliation and usage sample. It does not test
+PostgreSQL persistence, a live Gateway process, native tool calls through the
+worker, or a restored framework session.
 Its non-streaming provider calls recheck the supplied currency callback and
 use `EllaiFrameworkUsage` to estimate the prompt and tool-schema budget against
 the existing ledger, then record provider usage through `IEllaiUsageStore`.
