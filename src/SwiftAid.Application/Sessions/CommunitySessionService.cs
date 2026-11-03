@@ -15,12 +15,13 @@ namespace SwiftAid.Application.Sessions;
 /// Reminder dispatch/execution is OUT of scope (P6.3 durable-reminder lane); this
 /// service only (re)computes occurrence rows and suppresses them on cancel.
 /// </summary>
-public sealed class CommunitySessionService(ICommunitySessionStore store) : ICommunitySessionService
+public sealed class CommunitySessionService(ICommunitySessionStore store, ISessionMaterialEligibility? materialEligibility = null) : ICommunitySessionService
 {
     public const int DefaultPublicLimit = 50;
     public const int MaxPublicLimit = 100;
 
     private readonly ICommunitySessionStore _store = store ?? throw new ArgumentNullException(nameof(store));
+    private readonly ISessionMaterialEligibility? _materialEligibility = materialEligibility;
 
     public async Task<SessionCommandResult> ExecuteAsync(SessionCommand command, string actorId, CancellationToken ct)
     {
@@ -49,22 +50,29 @@ public sealed class CommunitySessionService(ICommunitySessionStore store) : ICom
         switch (command)
         {
             case ReviewSessionCommand review:
+                await RequireEligibleMaterialsAsync(session, session.Materials.Select(ToContractMaterial).ToArray(),
+                    ToContractVisibility(session.Visibility), session.Language, ct).ConfigureAwait(false);
                 session.Review(actorId, review.AcknowledgeSelfReview, review.RecordedAtUtc);
                 await _store.UpdateAsync(session, command.ExpectedVersion, actorId, command.Reason,
                     command.RecordedAtUtc, SessionReminderSync.None, null, ct).ConfigureAwait(false);
                 break;
             case ScheduleSessionCommand:
+                await RequireEligibleMaterialsAsync(session, session.Materials.Select(ToContractMaterial).ToArray(),
+                    ToContractVisibility(session.Visibility), session.Language, ct).ConfigureAwait(false);
                 session.Schedule(actorId, command.RecordedAtUtc);
                 await _store.UpdateAsync(session, command.ExpectedVersion, actorId, command.Reason,
                     command.RecordedAtUtc, SessionReminderSync.Recompute,
                     session.ComputeReminderOccurrences(session.ScheduledAtUtc!.Value), ct).ConfigureAwait(false);
                 break;
             case UpdateSessionCommand update:
+                var materialSnapshot = update.Materials?.ToArray() ?? throw new ArgumentException("Materials are required.", nameof(update));
+                if (session.Status == CommunitySessionStatus.Scheduled)
+                    await RequireEligibleMaterialsAsync(session, materialSnapshot, update.Visibility, update.Language, ct).ConfigureAwait(false);
                 session.UpdateDetails(
                     update.Title, update.Summary, update.AudienceDescription,
                     update.TopicTags, update.Presenter, update.Language,
                     update.StartUtc, update.DurationMinutes, update.Capacity,
-                    update.Materials.Select(ToDomainMaterial).ToArray(),
+                    materialSnapshot.Select(ToDomainMaterial).ToArray(),
                     ToDomainVisibility(update.Visibility), ToDomainChannel(update.ChannelType),
                     update.ChannelLink, update.ReminderLeadHours, command.RecordedAtUtc);
                 var sync = session.Status == CommunitySessionStatus.Scheduled
@@ -92,6 +100,20 @@ public sealed class CommunitySessionService(ICommunitySessionStore store) : ICom
 
         return new SessionCommandResult(session.SessionId, session.Version, session.Status.ToString());
     }
+
+    private async Task RequireEligibleMaterialsAsync(
+        CommunitySession session, IReadOnlyList<Contracts.Sessions.SessionMaterialRef> materials,
+        Contracts.Sessions.SessionVisibility visibility, string language, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var request = new SessionMaterialEligibilityRequest(session.CountryCode, session.RegionId, session.Sector,
+            language, visibility, Array.AsReadOnly(materials.ToArray()));
+        if (_materialEligibility is null || !await _materialEligibility.AreEligibleAsync(request, ct).ConfigureAwait(false))
+            throw new InvalidOperationException("Current approval and reuse rights for session materials could not be confirmed.");
+    }
+
+    private static Contracts.Sessions.SessionMaterialRef ToContractMaterial(DomainMaterial material) =>
+        new(material.MaterialId, material.SourceVersion);
 
     public async Task<CommunitySessionView?> GetStaffAsync(Guid sessionId, string actorId, CancellationToken ct)
     {

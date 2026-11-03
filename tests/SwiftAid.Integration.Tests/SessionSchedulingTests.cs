@@ -21,7 +21,7 @@ public sealed class SessionSchedulingTests
         var utcMidnight = new DateTimeOffset(day, TimeSpan.Zero);
         var marker = $"local-date-{Guid.NewGuid():N}";
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
-        var service = new CommunitySessionService(new PostgresCommunitySessionStore(db));
+        var service = new CommunitySessionService(new PostgresCommunitySessionStore(db), new FixtureMaterialEligibility());
         try
         {
             for (var index = 0; index < ids.Length; index++)
@@ -55,7 +55,7 @@ public sealed class SessionSchedulingTests
         var marker = $"session-{Guid.NewGuid():N}";
         var start = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddDays(10).ToUnixTimeSeconds());
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
-        var service = new CommunitySessionService(new PostgresCommunitySessionStore(db));
+        var service = new CommunitySessionService(new PostgresCommunitySessionStore(db), new FixtureMaterialEligibility());
         try
         {
             for (var index = 0; index < ids.Length; index++)
@@ -237,6 +237,44 @@ public sealed class SessionSchedulingTests
     }
 
     [IntakePostgresFact]
+    public async Task Editing_reviewed_session_requires_a_new_review_after_reload()
+    {
+        var sessionId = Guid.NewGuid();
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var service = CreateService(db);
+        try
+        {
+            await service.ExecuteAsync(CreateDraft(sessionId, "officer-1"), "officer-1", CancellationToken.None);
+            await service.ExecuteAsync(
+                new ReviewSessionCommand(sessionId, 1, false, "reviewed", DateTimeOffset.UtcNow),
+                "officer-2", CancellationToken.None);
+            await service.ExecuteAsync(UpdateDraft(sessionId, 2, "Revised session"), "officer-1", CancellationToken.None);
+
+            var edited = await service.GetStaffAsync(sessionId, "officer-1", CancellationToken.None);
+            Assert.NotNull(edited);
+            Assert.Equal("Draft", edited.Status);
+            Assert.Null(edited.ReviewedByActorId);
+            Assert.False(edited.SelfReviewAcknowledged);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.ExecuteAsync(
+                new ScheduleSessionCommand(sessionId, 3, "publish", DateTimeOffset.UtcNow),
+                "officer-2", CancellationToken.None));
+
+            await service.ExecuteAsync(
+                new ReviewSessionCommand(sessionId, 3, false, "reviewed revision", DateTimeOffset.UtcNow),
+                "officer-2", CancellationToken.None);
+            var scheduled = await service.ExecuteAsync(
+                new ScheduleSessionCommand(sessionId, 4, "publish", DateTimeOffset.UtcNow),
+                "officer-2", CancellationToken.None);
+            Assert.Equal("Scheduled", scheduled.Status);
+            Assert.Equal(5, await service.StoreCountRevisionsAsync(sessionId, CancellationToken.None));
+        }
+        finally
+        {
+            await CleanupAsync(sessionId);
+        }
+    }
+
+    [IntakePostgresFact]
     public async Task Cancel_suppresses_pending_reminders_but_retains_revisions()
     {
         var sessionId = Guid.NewGuid();
@@ -384,7 +422,7 @@ public sealed class SessionSchedulingTests
         const string accountId = "subscription-owner-1";
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
         var sessionStore = new PostgresCommunitySessionStore(db);
-        var sessions = new CommunitySessionService(sessionStore);
+        var sessions = new CommunitySessionService(sessionStore, new FixtureMaterialEligibility());
         var service = new EventSubscriptionService(new PostgresEventSubscriptionStore(db), sessions, TimeProvider.System);
         var setup = CreateService(db);
         try
@@ -445,7 +483,7 @@ public sealed class SessionSchedulingTests
         const string accountId = "subscription-owner-cancel";
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
         var sessionStore = new PostgresCommunitySessionStore(db);
-        var sessions = new CommunitySessionService(sessionStore);
+        var sessions = new CommunitySessionService(sessionStore, new FixtureMaterialEligibility());
         var service = new EventSubscriptionService(new PostgresEventSubscriptionStore(db), sessions, TimeProvider.System);
         var setup = CreateService(db);
         try
@@ -482,7 +520,7 @@ public sealed class SessionSchedulingTests
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
         var sessionStore = new PostgresCommunitySessionStore(db);
         var subscriptionService = new EventSubscriptionService(
-            new PostgresEventSubscriptionStore(db), new CommunitySessionService(sessionStore), TimeProvider.System);
+            new PostgresEventSubscriptionStore(db), new CommunitySessionService(sessionStore, new FixtureMaterialEligibility()), TimeProvider.System);
         var setup = CreateService(db);
         try
         {
@@ -572,7 +610,7 @@ public sealed class SessionSchedulingTests
             await PublishAsync(setup, sessionId, SessionVisibility.Public);
             var sessionStore = new PostgresCommunitySessionStore(db);
             var service = new EventSubscriptionService(
-                new PostgresEventSubscriptionStore(db), new CommunitySessionService(sessionStore), TimeProvider.System);
+                new PostgresEventSubscriptionStore(db), new CommunitySessionService(sessionStore, new FixtureMaterialEligibility()), TimeProvider.System);
             var options = Assert.IsType<EventSubscriptionOptions>(
                 await service.GetOptionsAsync(sessionId, accountId, CancellationToken.None));
             await service.SubscribeAsync(sessionId, accountId, options.SessionVersion,
@@ -637,7 +675,7 @@ public sealed class SessionSchedulingTests
     private static TestCommunitySessionService CreateService(SwiftAid.Infrastructure.Persistence.SwiftAidDbContext db)
     {
         var store = new PostgresCommunitySessionStore(db);
-        return new TestCommunitySessionService(new CommunitySessionService(store), store);
+        return new TestCommunitySessionService(new CommunitySessionService(store, new FixtureMaterialEligibility()), store);
     }
 
     private static async Task PublishAsync(TestCommunitySessionService service, Guid sessionId, SessionVisibility visibility)
@@ -745,6 +783,16 @@ public sealed class SessionSchedulingTests
         }
 
         await db.SaveChangesAsync();
+    }
+
+    // Synthetic fixture only: production does not have an eligibility authority wired.
+    private sealed class FixtureMaterialEligibility : ISessionMaterialEligibility
+    {
+        public Task<bool> AreEligibleAsync(SessionMaterialEligibilityRequest request, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(true);
+        }
     }
 
     /// <summary>Test-local handle exposing the store counters alongside the service.</summary>

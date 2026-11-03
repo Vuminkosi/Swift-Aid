@@ -105,18 +105,103 @@ public sealed class CommunitySessionServiceTests
     }
 
     [Fact]
-    public async Task Cancelling_a_reviewed_unpublished_session_never_exposes_it_publicly()
+    public async Task EditingAfterReviewRequiresAReviewOfTheNewVersion()
     {
         var services = CreateServices();
         var id = Guid.NewGuid();
         await services.Service.ExecuteAsync(CreateDraft(id), "officer-1", CancellationToken.None);
         await services.Service.ExecuteAsync(new ReviewSessionCommand(id, 1, false, "review", Now), "officer-2", CancellationToken.None);
-        await services.Service.ExecuteAsync(new CancelSessionCommand(id, 2, "cancelled", "cancel", Now), "officer-2", CancellationToken.None);
+        var edited = await services.Service.ExecuteAsync(UpdateDraft(id, 2), "officer-1", CancellationToken.None);
+        Assert.Equal("Draft", edited.Status);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => services.Service.ExecuteAsync(
+            new ScheduleSessionCommand(id, 3, "schedule", Now), "officer-2", CancellationToken.None));
+        await services.Service.ExecuteAsync(new ReviewSessionCommand(id, 3, false, "review update", Now), "officer-2", CancellationToken.None);
+        var scheduled = await services.Service.ExecuteAsync(new ScheduleSessionCommand(id, 4, "schedule", Now), "officer-2", CancellationToken.None);
+        Assert.Equal("Scheduled", scheduled.Status);
+    }
 
-        Assert.Null(await services.Service.GetPublicAsync(id, CancellationToken.None));
-        Assert.Null(await services.Service.GetIcsAsync(id, Now, CancellationToken.None));
-        Assert.Null(await services.Service.GetInvitationTextAsync(id, CancellationToken.None));
-        Assert.DoesNotContain(await services.Service.ListPublicAsync(null, CancellationToken.None), item => item.SessionId == id);
+    [Fact]
+    public async Task EligibilityIsRecheckedBetweenReviewAndScheduling()
+    {
+        var store = new FakeSessionStore();
+        var eligibility = new FixtureMaterialEligibility();
+        var service = new CommunitySessionService(store, eligibility);
+        var id = Guid.NewGuid();
+        await service.ExecuteAsync(CreateDraft(id), "officer-1", CancellationToken.None);
+        await service.ExecuteAsync(new ReviewSessionCommand(id, 1, false, "review", Now), "officer-2", CancellationToken.None);
+        eligibility.Eligible = false;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.ExecuteAsync(new ScheduleSessionCommand(id, 2, "schedule", Now), "officer-2", CancellationToken.None));
+
+        var unchanged = await service.GetStaffAsync(id, "officer-1", CancellationToken.None);
+        Assert.Equal("Reviewed", unchanged!.Status);
+        Assert.Equal(2, unchanged.Version);
+    }
+
+    [Fact]
+    public async Task WithdrawnMaterialBlocksScheduledRevisionButNotCancellation()
+    {
+        var store = new FakeSessionStore();
+        var eligibility = new FixtureMaterialEligibility();
+        var service = new CommunitySessionService(store, eligibility);
+        var id = Guid.NewGuid();
+        await PublishAsync(service, id, SessionVisibility.Public);
+        Assert.Equal("harare", eligibility.LastRequest!.RegionId);
+        Assert.Equal("en", eligibility.LastRequest.Language);
+        Assert.Single(eligibility.LastRequest.Materials);
+        eligibility.Eligible = false;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.ExecuteAsync(UpdateDraft(id, 3), "officer-1", CancellationToken.None));
+        var unchanged = await service.GetStaffAsync(id, "officer-1", CancellationToken.None);
+        Assert.Equal(3, unchanged!.Version);
+        Assert.Equal("Scheduled", unchanged.Status);
+        var cancelled = await service.ExecuteAsync(new CancelSessionCommand(id, 3, "No longer safe", "cancel", Now), "officer-2", CancellationToken.None);
+        Assert.Equal("Cancelled", cancelled.Status);
+    }
+
+    [Fact]
+    public async Task SchedulingFailsClosedWithoutMaterialEligibilityAuthority()
+    {
+        var store = new FakeSessionStore();
+        var service = new CommunitySessionService(store);
+        var approvedFixture = new CommunitySessionService(store, new FixtureMaterialEligibility());
+        var id = Guid.NewGuid();
+        await service.ExecuteAsync(CreateDraft(id), "officer-1", CancellationToken.None);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.ExecuteAsync(new ReviewSessionCommand(id, 1, false, "review", Now), "officer-2", CancellationToken.None));
+        await approvedFixture.ExecuteAsync(new ReviewSessionCommand(id, 1, false, "review", Now), "officer-2", CancellationToken.None);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.ExecuteAsync(new ScheduleSessionCommand(id, 2, "publish", Now), "officer-2", CancellationToken.None));
+
+        var draft = await service.GetStaffAsync(id, "officer-1", CancellationToken.None);
+        Assert.Equal("Reviewed", draft!.Status);
+        Assert.Equal(2, draft.Version);
+        Assert.Null(await service.GetPublicAsync(id, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task PublicOutputsDoNotExposeUnverifiedMaterialReferences()
+    {
+        var services = CreateServices();
+        var id = Guid.NewGuid();
+        await PublishAsync(services.Service, id, SessionVisibility.Public);
+
+        var staff = await services.Service.GetStaffAsync(id, "officer-1", CancellationToken.None);
+        var publicView = await services.Service.GetPublicAsync(id, CancellationToken.None);
+        var list = await services.Service.ListPublicAsync(null, CancellationToken.None);
+        var page = await services.Service.QueryPublicAsync(new PublicSessionQuery(), CancellationToken.None);
+        var calendar = await services.Service.GetIcsAsync(id, Now, CancellationToken.None);
+        var invitation = await services.Service.GetInvitationTextAsync(id, CancellationToken.None);
+
+        var material = Assert.Single(staff!.Materials);
+        Assert.Empty(publicView!.Materials);
+        Assert.Empty(Assert.Single(list).Materials);
+        Assert.Empty(Assert.Single(page.Items).Materials);
+        Assert.DoesNotContain(material.MaterialId, calendar!, StringComparison.Ordinal);
+        Assert.DoesNotContain(material.MaterialId, invitation!, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -161,25 +246,37 @@ public sealed class CommunitySessionServiceTests
     }
 
     [Fact]
-    public async Task PublicOutputsDoNotExposeUnverifiedMaterialReferences()
+    public async Task PublishedCancellationRemainsAvailableAsCalendarUpdate()
     {
         var services = CreateServices();
         var id = Guid.NewGuid();
         await PublishAsync(services.Service, id, SessionVisibility.Public);
+        await services.Service.ExecuteAsync(new CancelSessionCommand(id, 3, "Venue unavailable", "cancel", Now), "officer-2", CancellationToken.None);
 
-        var staff = await services.Service.GetStaffAsync(id, "officer-1", CancellationToken.None);
-        var publicView = await services.Service.GetPublicAsync(id, CancellationToken.None);
-        var list = await services.Service.ListPublicAsync(null, CancellationToken.None);
-        var page = await services.Service.QueryPublicAsync(new PublicSessionQuery(), CancellationToken.None);
+        var publicSession = await services.Service.GetPublicAsync(id, CancellationToken.None);
         var calendar = await services.Service.GetIcsAsync(id, Now, CancellationToken.None);
-        var invitation = await services.Service.GetInvitationTextAsync(id, CancellationToken.None);
 
-        var material = Assert.Single(staff!.Materials);
-        Assert.Empty(publicView!.Materials);
-        Assert.Empty(Assert.Single(list).Materials);
-        Assert.Empty(Assert.Single(page.Items).Materials);
-        Assert.DoesNotContain(material.MaterialId, calendar!, StringComparison.Ordinal);
-        Assert.DoesNotContain(material.MaterialId, invitation!, StringComparison.Ordinal);
+        Assert.Equal("Cancelled", publicSession!.Status);
+        Assert.NotNull(calendar);
+        Assert.Contains("STATUS:CANCELLED", calendar, StringComparison.Ordinal);
+        Assert.Contains("SEQUENCE:1", calendar, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Cancelling_a_reviewed_unpublished_session_never_exposes_it_publicly()
+    {
+        var services = CreateServices();
+        var id = Guid.NewGuid();
+        await services.Service.ExecuteAsync(CreateDraft(id), "officer-1", CancellationToken.None);
+        await services.Service.ExecuteAsync(new ReviewSessionCommand(id, 1, false, "review", Now), "officer-2", CancellationToken.None);
+        await services.Service.ExecuteAsync(new CancelSessionCommand(id, 2, "cancelled", "cancel", Now), "officer-2", CancellationToken.None);
+
+        Assert.Null(await services.Service.GetPublicAsync(id, CancellationToken.None));
+        Assert.Null(await services.Service.GetIcsAsync(id, Now, CancellationToken.None));
+        Assert.Null(await services.Service.GetInvitationTextAsync(id, CancellationToken.None));
+        Assert.DoesNotContain(await services.Service.ListPublicAsync(null, CancellationToken.None), item => item.SessionId == id);
+        Assert.DoesNotContain((await services.Service.QueryPublicAsync(new PublicSessionQuery(), CancellationToken.None)).Items,
+            item => item.SessionId == id);
     }
 
     [Fact]
@@ -257,7 +354,20 @@ public sealed class CommunitySessionServiceTests
     private static (CommunitySessionService Service, FakeSessionStore Store) CreateServices()
     {
         var store = new FakeSessionStore();
-        return (new CommunitySessionService(store), store);
+        return (new CommunitySessionService(store, new FixtureMaterialEligibility()), store);
+    }
+
+    private sealed class FixtureMaterialEligibility : ISessionMaterialEligibility
+    {
+        public bool Eligible { get; set; } = true;
+        public SessionMaterialEligibilityRequest? LastRequest { get; private set; }
+
+        public Task<bool> AreEligibleAsync(SessionMaterialEligibilityRequest request, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            LastRequest = request;
+            return Task.FromResult(Eligible);
+        }
     }
 
     private static async Task PublishAsync(ICommunitySessionService service, Guid sessionId, SessionVisibility visibility)
