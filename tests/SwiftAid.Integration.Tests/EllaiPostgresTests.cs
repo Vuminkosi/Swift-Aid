@@ -72,6 +72,75 @@ public sealed class FrameworkPostgresLiveMuseFactAttribute : FactAttribute
 public sealed class EllaiPostgresTests : IAsyncLifetime
 {
     [FrameworkPostgresFact]
+    public async Task CaseResultToolsRestoreOriginalAfterNewSearchAndRecheckAccess()
+    {
+        var sessionId = $"case-history-tools-{Guid.NewGuid():N}";
+        await using var initDb = CreateFrameworkDbContext();
+        await initDb.Database.MigrateAsync();
+        var firstId = Guid.NewGuid();
+        var secondId = Guid.NewGuid();
+        var queue = new MutableHistoryQueue();
+        var consent = new EllaiConsentService();
+        consent.Grant(sessionId, EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
+        var context = new EllaiToolContext(sessionId, "scope-test", "cases", null, 4, true,
+            Actor: Actor, DataClassification: EllaiProcessingClassification.SyntheticDemo);
+        var state = new EllaiToolRequest(EllaiToolNames.State, new Dictionary<string, string> { ["projection"] = "queue" });
+        var originalRequest = new EllaiToolRequest(EllaiToolNames.Evidence, new Dictionary<string, string> { ["ref"] = "case-results-original" });
+        var latestRequest = new EllaiToolRequest(EllaiToolNames.Evidence, new Dictionary<string, string> { ["ref"] = "case-results" });
+        try
+        {
+            queue.Rows = [firstId];
+            await using (var db = CreateFrameworkDbContext())
+            {
+                var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue,
+                    topics: new EllaiTopicService(new PostgresEllaiTopicStore(db)));
+                Assert.True((await broker.InvokeAsync(context, state, default)).Allowed);
+            }
+            queue.Rows = [secondId];
+            await using (var db = CreateFrameworkDbContext())
+            {
+                var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue,
+                    topics: new EllaiTopicService(new PostgresEllaiTopicStore(db)));
+                Assert.True((await broker.InvokeAsync(context, state, default)).Allowed);
+            }
+            queue.Rows = [firstId, secondId];
+            await using (var db = CreateFrameworkDbContext())
+            {
+                var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue,
+                    topics: new EllaiTopicService(new PostgresEllaiTopicStore(db)));
+                var original = await broker.InvokeAsync(context, originalRequest, default);
+                var latest = await broker.InvokeAsync(context, latestRequest, default);
+                Assert.Equal(firstId.ToString("D"), Assert.Single(original.Evidence).ResourceId);
+                Assert.Equal(secondId.ToString("D"), Assert.Single(latest.Evidence).ResourceId);
+                queue.Rows = [secondId];
+                var revoked = await broker.InvokeAsync(context, originalRequest, default);
+                Assert.True(revoked.Allowed);
+                Assert.Empty(revoked.Evidence);
+                Assert.DoesNotContain(firstId.ToString("D"), revoked.ResultSummary);
+            }
+        }
+        finally
+        {
+            await using var cleanupDb = CreateFrameworkDbContext();
+            await cleanupDb.Set<EllaiTopicEntity>().Where(topic => topic.SessionId == sessionId).ExecuteDeleteAsync();
+        }
+    }
+
+    private sealed class MutableHistoryQueue : SwiftAid.Application.Cases.ICaseQueueQuery
+    {
+        public IReadOnlyList<Guid> Rows { get; set; } = [];
+        public Task<SwiftAid.Contracts.Cases.CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CancellationToken ct) =>
+            Result(actor, null);
+        public Task<SwiftAid.Contracts.Cases.CaseQueueResult> GetMineAsync(ActorContext actor, int? limit,
+            SwiftAid.Application.Cases.CaseQueueFilter filter, CancellationToken ct) => Result(actor, filter.CaseIds);
+        private Task<SwiftAid.Contracts.Cases.CaseQueueResult> Result(ActorContext actor, IReadOnlyList<Guid>? ids) =>
+            Task.FromResult(new SwiftAid.Contracts.Cases.CaseQueueResult(SwiftAid.Contracts.Cases.CaseQueueAccess.Allowed,
+                Rows.Where(id => ids is null || ids.Contains(id)).Select(id =>
+                    new SwiftAid.Contracts.Cases.CaseQueueItem(id, "Reported", "SZ", actor.ActorId, 1, DateTimeOffset.UtcNow)).ToArray()));
+    }
+
+    [FrameworkPostgresFact]
     public async Task ConcurrentCaseHistoryWritesKeepEachResultInPostgres()
     {
         var sessionId = $"case-history-{Guid.NewGuid():N}";
