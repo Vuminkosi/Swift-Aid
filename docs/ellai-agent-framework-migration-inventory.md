@@ -74,7 +74,10 @@ not recorded, so the precise rejection cause is unknown; this result does not
 establish that all structured schemas, forced tool choices, context sizes or
 streaming tool-call deltas are supported. A framework agent also invoked a
 synthetic function through the live provider and used the result in its final
-answer. These probes did not exercise SwiftAid tools or the Gateway worker. The opt-in tests are in
+answer. A separate live framework-agent probe invoked the real `ellai_now`
+broker tool through the admitted framework catalogue, with a synthetic session,
+one-tool allowlist and consent; the broker returned an allowed result. It did
+not exercise case data or the Gateway worker. The opt-in tests are in
 `EllaiLiveProbeTests`; default execution skips them.
 
 The official NuGet feed resolved `Microsoft.Agents.AI` version `1.27.0` on

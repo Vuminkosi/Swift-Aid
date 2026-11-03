@@ -1,6 +1,7 @@
 using SwiftAid.Intelligence.Meta;
 using Microsoft.Extensions.AI;
 using Microsoft.Agents.AI;
+using SwiftAid.Application.Ellai;
 
 namespace SwiftAid.Application.Tests.Ellai;
 
@@ -110,6 +111,43 @@ public sealed class EllaiLiveProbeTests
         catch (System.ClientModel.ClientResultException error)
         {
             throw new InvalidOperationException($"Provider rejected the framework agent request (HTTP {error.Status}).");
+        }
+    }
+
+    [LiveFact]
+    public async Task LiveFrameworkAgentInvokesBrokeredTool()
+    {
+        var options = LiveOptions();
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
+        using var client = EllaiMuseChatClientFactory.Create(options, http);
+        var consent = new EllaiConsentService();
+        consent.Grant("synthetic-session", EllaiConsentDimension.ReasoningText,
+            EllaiToolBroker.ToolReadPurpose, EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromMinutes(5));
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), consent);
+        var context = new EllaiToolContext("synthetic-session", "epoch", "cases", null, 4, true,
+            DataClassification: EllaiProcessingClassification.SyntheticDemo,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.Now });
+        var calls = 0;
+        EllaiToolResult? observation = null;
+        var tools = EllaiFrameworkToolCatalog.Create(context, async (toolContext, request, ct) =>
+        {
+            Interlocked.Increment(ref calls);
+            observation = await broker.InvokeAsync(toolContext, request, ct);
+            return observation;
+        });
+        AIAgent agent = client.AsAIAgent(name: "EllaiBrokerProbe", tools: tools.ToList());
+        var session = await agent.CreateSessionAsync();
+        try
+        {
+            var response = await agent.RunAsync("Use ellai_now to check the current UTC time and report it.", session);
+            Assert.True(calls > 0);
+            Assert.NotNull(observation);
+            Assert.True(observation.Allowed);
+            Assert.False(string.IsNullOrWhiteSpace(response.Text));
+        }
+        catch (System.ClientModel.ClientResultException error)
+        {
+            throw new InvalidOperationException($"Provider rejected the brokered tool request (HTTP {error.Status}).");
         }
     }
 
