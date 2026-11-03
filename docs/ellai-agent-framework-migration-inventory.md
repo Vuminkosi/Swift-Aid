@@ -3400,3 +3400,14 @@ PASS: `dotnet test tests\SwiftAid.Application.Tests\SwiftAid.Application.Tests.c
 --no-restore -m:1 -nr:false --logger 'console;verbosity=quiet'` passed 1,181,
 failed 0 and skipped 17. The first full run had 1,178 passed, 3 failed and
 17 skipped; the skipped live-provider tests are not evidence from this run.
+
+On commit `c500af6`, the separately enabled synthetic live-provider run
+`dotnet test tests\SwiftAid.Application.Tests\SwiftAid.Application.Tests.csproj
+--no-build --no-restore -m:1 -nr:false --filter 'FullyQualifiedName~EllaiLiveProbeTests'
+--logger 'console;verbosity=minimal'` passed 16, failed 1 and skipped 0.
+`LiveFrameworkPreservesAuthorizedCapabilityObservationForFollowup` failed
+with `ProviderOutputLimit` after the bounded retry at its 1,024-token starting
+limit. The exact failing test passed 1/1 when rerun unchanged, in 31 seconds.
+The initial failure remains evidence of live model variability, not a passing
+full run. The probes used synthetic data and process-local provider settings;
+they do not prove deployed Gateway or device behavior.
