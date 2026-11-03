@@ -413,6 +413,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICaseSummaryStore, PostgresCaseSummaryStore>();
         services.AddScoped<ICaseSummaryQuery, CaseSummaryQuery>();
         services.AddScoped<ICaseReportReadQuery, CaseReportReadQuery>();
+        services.AddScoped<ICaseOccurrenceLocationQuery, CaseReportReadQuery>();
         services.AddScoped<ICaseMapCandidateStore, PostgresCaseQueueStore>();
         services.AddScoped<ICaseCorrectionReadQuery, CaseCorrectionReadQuery>();
         services.AddScoped<IHomeOverviewStore, PostgresHomeOverviewStore>();

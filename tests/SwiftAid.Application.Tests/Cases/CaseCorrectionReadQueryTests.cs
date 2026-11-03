@@ -24,6 +24,36 @@ public sealed class CaseCorrectionReadQueryTests
     }
 
     [Fact]
+    public async Task OccurrenceLocationRequiresCurrentReadAccessAndOmitsReportEvidence()
+    {
+        var persistence = new StubPersistence(TypedAggregate());
+        var denied = new CaseReportReadQuery(new StubPolicy(false, false), new StubUnitOfWork(), persistence);
+        var deniedResult = await denied.GetLocationAsync(Actor(), CaseId, CancellationToken.None);
+        Assert.Equal(CaseOccurrenceLocationAccess.NotFoundOrNotAuthorized, deniedResult.Access);
+        Assert.Equal(0, persistence.ReplayCalls);
+
+        var allowed = new CaseReportReadQuery(new StubPolicy(true, false), new StubUnitOfWork(), persistence);
+        var result = await allowed.GetLocationAsync(Actor(), CaseId, CancellationToken.None);
+        Assert.Equal(CaseOccurrenceLocationAccess.Allowed, result.Access);
+        Assert.Equal("ZA", result.Location?.CountryCode);
+        Assert.DoesNotContain("synthetic typed narrative", System.Text.Json.JsonSerializer.Serialize(result));
+        Assert.DoesNotContain("reported symptom", System.Text.Json.JsonSerializer.Serialize(result));
+    }
+
+    [Fact]
+    public async Task OccurrenceLocationDistinguishesUnknownAndUnavailable()
+    {
+        var legacy = new CaseReportReadQuery(new StubPolicy(true, false), new StubUnitOfWork(), new StubPersistence(LegacyAggregate()));
+        var unknown = await legacy.GetLocationAsync(Actor(), CaseId, CancellationToken.None);
+        Assert.Equal(CaseOccurrenceLocationAccess.Allowed, unknown.Access);
+        Assert.Null(unknown.Location);
+        var failed = new CaseReportReadQuery(new StubPolicy(true, false), new StubUnitOfWork(), new StubPersistence(null, true));
+        Assert.Equal(CaseOccurrenceLocationAccess.Unavailable, (await failed.GetLocationAsync(Actor(), CaseId, CancellationToken.None)).Access);
+        var sourceDown = new CaseReportReadQuery(new StubPolicy(false, false, readDecisionCode: AccessDecisionCode.GrantSourceUnavailable), new StubUnitOfWork(), new StubPersistence(TypedAggregate()));
+        Assert.Equal(CaseOccurrenceLocationAccess.Unavailable, (await sourceDown.GetLocationAsync(Actor(), CaseId, CancellationToken.None)).Access);
+    }
+
+    [Fact]
     public async Task ReportReadShowsTypedEvidenceWithoutGrantingCorrection()
     {
         var policy = new StubPolicy(true, false);

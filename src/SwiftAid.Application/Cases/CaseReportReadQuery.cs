@@ -12,13 +12,51 @@ public interface ICaseReportReadQuery
     Task<CaseReportDetails?> GetAsync(ActorContext actor, Guid caseId, CancellationToken ct);
 }
 
+/// <summary>Occurrence location from a currently authorized report, without report evidence.</summary>
+public interface ICaseOccurrenceLocationQuery
+{
+    Task<CaseOccurrenceLocationResult> GetLocationAsync(ActorContext actor, Guid caseId, CancellationToken ct);
+}
+
+public enum CaseOccurrenceLocationAccess { Allowed, NotFoundOrNotAuthorized, Unavailable }
+
+public sealed record CaseOccurrenceLocationResult(CaseOccurrenceLocationAccess Access, long? ReportRevision, CaseReportPlace? Location);
+
 /// <summary>Reuses the protected journal under a read lease; no derived index or unguarded payload read.</summary>
 public sealed class CaseReportReadQuery(
     ICaseAccessPolicy policy,
     ICaseCommandUnitOfWork unitOfWork,
     ICaseCommandPersistence persistence,
-    IGeographicRegistry? registry = null) : ICaseReportReadQuery
+    IGeographicRegistry? registry = null) : ICaseReportReadQuery, ICaseOccurrenceLocationQuery
 {
+    public async Task<CaseOccurrenceLocationResult> GetLocationAsync(ActorContext actor, Guid caseId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+        ct.ThrowIfCancellationRequested();
+        if (caseId == Guid.Empty) return new(CaseOccurrenceLocationAccess.NotFoundOrNotAuthorized, null, null);
+        try
+        {
+            ICaseCommandLease lease;
+            try { lease = await unitOfWork.BeginCaseAsync(actor, caseId, ImmutableArray<string>.Empty, CaseLeaseMode.Read, ct); }
+            catch (KeyNotFoundException) { return new(CaseOccurrenceLocationAccess.NotFoundOrNotAuthorized, null, null); }
+            await using var ownedLease = lease;
+            var decision = await policy.AuthorizeAsync(actor, caseId, CaseOperation.ReadCase, ct);
+            ct.ThrowIfCancellationRequested();
+            if (!decision.IsAllowed) return new(decision.Code is AccessDecisionCode.GrantSourceUnavailable or AccessDecisionCode.ResourceSourceUnavailable
+                ? CaseOccurrenceLocationAccess.Unavailable : CaseOccurrenceLocationAccess.NotFoundOrNotAuthorized, null, null);
+            var aggregate = await persistence.ReplayCaseAsync(lease, ct);
+            ct.ThrowIfCancellationRequested();
+            if (aggregate.CaseId != caseId || aggregate.ReportData is null)
+                return new(CaseOccurrenceLocationAccess.Unavailable, null, null);
+            var place = ProjectLocation(aggregate);
+            await lease.CommitAsync(ct);
+            ct.ThrowIfCancellationRequested();
+            return new(CaseOccurrenceLocationAccess.Allowed, aggregate.ReportRevision, place);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception error) when (error is not OutOfMemoryException) { return new(CaseOccurrenceLocationAccess.Unavailable, null, null); }
+    }
+
     public async Task<CaseReportDetails?> GetAsync(ActorContext actor, Guid caseId, CancellationToken ct)
     {
         if (caseId == Guid.Empty) return null;
@@ -64,8 +102,19 @@ public sealed class CaseReportReadQuery(
         observations = observations.Concat(aggregate.Events.OfType<CaseObservationRecorded>().Select(item => item.Narrative));
         return new(aggregate.CaseId, aggregate.ReportRevision,
             evidence?.Narrative?.Text ?? legacy?.Report.Narrative, observations.ToArray(),
-            location is null ? null : new(location.CountryCode, location.Region.ReportedName,
-                location.Area.ReportedName, location.Locality.ReportedName, location.Region.NormalizedId,
-                location.Area.NormalizedId, location.Locality.NormalizedId), NearbyMedicalFacilities.Find(location));
+            ProjectLocation(aggregate), NearbyMedicalFacilities.Find(location));
+    }
+
+    private static CaseReportPlace? ProjectLocation(CaseAggregate aggregate)
+    {
+        var location = aggregate.ReportData switch
+        {
+            CaseReportEventData.HumanV2 human => human.Report.Context.Location,
+            CaseReportEventData.AnimalV2 animal => animal.Report.Context.Location,
+            _ => null
+        };
+        return location is null ? null : new(location.CountryCode, location.Region.ReportedName,
+            location.Area.ReportedName, location.Locality.ReportedName, location.Region.NormalizedId,
+            location.Area.NormalizedId, location.Locality.NormalizedId);
     }
 }
