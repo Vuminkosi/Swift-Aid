@@ -118,6 +118,33 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
         }
         assert.equal(await page.locator('#submission-count').textContent(), '0');
         console.log('PASS: oversized place fields are highlighted in order without submitting');
+        await page.goto(base + '/ellai-report-fixture');
+        await page.waitForSelector('[data-fixture-ready=true]');
+        await page.getByRole('button', { name: 'Continue to details' }).click();
+        await page.getByLabel('Describe what happened').fill('Synthetic description');
+        const observations = page.getByLabel('Add other observations (optional)');
+        await observations.fill(['x'.repeat(301), ...Array(20).fill('synthetic')].join('\n'));
+        await observations.press('Tab');
+        await page.getByRole('button', { name: 'Review report', exact: true }).click();
+        await page.evaluate(async () => { window.fixtureObservations = await import('/_content/SwiftAid.UI/js/ellai-ui-observations.js'); });
+        await page.waitForFunction(() => window.fixtureObservations.collect().validationInputIds?.join(',') ===
+            'report.too-many-observations,report.observation-too-long');
+        await page.getByRole('button', { name: 'Guide report details' }).click();
+        await page.locator('.bit-bonboarding-popover').waitFor({ state: 'visible' });
+        await page.getByRole('button', { name: 'Refresh validation target' }).click();
+        await page.waitForFunction(() => {
+            const target = document.querySelector('[data-bonboarding-anchor="ellai-report-other-observations"]')?.getBoundingClientRect();
+            const spot = document.querySelector('.bit-bonboarding-spotlight')?.getBoundingClientRect();
+            return target && spot && spot.left <= target.left && spot.top <= target.top && spot.right >= target.right && spot.bottom >= target.bottom;
+        });
+        await observations.fill('x'.repeat(301));
+        await observations.press('Tab');
+        await page.waitForFunction(() => window.fixtureObservations.collect().validationInputIds?.join(',') === 'report.observation-too-long');
+        await observations.fill('x'.repeat(300));
+        await observations.press('Tab');
+        await page.waitForFunction(() => window.fixtureObservations.collect().validationInputIds?.length === 0);
+        assert.equal(await page.locator('#submission-count').textContent(), '0');
+        console.log('PASS: observation count and length errors identify and highlight the input in order');
         assert.deepEqual(errors, []);
         assert(!output.includes('Unhandled exception'), output);
     } finally {

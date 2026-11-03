@@ -55,16 +55,40 @@ public sealed partial class GuidedReportDraftPersistenceTests
         await (Task)Invoke(component, "ContinueFromTypeAsync")!;
         await (Task)Invoke(component, "ContinueToReviewAsync")!;
 
-        Assert.Equal(new[] { "report.original-statement", "report.other-observations" },
+        Assert.Equal(new[] { "report.original-statement-too-long", "report.observation-too-long" },
             component.GetState().ValidationIssues.Select(issue => issue.InputId));
         Assert.Equal(101, draft.Narrative.Length);
         Assert.Equal(251, draft.ObservationsText.Length);
         draft.Narrative = new string('n', 100);
-        Assert.Equal("report.other-observations", Assert.Single(component.GetState().ValidationIssues).InputId);
+        Assert.Equal("report.observation-too-long", Assert.Single(component.GetState().ValidationIssues).InputId);
         draft.ObservationsText = new string('o', 250);
         Assert.Empty(component.GetState().ValidationIssues);
         await (Task)Invoke(component, "ContinueToReviewAsync")!;
         Assert.True(component.GetState().Controls.Single(control => control.ControlId == "report.narrative").CompletionAccepted);
+    }
+
+    [Fact]
+    public async Task ObservationValidationExplainsEachReasonInOrderWithoutExposingValues()
+    {
+        var draft = CreateDraft();
+        draft.ObservationsText = string.Join("\n", new string('x', 251), "second", "third") + new string(' ', 20000);
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        component.TextLimits = new(6000, 2, 250);
+        await (Task)Invoke(component, "ContinueFromTypeAsync")!;
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+
+        var issues = component.GetState().ValidationIssues;
+        Assert.Equal(new[] { "report.too-many-observations", "report.observation-too-long", "report.observations-total-too-long" },
+            issues.Select(issue => issue.InputId));
+        Assert.All(issues, issue => Assert.Equal("ellai-report-other-observations", issue.Anchor));
+        Assert.DoesNotContain("second", System.Text.Json.JsonSerializer.Serialize(issues));
+
+        draft.ObservationsText = new string('x', 251) + "\nsecond" + new string(' ', 20000);
+        Assert.Equal("report.observation-too-long", component.GetState().ValidationIssues.First().InputId);
+        draft.ObservationsText = new string('x', 250) + "\nsecond" + new string(' ', 20000);
+        Assert.Equal("report.observations-total-too-long", Assert.Single(component.GetState().ValidationIssues).InputId);
+        draft.ObservationsText = new string('x', 250) + "\nsecond";
+        Assert.Empty(component.GetState().ValidationIssues);
     }
 
     [Fact]
@@ -94,9 +118,9 @@ public sealed partial class GuidedReportDraftPersistenceTests
         await (Task)Invoke(component, "ContinueFromTypeAsync")!;
         await (Task)Invoke(component, "ContinueToReviewAsync")!;
 
-        var issue = Assert.Single(component.GetState().ValidationIssues);
-        Assert.Equal("report.other-observations", issue.InputId);
-        Assert.Contains("limits shown", issue.Message);
+        var issues = component.GetState().ValidationIssues;
+        Assert.Equal(new[] { "report.observation-too-long", "report.observations-total-too-long" }, issues.Select(issue => issue.InputId));
+        Assert.All(issues, issue => Assert.Equal("ellai-report-other-observations", issue.Anchor));
         Assert.False(component.GetState().Controls.Single(control => control.ControlId == "report.narrative").CompletionAccepted);
         draft.ObservationsText = new string(' ', 20000);
         Assert.Empty(component.GetState().ValidationIssues);

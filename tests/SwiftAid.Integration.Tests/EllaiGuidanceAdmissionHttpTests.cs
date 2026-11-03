@@ -193,6 +193,22 @@ public sealed class EllaiGuidanceAdmissionHttpTests
                     Assert.NotEmpty(await nextAudio.Content.ReadAsByteArrayAsync());
                 Assert.Contains(speech.Requests, item => item.RequestId.StartsWith($"owned-{nextValidation.Sequence}-", StringComparison.Ordinal) &&
                     item.Text.Contains("reported date", StringComparison.Ordinal) && item.VoiceId == "am_michael");
+                foreach (var inputId in new[] { "report.original-statement-too-long", "report.too-many-observations",
+                             "report.observation-too-long", "report.observations-total-too-long" })
+                {
+                    var contextStamp = $"context-{inputId}";
+                    using var issueObservation = await client.PostAsJsonAsync("/sessions/owned/ui-observations",
+                        observed with { ContextStamp = contextStamp, ValidationInputIds = [inputId, "report.occurrence-date"] });
+                    Assert.Equal(HttpStatusCode.OK, issueObservation.StatusCode);
+                    using var issueResponse = await client.PostAsJsonAsync("/sessions/owned/guidance/narration", validationRequest with
+                        { ValidationInputId = inputId, ObservationContextStamp = contextStamp });
+                    Assert.Equal(HttpStatusCode.OK, issueResponse.StatusCode);
+                    var issueNarration = (await issueResponse.Content.ReadFromJsonAsync<EllaiSessionResponseDto>())!;
+                    Assert.Equal(EllaiReportValidationGuidance.Find(inputId)!.Message, issueNarration.Text);
+                    using var laterIssue = await client.PostAsJsonAsync("/sessions/owned/guidance/narration", validationRequest with
+                        { ValidationInputId = "report.occurrence-date", ObservationContextStamp = contextStamp });
+                    Assert.Equal(HttpStatusCode.NotFound, laterIssue.StatusCode);
+                }
             }
             await observations.RecordAsync(new("owned", "refreshed-view", "refreshed-context", "web", [control], DateTimeOffset.UtcNow,
                 [new(control, UiObservationState.Ready)]), default);

@@ -7,8 +7,12 @@ public static class EllaiReportValidationGuidance
     {
         "report.subject-kind" => new(inputId, "ellai-report-subject-kind", "Choose whether the concern is about human health or animal health."),
         "report.animal-scope" => new(inputId, "ellai-report-animal-scope", "Choose whether the concern is about an individual animal, herd, flock, or another group."),
-        "report.original-statement" => new(inputId, "ellai-report-original-statement", "Describe what happened or add an observation. Keep the description within the limit shown on the form."),
+        "report.original-statement" => new(inputId, "ellai-report-original-statement", "Describe what happened or add an observation."),
+        "report.original-statement-too-long" => new(inputId, "ellai-report-original-statement", "The description is too long. Shorten it to the limit shown on the form."),
         "report.other-observations" => new(inputId, "ellai-report-other-observations", "The observations exceed the allowed length or count. Check the limits shown on the form."),
+        "report.too-many-observations" => new(inputId, "ellai-report-other-observations", "There are too many observations. Remove some to meet the limit shown on the form."),
+        "report.observation-too-long" => new(inputId, "ellai-report-other-observations", "An observation is too long. Shorten it to the per-observation limit shown on the form."),
+        "report.observations-total-too-long" => new(inputId, "ellai-report-other-observations", "The observations text is too long overall. Shorten or remove some text."),
         "report.occurrence-date" => new(inputId, "ellai-report-occurrence-date", "Add the reported date or choose that the time is unknown."),
         "report.occurrence-time" => new(inputId, "ellai-report-occurrence-time", "Enter a valid reported time."),
         "report.utc-offset" => new(inputId, "ellai-report-utc-offset", "Enter a valid time difference from UTC, such as plus zero two colon zero zero."),

@@ -54,9 +54,11 @@ public partial class GuidedReportStepper
         }
         if (_step != 1 || !_detailsValidationAttempted) return [];
         var observations = Draft.GetObservations();
-        AddIfInvalid(string.IsNullOrWhiteSpace(Draft.Narrative) && observations.Count == 0 ||
-            (Draft.Narrative?.Length ?? 0) > MaximumNarrativeCharacters, "report.original-statement");
-        AddIfInvalid(!Draft.HasValidObservations(observations, MaximumObservations, MaximumObservationCharacters), "report.other-observations");
+        AddIfInvalid(string.IsNullOrWhiteSpace(Draft.Narrative) && observations.Count == 0, "report.original-statement");
+        AddIfInvalid((Draft.Narrative?.Length ?? 0) > MaximumNarrativeCharacters, "report.original-statement-too-long");
+        AddIfInvalid(observations.Count > MaximumObservations, "report.too-many-observations");
+        AddIfInvalid(observations.Any(value => value.Length > MaximumObservationCharacters), "report.observation-too-long");
+        AddIfInvalid((Draft.ObservationsText?.Length ?? 0) > 20000, "report.observations-total-too-long");
         AddIfInvalid(Draft.OccurrencePrecision != ReportedTimePrecision.Unknown && !Draft.OccurrenceDate.HasValue,
             "report.occurrence-date");
         AddIfInvalid(Draft.OccurrencePrecision == ReportedTimePrecision.Exact && !TimeOnly.TryParse(Draft.OccurrenceTime, out _),
