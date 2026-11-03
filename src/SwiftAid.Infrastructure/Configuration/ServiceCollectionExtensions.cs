@@ -515,6 +515,7 @@ public static class ServiceCollectionExtensions
         FederationSetup.AddConfiguredProviders(authentication, federationOptions);
         services.Configure<PublicSiteOptions>(configuration.GetSection("PublicSite"));
         services.Configure<SmtpEmailOptions>(configuration.GetSection("Smtp"));
+        services.AddScoped<SmtpEmailSender>();
         services.AddScoped<IEmailSender<SwiftAidUser>, SmtpEmailSender>();
         services.AddScoped<IAccountVerificationMailer, SmtpEmailSender>();
         services.AddScoped<IPasswordIdentityRegistrar, PasswordIdentityRegistrar>();

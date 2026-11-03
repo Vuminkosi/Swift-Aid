@@ -11,6 +11,7 @@ using SwiftAid.Application.Intake;
 using SwiftAid.Application.Sessions;
 using SwiftAid.Contracts.Sessions;
 using SwiftAid.Infrastructure.Configuration;
+using SwiftAid.Infrastructure.Identity;
 using SwiftAid.Infrastructure.Persistence;
 using SwiftAid.Infrastructure.Persistence.Protection;
 using SwiftAid.Infrastructure.Persistence.Transactions;
@@ -266,6 +267,12 @@ public sealed class CaseCommandProcessorDependencyInjectionTests
             var keyDirectory = PrivateKeyRingTestDirectory.CreateKeyDirectory(keyRoot);
             var services = new ServiceCollection();
             services.AddLogging();
+            services.Configure<SmtpEmailOptions>(options =>
+            {
+                options.Enabled = true;
+                options.Host = "localhost";
+                options.FromAddress = "fixture@example.test";
+            });
             services.AddSwiftAidInfrastructure(Configuration(new Dictionary<string, string?>
             {
                 ["CaseCommandProcessing:Enabled"] = "true",
@@ -289,6 +296,10 @@ public sealed class CaseCommandProcessorDependencyInjectionTests
                 await using var scope = serviceProvider.CreateAsyncScope();
                 Assert.NotNull(scope.ServiceProvider.GetRequiredService<ICommunitySessionService>());
                 Assert.NotNull(scope.ServiceProvider.GetRequiredService<ICommunitySessionStore>());
+                var sender = scope.ServiceProvider.GetRequiredService<ISessionReminderChannelSender>();
+                var delivery = new SessionReminderDeliveryLease(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+                    "fixture-account", "Email", 1, 1, "fixture-consent", 1, Guid.NewGuid(), DateTimeOffset.UtcNow.AddMinutes(1));
+                Assert.Equal(SessionReminderSendStatus.NotConfigured, await sender.SendAsync(delivery, CancellationToken.None));
             }
             finally
             {

@@ -12,17 +12,17 @@ namespace SwiftAid.Infrastructure.Persistence.Sessions;
 public sealed class SessionReminderChannelSender(
     IEventSubscriptionService subscriptions,
     ISessionReminderDeliveryStore deliveries,
-    UserManager<SwiftAidUser> users,
-    SmtpEmailSender emailSender,
-    IOptions<SmtpEmailOptions> smtpOptions,
     IPushDeviceStore pushDevices,
-    IPushNotificationSender pushSender) : ISessionReminderChannelSender
+    IPushNotificationSender pushSender,
+    UserManager<SwiftAidUser>? users = null,
+    SmtpEmailSender? emailSender = null,
+    IOptions<SmtpEmailOptions>? smtpOptions = null) : ISessionReminderChannelSender
 {
     private readonly IEventSubscriptionService _subscriptions = subscriptions ?? throw new ArgumentNullException(nameof(subscriptions));
     private readonly ISessionReminderDeliveryStore _deliveries = deliveries ?? throw new ArgumentNullException(nameof(deliveries));
-    private readonly UserManager<SwiftAidUser> _users = users ?? throw new ArgumentNullException(nameof(users));
-    private readonly SmtpEmailSender _emailSender = emailSender ?? throw new ArgumentNullException(nameof(emailSender));
-    private readonly SmtpEmailOptions _smtpOptions = smtpOptions?.Value ?? throw new ArgumentNullException(nameof(smtpOptions));
+    private readonly UserManager<SwiftAidUser>? _users = users;
+    private readonly SmtpEmailSender? _emailSender = emailSender;
+    private readonly SmtpEmailOptions? _smtpOptions = smtpOptions?.Value;
     private readonly IPushDeviceStore _pushDevices = pushDevices ?? throw new ArgumentNullException(nameof(pushDevices));
     private readonly IPushNotificationSender _pushSender = pushSender ?? throw new ArgumentNullException(nameof(pushSender));
 
@@ -43,7 +43,8 @@ public sealed class SessionReminderChannelSender(
         SessionReminderDeliveryLease delivery,
         CancellationToken cancellationToken)
     {
-        if (!_smtpOptions.Enabled || string.IsNullOrWhiteSpace(_smtpOptions.Host) ||
+        if (_users is null || _emailSender is null || _smtpOptions is null ||
+            !_smtpOptions.Enabled || string.IsNullOrWhiteSpace(_smtpOptions.Host) ||
             string.IsNullOrWhiteSpace(_smtpOptions.FromAddress))
             return SessionReminderSendStatus.NotConfigured;
 
