@@ -192,6 +192,8 @@ public sealed class OllamaEllaiReasoningProvider(HttpClient http, EllaiOptions o
             var model = options.OllamaModel;
             var promptTokens = 0;
             var completionTokens = 0;
+            var finishReason = string.Empty;
+            var completed = false;
             await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false,
                 bufferSize: 4096, leaveOpen: false);
@@ -235,8 +237,15 @@ public sealed class OllamaEllaiReasoningProvider(HttpClient http, EllaiOptions o
                     if (root.TryGetProperty("done", out var done)
                         && done.ValueKind == JsonValueKind.True)
                     {
+                        completed = true;
+                        if (root.TryGetProperty("done_reason", out var reason)
+                            && reason.ValueKind == JsonValueKind.String)
+                        {
+                            finishReason = reason.GetString() ?? string.Empty;
+                        }
                         promptTokens = GetInt(root, "prompt_eval_count");
                         completionTokens = GetInt(root, "eval_count");
+                        break;
                     }
                 }
                 catch (JsonException)
@@ -245,7 +254,12 @@ public sealed class OllamaEllaiReasoningProvider(HttpClient http, EllaiOptions o
                 }
             }
 
-            return new EllaiReasoningResult(text.ToString(), model, "stop",
+            if (!completed)
+            {
+                throw new InvalidOperationException("Ellai Ollama stream ended before completion.");
+            }
+
+            return new EllaiReasoningResult(text.ToString(), model, finishReason,
                 new EllaiReasoningUsage(promptTokens, completionTokens, promptTokens + completionTokens, 0));
         }
     }
