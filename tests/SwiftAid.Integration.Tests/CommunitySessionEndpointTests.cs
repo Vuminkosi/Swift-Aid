@@ -70,7 +70,7 @@ public sealed class CommunitySessionEndpointTests
                 "/public/v1/sessions", StringComparison.Ordinal))
             .ToArray();
 
-        Assert.Equal(4, routes.Length);
+        Assert.Equal(5, routes.Length);
         foreach (var route in routes)
         {
             Assert.NotEmpty(route.Metadata.GetOrderedMetadata<IAllowAnonymous>());
@@ -250,6 +250,36 @@ public sealed class CommunitySessionEndpointTests
         Assert.False(outcome.Succeeded);
         Assert.Equal(0, service.StaffReadCalls);
         Assert.Equal(0, service.ExecuteCalls);
+    }
+
+    [Fact]
+    public async Task PublicSearch_UsesPublicProjectionAndPassesFilters()
+    {
+        await using var host = await TestSessionHost.StartAsync(withPublished: true);
+        using var response = await host.Client.GetAsync("/public/v1/sessions/search?search=water&country=ZW&category=Nutrition&language=en&localFrom=2026-11-01&limit=1");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var page = JsonSerializer.Deserialize<PublicSessionPage>(await response.Content.ReadAsStringAsync(), JsonOptions);
+        Assert.NotNull(page);
+        Assert.Equal(KnownSessionId, Assert.Single(page.Items).SessionId);
+        Assert.Equal("water", host.Service.LastQuery?.Search);
+        Assert.Equal("ZW", host.Service.LastQuery?.CountryCode);
+        Assert.Equal("Nutrition", host.Service.LastQuery?.Category);
+        Assert.Equal("en", host.Service.LastQuery?.Language);
+        Assert.Equal(new DateOnly(2026, 11, 1), host.Service.LastQuery?.LocalDateFrom);
+        Assert.Equal(1, host.Service.LastQuery?.Limit);
+    }
+
+    [Theory]
+    [InlineData("afterId=not-a-guid")]
+    [InlineData("from=not-a-date")]
+    [InlineData("limit=invalid")]
+    [InlineData("localFrom=11-01-2026")]
+    public async Task PublicSearch_RejectsMalformedParameters(string query)
+    {
+        await using var host = await TestSessionHost.StartAsync();
+        using var response = await host.Client.GetAsync($"/public/v1/sessions/search?{query}");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Fact]
@@ -596,6 +626,7 @@ public sealed class CommunitySessionEndpointTests
 
         public Func<SessionCommand, string, SessionCommandResult>? OnExecute { get; set; }
         public bool WithPublished { get; set; }
+        public PublicSessionQuery? LastQuery { get; private set; }
 
         public Task<SessionCommandResult> ExecuteAsync(SessionCommand command, string actorId, CancellationToken ct)
         {
@@ -633,8 +664,12 @@ public sealed class CommunitySessionEndpointTests
                     ? CommunitySessionEndpointTests.PublishedView()
                     : null);
 
-        public Task<PublicSessionPage> QueryPublicAsync(PublicSessionQuery query, CancellationToken ct) =>
-            Task.FromResult(new PublicSessionPage(WithPublished ? [PublishedView()] : [], null));
+        public Task<PublicSessionPage> QueryPublicAsync(PublicSessionQuery query, CancellationToken ct)
+        {
+            LastQuery = query;
+            IReadOnlyList<PublicSessionView> items = WithPublished ? [PublishedView()] : [];
+            return Task.FromResult(new PublicSessionPage(items, null));
+        }
 
         public Task<string?> GetIcsAsync(Guid sessionId, DateTimeOffset generatedAtUtc, CancellationToken ct) =>
             Task.FromResult<string?>(

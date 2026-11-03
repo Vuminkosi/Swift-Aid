@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
@@ -31,6 +32,12 @@ public static class PublicSessionEndpoints
             .Produces<IReadOnlyList<PublicSessionView>>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
+        routes.MapGet("/search", SearchAsync)
+            .AllowAnonymous()
+            .WithName("SearchPublicSessions")
+            .Produces<PublicSessionPage>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status503ServiceUnavailable);
         routes.MapGet("/{sessionId:guid}", GetAsync)
             .AllowAnonymous()
             .WithName("GetPublicSession")
@@ -51,6 +58,73 @@ public static class PublicSessionEndpoints
     /// <summary>Maps a missing publication to the generic public 404.</summary>
     public static IResult MapMissing() =>
         Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "The community session was not found.");
+
+    private static async Task<IResult> SearchAsync(HttpContext context, CancellationToken cancellationToken)
+    {
+        var values = context.Request.Query;
+        if (!TryDate(values["from"], out var from) || !TryDate(values["before"], out var before) ||
+            !TryDate(values["afterStart"], out var afterStart) ||
+            !TryLocalDate(values["localFrom"], out var localFrom) || !TryLocalDate(values["localTo"], out var localTo) ||
+            (!string.IsNullOrWhiteSpace(values["afterId"]) && !Guid.TryParse(values["afterId"], out _)) ||
+            (!string.IsNullOrWhiteSpace(values["limit"]) && !int.TryParse(values["limit"], out _)))
+        {
+            return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "The session search is invalid.");
+        }
+
+        var query = new PublicSessionQuery(
+            Search: values["search"], CountryCode: values["country"], RegionId: values["region"],
+            Sector: values["sector"], Language: values["language"], Topic: values["topic"],
+            StartFromUtc: from, StartBeforeUtc: before, AfterStartUtc: afterStart,
+            AfterSessionId: Guid.TryParse(values["afterId"], out var afterId) ? afterId : null,
+            Limit: int.TryParse(values["limit"], out var limit) ? limit : 25,
+            Category: values["category"], LocalDateFrom: localFrom, LocalDateTo: localTo);
+        var service = context.RequestServices.GetService<ICommunitySessionService>();
+        if (service is null)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Community sessions are temporarily unavailable.");
+        }
+
+        try
+        {
+            var page = await service.QueryPublicAsync(query, cancellationToken).ConfigureAwait(false);
+            context.Response.Headers.CacheControl = "no-store";
+            return Results.Json(page, options: JsonOptions);
+        }
+        catch (ArgumentException)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "The session search is invalid.");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Community sessions are temporarily unavailable.");
+        }
+    }
+
+    private static bool TryDate(string? value, out DateTimeOffset? result)
+    {
+        result = null;
+        if (string.IsNullOrWhiteSpace(value))
+            return true;
+        if (!DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+            return false;
+        result = parsed;
+        return true;
+    }
+
+    private static bool TryLocalDate(string? value, out DateOnly? result)
+    {
+        result = null;
+        if (string.IsNullOrWhiteSpace(value))
+            return true;
+        if (!DateOnly.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+            return false;
+        result = parsed;
+        return true;
+    }
 
     private static async Task<IResult> ListAsync(
         HttpContext context,
