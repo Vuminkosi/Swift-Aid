@@ -177,6 +177,8 @@ public partial class EllaiGuidanceHost
 
     private void TrackNavigation(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs args)
     {
+        Interlocked.Increment(ref _uiNavigationEpoch);
+        _latestGuidanceObservation = null;
         try { _navigationTrail.Record(Navigation.ToBaseRelativePath(args.Location)); }
         catch (ArgumentException) { _navigationTrail.Record(string.Empty); }
     }

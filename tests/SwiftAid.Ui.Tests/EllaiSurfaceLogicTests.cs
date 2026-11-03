@@ -42,6 +42,69 @@ public sealed partial class EllaiSurfaceLogicTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task NavigationDuringObservationAcknowledgementCannotPublishOldEvidence(bool returnToOriginal)
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var client = new FakeReviewClient { ObservationHandler = () => { started.TrySetResult(); return release.Task; } };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        var navigation = new TabNavigationManager("report");
+        SetProperty(host, "Navigation", navigation);
+        SetField(host, "_uiObservationModule", new ObservationJsModule());
+        var pending = InvokeTask(host, "ReportCurrentUiAsync", CancellationToken.None);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        navigation.NavigateTo("dashboard");
+        await InvokeAsync(host, "TrackNavigation", null, new Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs(navigation.Uri, false));
+        if (returnToOriginal)
+        {
+            navigation.NavigateTo("report");
+            await InvokeAsync(host, "TrackNavigation", null, new Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs(navigation.Uri, false));
+        }
+        release.SetResult(true);
+        await pending;
+        Assert.Null(GetField<UiObservationReport?>(host, "_latestGuidanceObservation"));
+        await InvokeAsync(host, "ReportCurrentUiAsync", CancellationToken.None);
+        Assert.NotNull(GetField<UiObservationReport?>(host, "_latestGuidanceObservation"));
+    }
+
+    [Fact]
+    public async Task NavigationDuringObservationCollectionDoesNotPostOldEvidence()
+    {
+        var posts = 0;
+        var client = new FakeReviewClient { ObservationHandler = () => { posts++; return Task.FromResult(true); } };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        var navigation = new TabNavigationManager("report");
+        SetProperty(host, "Navigation", navigation);
+        var module = new BlockingObservationJsModule();
+        SetField(host, "_uiObservationModule", module);
+        var pending = InvokeTask(host, "ReportCurrentUiAsync", CancellationToken.None);
+        await module.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        navigation.NavigateTo("dashboard");
+        await InvokeAsync(host, "TrackNavigation", null, new Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs(navigation.Uri, false));
+        module.Release.TrySetResult();
+        await pending;
+        Assert.Equal(0, posts);
+        Assert.Null(GetField<UiObservationReport?>(host, "_latestGuidanceObservation"));
+    }
+
+    [Fact]
+    public async Task NavigationImmediatelyInvalidatesPreviouslyAcceptedEvidence()
+    {
+        var client = new FakeReviewClient { ObservationHandler = () => Task.FromResult(true) };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        var navigation = new TabNavigationManager("report");
+        SetProperty(host, "Navigation", navigation);
+        SetField(host, "_uiObservationModule", new ObservationJsModule());
+        await InvokeAsync(host, "ReportCurrentUiAsync", CancellationToken.None);
+        Assert.NotNull(GetField<UiObservationReport?>(host, "_latestGuidanceObservation"));
+        navigation.NavigateTo("dashboard");
+        await InvokeAsync(host, "TrackNavigation", null, new Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs(navigation.Uri, false));
+        Assert.Null(GetField<UiObservationReport?>(host, "_latestGuidanceObservation"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task GuidanceObserverRecoversAfterTransportFailureOrTimeout(bool timeout)
     {
         var calls = 0;
@@ -2265,6 +2328,20 @@ public sealed partial class EllaiSurfaceLogicTests
         public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args) =>
             ValueTask.FromResult((TValue)(object)new UiObservationReport("view", "context", "web", [ControlId],
                 [new(ControlId, UiObservationState.Ready)]));
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class BlockingObservationJsModule : IJSObjectReference
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) => InvokeAsync<TValue>(identifier, CancellationToken.None, args);
+        public async ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args)
+        {
+            Started.TrySetResult();
+            await Release.Task.WaitAsync(cancellationToken);
+            return (TValue)(object)new UiObservationReport("view", "context", "web", ["report.entry"], [new("report.entry", UiObservationState.Ready)]);
+        }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 

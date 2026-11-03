@@ -9,6 +9,7 @@ public partial class EllaiGuidanceHost
     private readonly SemaphoreSlim _uiObservationGate = new(1, 1);
     private IJSObjectReference? _uiObservationModule;
     private UiObservationReport? _latestGuidanceObservation;
+    private long _uiNavigationEpoch;
     private string? _unavailableObservedStepId;
     private const string UnavailableTargetNotice = "The current control is unavailable. Find another way to continue.";
 
@@ -154,6 +155,10 @@ public partial class EllaiGuidanceHost
         await _uiObservationGate.WaitAsync(token);
         try
         {
+            var navigationEpoch = Interlocked.Read(ref _uiNavigationEpoch);
+            var observedUri = Navigation.Uri;
+            bool IsCurrent() => Interlocked.Read(ref _uiNavigationEpoch) == navigationEpoch &&
+                Navigation.Uri == observedUri && _sessionView?.SessionId == session.SessionId && _sessionView.Status == "Active";
             _uiObservationModule ??= await JS.InvokeAsync<IJSObjectReference>("import", token,
                 "./_content/SwiftAid.UI/js/ellai-ui-observations.js");
             var requestedControls = featureId switch
@@ -172,15 +177,15 @@ public partial class EllaiGuidanceHost
             };
             var report = await _uiObservationModule.InvokeAsync<UiObservationReport>("collect", token,
                 new object?[] { requestedControls });
-            if (report is null) return;
-            var path = "/" + Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].TrimEnd('/');
+            if (report is null || !IsCurrent()) return;
+            var path = "/" + Navigation.ToBaseRelativePath(observedUri).Split('?', '#')[0].TrimEnd('/');
             report = report with { CurrentNavigationId = path == "/report" ? EllaiReportUiManifest.NavigationId :
                 EllaiNavigationManifest.ResolveNavigationId(path) };
             report = report with { Platform = OperatingSystem.IsAndroid() ? "android" : OperatingSystem.IsIOS() ? "ios" : "web" };
-            if (report.IsValid() && _sessionView?.SessionId == session.SessionId)
+            if (report.IsValid() && IsCurrent())
             {
                 var accepted = await ReviewClient.ReportUiObservationAsync(session.SessionId, report, token);
-                if (accepted && _sessionView?.SessionId == session.SessionId && _sessionView.Status == "Active")
+                if (accepted && IsCurrent())
                     _latestGuidanceObservation = report;
             }
         }
