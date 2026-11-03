@@ -17,8 +17,10 @@ namespace SwiftAid.Integration.Tests;
 
 public sealed class EllaiUtteranceWorkerOutcomeTests
 {
-    [Fact]
-    public async Task WorkerRunsFrameworkExecutorAndPersistsAndStreamsAnswer()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WorkerRunsFrameworkExecutorAndPersistsAndStreamsAnswer(bool useTool)
     {
         var store = new InMemoryEllaiSessionStore();
         var responses = new EllaiSessionResponseStore();
@@ -30,18 +32,19 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
         var work = new EllaiUtteranceWork(session.SessionId, "scope", "Synthetic question", "public.product-help", null,
             EllaiMode.Ask, 1, "cycle", actor, true, "consent/0",
             EllaiProcessingClassification.UserProvidedNonSensitive, EllaiProcessingClassification.UserProvidedNonSensitive,
-            new HashSet<string>(), EllaiConsentPurposes.PublicProductHelp, "framework-u");
+            useTool ? new HashSet<string> { EllaiToolNames.Now } : new HashSet<string>(), EllaiConsentPurposes.PublicProductHelp, "framework-u");
         await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 }, 1, "framework-u",
             CancellationToken.None, EllaiUtteranceWorkEnvelope.Serialize(work, "framework-u"));
         var consent = new EllaiConsentService();
         var usage = new InMemoryEllaiUsageStore();
-        using var model = new FrameworkStreamingClient();
+        using var model = new FrameworkStreamingClient(useTool);
         IEllaiReasoningExecutor executor = new EllaiFrameworkExecutor(model,
             new EllaiPromptBuilder("Synthetic test policy", "v-test"),
             new EllaiToolBroker(new EllaiPolicyService(), consent), new EllaiUsageLedger(), usage);
         await using var services = new ServiceCollection()
             .AddSingleton<IEllaiSessionStore>(store).AddSingleton<IEllaiUtteranceOutboxStore>(store)
-            .AddSingleton(responses).AddSingleton(consent).AddSingleton(executor).BuildServiceProvider();
+            .AddSingleton(responses).AddSingleton(consent).AddSingleton(executor)
+            .AddScoped(_ => new EllaiToolBroker(new EllaiPolicyService(), consent)).BuildServiceProvider();
         using var worker = new EllaiUtteranceWorker(services, NullLogger<EllaiUtteranceWorker>.Instance);
         await worker.StartAsync(CancellationToken.None);
         try
@@ -58,15 +61,21 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
             var published = responses.ReadSince(session.SessionId, 0).Responses;
             Assert.Contains(published, item => !item.IsFinal && item.Text.Contains("Synthetic answer."));
             Assert.Contains(published, item => item.IsReconciliation && item.Text == "Synthetic answer.");
-            Assert.Equal(1, model.Calls);
-            Assert.Equal(1, (await usage.TotalsAsync(session.SessionId, CancellationToken.None)).Calls);
+            Assert.Equal(useTool ? 2 : 1, model.Calls);
+            Assert.Equal(useTool ? 2 : 1, (await usage.TotalsAsync(session.SessionId, CancellationToken.None)).Calls);
+            if (useTool)
+            {
+                Assert.Contains("\"allowed\":true", model.ToolResult);
+                Assert.Contains(published, item => item.Progress?.State == "Acknowledgement");
+            }
         }
         finally { await worker.StopAsync(CancellationToken.None); }
     }
 
-    private sealed class FrameworkStreamingClient : IChatClient
+    private sealed class FrameworkStreamingClient(bool useTool) : IChatClient
     {
         public int Calls { get; private set; }
+        public string ToolResult { get; private set; } = string.Empty;
         public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
             CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
@@ -75,7 +84,15 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
             await Task.Yield();
             cancellationToken.ThrowIfCancellationRequested();
             Calls++;
-            yield return new ChatResponseUpdate(ChatRole.Assistant, Answer);
+            if (useTool && Calls == 1)
+                yield return new ChatResponseUpdate(ChatRole.Assistant,
+                    [new FunctionCallContent("call-1", EllaiToolNames.Now, new Dictionary<string, object?>())]);
+            else
+            {
+                ToolResult = string.Join(" ", messages.SelectMany(message => message.Contents)
+                    .OfType<FunctionResultContent>().Select(content => content.Result?.ToString()));
+                yield return new ChatResponseUpdate(ChatRole.Assistant, Answer);
+            }
             yield return new ChatResponseUpdate(ChatRole.Assistant,
                 [new UsageContent(new UsageDetails { InputTokenCount = 5, OutputTokenCount = 4 })]);
         }

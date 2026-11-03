@@ -146,13 +146,17 @@ durable conversation implementation.
 the shared framework prompt, filtered conversation, tool guard and usage store.
 An in-process fixture verifies a successful tool call and activity event. It
 is not Gateway-registered: pending-progress parity, precise blocked failure
-codes, exception sanitization, unknown-tool handling, durable framework
+codes, exception sanitization, durable framework
 sessions and worker-level acceptance still require verification.
 An in-memory worker integration fixture now runs this executor with a
 deterministic streaming `IChatClient`, checks the owner-filtered completed
 turn, response chunk, final reconciliation and usage sample. It does not test
-PostgreSQL persistence, a live Gateway process, native tool calls through the
-worker, or a restored framework session.
+PostgreSQL persistence, a live Gateway process, or a restored framework
+session. A second deterministic worker case invokes the real scoped
+`ellai_now` broker and verifies its observation and progress acknowledgement.
+The framework model-call guard rejects named tool calls outside the advertised
+catalogue; malformed partial streaming call handling still requires additional
+provider-level verification.
 Its non-streaming provider calls recheck the supplied currency callback and
 use `EllaiFrameworkUsage` to estimate the prompt and tool-schema budget against
 the existing ledger, then record provider usage through `IEllaiUsageStore`.

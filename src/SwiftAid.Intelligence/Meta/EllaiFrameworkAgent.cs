@@ -114,6 +114,7 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
             CallSequence++;
             var response = await base.GetResponseAsync(boundedMessages, options, cancellationToken).ConfigureAwait(false);
             await usage.RecordAsync(response, cancellationToken).ConfigureAwait(false);
+            ValidateToolCalls(response.Messages.SelectMany(message => message.Contents), options);
             _lastText.Clear().Append(response.Text);
             return response;
         }
@@ -136,6 +137,7 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
                 await foreach (var update in base.GetStreamingResponseAsync(boundedMessages, options, cancellationToken).ConfigureAwait(false))
                 {
                     details = update.Contents.OfType<UsageContent>().LastOrDefault()?.Details ?? details;
+                    ValidateToolCalls(update.Contents, options);
                     _lastText.Append(update.Text);
                     yield return update;
                 }
@@ -146,6 +148,14 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
                 if (completed || details is not null)
                     await usage.RecordAsync(new ChatResponse { Usage = details }, CancellationToken.None).ConfigureAwait(false);
             }
+        }
+
+        private static void ValidateToolCalls(IEnumerable<AIContent> contents, ChatOptions? options)
+        {
+            var allowed = options?.Tools?.OfType<AIFunctionDeclaration>()
+                .Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal) ?? new HashSet<string>(StringComparer.Ordinal);
+            if (contents.OfType<FunctionCallContent>().Any(call => !string.IsNullOrEmpty(call.Name) && !allowed.Contains(call.Name)))
+                throw new InvalidOperationException("The model requested an unavailable tool.");
         }
     }
 }

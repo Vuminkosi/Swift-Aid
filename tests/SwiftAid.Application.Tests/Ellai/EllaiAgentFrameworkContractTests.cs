@@ -37,6 +37,25 @@ public sealed class EllaiAgentFrameworkContractTests
     }
 
     [Fact]
+    public async Task StreamingModelCannotRequestToolOutsideAdmittedCatalogue()
+    {
+        using var client = new ToolStreamingClient();
+        var agent = new EllaiFrameworkAgent(client);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal));
+        var invoked = false;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => agent.RunAsync(context, "Test instructions",
+            [new ChatMessage(ChatRole.User, "test")], 100, _ => Task.FromResult(true), (_, _, _) =>
+            {
+                invoked = true;
+                throw new InvalidOperationException();
+            }, new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()),
+            CancellationToken.None, (_, _) => ValueTask.CompletedTask));
+        Assert.False(invoked);
+        Assert.Equal(1, client.Calls);
+    }
+
+    [Fact]
     public async Task FrameworkStreamingInvokesToolBeforeFinalDecision()
     {
         using var client = new ToolStreamingClient();
