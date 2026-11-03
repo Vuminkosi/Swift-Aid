@@ -41,6 +41,7 @@ public sealed class EventSubscriptionEndpointTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("actor-1", host.Service.LastAccountId);
+        Assert.True(response.Headers.CacheControl?.NoStore);
     }
 
     [Fact]
@@ -57,6 +58,7 @@ public sealed class EventSubscriptionEndpointTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("actor-1", host.Service.LastAccountId);
         Assert.Equal("actor-1", Assert.Single(items!).AccountId);
+        Assert.True(response.Headers.CacheControl?.NoStore);
     }
 
     [Fact]
@@ -79,6 +81,19 @@ public sealed class EventSubscriptionEndpointTests
     }
 
     [Fact]
+    public async Task SubscriptionOptionsAreNotStoredByCaches()
+    {
+        await using var host = await HostFixture.StartAsync();
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/sessions/{SessionId:D}/subscription/options");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", TestAuthenticationHandler.BearerToken);
+
+        using var response = await host.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(response.Headers.CacheControl?.NoStore);
+    }
+
+    [Fact]
     public async Task AuthenticatedMutation_WithoutAntiforgeryProof_IsRejectedBeforeService()
     {
         await using var host = await HostFixture.StartAsync();
@@ -92,6 +107,7 @@ public sealed class EventSubscriptionEndpointTests
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Null(host.Service.LastAccountId);
+        Assert.True(response.Headers.CacheControl?.NoStore);
     }
 
     private sealed class HostFixture : IAsyncDisposable
