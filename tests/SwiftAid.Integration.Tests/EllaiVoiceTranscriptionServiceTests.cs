@@ -15,11 +15,114 @@ using SwiftAid.Application.Ellai;
 using SwiftAid.Contracts.Ellai;
 using SwiftAid.Gateway.Ellai;
 using SwiftAid.Intelligence.Meta;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging.Abstractions;
+using System.Runtime.CompilerServices;
 
 namespace SwiftAid.Integration.Tests;
 
 public sealed class EllaiVoiceTranscriptionServiceTests
 {
+    [Fact]
+    public async Task RecordedVoiceFlowsThroughFrameworkWorkerToPreparedSpeech()
+    {
+        const string sessionId = "framework-recorded-voice";
+        var options = new EllaiOptions { Enabled = true, ApiKey = "synthetic", AsrModel = "fixture",
+            AsrTranscriptionUrl = "https://transcription.test/v1/transcribe" };
+        var principal = new ClaimsPrincipal(new ClaimsIdentity([
+            new Claim(ClaimTypes.NameIdentifier, "voice-owner"), new Claim(ActorContext.AccessEpochClaimType, "1")], "test"));
+        var store = new InMemoryEllaiSessionStore();
+        await store.CreateAsync(new(sessionId, EllaiMode.Ask, "Active", 1, 1, 1, 1, 0, 12,
+            "voice-owner", "ellai-help-identity-epoch-1", null, null, DateTimeOffset.UtcNow), default);
+        var consent = new EllaiConsentService();
+        var speech = new FixtureSpeech();
+        using var prepared = new EllaiPreparedResponseAudio(speech, NullLogger<EllaiPreparedResponseAudio>.Instance);
+        await prepared.StartAsync(default);
+        var responses = new EllaiSessionResponseStore(audioPreparation: prepared);
+        using var http = new HttpClient(new StubAsrHandler());
+        using var model = new VoiceFrameworkClient();
+        var registrations = new ServiceCollection();
+        registrations.AddSingleton(consent).AddSingleton<IEllaiSessionStore>(store).AddSingleton<IEllaiUtteranceOutboxStore>(store);
+        registrations.AddScoped<EllaiUtteranceSubmissionService>().AddSingleton(new MetaAsrUploadAdapter(http, options));
+        registrations.AddSingleton(responses).AddSingleton<EllaiUsageLedger>().AddSingleton<IEllaiUsageStore, InMemoryEllaiUsageStore>();
+        registrations.AddScoped(_ => new EllaiPromptBuilder("Synthetic policy", "fixture"));
+        registrations.AddScoped(_ => new EllaiToolBroker(new EllaiPolicyService(), consent));
+        registrations.AddEllaiReasoningExecutor(new EllaiOptions { Enabled = true, ApiKey = "synthetic",
+            ApiUrl = "https://fixture.invalid", ReasoningModel = "fixture" }, "framework");
+        registrations.AddKeyedSingleton<IChatClient>(EllaiReasoningRegistration.FrameworkClientKey, model);
+        await using var provider = registrations.BuildServiceProvider();
+        var voice = new EllaiVoiceTranscriptionService(consent, new InMemoryEllaiConsentStore(), options, provider);
+        await voice.GrantVoiceConsentAsync(sessionId, default);
+        var wave = new byte[44];
+        "RIFF"u8.CopyTo(wave);
+        "WAVE"u8.CopyTo(wave.AsSpan(8));
+        using var worker = new EllaiUtteranceWorker(provider, NullLogger<EllaiUtteranceWorker>.Instance);
+        await worker.StartAsync(default);
+        try
+        {
+            using var audio = new MemoryStream(wave);
+            var result = await voice.TranscribeAsync(sessionId, EllaiVoiceCaptureMode.Recorded, audio, audio.Length,
+                default, "fixture-capture", submissionPrincipal: principal);
+            Assert.Equal(EllaiClientOperationStatus.Accepted, result!.Admission!.Status);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            EllaiConversationTurn turn;
+            do
+            {
+                await Task.Delay(25, timeout.Token);
+                turn = Assert.Single(await store.ReadConversationAsync(sessionId, "voice-owner", timeout.Token));
+            } while (turn.CompletedAtUtc is null);
+            Assert.Equal("Completed", turn.Outcome);
+            Assert.Contains("recognized fallback words", model.Messages);
+            var chunk = Assert.Single(responses.ReadSince(sessionId, 0).Responses,
+                item => !item.IsFinal && item.Progress is null);
+            using var pcm = await prepared.OpenAsync(sessionId, chunk.Sequence, timeout.Token);
+            Assert.Equal(new byte[] { 0, 0, 0, 0 }, await pcm.Content.ReadAsByteArrayAsync(timeout.Token));
+            Assert.Equal("Synthetic voice answer.", speech.Text);
+        }
+        finally
+        {
+            await worker.StopAsync(default);
+            await prepared.StopAsync(default);
+        }
+    }
+
+    private sealed class VoiceFrameworkClient : IChatClient
+    {
+        public IReadOnlyList<string> Messages { get; private set; } = [];
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            cancellationToken.ThrowIfCancellationRequested();
+            Messages = messages.Select(item => item.Text).ToArray();
+            yield return new ChatResponseUpdate(ChatRole.Assistant, """{"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Synthetic voice answer.","spokenText":"Synthetic voice answer.","claims":[],"questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}""");
+        }
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    private sealed class FixtureSpeech : IEllaiSpeechSynthesisClient
+    {
+        public bool IsConfigured => true;
+        public string? Text { get; private set; }
+        public Task<HttpResponseMessage> SynthesizeAsync(string requestId, string text, string language, string? voiceId,
+            CancellationToken cancellationToken)
+        {
+            Assert.Equal("eng", language);
+            Assert.Equal("af_heart", voiceId);
+            return SynthesizeAsync(requestId, text, cancellationToken);
+        }
+        public Task<HttpResponseMessage> SynthesizeAsync(string requestId, string text, CancellationToken cancellationToken)
+        {
+            Text = text;
+            var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([0, 0, 0, 0]) };
+            response.Content.Headers.ContentType = new("application/vnd.swiftaid.pcm");
+            response.Headers.Add("X-SwiftAid-Voice-Id", "swiftaid-mms-english-v1");
+            response.Headers.Add("X-SwiftAid-Sample-Rate", "16000");
+            return Task.FromResult(response);
+        }
+    }
     [Theory]
     [InlineData("voice-owner", EllaiClientOperationStatus.Accepted)]
     [InlineData("other-owner", EllaiClientOperationStatus.Unauthorized)]

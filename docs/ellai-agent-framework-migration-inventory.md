@@ -376,6 +376,19 @@ serialization to preserve evidence in the model-facing observation.
 
 ## Rollback and outstanding work
 
+`RecordedVoiceFlowsThroughFrameworkWorkerToPreparedSpeech` exercises recorded
+voice admission, the framework worker, response streaming and prepared PCM
+with synthetic ASR, model and speech providers and an in-memory session store.
+The transcript reaches the model and the prepared audio contains the fixture
+PCM. The first run failed because the fake speech provider did not implement
+the selected `af_heart` profile; the corrected test passed. The enclosing
+voice transcription suite passed 18/18 using `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-build
+--no-restore -m:1 -nr:false --filter
+FullyQualifiedName~EllaiVoiceTranscriptionServiceTests --verbosity quiet`.
+This is not live transcription, actual Kokoro inference, browser playback,
+device capture or a deployed Gateway check.
+
 The analytics acceptance requirement previously had no complete aggregate
 tool: `ellai_state` returns a bounded case page, which is not a total. The new
 `ellai_owned_case_count` adapts the existing `IDashboardAggregateQuery` for a
