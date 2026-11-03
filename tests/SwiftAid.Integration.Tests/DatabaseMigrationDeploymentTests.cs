@@ -39,6 +39,13 @@ public sealed class DatabaseMigrationDeploymentTests
                 """).SingleAsync());
             await verified.Database.ExecuteSqlRawAsync("SELECT 1 FROM swiftaid_classification.results LIMIT 1");
 
+            // The topic concurrency mapping uses PostgreSQL's system xmin
+            // column. Rolling its metadata migration down must not drop it.
+            await verified.GetService<IMigrator>().MigrateAsync("20261103200000_EllaiEstimatedUsage");
+            await verified.Database.ExecuteSqlRawAsync("SELECT xmin FROM ellai_topics LIMIT 0");
+            await verified.GetService<IMigrator>().MigrateAsync();
+            Assert.Empty(await verified.Database.GetPendingMigrationsAsync());
+
             using var cancelled = new CancellationTokenSource();
             cancelled.Cancel();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => DatabaseMigrationRunner.RunAsync(connection, cancelled.Token));
