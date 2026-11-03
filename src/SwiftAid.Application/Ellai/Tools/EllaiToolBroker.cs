@@ -975,7 +975,8 @@ public sealed class EllaiToolBroker
         if (items.Count == 0)
         {
             var empty = Allow(request.ToolName, "No entitled controls are registered for this feature.", 0, false);
-            return goalTags.Length == 0 ? empty with { UiCatalogueReplayScope = EllaiUiCatalogueReplayScope.Create(feature, limit, empty) } : empty;
+            return goalTags.Length == 0 || unmatchedGoal
+                ? empty with { UiCatalogueReplayScope = EllaiUiCatalogueReplayScope.Create(feature, limit, empty) } : empty;
         }
 
         var lines = items.Select(d =>
@@ -997,8 +998,15 @@ public sealed class EllaiToolBroker
         // Arbitrary model text is never copied into durable replay provenance.
         var replayGoal = goalTags.Length == 1 && !unmatchedGoal
             ? items.SelectMany(item => item.GoalTags).FirstOrDefault(tag => tag == goalTags[0]) : null;
-        return !result.Truncated && (goalTags.Length == 0 || replayGoal is not null)
-            ? result with { UiCatalogueReplayScope = EllaiUiCatalogueReplayScope.Create(feature, limit, result, replayGoal) }
+        // An unmatched hint returns the full, unfiltered catalogue. Revalidate that
+        // same projection without retaining the arbitrary hint in durable history.
+        var replayResult = unmatchedGoal ? result with
+        {
+            ResultSummary = result.ResultSummary.Replace(
+                " No exact goal tag matched; showing the bounded entitled feature catalogue instead.", "", StringComparison.Ordinal)
+        } : result;
+        return !result.Truncated && (goalTags.Length == 0 || replayGoal is not null || unmatchedGoal)
+            ? result with { UiCatalogueReplayScope = EllaiUiCatalogueReplayScope.Create(feature, limit, replayResult, replayGoal) }
             : result;
     }
 

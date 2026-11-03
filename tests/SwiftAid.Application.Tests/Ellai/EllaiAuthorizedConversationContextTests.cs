@@ -306,7 +306,7 @@ public sealed class EllaiAuthorizedConversationContextTests
 
     [Theory]
     [InlineData("report-help", true)]
-    [InlineData("arbitrary private phrase", false)]
+    [InlineData("arbitrary private phrase", true)]
     public async Task GoalFilteredCatalogueReplaysOnlyServerOwnedTags(string goal, bool expected)
     {
         var registry = new EllaiUiRegistry();
@@ -319,7 +319,8 @@ public sealed class EllaiAuthorizedConversationContextTests
         var request = new EllaiToolRequest(EllaiToolNames.UiCatalogue, new Dictionary<string, string> { ["goal"] = goal });
         var result = await broker.InvokeAsync(context, request, default);
         Assert.True(result.Allowed);
-        Assert.Equal(expected ? goal : null, result.UiCatalogueReplayScope?.GoalTag);
+        Assert.NotNull(result.UiCatalogueReplayScope);
+        Assert.Equal(goal == "report-help" ? goal : null, result.UiCatalogueReplayScope?.GoalTag);
         var trace = EllaiToolTrace.SerializeFlattened([EllaiObservedToolResult.From(request, result)], false, []);
         Assert.DoesNotContain("arbitrary private phrase", trace!);
         var turns = new[] { Turn("prior", 1, "show report", "report guidance", trace),
@@ -327,6 +328,16 @@ public sealed class EllaiAuthorizedConversationContextTests
         var replay = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), null, default,
             toolContext: context, invokeTool: broker.InvokeAsync);
         Assert.Equal(expected, replay.Messages.Any(message => message.Content == "report guidance"));
+        if (goal != "report-help")
+        {
+            var unfiltered = await broker.InvokeAsync(context,
+                new EllaiToolRequest(EllaiToolNames.UiCatalogue, new Dictionary<string, string>()), default);
+            Assert.Equal(unfiltered.UiCatalogueReplayScope, result.UiCatalogueReplayScope);
+            var changedBroker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService(), uiRegistry: new EllaiUiRegistry());
+            var changed = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), null, default,
+                toolContext: context, invokeTool: changedBroker.InvokeAsync);
+            Assert.DoesNotContain(changed.Messages, message => message.Content == "report guidance");
+        }
     }
 
     [Theory]
