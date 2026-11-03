@@ -530,7 +530,7 @@ they do not establish PostgreSQL persistence or live client tour execution.
 | 7 | Reject unauthorized calls | Framework and PostgreSQL fixtures exercised denied tools and revoked case access. Independent security review and deployed authorization remain open. |
 | 8 | Invalid or unavailable tools | Synthetic malformed-tool tests and disposable stopped-Qdrant tests fail safely or use the existing PostgreSQL fallback. Other provider and service failure modes remain open. |
 | 9 | Timeout and cancellation | Explicitly classified read-only Gateway tools and the state tool's authorized queue-read phase return at cancellation/deadline even if a read ignores cancellation; late results are withheld and at most eight operations can remain active. State reference writes, unclassified tools and direct executor calls remain cooperative. The underlying operation is not forcibly terminated; deployed validation and independent review remain open. |
-| 10 | Existing integration and regression tests | After the session-reminder registration fix, the default application suite passed 1,156 with 13 skipped and the latest integration suite passed 748 with 304 skipped. Selected opt-in fixtures passed separately; one live 1,024-token follow-up failed twice. Full regression acceptance remains open. |
+| 10 | Existing integration and regression tests | At `f2b46f8` the application suite passed 1,188 with 18 skipped. Three default integration runs produced 806 passed/1 failed/333 skipped, 805 passed/2 failed/333 skipped, and 807 passed/0 failed/333 skipped. The first failure was a signed-in native WebSocket test that passed in isolation; the second run's failure details were lost to output truncation. Intermittent failures and opt-in skips leave full regression acceptance open. |
 
 The Gateway runs explicitly classified read-only tools in independently owned
 scopes through a process-wide pool of eight. Cancellation or the existing tool deadline stops
@@ -3767,3 +3767,21 @@ framework worker filter passed 9/9 with a synthetic model and in-memory stores;
 it now refreshes the identical report before the answer and separately changes
 the report before an answer. A deployed browser and independent security review
 remain NOT VERIFIED.
+
+### Current default regression runs — 2026-11-04
+
+At `f2b46f8`, `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj
+--no-restore -m:1 -nr:false --logger 'console;verbosity=quiet'` passed 1,188,
+failed 0 and skipped 18. Three integration runs used `OS=Windows_NT`,
+`ELLAI_LIVE=0`, disabled intake/framework/SQL-authority PostgreSQL opt-ins,
+and `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false` (the latter two used
+`--no-build`). The first returned 806 passed, 1 failed and 333 skipped; its
+failure was the signed-in `PcmAndSilenceStreamBeforeEofThroughExistingAuthenticationHandlers`
+case. The second returned 805 passed, 2 failed and 333 skipped, but output
+truncation lost those failure names and errors. The third returned 807 passed,
+0 failed and 333 skipped, confirmed in its TRX counters. An isolated rerun
+of both native WebSocket cases passed 2/2. The cause of the first failure was
+not captured; the test uses a one-second HTTP timeout, but load is only a
+possible explanation. These inconsistent results and skipped fixtures do not
+establish a stable full regression pass.
