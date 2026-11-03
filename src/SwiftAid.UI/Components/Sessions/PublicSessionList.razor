@@ -84,7 +84,7 @@
                                     {
                                         <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.ContentCopy"
                                                    OnClick="() => CopyInvitationAsync(session)" aria-label="@($"Copy invitation for {session.Title}")">
-                                            @(_copiedSessionId == session.SessionId ? "Copied" : "Copy invitation")
+                                            @(IsCopiedVersion(session) ? "Copied" : "Copy invitation")
                                         </MudButton>
                                     }
                                     @if (!string.IsNullOrWhiteSpace(PublicBasePath))
@@ -102,7 +102,7 @@
                                     <MudText Typo="Typo.caption" role="status">Share request finished. Delivery is not confirmed.</MudText>
                                 }
 
-                                @if (_openInvitationId == session.SessionId && _openInvitationText is not null)
+                                @if (IsOpenInvitationVersion(session))
                                 {
                                     <MudPaper Elevation="0" Outlined="true" Class="session-public-list__invitation">
                                         <MudText Typo="Typo.caption" Color="Color.Secondary">Copy this text to invite someone. Opening this panel does not send anything.</MudText>
@@ -186,7 +186,7 @@
                                 @if (LoadInvitationTextAsync is not null)
                                 {
                                     <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ContentCopy" Color="Color.Primary" OnClick="() => CopyInvitationAsync(session)" aria-label="@($"Copy invitation for {session.Title}")">
-                                        @(_copiedSessionId == session.SessionId ? "Copied" : "Copy invitation")
+                                        @(IsCopiedVersion(session) ? "Copied" : "Copy invitation")
                                     </MudButton>
                                 }
                                 @if (ShareTextAsync is not null && LoadInvitationTextAsync is not null)
@@ -203,7 +203,7 @@
                             <MudText Typo="Typo.caption" role="status">Share request finished. Delivery is not confirmed.</MudText>
                         }
 
-                        @if (_openInvitationId == session.SessionId && _openInvitationText is not null)
+                        @if (IsOpenInvitationVersion(session))
                         {
                             <MudPaper Elevation="0" Outlined="true" Class="session-public-list__invitation">
                                 <MudText Typo="Typo.caption" Color="Color.Secondary">Copy this text to invite someone. Opening this panel does not send anything.</MudText>
@@ -253,11 +253,34 @@
     [Parameter] public string? PublicBasePath { get; set; } = "/public/v1/sessions";
 
     private Guid? _openInvitationId;
+    private long _openInvitationVersion;
     private string? _openInvitationText;
     private string? _invitationError;
     private Guid? _copiedSessionId;
+    private long _copiedSessionVersion;
     private Guid? _shareRequestSessionId;
     private long _shareRequestVersion;
+
+    private bool IsCurrentScheduledVersion(PublicSessionView session) => Sessions.Any(current =>
+        current.SessionId == session.SessionId && current.Version == session.Version && IsScheduled(current));
+
+    private bool IsOpenInvitationVersion(PublicSessionView session) =>
+        _openInvitationId == session.SessionId && _openInvitationVersion == session.Version &&
+        _openInvitationText is not null && IsScheduled(session);
+
+    private bool IsCopiedVersion(PublicSessionView session) =>
+        _copiedSessionId == session.SessionId && _copiedSessionVersion == session.Version && IsScheduled(session);
+
+    protected override void OnParametersSet()
+    {
+        if (_openInvitationText is not null && !Sessions.Any(IsOpenInvitationVersion))
+        {
+            _openInvitationId = null;
+            _openInvitationText = null;
+        }
+        if (_copiedSessionId is not null && !Sessions.Any(IsCopiedVersion))
+            _copiedSessionId = null;
+    }
 
     private string CalendarHref(Guid sessionId) => $"{PublicBasePath?.TrimEnd('/')}/{sessionId:D}/calendar";
 
@@ -353,7 +376,9 @@
         try
         {
             await Js.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            if (!IsCurrentScheduledVersion(session)) return;
             _copiedSessionId = session.SessionId;
+            _copiedSessionVersion = session.Version;
             _openInvitationId = null;
             _openInvitationText = null;
         }
@@ -361,8 +386,12 @@
         {
             // Clipboard access is unavailable (for example a device web view without
             // clipboard permission): show the text so it can be selected manually.
-            _openInvitationId = session.SessionId;
-            _openInvitationText = text;
+            if (IsCurrentScheduledVersion(session))
+            {
+                _openInvitationId = session.SessionId;
+                _openInvitationVersion = session.Version;
+                _openInvitationText = text;
+            }
         }
     }
 
@@ -379,7 +408,7 @@
         try
         {
             await ShareTextAsync(text);
-            if (Sessions.Any(current => current.SessionId == session.SessionId && current.Version == session.Version && IsScheduled(current)))
+            if (IsCurrentScheduledVersion(session))
             {
                 _shareRequestSessionId = session.SessionId;
                 _shareRequestVersion = session.Version;
@@ -387,9 +416,13 @@
         }
         catch (Exception)
         {
-            _openInvitationId = session.SessionId;
-            _openInvitationText = text;
-            _invitationError = "Sharing is unavailable right now. The invitation text is shown below instead.";
+            if (IsCurrentScheduledVersion(session))
+            {
+                _openInvitationId = session.SessionId;
+                _openInvitationVersion = session.Version;
+                _openInvitationText = text;
+                _invitationError = "Sharing is unavailable right now. The invitation text is shown below instead.";
+            }
         }
     }
 
@@ -403,8 +436,7 @@
         try
         {
             var text = await LoadInvitationTextAsync(session.SessionId, session.Version);
-            if (string.IsNullOrWhiteSpace(text) || !Sessions.Any(current =>
-                    current.SessionId == session.SessionId && current.Version == session.Version && IsScheduled(current)))
+            if (string.IsNullOrWhiteSpace(text) || !IsCurrentScheduledVersion(session))
             {
                 _openInvitationId = session.SessionId;
                 _openInvitationText = null;

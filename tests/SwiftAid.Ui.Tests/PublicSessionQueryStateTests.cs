@@ -551,6 +551,45 @@ public sealed class PublicSessionQueryStateTests
         Assert.Equal("Public invitation", typeof(PublicSessionList).GetField("_openInvitationText", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SelectableInvitationIsClearedWhenSessionChangesOrIsCancelled(bool cancelled)
+    {
+        var session = Session(Guid.NewGuid());
+        var list = new PublicSessionList();
+        var type = typeof(PublicSessionList);
+        type.GetProperty(nameof(list.Sessions))!.SetValue(list, new[] { session });
+        type.GetProperty(nameof(list.LoadInvitationTextAsync))!.SetValue(list,
+            (Func<Guid, long, Task<string?>>)((_, _) => Task.FromResult<string?>("Old invitation")));
+        type.GetProperty("Js", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(list, new UnavailableClipboard());
+        await (Task)type.GetMethod("CopyInvitationAsync", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(list, [session])!;
+        Assert.NotNull(type.GetField("_openInvitationText", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
+
+        var updated = cancelled ? session with { Status = "Cancelled" } : session with { Version = session.Version + 1 };
+        type.GetProperty(nameof(list.Sessions))!.SetValue(list, new[] { updated });
+        type.GetMethod("OnParametersSet", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(list, null);
+        Assert.Null(type.GetField("_openInvitationText", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
+    }
+
+    [Fact]
+    public async Task FailedShareDoesNotExposeOldTextAfterSessionChanges()
+    {
+        var session = Session(Guid.NewGuid());
+        var list = new PublicSessionList();
+        var type = typeof(PublicSessionList);
+        var pending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        type.GetProperty(nameof(list.Sessions))!.SetValue(list, new[] { session });
+        type.GetProperty(nameof(list.LoadInvitationTextAsync))!.SetValue(list,
+            (Func<Guid, long, Task<string?>>)((_, _) => Task.FromResult<string?>("Old invitation")));
+        type.GetProperty(nameof(list.ShareTextAsync))!.SetValue(list, (Func<string, Task>)(_ => pending.Task));
+        var request = (Task)type.GetMethod("ShareInvitationAsync", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(list, [session])!;
+        type.GetProperty(nameof(list.Sessions))!.SetValue(list, new[] { session with { Version = session.Version + 1 } });
+        pending.SetException(new InvalidOperationException());
+        await request;
+        Assert.Null(type.GetField("_openInvitationText", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
+    }
+
     [Fact]
     public async Task InvitationIsNotSharedIfTheDisplayedSessionChangesWhileLoading()
     {
