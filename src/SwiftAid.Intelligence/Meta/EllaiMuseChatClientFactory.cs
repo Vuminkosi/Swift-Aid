@@ -25,8 +25,8 @@ public static class EllaiMuseChatClientFactory
         if (httpClient is not null)
             clientOptions.Transport = new HttpClientPipelineTransport(httpClient);
 
-        return new ChatClient(options.ReasoningModel, new ApiKeyCredential(options.ApiKey), clientOptions)
-            .AsIChatClient();
+        return new StreamedToolNameClient(new ChatClient(options.ReasoningModel, new ApiKeyCredential(options.ApiKey), clientOptions)
+            .AsIChatClient());
     }
 
     /// <summary>Uses the configured, explicitly enabled serverless chat-completions route.</summary>
@@ -57,8 +57,74 @@ public static class EllaiMuseChatClientFactory
             Endpoint = new Uri(options.OllamaEndpoint.TrimEnd('/') + "/v1/", UriKind.Absolute),
             Transport = new HttpClientPipelineTransport(transport)
         };
-        return new CompatibleChatClient(new ChatClient(options.OllamaModel,
-            new ApiKeyCredential("unused"), clientOptions).AsIChatClient(), transport, streaming: true);
+        return new StreamedToolNameClient(new CompatibleChatClient(new ChatClient(options.OllamaModel,
+            new ApiKeyCredential("unused"), clientOptions).AsIChatClient(), transport, streaming: true));
+    }
+
+    // The official adapter assembles argument fragments but retains only the first
+    // name fragment. Use its raw typed updates to correct that field before the
+    // framework receives its completed function call; never infer an identity.
+    private sealed class StreamedToolNameClient(IChatClient inner) : DelegatingChatClient(inner)
+    {
+        public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<Microsoft.Extensions.AI.ChatMessage> messages, ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var names = new Dictionary<int, StreamedToolName>();
+            await foreach (var update in base.GetStreamingResponseAsync(messages, options, cancellationToken).ConfigureAwait(false))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (update.RawRepresentation is StreamingChatCompletionUpdate raw)
+                {
+                    foreach (var part in raw.ToolCallUpdates)
+                    {
+                        if (!names.TryGetValue(part.Index, out var name)) names[part.Index] = name = new();
+                        if (!string.IsNullOrEmpty(part.ToolCallId))
+                        {
+                            if (name.CallId is not null && name.CallId != part.ToolCallId)
+                                throw new InvalidDataException("Conflicting streamed tool-call identities.");
+                            name.CallId = part.ToolCallId;
+                        }
+                        if (!string.IsNullOrEmpty(part.FunctionName))
+                        {
+                            if (name.Value.Length + part.FunctionName.Length > 128)
+                                throw new InvalidDataException("Streamed tool-call name exceeds the permitted length.");
+                            name.First ??= part.FunctionName;
+                            name.Value.Append(part.FunctionName);
+                            name.Parts++;
+                        }
+                    }
+                }
+                for (var index = 0; index < update.Contents.Count; index++)
+                {
+                    if (update.Contents[index] is not FunctionCallContent call) continue;
+                    var matches = names.Values.Where(name => name.CallId is not null && name.CallId == call.CallId).ToArray();
+                    if (matches.Length > 1 || matches.Length == 0 && names.Values.Any(name => name.Parts > 1))
+                        throw new InvalidDataException("Ambiguous streamed tool-call identity.");
+                    if (matches is not [{ Parts: > 1 } match]) continue;
+                    var completeName = match.Value.ToString();
+                    if (call.Name == completeName) continue;
+                    if (call.Name != match.First) throw new InvalidDataException("Inconsistent streamed tool-call name.");
+                    update.Contents[index] = new FunctionCallContent(call.CallId, completeName, call.Arguments)
+                    {
+                        Exception = call.Exception,
+                        InformationalOnly = call.InformationalOnly,
+                        RawRepresentation = call.RawRepresentation,
+                        AdditionalProperties = call.AdditionalProperties,
+                        Annotations = call.Annotations
+                    };
+                }
+                yield return update;
+            }
+        }
+
+        private sealed class StreamedToolName
+        {
+            public string? CallId;
+            public string? First;
+            public StringBuilder Value { get; } = new();
+            public int Parts;
+        }
     }
 
     // Serverless completes before publishing updates; Ollama supports streaming.

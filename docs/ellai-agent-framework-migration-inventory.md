@@ -1934,7 +1934,34 @@ tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj --no-restore
 'FullyQualifiedName~EllaiMuseChatClientTests|FullyQualifiedName~FrameworkRejectsProviderToolCallWithoutAName'
 --logger 'console;verbosity=normal'`. This is a synthetic protocol fixture;
 whether live Muse emits split function names remains **NOT VERIFIED**. The
-migration does not add a custom function-call reassembly pipeline.
+migration initially did not correct that adapter behavior.
+
+On 2026-11-04 a narrowly scoped adapter correction was added for Meta and
+Ollama streaming. It observes the official adapter's typed raw updates, binds
+name fragments by provider call index and ID, and replaces only the final name
+when the SDK retained its first fragment. Framework agent construction,
+streaming and function invocation remain framework-managed. Conflicting or
+ambiguous identities fail closed, argument-parse exceptions and other call
+metadata are retained, and an allowed prefix followed by an unregistered
+suffix is rejected before a broker call. The [official adapter source](https://github.com/dotnet/extensions/blob/main/src/Libraries/Microsoft.Extensions.AI.OpenAI/OpenAIChatClient.cs)
+shows the first-name-fragment behavior that the synthetic fixture exposed.
+
+PASS: the `EllaiMuseChatClientTests|EllaiAgentFrameworkContractTests` filter
+passed 132/132 using `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj
+--no-build --no-restore -m:1 -nr:false --filter
+'FullyQualifiedName~EllaiMuseChatClientTests|FullyQualifiedName~EllaiAgentFrameworkContractTests'
+--logger 'console;verbosity=minimal'`. It covers split names, interleaved
+calls, duplicate IDs, unregistered suffixes, malformed arguments and the
+Ollama-compatible route. The focused synthetic Gateway worker tests passed
+2/2, including a fragmented HTTP stream that reached the real clock broker.
+The broader reasoning-registration and worker-outcome integration filters
+passed 55/55 with `OS=Windows_NT`, `-m:1 -nr:false` and
+`-p:WasmBuildNative=false`.
+The complete application suite passed 1,200, failed 0 and skipped 18.
+The opt-in `LiveFrameworkRunnerStreamsBrokeredToolDecision` passed 1/1 with
+the configured live Muse route and the correction enabled. These tests do not
+establish how often live Muse splits function names, live Ollama compatibility,
+deployed Gateway behavior or an independent security review.
 
 After the blank-name guard change, `LiveFrameworkRunnerStreamsBrokeredToolDecision`
 passed 1/1 against the configured live Muse route with a synthetic prompt,
@@ -3810,7 +3837,7 @@ tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore
 -m:1 -nr:false -p:WasmBuildNative=false --filter
 'FullyQualifiedName~WorkerRejectsMalformedToolArgumentsWithoutPublishingAnAnswer|FullyQualifiedName~WorkerAcknowledgesOnlyWithDurableExplicitOutcome'
 --logger 'console;verbosity=minimal'`; the worker recorded terminal failure with
-no answer or tool trace. This does not verify malformed output from live Muse
-or change the separate split-function-name compatibility limitation.
+no answer or tool trace. This does not verify malformed output from live Muse;
+the separate split-function-name adapter correction is described above.
 The complete default application suite also passed 1,194, failed 0 and skipped
 18 after this change using the application test command above without a filter.

@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
+using StreamingChatCompletionUpdate = OpenAI.Chat.StreamingChatCompletionUpdate;
 using SwiftAid.Application.Ellai;
 using SwiftAid.Intelligence.Meta;
 
@@ -10,7 +11,7 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiMuseChatClientTests
 {
     [Fact]
-    public async Task OfficialAdapterDoesNotAssembleSplitFunctionName()
+    public async Task StreamingAdapterRestoresSplitFunctionNameFromTypedUpdates()
     {
         using var handler = new FragmentedToolHandler(splitName: true);
         using var http = new HttpClient(handler);
@@ -19,13 +20,19 @@ public sealed class EllaiMuseChatClientTests
             Enabled = true, ApiUrl = "https://fixture.invalid/v1", ApiKey = "fixture-key", ReasoningModel = "fixture-model"
         }, http);
         var names = new List<string>();
+        var fragments = new List<string>();
         await foreach (var update in client.GetStreamingResponseAsync([new ChatMessage(ChatRole.User, "time?")]))
+        {
             names.AddRange(update.Contents.OfType<FunctionCallContent>().Select(call => call.Name));
-        Assert.Equal(new[] { "ellai_" }, names);
+            if (update.RawRepresentation is StreamingChatCompletionUpdate raw)
+                fragments.AddRange(raw.ToolCallUpdates.Where(item => item.FunctionName is not null).Select(item => item.FunctionName));
+        }
+        Assert.Equal(new[] { "ellai_now" }, names);
+        Assert.Equal(new[] { "ellai_", "now" }, fragments);
     }
 
     [Fact]
-    public async Task FrameworkRejectsSplitFunctionNameThatOfficialAdapterCannotAssemble()
+    public async Task FrameworkInvokesRestoredSplitFunctionName()
     {
         using var handler = new FragmentedToolHandler(splitName: true);
         using var http = new HttpClient(handler);
@@ -37,11 +44,38 @@ public sealed class EllaiMuseChatClientTests
         var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
             AllowedTools: new HashSet<string> { EllaiToolNames.Now });
         var invoked = false;
-        var error = await Assert.ThrowsAsync<EllaiFrameworkFailureException>(() => agent.RunAsync(context, "policy",
-            [new ChatMessage(ChatRole.User, "time?")], 100, _ => Task.FromResult(true), (_, _, _) =>
+        var answer = await agent.RunAsync(context, "policy",
+            [new ChatMessage(ChatRole.User, "time?")], 100, _ => Task.FromResult(true), (_, request, _) =>
             {
                 invoked = true;
-                throw new InvalidOperationException();
+                Assert.Equal(EllaiToolNames.Now, request.ToolName);
+                Assert.Equal("call-1", request.CallId);
+                return Task.FromResult(new EllaiToolResult(request.ToolName, true, null, [], "Synthetic time", 1, false));
+            }, new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default,
+            (_, _) => ValueTask.CompletedTask);
+        Assert.True(invoked);
+        Assert.Equal("Done.", answer?.DisplayText);
+        Assert.Equal(2, handler.Requests);
+    }
+
+    [Fact]
+    public async Task FrameworkRejectsUnregisteredNameEvenWhenFirstFragmentIsAnAllowedTool()
+    {
+        using var handler = new FragmentedToolHandler(maliciousSuffix: true);
+        using var http = new HttpClient(handler);
+        using var client = EllaiMuseChatClientFactory.Create(new EllaiOptions
+        {
+            Enabled = true, ApiUrl = "https://fixture.invalid/v1", ApiKey = "fixture-key", ReasoningModel = "fixture-model"
+        }, http);
+        var agent = new EllaiFrameworkAgent(client);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string> { EllaiToolNames.Now });
+        var invoked = false;
+        var error = await Assert.ThrowsAsync<EllaiFrameworkFailureException>(() => agent.RunAsync(context, "policy",
+            [new ChatMessage(ChatRole.User, "time?")], 100, _ => Task.FromResult(true), (_, request, _) =>
+            {
+                invoked = true;
+                return Task.FromResult(new EllaiToolResult(request.ToolName, true, null, [], "Synthetic time", 1, false));
             }, new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default,
             (_, _) => ValueTask.CompletedTask));
         Assert.Equal(EllaiToolReasonCodes.UnregisteredTool, error.Code);
@@ -79,10 +113,12 @@ public sealed class EllaiMuseChatClientTests
         Assert.Equal("Done.", string.Concat(chunks));
     }
 
-    [Fact]
-    public async Task FrameworkRejectsMalformedStreamedArgumentsFromOfficialAdapter()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FrameworkRejectsMalformedStreamedArgumentsFromOfficialAdapter(bool splitName)
     {
-        using var handler = new FragmentedToolHandler(malformedArguments: true);
+        using var handler = new FragmentedToolHandler(splitName: splitName, malformedArguments: true);
         using var http = new HttpClient(handler);
         using var client = EllaiMuseChatClientFactory.Create(new EllaiOptions
         {
@@ -137,7 +173,99 @@ public sealed class EllaiMuseChatClientTests
             });
     }
 
-    private sealed class FragmentedToolHandler(bool splitName = false, bool malformedArguments = false) : HttpMessageHandler
+    [Fact]
+    public async Task StreamingAdapterKeepsInterleavedToolNamesBoundToTheirCallIds()
+    {
+        using var http = new HttpClient(new InterleavedToolHandler());
+        using var client = EllaiMuseChatClientFactory.Create(new EllaiOptions
+        {
+            Enabled = true, ApiUrl = "https://fixture.invalid/v1", ApiKey = "fixture-key", ReasoningModel = "fixture-model"
+        }, http);
+        var calls = new List<FunctionCallContent>();
+        await foreach (var update in client.GetStreamingResponseAsync([new ChatMessage(ChatRole.User, "test")]))
+            calls.AddRange(update.Contents.OfType<FunctionCallContent>());
+        Assert.Equal(2, calls.Count);
+        Assert.Equal("ellai_now", Assert.Single(calls, call => call.CallId == "call-a").Name);
+        Assert.Equal("ellai_capabilities", Assert.Single(calls, call => call.CallId == "call-b").Name);
+    }
+
+    [Fact]
+    public async Task OllamaStreamingAdapterRestoresSplitToolNames()
+    {
+        using var handler = new FragmentedToolHandler(splitName: true);
+        using var http = new HttpClient(handler);
+        using var client = EllaiMuseChatClientFactory.CreateOllama(new EllaiOptions
+        {
+            Enabled = true, ReasoningBackend = "ollama", OllamaEndpoint = "http://127.0.0.1:11434", OllamaModel = "fixture-model"
+        }, http);
+        var calls = new List<FunctionCallContent>();
+        await foreach (var update in client.GetStreamingResponseAsync([new ChatMessage(ChatRole.User, "test")]))
+            calls.AddRange(update.Contents.OfType<FunctionCallContent>());
+        var call = Assert.Single(calls);
+        Assert.Equal("ellai_now", call.Name);
+        Assert.Equal("call-1", call.CallId);
+    }
+
+    [Fact]
+    public async Task StreamingAdapterRejectsAmbiguousDuplicateCallIds()
+    {
+        using var http = new HttpClient(new InterleavedToolHandler(duplicateId: true));
+        using var client = EllaiMuseChatClientFactory.Create(new EllaiOptions
+        {
+            Enabled = true, ApiUrl = "https://fixture.invalid/v1", ApiKey = "fixture-key", ReasoningModel = "fixture-model"
+        }, http);
+        await Assert.ThrowsAsync<InvalidDataException>(async () =>
+        {
+            await foreach (var _ in client.GetStreamingResponseAsync([new ChatMessage(ChatRole.User, "test")])) { }
+        });
+    }
+
+    [Fact]
+    public async Task FrameworkDoesNotInvokeAmbiguousDuplicateCallIds()
+    {
+        using var http = new HttpClient(new InterleavedToolHandler(duplicateId: true));
+        using var client = EllaiMuseChatClientFactory.Create(new EllaiOptions
+        {
+            Enabled = true, ApiUrl = "https://fixture.invalid/v1", ApiKey = "fixture-key", ReasoningModel = "fixture-model"
+        }, http);
+        var agent = new EllaiFrameworkAgent(client);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string> { EllaiToolNames.Now, EllaiToolNames.Capabilities });
+        var invoked = false;
+        var error = await Assert.ThrowsAsync<EllaiFrameworkFailureException>(() => agent.RunAsync(context, "policy",
+            [new ChatMessage(ChatRole.User, "test")], 100, _ => Task.FromResult(true), (_, request, _) =>
+            {
+                invoked = true;
+                return Task.FromResult(new EllaiToolResult(request.ToolName, true, null, [], "Synthetic", 1, false));
+            }, new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default,
+            (_, _) => ValueTask.CompletedTask));
+        Assert.Equal("ProviderUnavailable", error.Code);
+        Assert.False(invoked);
+    }
+
+    private sealed class InterleavedToolHandler(bool duplicateId = false) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var payload = """
+                data: {"id":"fixture","object":"chat.completion.chunk","created":1,"model":"fixture-model","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call-a","type":"function","function":{"name":"ellai_","arguments":"{"}},{"index":1,"id":"call-b","type":"function","function":{"name":"ellai_","arguments":"{"}}]},"finish_reason":null}]}
+
+                data: {"id":"fixture","object":"chat.completion.chunk","created":1,"model":"fixture-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"function":{"name":"capabilities","arguments":"}"}},{"index":0,"function":{"name":"now","arguments":"}"}}]},"finish_reason":null}]}
+
+                data: {"id":"fixture","object":"chat.completion.chunk","created":1,"model":"fixture-model","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+                data: [DONE]
+
+                """;
+            if (duplicateId) payload = payload.Replace("call-b", "call-a", StringComparison.Ordinal);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(payload, Encoding.UTF8, "text/event-stream")
+            });
+        }
+    }
+
+    private sealed class FragmentedToolHandler(bool splitName = false, bool malformedArguments = false, bool maliciousSuffix = false) : HttpMessageHandler
     {
         public int Requests { get; private set; }
         public List<string> Bodies { get; } = [];
@@ -167,6 +295,8 @@ public sealed class EllaiMuseChatClientTests
                     .Replace("\"function\":{\"arguments\":\"}\"}", "\"function\":{\"name\":\"now\",\"arguments\":\"}\"}", StringComparison.Ordinal);
             if (Requests == 1 && malformedArguments)
                 payload = payload.Replace("\"arguments\":\"}\"", "\"arguments\":\"invalid}\"", StringComparison.Ordinal);
+            if (Requests == 1 && maliciousSuffix)
+                payload = payload.Replace("\"function\":{\"arguments\":\"}\"}", "\"function\":{\"name\":\"_extra\",\"arguments\":\"}\"}", StringComparison.Ordinal);
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(payload, Encoding.UTF8, "text/event-stream")

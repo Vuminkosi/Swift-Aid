@@ -718,6 +718,81 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
     }
 
     [Fact]
+    public async Task WorkerExecutesSplitProviderToolNameThroughFramework()
+    {
+        var store = new InMemoryEllaiSessionStore();
+        var responses = new EllaiSessionResponseStore();
+        var actor = ActorContext.FromValidatedPrincipal(new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, "split-worker"), new Claim(ActorContext.AccessEpochClaimType, "1")], "test")));
+        var session = new EllaiSessionRecord("split-session", EllaiMode.Ask, "Active", 1, 1, 1, 1,
+            0, 12, actor.ActorId, "scope", null, null, DateTimeOffset.UtcNow);
+        await store.CreateAsync(session, default);
+        var work = new EllaiUtteranceWork(session.SessionId, "scope", "What time is it?", "public.product-help", null,
+            EllaiMode.Ask, 1, "cycle", actor, true, "consent/0", EllaiProcessingClassification.UserProvidedNonSensitive,
+            EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string> { EllaiToolNames.Now },
+            EllaiConsentPurposes.PublicProductHelp, "turn");
+        await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 }, 1, work.ClientUtteranceId,
+            default, EllaiUtteranceWorkEnvelope.Serialize(work, work.ClientUtteranceId));
+        var consent = new EllaiConsentService();
+        using var handler = new SplitToolHttpHandler();
+        using var http = new HttpClient(handler);
+        using var model = EllaiMuseChatClientFactory.Create(new EllaiOptions
+        {
+            Enabled = true, ApiUrl = "https://fixture.invalid/v1", ApiKey = "fixture-key", ReasoningModel = "fixture-model"
+        }, http);
+        var executor = new EllaiFrameworkExecutor(model, new EllaiPromptBuilder("Synthetic policy", "fixture"),
+            new EllaiToolBroker(new EllaiPolicyService(), consent), new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
+        await using var services = new ServiceCollection().AddSingleton<IEllaiSessionStore>(store)
+            .AddSingleton<IEllaiUtteranceOutboxStore>(store).AddSingleton(responses).AddSingleton(consent)
+            .AddSingleton<IEllaiReasoningExecutor>(executor).BuildServiceProvider();
+        using var worker = new EllaiUtteranceWorker(services, NullLogger<EllaiUtteranceWorker>.Instance);
+        await worker.StartAsync(default);
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            EllaiConversationTurn turn;
+            do
+            {
+                await Task.Delay(10, timeout.Token);
+                turn = Assert.Single(await store.ReadConversationAsync(session.SessionId, actor.ActorId, timeout.Token));
+            } while (turn.CompletedAtUtc is null);
+            Assert.Equal("Completed", turn.Outcome);
+            Assert.Equal("Synthetic answer.", turn.AssistantText);
+            Assert.Equal(2, handler.Calls);
+            Assert.True(EllaiToolTrace.TryRead(turn.ToolTraceJson!, out var trace));
+            Assert.Contains(trace!.Observations, item => item.ToolName == EllaiToolNames.Now &&
+                item.ClockVersion == EllaiObservedToolResult.CurrentClockVersion);
+        }
+        finally { await worker.StopAsync(default); }
+    }
+
+    private sealed class SplitToolHttpHandler : HttpMessageHandler
+    {
+        public int Calls { get; private set; }
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var payload = ++Calls == 1 ? """
+                data: {"id":"fixture","object":"chat.completion.chunk","created":1,"model":"fixture-model","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"ellai_","arguments":"{"}}]},"finish_reason":null}]}
+
+                data: {"id":"fixture","object":"chat.completion.chunk","created":1,"model":"fixture-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"now","arguments":"}"}}]},"finish_reason":null}]}
+
+                data: {"id":"fixture","object":"chat.completion.chunk","created":1,"model":"fixture-model","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+                data: [DONE]
+
+                """ : "data: " + System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    id = "fixture", @object = "chat.completion.chunk", created = 1, model = "fixture-model",
+                    choices = new[] { new { index = 0, delta = new { role = "assistant", content = Answer }, finish_reason = "stop" } }
+                }) + "\n\ndata: [DONE]\n\n";
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(payload, System.Text.Encoding.UTF8, "text/event-stream")
+            });
+        }
+    }
+
+    [Fact]
     public async Task WorkerRejectsMalformedToolArgumentsWithoutPublishingAnAnswer()
     {
         var store = new InMemoryEllaiSessionStore();
