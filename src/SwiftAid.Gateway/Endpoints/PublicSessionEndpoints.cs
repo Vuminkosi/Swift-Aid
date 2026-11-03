@@ -59,6 +59,12 @@ public static class PublicSessionEndpoints
             .WithName("GetPublicSessionInvitation")
             .Produces(StatusCodes.Status200OK, contentType: "text/plain")
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
+        routes.MapGet("/{sessionId:guid}/destination", GetDestinationAsync)
+            .AllowAnonymous()
+            .WithName("OpenPublicSessionDestination")
+            .Produces(StatusCodes.Status302Found)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status503ServiceUnavailable);
     }
 
     /// <summary>Maps a missing publication to the generic public 404.</summary>
@@ -270,6 +276,41 @@ public static class PublicSessionEndpoints
                 title: "Community sessions are temporarily unavailable.");
         }
     }
+
+    private static async Task<IResult> GetDestinationAsync(HttpContext context, Guid sessionId, CancellationToken cancellationToken)
+    {
+        if (!long.TryParse(context.Request.Query["version"], NumberStyles.None, CultureInfo.InvariantCulture, out var expectedVersion) || expectedVersion < 1)
+            return DestinationUnavailable();
+
+        var service = context.RequestServices.GetService<ICommunitySessionService>();
+        if (service is null) return DestinationUnavailable();
+        try
+        {
+            var session = await service.GetPublicAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            var link = session?.ChannelLink;
+            if (session is null || session.SessionId != sessionId || session.Version != expectedVersion ||
+                !string.Equals(session.Status, "Scheduled", StringComparison.Ordinal) ||
+                session.ChannelType == SessionChannelType.None ||
+                string.IsNullOrWhiteSpace(link) || link.Any(char.IsControl) ||
+                !Uri.TryCreate(link, UriKind.Absolute, out var uri) ||
+                (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) ||
+                !string.IsNullOrEmpty(uri.UserInfo))
+                return DestinationUnavailable();
+
+            return Results.Redirect(uri.AbsoluteUri);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Community sessions are temporarily unavailable.");
+        }
+    }
+
+    private static IResult DestinationUnavailable() => Results.Problem(statusCode: StatusCodes.Status404NotFound,
+        title: "The session destination is unavailable or changed. Refresh the session and try again.");
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 }

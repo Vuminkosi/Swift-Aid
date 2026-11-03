@@ -64,6 +64,30 @@ public sealed class CommunitySessionEndpointTests
     }
 
     [Fact]
+    public async Task DestinationRequiresTheCurrentPublicScheduledVersion()
+    {
+        await using var host = await TestSessionHost.StartAsync(withPublished: true);
+        var scheduled = PublishedView() with { ChannelType = SessionChannelType.Other, ChannelLink = "https://example.test/session" };
+        host.Service.PublicOverride = scheduled;
+        var path = $"/public/v1/sessions/{KnownSessionId:D}/destination?version={scheduled.Version}";
+
+        using var first = await host.Client.GetAsync(path);
+        Assert.Equal(HttpStatusCode.Redirect, first.StatusCode);
+        Assert.Equal("https://example.test/session", first.Headers.Location?.AbsoluteUri);
+        Assert.True(first.Headers.CacheControl?.NoStore);
+
+        host.Service.PublicOverride = scheduled with { Version = scheduled.Version + 1 };
+        using var stale = await host.Client.GetAsync(path);
+        Assert.Equal(HttpStatusCode.NotFound, stale.StatusCode);
+        host.Service.PublicOverride = scheduled with { Status = "Cancelled" };
+        using var cancelled = await host.Client.GetAsync(path);
+        Assert.Equal(HttpStatusCode.NotFound, cancelled.StatusCode);
+        host.Service.PublicOverride = scheduled with { ChannelLink = "https://user:password@example.test/session" };
+        using var unsafeDestination = await host.Client.GetAsync(path);
+        Assert.Equal(HttpStatusCode.NotFound, unsafeDestination.StatusCode);
+    }
+
+    [Fact]
     public void OfficerRoutesRequireAuthenticationAndScopedCapabilityMetadata()
     {
         var builder = WebApplication.CreateBuilder();
@@ -105,7 +129,7 @@ public sealed class CommunitySessionEndpointTests
                 "/public/v1/sessions", StringComparison.Ordinal))
             .ToArray();
 
-        Assert.Equal(5, routes.Length);
+        Assert.Equal(6, routes.Length);
         foreach (var route in routes)
         {
             Assert.NotEmpty(route.Metadata.GetOrderedMetadata<IAllowAnonymous>());
@@ -744,6 +768,7 @@ public sealed class CommunitySessionEndpointTests
 
         public Func<SessionCommand, string, SessionCommandResult>? OnExecute { get; set; }
         public bool WithPublished { get; set; }
+        public PublicSessionView? PublicOverride { get; set; }
         public bool FailList { get; set; }
         public PublicSessionQuery? LastQuery { get; private set; }
 
@@ -785,7 +810,7 @@ public sealed class CommunitySessionEndpointTests
         public Task<PublicSessionView?> GetPublicAsync(Guid sessionId, CancellationToken ct) =>
             Task.FromResult<PublicSessionView?>(
                 WithPublished && sessionId == CommunitySessionEndpointTests.KnownSessionId
-                    ? CommunitySessionEndpointTests.PublishedView()
+                    ? PublicOverride ?? CommunitySessionEndpointTests.PublishedView()
                     : null);
 
         public Task<PublicSessionPage> QueryPublicAsync(PublicSessionQuery query, CancellationToken ct)

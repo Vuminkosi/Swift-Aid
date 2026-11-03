@@ -374,6 +374,19 @@ public sealed class PublicSessionQueryStateTests
     }
 
     [Fact]
+    public void DestinationLinkUsesGatewayAndBindsTheDisplayedVersion()
+    {
+        var list = new PublicSessionList();
+        typeof(PublicSessionList).GetProperty(nameof(list.PublicBasePath))!.SetValue(list, "https://gateway.example/public/v1/sessions/");
+        var method = typeof(PublicSessionList).GetMethod("DestinationHref", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var session = Session(Guid.NewGuid());
+
+        var href = (string)method.Invoke(list, [session])!;
+
+        Assert.Equal($"https://gateway.example/public/v1/sessions/{session.SessionId:D}/destination?version={session.Version}", href);
+    }
+
+    [Fact]
     public void CompactTimeShowsTheEndDateForAnOvernightSession()
     {
         var session = Session(Guid.NewGuid()) with

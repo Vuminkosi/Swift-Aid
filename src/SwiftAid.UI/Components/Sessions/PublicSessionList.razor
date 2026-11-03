@@ -65,10 +65,10 @@
                                         <MudIcon Icon="@Icons.Material.Filled.Info" aria-hidden="true" />
                                         View details
                                     </a>
-                                    @if (IsScheduled(session) && !string.IsNullOrWhiteSpace(session.ChannelLink))
+                                    @if (IsScheduled(session) && !string.IsNullOrWhiteSpace(session.ChannelLink) && !string.IsNullOrWhiteSpace(PublicBasePath))
                                     {
                                         <a class="session-public-list__mobile-action session-public-list__mobile-action--destination"
-                                           href="@session.ChannelLink" target="_blank" rel="noopener noreferrer">
+                                           href="@DestinationHref(session)" target="_blank" rel="noopener noreferrer">
                                             <MudIcon Icon="@Icons.Material.Filled.OpenInNew" aria-hidden="true" />
                                             @ChannelLabel(session.ChannelType)
                                         </a>
@@ -150,10 +150,10 @@
                             </MudAlert>
                         }
 
-                        @if (IsScheduled(session) && !string.IsNullOrWhiteSpace(session.ChannelLink))
+                        @if (IsScheduled(session) && !string.IsNullOrWhiteSpace(session.ChannelLink) && !string.IsNullOrWhiteSpace(PublicBasePath))
                         {
                             <MudText Typo="Typo.body2" Class="mt-2">
-                                Join here: <MudLink Href="@session.ChannelLink" Target="_blank" rel="noopener">@session.ChannelLink</MudLink>
+                                <MudLink Href="@DestinationHref(session)" Target="_blank" rel="noopener noreferrer">Open configured destination</MudLink>
                             </MudText>
                         }
 
@@ -234,6 +234,8 @@
     private Guid? _copiedSessionId;
 
     private string CalendarHref(Guid sessionId) => $"{PublicBasePath?.TrimEnd('/')}/{sessionId:D}/calendar";
+
+    private string DestinationHref(PublicSessionView session) => $"{PublicBasePath?.TrimEnd('/')}/{session.SessionId:D}/destination?version={session.Version.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
 
     private static string DetailHref(Guid sessionId) => $"/sessions?sessionId={sessionId:D}";
 
