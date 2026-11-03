@@ -14,7 +14,9 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using OpenIddict.Validation.AspNetCore;
 using SwiftAid.Contracts.Sessions;
+using SwiftAid.Client.Presentation;
 using SwiftAid.Gateway.Endpoints;
+using SwiftAid.Gateway.Presentation;
 using SwiftAid.Gateway.Sessions;
 
 namespace SwiftAid.Integration.Tests;
@@ -253,6 +255,72 @@ public sealed class CommunitySessionEndpointTests
     }
 
     [Fact]
+    public async Task ServerPublicDetail_DistinguishesUnavailableAndUnknown()
+    {
+        using var noServices = new ServiceCollection().BuildServiceProvider();
+        var unavailable = new WebPublicCommunitySessionClient(new SessionGatewayClient(
+            new CommunityFixedAuthenticationStateProvider(new ClaimsPrincipal()), noServices));
+        using var services = new ServiceCollection()
+            .AddSingleton<ICommunitySessionService>(new FakeCommunitySessionService())
+            .BuildServiceProvider();
+        var available = new WebPublicCommunitySessionClient(new SessionGatewayClient(
+            new CommunityFixedAuthenticationStateProvider(new ClaimsPrincipal()), services));
+
+        var failed = await unavailable.GetPublicAsync(KnownSessionId);
+        var missing = await available.GetPublicAsync(KnownSessionId);
+
+        Assert.Equal(UiCapabilityResultCode.Unavailable, failed.Code);
+        Assert.Equal(UiCapabilityResultCode.Success, missing.Code);
+        Assert.Null(missing.Value);
+    }
+
+    [Fact]
+    public async Task ServerPublicClient_MissingService_IsUnavailableRatherThanEmpty()
+    {
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var gateway = new SessionGatewayClient(
+            new CommunityFixedAuthenticationStateProvider(new ClaimsPrincipal()), services);
+        var client = new WebPublicCommunitySessionClient(gateway);
+
+        var result = await client.ListPublicAsync();
+
+        Assert.Equal(UiCapabilityResultCode.Unavailable, result.Code);
+        Assert.False(result.Metadata.IsAvailable);
+        Assert.Null(result.Value);
+    }
+
+    [Fact]
+    public async Task ServerPublicClient_ServiceFailure_IsUnavailableRatherThanEmpty()
+    {
+        var service = new FakeCommunitySessionService { FailList = true };
+        using var services = new ServiceCollection().AddSingleton<ICommunitySessionService>(service).BuildServiceProvider();
+        var gateway = new SessionGatewayClient(
+            new CommunityFixedAuthenticationStateProvider(new ClaimsPrincipal()), services);
+        var client = new WebPublicCommunitySessionClient(gateway);
+
+        var result = await client.ListPublicAsync();
+
+        Assert.Equal(UiCapabilityResultCode.Unavailable, result.Code);
+        Assert.Null(result.Value);
+    }
+
+    [Fact]
+    public async Task ServerPublicClient_EmptyServiceResult_IsSuccessful()
+    {
+        using var services = new ServiceCollection()
+            .AddSingleton<ICommunitySessionService>(new FakeCommunitySessionService())
+            .BuildServiceProvider();
+        var gateway = new SessionGatewayClient(
+            new CommunityFixedAuthenticationStateProvider(new ClaimsPrincipal()), services);
+        var client = new WebPublicCommunitySessionClient(gateway);
+
+        var result = await client.ListPublicAsync();
+
+        Assert.Equal(UiCapabilityResultCode.Success, result.Code);
+        Assert.Empty(Assert.IsAssignableFrom<IReadOnlyList<PublicSessionView>>(result.Value));
+    }
+
+    [Fact]
     public async Task PublicSearch_UsesPublicProjectionAndPassesFilters()
     {
         await using var host = await TestSessionHost.StartAsync(withPublished: true);
@@ -450,8 +518,10 @@ public sealed class CommunitySessionEndpointTests
         using var client = app.GetTestClient();
 
         using var response = await client.GetAsync("/public/v1/sessions");
+        using var detailResponse = await client.GetAsync($"/public/v1/sessions/{KnownSessionId:D}");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, detailResponse.StatusCode);
         await app.StopAsync();
     }
 
@@ -626,6 +696,7 @@ public sealed class CommunitySessionEndpointTests
 
         public Func<SessionCommand, string, SessionCommandResult>? OnExecute { get; set; }
         public bool WithPublished { get; set; }
+        public bool FailList { get; set; }
         public PublicSessionQuery? LastQuery { get; private set; }
 
         public Task<SessionCommandResult> ExecuteAsync(SessionCommand command, string actorId, CancellationToken ct)
@@ -651,6 +722,11 @@ public sealed class CommunitySessionEndpointTests
 
         public Task<IReadOnlyList<PublicSessionView>> ListPublicAsync(int? limit, CancellationToken ct)
         {
+            ct.ThrowIfCancellationRequested();
+            if (FailList)
+            {
+                throw new InvalidOperationException("Test service failure.");
+            }
             ListCalls++;
             LastLimit = limit;
             IReadOnlyList<PublicSessionView> sessions =

@@ -13,6 +13,57 @@ public sealed class CommunitySessionHttpClientTests
     private static readonly Guid KnownSessionId = Guid.Parse("d0c00001-2222-4a44-9aa9-123456789abc");
 
     [Fact]
+    public async Task TypedPublicDetail_DistinguishesMissingFromOutage()
+    {
+        var missing = await Create(new HttpResponseMessage(HttpStatusCode.NotFound)).GetPublicResultAsync(KnownSessionId);
+        var unavailable = await Create(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)).GetPublicResultAsync(KnownSessionId);
+
+        Assert.True(missing.Succeeded);
+        Assert.Null(missing.Value);
+        Assert.False(unavailable.Succeeded);
+        Assert.Null(unavailable.Value);
+    }
+
+    [Fact]
+    public async Task TypedPublicDetail_ReturnsRequestedProjection()
+    {
+        var view = PublishedView();
+        var handler = new CapturingHandler(JsonResponse(HttpStatusCode.OK, view));
+        var client = new CommunitySessionHttpClient(new HttpClient(handler) { BaseAddress = new Uri("https://gateway.test/") });
+
+        var result = await client.GetPublicResultAsync(KnownSessionId);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(KnownSessionId, result.Value!.SessionId);
+        Assert.Equal($"/public/v1/sessions/{KnownSessionId:D}", handler.LastRequest!.RequestUri!.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task QueryPublic_EncodesSearchAndReturnsContinuation()
+    {
+        var view = PublishedView();
+        var page = new PublicSessionPage([view], new PublicSessionPosition(view.StartUtc, view.SessionId));
+        var handler = new CapturingHandler(JsonResponse(HttpStatusCode.OK, page));
+        var client = new CommunitySessionHttpClient(new HttpClient(handler) { BaseAddress = new Uri("https://gateway.test/") });
+
+        var result = await client.QueryPublicResultAsync(new PublicSessionQuery(Search: "water & health", Language: "en", Limit: 1, Category: "Food & water", LocalDateFrom: new DateOnly(2026, 11, 1)));
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(view.SessionId, Assert.Single(result.Value!.Items).SessionId);
+        Assert.Equal(view.SessionId, result.Value.Next!.SessionId);
+        Assert.Equal("/public/v1/sessions/search?search=water%20%26%20health&language=en&category=Food%20%26%20water&localFrom=2026-11-01&limit=1", handler.LastRequest!.RequestUri!.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task QueryPublic_ReportsServiceFailure()
+    {
+        var client = Create(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        var result = await client.QueryPublicResultAsync(new PublicSessionQuery());
+        Assert.False(result.Succeeded);
+        Assert.Null(result.Value);
+    }
+
+    [Fact]
     public async Task ListPublic_ReturnsSessions()
     {
         var view = PublishedView();

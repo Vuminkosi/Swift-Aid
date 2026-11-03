@@ -13,4 +13,12 @@ public sealed class HttpPublicCommunitySessionClient(CommunitySessionHttpClient 
     public Task<UiCapabilityResult<string>> GetInvitationTextAsync(
         Guid sessionId,
         CancellationToken cancellationToken = default) => client.GetInvitationTextResultAsync(sessionId, cancellationToken);
+
+    public Task<UiCapabilityResult<SwiftAid.Contracts.Sessions.PublicSessionPage>> QueryPublicAsync(
+        SwiftAid.Contracts.Sessions.PublicSessionQuery query,
+        CancellationToken cancellationToken = default) => client.QueryPublicResultAsync(query, cancellationToken);
+
+    public Task<UiCapabilityResult<SwiftAid.Contracts.Sessions.PublicSessionView>> GetPublicAsync(
+        Guid sessionId,
+        CancellationToken cancellationToken = default) => client.GetPublicResultAsync(sessionId, cancellationToken);
 }

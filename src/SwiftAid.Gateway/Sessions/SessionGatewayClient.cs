@@ -30,25 +30,28 @@ public sealed class SessionGatewayClient(
     private readonly IServiceProvider _serviceProvider =
         serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
 
-    /// <summary>Lists the published public sessions; empty when the pipeline is disabled.</summary>
+    /// <summary>Lists published public sessions; failures propagate to the presentation adapter.</summary>
     public async Task<IReadOnlyList<PublicSessionView>> ListPublicAsync(
         int? limit,
         CancellationToken cancellationToken = default)
     {
-        var service = _serviceProvider.GetService<ICommunitySessionService>();
-        if (service is null)
-        {
-            return [];
-        }
+        var service = _serviceProvider.GetService<ICommunitySessionService>()
+            ?? throw new InvalidOperationException("The community session service is unavailable.");
+        return await service.ListPublicAsync(limit, cancellationToken).ConfigureAwait(false);
+    }
 
-        try
-        {
-            return await service.ListPublicAsync(limit, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception)
-        {
-            return [];
-        }
+    public Task<PublicSessionPage> QueryPublicAsync(PublicSessionQuery query, CancellationToken cancellationToken = default)
+    {
+        var service = _serviceProvider.GetService<ICommunitySessionService>()
+            ?? throw new InvalidOperationException("The community session service is unavailable.");
+        return service.QueryPublicAsync(query, cancellationToken);
+    }
+
+    public Task<PublicSessionView?> GetPublicAsync(Guid sessionId, CancellationToken cancellationToken = default)
+    {
+        var service = _serviceProvider.GetService<ICommunitySessionService>()
+            ?? throw new InvalidOperationException("The community session service is unavailable.");
+        return service.GetPublicAsync(sessionId, cancellationToken);
     }
 
     /// <summary>Loads the plain-text invitation for a published session, if available.</summary>
