@@ -101,6 +101,19 @@ not explained by the fresh-database migration race.
 An instrumented repeat captured one verified provisional segment followed by
 malformed final JSON; the live count case passed. Diagnostics recorded only
 structural metadata, not provider text or case identifiers.
+The framework agent now permits model-only final-decision repair after a
+verified segment, rechecking private observation authority before each repair
+and rejecting a final display or speech text that differs from what was
+published. The framework contract suite passed 114/114, including three new
+repair, changed-answer and revoked-authority cases. A post-commit focused run
+passed 3/3. The live Muse authorized-recall and authorized-count integration
+filter then passed 2/2 against disposable PostgreSQL and Qdrant fixtures
+(`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false`, filtered to those two
+tests, with live provider and fixture environment variables enabled). This
+single successful rerun does not establish provider reliability or deployment
+acceptance. Repair attempts remain subject to cancellation rather than a fixed
+attempt ceiling.
 
 ## Provider observations and open checks
 
