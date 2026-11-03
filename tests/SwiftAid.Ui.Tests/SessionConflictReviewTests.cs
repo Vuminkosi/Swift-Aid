@@ -14,6 +14,26 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed class SessionConflictReviewTests
 {
+    [Fact]
+    public async Task ReopeningSameSessionReplacesTheEditorEvenWhenVersionIsUnchanged()
+    {
+        var id = Guid.NewGuid();
+        var current = new CommunitySessionView(id, 4, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", DateTimeOffset.UtcNow.AddDays(1), "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
+        var page = new SwiftAid.Gateway.Components.Pages.Sessions();
+        var type = page.GetType();
+        type.GetProperty("StaffSessionEditor", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, new StaffClient(current, true));
+        type.GetField("_actorId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, "officer");
+        type.GetField("_editingSessionId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, id);
+        type.GetField("_editingVersion", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, 4L);
+        var generation = type.GetField("_editorGeneration", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var before = (long)generation.GetValue(page)!;
+
+        await (Task)type.GetMethod("ManageSessionAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page, [id])!;
+
+        Assert.True((long)generation.GetValue(page)! > before);
+        Assert.Equal(4L, type.GetField("_editingVersion", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

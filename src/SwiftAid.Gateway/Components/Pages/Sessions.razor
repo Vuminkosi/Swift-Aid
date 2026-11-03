@@ -313,6 +313,7 @@
             return;
         }
 
+        Interlocked.Increment(ref _editorGeneration);
         await LoadStaffSessionAsync(sessionId.Value);
     }
 
