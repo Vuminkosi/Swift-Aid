@@ -2891,3 +2891,234 @@ The read-lease deadline limits PostgreSQL authority locks, but a cancellation-
 ignoring operation can still occupy an isolation slot and the state path can
 perform a session snapshot write. These limitations must not be reported as
 fully closed by the passing focused checks.
+
+### Evidence-free provisional output verification — 2026-11-03
+
+An evidence-free model segment could previously reach the provisional feed
+before the final decision was validated. The framework adapter now buffers such
+segments and publishes only the validated final decision through the existing
+final-text callback. Evidence-backed segments still require matching claims,
+verbatim observation lines and current authorization before early publication.
+Ordinary evidence-free answers therefore wait for the provider to finish;
+framework streaming and early publication of eligible evidence-backed segments
+remain available.
+
+PASS: the new synthetic regression first failed on the former implementation,
+then passed for both a matching segment and a segment that differed from the
+final answer. PASS: the full Application suite reported 1,177 passed, 17
+skipped and 0 failed using
+`dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj --no-restore -m:1 -nr:false --logger 'console;verbosity=minimal'`.
+PASS: the Gateway worker and registration filter reported 47 passed, 0 failed
+using
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter 'FullyQualifiedName~EllaiUtteranceWorkerOutcomeTests|FullyQualifiedName~EllaiReasoningRegistrationTests' --logger 'console;verbosity=minimal'`.
+The worker fixture held a synthetic model open and checked that no
+evidence-free answer reached the feed before completion.
+
+NOT VERIFIED: the updated live Muse probe, deployed Gateway and voice delivery.
+This change does not prove semantic safety of evidence-backed text, close the
+cross-process publication finding, or make noncooperative tool operations stop.
+In particular, the state tool may persist session references, so detaching an
+arbitrary timed-out operation without a durable write fence is unsafe.
+
+### Concurrent topic insert verification — 2026-11-03
+
+A controlled concurrent PostgreSQL insert reproduced a lost case-result
+snapshot: the caller that lost the insert race returned the competing row
+without applying its own values. An initial correction retried that update,
+but a further audit showed that an older delayed attempt could overwrite a
+newer result. The current implementation reports a concurrency failure for
+the competing insert and preserves the winner. It propagates unrelated
+database update failures and verifies the session and title before modifying
+a row found by its stable identifier.
+
+PASS: `EllaiPostgresTopicTests` reported 4 passed, 0 failed against a
+task-created loopback PostgreSQL 16 container with the topic table and its
+production-named primary key. The deterministic race test failed against the
+previous implementation and passed after the initial correction. The command was
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter FullyQualifiedName~EllaiPostgresTopicTests --logger 'console;verbosity=minimal'`,
+with the existing disposable SQL fixture enabled. The container was removed.
+NOT VERIFIED: the full production schema, deployed service, cancellation during
+a database commit, and independent review. This correction does not resolve the
+noncooperative tool timeout or establish serialized AgentSession restoration.
+
+The same PostgreSQL fixture was subsequently expanded to check that an
+unrelated unique constraint is propagated and that a colliding topic
+identifier cannot alter another session's row. PASS: 6 passed, 0 failed with
+the command above against a fresh PostgreSQL 16 container. Its data directory
+was a task-created tmpfs, and the container was removed after the run.
+
+The updated evidence-free buffering probe was subsequently run with synthetic
+input against the configured live Muse route, together with official-client
+text, framework brokered-tool and streaming-cancellation probes. PASS: 4
+passed, 0 failed, 0 skipped using the Application test project with
+`--no-build --no-restore -m:1 -nr:false` and filter
+`LiveMuseBuffersEvidenceFreeSegmentsUntilDecisionCompletes|LiveOfficialChatClientReturnsSyntheticText|LiveFrameworkAgentInvokesBrokeredTool|LiveMuseStreamingCancellationStopsFrameworkTurn`.
+The configuration came from the running local Gateway, without restarting it.
+These tests ran in the test process against the provider, not through the
+deployed Gateway or a physical voice device.
+
+The entire current `EllaiLiveProbeTests` class was then run with the same
+live configuration and synthetic inputs: PASS, 17 passed, 0 failed, 0 skipped
+in 2 minutes 29 seconds. Command:
+`dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj --no-build --no-restore -m:1 -nr:false --filter FullyQualifiedName~EllaiLiveProbeTests --logger 'console;verbosity=minimal'`.
+This run includes synthetic upload and realtime ASR, framework-native tool
+calls, provider streaming and cancellation. It does not demonstrate stability
+across future provider calls, deployed Gateway execution, microphone capture,
+or mobile-device behavior.
+
+### Static state cancellation boundary — 2026-11-03
+
+The Gateway now runs the state tool's static feature projection through the
+existing bounded read-isolation pool. A missing projection or a sole
+`projection=feature` argument has no case-result snapshot write; if its
+scoped operation ignores cancellation, the caller can stop waiting while the
+scope remains owned by the held operation. At that stage queue projections,
+extra arguments, unknown projections and unclassified tools remained attached;
+the later fenced PostgreSQL queue path is described below.
+
+PASS: the focused selection/cancellation filter reported 20 passed, 0 failed.
+PASS: `EllaiIsolatedToolCallsTests|EllaiUtteranceWorkerOutcomeTests` reported
+64 passed, 2 skipped, 0 failed with
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-build --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter 'FullyQualifiedName~EllaiIsolatedToolCallsTests|FullyQualifiedName~EllaiUtteranceWorkerOutcomeTests' --logger 'console;verbosity=minimal'`.
+The two skips require the disposable PostgreSQL authority fixture. The new
+cancellation tests exercise the worker's selection boundary with held synthetic
+operations; they are not deployed Gateway tests. Queue snapshot writes and
+arbitrary noncooperative work still do not have a complete timeout guarantee.
+
+### Topic update concurrency and EF metadata — 2026-11-03
+
+A second PostgreSQL regression reproduced an older loaded topic overwriting a
+newer save. The topic mapping now uses PostgreSQL's `xmin` as its EF
+row-version token. Stale updates and competing inserts fail visibly; the state
+tool reports that result references could not be retained instead of claiming
+they were saved. PASS: the PostgreSQL topic filter reported 8 passed, 0 failed
+against a task-created PostgreSQL 16 database with the topic table; the
+delayed-update regression failed before the row-version mapping.
+
+The EF model requires a metadata-only migration
+`20261103210000_EllaiTopicConcurrency`: PostgreSQL already supplies the
+system column. PASS: the Infrastructure build, EF pending-model check, and
+generated upgrade and downgrade scripts. The scripts only insert or delete
+the migration-history entry. The installed EF CLI was 10.0.12 and warned that
+the runtime was 10.0.14.
+
+PASS: `DatabaseMigrationDeploymentTests` ran against a task-created
+PostgreSQL 17/PostGIS fixture, upgraded the full schema, rolled the metadata
+migration back, verified that `xmin` remained readable, and reapplied it.
+Command: `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter FullyQualifiedName~DatabaseMigrationDeploymentTests --logger 'console;verbosity=minimal'`.
+The temporary database was deleted by the fixture and the tmpfs-backed
+container was removed. NOT VERIFIED: deployed Gateway startup.
+
+PASS: a combined worker/isolation and representative SQLite-backed integration
+filter reported 83 passed, 2 skipped, 0 failed:
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-build --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter 'FullyQualifiedName~DemoDataTests|FullyQualifiedName~EmailChangeServiceTests|FullyQualifiedName~GeographicRegistryTests|FullyQualifiedName~EllaiIsolatedToolCallsTests|FullyQualifiedName~EllaiUtteranceWorkerOutcomeTests' --logger 'console;verbosity=minimal'`.
+The skipped tests require the PostgreSQL authority fixture. These checks do not
+exercise SQLite topic persistence.
+
+The row-version token detects changes between reading and updating the topic;
+it does not by itself fence a cancelled attempt whose old case read finishes
+after a newer attempt has already saved. The subsequent PostgreSQL
+outbox-attempt fence is described below.
+
+### Case-result snapshot attempt fence — 2026-11-03
+
+The default PostgreSQL Gateway path now persists case-result snapshots while
+holding the session and claimed-utterance row locks in the same transaction
+as the topic write. It checks owner, scope and interaction epochs, attempt
+number, processing state and unexpired lease, and rechecks the lease after
+the write before committing. A reclaimed, cancelled or expired attempt cannot
+start a new snapshot write through this fence. The worker uses the fence only
+when its broker's topic store is the PostgreSQL store sharing the same scoped
+database context. Other store arrangements retain their existing attached,
+cooperative behavior.
+
+PASS: five focused tests against disposable PostgreSQL 17/PostGIS covered
+the framework worker's successful snapshot and lock behavior, foreign
+owner/scope, expired and reclaimed attempts, session cancellation, and
+rollback when a lease expires before commit. Command:
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter 'FullyQualifiedName~FrameworkWorkerPersistsFencedCaseResultSnapshot|FullyQualifiedName~FrameworkWorkerHoldsSessionFenceDuringCaseSnapshotWrite|FullyQualifiedName~CaseResultSnapshotRejectsReclaimedOrCancelledAttempts|FullyQualifiedName~CaseResultSnapshotHoldsSessionFenceUntilCommit|FullyQualifiedName~CaseResultSnapshotRollsBackWhenLeaseExpiresBeforeCommit' --logger 'console;verbosity=minimal'`.
+The tmpfs-backed fixture container was removed. PASS: Application suite,
+1,177 passed, 17 skipped; worker/isolation/registration filter, 73 passed,
+2 skipped. The latter skips require the PostgreSQL authority fixture.
+
+This fence protects the tested PostgreSQL attempt transitions but does not
+prove transaction behavior during a network partition or guarantee termination
+of a cancellation-ignoring topic write. At this stage queue state operations
+remained attached; the later bounded-worker change is described below.
+
+The snapshot transaction now also applies an absolute server-side
+`transaction_timeout`, defaulting to 35 seconds and respecting a shorter
+existing setting. PostgreSQL without this capability fails the snapshot write
+closed; the configured Compose database is PostgreSQL 17. PASS: six focused
+PostgreSQL 17/PostGIS tests, including a held client operation where a
+two-second injected server deadline released the session lock before the
+client was released and left no snapshot. Command: the five-test filter above
+plus `FullyQualifiedName~SnapshotTransactionDeadlineReleasesSessionLockWhenClientStalls`.
+The tmpfs-backed fixture was removed. This bounds tested database lock
+retention; it does not terminate arbitrary application work or prove behavior
+under a network partition.
+
+### Fenced queue timeout — 2026-11-03
+
+The framework executor now passes the current tool's server-owned absolute
+deadline to the PostgreSQL snapshot fence. The transaction deadline is the
+earlier of that limit and the existing 35-second cap. The Gateway uses a
+separate bounded isolation pool for queue state work only when its scoped
+queue and topic stores match the expected services and the topic store shares
+the fence's PostgreSQL context. A fresh detached scope must pass those checks
+again; otherwise the tool fails closed. Other store arrangements remain
+attached. Separate pools prevent queue calls from consuming all of the slots
+needed by their nested authorized reads.
+
+PASS: 12 focused cases against disposable PostgreSQL 17/PostGIS and the
+in-process Gateway worker. They include a two-second tool deadline with a
+snapshot operation that ignores cancellation: the timed-out turn failed, a
+subsequent turn completed while the old operation remained held, and releasing
+the old operation did not persist a snapshot. The filter also covered
+reclaimed, cancelled, foreign, expired and lock-contending attempts and
+unrecognized request shapes. Command:
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter 'FullyQualifiedName~FrameworkWorkerPersistsFencedCaseResultSnapshot|FullyQualifiedName~FrameworkWorkerHoldsSessionFenceDuringCaseSnapshotWrite|FullyQualifiedName~FrameworkWorkerTimesOutStalledSnapshotAndProcessesNextTurn|FullyQualifiedName~CaseResultSnapshotRejectsReclaimedOrCancelledAttempts|FullyQualifiedName~CaseResultSnapshotHoldsSessionFenceUntilCommit|FullyQualifiedName~CaseResultSnapshotRollsBackWhenLeaseExpiresBeforeCommit|FullyQualifiedName~SnapshotTransactionDeadlineReleasesSessionLockWhenClientStalls|FullyQualifiedName~FencedQueueSelectionRejectsUnrecognizedShapes' --logger 'console;verbosity=minimal'`.
+
+These tests establish the synthetic in-process PostgreSQL path, not deployed
+Gateway acceptance or network-partition behavior. A cancellation-ignoring
+operation can still retain a bounded isolation slot until it returns; custom
+stores without the transactional fence retain cooperative timeout behavior.
+
+Further verification: PASS, the PostgreSQL session class reported 22 passed,
+16 skipped and 0 failed on its final run against the disposable fixture. An
+earlier run reported one failure in
+`FrameworkWorkerRestoresHistoryAfterManyRepeatedToolObservations`; the quiet
+logger did not capture the cause. That test passed in isolation and in the
+full-class rerun. Its 300-tool-call first turn now has a 30-second fixture
+allowance rather than 10 seconds; the cause of the original failure is not
+established.
+
+PASS: the Application suite reported 1,177 passed, 17 skipped, 0 failed.
+The first full default Integration run reported 787 passed, 327 skipped and
+one failed audio-worker case; quiet output did not capture its cause. All
+seven cases in that audio theory passed on immediate rerun. A subsequent full
+Integration run reported 788 passed, 327 skipped and 0 failed. Command:
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-build --no-restore -m:1 -nr:false -p:WasmBuildNative=false --logger 'console;verbosity=normal'`.
+The intermittent initial failure remains unexplained; a passing rerun does not
+prove it cannot recur.
+
+### Verification checkout delivery — 2026-11-03
+
+The verified changes were committed on the designated verification checkout's
+active branch without pushing:
+
+- `fa15517`: buffer evidence-free provisional responses. Post-commit focused
+  Application checks passed 7/7.
+- `95a173a`: protect topic snapshots against concurrent overwrites, including
+  the metadata-only row-version migration. Post-commit PostgreSQL topic and
+  full-schema migration checks passed 9/9 on a disposable PostgreSQL 17/PostGIS
+  instance.
+- `894bf78`: fence and bound PostgreSQL queue snapshot execution. Post-commit
+  fence, timeout and request-selection checks passed 12/12 on a separate
+  disposable PostgreSQL 17/PostGIS instance.
+
+Both post-commit database fixtures used tmpfs and were removed. These commits
+are on the verification branch; the separate `interactive-ellai` checkout
+was not changed. The earlier intermittent integration failure, network
+partition behavior, custom-store cooperative timeout, and deployed
+Gateway/device acceptance remain open as described above.
