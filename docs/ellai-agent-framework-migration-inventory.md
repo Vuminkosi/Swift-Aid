@@ -3168,3 +3168,24 @@ the run. No running application service or shared database was restarted.
 NOT VERIFIED: the deployed Gateway process, browser or device behavior,
 production data-protection configuration, and actual network partition or
 instantaneous revocation behavior. This run does not establish those gates.
+
+### Authorized framework case recall — current branch verification
+
+PASS: on commit `ce343af`, the following focused integration run passed 2/2
+in 1 minute 2 seconds, with no skips:
+
+```powershell
+dotnet test tests\SwiftAid.Integration.Tests\SwiftAid.Integration.Tests.csproj --no-build --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter 'FullyQualifiedName~FrameworkWorkerRecallsAuthorizedCaseFromPostgresAndQdrant|FullyQualifiedName~LiveMuseWorkerRecallsAuthorizedCaseFromPostgresAndQdrant' --logger 'console;verbosity=minimal'
+```
+
+The fixture enabled live Muse and dedicated framework PostgreSQL and Qdrant
+fixtures. One test used a synthetic model and one used Muse. Both used synthetic
+case data, a real framework worker, real PostgreSQL authorization, and a real
+derived Qdrant index; their scenarios cover authorized recall, index failure,
+and grant expiry. The synthetic-model fixture additionally exercises a held
+index read and revocation before final publication. Provider settings were
+supplied privately to the test process.
+
+NOT VERIFIED: a deployed Gateway, browser or device journey, and a real
+network partition. These are worker-boundary tests and do not demonstrate
+instantaneous revocation of bytes already delivered.
