@@ -1,6 +1,12 @@
 using Microsoft.EntityFrameworkCore;
+using System.Net;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 using SwiftAid.Application.Sessions;
 using SwiftAid.Contracts.Sessions;
+using SwiftAid.Gateway.Endpoints;
 using SwiftAid.Infrastructure.Persistence.Sessions;
 
 namespace SwiftAid.Integration.Tests;
@@ -13,6 +19,52 @@ namespace SwiftAid.Integration.Tests;
 [Collection(IntakePostgresCollection.Name)]
 public sealed class SessionSchedulingTests
 {
+    [IntakePostgresFact]
+    public async Task DestinationEndpointRejectsPersistedRevisionAndCancellation()
+    {
+        var sessionId = Guid.NewGuid();
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var service = new CommunitySessionService(new PostgresCommunitySessionStore(db), new FixtureMaterialEligibility());
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddAuthorization();
+        builder.Services.AddSingleton<ICommunitySessionService>(service);
+        await using var app = builder.Build();
+        app.UseAuthorization();
+        app.MapPublicSessionEndpoints();
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+        try
+        {
+            await service.ExecuteAsync(CreateDraft(sessionId, "officer-1"), "officer-1", CancellationToken.None);
+            await service.ExecuteAsync(new ReviewSessionCommand(sessionId, 1, false, "review", DateTimeOffset.UtcNow), "officer-2", CancellationToken.None);
+            await service.ExecuteAsync(new ScheduleSessionCommand(sessionId, 2, "publish", DateTimeOffset.UtcNow), "officer-2", CancellationToken.None);
+            var path = $"/public/v1/sessions/{sessionId:D}/destination?version=";
+            using var first = await client.GetAsync(path + "3");
+            Assert.Equal(HttpStatusCode.Redirect, first.StatusCode);
+            Assert.Equal("https://chat.example/join/abc", first.Headers.Location?.AbsoluteUri);
+            Assert.True(first.Headers.CacheControl?.NoStore);
+
+            await service.ExecuteAsync(UpdateDraft(sessionId, 3, "Malaria prevention talk") with { DurationMinutes = 60 }, "officer-2", CancellationToken.None);
+            using var stale = await client.GetAsync(path + "3");
+            Assert.Equal(HttpStatusCode.NotFound, stale.StatusCode);
+            using var revised = await client.GetAsync(path + "4");
+            Assert.Equal(HttpStatusCode.Redirect, revised.StatusCode);
+
+            await service.ExecuteAsync(new CancelSessionCommand(sessionId, 4, "Private reason", "cancel", DateTimeOffset.UtcNow), "officer-2", CancellationToken.None);
+            using var cancelled = await client.GetAsync(path + "4");
+            Assert.Equal(HttpStatusCode.NotFound, cancelled.StatusCode);
+            Assert.True(cancelled.Headers.CacheControl?.NoStore);
+            Assert.DoesNotContain("Private reason", await cancelled.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+            using var cancelledCurrent = await client.GetAsync(path + "5");
+            Assert.Equal(HttpStatusCode.NotFound, cancelledCurrent.StatusCode);
+        }
+        finally
+        {
+            await CleanupAsync(sessionId);
+        }
+    }
+
     [IntakePostgresFact]
     public async Task CompletedPublishedSessionsRemainInPublicQueriesButInternalSessionsStayPrivate()
     {
