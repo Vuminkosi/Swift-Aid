@@ -1,4 +1,5 @@
 using System.Reflection;
+using Microsoft.AspNetCore.Components;
 using SwiftAid.Contracts.Sessions;
 using SwiftAid.UI.Components.Sessions;
 
@@ -6,6 +7,43 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed class SessionEditorTimeTests
 {
+    [Fact]
+    public async Task UnsavedEditsCannotBeReviewedOrPublished()
+    {
+        var id = Guid.NewGuid();
+        var saved = new CommunitySessionView(id, 1, "Title", "Summary", "Community", ["topic"],
+            "SZ", "region", "education", "Presenter", "en", DateTimeOffset.UtcNow.AddDays(2),
+            "UTC", 60, null, [new StoredSessionMaterial("material", "1")], SessionVisibility.Public,
+            SessionChannelType.None, null, [24], "Draft", "creator", null, false, 0, null);
+        var editor = new SessionEditor();
+        typeof(SessionEditor).GetProperty(nameof(SessionEditor.SessionId))!.SetValue(editor, id);
+        typeof(SessionEditor).GetProperty(nameof(SessionEditor.ExpectedVersion))!.SetValue(editor, 1L);
+        typeof(SessionEditor).GetProperty(nameof(SessionEditor.Status))!.SetValue(editor, "Draft");
+        typeof(SessionEditor).GetProperty(nameof(SessionEditor.ManagementCapabilities))!.SetValue(editor,
+            new SessionManagementPresentation(true, true, id, 1, "Draft", false, true, true, true, false, false));
+        typeof(SessionEditor).GetMethod("Prefill", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(editor, [saved]);
+        var invoked = false;
+        typeof(SessionEditor).GetProperty(nameof(SessionEditor.OnReview))!.SetValue(editor,
+            EventCallback.Factory.Create<SessionReviewSubmission>(editor, _ => invoked = true));
+        typeof(SessionEditor).GetProperty(nameof(SessionEditor.OnSchedule))!.SetValue(editor,
+            EventCallback.Factory.Create<string>(editor, _ => invoked = true));
+        Set(editor, "_title", "Unsaved title");
+
+        Assert.True((bool)typeof(SessionEditor).GetProperty("HasUnsavedChanges", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(editor)!);
+        await (Task)Invoke(editor, "SubmitReviewAsync")!;
+        await (Task)Invoke(editor, "SubmitScheduleAsync")!;
+        Assert.False(invoked);
+        Set(editor, "_title", "Title");
+        Assert.False((bool)typeof(SessionEditor).GetProperty("HasUnsavedChanges", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(editor)!);
+    }
+
+    [Fact]
+    public void UnknownTimeZoneDoesNotDisplayUtcAsLocalTime()
+    {
+        var method = typeof(SessionEditor).GetMethod("ToWallClock", BindingFlags.NonPublic | BindingFlags.Static)!;
+        Assert.Null(method.Invoke(null, [DateTimeOffset.UtcNow, "Unavailable/Zone"]));
+    }
+
     [Fact]
     public void ReschedulingPreservesTheExactPublishedContent()
     {

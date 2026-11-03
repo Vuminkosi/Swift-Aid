@@ -22,6 +22,20 @@
         </MudAlert>
     }
 
+    @if (_storedTimeZoneUnavailable)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" role="alert" Class="mt-2">
+            This device cannot resolve the saved time zone. The local start time cannot be displayed or edited here.
+        </MudAlert>
+    }
+
+    @if (HasUnsavedChanges)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status" Class="mt-2">
+            You have unsaved changes. Save them before recording a review or publishing the schedule.
+        </MudAlert>
+    }
+
     @if (ServerError is not null)
     {
         <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" role="alert" Class="mt-2">@ServerError</MudAlert>
@@ -75,7 +89,7 @@
         </MudItem>
         <MudItem xs="12" md="6">
             <MudTextField T="DateTime?" Format="s" InputType="InputType.DateTimeLocal" Label="Start date and time"
-                         @bind-Value="_startLocal" @bind-Value:after="ClearAmbiguousOffset" Required="true"
+                         @bind-Value="_startLocal" @bind-Value:after="ClearAmbiguousOffset" Disabled="@_storedTimeZoneUnavailable" Required="true"
                          HelperText="Wall-clock time in the time zone above."
                          Error='@HasError("Start")' ErrorText='@FieldError("Start")' />
         </MudItem>
@@ -186,11 +200,11 @@
                         <MudText Typo="Typo.caption" Color="Color.Error">@FieldError("SelfReview")</MudText>
                     }
                 }
-                <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="SubmitReviewAsync" Disabled="Busy" StartIcon="@Icons.Material.Filled.RateReview">Record review</MudButton>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="SubmitReviewAsync" Disabled="@(Busy || HasUnsavedChanges)" StartIcon="@Icons.Material.Filled.RateReview">Record review</MudButton>
             }
             @if (CanSchedule)
             {
-                <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="SubmitScheduleAsync" Disabled="Busy" StartIcon="@Icons.Material.Filled.Publish">Publish schedule</MudButton>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="SubmitScheduleAsync" Disabled="@(Busy || HasUnsavedChanges)" StartIcon="@Icons.Material.Filled.Publish">Publish schedule</MudButton>
             }
             @if (CanComplete)
             {
@@ -269,11 +283,14 @@
     private bool _acknowledgeSelfReview;
     private bool _confirmingCancel;
     private Guid? _loadedForSessionId;
+    private string?[]? _savedFields;
+    private bool _storedTimeZoneUnavailable;
     private readonly Dictionary<string, string> _errors = new(StringComparer.Ordinal);
 
     private bool IsNew => SessionId is null;
     private bool IsScheduled => string.Equals(Status, "Scheduled", StringComparison.OrdinalIgnoreCase);
     private bool IsDraft => string.Equals(Status, "Draft", StringComparison.OrdinalIgnoreCase);
+    private bool HasUnsavedChanges => !IsNew && _savedFields is not null && !CaptureFields().SequenceEqual(_savedFields);
     private bool HasCurrentCapabilities => ManagementCapabilities is { } capabilities &&
         capabilities.Matches(SessionId, IsNew ? null : ExpectedVersion, Status);
     private bool CanCreate => IsNew && HasCurrentCapabilities && ManagementCapabilities!.CanCreate;
@@ -314,6 +331,7 @@
         _topicTagsText = string.Join(", ", view.TopicTags);
         _timeZone = view.TimeZoneId;
         _startLocal = ToWallClock(view.StartUtc, view.TimeZoneId);
+        _storedTimeZoneUnavailable = _startLocal is null;
         _ambiguousOffsetMinutes = GetStoredAmbiguousOffset(view.StartUtc, view.TimeZoneId);
         _durationText = view.DurationMinutes.ToString(System.Globalization.CultureInfo.InvariantCulture);
         _capacityText = view.Capacity?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
@@ -329,6 +347,24 @@
 
         _errors.Clear();
         _confirmingCancel = false;
+        _savedFields = CaptureFields();
+    }
+
+    private string?[] CaptureFields()
+    {
+        var fields = new List<string?>
+        {
+            _title, _summary, _audience, _country, _region, _sector, _presenter, _language,
+            _topicTagsText, _timeZone, _startLocal?.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+            _ambiguousOffsetMinutes?.ToString(System.Globalization.CultureInfo.InvariantCulture), _durationText,
+            _capacityText, _visibility, _channelType, _channelLink, _reminderLeadsText
+        };
+        foreach (var material in _materials)
+        {
+            fields.Add(material.MaterialId);
+            fields.Add(material.SourceVersion);
+        }
+        return fields.ToArray();
     }
 
     private static DateTime? ToWallClock(DateTimeOffset startUtc, string timeZoneId)
@@ -340,7 +376,7 @@
         }
         catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException or ArgumentException)
         {
-            return startUtc.UtcDateTime;
+            return null;
         }
     }
 
@@ -375,7 +411,7 @@
 
     private async Task SubmitReviewAsync()
     {
-        if (!CanReview || !IsDraft || !ValidateForm(requireReason: true, forSchedule: false))
+        if (!CanReview || !IsDraft || HasUnsavedChanges || !ValidateForm(requireReason: true, forSchedule: false))
         {
             return;
         }
@@ -391,7 +427,7 @@
 
     private async Task SubmitScheduleAsync()
     {
-        if (!CanSchedule || !ValidateForm(requireReason: true, forSchedule: true))
+        if (!CanSchedule || HasUnsavedChanges || !ValidateForm(requireReason: true, forSchedule: true))
         {
             return;
         }
