@@ -384,6 +384,22 @@ used the required `swiftaid_intake_test` database. These tests cover existing
 registry and client contracts, including an authorized Ellai classification
 read, but do not demonstrate live NLLB or BART inference through the framework.
 The disposable database container was stopped.
+
+On 2026-11-04 the authorized classification fixture was extended through
+`EllaiFrameworkExecutor` and a scripted framework function call. PASS: the
+focused `Authorized_query_and_ellai_read_persisted_results_without_inference_or_lease_disclosure`
+test passed 1/1 against disposable PostgreSQL with
+`SWIFTAID_RUN_INTAKE_POSTGRES_FIXTURES=1` and `OS=Windows_NT`, using `dotnet
+test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~Authorized_query_and_ellai_read_persisted_results_without_inference_or_lease_disclosure'
+--logger 'console;verbosity=minimal'`. The scripted model received the
+persisted result ID through the framework function result, without the source
+narrative or worker lease ID; the fixture also checks foreign and absent actor
+denial at the broker. It uses synthetic persisted classifications, not live
+BART inference, a live model or deployed Gateway.
+The `ClassificationRegistryTests` filter also passed 10/10 against the same
+fixture using `--no-build --no-restore` and the same test-project options.
 The disposable PostgreSQL/Qdrant framework-worker recall test was extended to
 start a follow-up with a healthy index, then inject a Qdrant transport failure
 after the scripted framework model requested the recall tool. The worker used

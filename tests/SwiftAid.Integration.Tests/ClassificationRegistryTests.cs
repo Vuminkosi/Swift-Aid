@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 using SwiftAid.Application.Classification;
 using SwiftAid.Contracts.Events;
@@ -10,6 +11,7 @@ using SwiftAid.Infrastructure.Persistence.Transactions;
 using SwiftAid.Infrastructure.Classification;
 using SwiftAid.Infrastructure.Persistence;
 using SwiftAid.Infrastructure.Persistence.Classification;
+using SwiftAid.Intelligence.Meta;
 
 namespace SwiftAid.Integration.Tests;
 
@@ -205,11 +207,60 @@ public sealed class ClassificationRegistryTests
         var response = await broker.InvokeAsync(context, request, default);
         Assert.True(response.Allowed); Assert.DoesNotContain(claim.Lease.LeaseId.ToString("D"), response.ResultSummary);
         Assert.DoesNotContain("Original supplied concern", response.ResultSummary);
+        using var model = new ClassificationToolClient(notice.SourceId);
+        var frameworkContext = context with { AllowedTools = new HashSet<string> { EllaiToolNames.ClassificationEvidence } };
+        var executor = new EllaiFrameworkExecutor(model, new EllaiPromptBuilder("Synthetic policy", "fixture"),
+            broker, new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
+        var observations = new List<EllaiToolResult>();
+        var turn = await executor.RunAsync(new EllaiLoopRequest(frameworkContext, "Read the classification evidence.",
+            new EllaiRoleOverlay("ask", "Be brief."), "classification", 1024, "cycle", 1)
+            {
+                RevalidateStreamObservations = async (observed, ct) => observed.Count > 0 &&
+                    await query.GetAsync(CaseImportPostgresTests.Actor, notice.SourceId, ct) is not null
+            }, default,
+            invokeToolAsync: async (toolContext, toolRequest, ct) =>
+            {
+                var observation = await broker.InvokeAsync(toolContext, toolRequest, ct);
+                observations.Add(observation);
+                return observation;
+            });
+        Assert.True(turn.Completed, turn.FailureCode);
+        Assert.NotEmpty(observations);
+        Assert.All(observations, observation => Assert.True(observation.Allowed));
+        Assert.True(model.SawToolResult);
+        Assert.Contains(claim.Lease.ResultId.ToString("D"), model.ToolResultText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(claim.Lease.LeaseId.ToString("D"), model.ToolResultText);
+        Assert.DoesNotContain("Original supplied concern", model.ToolResultText);
         var foreign = await SharedWorkspaceImportTests.AddOrganizationAsync(fixture.Db);
         Assert.Null(await query.GetAsync(foreign.Actor, notice.SourceId, default));
         Assert.False((await broker.InvokeAsync(context with { Actor = null }, request, default)).Allowed);
         Assert.False((await broker.InvokeAsync(context with { Actor = foreign.Actor }, request, default)).Allowed);
         Assert.Equal(1, (await fixture.Db.Set<ClassificationResultEntity>().AsNoTracking().SingleAsync(r => r.Id == claim.Lease.ResultId)).Attempts);
+    }
+
+    private sealed class ClassificationToolClient(Guid caseId) : IChatClient
+    {
+        private int _calls;
+        public bool SawToolResult { get; private set; }
+        public string ToolResultText { get; private set; } = string.Empty;
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (++_calls == 1)
+                return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                    [new FunctionCallContent("classification", EllaiToolNames.ClassificationEvidence,
+                        new Dictionary<string, object?> { ["case_id"] = caseId.ToString("D") })])));
+            var results = messages.SelectMany(message => message.Contents).OfType<FunctionResultContent>().ToArray();
+            SawToolResult = results.Any(result => result.CallId == "classification");
+            ToolResultText = System.Text.Json.JsonSerializer.Serialize(results);
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                """{"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Done.","spokenText":"Done.","claims":[],"questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}""")));
+        }
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
     }
 
     [IntakePostgresFact]
