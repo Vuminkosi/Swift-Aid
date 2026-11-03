@@ -15,6 +15,41 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed class PublicSessionQueryStateTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ActiveReminderShowsChangeActionOnlyWithCurrentConsentOptions(bool current)
+    {
+        var session = Session(Guid.NewGuid());
+        var options = new PublicSessionsSurface.SessionSubscriptionOptions(session.SessionId, "consent", 1,
+            "Reminder consent", [PublicSessionsSurface.SessionReminderChannel.Email], current);
+        var state = new PublicSessionsSurface.SessionSubscriptionPanelState(session.SessionId,
+            PublicSessionsSurface.SessionSubscriptionStatus.Active, 1, options, null);
+        var registrations = new ServiceCollection();
+        registrations.AddLogging();
+        registrations.AddMudServices();
+        registrations.AddSingleton<IJSRuntime>(new UnavailableClipboard());
+        registrations.AddSingleton<NavigationManager>(new TestNavigationManager());
+        await using var services = registrations.BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        var markup = await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var component = await renderer.RenderComponentAsync<PublicSessionsSurface>(ParameterView.FromDictionary(
+                new Dictionary<string, object?>
+                {
+                    [nameof(PublicSessionsSurface.Sessions)] = new[] { session },
+                    [nameof(PublicSessionsSurface.InitialSessionId)] = session.SessionId,
+                    [nameof(PublicSessionsSurface.InitialRemindersView)] = true,
+                    [nameof(PublicSessionsSurface.LoadSubscriptionStateAsync)] =
+                        (Func<Guid, Task<PublicSessionsSurface.SessionSubscriptionPanelState?>>)(_ => Task.FromResult<PublicSessionsSurface.SessionSubscriptionPanelState?>(state))
+                }));
+            return component.ToHtmlString();
+        });
+
+        Assert.Contains("Turn off reminders", markup, StringComparison.Ordinal);
+        Assert.Equal(current, markup.Contains("Change reminder method", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task ChangedReminderTermsRequireConsentAgainAfterConflict()
     {
