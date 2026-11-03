@@ -17,9 +17,10 @@ public sealed class EllaiFrameworkToolTests
 
         Assert.True(JsonElement.DeepEquals(JsonSerializer.Deserialize<JsonElement>(
             EllaiToolContractCatalog.ToJsonSchema(EllaiToolNames.State)), tool.JsonSchema));
-        var result = Assert.IsType<EllaiToolResult>(await tool.InvokeAsync(new AIFunctionArguments()));
-        Assert.False(result.Allowed);
-        Assert.Equal(EllaiToolReasonCodes.ConsentMissing, result.ReasonCode);
+        var result = Assert.IsType<string>(await tool.InvokeAsync(new AIFunctionArguments()));
+        using var json = JsonDocument.Parse(result);
+        Assert.False(json.RootElement.GetProperty("allowed").GetBoolean());
+        Assert.Equal(EllaiToolReasonCodes.ConsentMissing, json.RootElement.GetProperty("reasonCode").GetString());
     }
 
     [Fact]

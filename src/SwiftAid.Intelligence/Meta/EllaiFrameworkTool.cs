@@ -7,6 +7,7 @@ namespace SwiftAid.Intelligence.Meta;
 /// <summary>Framework function backed by a server-owned Ellai tool invocation.</summary>
 public sealed class EllaiFrameworkTool : AIFunction
 {
+    private static readonly JsonSerializerOptions ResultJson = new(JsonSerializerDefaults.Web);
     private readonly Func<EllaiToolRequest, CancellationToken, Task<EllaiToolResult>> _invoke;
     private readonly JsonElement _schema;
 
@@ -48,6 +49,7 @@ public sealed class EllaiFrameworkTool : AIFunction
         if (!EllaiToolContractCatalog.TryValidateArguments(Name, converted, out _))
             throw new ArgumentException("Invalid tool arguments.", nameof(arguments));
 
-        return await _invoke(new EllaiToolRequest(Name, converted), cancellationToken).ConfigureAwait(false);
+        var result = await _invoke(new EllaiToolRequest(Name, converted), cancellationToken).ConfigureAwait(false);
+        return JsonSerializer.Serialize(result, ResultJson);
     }
 }

@@ -90,6 +90,11 @@ malformed arguments and cancellation before invocation. This adapter is not
 registered in the Gateway. The production caller must still provide admitted
 tools, current-scope checks, bounded execution, denial termination, evidence
 collection, progress and audit handling before it can be used safely.
+The deterministic framework fixture also invokes the real broker's admitted
+public-facts tool and observes its serialized JSON evidence. This is not a live
+provider or managed-case test. The framework and adapter focused tests passed
+5/5 after an initial failure exposed that the tool result needed explicit JSON
+serialization to preserve evidence in the model-facing observation.
 `dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false` passed. The default build failed at native WebAssembly linking because `emcc` was unavailable (exit 9009).
 
 ## Rollback and outstanding work
