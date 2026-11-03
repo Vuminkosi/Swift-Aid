@@ -16,6 +16,38 @@ namespace SwiftAid.Ui.Tests;
 public sealed class PublicSessionQueryStateTests
 {
     [Fact]
+    public async Task CalendarNavigationRestoresLibraryDateRangeAndOtherFilters()
+    {
+        var component = new PublicSessionsSurface();
+        var type = typeof(PublicSessionsSurface);
+        var period = type.GetField("_periodFilter", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        period.SetValue(component, Enum.Parse(period.FieldType, "CustomDates"));
+        type.GetField("_dateFrom", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, new DateTime(2027, 1, 4));
+        type.GetField("_dateTo", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, new DateTime(2027, 1, 9));
+        type.GetField("_searchText", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "workshop");
+        var queries = new List<PublicSessionQuery>();
+        SetQuery(component, query =>
+        {
+            queries.Add(query);
+            return Task.FromResult<PublicSessionPage?>(new PublicSessionPage([], null));
+        });
+
+        await InvokeAsync(component, "ShowCalendarAsync");
+        await (Task)type.GetMethod("SelectCalendarDayAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(component, [new DateTime(2027, 2, 15)])!;
+        await InvokeAsync(component, "ShowLibraryAsync");
+
+        var restored = queries[^1];
+        Assert.Equal(new DateOnly(2027, 1, 4), restored.LocalDateFrom);
+        Assert.Equal(new DateOnly(2027, 1, 9), restored.LocalDateTo);
+        Assert.Equal("workshop", restored.Search);
+
+        await InvokeAsync(component, "ShowCalendarAsync");
+        Assert.Equal(new DateOnly(2027, 2, 15), queries[^1].LocalDateFrom);
+        Assert.Equal(new DateOnly(2027, 2, 15), queries[^1].LocalDateTo);
+    }
+
+    [Fact]
     public async Task UnknownClientTimeZoneDoesNotInventAMonthDateOrDiscardServerFilteredResults()
     {
         var session = Session(Guid.NewGuid()) with { TimeZoneId = "Unavailable/Zone" };

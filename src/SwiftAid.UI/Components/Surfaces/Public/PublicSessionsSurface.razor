@@ -509,6 +509,9 @@
     private string? _moreError;
     private long _queryGeneration;
     private bool _calendarVisible;
+    private SessionPeriodFilter _libraryPeriodFilter = SessionPeriodFilter.Upcoming;
+    private DateTime? _libraryDateFrom;
+    private DateTime? _libraryDateTo;
     private DateTime _calendarMonth = new(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
     private DateTime? _calendarSelectedDate;
     private readonly HashSet<DateOnly> _monthDates = [];
@@ -813,6 +816,7 @@
     private async Task PeriodChangedAsync(SessionPeriodFilter value)
     {
         _periodFilter = value;
+        RememberLibraryDates();
         if (value != SessionPeriodFilter.CustomDates)
             _calendarSelectedDate = null;
         var monthTask = _calendarVisible ? RefreshCalendarMonthAsync() : Task.CompletedTask;
@@ -825,6 +829,7 @@
     private async Task DateFromChangedAsync(DateTime? value)
     {
         _dateFrom = value?.Date;
+        RememberLibraryDates();
         _calendarSelectedDate = null;
         await RefreshQueryAsync();
         EnsureSelectedSession();
@@ -834,6 +839,7 @@
     private async Task DateToChangedAsync(DateTime? value)
     {
         _dateTo = value?.Date;
+        RememberLibraryDates();
         _calendarSelectedDate = null;
         await RefreshQueryAsync();
         EnsureSelectedSession();
@@ -853,6 +859,7 @@
         _periodFilter = SessionPeriodFilter.Upcoming;
         _dateFrom = null;
         _dateTo = null;
+        RememberLibraryDates();
         _calendarSelectedDate = null;
         var monthTask = _calendarVisible ? RefreshCalendarMonthAsync() : Task.CompletedTask;
         await RefreshQueryAsync();
@@ -861,19 +868,32 @@
         await EnsureSubscriptionForSelectionAsync();
     }
 
-    private Task ShowLibraryAsync()
+    private async Task ShowLibraryAsync()
     {
+        if (!_calendarVisible) return;
         _calendarVisible = false;
-        return Task.CompletedTask;
+        _periodFilter = _libraryPeriodFilter;
+        _dateFrom = _libraryDateFrom;
+        _dateTo = _libraryDateTo;
+        await RefreshQueryAsync();
+        EnsureSelectedSession();
+        await EnsureSubscriptionForSelectionAsync();
     }
 
     private async Task ShowCalendarAsync()
     {
+        if (_calendarVisible) return;
+        RememberLibraryDates();
         _calendarVisible = true;
-        if (_calendarSelectedDate is null)
-            await SelectTodayAsync();
-        else
-            await RefreshCalendarMonthAsync();
+        _monthQuery = null;
+        await SelectCalendarDayAsync(_calendarSelectedDate ?? DateTime.UtcNow.Date);
+    }
+
+    private void RememberLibraryDates()
+    {
+        _libraryPeriodFilter = _periodFilter;
+        _libraryDateFrom = _dateFrom;
+        _libraryDateTo = _dateTo;
     }
 
     private Task SelectTodayAsync() => SelectCalendarDayAsync(DateTime.UtcNow.Date);
