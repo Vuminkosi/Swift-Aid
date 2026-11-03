@@ -55,7 +55,7 @@ public partial class GuidedReportStepper
         var observations = Draft.GetObservations();
         AddIfInvalid(string.IsNullOrWhiteSpace(Draft.Narrative) && observations.Count == 0 ||
             (Draft.Narrative?.Length ?? 0) > 6000, "report.original-statement");
-        AddIfInvalid(observations.Count > 20 || observations.Any(value => value.Length > 1000), "report.other-observations");
+        AddIfInvalid(!Draft.HasValidObservations(observations), "report.other-observations");
         AddIfInvalid(Draft.OccurrencePrecision != ReportedTimePrecision.Unknown && !Draft.OccurrenceDate.HasValue,
             "report.occurrence-date");
         AddIfInvalid(Draft.OccurrencePrecision == ReportedTimePrecision.Exact && !TimeOnly.TryParse(Draft.OccurrenceTime, out _),

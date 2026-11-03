@@ -92,4 +92,15 @@ public sealed class PublicReportDraftTimeTests
         draft.Region = new string('x', 200);
         Assert.Equal(draft.Region, Submit(draft).Location.Region.ReportedName);
     }
+
+    [Fact]
+    public void ToSubmission_RejectsOversizedObservationTextAndAcceptsBoundary()
+    {
+        var draft = Draft();
+        draft.ObservationsText = new string(' ', 20001);
+        Assert.Throws<InvalidOperationException>(() => Submit(draft));
+
+        draft.ObservationsText = new string(' ', 20000);
+        Assert.Empty(Submit(draft).Observations);
+    }
 }

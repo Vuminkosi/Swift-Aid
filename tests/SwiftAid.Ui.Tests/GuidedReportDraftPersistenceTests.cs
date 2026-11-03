@@ -11,6 +11,26 @@ namespace SwiftAid.Ui.Tests;
 public sealed partial class GuidedReportDraftPersistenceTests
 {
     [Fact]
+    public async Task OversizedObservationTextBlocksReviewAndIdentifiesItsField()
+    {
+        var draft = CreateDraft();
+        draft.ObservationsText = string.Join("\n", Enumerable.Repeat(new string('x', 1000), 20));
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+
+        await (Task)Invoke(component, "ContinueFromTypeAsync")!;
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+
+        var issue = Assert.Single(component.GetState().ValidationIssues);
+        Assert.Equal("report.other-observations", issue.InputId);
+        Assert.Contains("20,000", issue.Message);
+        Assert.False(component.GetState().Controls.Single(control => control.ControlId == "report.narrative").CompletionAccepted);
+        draft.ObservationsText = new string(' ', 20000);
+        Assert.Empty(component.GetState().ValidationIssues);
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+        Assert.True(component.GetState().Controls.Single(control => control.ControlId == "report.narrative").CompletionAccepted);
+    }
+
+    [Fact]
     public async Task OversizedPlaceNamesBlockReviewAndAreIdentifiedInOrder()
     {
         var draft = CreateDraft();

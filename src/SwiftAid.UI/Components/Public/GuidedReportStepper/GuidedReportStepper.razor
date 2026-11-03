@@ -1076,9 +1076,9 @@
             isValid = false;
         }
 
-        if (observations.Count > 20 || observations.Any(value => value.Length > 1000))
+        if (!Draft.HasValidObservations(observations))
         {
-            AddError(nameof(Draft.ObservationsText), "Use no more than 20 observations, with each under 1,000 characters.");
+            AddError(nameof(Draft.ObservationsText), "Use at most 20 observations, 1,000 characters each and 20,000 characters in total.");
             isValid = false;
         }
 

@@ -8,7 +8,7 @@ public static class EllaiReportValidationGuidance
         "report.subject-kind" => new(inputId, "ellai-report-subject-kind", "Choose whether the concern is about human health or animal health."),
         "report.animal-scope" => new(inputId, "ellai-report-animal-scope", "Choose whether the concern is about an individual animal, herd, flock, or another group."),
         "report.original-statement" => new(inputId, "ellai-report-original-statement", "Describe what happened or add an observation. Keep the description within 6,000 characters."),
-        "report.other-observations" => new(inputId, "ellai-report-other-observations", "Use no more than 20 observations, with each under 1,000 characters."),
+        "report.other-observations" => new(inputId, "ellai-report-other-observations", "Use at most 20 observations, 1,000 characters each and 20,000 characters in total."),
         "report.occurrence-date" => new(inputId, "ellai-report-occurrence-date", "Add the reported date or choose that the time is unknown."),
         "report.occurrence-time" => new(inputId, "ellai-report-occurrence-time", "Enter a valid reported time."),
         "report.utc-offset" => new(inputId, "ellai-report-utc-offset", "Enter a valid time difference from UTC, such as plus zero two colon zero zero."),

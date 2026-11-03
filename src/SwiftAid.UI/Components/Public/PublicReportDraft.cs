@@ -155,8 +155,8 @@ public sealed class PublicReportDraft : IValidatableObject
         }
 
         var observations = GetObservations();
-        if (observations.Count > 20 || observations.Any(value => value.Length > 1000))
-            throw new InvalidOperationException("Use no more than 20 observations, with each under 1,000 characters.");
+        if (!HasValidObservations(observations))
+            throw new InvalidOperationException("Use at most 20 observations, 1,000 characters each and 20,000 characters in total.");
 
         if (!IsValidPlaceName(RegionPresence, Region) ||
             !IsValidPlaceName(AreaPresence, Area) ||
@@ -248,6 +248,10 @@ public sealed class PublicReportDraft : IValidatableObject
             location,
             confirmations);
     }
+
+    internal bool HasValidObservations(IReadOnlyList<string> observations) =>
+        (ObservationsText?.Length ?? 0) <= 20000 && observations.Count <= 20 &&
+        observations.All(value => value.Length <= 1000);
 
     public IReadOnlyList<string> GetObservations() => (ObservationsText ?? string.Empty)
         .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
