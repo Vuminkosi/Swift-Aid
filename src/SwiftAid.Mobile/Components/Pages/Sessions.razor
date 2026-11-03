@@ -156,7 +156,8 @@
                     ? subscription.Message ?? subscription.Metadata.Notice ?? "Reminder status is unavailable."
                     : options.Succeeded ? subscription.Message : options.Message ?? options.Metadata.Notice,
                 IsError: status == PublicSessionsSurface.SessionSubscriptionStatus.Unavailable ||
-                    !options.Succeeded && status != PublicSessionsSurface.SessionSubscriptionStatus.RequiresAuthentication);
+                    !options.Succeeded && status != PublicSessionsSurface.SessionSubscriptionStatus.RequiresAuthentication,
+                CurrentChannel: subscription.Value?.Channel is { } currentChannel ? ToSurfaceChannel(currentChannel) : null);
         }
         catch (OperationCanceledException)
         {

@@ -24,7 +24,8 @@ public sealed class PublicSessionQueryStateTests
         var options = new PublicSessionsSurface.SessionSubscriptionOptions(session.SessionId, "consent", 1,
             "Reminder consent", [PublicSessionsSurface.SessionReminderChannel.Email], current);
         var state = new PublicSessionsSurface.SessionSubscriptionPanelState(session.SessionId,
-            PublicSessionsSurface.SessionSubscriptionStatus.Active, 1, options, null);
+            PublicSessionsSurface.SessionSubscriptionStatus.Active, 1, options, null,
+            CurrentChannel: PublicSessionsSurface.SessionReminderChannel.MobilePush);
         var registrations = new ServiceCollection();
         registrations.AddLogging();
         registrations.AddMudServices();
@@ -47,7 +48,31 @@ public sealed class PublicSessionQueryStateTests
         });
 
         Assert.Contains("Turn off reminders", markup, StringComparison.Ordinal);
+        Assert.Contains("Current method: Mobile notification", markup, StringComparison.Ordinal);
         Assert.Equal(current, markup.Contains("Change reminder method", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ReminderChangeStartsWithTheCurrentMethod()
+    {
+        var session = Session(Guid.NewGuid());
+        var component = new PublicSessionsSurface();
+        var type = typeof(PublicSessionsSurface);
+        var options = new PublicSessionsSurface.SessionSubscriptionOptions(session.SessionId, "consent", 1,
+            "Reminder consent", [PublicSessionsSurface.SessionReminderChannel.Email, PublicSessionsSurface.SessionReminderChannel.MobilePush], true);
+        var state = new PublicSessionsSurface.SessionSubscriptionPanelState(session.SessionId,
+            PublicSessionsSurface.SessionSubscriptionStatus.Active, 1, options, null,
+            CurrentChannel: PublicSessionsSurface.SessionReminderChannel.MobilePush);
+        type.GetProperty(nameof(component.Sessions))!.SetValue(component, new[] { session });
+        type.GetProperty(nameof(component.InitialSessionId))!.SetValue(component, session.SessionId);
+        type.GetProperty(nameof(component.LoadSubscriptionStateAsync))!.SetValue(component,
+            (Func<Guid, Task<PublicSessionsSurface.SessionSubscriptionPanelState?>>)(_ => Task.FromResult<PublicSessionsSurface.SessionSubscriptionPanelState?>(state)));
+
+        await InvokeAsync(component, "OnParametersSetAsync");
+
+        Assert.Equal(PublicSessionsSurface.SessionReminderChannel.MobilePush,
+            Field<PublicSessionsSurface.SessionReminderChannel?>(component, "_selectedReminderChannel"));
+        Assert.False(Field<bool>(component, "_reminderConsentAccepted"));
     }
 
     [Fact]

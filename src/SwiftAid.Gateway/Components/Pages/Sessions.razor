@@ -535,7 +535,8 @@
             }
 
             return new PublicSessionsSurface.SessionSubscriptionPanelState(
-                sessionId, status, result.Value.Version, options, message);
+                sessionId, status, result.Value.Version, options, message,
+                CurrentChannel: result.Value.Channel is { } channel ? MapChannel(channel) : null);
         }
         catch (Exception)
         {
