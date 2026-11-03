@@ -97,6 +97,11 @@
                                     }
                                 </div>
 
+                                @if (_shareRequestSessionId == session.SessionId && _shareRequestVersion == session.Version)
+                                {
+                                    <MudText Typo="Typo.caption" role="status">Share request finished. Delivery is not confirmed.</MudText>
+                                }
+
                                 @if (_openInvitationId == session.SessionId && _openInvitationText is not null)
                                 {
                                     <MudPaper Elevation="0" Outlined="true" Class="session-public-list__invitation">
@@ -187,6 +192,11 @@
                             }
                         </div>
 
+                        @if (_shareRequestSessionId == session.SessionId && _shareRequestVersion == session.Version)
+                        {
+                            <MudText Typo="Typo.caption" role="status">Share request finished. Delivery is not confirmed.</MudText>
+                        }
+
                         @if (_openInvitationId == session.SessionId && _openInvitationText is not null)
                         {
                             <MudPaper Elevation="0" Outlined="true" Class="session-public-list__invitation">
@@ -232,6 +242,8 @@
     private string? _openInvitationText;
     private string? _invitationError;
     private Guid? _copiedSessionId;
+    private Guid? _shareRequestSessionId;
+    private long _shareRequestVersion;
 
     private string CalendarHref(Guid sessionId) => $"{PublicBasePath?.TrimEnd('/')}/{sessionId:D}/calendar";
 
@@ -333,6 +345,7 @@
     private async Task ShareInvitationAsync(PublicSessionView session)
     {
         _invitationError = null;
+        _shareRequestSessionId = null;
         var text = await LoadTextAsync(session);
         if (text is null || ShareTextAsync is null)
         {
@@ -342,6 +355,11 @@
         try
         {
             await ShareTextAsync(text);
+            if (Sessions.Any(current => current.SessionId == session.SessionId && current.Version == session.Version && IsScheduled(current)))
+            {
+                _shareRequestSessionId = session.SessionId;
+                _shareRequestVersion = session.Version;
+            }
         }
         catch (Exception)
         {

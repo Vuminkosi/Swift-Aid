@@ -367,6 +367,28 @@ public sealed class PublicSessionQueryStateTests
         Assert.Contains("session changed", (string)typeof(PublicSessionList).GetField("_invitationError", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list)!, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ShareFeedbackReflectsWhetherTheDeviceRequestReturned(bool fails)
+    {
+        var session = Session(Guid.NewGuid());
+        var list = new PublicSessionList();
+        typeof(PublicSessionList).GetProperty(nameof(list.Sessions))!.SetValue(list, new[] { session });
+        typeof(PublicSessionList).GetProperty(nameof(list.LoadInvitationTextAsync))!.SetValue(list,
+            (Func<Guid, long, Task<string?>>)((_, _) => Task.FromResult<string?>("Invitation")));
+        typeof(PublicSessionList).GetProperty(nameof(list.ShareTextAsync))!.SetValue(list,
+            (Func<string, Task>)(_ => fails ? Task.FromException(new InvalidOperationException()) : Task.CompletedTask));
+        var share = typeof(PublicSessionList).GetMethod("ShareInvitationAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        await (Task)share.Invoke(list, [session])!;
+
+        var id = typeof(PublicSessionList).GetField("_shareRequestSessionId", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list);
+        Assert.Equal(fails ? null : session.SessionId, id);
+        var error = typeof(PublicSessionList).GetField("_invitationError", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list);
+        Assert.Equal(fails, error is not null);
+    }
+
     [Fact]
     public async Task CopyInvitationRequestsTheDisplayedVersionAndDoesNotCopyAnUnavailableResult()
     {
