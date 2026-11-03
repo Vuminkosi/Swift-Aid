@@ -128,6 +128,17 @@ decision-contract and parser filter passed 144/144; after adding identifier and
 null-entry cases, the malformed-claim filter passed 5/5, including a post-commit
 rerun. These scripted model tests verify repair of malformed claim shapes; they
 do not prove that all generated factual claims are grounded.
+Buffered private answers now recheck observation authority between text chunks
+and after the last chunk before successful completion. Count answers re-read
+the authorized aggregate and compare both count and membership at those points.
+The framework contract filter passed 125/125; the six new revocation and
+unchanged-authority cases passed again after commit. The Gateway worker and
+count integration filter passed 46 with 5 skipped using `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore
+-m:1 -nr:false -p:WasmBuildNative=false` with `OS=Windows_NT`. The new tests
+use synthetic callbacks, and these checks do not establish deployed revocation
+behavior. Rechecks add query work per output chunk and are not atomic with
+delivery; load and independent security review remain open.
 
 ## Provider observations and open checks
 
