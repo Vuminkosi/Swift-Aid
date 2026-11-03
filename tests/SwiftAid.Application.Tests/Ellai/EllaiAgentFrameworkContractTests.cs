@@ -1765,7 +1765,103 @@ public sealed class EllaiAgentFrameworkContractTests
         Assert.Equal("Done.", (await run)?.DisplayText);
     }
 
-    private sealed class PrivateSegmentStreamingClient(bool omitSegment = false, string? segmentPrefix = null, string? finalDecision = null) : IChatClient
+    [Fact]
+    public async Task AmbiguousMultiEvidenceLineIsNotPublishedProvisionally()
+    {
+        using var client = new PrivateSegmentStreamingClient(segmentPrefix: GroundedStreamPrefix, finalDecision: GroundedDecision);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string> { EllaiToolNames.State });
+        var published = new List<string>();
+        var other = new EvidenceRef("CaseQueue", "other", "1", null, "other");
+        var run = new EllaiFrameworkAgent(client).RunAsync(context, "Test instructions", [new ChatMessage(ChatRole.User, "test")], 100,
+            _ => Task.FromResult(true), (_, request, _) => Task.FromResult(new EllaiToolResult(request.ToolName,
+                true, null, [StreamEvidence, other], "Done.\nOther.", 2, false)),
+            new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None,
+            onVerifiedStreamSegment: (text, _) => { published.Add(text); return ValueTask.CompletedTask; },
+            revalidateStreamObservations: _ => Task.FromResult(true));
+        try
+        {
+            await client.SegmentSent.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Empty(published);
+        }
+        finally { client.Release.TrySetResult(); }
+        Assert.NotNull(await run);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ProductFactSegmentMustCiteItsOwnFact(bool correctReference)
+    {
+        var facts = new EllaiProductFactCatalog().Find("report");
+        Assert.True(facts.Count >= 2);
+        var chosen = facts[0];
+        var cited = correctReference ? chosen : facts[1];
+        var reference = new EvidenceRef("ProductFact", cited.FactId, cited.Revision, cited.SourceId, cited.FactId);
+        var text = System.Text.Json.JsonSerializer.Serialize(chosen.Text);
+        var referenceJson = System.Text.Json.JsonSerializer.Serialize(reference, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        var claim = "{\"claimId\":\"claim\",\"text\":" + text + ",\"kind\":\"Observed\",\"evidence\":[" + referenceJson + "]}";
+        var segment = "{\"stream_segments\":[{\"text\":" + text + ",\"claims\":[" + claim + "]}]";
+        var final = ValidDecision.Replace("\"Done.\"", text, StringComparison.Ordinal)
+            .Replace("\"claims\":[]", "\"claims\":[" + claim + "]", StringComparison.Ordinal);
+        using var client = new PrivateSegmentStreamingClient(segmentPrefix: segment, finalDecision: final, toolName: EllaiToolNames.ProductFacts);
+        var context = new EllaiToolContext("session", "epoch", "public.product-help", null, 4, true,
+            DataClassification: EllaiProcessingClassification.UserProvidedNonSensitive,
+            AllowedTools: new HashSet<string> { EllaiToolNames.ProductFacts }, ConsentPurpose: EllaiConsentService.PublicProductHelpPurpose);
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService());
+        var published = new List<string>();
+        var run = new EllaiFrameworkAgent(client).RunAsync(context, "Test instructions", [new ChatMessage(ChatRole.User, "test")], 100,
+            _ => Task.FromResult(true), broker.InvokeAsync,
+            new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None,
+            onVerifiedStreamSegment: (value, _) => { published.Add(value); return ValueTask.CompletedTask; },
+            revalidateStreamObservations: _ => Task.FromResult(true));
+        try
+        {
+            await client.SegmentSent.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(correctReference ? new[] { chosen.Text } : Array.Empty<string>(), published);
+        }
+        finally { client.Release.TrySetResult(); }
+        Assert.NotNull(await run);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CaseSegmentMustCiteItsOwnCase(bool correctReference)
+    {
+        const string firstId = "11111111-1111-1111-1111-111111111111";
+        const string secondId = "22222222-2222-2222-2222-222222222222";
+        var first = new EvidenceRef("CaseQueue", firstId, "1", null, firstId);
+        var second = new EvidenceRef("CaseQueue", secondId, "1", null, secondId);
+        var reference = correctReference ? first : second;
+        var line = $"case {firstId}; country SZ; workflow Reported; v1";
+        var text = System.Text.Json.JsonSerializer.Serialize(line);
+        var referenceJson = System.Text.Json.JsonSerializer.Serialize(reference, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        var claim = "{\"claimId\":\"claim\",\"text\":" + text + ",\"kind\":\"Observed\",\"evidence\":[" + referenceJson + "]}";
+        var segment = "{\"stream_segments\":[{\"text\":" + text + ",\"claims\":[" + claim + "]}]";
+        var final = ValidDecision.Replace("\"Done.\"", text, StringComparison.Ordinal)
+            .Replace("\"claims\":[]", "\"claims\":[" + claim + "]", StringComparison.Ordinal);
+        using var client = new PrivateSegmentStreamingClient(segmentPrefix: segment, finalDecision: final);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string> { EllaiToolNames.State });
+        var published = new List<string>();
+        var run = new EllaiFrameworkAgent(client).RunAsync(context, "Test instructions", [new ChatMessage(ChatRole.User, "test")], 100,
+            _ => Task.FromResult(true), (_, request, _) => Task.FromResult(new EllaiToolResult(request.ToolName,
+                true, null, [first, second], line + $"\ncase {secondId}; country SZ; workflow Active; v1", 2, false)),
+            new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None,
+            onVerifiedStreamSegment: (value, _) => { published.Add(value); return ValueTask.CompletedTask; },
+            revalidateStreamObservations: _ => Task.FromResult(true));
+        try
+        {
+            await client.SegmentSent.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(correctReference ? new[] { line } : Array.Empty<string>(), published);
+        }
+        finally { client.Release.TrySetResult(); }
+        Assert.NotNull(await run);
+    }
+
+    private sealed class PrivateSegmentStreamingClient(bool omitSegment = false, string? segmentPrefix = null, string? finalDecision = null,
+        string toolName = EllaiToolNames.State) : IChatClient
     {
         private int _calls;
         public TaskCompletionSource SegmentSent { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1778,7 +1874,9 @@ public sealed class EllaiAgentFrameworkContractTests
             if (++_calls == 1)
             {
                 yield return new ChatResponseUpdate(ChatRole.Assistant,
-                    [new FunctionCallContent("private", EllaiToolNames.State, new Dictionary<string, object?> { ["projection"] = "queue" })]);
+                    [new FunctionCallContent("private", toolName, toolName == EllaiToolNames.ProductFacts
+                        ? new Dictionary<string, object?> { ["topic"] = "report" }
+                        : new Dictionary<string, object?> { ["projection"] = "queue" })]);
                 yield break;
             }
             if (omitSegment)

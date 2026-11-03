@@ -99,7 +99,7 @@ public sealed class EllaiFrameworkAgent
                         evidence.Add(reference);
                         if (!evidenceSources.TryGetValue(reference, out var sources))
                             evidenceSources[reference] = sources = [];
-                        sources.Add(result.ResultSummary);
+                        sources.AddRange(EvidenceLines(request.ToolName, result, reference));
                     }
                 return result;
             });
@@ -122,7 +122,8 @@ public sealed class EllaiFrameworkAgent
         if (onVerifiedStreamSegment is not null)
             instructions += "\nFor a plain Answer with no UI action or question, put stream_segments first in the final JSON envelope. " +
                 "Each entry is an object with text and claims, where claims use the same GroundedClaim schema and exact evidence as final_decision. " +
-                "Each text must exactly match one complete line of every cited tool result. " +
+                "Each text must exactly match a complete line bound to each cited reference, " +
+                "or the complete product-fact text after that fact's source prefix. " +
                 "Each segment must have a nonempty claims array; each claim text must equal the segment text and cite observed evidence. " +
                 "If no evidence-backed segment is available, omit stream_segments and return the final_decision normally. " +
                 "The final_decision displayText and spokenText must both equal " +
@@ -181,12 +182,11 @@ public sealed class EllaiFrameworkAgent
                             continue;
                         }
                         // Evidence-backed prose may be released early only when
-                        // it matches a complete line of every cited observation.
+                        // it matches a line bound to every cited reference.
                         // Paraphrases still flow through the committed answer.
                         if (evidence.Count != 0 && parsedSegment.Claims.Any(claim =>
                             claim.Evidence.Any(reference => !evidenceSources.TryGetValue(reference, out var sources) ||
-                                !sources.Any(source => source.Split('\n').Any(line =>
-                                    string.Equals(line.Trim(), segment, StringComparison.Ordinal))))))
+                                !sources.Any(source => string.Equals(source, segment, StringComparison.Ordinal)))))
                         {
                             if (streamedSegments.Count != 0) throw new EllaiFrameworkFailureException("InvalidDecision");
                             streamingSuppressed = true;
@@ -320,6 +320,38 @@ public sealed class EllaiFrameworkAgent
             return null;
         }
         return decision;
+    }
+
+    private static IEnumerable<string> EvidenceLines(string toolName, EllaiToolResult result, EvidenceRef reference)
+    {
+        var lines = result.ResultSummary.Split('\n').Select(line => line.Trim()).Where(line => line.Length != 0);
+        if (toolName == EllaiToolNames.ProductFacts && reference.SourceKind == "ProductFact" &&
+            reference.ResourceId == reference.EvidenceId && !string.IsNullOrWhiteSpace(reference.FieldPath))
+        {
+            var prefix = $"[{reference.ResourceId}; source {reference.FieldPath}; revision {reference.Version}] ";
+            foreach (var line in lines.Where(line => line.StartsWith(prefix, StringComparison.Ordinal)))
+            {
+                yield return line;
+                var fact = line[prefix.Length..].Trim();
+                if (fact.Length != 0) yield return fact;
+            }
+            yield break;
+        }
+        if (result.Evidence.Count == 1)
+        {
+            foreach (var line in lines) yield return line;
+            yield break;
+        }
+        if (reference.SourceKind == "CaseQueue" &&
+            toolName is EllaiToolNames.State or EllaiToolNames.Topic or EllaiToolNames.Evidence &&
+            Guid.TryParseExact(reference.ResourceId, "D", out var caseId) &&
+            reference.ResourceId == caseId.ToString("D"))
+        {
+            var prefix = $"case {reference.ResourceId}";
+            foreach (var line in lines.Where(line => line.StartsWith(prefix + ";", StringComparison.Ordinal) ||
+                line.StartsWith(prefix + " ·", StringComparison.Ordinal)))
+                yield return line;
+        }
     }
 
     private static async Task<bool> PublishValidatedTextAsync(string text,

@@ -3179,6 +3179,26 @@ Gateway, a browser, or audible speech. Ordinary evidence-free answers remain
 buffered until validation, and user-visible model-time streaming and independent
 security review remain NOT VERIFIED.
 
+### Provisional line-to-evidence binding — 2026-11-03
+
+The framework previously associated every line of a multi-item tool result
+with every evidence reference in that result. A provisional segment could
+therefore quote one item while citing another. The regression first reproduced
+publication of an ambiguous line. Provisional matching now binds product-fact
+lines to their exact fact ID, source and revision, and case lines to their
+canonical case ID. Product facts can stream their complete text without the
+source-label prefix. Other multi-evidence formats remain buffered until the
+final decision because no safe per-line mapping has been established. Existing
+authorization rechecks remain in place.
+
+PASS: the framework and authorized-context application filter passed 163/163,
+including matching and mismatched case and product-fact references and the
+ambiguous-line regression. The PostgreSQL/Qdrant framework-worker recall and
+revocation fixture passed 1/1 with a synthetic model; the disposable stores
+were removed. This change strengthens provisional publication only. It does
+not establish semantic support for all final claims, live Gateway model-time
+delivery, or an independent security review.
+
 ### Gateway recovery on the verified branch — 2026-11-03
 
 PASS: on commit `4a09962`, the following focused integration run passed 3/3
