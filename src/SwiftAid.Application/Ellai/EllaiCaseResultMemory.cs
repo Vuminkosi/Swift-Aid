@@ -26,8 +26,12 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
             JsonSerializer.Serialize(snapshot), "case-results/1", cancellationToken: ct).ConfigureAwait(false);
     }
 
-    public async Task<EllaiToolResult> RecallAsync(EllaiToolContext context, CancellationToken ct)
+    public async Task<EllaiToolResult> RecallAsync(
+        EllaiToolContext context, CancellationToken ct, string? field = null)
     {
+        if (field is not null && field is not ("country" or "workflow"))
+            return new(EllaiToolNames.Topic, false, "Unsupported case-result field selector.", [], "", 0, false,
+                EllaiToolReasonCodes.InvalidArguments);
         if (context.Actor is null) return Unavailable();
         EllaiTopicEntry? indexedTopic = null;
         if (index is not null)
@@ -73,11 +77,22 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
             (old, row) => (old, row)).ToArray();
         var evidence = rows.Select(pair => new EvidenceRef("CaseQueue", pair.row.CaseId.ToString("D"),
             pair.row.AggregateVersion.ToString(CultureInfo.InvariantCulture), null, pair.row.CaseId.ToString("D"))).ToArray();
+        var scopedEvidence = field is null
+            ? evidence
+            : evidence.Select(item => item with { FieldPath = field }).ToArray();
         var text = "Previously retrieved cases, checked against current access; this is not a new search. " +
             "Unavailable records are omitted.\n" + string.Join("\n", rows.Select(pair =>
-                $"case {pair.row.CaseId:D}; country {pair.row.CountryCode}; workflow {pair.row.Workflow}; " +
-                $"v{pair.row.AggregateVersion}" + (pair.old.Version != pair.row.AggregateVersion ? " (changed since retrieval)" : "")));
-        return new(EllaiToolNames.Topic, true, null, evidence, text, rows.Length, false);
+            {
+                var selectedValue = field switch
+                {
+                    "country" => $"country {pair.row.CountryCode}",
+                    "workflow" => $"workflow {pair.row.Workflow}",
+                    _ => $"country {pair.row.CountryCode}; workflow {pair.row.Workflow}"
+                };
+                return $"case {pair.row.CaseId:D}; {selectedValue}; v{pair.row.AggregateVersion}" +
+                    (pair.old.Version != pair.row.AggregateVersion ? " (changed since retrieval)" : "");
+            }));
+        return new(EllaiToolNames.Topic, true, null, scopedEvidence, text, rows.Length, false);
     }
 
     public static string SourceVersion(string snapshot) => Convert.ToHexString(

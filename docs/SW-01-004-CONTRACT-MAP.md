@@ -95,21 +95,21 @@ The shared C# and browser JavaScript capture gates reject a frame that would exc
 
 ## Ellai read-tool registry and dispatch - 3 November 2026
 
-`EllaiToolNames.All` is the canonical advertised allowlist (18 names). `TryResolveCanonical` accepts two compatibility aliases (`ellai_voice_capability` and `ellai_guidance_session`) and resolves them to canonical handlers; aliases are not advertised. `InvokeAsync` applies session/profile allowlisting, a remaining-call budget, required scope, an eight-argument cap, bounded argument checks, reasoning-text consent (with the documented public-product-help exception), policy authorization, and the common result-byte bound before dispatch. Results share `EllaiToolResult` fields: tool name, allowed/denial reason, evidence, summary, item count, truncation and reason code. This catalog is source-derived and does not claim provider-schema registration or live model execution.
+`EllaiToolNames.All` is the canonical advertised allowlist (18 names). `TryResolveCanonical` accepts two compatibility aliases (`ellai_voice_capability` and `ellai_guidance_session`) and resolves them to canonical handlers; aliases are not advertised. `EllaiToolContractCatalog` defines JSON Schema 2020-12 input contracts for all 18 tools plus the shared `EllaiToolResult`/`EvidenceRef` output schema. `DescribeCatalogue` includes the input schemas only for the session-allowed tools and the shared result schema; both `EllaiModelTurnParser` and `InvokeAsync` enforce required keys, reject undeclared keys, and apply common string bounds. Handlers retain tighter value-format and authorization checks. Schema version 1 does not replace live model/provider or end-to-end acceptance.
 
 | Canonical tool(s) | Arguments advertised to model | Dispatch / data boundary | Version or persistence evidence |
 |---|---|---|---|
-| `ellai_state` | projection, limit, optional country/workflow/sort | `ReadStateAsync`; feature or authorized owned-case queue | Reads current application projection; no independent wire schema identified in broker. |
-| `ellai_evidence` | ref, optional field | Broker returns bounded versioned evidence references | Evidence references carry provenance/version metadata; backing source varies by reference. |
+| `ellai_state` | projection, limit, optional country/workflow/sort | `ReadStateAsync`; feature or authorized owned-case queue | JSON Schema v1 is exposed to the model and enforced in parser/broker. Queue filters retain handler-level enum/ISO checks. |
+| `ellai_evidence` | required ref=`case-results`, optional field=`country` or `workflow` | Reuses `EllaiCaseResultMemory` to load the session-owned retained case IDs, then re-queries the actor-authorized queue and returns current versions. Arbitrary case/resource IDs are rejected; no narrative or case directory is exposed. | JSON Schema v1 plus fresh owner/scope and per-case queue authorization. Field-specific evidence references carry the selected field. Only the retained case-results source is supported; generic evidence-source retrieval remains incomplete. |
 | `ellai_topic` | ref | `ReadTopicsAsync`; session topic/checkpoint service | Durable topic/checkpoint entities exist; see topic service and persistence entities. |
-| `ellai_capabilities` | optional feature | Static/current capability descriptors | No separate serialized schema identified. |
+| `ellai_capabilities` | optional feature | Static/current capability descriptors | JSON Schema v1 exposed/enforced; no separate provider-native function registration was verified. |
 | `ellai_receipts` | optional receipt | `ReadReceiptsAsync`; approval receipt store, session-bound | Durable approval store; result is minimized evidence. |
 | `ellai_productfacts` | optional topic | `ReadProductFacts`; versioned nonmedical product-fact catalog | Catalog supplies versioned facts; no external model call. |
 | `ellai_now` | none | Server UTC clock | Result uses round-trip UTC and Unix milliseconds; ephemeral. |
-| `ellai_docs_search` | q, optional limit | Approved technical documentation index | Read-only curated reference; no raw repository source. |
-| `ellai_docs_get` | exact section | Approved section retrieval | Section identifier and provenance returned; read-only. |
-| `ellai_ui_catalogue` | optional feature/goal/limit | `ReadUiCatalogueAsync`; entitlement-filtered UI registry | Registry/catalogue and UI contract versions are checked by admission. |
-| `ellai_ui_observe` | controls, optional view/context/feature | `ReadUiObserveAsync`; client-posted mounted-control observation | Client observation is server-stamped for freshness; not a durable UI schema. |
+| `ellai_docs_search` | required q, optional limit | Approved technical documentation index | JSON Schema v1 exposed/enforced; read-only curated reference, no raw repository source. |
+| `ellai_docs_get` | required exact section | Approved section retrieval | JSON Schema v1 exposed/enforced; section identifier and provenance returned; read-only. |
+| `ellai_ui_catalogue` | optional feature/goal/limit | `ReadUiCatalogueAsync`; entitlement-filtered UI registry | JSON Schema v1 exposed/enforced; registry/catalogue and UI contract versions are checked by admission. |
+| `ellai_ui_observe` | required controls/view, optional context/feature | `ReadUiObserveAsync`; client-posted mounted-control observation | JSON Schema v1 exposed/enforced; client observation is server-stamped for freshness, not a durable UI schema. |
 | `ellai_ingestion_schema` | none | Canonical CSV capture schema and authority guidance | Static contract description; performs no submission. |
 | `ellai_validate_observations` | observations_json | Bounded original-string validation; no inference or submission | JSON-array parser and CSV field bound; no persistence. |
 | `ellai_locations` | q, optional country/limit | `ReadLocationsAsync`; public geographic registry | Read-only registry lookup; user selects a match. |
@@ -118,7 +118,7 @@ The shared C# and browser JavaScript capture gates reject a frame that would exc
 | `ellai_import_status` | import_id | `ReadImportsAsync`; caller's durable import status/counts | Durable import store read; does not submit or return case contents. |
 | `ellai_classification_evidence` | case_id | `ReadClassificationAsync`; authorized persisted evidence for current case revision | Read-only classification query; no inference, diagnosis, or clinical probability. |
 
-Source anchors: `src/SwiftAid.Application/Ellai/Tools/EllaiToolBroker.cs` (`EllaiToolNames`, `TryResolveCanonical`, `ToolDescriptions`, `InvokeAsync`); `src/SwiftAid.Application/Ellai/UiIntelligence/EllaiUiRegistry.cs`; `src/SwiftAid.Infrastructure/Persistence/Ellai/` (durable session/topic/receipt stores). The catalog exposes a concrete crosswalk for the broker surface, while remaining gaps include formal per-tool argument/result schemas, exhaustive test mapping, and source-to-consumer/persistence linkage for every evidence reference. These gaps keep SW-01-004 partial.
+Source anchors: `src/SwiftAid.Application/Ellai/EllaiToolContractCatalog.cs`; `src/SwiftAid.Application/Ellai/EllaiModelTurnParser.cs`; `src/SwiftAid.Application/Ellai/Tools/EllaiToolBroker.cs`; `src/SwiftAid.Application/Ellai/EllaiCaseResultMemory.cs`; `tests/SwiftAid.Application.Tests/Ellai/EllaiToolContractCatalogTests.cs`. PASS full Application tests: 935 passed, 3 provider probes skipped. This establishes application parser/broker schema behavior and one scoped evidence recall path, not real provider invocation. Remaining gaps include other source-reference resolvers, per-tool authorization/denial/truncation/persistence test mapping, and producer/consumer/persistence linkage for every evidence reference. These gaps keep SW-01-004 partial.
 
 ## Public and recipient-scoped projections - 3 November 2026
 
@@ -153,6 +153,7 @@ PASS - `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.
 - Trace each audio/session version from client capture through Gateway, storage, response preparation and cancellation/error paths.
 - Complete the remaining endpoint projection inventory; add focused serialization/privacy assertions where route tests do not currently prove the DTO boundary.
 - Decide whether UI observations require durable or multi-instance storage; current behavior intentionally degrades to a fresh-observation requirement after process restart, but is not deployment-verified.
-- Add formal per-tool argument/result schemas and map each tool to focused authorization, denial, truncation, and persistence tests; the source registry/dispatch inventory above is not a substitute for those checks.
+- Expand per-tool tests to cover authorization, denial, truncation and persistence; the new JSON Schemas verify structure and bounds but do not replace handler-level behavior or data-source proof.
+- Extend ellai_evidence source resolution beyond the retained case-results reference where an approved authoritative read path exists.
 
 The v1 event schema was changed in this reconciliation; no migration or package change was needed. Current ownership for broader shared contract/schema work remains to be confirmed from active handoffs (BL-005).

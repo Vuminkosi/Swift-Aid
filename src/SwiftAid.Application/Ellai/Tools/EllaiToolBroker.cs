@@ -166,7 +166,7 @@ public sealed class EllaiToolBroker
     private static readonly string[] ToolDescriptions =
     {
         $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, country?, workflow?, sort?) — permitted feature or owned-case queue. country is an uppercase two-letter code (Zimbabwe=ZW, Eswatini=SZ); workflow is Reported, UnderReview, Active, AwaitingFollowUp or Resolved; sort=latest-reported or latest-updated. Reported is a recorded workflow, not proof that no human reviewed a case. Classification review status is not supplied; clarify ambiguous unreviewed requests.",
-        $"{EllaiToolNames.Evidence}(ref, field?) — versioned source items with provenance.",
+        $"{EllaiToolNames.Evidence}(ref=case-results, field=[country|workflow]?) — re-read retained case queue references under current access.",
         $"{EllaiToolNames.Topic}(ref) — session topic candidates with checkpoints. Use ref=case-results to recall the last retained case list with fresh authorization; never invent a remembered result set.",
         $"{EllaiToolNames.Capabilities}(feature?) — capability readiness, no credentials.",
         $"{EllaiToolNames.Receipts}(receipt?) — durable receipts, session-bound.",
@@ -195,7 +195,13 @@ public sealed class EllaiToolBroker
 
             var separator = description.IndexOf('(');
             return separator > 0 && allowedTools.Contains(description[..separator]);
-        }));
+        }).Select(description =>
+        {
+            var separator = description.IndexOf('(');
+            var toolName = description[..separator];
+            return $"{description}\nInput JSON Schema v{EllaiToolContractCatalog.CurrentSchemaVersion}: " +
+                EllaiToolContractCatalog.ToJsonSchema(toolName);
+        })) + "\nOutput JSON Schema: " + EllaiToolContractCatalog.ToResultJsonSchema();
 
     private readonly EllaiPolicyService _policy;
     private readonly EllaiConsentService _consent;
@@ -284,6 +290,12 @@ public sealed class EllaiToolBroker
             return Bound(Deny(request.ToolName, "Missing session scope.", EllaiToolReasonCodes.MissingScope));
         }
 
+        if (!EllaiToolContractCatalog.TryValidateArguments(canonical, request.Arguments, out var schemaError))
+        {
+            return Bound(Deny(request.ToolName, schemaError ?? "Tool arguments do not match the registered schema.",
+                EllaiToolReasonCodes.InvalidArguments));
+        }
+
         if (request.Arguments.Count > 8)
         {
             return Bound(Deny(request.ToolName, "Too many tool arguments.", EllaiToolReasonCodes.InvalidArguments));
@@ -357,10 +369,11 @@ public sealed class EllaiToolBroker
             return Bound(await ReadImportsAsync(context, request, ct).ConfigureAwait(false));
         if (canonical == EllaiToolNames.ClassificationEvidence)
             return Bound(await ReadClassificationAsync(context, request, ct).ConfigureAwait(false));
+        if (canonical == EllaiToolNames.Evidence)
+            return Bound(await ReadEvidenceAsync(context, request, ct).ConfigureAwait(false));
 
         return Bound(canonical switch
         {
-            EllaiToolNames.Evidence => Allow(request.ToolName, "Authorized versioned source items.", Math.Min(request.Arguments.Count, MaxItems), request.Arguments.Count > MaxItems),
             EllaiToolNames.Capabilities => Allow(request.ToolName, "Current capability descriptors.", 1, false),
             EllaiToolNames.ProductFacts => ReadProductFacts(request),
             EllaiToolNames.Now => Allow(request.ToolName, DescribeNow(DateTimeOffset.UtcNow), 1, false),
@@ -387,6 +400,51 @@ public sealed class EllaiToolBroker
         });
         return new(request.ToolName, true, null,
             [new EvidenceRef("ProductFact", "ingestion-schema", "1", "capture", "ingestion-schema/1")], summary, 1, false);
+    }
+
+    private async Task<EllaiToolResult> ReadEvidenceAsync(
+        EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
+    {
+        if (!string.Equals(request.Arguments["ref"], EllaiCaseResultMemory.Reference, StringComparison.Ordinal))
+        {
+            return Deny(request.ToolName, "Only the current session's retained case-results reference is supported.",
+                EllaiToolReasonCodes.InvalidArguments);
+        }
+
+        if (context.Actor is null)
+        {
+            return Deny(request.ToolName, "Current staff case access is required.",
+                EllaiToolReasonCodes.DeniedByPolicy);
+        }
+
+        if (_topics is null || _queue is null)
+        {
+            return Deny(request.ToolName, "Authorized case evidence is unavailable for this session.",
+                EllaiToolReasonCodes.Unavailable);
+        }
+
+        var field = request.Arguments.GetValueOrDefault("field");
+        if (field is not null && field is not ("country" or "workflow"))
+        {
+            return Deny(request.ToolName, "field must be country or workflow.",
+                EllaiToolReasonCodes.InvalidArguments);
+        }
+
+        try
+        {
+            var result = await new EllaiCaseResultMemory(_topics, _queue, _referenceIndex)
+                .RecallAsync(context, ct, field).ConfigureAwait(false);
+            return result with { ToolName = request.ToolName };
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception error) when (error is not OperationCanceledException and not OutOfMemoryException)
+        {
+            return Deny(request.ToolName, "Authorized case evidence is unavailable for this session.",
+                EllaiToolReasonCodes.Unavailable);
+        }
     }
 
     private async Task<EllaiToolResult> ReadClassificationAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
@@ -540,7 +598,7 @@ public sealed class EllaiToolBroker
                 EllaiToolReasonCodes.InvalidArguments);
         }
 
-        if (request.Arguments.Keys.Any(key => key is not ("projection" or "limit" or "ref" or "country" or "workflow" or "sort")))
+        if (request.Arguments.Keys.Any(key => key is not ("projection" or "limit" or "country" or "workflow" or "sort")))
             return Deny(request.ToolName, "This queue supports country, workflow and sort filters only.",
                 EllaiToolReasonCodes.InvalidArguments);
 

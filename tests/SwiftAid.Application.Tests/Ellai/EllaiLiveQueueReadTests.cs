@@ -159,6 +159,42 @@ public sealed class EllaiLiveQueueReadTests
     }
 
     [Fact]
+    public async Task EvidenceToolResolvesOnlyRetainedCaseResultsWithFreshAuthorizedFields()
+    {
+        var topics = new EllaiTopicService();
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [Row("01", 7)]) };
+        var context = Context with { Actor = TestActor() };
+        var broker = GrantedBroker(queue, topics);
+        await broker.InvokeAsync(context,
+            new(EllaiToolNames.State, Args(("projection", "queue"))), CancellationToken.None);
+
+        queue.Result = new(CaseQueueAccess.Allowed, [Row("01", 9)]);
+        var result = await broker.InvokeAsync(context,
+            new(EllaiToolNames.Evidence, Args(("ref", "case-results"), ("field", "workflow"))),
+            CancellationToken.None);
+
+        Assert.True(result.Allowed);
+        Assert.Equal(EllaiToolNames.Evidence, result.ToolName);
+        Assert.Equal("workflow", Assert.Single(result.Evidence).FieldPath);
+        Assert.Equal("9", Assert.Single(result.Evidence).Version);
+        Assert.Contains("workflow UnderReview", result.ResultSummary, StringComparison.Ordinal);
+        Assert.DoesNotContain("country US", result.ResultSummary, StringComparison.Ordinal);
+        Assert.Equal("actor-1", queue.LastActor?.ActorId);
+        Assert.Equal(new[] { Row("01", 7).CaseId }, queue.LastFilter!.CaseIds);
+
+        var unsupported = await broker.InvokeAsync(context,
+            new(EllaiToolNames.Evidence, Args(("ref", "arbitrary-case-id"))), CancellationToken.None);
+        Assert.False(unsupported.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.InvalidArguments, unsupported.ReasonCode);
+
+        queue.Throw = true;
+        var unavailable = await broker.InvokeAsync(context,
+            new(EllaiToolNames.Evidence, Args(("ref", "case-results"))), CancellationToken.None);
+        Assert.False(unavailable.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, unavailable.ReasonCode);
+    }
+
+    [Fact]
     public async Task ResultSnapshotsCannotBeReadThroughGenericTopicLookupOrChangedScope()
     {
         var topics = new EllaiTopicService();

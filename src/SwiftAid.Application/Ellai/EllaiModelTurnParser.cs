@@ -142,6 +142,11 @@ public static class EllaiModelTurnParser
                 return new ParsedModelTurn(null, $"Tool call '{id}' carries too many arguments.");
             }
 
+            if (!EllaiToolContractCatalog.TryValidateArguments(canonical, arguments, out var schemaError))
+            {
+                return new ParsedModelTurn(null, $"Tool call '{id}' arguments are invalid: {schemaError}");
+            }
+
             requests.Add(new EllaiToolRequest(canonical, arguments, id));
         }
 

@@ -82,21 +82,37 @@ public sealed class EllaiReadToolTests
                         ? new Dictionary<string, string> { ["section"] = "1-sample" }
                         : tool == EllaiToolNames.Topic
                             ? new Dictionary<string, string> { ["ref"] = "sample" }
+                            : tool == EllaiToolNames.Evidence
+                                ? new Dictionary<string, string> { ["ref"] = "case-results" }
                             : tool == EllaiToolNames.UiObserve
                                 ? new Dictionary<string, string>
                                 {
                                     ["controls"] = "cases.sample",
                                     ["view"] = "view-1",
                                 }
-                                : new Dictionary<string, string>();
+                                : tool == EllaiToolNames.Imports
+                                    ? new Dictionary<string, string>
+                                    {
+                                        ["workspace_id"] = "workspace",
+                                        ["organization_id"] = "organization",
+                                        ["country"] = "ZW",
+                                    }
+                                    : tool == EllaiToolNames.ImportStatus
+                                        ? new Dictionary<string, string> { ["import_id"] = "00000000-0000-0000-0000-000000000001" }
+                                        : tool == EllaiToolNames.ClassificationEvidence
+                                            ? new Dictionary<string, string> { ["case_id"] = "00000000-0000-0000-0000-000000000001" }
+                                            : new Dictionary<string, string>();
                 if (tool == EllaiToolNames.ValidateObservations) args["observations_json"] = "[\"Reported concern\"]";
                 if (tool == EllaiToolNames.Locations) args["q"] = "Rusape";
                 var result = await broker.InvokeAsync(
                     Context, new EllaiToolRequest(tool, args),
                     CancellationToken.None);
                 var requiresStaffActor = tool is EllaiToolNames.ImportDestinations or EllaiToolNames.Imports or EllaiToolNames.ImportStatus or EllaiToolNames.ClassificationEvidence;
-                Assert.Equal(!requiresStaffActor, result.Allowed);
-                Assert.Equal(requiresStaffActor ? EllaiToolReasonCodes.DeniedByPolicy : EllaiToolReasonCodes.Ok, result.ReasonCode);
+                var requiresActor = requiresStaffActor || tool == EllaiToolNames.Evidence;
+                Assert.Equal(!requiresActor, result.Allowed);
+                Assert.Equal(requiresStaffActor ? EllaiToolReasonCodes.DeniedByPolicy :
+                    tool == EllaiToolNames.Evidence ? EllaiToolReasonCodes.DeniedByPolicy : EllaiToolReasonCodes.Ok,
+                    result.ReasonCode);
                 Assert.True(result.ItemCount <= EllaiToolBroker.MaxItems);
                 Assert.True(EllaiToolBroker.MeasureEnvelopeBytes(result) <= EllaiToolBroker.MaxResultBytes);
             }
