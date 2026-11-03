@@ -3202,6 +3202,24 @@ after a successful check can still race bytes already in flight. Deployed
 Gateway, independent security review, and physical voice-device behavior
 remain NOT VERIFIED.
 
+### Import destination revalidation — 2026-11-04
+
+The production runner previously rejected every import-destination observation
+because it had no replay scope. It now stores a digest of the bounded result,
+re-reads the destination list through the authorized broker, and permits the
+turn only while that result is unchanged. Old traces without the digest remain
+ineligible for replay. The trace does not contain workspace names or the list.
+PASS: `EllaiImportToolsPostgresTests` passed 1/1 with the intake PostgreSQL
+fixture: a scripted framework model reached the actual runner, the authorized
+result completed, and a simulated foreign-actor recheck withheld the answer.
+This is not a database grant-revocation race or deployed Gateway test. PASS:
+the application authorization and framework contract filters passed 165/165
+with `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj
+--no-restore -m:1 -nr:false --filter
+'FullyQualifiedName~EllaiAuthorizedConversationContextTests|FullyQualifiedName~EllaiAgentFrameworkContractTests'
+--logger 'console;verbosity=minimal'`. The remaining location-search replay
+gap is separate and remains open.
+
 ### Grounded audio timing probe — 2026-11-03
 
 PASS: `SWIFTAID_RUN_LIVE_ELLAI=1 SWIFTAID_REQUIRE_AUDIO_BEFORE_COMPLETION=1

@@ -1,7 +1,10 @@
 using System.Text.Json;
 using System.Security.Claims;
+using Microsoft.Extensions.AI;
 using SwiftAid.Application.Ellai;
 using SwiftAid.Application.Authorization;
+using SwiftAid.Contracts.Ellai;
+using SwiftAid.Intelligence.Meta;
 
 namespace SwiftAid.Integration.Tests;
 
@@ -23,6 +26,34 @@ public sealed class EllaiImportToolsPostgresTests
         Assert.True(destinations.Allowed);
         Assert.Contains("workspace-1", destinations.ResultSummary);
         Assert.DoesNotContain(linked.Organization, destinations.ResultSummary);
+
+        foreach (var change in new[] { false, true })
+        {
+            using var model = new DestinationClient();
+            var executor = new EllaiFrameworkExecutor(model, new EllaiPromptBuilder("Synthetic policy", "fixture"),
+                broker, new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
+            var work = new EllaiUtteranceWork(context.SessionId, context.ScopeEpoch, "List import destinations.",
+                context.FeatureId, null, EllaiMode.Ask, 1, change ? "changed" : "current", CaseImportPostgresTests.Actor,
+                true, "consent/0", EllaiProcessingClassification.UserProvidedNonSensitive,
+                EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string> { EllaiToolNames.ImportDestinations },
+                EllaiConsentService.PublicProductHelpPurpose, "turn");
+            var calls = 0;
+            var turn = await EllaiUtteranceRunner.RunOneAsync(work, new EllaiUtteranceServices(executor, null, null,
+                new EllaiConsentService(), InvokeToolAsync: async (toolContext, toolRequest, ct) =>
+                    await broker.InvokeAsync(++calls >= 2 && change ? toolContext with { Actor = linked.Actor } : toolContext,
+                        toolRequest, ct)), 1024, default);
+            Assert.Equal(!change, turn.Completed);
+            Assert.True(calls >= 2);
+            Assert.Contains("workspace-1", model.ToolResultText);
+            Assert.DoesNotContain(linked.Organization, model.ToolResultText);
+            if (change) Assert.Null(turn.DisplayText);
+            else
+            {
+                var trace = EllaiToolTrace.SerializeFlattened(turn.ObservedTools, false, []);
+                Assert.NotNull(trace);
+                Assert.DoesNotContain("workspace-1", trace);
+            }
+        }
 
         var history = await broker.InvokeAsync(context, new(EllaiToolNames.Imports, new Dictionary<string, string>
         { ["workspace_id"] = "workspace-1", ["organization_id"] = "org-zw-1", ["country"] = "ZW" }), default);
@@ -57,4 +88,27 @@ public sealed class EllaiImportToolsPostgresTests
     private static EllaiToolContext Context(ActorContext actor) => new("import-session", "import-scope", "public.product-help", null, 4, true,
         Actor: actor, DataClassification: EllaiProcessingClassification.UserProvidedNonSensitive,
         ConsentPurpose: EllaiConsentService.PublicProductHelpPurpose);
+
+    private sealed class DestinationClient : IChatClient
+    {
+        private int _calls;
+        public string ToolResultText { get; private set; } = string.Empty;
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (++_calls == 1)
+                return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                    [new FunctionCallContent("destinations", EllaiToolNames.ImportDestinations, new Dictionary<string, object?>())])));
+            var results = messages.SelectMany(message => message.Contents).OfType<FunctionResultContent>().ToArray();
+            Assert.Contains(results, result => result.CallId == "destinations");
+            ToolResultText = JsonSerializer.Serialize(results);
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                """{"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Done.","spokenText":"Done.","claims":[],"questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}""")));
+        }
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
 }

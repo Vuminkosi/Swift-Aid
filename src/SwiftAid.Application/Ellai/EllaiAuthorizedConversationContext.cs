@@ -222,6 +222,32 @@ public static class EllaiAuthorizedConversationContext
                     }
                     continue;
                 }
+                if (observation.ToolName == EllaiToolNames.ImportDestinations)
+                {
+                    var digest = observation.ImportDestinationsDigest;
+                    if (digest is null || observation.ReasonCode != EllaiToolReasonCodes.Ok ||
+                        observation.Evidence.Count != 0 || toolContext is null || invokeTool is null ||
+                        toolContext.SessionId != turn.SessionId || toolContext.Actor is null ||
+                        toolContext.Actor.ActorId != actor.ActorId || toolContext.Actor.AccessEpoch != actor.AccessEpoch)
+                        return decisions[turn.ClientUtteranceId] = false;
+                    try
+                    {
+                        var current = await invokeTool(toolContext, new EllaiToolRequest(EllaiToolNames.ImportDestinations,
+                            new Dictionary<string, string>()), ct).ConfigureAwait(false);
+                        ct.ThrowIfCancellationRequested();
+                        if (current.ToolName != EllaiToolNames.ImportDestinations || !current.Allowed ||
+                            current.DenialReason is not null || current.ReasonCode != EllaiToolReasonCodes.Ok ||
+                            current.Truncated || current.Evidence.Count != 0 || current.ItemCount is < 0 or > 20 ||
+                            EllaiObservedToolResult.ResultFingerprint(current) != digest)
+                            return decisions[turn.ClientUtteranceId] = false;
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (Exception error) when (error is not OutOfMemoryException)
+                    {
+                        return decisions[turn.ClientUtteranceId] = false;
+                    }
+                    continue;
+                }
                 if (observation.ToolName == EllaiToolNames.ClassificationEvidence)
                 {
                     var scope = observation.ClassificationReplayScope;

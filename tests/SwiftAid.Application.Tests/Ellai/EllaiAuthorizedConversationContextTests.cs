@@ -483,6 +483,35 @@ public sealed class EllaiAuthorizedConversationContextTests
     }
 
     [Fact]
+    public async Task ImportDestinationHistoryRequiresTheSameAuthorizedResult()
+    {
+        var request = new EllaiToolRequest(EllaiToolNames.ImportDestinations, new Dictionary<string, string>());
+        var result = new EllaiToolResult(EllaiToolNames.ImportDestinations, true, null, [], "private workspace", 1, false);
+        var observation = EllaiObservedToolResult.From(request, result);
+        Assert.NotNull(observation.ImportDestinationsDigest);
+        var trace = EllaiToolTrace.SerializeFlattened([observation], false, []);
+        Assert.NotNull(trace);
+        Assert.DoesNotContain("private workspace", trace);
+        Assert.Null(EllaiToolTrace.SerializeFlattened([observation with { ToolName = EllaiToolNames.Now }], false, []));
+        Assert.Null(EllaiToolTrace.SerializeFlattened([observation with { ImportDestinationsDigest = "invalid" }], false, []));
+        Assert.Null(EllaiObservedToolResult.From(request, result with { Truncated = true }).ImportDestinationsDigest);
+        var turns = new[] { Turn("prior", 1, "destinations?", "answer", trace), Turn("current", 2, "follow up", null, null) };
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            Actor: Actor(), AllowedTools: new HashSet<string> { EllaiToolNames.ImportDestinations });
+        async Task<bool> Retained(EllaiToolContext currentContext, EllaiToolResult current) =>
+            (await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), null, default,
+                toolContext: currentContext, invokeTool: (_, _, _) => Task.FromResult(current))).RetainedTurnIds.Contains("prior");
+        Assert.True(await Retained(context, result));
+        Assert.False(await Retained(context, result with { ResultSummary = "changed" }));
+        Assert.False(await Retained(context, result with { Allowed = false }));
+        Assert.False(await Retained(context with { AllowedTools = new HashSet<string>() }, result));
+        var oldTrace = EllaiToolTrace.SerializeFlattened([observation with { ImportDestinationsDigest = null }], false, []);
+        var oldTurns = new[] { Turn("prior", 1, "destinations?", "answer", oldTrace), Turn("current", 2, "follow up", null, null) };
+        Assert.Empty((await EllaiAuthorizedConversationContext.BuildAsync(oldTurns, "current", Actor(), null, default,
+            toolContext: context, invokeTool: (_, _, _) => Task.FromResult(result))).RetainedTurnIds);
+    }
+
+    [Fact]
     public async Task ClassificationHistoryRequiresTheSameAuthorizedResult()
     {
         var caseId = Guid.NewGuid();

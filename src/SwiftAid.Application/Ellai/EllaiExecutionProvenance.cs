@@ -29,7 +29,8 @@ public sealed record EllaiObservedToolResult(
     EllaiUiCatalogueReplayScope? UiCatalogueReplayScope = null, string? CapabilityVersion = null,
     string? ReceiptListDigest = null, string? ReceiptLookupId = null,
     EllaiUiObservationReplayScope? UiObservationReplayScope = null,
-    EllaiClassificationReplayScope? ClassificationReplayScope = null)
+    EllaiClassificationReplayScope? ClassificationReplayScope = null,
+    string? ImportDestinationsDigest = null)
 {
     public const string CurrentStaticFeatureVersion = "state-feature/1";
     public const string CurrentClockVersion = "server-clock/1";
@@ -96,7 +97,11 @@ public sealed record EllaiObservedToolResult(
                 !result.Truncated && result.Evidence.Count == 0 && result.ItemCount == 1 &&
                 request.Arguments.Count == 1 && request.Arguments.TryGetValue("case_id", out var rawCaseId) &&
                 Guid.TryParse(rawCaseId, out var caseId) && caseId != Guid.Empty
-                    ? new EllaiClassificationReplayScope(caseId, ResultFingerprint(result)) : null);
+                    ? new EllaiClassificationReplayScope(caseId, ResultFingerprint(result)) : null,
+            request.ToolName == EllaiToolNames.ImportDestinations && result.ToolName == request.ToolName &&
+                result.Allowed && result.DenialReason is null && result.ReasonCode == EllaiToolReasonCodes.Ok &&
+                !result.Truncated && result.Evidence.Count == 0 && result.ItemCount is >= 0 and <= 20 &&
+                request.Arguments.Count == 0 ? ResultFingerprint(result) : null);
     }
 
     public static bool IsCanonicalReceiptId(string? value) => value is { Length: 37 } &&
