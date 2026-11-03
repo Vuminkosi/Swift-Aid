@@ -63,8 +63,9 @@ async function main() {
         await page.waitForFunction(text => document.querySelector(".ellai-composer__response")?.textContent?.trim() === text, turn.assistantText);
         const completedMs = Date.now() - started;
         await thinking.waitFor({ state: "hidden" });
-        const originalSession = sessionId;
+        const originalSession = await page.evaluate(() => localStorage.getItem("swiftaid.ellai.session"));
         assert.ok(originalSession);
+        if (sessionId) assert.equal(originalSession, sessionId);
         latestPage = null;
         await page.reload();
         await input.waitFor();
