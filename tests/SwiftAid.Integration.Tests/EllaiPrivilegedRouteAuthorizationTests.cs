@@ -31,6 +31,100 @@ namespace SwiftAid.Integration.Tests;
 
 public sealed class EllaiPrivilegedRouteAuthorizationTests
 {
+    private sealed class LiveFrameworkHttpFactAttribute : FactAttribute
+    {
+        public LiveFrameworkHttpFactAttribute()
+        {
+            if (Environment.GetEnvironmentVariable("ELLAI_LIVE") != "1" ||
+                Environment.GetEnvironmentVariable("SWIFTAID_RUN_FRAMEWORK_POSTGRES_FIXTURES") != "1")
+                Skip = "Requires the configured live Muse route and dedicated disposable PostgreSQL fixture.";
+        }
+    }
+
+    [LiveFrameworkHttpFact]
+    public async Task GuestHttpFrameworkUsesLiveMuseAndDurableMultiTurnHistory()
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
+        string? sessionId = null;
+        try
+        {
+            await using var host = await StartApplicationAsync(frameworkWorker: true, frameworkFixture: fixture, liveModel: true);
+            using var http = host.GetTestClient();
+            var cookies = new Dictionary<string, string>(StringComparer.Ordinal);
+            void Merge(HttpResponseMessage response)
+            {
+                if (!response.Headers.TryGetValues("Set-Cookie", out var values)) return;
+                foreach (var value in values)
+                {
+                    var pair = value.Split(';', 2)[0];
+                    var index = pair.IndexOf('=');
+                    if (index > 0) cookies[pair[..index]] = pair[(index + 1)..];
+                }
+            }
+            async Task<HttpResponseMessage> PostAsync<T>(string path, T body, string token)
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = JsonContent.Create(body) };
+                request.Headers.TryAddWithoutValidation("Cookie", string.Join("; ", cookies.Select(item => $"{item.Key}={item.Value}")));
+                request.Headers.TryAddWithoutValidation("X-CSRF-TOKEN", token);
+                return await http.SendAsync(request);
+            }
+            using var antiforgery = await http.GetAsync("/api/v1/ellai/guest/antiforgery");
+            Merge(antiforgery);
+            var token = (await antiforgery.Content.ReadFromJsonAsync<EllaiGuestAntiforgeryToken>())!.RequestToken;
+            using var started = await PostAsync("/api/v1/ellai/guest/sessions",
+                new StartSessionRequest(EllaiMode.Ask, "live-framework-http", null, null, null, null), token);
+            Assert.Equal(System.Net.HttpStatusCode.OK, started.StatusCode);
+            Merge(started);
+            var session = (await started.Content.ReadFromJsonAsync<EllaiSessionView>())!;
+            sessionId = session.SessionId;
+            async Task<(EllaiSessionView Session, string Answer)> SendTurnAsync(string id, string text, EllaiSessionView current, int ordinal)
+            {
+                using var submitted = await PostAsync($"/api/v1/ellai/guest/sessions/{sessionId}/utterances",
+                    new SubmitUtteranceRequest(id, sessionId, current.SessionVersion, text, null, "typed", ordinal), token);
+                Assert.Equal(System.Net.HttpStatusCode.OK, submitted.StatusCode);
+                var accepted = (await submitted.Content.ReadFromJsonAsync<EllaiSessionView>())!;
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+                while (true)
+                {
+                    await Task.Delay(100, timeout.Token);
+                    await using var db = fixture.CreateDbContext();
+                    var store = new PostgresEllaiSessionStore(db);
+                    var saved = (await store.GetAsync(sessionId, timeout.Token))!;
+                    var turn = (await store.ReadConversationAsync(sessionId, saved.OwnerActorId!, timeout.Token))
+                        .Single(item => item.ClientUtteranceId == id);
+                    if (turn.CompletedAtUtc is null) continue;
+                    Assert.Equal("Completed", turn.Outcome);
+                    Assert.False(string.IsNullOrWhiteSpace(turn.AssistantText));
+                    return (accepted, turn.AssistantText!);
+                }
+            }
+            var first = await SendTurnAsync("live-turn-1", "Remember the word cobalt for our conversation. Reply briefly.", session, 1);
+            var second = await SendTurnAsync("live-turn-2", "What word did I ask you to remember?", first.Session, 2);
+            Assert.Contains("cobalt", second.Answer, StringComparison.OrdinalIgnoreCase);
+            using var feedRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/ellai/guest/sessions/{sessionId}/responses?cursor=0");
+            feedRequest.Headers.TryAddWithoutValidation("Cookie", string.Join("; ", cookies.Select(item => $"{item.Key}={item.Value}")));
+            using var feed = await http.SendAsync(feedRequest);
+            Assert.Equal(System.Net.HttpStatusCode.OK, feed.StatusCode);
+            var page = (await feed.Content.ReadFromJsonAsync<EllaiSessionResponsePageDto>())!;
+            Assert.Contains(page.Responses, item => item.ClientUtteranceId == "live-turn-2" && !item.IsFinal && !string.IsNullOrWhiteSpace(item.Text));
+            await using var verify = fixture.CreateDbContext();
+            var usage = await new PostgresEllaiUsageStore(verify).TotalsAsync(sessionId, default);
+            Assert.True(usage.Calls >= 2);
+            Assert.True(usage.TotalTokens > 0);
+        }
+        finally
+        {
+            if (sessionId is not null)
+            {
+                await using var db = fixture.CreateDbContext();
+                await db.Set<EllaiUsageSampleEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+                await db.Set<EllaiConsentGrantEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+                await db.Set<EllaiUtteranceEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+                await db.Set<EllaiCheckpointEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+                await db.Set<EllaiSessionEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+            }
+        }
+    }
     [FrameworkPostgresFact]
     public async Task GuestHttpConversationRecoversAfterTestHostRestartWithPostgres()
     {
@@ -779,7 +873,8 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
     private static async Task<WebApplication> StartApplicationAsync(
         string sessionOwnerId = "test-owner", string sessionStatus = "Active",
         bool hasCurrentScope = false, bool frameworkWorker = false,
-        CaseAuthorityPostgresFixture? frameworkFixture = null, IDataProtectionProvider? protection = null)
+        CaseAuthorityPostgresFixture? frameworkFixture = null, IDataProtectionProvider? protection = null,
+        bool liveModel = false)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
@@ -869,12 +964,14 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             else builder.Services.AddScoped<IEllaiUsageStore, PostgresEllaiUsageStore>();
             builder.Services.AddScoped(_ => new EllaiPromptBuilder("Synthetic test policy", "fixture"));
             builder.Services.AddScoped(sp => new EllaiToolBroker(new EllaiPolicyService(), sp.GetRequiredService<EllaiConsentService>()));
-            builder.Services.AddEllaiReasoningExecutor(new EllaiOptions
+            var modelOptions = liveModel ? EllaiOptions.Bind(Environment.GetEnvironmentVariable) : new EllaiOptions
             {
                 Enabled = true, ApiKey = "synthetic", ApiUrl = "https://fixture.invalid", ReasoningModel = "fixture"
-            }, "framework");
-            builder.Services.AddKeyedSingleton<IChatClient>(EllaiReasoningRegistration.FrameworkClientKey,
-                (sp, _) => sp.GetRequiredService<FrameworkHttpClient>());
+            };
+            builder.Services.AddEllaiReasoningExecutor(modelOptions, "framework");
+            if (!liveModel)
+                builder.Services.AddKeyedSingleton<IChatClient>(EllaiReasoningRegistration.FrameworkClientKey,
+                    (sp, _) => sp.GetRequiredService<FrameworkHttpClient>());
             builder.Services.AddHostedService<EllaiUtteranceWorker>();
         }
 

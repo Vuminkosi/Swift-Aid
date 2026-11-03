@@ -203,7 +203,20 @@ rejected, and a follow-up reaches the framework with the earlier exchange. The
 full endpoint authorization fixture passed 22/22, zero skipped, with
 `SWIFTAID_RUN_FRAMEWORK_POSTGRES_FIXTURES=1` and its dedicated loopback database.
 Both hosts ran in one test process with a synthetic model; actual Gateway
-process restart, deployed key storage and live Muse remain **NOT VERIFIED**.
+process restart, deployed key storage and live Muse across a restart remain
+**NOT VERIFIED**.
+
+`GuestHttpFrameworkUsesLiveMuseAndDurableMultiTurnHistory` passed 1/1 against
+the configured `muse-spark-1.3-contributor` endpoint and a disposable
+PostgreSQL database after 60 migrations. Through the guest HTTP routes, test
+host, worker and framework registration, two synthetic turns completed; the
+second answer recalled the word from the first, its response feed contained a
+non-final text chunk, and PostgreSQL recorded at least two model calls with
+nonzero usage. The provider route was supplied in process without committing
+credentials. Run the integration test filtered by this name with
+`ELLAI_LIVE=1`, the configured Ellai environment variables, and the dedicated
+PostgreSQL fixture opt-in. This was ASP.NET Core TestServer, not a deployed
+Gateway process, browser, voice or managed-case provider acceptance test.
 
 `FrameworkWorkerRecallsAuthorizedCaseFromPostgresAndQdrant` passed 1/1 using
 the actual outbox worker, scoped broker, PostgreSQL session/topic stores and
