@@ -361,6 +361,8 @@ public sealed class SessionSchedulingTests
             var publicSession = await service.GetPublicAsync(sessionId, CancellationToken.None);
             Assert.Equal("Cancelled", publicSession!.Status);
             Assert.Null(publicSession.CancellationReason);
+            Assert.Null(publicSession.ChannelLink);
+            Assert.NotNull((await service.GetStaffAsync(sessionId, "officer-1", CancellationToken.None))!.ChannelLink);
             var calendar = (await service.GetIcsAsync(sessionId, DateTimeOffset.UtcNow, CancellationToken.None))!;
             Assert.Contains("STATUS:CANCELLED", calendar, StringComparison.Ordinal);
             Assert.DoesNotContain(reason, calendar, StringComparison.Ordinal);

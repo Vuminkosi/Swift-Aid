@@ -294,6 +294,10 @@ public sealed class CommunitySessionServiceTests
         Assert.Null((await services.Service.GetPublicAsync(id, CancellationToken.None))!.CancellationReason);
         Assert.Null(Assert.Single(await services.Service.ListPublicAsync(null, CancellationToken.None)).CancellationReason);
         Assert.Null(Assert.Single((await services.Service.QueryPublicAsync(new PublicSessionQuery(), CancellationToken.None)).Items).CancellationReason);
+        Assert.Null((await services.Service.GetPublicAsync(id, CancellationToken.None))!.ChannelLink);
+        Assert.Null(Assert.Single(await services.Service.ListPublicAsync(null, CancellationToken.None)).ChannelLink);
+        Assert.Null(Assert.Single((await services.Service.QueryPublicAsync(new PublicSessionQuery(), CancellationToken.None)).Items).ChannelLink);
+        Assert.NotNull((await services.Service.GetStaffAsync(id, "officer-1", CancellationToken.None))!.ChannelLink);
         var calendar = (await services.Service.GetIcsAsync(id, Now, CancellationToken.None))!;
         var invitation = (await services.Service.GetInvitationTextAsync(id, CancellationToken.None))!;
         Assert.DoesNotContain(reason, calendar, StringComparison.Ordinal);

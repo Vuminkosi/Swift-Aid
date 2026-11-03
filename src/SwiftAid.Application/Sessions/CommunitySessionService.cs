@@ -331,7 +331,8 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
         // No authoritative public-rights and withdrawal lookup is wired here.
         // Preserve staff references, but do not serialize unverified references publicly.
         Array.Empty<StoredSessionMaterial>(),
-        ToContractChannel(session.ChannelType), session.PublicChannelLink,
+        ToContractChannel(session.ChannelType),
+        session.Status == CommunitySessionStatus.Cancelled ? null : session.PublicChannelLink,
         session.Status.ToString(), null, session.IcsSequence);
 
     private static DomainVisibility ToDomainVisibility(Contracts.Sessions.SessionVisibility visibility) =>
