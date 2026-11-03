@@ -2113,6 +2113,10 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("completed_at_utc");
 
+                    b.Property<string>("FrameworkSessionJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("framework_session_json");
+
                     b.Property<DateTimeOffset?>("LeaseExpiresAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("lease_expires_at_utc");
@@ -2158,6 +2162,8 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_ellai_utterances_attempt_count", "attempt_count >= 0");
 
                             t.HasCheckConstraint("ck_ellai_utterances_completed_response", "outcome <> 'Completed' OR (assistant_text IS NOT NULL AND length(btrim(assistant_text)) > 0 AND completed_at_utc IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_ellai_utterances_framework_session_size", "framework_session_json IS NULL OR octet_length(framework_session_json::text) <= 1048576");
 
                             t.HasCheckConstraint("ck_ellai_utterances_ids_nonempty", "length(btrim(session_id)) > 0 AND length(btrim(client_utterance_id)) > 0");
 

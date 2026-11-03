@@ -143,6 +143,9 @@ public sealed class EllaiUtteranceWorker(
                     ? EllaiUtteranceResolution.Completed(runOutcome.DisplayText, work.ControllerEpoch) with
                     {
                         UiProposalsJson = EllaiUiProposalPayload.Serialize(runOutcome.Decision?.UiIntents ?? []),
+                        FrameworkSessionJson = runOutcome.FrameworkSessionJson,
+                        ExpectedOwnerActorId = work.Actor.ActorId,
+                        ExpectedScopeEpoch = work.ScopeEpoch,
                         ToolTraceJson = runOutcome.InheritedObservations is null
                             ? EllaiToolTrace.Serialize(runOutcome.ObservedTools, runOutcome.HistoryIncluded, runOutcome.HistoryTurnIds)
                             : EllaiToolTrace.SerializeFlattened(runOutcome.ObservedTools, runOutcome.HistoryIncluded, runOutcome.InheritedObservations)

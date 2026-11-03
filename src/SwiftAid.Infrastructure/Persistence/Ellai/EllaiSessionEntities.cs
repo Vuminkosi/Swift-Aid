@@ -35,6 +35,7 @@ public sealed class EllaiUtteranceEntity
     public string? AssistantText { get; set; }
     public string? UiProposalsJson { get; set; }
     public string? ToolTraceJson { get; set; }
+    public string? FrameworkSessionJson { get; set; }
     public string Outcome { get; set; } = "Queued";
     public DateTimeOffset? LeaseExpiresAtUtc { get; set; }
     public int AttemptCount { get; set; }

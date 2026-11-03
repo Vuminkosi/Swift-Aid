@@ -90,6 +90,10 @@ public interface IEllaiUtteranceOutboxStore
         string sessionId, string ownerActorId, string clientUtteranceId, CancellationToken ct) =>
         ReadConversationAsync(sessionId, ownerActorId, ct);
 
+    /// <summary>Reads one completed checkpoint after its turn has passed current history authorization.</summary>
+    Task<string?> ReadFrameworkSessionAsync(string sessionId, string ownerActorId, string clientUtteranceId, CancellationToken ct) =>
+        Task.FromResult<string?>(null);
+
     Task<EllaiUtteranceOutboxItem?> ClaimNextAsync(
         DateTimeOffset nowUtc, DateTimeOffset leaseExpiresAtUtc, CancellationToken ct);
 
@@ -335,6 +339,17 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
         }
     }
 
+    public Task<string?> ReadFrameworkSessionAsync(string sessionId, string ownerActorId, string clientUtteranceId, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            return Task.FromResult(_sessions.TryGetValue(sessionId, out var session) && session.OwnerActorId == ownerActorId &&
+                _utterances.TryGetValue((sessionId, clientUtteranceId), out var turn) && turn.Outcome == "Completed"
+                    ? turn.FrameworkSessionJson : null);
+        }
+    }
+
     public Task<EllaiConversationTurn?> ReadLatestGuidanceTurnAsync(string sessionId, string ownerActorId, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -370,17 +385,22 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
         lock (_gate)
         {
             var key = (sessionId, clientUtteranceId);
+            var claimCheckAt = DateTimeOffset.UtcNow > completedAtUtc ? DateTimeOffset.UtcNow : completedAtUtc;
             if (_utterances.TryGetValue(key, out var item)
-                && item.CompletedAtUtc is null && item.AttemptCount == attemptCount)
+                && item.CompletedAtUtc is null && item.AttemptCount == attemptCount && item.Outcome == "Processing"
+                && item.PayloadJson is not null && item.LeaseExpiresAtUtc > claimCheckAt)
             {
                 if (resolution.ExpectedInteractionEpoch.HasValue && (!_sessions.TryGetValue(sessionId, out var session)
-                    || session.Status != "Active" || session.InteractionEpoch != resolution.ExpectedInteractionEpoch))
+                    || session.Status != "Active" || session.InteractionEpoch != resolution.ExpectedInteractionEpoch
+                    || resolution.ExpectedOwnerActorId is not null && session.OwnerActorId != resolution.ExpectedOwnerActorId
+                    || resolution.ExpectedScopeEpoch is not null && session.ScopeEpoch != resolution.ExpectedScopeEpoch))
                     resolution = EllaiUtteranceResolution.Cancelled;
                 _utterances[key] = item with
                 {
                     PayloadJson = null, LeaseExpiresAtUtc = null, CompletedAtUtc = completedAtUtc,
                     Outcome = resolution.Outcome, AssistantText = resolution.AssistantText, UiProposalsJson = resolution.UiProposalsJson,
                     ToolTraceJson = resolution.ToolTraceJson,
+                    FrameworkSessionJson = resolution.FrameworkSessionJson,
                 };
                 return Task.FromResult<EllaiUtteranceResolution?>(resolution);
             }
@@ -420,6 +440,7 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
         public string? AssistantText { get; init; }
         public string? UiProposalsJson { get; init; }
         public string? ToolTraceJson { get; init; }
+        public string? FrameworkSessionJson { get; init; }
         public string Outcome { get; init; } = "Queued";
     }
 

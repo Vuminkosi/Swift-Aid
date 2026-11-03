@@ -17,6 +17,7 @@ public sealed record EllaiUtteranceOutcome(
     public bool HistoryIncluded { get; init; }
     public IReadOnlyList<string>? HistoryTurnIds { get; init; }
     public IReadOnlyList<EllaiObservedToolResult>? InheritedObservations { get; init; }
+    public string? FrameworkSessionJson { get; init; }
 }
 
 /// <summary>Dependencies for one background run, resolved per scope by the
@@ -131,11 +132,19 @@ public static class EllaiUtteranceRunner
                 work.Actor, services.CaseQueue, ct, services.TechnicalDocs, services.Imports, services.ImportWorkspaces,
                 services.Dashboard, context, services.InvokeToolAsync).ConfigureAwait(false) : null;
         var history = authorizedHistory?.Messages ?? EllaiConversationContext.Build(conversation, work.ClientUtteranceId);
+        var checkpointTurnId = authorizedHistory is null ? null : conversation
+            .LastOrDefault(turn => turn.Outcome == "Completed" &&
+                authorizedHistory.RetainedTurnIds.Contains(turn.ClientUtteranceId, StringComparer.Ordinal))?.ClientUtteranceId;
+        var frameworkSession = checkpointTurnId is null || services.Outbox is null ? null :
+            await services.Outbox.ReadFrameworkSessionAsync(work.SessionId, work.Actor.ActorId, checkpointTurnId, ct).ConfigureAwait(false);
         var request = new EllaiLoopRequest(
             context, reasoningText, ForMode(work.Mode),
             EllaiToolBroker.DescribeCatalogue(work.AllowedTools), maxTokensPerTurn,
             work.CycleId, work.ControllerEpoch,
-            history, work.ActivePage, work.InteractionMode, guidanceState);
+            history, work.ActivePage, work.InteractionMode, guidanceState)
+        {
+            FrameworkSessionJson = frameworkSession
+        };
 
         async Task<bool> IsExecutionCurrentAsync(CancellationToken fenceCt)
         {
@@ -263,7 +272,8 @@ public static class EllaiUtteranceRunner
             ObservedTools = outcome.Completed ? outcome.ObservedTools : null,
             HistoryIncluded = history.Count > 0,
             HistoryTurnIds = authorizedHistory?.RetainedTurnIds,
-            InheritedObservations = authorizedHistory?.InheritedObservations
+            InheritedObservations = authorizedHistory?.InheritedObservations,
+            FrameworkSessionJson = outcome.Completed ? outcome.FrameworkSessionJson : null
         };
     }
 

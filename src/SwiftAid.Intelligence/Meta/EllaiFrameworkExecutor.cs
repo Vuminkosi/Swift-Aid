@@ -176,7 +176,8 @@ public sealed class EllaiFrameworkExecutor(
                     request.OnVerifiedStreamSegment,
                     request.RevalidateStreamObservations is null ? null :
                         async token => observationTraceComplete &&
-                            await request.RevalidateStreamObservations(observations.ToArray(), token).ConfigureAwait(false)).ConfigureAwait(false);
+                            await request.RevalidateStreamObservations(observations.ToArray(), token).ConfigureAwait(false),
+                    request.FrameworkSessionJson).ConfigureAwait(false);
             }
             catch (EllaiFrameworkFailureException failure) when (failure.Code is not ("ProviderUnavailable" or "UsageUnavailable"))
             {
@@ -192,7 +193,8 @@ public sealed class EllaiFrameworkExecutor(
             if (accepted) Trace(EllaiActivityKind.CycleCompleted, "verified");
             return new(true, result, null, agent.LastModelCallCount, calls, agent.LastRepairUsed)
             {
-                ObservedTools = observationTraceComplete ? observations.ToArray() : null
+                ObservedTools = observationTraceComplete ? observations.ToArray() : null,
+                FrameworkSessionJson = agent.LastFrameworkSessionJson
             };
         }
         finally

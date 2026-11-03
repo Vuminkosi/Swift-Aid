@@ -18,6 +18,7 @@ public sealed record EllaiCycleOutcome(
     /// <summary>Server-observed tool results for this execution. Null means no
     /// complete observation trace is available; it is never authorization.</summary>
     public IReadOnlyList<EllaiObservedToolResult>? ObservedTools { get; init; }
+    public string? FrameworkSessionJson { get; init; }
 }
 
 /// <summary>Bounded tool provenance, excluding result text and arbitrary arguments.</summary>

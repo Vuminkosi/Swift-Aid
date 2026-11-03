@@ -22,6 +22,7 @@ public sealed class EllaiFrameworkAgent
     public int LastModelCallCount { get; private set; }
     public string? LastFailureCode { get; private set; }
     public bool LastRepairUsed { get; private set; }
+    public string? LastFrameworkSessionJson { get; private set; }
 
     public async Task<EllaiDecision?> RunAsync(
         EllaiToolContext context, string instructions, IReadOnlyList<ChatMessage> messages, int maxOutputTokens,
@@ -31,7 +32,8 @@ public sealed class EllaiFrameworkAgent
         CancellationToken ct, Func<string, CancellationToken, ValueTask>? onTextDelta = null,
         Func<EllaiToolContext, EllaiToolRequest, CancellationToken, Task<EllaiToolResult>>? revalidateTool = null,
         Func<string, CancellationToken, ValueTask>? onVerifiedStreamSegment = null,
-        Func<CancellationToken, Task<bool>>? revalidateStreamObservations = null)
+        Func<CancellationToken, Task<bool>>? revalidateStreamObservations = null,
+        string? frameworkSessionJson = null)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(instructions);
@@ -44,6 +46,7 @@ public sealed class EllaiFrameworkAgent
         if (messages.Count == 0 || maxOutputTokens is < 1 or > 16384)
             throw new ArgumentException("Messages and a bounded token limit are required.");
         LastFailureCode = null;
+        LastFrameworkSessionJson = null;
         LastRepairUsed = false;
         LastModelCallCount = 0;
         async Task<bool> Current(CancellationToken token)
@@ -132,8 +135,24 @@ public sealed class EllaiFrameworkAgent
             ChatHistoryProvider = new InMemoryChatHistoryProvider(),
             ChatOptions = new ChatOptions { Instructions = instructions, Tools = tools.ToList(), MaxOutputTokens = maxOutputTokens }
         });
-        var session = await agent.CreateSessionAsync(cancellationToken: ct).ConfigureAwait(false);
-        session.SetInMemoryChatHistory(messages.Take(messages.Count - 1).ToList());
+        var history = messages.Take(messages.Count - 1).ToList();
+        var owner = context.Actor?.ActorId;
+        var restore = frameworkSessionJson is not null && owner is not null &&
+            EllaiFrameworkSessionCodec.IsCurrentScope(frameworkSessionJson, context.SessionId, owner, context.ScopeEpoch);
+        var session = restore
+            ? await EllaiFrameworkSessionCodec.RestoreAsync(agent, frameworkSessionJson!, context.SessionId,
+                owner!, context.ScopeEpoch, history, ct).ConfigureAwait(false)
+            : await agent.CreateSessionAsync(cancellationToken: ct).ConfigureAwait(false);
+        if (!restore) session.SetInMemoryChatHistory(history);
+        async Task SaveSessionAsync()
+        {
+            if (owner is null) return;
+            // Conversation is reauthorized from the journal at the next turn.
+            // Do not persist provider tool messages or model-generated history.
+            session.SetInMemoryChatHistory([]);
+            LastFrameworkSessionJson = await EllaiFrameworkSessionCodec.SerializeAsync(
+                agent, session, context.SessionId, owner, context.ScopeEpoch, ct).ConfigureAwait(false);
+        }
         var currentMessage = messages[^1];
         var streamedSegments = new List<string>();
         var streamingSuppressed = false;
@@ -276,6 +295,7 @@ public sealed class EllaiFrameworkAgent
                 LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
                 return null;
             }
+            await SaveSessionAsync().ConfigureAwait(false);
             return decision;
         }
         if (decision is null) return null;
@@ -308,6 +328,7 @@ public sealed class EllaiFrameworkAgent
             LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
             return null;
         }
+        await SaveSessionAsync().ConfigureAwait(false);
         return decision;
     }
 

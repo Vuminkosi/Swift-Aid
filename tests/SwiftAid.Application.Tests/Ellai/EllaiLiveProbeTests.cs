@@ -20,6 +20,37 @@ namespace SwiftAid.Application.Tests.Ellai;
 [Trait("Live", "Provider")]
 public sealed class EllaiLiveProbeTests
 {
+    [LiveFact]
+    public async Task LiveFrameworkRestoresSerializedOwnedSessionForNextTurn()
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
+        using var client = EllaiMuseChatClientFactory.Create(LiveOptions(), http);
+        var principal = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+            [new(System.Security.Claims.ClaimTypes.NameIdentifier, "synthetic-session-owner"),
+             new(SwiftAid.Application.Authorization.ActorContext.AccessEpochClaimType, "1")], "fixture"));
+        var actor = SwiftAid.Application.Authorization.ActorContext.FromValidatedPrincipal(principal);
+        var context = new EllaiToolContext("live-session-checkpoint", "scope", "public.product-help", null, 4, true,
+            Actor: actor, AllowedTools: new HashSet<string>());
+        var usage = new EllaiFrameworkUsage(context.SessionId, new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
+        const string instructions = "Answer briefly. Return JSON containing final_decision with schemaVersion 2, kind Answer, " +
+            "displayText, spokenText, claims, questions, uiIntents, planProposal, topicRefs, resumeSuggestion and stopReason. " +
+            "Use empty arrays and null for unused fields.";
+        var firstAgent = new EllaiFrameworkAgent(client);
+        var first = await firstAgent.RunAsync(context, instructions, [new ChatMessage(ChatRole.User, "Say hello briefly.")], 2048,
+            _ => Task.FromResult(true), (_, _, _) => throw new InvalidOperationException(), usage, default);
+        Assert.NotNull(first);
+        Assert.False(string.IsNullOrWhiteSpace(firstAgent.LastFrameworkSessionJson));
+
+        var resumed = new EllaiFrameworkAgent(client);
+        var second = await resumed.RunAsync(context, instructions,
+            [new ChatMessage(ChatRole.User, "Say hello briefly."), new ChatMessage(ChatRole.Assistant, first!.DisplayText),
+             new ChatMessage(ChatRole.User, "Say goodbye briefly.")], 2048,
+            _ => Task.FromResult(true), (_, _, _) => throw new InvalidOperationException(), usage, default,
+            frameworkSessionJson: firstAgent.LastFrameworkSessionJson);
+        Assert.NotNull(second);
+        Assert.False(string.IsNullOrWhiteSpace(resumed.LastFrameworkSessionJson));
+    }
+
     private sealed record ProbeDecisionEnvelope([property: JsonPropertyName("final_decision")] EllaiDecision FinalDecision);
 
     private sealed class SchemaProbeFactory : IEllaiFrameworkAgentFactory

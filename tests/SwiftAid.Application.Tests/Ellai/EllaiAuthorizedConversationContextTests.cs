@@ -171,15 +171,17 @@ public sealed class EllaiAuthorizedConversationContextTests
             Turn("current", 2, "follow-up", null, null) };
         var executor = new CapturingExecutor();
         var queue = new BatchQueue();
+        var outbox = new ConversationOutbox(turns);
         var work = new EllaiUtteranceWork("session", "scope", "next", "public.product-help", null,
             EllaiMode.Ask, 1, "cycle", Actor(), true, "consent/0",
             EllaiProcessingClassification.UserProvidedNonSensitive, EllaiProcessingClassification.UserProvidedNonSensitive,
             AllowedTools: new HashSet<string>(), ConsentPurpose: EllaiConsentService.PublicProductHelpPurpose,
             ClientUtteranceId: "current");
         await EllaiUtteranceRunner.RunOneAsync(work,
-            new(executor, null, null, new EllaiConsentService(), Outbox: new ConversationOutbox(turns), CaseQueue: queue), 256, default);
+            new(executor, null, null, new EllaiConsentService(), Outbox: outbox, CaseQueue: queue), 256, default);
         Assert.DoesNotContain(executor.Messages, message => message.Content == "private case answer");
         Assert.Equal(0, queue.Calls);
+        Assert.Empty(outbox.CheckpointReads);
     }
 
     [Fact]
@@ -194,14 +196,16 @@ public sealed class EllaiAuthorizedConversationContextTests
             Turn("current", 2, "current", null, null)
         };
         var executor = new CapturingExecutor();
+        var outbox = new ConversationOutbox(turns);
         var work = new EllaiUtteranceWork("session", "scope", "next", "public.product-help", null,
             EllaiMode.Ask, 1, "cycle", Actor(), true, "consent/0",
             EllaiProcessingClassification.UserProvidedNonSensitive, EllaiProcessingClassification.UserProvidedNonSensitive,
             ConsentPurpose: EllaiConsentService.PublicProductHelpPurpose, ClientUtteranceId: "current");
         await EllaiUtteranceRunner.RunOneAsync(work,
-            new(executor, null, null, new EllaiConsentService(), Outbox: new ConversationOutbox(turns)), 256, default);
+            new(executor, null, null, new EllaiConsentService(), Outbox: outbox), 256, default);
         Assert.Contains(executor.Messages, message => message.Content == "own answer");
         Assert.DoesNotContain(executor.Messages, message => message.Content == "other answer");
+        Assert.Equal(["prior"], outbox.CheckpointReads);
     }
 
     private sealed class CapturingExecutor : IEllaiReasoningExecutor, IEllaiHistoryAuthorizationRequired
@@ -1016,6 +1020,12 @@ public sealed class EllaiAuthorizedConversationContextTests
 
     private sealed class ConversationOutbox(IReadOnlyList<EllaiConversationTurn> turns) : IEllaiUtteranceOutboxStore
     {
+        public List<string> CheckpointReads { get; } = [];
+        public Task<string?> ReadFrameworkSessionAsync(string sessionId, string ownerActorId, string clientUtteranceId, CancellationToken ct)
+        {
+            CheckpointReads.Add(clientUtteranceId);
+            return Task.FromResult<string?>(null);
+        }
         public Task<IReadOnlyList<EllaiConversationTurn>> ReadConversationAsync(string sessionId, string ownerActorId, CancellationToken ct) => Task.FromResult(turns);
         public Task<EllaiConversationTurn?> ReadLatestGuidanceTurnAsync(string sessionId, string ownerActorId, CancellationToken ct) => throw new NotSupportedException();
         public Task<EllaiUtteranceOutboxItem?> ClaimNextAsync(DateTimeOffset nowUtc, DateTimeOffset leaseExpiresAtUtc, CancellationToken ct) => throw new NotSupportedException();

@@ -8,6 +8,40 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiUtteranceOutboxTests
 {
     [Fact]
+    public async Task ExpiredClaimCannotCommitFrameworkSessionBeforeReclaim()
+    {
+        var store = await CreateStoreAsync();
+        await AcceptAsync(store, "expired", 1, "payload");
+        var now = DateTimeOffset.UtcNow;
+        var claim = (await store.ClaimNextAsync(now, now.AddSeconds(1), default))!;
+        Assert.Null(await store.CompleteAsync(claim.SessionId, claim.ClientUtteranceId, claim.AttemptCount,
+            now.AddSeconds(1), default, EllaiUtteranceResolution.Completed("late", 2) with { FrameworkSessionJson = "{}" }));
+        var recovered = (await store.ClaimNextAsync(now.AddSeconds(2), now.AddMinutes(1), default))!;
+        Assert.Equal(2, recovered.AttemptCount);
+    }
+
+    [Fact]
+    public async Task ChangedScopeCannotCommitFrameworkSession()
+    {
+        var store = await CreateStoreAsync();
+        await AcceptAsync(store, "scope-change", 1, "payload");
+        var now = DateTimeOffset.UtcNow;
+        var claim = (await store.ClaimNextAsync(now, now.AddMinutes(1), default))!;
+        var session = (await store.GetAsync(claim.SessionId, default))!;
+        Assert.NotNull(await store.TryUpdateAsync(session with { SessionVersion = session.SessionVersion + 1,
+            ScopeEpoch = "changed-scope" }, session.SessionVersion, default));
+        var result = await store.CompleteAsync(claim.SessionId, claim.ClientUtteranceId, claim.AttemptCount, now, default,
+            EllaiUtteranceResolution.Completed("answer", session.InteractionEpoch) with
+            {
+                ExpectedOwnerActorId = session.OwnerActorId,
+                ExpectedScopeEpoch = session.ScopeEpoch,
+                FrameworkSessionJson = "{}"
+            });
+        Assert.Equal("Cancelled", result!.Outcome);
+        Assert.Null(result.FrameworkSessionJson);
+    }
+
+    [Fact]
     public async Task ExecutionHistoryIsAnchoredAndOwnerScopedInMemory()
     {
         var store = new InMemoryEllaiSessionStore();
@@ -50,11 +84,12 @@ public sealed class EllaiUtteranceOutboxTests
         Assert.Equal("Hello", processing.UserText);
         var retry = (await store.ClaimNextAsync(now.AddSeconds(2), now.AddMinutes(1), CancellationToken.None))!;
         await store.CompleteAsync(item.SessionId, item.ClientUtteranceId, item.AttemptCount, now,
-            CancellationToken.None, EllaiUtteranceResolution.Completed("stale answer", 2));
+            CancellationToken.None, EllaiUtteranceResolution.Completed("stale answer", 2) with { FrameworkSessionJson = "{\"attempt\":1}" });
         Assert.Null(Assert.Single(await store.ReadConversationAsync(item.SessionId, "actor-one", CancellationToken.None)).AssistantText);
         await store.CompleteAsync(retry.SessionId, retry.ClientUtteranceId, retry.AttemptCount, now,
             CancellationToken.None, EllaiUtteranceResolution.Completed("Hello back", 2) with
             {
+                FrameworkSessionJson = "{\"attempt\":2}",
                 UiProposalsJson = EllaiUiProposalPayload.Serialize([new(UiIntentKind.StartGuidance, "report", null, null,
                     new Dictionary<string, string> { ["objective"] = "Create a report" })])
             });
@@ -63,6 +98,9 @@ public sealed class EllaiUtteranceOutboxTests
         Assert.Equal("Hello back", completed.AssistantText);
         Assert.Equal(UiIntentKind.StartGuidance, Assert.Single(EllaiUiProposalPayload.Deserialize(completed.UiProposalsJson!)).Kind);
         Assert.Equal("Completed", completed.Outcome);
+        Assert.Equal("{\"attempt\":2}", await store.ReadFrameworkSessionAsync(item.SessionId, "actor-one", item.ClientUtteranceId, CancellationToken.None));
+        Assert.Null(await store.ReadFrameworkSessionAsync(item.SessionId, "another-owner", item.ClientUtteranceId, CancellationToken.None));
+        Assert.Empty(await store.ReadConversationForExecutionAsync(item.SessionId, "another-owner", item.ClientUtteranceId, CancellationToken.None));
         Assert.Empty(await store.ReadConversationAsync(item.SessionId, "another-owner", CancellationToken.None));
     }
 

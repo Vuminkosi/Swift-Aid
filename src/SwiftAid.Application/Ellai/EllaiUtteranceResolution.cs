@@ -7,6 +7,9 @@ public sealed record EllaiUtteranceResolution(string Outcome, string? AssistantT
     public string? UiProposalsJson { get; init; }
     /// <summary>Server-observed tool references for this turn, not authorization to replay it.</summary>
     public string? ToolTraceJson { get; init; }
+    public string? FrameworkSessionJson { get; init; }
+    public string? ExpectedOwnerActorId { get; init; }
+    public string? ExpectedScopeEpoch { get; init; }
 
     public static EllaiUtteranceResolution Completed(string text, long epoch)
     {
@@ -19,6 +22,9 @@ public sealed record EllaiUtteranceResolution(string Outcome, string? AssistantT
 
     public void Validate()
     {
+        if (FrameworkSessionJson is not null && (Outcome != "Completed" ||
+            System.Text.Encoding.UTF8.GetByteCount(FrameworkSessionJson) > 1_048_576))
+            throw new ArgumentException("Only completed decisions may retain a bounded framework session.");
         if (ToolTraceJson is not null)
         {
             if (Outcome != "Completed" || !EllaiToolTrace.IsValid(ToolTraceJson))

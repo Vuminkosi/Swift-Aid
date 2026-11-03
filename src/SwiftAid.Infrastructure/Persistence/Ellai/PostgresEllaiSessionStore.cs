@@ -449,6 +449,13 @@ public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext) : IEl
         return rows;
     }
 
+    public Task<string?> ReadFrameworkSessionAsync(string sessionId, string ownerActorId, string clientUtteranceId, CancellationToken ct) =>
+        _dbContext.Set<EllaiUtteranceEntity>().AsNoTracking()
+            .Where(turn => turn.SessionId == sessionId && turn.ClientUtteranceId == clientUtteranceId && turn.Outcome == "Completed" &&
+                _dbContext.Set<EllaiSessionEntity>().Any(session => session.SessionId == turn.SessionId && session.OwnerActorId == ownerActorId))
+            .Select(turn => turn.FrameworkSessionJson)
+            .SingleOrDefaultAsync(ct);
+
     public async Task<EllaiUtteranceResolution?> CompleteAsync(
         string sessionId, string clientUtteranceId, int attemptCount,
         DateTimeOffset completedAtUtc, CancellationToken ct, EllaiUtteranceResolution? resolution = null)
@@ -462,24 +469,33 @@ public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext) : IEl
             """).AsNoTracking().ToListAsync(ct).ConfigureAwait(false);
         var session = sessions.SingleOrDefault();
         if (resolution.ExpectedInteractionEpoch.HasValue && (session is null || session.Status != "Active"
-            || session.InteractionEpoch != resolution.ExpectedInteractionEpoch))
+            || session.InteractionEpoch != resolution.ExpectedInteractionEpoch
+            || resolution.ExpectedOwnerActorId is not null && session.OwnerActorId != resolution.ExpectedOwnerActorId
+            || resolution.ExpectedScopeEpoch is not null && session.ScopeEpoch != resolution.ExpectedScopeEpoch))
         {
             resolution = EllaiUtteranceResolution.Cancelled;
         }
 
         // Compare the claim attempt in the UPDATE itself: a reclaimed worker cannot acknowledge
         // or overwrite its successor. Response persistence and queue completion are one commit.
-        var changed = await _dbContext.Set<EllaiUtteranceEntity>()
-            .Where(turn => turn.SessionId == sessionId && turn.ClientUtteranceId == clientUtteranceId
-                && turn.AttemptCount == attemptCount && turn.CompletedAtUtc == null)
-            .ExecuteUpdateAsync(update => update
-                .SetProperty(turn => turn.Outcome, resolution.Outcome)
-                .SetProperty(turn => turn.AssistantText, resolution.AssistantText)
-                .SetProperty(turn => turn.UiProposalsJson, resolution.UiProposalsJson)
-                .SetProperty(turn => turn.ToolTraceJson, resolution.ToolTraceJson)
-                .SetProperty(turn => turn.WorkPayloadJson, (string?)null)
-                .SetProperty(turn => turn.LeaseExpiresAtUtc, (DateTimeOffset?)null)
-                .SetProperty(turn => turn.CompletedAtUtc, completedAtUtc), ct).ConfigureAwait(false);
+        await _dbContext.Set<EllaiUtteranceEntity>().FromSqlInterpolated($"""
+            SELECT * FROM ellai_utterances
+            WHERE session_id = {sessionId} AND client_utterance_id = {clientUtteranceId} FOR UPDATE
+            """).AsNoTracking().ToListAsync(ct).ConfigureAwait(false);
+        // clock_timestamp is evaluated by PostgreSQL after any row-lock wait;
+        // a worker cannot commit merely because its lease was live before waiting.
+        var changed = await _dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE ellai_utterances
+            SET outcome = {resolution.Outcome}, assistant_text = {resolution.AssistantText},
+                ui_proposals_json = CAST({resolution.UiProposalsJson} AS jsonb),
+                tool_trace_json = CAST({resolution.ToolTraceJson} AS jsonb),
+                framework_session_json = CAST({resolution.FrameworkSessionJson} AS jsonb),
+                work_payload_json = NULL, lease_expires_at_utc = NULL, completed_at_utc = {completedAtUtc}
+            WHERE session_id = {sessionId} AND client_utterance_id = {clientUtteranceId}
+              AND attempt_count = {attemptCount} AND completed_at_utc IS NULL AND outcome = 'Processing'
+              AND work_payload_json IS NOT NULL AND lease_expires_at_utc > {completedAtUtc}
+              AND lease_expires_at_utc > clock_timestamp()
+            """, ct).ConfigureAwait(false);
         await transaction.CommitAsync(ct).ConfigureAwait(false);
         return changed == 1 ? resolution : null;
     }

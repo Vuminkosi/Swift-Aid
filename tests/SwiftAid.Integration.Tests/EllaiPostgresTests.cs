@@ -783,6 +783,13 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
 
         using var model = new RecoveryClient();
         await RunFrameworkWorkerAsync(id, "turn-1", model, cache);
+        await using (var db = CreateFrameworkDbContext())
+        {
+            var checkpoint = await new PostgresEllaiSessionStore(db)
+                .ReadFrameworkSessionAsync(id, Actor.ActorId, "turn-1", default);
+            Assert.False(string.IsNullOrWhiteSpace(checkpoint));
+            Assert.DoesNotContain("First synthetic question", checkpoint, StringComparison.Ordinal);
+        }
         var second = first with { Utterance = "Second synthetic question", ClientUtteranceId = "turn-2", CycleId = "cycle-2" };
         await using (var db = CreateFrameworkDbContext())
         {
@@ -799,6 +806,9 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         var turns = await verified.ReadConversationAsync(id, Actor.ActorId, default);
         Assert.Equal(2, turns.Count);
         Assert.All(turns, turn => Assert.Equal("Completed", turn.Outcome));
+        var executionTurns = await verified.ReadConversationForExecutionAsync(id, Actor.ActorId, "turn-2", default);
+        foreach (var executionTurn in executionTurns)
+            Assert.False(string.IsNullOrWhiteSpace(await verified.ReadFrameworkSessionAsync(id, Actor.ActorId, executionTurn.ClientUtteranceId, default)));
         Assert.Empty(await verified.ReadConversationAsync(id, "different-owner", default));
         Assert.Contains("First synthetic question", model.LastMessages);
         Assert.Contains("Synthetic recovered answer.", model.LastMessages);
@@ -874,6 +884,68 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
     private readonly List<string> _frameworkSessionIds = new();
 
     public Task InitializeAsync() => Task.CompletedTask;
+
+    [FrameworkPostgresFact]
+    public async Task FrameworkCheckpointCommitsWithFencedTurnAndSurvivesNewContext()
+    {
+        var id = $"framework-checkpoint-{Guid.NewGuid():N}";
+        _frameworkSessionIds.Add(id);
+        var now = DateTimeOffset.UtcNow;
+        await using var firstDb = CreateFrameworkDbContext();
+        await firstDb.Database.MigrateAsync();
+        var first = new PostgresEllaiSessionStore(firstDb);
+        var session = new EllaiSessionRecord(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
+            0, 12, Actor.ActorId, "scope-test", null, null, now);
+        await first.CreateAsync(session, default);
+        Assert.NotNull(await first.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 },
+            1, "turn-1", default, "{\"utterance\":\"question\"}"));
+        var original = (await first.ClaimNextAsync(now, now.AddSeconds(1), default))!;
+        await using (var blockerDb = CreateFrameworkDbContext())
+        await using (var blocker = await blockerDb.Database.BeginTransactionAsync())
+        {
+            await blockerDb.Set<EllaiUtteranceEntity>().FromSqlInterpolated($"""
+                SELECT * FROM ellai_utterances WHERE session_id = {id} AND client_utterance_id = 'turn-1' FOR UPDATE
+                """).AsNoTracking().ToListAsync();
+            var late = first.CompleteAsync(id, "turn-1", original.AttemptCount, now, default,
+                EllaiUtteranceResolution.Completed("expired", 1) with { FrameworkSessionJson = "{\"attempt\":0}" });
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            Assert.False(late.IsCompleted);
+            await blocker.CommitAsync();
+            Assert.Null(await late);
+        }
+        await using var secondDb = CreateFrameworkDbContext();
+        var second = new PostgresEllaiSessionStore(secondDb);
+        var retry = (await second.ClaimNextAsync(now.AddSeconds(2), now.AddMinutes(1), default))!;
+        Assert.Null(await first.CompleteAsync(id, "turn-1", original.AttemptCount, now, default,
+            EllaiUtteranceResolution.Completed("stale", 1) with { FrameworkSessionJson = "{\"attempt\":1}" }));
+        Assert.NotNull(await second.CompleteAsync(id, "turn-1", retry.AttemptCount, now, default,
+            EllaiUtteranceResolution.Completed("answer", 1) with { FrameworkSessionJson = "{\"attempt\":2}" }));
+
+        await using var restoredDb = CreateFrameworkDbContext();
+        var restored = new PostgresEllaiSessionStore(restoredDb);
+        var checkpoint = await restored.ReadFrameworkSessionAsync(id, Actor.ActorId, "turn-1", default);
+        Assert.Equal(2, System.Text.Json.JsonDocument.Parse(checkpoint!).RootElement.GetProperty("attempt").GetInt32());
+        Assert.Null(await restored.ReadFrameworkSessionAsync(id, "foreign-owner", "turn-1", default));
+        Assert.Empty(await restored.ReadConversationForExecutionAsync(id, "foreign-owner", "turn-1", default));
+
+        var current = (await restored.GetAsync(id, default))!;
+        Assert.NotNull(await restored.TryAcceptUtteranceAsync(current with { SessionVersion = current.SessionVersion + 1,
+                CyclesUsed = current.CyclesUsed + 1 },
+            current.SessionVersion, "turn-2", default, "{\"utterance\":\"next\"}"));
+        var currentClaim = (await restored.ClaimNextAsync(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(1), default))!;
+        current = (await restored.GetAsync(id, default))!;
+        Assert.NotNull(await restored.TryUpdateAsync(current with { SessionVersion = current.SessionVersion + 1,
+            ScopeEpoch = "changed-scope" }, current.SessionVersion, default));
+        var denied = await restored.CompleteAsync(id, "turn-2", currentClaim.AttemptCount, DateTimeOffset.UtcNow, default,
+            EllaiUtteranceResolution.Completed("answer", current.InteractionEpoch) with
+            {
+                ExpectedOwnerActorId = Actor.ActorId,
+                ExpectedScopeEpoch = "scope-test",
+                FrameworkSessionJson = "{\"attempt\":3}"
+            });
+        Assert.Equal("Cancelled", denied!.Outcome);
+        Assert.Null(denied.FrameworkSessionJson);
+    }
 
     [EllaiPostgresFact]
     public async Task LatestGuidanceLookupSpansHistoryWindowAndEnforcesOwnerAndOutcome()

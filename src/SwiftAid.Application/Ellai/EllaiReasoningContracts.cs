@@ -49,6 +49,7 @@ public sealed record EllaiLoopRequest(
     string InteractionMode = "typed",
     string? GuidanceState = null)
 {
+    public string? FrameworkSessionJson { get; init; }
     public Func<string, CancellationToken, ValueTask>? OnVerifiedStreamSegment { get; init; }
     public Func<IReadOnlyList<EllaiObservedToolResult>, CancellationToken, Task<bool>>? RevalidateStreamObservations { get; init; }
 }
