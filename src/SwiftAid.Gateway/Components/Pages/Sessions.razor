@@ -18,6 +18,12 @@
 <PageTitle>Community sessions | SwiftAid</PageTitle>
 
 <div class="community-sessions-page">
+    @if (_deferredProposal is not null)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
+            An update could not be confirmed. Reopen the session when access returns to compare your submitted changes. This temporary copy lasts only while this page remains open.
+        </MudAlert>
+    }
     <PublicSessionsSurface @key="(RequestedSessionId, IsCalendarRoute, InitialRemindersView)" Sessions="_sessions"
                            Loading="_loadingList"
                            ErrorMessage="@ListError"
@@ -84,6 +90,8 @@
     private CommunitySessionView? _staffView;
     private SessionUpdateSubmission? _conflictProposal;
     private bool _proposalOutcomeUnknown;
+    private SessionUpdateSubmission? _deferredProposal;
+    private string? _deferredProposalActor;
     private SessionEditor? _sessionEditor;
     private bool HasPendingEditorInput() => _sessionEditor?.HasPendingInput == true;
     private Guid? _loadedRequestId;
@@ -139,6 +147,8 @@
                 !string.IsNullOrWhiteSpace(result.Value))
             {
                 _actorId = result.Value;
+                if (_deferredProposalActor is not null && !string.Equals(_deferredProposalActor, _actorId, StringComparison.Ordinal))
+                    ClearDeferredProposal();
                 if (!string.Equals(previousActorId, _actorId, StringComparison.Ordinal))
                 {
                     _managementCapabilities = SessionManagementPresentation.Unavailable();
@@ -148,6 +158,7 @@
                 return true;
             }
 
+            if (result.Code == UiCapabilityResultCode.Denied) ClearDeferredProposal();
             _actorId = null;
             _canManageSessions = false;
             _managementCapabilities = SessionManagementPresentation.Unavailable();
@@ -377,6 +388,15 @@
                 _staffView = session;
                 _managementCapabilities = presentation;
                 _canManageSessions = true;
+                if (capabilities.CanEdit && _deferredProposal is { } deferred &&
+                    deferred.SessionId == session.SessionId &&
+                    string.Equals(_deferredProposalActor, _actorId, StringComparison.Ordinal))
+                {
+                    _conflictProposal = deferred;
+                    _proposalOutcomeUnknown = true;
+                    ClearDeferredProposal();
+                    _serverError = "The update outcome could not be confirmed. Compare your proposal with the current version below.";
+                }
                 return;
             }
 
@@ -426,6 +446,7 @@
     {
         _ = InvokeAsync(async () =>
         {
+            ClearDeferredProposal();
             _ = await authenticationStateTask;
             await RefreshStaffAccessAsync(_editingSessionId, _editingSessionId is null ? null : _editingVersion);
             if (_canManageSessions && RequestedSessionId is { } id && id != Guid.Empty)
@@ -436,7 +457,17 @@
         });
     }
 
-    public void Dispose() => AuthenticationState.AuthenticationStateChanged -= OnAuthenticationStateChanged;
+    public void Dispose()
+    {
+        ClearDeferredProposal();
+        AuthenticationState.AuthenticationStateChanged -= OnAuthenticationStateChanged;
+    }
+
+    private void ClearDeferredProposal()
+    {
+        _deferredProposal = null;
+        _deferredProposalActor = null;
+    }
 
     private async Task LoadListAsync()
     {
@@ -733,6 +764,12 @@
         if (string.IsNullOrWhiteSpace(originalActorId) || !string.Equals(_actorId, originalActorId, StringComparison.Ordinal))
             return;
 
+        if (outcomeUnknown)
+        {
+            _deferredProposal = proposal;
+            _deferredProposalActor = originalActorId;
+        }
+
         await LoadStaffSessionAsync(proposal.SessionId);
         if (string.Equals(_actorId, originalActorId, StringComparison.Ordinal) &&
             _editingSessionId == proposal.SessionId && (outcomeUnknown || _editingVersion != proposal.ExpectedVersion) &&
@@ -740,6 +777,7 @@
         {
             _conflictProposal = proposal;
             _proposalOutcomeUnknown = outcomeUnknown;
+            if (outcomeUnknown) ClearDeferredProposal();
             _serverError = outcomeUnknown
                 ? "The update outcome could not be confirmed. Compare your proposal with the current version below."
                 : "The session changed before your update was saved. Compare your proposal with the current version below.";
