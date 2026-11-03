@@ -3247,6 +3247,20 @@ disposable fixture was recreated and the restoration was added. Durable keys
 across independent deployed processes, browser behavior, real provider output,
 and an independent security review remain NOT VERIFIED.
 
+The location replay key-ring test now creates independent data-protection
+providers over one private disposable directory. PASS: `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore
+-m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~EllaiLocationReplayTests' --logger 'console;verbosity=minimal'`
+passed 10, skipped the opt-in PostgreSQL case, and failed 0 with
+`OS=Windows_NT`. A recreated provider read the original token, a new key was
+selected after rotation, a later provider read both tokens, and revoking the
+old key made only its token unreadable. A different application discriminator
+also failed to read it. The private fixture removed its own key and revocation
+files and directories. These providers ran in one test process; deployed
+cross-process key sharing and production key-ring configuration remain
+NOT VERIFIED.
+
 ### Grounded audio timing probe — 2026-11-03
 
 PASS: `SWIFTAID_RUN_LIVE_ELLAI=1 SWIFTAID_REQUIRE_AUDIO_BEFORE_COMPLETION=1

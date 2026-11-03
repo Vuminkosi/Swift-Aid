@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Runtime.CompilerServices;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
@@ -197,6 +198,77 @@ public sealed class EllaiLocationReplayTests
 
     private static ActorContext Actor(string id) => ActorContext.FromValidatedPrincipal(new ClaimsPrincipal(new ClaimsIdentity(
         [new Claim(ClaimTypes.NameIdentifier, id), new Claim(ActorContext.AccessEpochClaimType, "1")], "fixture")));
+
+    [Fact]
+    public void ProtectedSearchSurvivesProviderRecreationAndKeyRotation()
+    {
+        var root = PrivateKeyRingTestDirectory.CreateRoot("swiftaid-location-replay");
+        var keys = PrivateKeyRingTestDirectory.CreateKeyDirectory(root);
+        try
+        {
+            ServiceProvider CreateServices(string applicationName)
+            {
+                var services = new ServiceCollection();
+                services.AddLogging();
+                services.AddDataProtection().SetApplicationName(applicationName).PersistKeysToFileSystem(new DirectoryInfo(keys));
+                return services.BuildServiceProvider();
+            }
+
+            var actor = Actor("protected-owner");
+            var context = new EllaiToolContext("protected-session", "scope", "public.product-help", null, 4, true, Actor: actor);
+            var arguments = new Dictionary<string, string> { ["q"] = "synthetic private search", ["country"] = "ZW" };
+            string original;
+            using (var first = CreateServices("location-replay-fixture"))
+            {
+                original = new EllaiLocationReplayProtector(first.GetRequiredService<IDataProtectionProvider>()).Protect(context, arguments);
+            }
+            Guid rotatedKeyId;
+            using (var second = CreateServices("location-replay-fixture"))
+            {
+                var protector = new EllaiLocationReplayProtector(second.GetRequiredService<IDataProtectionProvider>());
+                Assert.Equal(arguments["q"], protector.Unprotect(context, original)!["q"]);
+                rotatedKeyId = second.GetRequiredService<IKeyManager>()
+                    .CreateNewKey(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(90)).KeyId;
+            }
+            string rotated;
+            using (var third = CreateServices("location-replay-fixture"))
+            {
+                var protector = new EllaiLocationReplayProtector(third.GetRequiredService<IDataProtectionProvider>());
+                rotated = protector.Protect(context, arguments);
+                Assert.Equal(rotatedKeyId, new Guid(Convert.FromBase64String(rotated).AsSpan(4, 16)));
+                Assert.Equal(arguments["q"], protector.Unprotect(context, original)!["q"]);
+                Assert.Equal(arguments["q"], protector.Unprotect(context, rotated)!["q"]);
+            }
+            using (var fourth = CreateServices("location-replay-fixture"))
+            {
+                var protector = new EllaiLocationReplayProtector(fourth.GetRequiredService<IDataProtectionProvider>());
+                Assert.Equal(arguments["q"], protector.Unprotect(context, original)!["q"]);
+                Assert.Equal(arguments["q"], protector.Unprotect(context, rotated)!["q"]);
+                var originalKeyId = new Guid(Convert.FromBase64String(original).AsSpan(4, 16));
+                Assert.NotEqual(rotatedKeyId, originalKeyId);
+                fourth.GetRequiredService<IKeyManager>().RevokeKey(originalKeyId, "synthetic fixture revocation");
+            }
+            using (var revoked = CreateServices("location-replay-fixture"))
+            {
+                var protector = new EllaiLocationReplayProtector(revoked.GetRequiredService<IDataProtectionProvider>());
+                Assert.Null(protector.Unprotect(context, original));
+                Assert.Equal(arguments["q"], protector.Unprotect(context, rotated)!["q"]);
+            }
+            using (var other = CreateServices("different-application"))
+            {
+                Assert.Null(new EllaiLocationReplayProtector(other.GetRequiredService<IDataProtectionProvider>()).Unprotect(context, original));
+            }
+        }
+        finally
+        {
+            foreach (var file in Directory.EnumerateFiles(keys, "key-*.xml", SearchOption.TopDirectoryOnly))
+                File.Delete(file);
+            foreach (var file in Directory.EnumerateFiles(keys, "revocation-*.xml", SearchOption.TopDirectoryOnly))
+                File.Delete(file);
+            Directory.Delete(keys);
+            Directory.Delete(root);
+        }
+    }
 
     private sealed class Registry(bool empty, bool changed) : IGeographicRegistry
     {
