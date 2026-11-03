@@ -3146,3 +3146,25 @@ fault, not a process-level network-partition test; an authorization change
 after a successful check can still race bytes already in flight. Deployed
 Gateway, independent security review, and physical voice-device behavior
 remain NOT VERIFIED.
+
+### Gateway recovery on the verified branch — 2026-11-03
+
+PASS: on commit `4a09962`, the following focused integration run passed 3/3
+in 57 seconds, with no skips:
+
+```powershell
+dotnet test tests\SwiftAid.Integration.Tests\SwiftAid.Integration.Tests.csproj --no-build --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter 'FullyQualifiedName~GuestHttpFrameworkUsesLiveMuseAndDurableMultiTurnHistory|FullyQualifiedName~GuestHttpLiveMuseRecoversConversationAfterTestHostRestart|FullyQualifiedName~GuestHttpConversationRecoversAfterTestHostRestartWithPostgres' --logger 'console;verbosity=minimal'
+```
+
+The run enabled `ELLAI_LIVE` and the framework PostgreSQL fixture, supplied
+the existing Gateway's Ellai provider configuration privately to the test
+process, and used synthetic conversation data. Two tests exercised live Muse;
+the third used a deterministic model. They crossed an in-process Gateway and
+real PostgreSQL boundary, including multi-turn context, a brokered tool,
+streamed responses, and conversation recovery across test-host restart. The
+PostGIS 17 fixture was a task-owned container using tmpfs; it was removed after
+the run. No running application service or shared database was restarted.
+
+NOT VERIFIED: the deployed Gateway process, browser or device behavior,
+production data-protection configuration, and actual network partition or
+instantaneous revocation behavior. This run does not establish those gates.
