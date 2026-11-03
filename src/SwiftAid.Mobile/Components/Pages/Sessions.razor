@@ -17,6 +17,7 @@
                        InitialCalendarView="@(IsCalendarRoute && RequestedSessionId is null)"
                        Loading="_loading"
                        ErrorMessage="@_listError"
+                       SubscriptionsHref="/notifications"
                        OnRetry="LoadAsync"
                        PublicSessionBasePath="@CalendarBasePath"
                        QuerySessionsAsync="@(RequestedSessionId is null ? QuerySessionsAsync : null)"

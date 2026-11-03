@@ -21,6 +21,7 @@
     <PublicSessionsSurface @key="(RequestedSessionId, IsCalendarRoute, InitialRemindersView)" Sessions="_sessions"
                            Loading="_loadingList"
                            ErrorMessage="@ListError"
+                           SubscriptionsHref="/notifications"
                            OnRetry="LoadListAsync"
                            QuerySessionsAsync="@(RequestedSessionId is null ? QuerySessionsAsync : null)"
                            InitialCalendarView="@(IsCalendarRoute && RequestedSessionId is null)"

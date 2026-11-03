@@ -14,6 +14,29 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed class PublicSessionQueryStateTests
 {
+    [Theory]
+    [InlineData("/notifications", true)]
+    [InlineData(null, false)]
+    public async Task SubscriptionNavigationIsShownOnlyWhenHostProvidesIt(string? href, bool expected)
+    {
+        var registrations = new ServiceCollection();
+        registrations.AddLogging();
+        registrations.AddMudServices();
+        registrations.AddSingleton<IJSRuntime>(new UnavailableClipboard());
+        registrations.AddSingleton<NavigationManager>(new TestNavigationManager());
+        await using var services = registrations.BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        var markup = await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var component = await renderer.RenderComponentAsync<PublicSessionsSurface>(ParameterView.FromDictionary(
+                new Dictionary<string, object?> { [nameof(PublicSessionsSurface.SubscriptionsHref)] = href }));
+            return component.ToHtmlString();
+        });
+
+        Assert.Equal(expected, markup.Contains("My subscriptions", StringComparison.Ordinal));
+        if (expected) Assert.Contains("/notifications", markup, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void SessionDetailsDisambiguateRepeatedLocalTime()
     {

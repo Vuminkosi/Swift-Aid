@@ -44,6 +44,12 @@
         </div>
     </MudHidden>
 
+    @if (!string.IsNullOrWhiteSpace(SubscriptionsHref))
+    {
+        <MudButton Href="@SubscriptionsHref" Variant="Variant.Text" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.NotificationsActive">My subscriptions</MudButton>
+    }
+
     @if (ManagementNotice is { } managementNotice)
     {
         <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
@@ -427,6 +433,7 @@
     [Parameter] public string? ErrorMessage { get; set; }
     [Parameter] public EventCallback OnRetry { get; set; }
     [Parameter] public string? PublicSessionBasePath { get; set; } = "/public/v1/sessions";
+    [Parameter] public string? SubscriptionsHref { get; set; }
     [Parameter] public Func<PublicSessionQuery, Task<PublicSessionPage?>>? QuerySessionsAsync { get; set; }
     [Parameter] public bool InitialCalendarView { get; set; }
     [Parameter] public Func<Guid, Task<string?>>? LoadInvitationTextAsync { get; set; }
