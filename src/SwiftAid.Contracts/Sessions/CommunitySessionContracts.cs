@@ -179,6 +179,13 @@ public sealed record PublicSessionQuery(
     DateOnly? LocalDateTo = null,
     string? Status = null);
 
+/// <summary>Response feature marker for public query behavior introduced after the original search endpoint.</summary>
+public static class PublicSessionQueryFeatures
+{
+    public const string HeaderName = "X-SwiftAid-Session-Query-Features";
+    public const string StatusFilter = "status-v1";
+}
+
 /// <summary>Position for the next page of a public session query.</summary>
 public sealed record PublicSessionPosition(DateTimeOffset StartUtc, Guid SessionId);
 

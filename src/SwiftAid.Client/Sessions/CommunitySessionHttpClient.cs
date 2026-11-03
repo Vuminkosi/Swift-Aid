@@ -88,6 +88,13 @@ public sealed class CommunitySessionHttpClient(HttpClient httpClient)
                     LiveMetadata("public-community-sessions"), "The session search is invalid.");
             if (response.StatusCode != HttpStatusCode.OK)
                 return UiCapabilityResults.Unavailable<PublicSessionPage>("public-community-sessions");
+            if (!string.IsNullOrWhiteSpace(query.Status) &&
+                (!response.Headers.TryGetValues(PublicSessionQueryFeatures.HeaderName, out var features) ||
+                 !features.SelectMany(value => value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+                     .Contains(PublicSessionQueryFeatures.StatusFilter, StringComparer.OrdinalIgnoreCase)))
+            {
+                return UiCapabilityResults.Unavailable<PublicSessionPage>("public-community-session-status-filter");
+            }
             var page = await response.Content.ReadFromJsonAsync<PublicSessionPage>(JsonOptions, cancellationToken).ConfigureAwait(false);
             return page is null ? UiCapabilityResults.Unavailable<PublicSessionPage>("public-community-sessions")
                 : Success(page, "public-community-sessions");

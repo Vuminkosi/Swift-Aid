@@ -15,6 +15,7 @@ using Microsoft.Extensions.DependencyInjection;
 using OpenIddict.Validation.AspNetCore;
 using SwiftAid.Contracts.Sessions;
 using SwiftAid.Client.Presentation;
+using SwiftAid.Client.Sessions;
 using SwiftAid.Gateway.Endpoints;
 using SwiftAid.Gateway.Presentation;
 using SwiftAid.Gateway.Sessions;
@@ -327,6 +328,7 @@ public sealed class CommunitySessionEndpointTests
         using var response = await host.Client.GetAsync("/public/v1/sessions/search?search=water&country=ZW&category=Nutrition&language=en&status=Completed&localFrom=2026-11-01&limit=1");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains(PublicSessionQueryFeatures.StatusFilter, response.Headers.GetValues(PublicSessionQueryFeatures.HeaderName));
         var page = JsonSerializer.Deserialize<PublicSessionPage>(await response.Content.ReadAsStringAsync(), JsonOptions);
         Assert.NotNull(page);
         Assert.Equal(KnownSessionId, Assert.Single(page.Items).SessionId);
@@ -337,6 +339,19 @@ public sealed class CommunitySessionEndpointTests
         Assert.Equal("Completed", host.Service.LastQuery?.Status);
         Assert.Equal(new DateOnly(2026, 11, 1), host.Service.LastQuery?.LocalDateFrom);
         Assert.Equal(1, host.Service.LastQuery?.Limit);
+    }
+
+    [Fact]
+    public async Task PublicSearch_StatusCapabilityIsUnderstoodByTheHttpClient()
+    {
+        await using var host = await TestSessionHost.StartAsync(withPublished: true);
+        var client = new CommunitySessionHttpClient(host.Client);
+
+        var result = await client.QueryPublicResultAsync(new PublicSessionQuery(Status: "Scheduled"));
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("Scheduled", host.Service.LastQuery?.Status);
+        Assert.NotNull(result.Value);
     }
 
     [Theory]

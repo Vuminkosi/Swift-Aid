@@ -43,7 +43,9 @@ public sealed class CommunitySessionHttpClientTests
     {
         var view = PublishedView();
         var page = new PublicSessionPage([view], new PublicSessionPosition(view.StartUtc, view.SessionId));
-        var handler = new CapturingHandler(JsonResponse(HttpStatusCode.OK, page));
+        var response = JsonResponse(HttpStatusCode.OK, page);
+        response.Headers.Add(PublicSessionQueryFeatures.HeaderName, PublicSessionQueryFeatures.StatusFilter);
+        var handler = new CapturingHandler(response);
         var client = new CommunitySessionHttpClient(new HttpClient(handler) { BaseAddress = new Uri("https://gateway.test/") });
 
         var result = await client.QueryPublicResultAsync(new PublicSessionQuery(Search: "water & health", Sector: "Human Health", Topic: "Water & food", Language: "en", Limit: 1, Category: "Food & water", LocalDateFrom: new DateOnly(2026, 11, 1), Status: "Completed"));
@@ -52,6 +54,28 @@ public sealed class CommunitySessionHttpClientTests
         Assert.Equal(view.SessionId, Assert.Single(result.Value!.Items).SessionId);
         Assert.Equal(view.SessionId, result.Value.Next!.SessionId);
         Assert.Equal("/public/v1/sessions/search?search=water%20%26%20health&sector=Human%20Health&language=en&topic=Water%20%26%20food&category=Food%20%26%20water&status=Completed&localFrom=2026-11-01&limit=1", handler.LastRequest!.RequestUri!.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task StatusFilterFailsClosedWhenOlderServerDoesNotConfirmSupport()
+    {
+        var page = new PublicSessionPage([PublishedView()], null);
+        var client = Create(JsonResponse(HttpStatusCode.OK, page));
+        var result = await client.QueryPublicResultAsync(new PublicSessionQuery(Status: "Completed"));
+
+        Assert.False(result.Succeeded);
+        Assert.Null(result.Value);
+    }
+
+    [Fact]
+    public async Task QueriesWithoutStatusRemainCompatibleWithOlderServers()
+    {
+        var page = new PublicSessionPage([PublishedView()], null);
+        var client = Create(JsonResponse(HttpStatusCode.OK, page));
+        var result = await client.QueryPublicResultAsync(new PublicSessionQuery());
+
+        Assert.True(result.Succeeded);
+        Assert.Single(result.Value!.Items);
     }
 
     [Fact]

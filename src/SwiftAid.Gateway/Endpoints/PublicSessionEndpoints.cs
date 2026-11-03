@@ -88,6 +88,7 @@ public static class PublicSessionEndpoints
         {
             var page = await service.QueryPublicAsync(query, cancellationToken).ConfigureAwait(false);
             context.Response.Headers.CacheControl = "no-store";
+            context.Response.Headers[PublicSessionQueryFeatures.HeaderName] = PublicSessionQueryFeatures.StatusFilter;
             return Results.Json(page, options: JsonOptions);
         }
         catch (ArgumentException)
