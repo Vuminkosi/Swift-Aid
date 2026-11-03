@@ -8,6 +8,25 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiFrameworkToolTests
 {
     [Fact]
+    public async Task EveryFrameworkToolUsesItsCanonicalSchemaAndRejectsUnknownArguments()
+    {
+        foreach (var name in EllaiToolContractCatalog.All.Keys)
+        {
+            var invoked = false;
+            var tool = new EllaiFrameworkTool(name, (_, _) =>
+            {
+                invoked = true;
+                throw new InvalidOperationException("Malformed requests must not reach the broker.");
+            });
+            var canonical = JsonSerializer.Deserialize<JsonElement>(EllaiToolContractCatalog.ToJsonSchema(name));
+            Assert.True(JsonElement.DeepEquals(canonical, tool.JsonSchema), name);
+            await Assert.ThrowsAsync<ArgumentException>(async () =>
+                await tool.InvokeAsync(new AIFunctionArguments { ["unexpected_argument"] = "synthetic" }));
+            Assert.False(invoked, name);
+        }
+    }
+
+    [Fact]
     public async Task CatalogueUsesSnapshotOfServerProfileAndBrokerStillChecksIt()
     {
         var allowed = new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.ProductFacts };
