@@ -15,6 +15,38 @@ public sealed class EllaiAgentFrameworkContractTests
         """;
 
     [Fact]
+    public async Task FrameworkExecutorReportsBrokerDenialWithoutAcceptingAnswer()
+    {
+        using var client = new ScriptedClient(EllaiToolNames.Now, "unused", "example", ValidDecision, noArguments: true);
+        var executor = new EllaiFrameworkExecutor(client, new EllaiPromptBuilder("Policy text.", "test"),
+            new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService()), new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.Now });
+        var outcome = await executor.RunAsync(new EllaiLoopRequest(context, "time?", new EllaiRoleOverlay("ask", "help"),
+            "clock", 100, "cycle", 1), CancellationToken.None);
+        Assert.False(outcome.Completed);
+        Assert.Equal(EllaiToolReasonCodes.ConsentMissing, outcome.FailureCode);
+        Assert.Null(outcome.Decision);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ProviderErrorsAreSanitizedAtFrameworkBoundary(bool streaming)
+    {
+        using var client = new FailingClient();
+        var executor = new EllaiFrameworkExecutor(client, new EllaiPromptBuilder("Policy text.", "test"),
+            new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService()), new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal));
+        var error = await Assert.ThrowsAsync<EllaiFrameworkFailureException>(() => executor.RunAsync(new EllaiLoopRequest(context, "hello", new EllaiRoleOverlay("ask", "help"),
+            "chat", 100, "cycle", 1), CancellationToken.None,
+            onTextDelta: streaming ? (_, _) => ValueTask.CompletedTask : null));
+        Assert.Equal("ProviderUnavailable", error.Code);
+        Assert.DoesNotContain("fixture-secret", error.ToString());
+    }
+
+    [Fact]
     public async Task FrameworkSessionRestoresOnlyProvidedConversationHistory()
     {
         using var client = new ScriptedClient(EllaiToolNames.Now, "unused", "example", ValidDecision, noArguments: true);
@@ -61,7 +93,7 @@ public sealed class EllaiAgentFrameworkContractTests
         var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
             AllowedTools: new HashSet<string>(StringComparer.Ordinal));
         var invoked = false;
-        await Assert.ThrowsAsync<InvalidOperationException>(() => agent.RunAsync(context, "Test instructions",
+        await Assert.ThrowsAsync<EllaiFrameworkFailureException>(() => agent.RunAsync(context, "Test instructions",
             [new ChatMessage(ChatRole.User, "test")], 100, _ => Task.FromResult(true), (_, _, _) =>
             {
                 invoked = true;
@@ -140,7 +172,7 @@ public sealed class EllaiAgentFrameworkContractTests
             AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.Now });
         var checks = 0;
         var usageStore = new InMemoryEllaiUsageStore();
-        await Assert.ThrowsAsync<InvalidOperationException>(() => agent.RunAsync(context, "Test instructions",
+        await Assert.ThrowsAsync<EllaiFrameworkFailureException>(() => agent.RunAsync(context, "Test instructions",
             [new ChatMessage(ChatRole.User, "test")], 100, _ => Task.FromResult(++checks < 5),
             (_, request, _) => Task.FromResult(new EllaiToolResult(request.ToolName, true, null, [], "observation", 1, false)),
             new EllaiFrameworkUsage("session", new EllaiUsageLedger(), usageStore), CancellationToken.None));
@@ -259,6 +291,16 @@ public sealed class EllaiAgentFrameworkContractTests
                 [new UsageContent(new UsageDetails { InputTokenCount = 3, OutputTokenCount = 2 })]);
         }
 
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    private sealed class FailingClient : IChatClient
+    {
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default) => throw new InvalidOperationException("fixture-secret");
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new InvalidOperationException("fixture-secret");
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
         public void Dispose() { }
     }

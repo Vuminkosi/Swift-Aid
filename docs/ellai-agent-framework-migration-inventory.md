@@ -190,9 +190,12 @@ process-restart recovery remain unverified.
 `EllaiFrameworkExecutor` implements the application execution boundary using
 the shared framework prompt, filtered conversation, tool guard and usage store.
 An in-process fixture verifies a successful tool call and activity event. It
-is not Gateway-registered: pending-progress parity, precise blocked failure
-codes, exception sanitization, durable framework
-sessions and worker-level acceptance still require verification.
+is not Gateway-registered: durable framework sessions and worker-level
+acceptance still require verification. The executor emits pending-tool events,
+maps known authorization and budget denials to safe blocked codes, and
+sanitizes model-provider exceptions while preserving worker retry behavior.
+Focused tests cover denial and synthetic provider failures; live outage,
+timeout and long-running tool progress remain unverified.
 An in-memory worker integration fixture now runs this executor with a
 deterministic streaming `IChatClient`, checks the owner-filtered completed
 turn, response chunk, final reconciliation and usage sample. It does not test

@@ -12,6 +12,7 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
 {
     private readonly IChatClient _client = client ?? throw new ArgumentNullException(nameof(client));
     public int LastModelCallCount { get; private set; }
+    public string? LastFailureCode { get; private set; }
 
     public async Task<EllaiDecision?> RunAsync(
         EllaiToolContext context, string instructions, IReadOnlyList<ChatMessage> messages, int maxOutputTokens,
@@ -30,7 +31,9 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
             throw new ArgumentException("Usage must belong to the current session.", nameof(usage));
         if (messages.Count == 0 || maxOutputTokens is < 1 or > 16384)
             throw new ArgumentException("Messages and a bounded token limit are required.");
-        if (context.RemainingCalls <= 0 || !await isCurrent(ct).ConfigureAwait(false)) return null;
+        LastFailureCode = null;
+        if (context.RemainingCalls <= 0) { LastFailureCode = EllaiToolReasonCodes.BudgetExceeded; return null; }
+        if (!await isCurrent(ct).ConfigureAwait(false)) { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
 
         var evidence = new HashSet<EvidenceRef>();
         var guard = new EllaiFrameworkToolGuard(Math.Min(context.RemainingCalls, EllaiCycleRunner.MaxToolCalls),
@@ -84,7 +87,8 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
             }
         }
         LastModelCallCount = guardedClient.CallSequence;
-        if (guard.FailureCode is not null || !await isCurrent(ct).ConfigureAwait(false)) return null;
+        if (guard.FailureCode is not null) { LastFailureCode = guard.FailureCode; return null; }
+        if (!await isCurrent(ct).ConfigureAwait(false)) { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
 
         var decision = EllaiModelTurnParser.Parse(guardedClient.LastText).Turn?.FinalDecision;
         if (decision is null || EllaiDecisionValidator.Validate(decision).Count != 0) return null;
@@ -110,12 +114,15 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
             ChatOptions? options = null, CancellationToken cancellationToken = default)
         {
             if (!await isCurrent(cancellationToken).ConfigureAwait(false))
-                throw new InvalidOperationException("The Ellai session is no longer authorized.");
+                throw new EllaiFrameworkFailureException(EllaiToolReasonCodes.DeniedByPolicy);
             var boundedMessages = messages.ToArray();
             if (!usage.CanDispatch(boundedMessages, options))
-                throw new InvalidOperationException("The Ellai session budget is exhausted.");
+                throw new EllaiFrameworkFailureException(EllaiToolReasonCodes.BudgetExceeded);
             CallSequence++;
-            var response = await base.GetResponseAsync(boundedMessages, options, cancellationToken).ConfigureAwait(false);
+            ChatResponse response;
+            try { response = await base.GetResponseAsync(boundedMessages, options, cancellationToken).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception error) when (error is not OutOfMemoryException) { throw new EllaiFrameworkFailureException("ProviderUnavailable"); }
             await usage.RecordAsync(response, cancellationToken).ConfigureAwait(false);
             ValidateToolCalls(response.Messages.SelectMany(message => message.Contents), options);
             _lastText.Clear().Append(response.Text);
@@ -127,18 +134,20 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             if (!await isCurrent(cancellationToken).ConfigureAwait(false))
-                throw new InvalidOperationException("The Ellai session is no longer authorized.");
+                throw new EllaiFrameworkFailureException(EllaiToolReasonCodes.DeniedByPolicy);
             var boundedMessages = messages.ToArray();
             if (!usage.CanDispatch(boundedMessages, options))
-                throw new InvalidOperationException("The Ellai session budget is exhausted.");
+                throw new EllaiFrameworkFailureException(EllaiToolReasonCodes.BudgetExceeded);
             CallSequence++;
             _lastText.Clear();
             UsageDetails? details = null;
             var completed = false;
             try
             {
-                await foreach (var update in base.GetStreamingResponseAsync(boundedMessages, options, cancellationToken).ConfigureAwait(false))
+                await using var stream = CreateStreamSafe(boundedMessages, options, cancellationToken);
+                while (await MoveNextSafeAsync(stream, cancellationToken).ConfigureAwait(false))
                 {
+                    var update = stream.Current;
                     details = update.Contents.OfType<UsageContent>().LastOrDefault()?.Details ?? details;
                     ValidateToolCalls(update.Contents, options);
                     _lastText.Append(update.Text);
@@ -158,7 +167,28 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
             var allowed = options?.Tools?.OfType<AIFunctionDeclaration>()
                 .Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal) ?? new HashSet<string>(StringComparer.Ordinal);
             if (contents.OfType<FunctionCallContent>().Any(call => !string.IsNullOrEmpty(call.Name) && !allowed.Contains(call.Name)))
-                throw new InvalidOperationException("The model requested an unavailable tool.");
+                throw new EllaiFrameworkFailureException(EllaiToolReasonCodes.UnregisteredTool);
+        }
+
+        private static async ValueTask<bool> MoveNextSafeAsync(IAsyncEnumerator<ChatResponseUpdate> stream, CancellationToken ct)
+        {
+            try { return await stream.MoveNextAsync().ConfigureAwait(false); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception error) when (error is not OutOfMemoryException) { throw new EllaiFrameworkFailureException("ProviderUnavailable"); }
+        }
+
+        private IAsyncEnumerator<ChatResponseUpdate> CreateStreamSafe(IReadOnlyList<ChatMessage> messages,
+            ChatOptions? options, CancellationToken ct)
+        {
+            try { return base.GetStreamingResponseAsync(messages, options, ct).GetAsyncEnumerator(ct); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception error) when (error is not OutOfMemoryException) { throw new EllaiFrameworkFailureException("ProviderUnavailable"); }
         }
     }
+}
+
+/// <summary>Safe, non-provider diagnostic for an unsuccessful framework call.</summary>
+public sealed class EllaiFrameworkFailureException(string code) : InvalidOperationException("Ellai framework execution was stopped.")
+{
+    public string Code { get; } = code;
 }

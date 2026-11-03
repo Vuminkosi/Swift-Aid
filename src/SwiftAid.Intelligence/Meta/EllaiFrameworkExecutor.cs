@@ -48,9 +48,22 @@ public sealed class EllaiFrameworkExecutor(
                 }
                 Trace(EllaiActivityKind.ToolStarted, "read", tool.ToolName);
                 calls++;
-                var result = await (invokeToolAsync ?? broker.InvokeAsync)(context, tool, token).ConfigureAwait(false);
-                if (result.Allowed) Trace(EllaiActivityKind.ToolObservationAccepted);
-                return result;
+                var invocation = (invokeToolAsync ?? broker.InvokeAsync)(context, tool, token);
+                using var pending = CancellationTokenSource.CreateLinkedTokenSource(token);
+                try
+                {
+                    for (var update = 0; update < 2 && !invocation.IsCompleted; update++)
+                    {
+                        var delay = Task.Delay(TimeSpan.FromSeconds(update == 0 ? 8 : 20), pending.Token);
+                        if (await Task.WhenAny(invocation, delay).ConfigureAwait(false) == invocation
+                            || invocation.IsCompleted || token.IsCancellationRequested) break;
+                        Trace(EllaiActivityKind.ToolPending, "read", tool.ToolName);
+                    }
+                    var result = await invocation.ConfigureAwait(false);
+                    if (result.Allowed) Trace(EllaiActivityKind.ToolObservationAccepted);
+                    return result;
+                }
+                finally { await pending.CancelAsync().ConfigureAwait(false); }
             }
 
             var messages = (request.Conversation ?? []).Where(message => message.Role is "user" or "assistant")
@@ -58,14 +71,24 @@ public sealed class EllaiFrameworkExecutor(
                 .ToList();
             messages.Add(new ChatMessage(ChatRole.User, request.Utterance));
             var agent = new EllaiFrameworkAgent(client);
-            var result = await agent.RunAsync(request.Context,
-                new EllaiExecutionPromptBuilder(prompts, ledger).Build(request, frameworkNative: true),
-                messages, request.MaxTokensPerTurn, Current, Invoke,
-                new EllaiFrameworkUsage(request.Context.SessionId, ledger, usageStore), ct, onTextDelta).ConfigureAwait(false);
+            SwiftAid.Contracts.Ellai.EllaiDecision? result;
+            try
+            {
+                result = await agent.RunAsync(request.Context,
+                    new EllaiExecutionPromptBuilder(prompts, ledger).Build(request, frameworkNative: true),
+                    messages, request.MaxTokensPerTurn, Current, Invoke,
+                    new EllaiFrameworkUsage(request.Context.SessionId, ledger, usageStore), ct, onTextDelta).ConfigureAwait(false);
+            }
+            catch (EllaiFrameworkFailureException failure) when (failure.Code != "ProviderUnavailable")
+            {
+                Trace(EllaiActivityKind.CycleBlocked, BlockedDetail(failure.Code));
+                return new(false, null, "The assistant could not complete this request.", agent.LastModelCallCount, calls, false, failure.Code);
+            }
             if (result is null)
             {
-                Trace(EllaiActivityKind.CycleBlocked, "invalid");
-                return new(false, null, "The assistant could not produce a verified decision.", agent.LastModelCallCount, calls, false, "InvalidDecision");
+                var code = agent.LastFailureCode ?? "InvalidDecision";
+                Trace(EllaiActivityKind.CycleBlocked, BlockedDetail(code));
+                return new(false, null, "The assistant could not produce a verified decision.", agent.LastModelCallCount, calls, false, code);
             }
             if (accepted) Trace(EllaiActivityKind.CycleCompleted, "verified");
             return new(true, result, null, agent.LastModelCallCount, calls, false);
@@ -75,4 +98,12 @@ public sealed class EllaiFrameworkExecutor(
             Volatile.Write(ref _active, 0);
         }
     }
+
+    private static string BlockedDetail(string code) => code switch
+    {
+        EllaiToolReasonCodes.BudgetExceeded => "budget",
+        EllaiToolReasonCodes.ConsentMissing or EllaiToolReasonCodes.DeniedByPolicy or EllaiToolReasonCodes.MissingScope => "denied",
+        EllaiToolReasonCodes.Unavailable or "ProviderUnavailable" => "unavailable",
+        _ => "invalid"
+    };
 }
