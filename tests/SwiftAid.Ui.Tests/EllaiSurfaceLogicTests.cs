@@ -2822,6 +2822,111 @@ public sealed partial class EllaiSurfaceLogicTests
     }
 
     [Fact]
+    public async Task MissingTargetWarningMovesWithTheCurrentStepAndClearsForValidation()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), "");
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = BonboardingTourStatus.Waiting;
+        proxy.CurrentStep = new BonboardingStepDefinition { Id = "first" };
+        var first = new GuidancePlanStep("first", "report.subject", "choose-report-subject", PlanStepBehavior.GuideHuman,
+            null, null, [], [], "Choose the subject.", null);
+        var second = new GuidancePlanStep("second", "report.narrative", "record-observations", PlanStepBehavior.GuideHuman,
+            null, null, [], [], "Describe the report.", null);
+        SetField(host, "_generatedTour", tour);
+        SetField(host, "_generatedPlan", new ValidatedGuidancePlan("plan", 1, null, "Initial", ["first", "second"], [], [], [first, second], [], "catalogue", "contract"));
+        SetField(host, "_latestGuidanceObservation", new UiObservationReport("view", "context", "web", [], []));
+        await InvokeAsync(host, "UpdateUnavailableGuidanceTarget");
+        Assert.Equal("first", GetField<string?>(host, "_unavailableObservedStepId"));
+
+        proxy.CurrentStep = new BonboardingStepDefinition { Id = "second" };
+        await InvokeAsync(host, "UpdateUnavailableGuidanceTarget");
+        Assert.True(GetField<bool>(host, "_guidanceReplanRequired"));
+        Assert.Equal("second", GetField<string?>(host, "_unavailableObservedStepId"));
+
+        SetField(host, "_validationGuidanceText", "Describe what happened.");
+        await InvokeAsync(host, "UpdateUnavailableGuidanceTarget");
+        Assert.False(GetField<bool>(host, "_guidanceReplanRequired"));
+        Assert.Null(GetField<string?>(host, "_guidanceNotice"));
+        Assert.Null(GetField<string?>(host, "_unavailableObservedStepId"));
+    }
+
+    [Fact]
+    public async Task MissingTargetWarningClearsWhenTheNextStepIsReady()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), "");
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = BonboardingTourStatus.Running;
+        proxy.CurrentStep = new BonboardingStepDefinition { Id = "first" };
+        var first = new GuidancePlanStep("first", "report.subject", "choose-report-subject", PlanStepBehavior.GuideHuman,
+            null, null, [], [], "Choose the subject.", null);
+        var second = new GuidancePlanStep("second", "report.narrative", "record-observations", PlanStepBehavior.GuideHuman,
+            null, null, [], [], "Describe the report.", null);
+        SetField(host, "_generatedTour", tour);
+        SetField(host, "_generatedPlan", new ValidatedGuidancePlan("plan", 1, null, "Initial", ["first", "second"], [], [], [first, second], [], "catalogue", "contract"));
+        SetField(host, "_latestGuidanceObservation", new UiObservationReport("view", "context", "web", [], []));
+        await InvokeAsync(host, "UpdateUnavailableGuidanceTarget");
+        proxy.CurrentStep = new BonboardingStepDefinition { Id = "second" };
+        SetField(host, "_latestGuidanceObservation", new UiObservationReport("view", "next", "web", ["report.narrative"], [new("report.narrative", UiObservationState.Ready)]));
+
+        await InvokeAsync(host, "UpdateUnavailableGuidanceTarget");
+
+        Assert.False(GetField<bool>(host, "_guidanceReplanRequired"));
+        Assert.Null(GetField<string?>(host, "_guidanceNotice"));
+    }
+
+    [Fact]
+    public async Task TargetRecoveryDoesNotClearAnIndependentReplanNotice()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), "");
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = BonboardingTourStatus.Waiting;
+        proxy.CurrentStep = new BonboardingStepDefinition { Id = "step" };
+        var step = new GuidancePlanStep("step", "report.subject", "choose-report-subject", PlanStepBehavior.GuideHuman,
+            null, null, [], [], "Choose the subject.", null);
+        SetField(host, "_generatedTour", tour);
+        SetField(host, "_generatedPlan", new ValidatedGuidancePlan("plan", 1, null, "Initial", ["step"], [], [], [step], [], "catalogue", "contract"));
+        SetField(host, "_latestGuidanceObservation", new UiObservationReport("view", "context", "web", [], []));
+        await InvokeAsync(host, "UpdateUnavailableGuidanceTarget");
+        SetField(host, "_guidanceNotice", "Permissions changed; replan required.");
+        SetField(host, "_latestGuidanceObservation", new UiObservationReport("view", "next", "web", ["report.subject"], [new("report.subject", UiObservationState.Ready)]));
+
+        await InvokeAsync(host, "UpdateUnavailableGuidanceTarget");
+
+        Assert.True(GetField<bool>(host, "_guidanceReplanRequired"));
+        Assert.Equal("Permissions changed; replan required.", GetField<string?>(host, "_guidanceNotice"));
+        Assert.Null(GetField<string?>(host, "_unavailableObservedStepId"));
+    }
+
+    [Fact]
+    public async Task DisplayedReceiptClearsPreviousMissingSubmitControlWarning()
+    {
+        var context = new EllaiDisplayedReceiptContext();
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), "", context);
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = BonboardingTourStatus.Waiting;
+        proxy.CurrentStep = new BonboardingStepDefinition { Id = "submit" };
+        var step = new GuidancePlanStep("submit", "report.submit", "submit-report", PlanStepBehavior.GuideHuman,
+            null, null, [], [], "Submit using the report form.", null);
+        SetField(host, "_generatedTour", tour);
+        SetField(host, "_generatedPlan", new ValidatedGuidancePlan("plan", 1, null, "Initial", ["submit"], [], [], [step], [], "catalogue", "contract"));
+        SetField(host, "_latestGuidanceObservation", new UiObservationReport("view", "context", "web", [], []));
+        await InvokeAsync(host, "UpdateUnavailableGuidanceTarget");
+        Assert.True(GetField<bool>(host, "_guidanceReplanRequired"));
+
+        context.Update(this, new SwiftAid.Contracts.Intake.IntakeReceipt(Guid.NewGuid(), Guid.NewGuid(),
+            SwiftAid.Contracts.Intake.IntakeStatus.ReceivedUnverified, SwiftAid.Contracts.Intake.IntakeRoutingStatus.NeedsRouting, DateTimeOffset.UtcNow));
+        await InvokeAsync(host, "UpdateUnavailableGuidanceTarget");
+
+        Assert.False(GetField<bool>(host, "_guidanceReplanRequired"));
+        Assert.Null(GetField<string?>(host, "_guidanceNotice"));
+        Assert.Empty(proxy.Calls);
+    }
+
+    [Fact]
     public async Task FindingAnotherWayReplansSameConversationWithoutCancellingItsCheckpointOrDraft()
     {
         var client = new FakeReviewClient();

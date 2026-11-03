@@ -10,6 +10,7 @@ public partial class EllaiGuidanceHost
     private IJSObjectReference? _uiObservationModule;
     private UiObservationReport? _latestGuidanceObservation;
     private string? _unavailableObservedStepId;
+    private const string UnavailableTargetNotice = "The current control is unavailable. Find another way to continue.";
 
     private async Task MonitorUiObservationsAsync()
     {
@@ -109,30 +110,38 @@ public partial class EllaiGuidanceHost
     {
         if (_generatedTour?.Status is not (Bit.Bonboarding.BonboardingTourStatus.Running or Bit.Bonboarding.BonboardingTourStatus.Waiting) ||
             CurrentGuidanceStep is not { } step || _latestGuidanceObservation is not { } observation) return;
+        if (_unavailableObservedStepId is { } previous &&
+            (previous != step.StepKey || _validationGuidanceText is not null))
+            ClearUnavailableObservedTarget();
         if (_validationGuidanceText is not null) return;
         if (step.ControlId is "report.submit" or "report.receipt" &&
-            Services.GetService(typeof(EllaiDisplayedReceiptContext)) is EllaiDisplayedReceiptContext { Current: not null }) return;
+            Services.GetService(typeof(EllaiDisplayedReceiptContext)) is EllaiDisplayedReceiptContext { Current: not null })
+        {
+            if (_unavailableObservedStepId == step.StepKey) ClearUnavailableObservedTarget();
+            return;
+        }
         // Accepted input can legitimately disappear when the wizard moves forward.
         var completed = observation.CompletedControlIds?.Contains(step.ControlId) == true;
         var state = observation.ControlStates?.SingleOrDefault(item => item.ControlId == step.ControlId);
         if (completed || state?.State == UiObservationState.Ready)
         {
             if (_unavailableObservedStepId == step.StepKey)
-            {
-                _unavailableObservedStepId = null;
-                if (_guidanceReplanRequired && _guidanceNotice == "The current control is unavailable. Find another way to continue.")
-                {
-                    _guidanceReplanRequired = false;
-                    _guidanceNotice = null;
-                    StateHasChanged();
-                }
-            }
+                ClearUnavailableObservedTarget();
             return;
         }
         if (_guidanceReplanRequired) return;
         _guidanceReplanRequired = true;
         _unavailableObservedStepId = step.StepKey;
-        _guidanceNotice = "The current control is unavailable. Find another way to continue.";
+        _guidanceNotice = UnavailableTargetNotice;
+        StateHasChanged();
+    }
+
+    private void ClearUnavailableObservedTarget()
+    {
+        _unavailableObservedStepId = null;
+        if (!_guidanceReplanRequired || _guidanceNotice != UnavailableTargetNotice) return;
+        _guidanceReplanRequired = false;
+        _guidanceNotice = null;
         StateHasChanged();
     }
 
