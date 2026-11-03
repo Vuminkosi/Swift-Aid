@@ -159,7 +159,7 @@ public partial class EllaiGuidanceHost
                 EllaiGuidanceControlProposal.ReadCommand(control.Proposal) is { } command)
             {
                 _lastGuidanceControlProposalId = control.ProposalId;
-                if (command == "stop-speech") StopResponseAudio();
+                if (command == "stop-speech") DisableResponseAudio();
                 else _ = DispatchConversationalGuidanceControlAsync(command);
             }
             return;

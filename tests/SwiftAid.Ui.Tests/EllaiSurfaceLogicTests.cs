@@ -362,6 +362,28 @@ public sealed partial class EllaiSurfaceLogicTests
         Assert.Same(tour, GetField<IBonboardingTourSession?>(host, "_generatedTour"));
     }
 
+    [Fact]
+    public async Task StopSpeakingDisablesLaterNarrationWithoutCancellingGuidance()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), string.Empty);
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = BonboardingTourStatus.Running;
+        SetField(host, "_generatedTour", tour);
+        SetField(host, "_readResponsesAloud", true);
+        var turn = new EllaiConversationTurnDto("stop", 2, "Stop speaking", "Requested", "Completed", 1, DateTimeOffset.UtcNow)
+        {
+            UiProposals = [new("stop-proposal", new(UiIntentKind.ControlGuidance, "ellai.guidance", null, null,
+                new Dictionary<string, string> { ["command"] = "stop-speech" }))],
+        };
+
+        await InvokeAsync(host, "ObserveGuidanceProposal", turn, true);
+
+        Assert.False(GetField<bool>(host, "_readResponsesAloud"));
+        Assert.Same(tour, GetField<IBonboardingTourSession?>(host, "_generatedTour"));
+        Assert.Empty(proxy.Calls);
+    }
+
     [Theory]
     [InlineData("back", false)]
     [InlineData("back", true)]
