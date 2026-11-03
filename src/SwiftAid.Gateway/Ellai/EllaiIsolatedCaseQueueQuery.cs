@@ -8,19 +8,25 @@ namespace SwiftAid.Gateway.Ellai;
 internal sealed class EllaiIsolatedCaseQueueQuery(IServiceProvider services, EllaiIsolatedToolCalls calls) : ICaseQueueQuery
 {
     public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CancellationToken ct) =>
-        ReadAsync(actor, limit, null, ct);
+        ReadAsync(actor, limit, null, null, ct);
+
+    public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, string? cursor, CancellationToken ct) =>
+        ReadAsync(actor, limit, null, cursor, ct);
 
     public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CaseQueueFilter filter, CancellationToken ct) =>
-        ReadAsync(actor, limit, filter, ct);
+        ReadAsync(actor, limit, filter, null, ct);
 
-    private Task<CaseQueueResult> ReadAsync(ActorContext actor, int? limit, CaseQueueFilter? filter, CancellationToken ct) =>
+    public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CaseQueueFilter filter, string? cursor, CancellationToken ct) =>
+        ReadAsync(actor, limit, filter, cursor, ct);
+
+    private Task<CaseQueueResult> ReadAsync(ActorContext actor, int? limit, CaseQueueFilter? filter, string? cursor, CancellationToken ct) =>
         calls.RunAsync(async token =>
         {
             await using var scope = services.CreateAsyncScope();
             var query = scope.ServiceProvider.GetRequiredService<ICaseQueueQuery>();
             token.ThrowIfCancellationRequested();
             return filter is null
-                ? await query.GetMineAsync(actor, limit, token).ConfigureAwait(false)
-                : await query.GetMineAsync(actor, limit, filter, token).ConfigureAwait(false);
+                ? await query.GetMineAsync(actor, limit, cursor, token).ConfigureAwait(false)
+                : await query.GetMineAsync(actor, limit, filter, cursor, token).ConfigureAwait(false);
         }, ct);
 }
