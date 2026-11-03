@@ -42,15 +42,18 @@ public sealed class EllaiFrameworkExecutor(
                 (reauthorizeAsync is null || await reauthorizeAsync(0, token).ConfigureAwait(false)) &&
                 (isExecutionCurrentAsync is null || await isExecutionCurrentAsync(token).ConfigureAwait(false));
 
-            async Task<EllaiToolResult> Invoke(EllaiToolContext context, EllaiToolRequest tool, CancellationToken token)
+            async Task<EllaiToolResult> InvokeCore(EllaiToolContext context, EllaiToolRequest tool, CancellationToken token, bool revalidation)
             {
-                if (!accepted)
+                if (!revalidation && !accepted)
                 {
                     accepted = true;
                     Trace(EllaiActivityKind.OperationAccepted);
                 }
-                Trace(EllaiActivityKind.ToolStarted, "read", tool.ToolName);
-                calls++;
+                if (!revalidation)
+                {
+                    Trace(EllaiActivityKind.ToolStarted, "read", tool.ToolName);
+                    calls++;
+                }
                 using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
                 deadline.CancelAfter(_toolTimeout);
                 var invocation = (invokeToolAsync ?? broker.InvokeAsync)(context, tool, deadline.Token);
@@ -62,12 +65,12 @@ public sealed class EllaiFrameworkExecutor(
                         var delay = Task.Delay(TimeSpan.FromSeconds(update == 0 ? 8 : 20), pending.Token);
                         if (await Task.WhenAny(invocation, delay).ConfigureAwait(false) == invocation
                             || invocation.IsCompleted || token.IsCancellationRequested) break;
-                        Trace(EllaiActivityKind.ToolPending, "read", tool.ToolName);
+                        if (!revalidation) Trace(EllaiActivityKind.ToolPending, "read", tool.ToolName);
                     }
                     var result = await invocation.ConfigureAwait(false);
                     if (deadline.IsCancellationRequested && !token.IsCancellationRequested)
                         return new(tool.ToolName, false, "Tool execution timed out.", [], string.Empty, 0, false, EllaiToolReasonCodes.Unavailable);
-                    if (result.Allowed) Trace(EllaiActivityKind.ToolObservationAccepted);
+                    if (!revalidation && result.Allowed) Trace(EllaiActivityKind.ToolObservationAccepted);
                     return result;
                 }
                 catch (OperationCanceledException) when (deadline.IsCancellationRequested && !token.IsCancellationRequested)
@@ -76,6 +79,11 @@ public sealed class EllaiFrameworkExecutor(
                 }
                 finally { await pending.CancelAsync().ConfigureAwait(false); }
             }
+
+            Task<EllaiToolResult> Invoke(EllaiToolContext context, EllaiToolRequest tool, CancellationToken token) =>
+                InvokeCore(context, tool, token, revalidation: false);
+            Task<EllaiToolResult> Revalidate(EllaiToolContext context, EllaiToolRequest tool, CancellationToken token) =>
+                InvokeCore(context, tool, token, revalidation: true);
 
             var messages = (request.Conversation ?? []).Where(message => message.Role is "user" or "assistant")
                 .Select(message => new ChatMessage(message.Role == "user" ? ChatRole.User : ChatRole.Assistant, message.Content))
@@ -88,7 +96,7 @@ public sealed class EllaiFrameworkExecutor(
                 result = await agent.RunAsync(request.Context,
                     new EllaiExecutionPromptBuilder(prompts, ledger).Build(request, frameworkNative: true),
                     messages, request.MaxTokensPerTurn, Current, Invoke,
-                    new EllaiFrameworkUsage(request.Context.SessionId, ledger, usageStore), ct, onTextDelta).ConfigureAwait(false);
+                    new EllaiFrameworkUsage(request.Context.SessionId, ledger, usageStore), ct, onTextDelta, Revalidate).ConfigureAwait(false);
             }
             catch (EllaiFrameworkFailureException failure) when (failure.Code != "ProviderUnavailable")
             {

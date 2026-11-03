@@ -39,6 +39,32 @@ public sealed class EllaiAgentFrameworkContractTests
     }
 
     [Fact]
+    public async Task CountRevalidationDoesNotConsumeModelToolBudgetOrDuplicateProgress()
+    {
+        using var client = new CountStreamingClient();
+        var executor = new EllaiFrameworkExecutor(client, new EllaiPromptBuilder("Policy", "test"),
+            new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService()), new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.OwnedCaseCount });
+        var calls = 0;
+        var events = new List<EllaiActivityEvent>();
+        var outcome = await executor.RunAsync(new EllaiLoopRequest(context, "Count", new EllaiRoleOverlay("ask", "help"),
+            "count", 100, "cycle", 1), default, onActivity: events.Add,
+            onTextDelta: (_, _) => ValueTask.CompletedTask, invokeToolAsync: (_, request, _) =>
+            {
+                calls++;
+                return Task.FromResult(new EllaiToolResult(request.ToolName, true, null,
+                    [new EvidenceRef("DashboardAggregate", "owned-cases", "v1", null, "proof")],
+                    "2 managed case(s) in scope.", 1, false));
+            });
+        Assert.True(outcome.Completed);
+        Assert.Equal(2, calls);
+        Assert.Equal(1, outcome.ToolCallsUsed);
+        Assert.Single(events, item => item.Kind == EllaiActivityKind.ToolStarted);
+        Assert.Single(events, item => item.Kind == EllaiActivityKind.ToolObservationAccepted);
+    }
+
+    [Fact]
     public async Task CountChangedBeforePublicationIsNotPublished()
     {
         using var client = new CountStreamingClient();

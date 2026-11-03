@@ -20,7 +20,8 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
         Func<CancellationToken, Task<bool>> isCurrent,
         Func<EllaiToolContext, EllaiToolRequest, CancellationToken, Task<EllaiToolResult>> invoke,
         EllaiFrameworkUsage usage,
-        CancellationToken ct, Func<string, CancellationToken, ValueTask>? onTextDelta = null)
+        CancellationToken ct, Func<string, CancellationToken, ValueTask>? onTextDelta = null,
+        Func<EllaiToolContext, EllaiToolRequest, CancellationToken, Task<EllaiToolResult>>? revalidateTool = null)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(instructions);
@@ -134,7 +135,7 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
             }
             // Re-read through the same scoped, authorized broker immediately before
             // publication; the session fence alone does not detect grant changes.
-            var fresh = await invoke(context, countRequest!, ct).ConfigureAwait(false);
+            var fresh = await (revalidateTool ?? invoke)(context, countRequest!, ct).ConfigureAwait(false);
             if (!fresh.Allowed || fresh.Evidence.Count != 1 ||
                 !TryCount(countResult.ResultSummary, out var previousCount) ||
                 !TryCount(fresh.ResultSummary, out var freshCount) || previousCount != freshCount ||

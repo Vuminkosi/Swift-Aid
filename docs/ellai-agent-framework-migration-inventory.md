@@ -426,6 +426,11 @@ and publication are not atomic, and same-count changes are not detected; a
 grant can still change after the recheck. The model may already have received
 the earlier authorized observation. Live Gateway and voice behavior remain
 **NOT VERIFIED**.
+The executor routes this recheck through the same timeout and scoped broker
+without counting it as another model tool call or publishing a second tool
+start/observation event. A focused framework test verifies two broker reads,
+one model-visible call and one set of progress events; the framework contract
+suite passed 27/27 and the application suite passed 1001 with 10 skips.
 
 An opt-in Gateway execution selection has been added; its default remains the
 existing loop. Invalid selection and unconfigured or unsupported framework
