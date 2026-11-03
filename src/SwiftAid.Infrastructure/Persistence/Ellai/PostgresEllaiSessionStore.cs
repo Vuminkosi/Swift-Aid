@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Storage;
 using SwiftAid.Application.Ellai;
 using SwiftAid.Contracts.Ellai;
 
@@ -11,9 +12,12 @@ namespace SwiftAid.Infrastructure.Persistence.Ellai;
 /// version yields null instead of overwriting newer state. Checkpoints are
 /// idempotent by checkpoint ID. Provider calls never run inside these
 /// transactions; callers keep them short.</summary>
-public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext) : IEllaiSessionStore, IEllaiUtteranceOutboxStore, IEllaiUtteranceLeaseRenewal, IEllaiProvisionalPublicationFence
+public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext, TimeSpan? snapshotTransactionLimit = null) : IEllaiSessionStore, IEllaiUtteranceOutboxStore, IEllaiUtteranceLeaseRenewal, IEllaiProvisionalPublicationFence, IEllaiCaseResultSnapshotFence
 {
     private readonly SwiftAidDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+    private readonly TimeSpan _snapshotTransactionLimit = snapshotTransactionLimit is null ? TimeSpan.FromSeconds(35)
+        : snapshotTransactionLimit > TimeSpan.Zero && snapshotTransactionLimit <= TimeSpan.FromMinutes(5)
+            ? snapshotTransactionLimit.Value : throw new ArgumentOutOfRangeException(nameof(snapshotTransactionLimit));
 
     public async Task<IReadOnlyList<EllaiSessionRecord>> ListOwnedAsync(string ownerActorId, int offset, int take, CancellationToken ct)
     {
@@ -397,6 +401,59 @@ public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext) : IEl
         var result = publish();
         await transaction.CommitAsync(ct).ConfigureAwait(false);
         return result;
+    }
+
+    public bool CanFenceTopicStore(IEllaiTopicStore? store) =>
+        store is PostgresEllaiTopicStore postgres && postgres.UsesContext(_dbContext);
+
+    public async Task<bool> StoreCaseResultsIfCurrentAsync(string sessionId, string utteranceId, int attempt,
+        string actorId, string scopeEpoch, long interactionEpoch, string snapshotJson, CancellationToken ct,
+        DateTimeOffset? executionDeadlineUtc = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(snapshotJson);
+        if (snapshotJson.Length > 16000) throw new ArgumentOutOfRangeException(nameof(snapshotJson));
+        var deadline = DateTimeOffset.UtcNow + _snapshotTransactionLimit;
+        if (executionDeadlineUtc is { } toolDeadline && toolDeadline < deadline) deadline = toolDeadline;
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
+        var remaining = deadline - DateTimeOffset.UtcNow;
+        if (remaining <= TimeSpan.Zero) throw new OperationCanceledException("The snapshot transaction deadline expired.");
+        // Bound the lock lifetime even when application code stops observing
+        // cancellation. Servers without transaction_timeout fail closed.
+        await using (var command = _dbContext.Database.GetDbConnection().CreateCommand())
+        {
+            command.Transaction = transaction.GetDbTransaction();
+            command.CommandText = "SELECT set_config('transaction_timeout', " +
+                "(CASE WHEN setting::bigint = 0 THEN @milliseconds ELSE LEAST(setting::bigint, @milliseconds) END)::text || 'ms', true) " +
+                "FROM pg_settings WHERE name = 'transaction_timeout'";
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "milliseconds";
+            parameter.DbType = System.Data.DbType.Int64;
+            parameter.Value = Math.Max(1, (long)remaining.TotalMilliseconds);
+            command.Parameters.Add(parameter);
+            if (await command.ExecuteScalarAsync(ct).ConfigureAwait(false) is not string)
+                throw new InvalidOperationException("A bounded snapshot transaction requires PostgreSQL transaction_timeout support.");
+        }
+        var sessions = await _dbContext.Set<EllaiSessionEntity>().FromSqlInterpolated($"""
+            SELECT * FROM ellai_sessions WHERE session_id = {sessionId} FOR UPDATE
+            """).AsNoTracking().ToListAsync(ct).ConfigureAwait(false);
+        var session = sessions.SingleOrDefault();
+        if (session is null || session.Status != "Active" || session.OwnerActorId != actorId ||
+            session.ScopeEpoch != scopeEpoch || session.InteractionEpoch != interactionEpoch) return false;
+        var rows = await _dbContext.Set<EllaiUtteranceEntity>().FromSqlInterpolated($"""
+            SELECT * FROM ellai_utterances WHERE session_id = {sessionId} AND client_utterance_id = {utteranceId} FOR UPDATE
+            """).AsNoTracking().ToListAsync(ct).ConfigureAwait(false);
+        var row = rows.SingleOrDefault();
+        if (row is null || row.AttemptCount != attempt || row.Outcome != "Processing" || row.CompletedAtUtc is not null ||
+            row.WorkPayloadJson is null || row.LeaseExpiresAtUtc is null || row.LeaseExpiresAtUtc <= DateTimeOffset.UtcNow)
+            return false;
+        ct.ThrowIfCancellationRequested();
+        await new PostgresEllaiTopicStore(_dbContext).RecordAsync(sessionId, EllaiCaseResultMemory.TopicTitle,
+            [EllaiCaseResultMemory.Reference], snapshotJson, "case-results/1", null, DateTimeOffset.UtcNow, ct)
+            .ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
+        if (row.LeaseExpiresAtUtc <= DateTimeOffset.UtcNow) return false;
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
+        return true;
     }
 
     public Task<EllaiConversationTurn?> ReadLatestGuidanceTurnAsync(string sessionId, string ownerActorId, CancellationToken ct) =>

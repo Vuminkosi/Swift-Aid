@@ -116,6 +116,16 @@ public interface IEllaiProvisionalPublicationFence
         string scopeEpoch, long interactionEpoch, Func<bool> publish, CancellationToken ct);
 }
 
+/// <summary>Stores case-result references only while the claimed turn and session remain current.</summary>
+public interface IEllaiCaseResultSnapshotFence
+{
+    bool CanFenceTopicStore(IEllaiTopicStore? store);
+
+    Task<bool> StoreCaseResultsIfCurrentAsync(string sessionId, string utteranceId, int attempt, string actorId,
+        string scopeEpoch, long interactionEpoch, string snapshotJson, CancellationToken ct,
+        DateTimeOffset? executionDeadlineUtc = null);
+}
+
 /// <summary>Thread-safe in-memory store for tests and local development.
 /// Production persistence (PostgreSQL, ELL-T04) must implement the same
 /// interface with transactional outbox writes.</summary>

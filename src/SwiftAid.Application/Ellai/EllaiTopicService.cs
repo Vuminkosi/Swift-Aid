@@ -46,6 +46,8 @@ public sealed class EllaiTopicService
         _topicStore = topicStore ?? throw new ArgumentNullException(nameof(topicStore));
     }
 
+    public bool UsesStore(IEllaiTopicStore? store) => store is not null && ReferenceEquals(_topicStore, store);
+
     /// <summary>Tracks a topic candidate for the session into durable
     /// history. Re-tracking the same title updates one stable row.</summary>
     public async Task<EllaiTopic> TrackAsync(

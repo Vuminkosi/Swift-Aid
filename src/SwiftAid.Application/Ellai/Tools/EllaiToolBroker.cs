@@ -89,7 +89,12 @@ public sealed record EllaiToolContext(
     string DataClassification = EllaiProcessingClassification.UnknownOrigin,
     ActorContext? Actor = null,
     IReadOnlySet<string>? AllowedTools = null,
-    string ConsentPurpose = EllaiToolBroker.ToolReadPurpose);
+    string ConsentPurpose = EllaiToolBroker.ToolReadPurpose)
+{
+    /// <summary>Server-owned absolute deadline for the current tool invocation.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public DateTimeOffset? ToolDeadlineUtc { get; init; }
+}
 
 /// <summary>Tool request with bounded arguments. <see cref="CallId"/> is the
 /// model-assigned call correlation id: it travels untouched through
@@ -291,6 +296,7 @@ public sealed class EllaiToolBroker
     }
 
     public bool UsesStateQueue(ICaseQueueQuery? queue) => queue is not null && ReferenceEquals(_queue, queue);
+    public bool UsesTopicStore(IEllaiTopicStore? store) => _topics?.UsesStore(store) == true;
     public ICaseQueueQuery? StateQueue => _queue;
     public bool UsesReferenceIndex(IEllaiExactReferenceIndex? index) => index is not null && ReferenceEquals(_referenceIndex, index);
 
@@ -300,7 +306,8 @@ public sealed class EllaiToolBroker
 
     public async Task<EllaiToolResult> InvokeAsync(
         EllaiToolContext context, EllaiToolRequest request, CancellationToken ct, ICaseQueueQuery? stateQueue,
-        IEllaiExactReferenceIndex? referenceIndex = null)
+        IEllaiExactReferenceIndex? referenceIndex = null,
+        Func<EllaiToolContext, IReadOnlyList<CaseQueueItem>, CancellationToken, Task<bool>>? rememberCaseResults = null)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(request);
@@ -377,7 +384,7 @@ public sealed class EllaiToolBroker
 
         if (string.Equals(canonical, EllaiToolNames.State, StringComparison.Ordinal))
         {
-            return Bound(await ReadStateAsync(context, request, stateQueue ?? _queue, ct).ConfigureAwait(false));
+            return Bound(await ReadStateAsync(context, request, stateQueue ?? _queue, ct, rememberCaseResults).ConfigureAwait(false));
         }
 
         if (string.Equals(canonical, EllaiToolNames.Receipts, StringComparison.Ordinal))
@@ -643,7 +650,8 @@ public sealed class EllaiToolBroker
     /// the trusted actor: same handlers, same per-case authorization, no
     /// Ellai-only query path.</summary>
     private async Task<EllaiToolResult> ReadStateAsync(
-        EllaiToolContext context, EllaiToolRequest request, ICaseQueueQuery? queue, CancellationToken ct)
+        EllaiToolContext context, EllaiToolRequest request, ICaseQueueQuery? queue, CancellationToken ct,
+        Func<EllaiToolContext, IReadOnlyList<CaseQueueItem>, CancellationToken, Task<bool>>? rememberCaseResults)
     {
         if (!request.Arguments.TryGetValue("projection", out var projection)
             || string.Equals(projection, "feature", StringComparison.OrdinalIgnoreCase))
@@ -724,8 +732,18 @@ public sealed class EllaiToolBroker
         {
             try
             {
-                await new EllaiCaseResultMemory(_topics, queue, _referenceIndex).RememberAsync(context, items, ct).ConfigureAwait(false);
-                recallNotice = " Result references retained for this session; recall with ellai_topic(ref=case-results).";
+                var retained = rememberCaseResults is null
+                    ? await RememberDirectlyAsync().ConfigureAwait(false)
+                    : await rememberCaseResults(context, items, ct).ConfigureAwait(false);
+                recallNotice = retained
+                    ? " Result references retained for this session; recall with ellai_topic(ref=case-results)."
+                    : " Result references could not be retained; do not claim they were remembered.";
+
+                async Task<bool> RememberDirectlyAsync()
+                {
+                    await new EllaiCaseResultMemory(_topics, queue, _referenceIndex).RememberAsync(context, items, ct).ConfigureAwait(false);
+                    return true;
+                }
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {

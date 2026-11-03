@@ -83,8 +83,10 @@ public sealed class EllaiFrameworkExecutor(
                 // This deadline is cooperative: broker/dependency code must observe the token.
                 // A noncooperative operation can continue running and keep this await pending.
                 using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+                var deadlineUtc = DateTimeOffset.UtcNow + _toolTimeout;
                 deadline.CancelAfter(_toolTimeout);
-                var invocation = (invokeToolAsync ?? broker.InvokeAsync)(context, tool, deadline.Token);
+                var invocation = (invokeToolAsync ?? broker.InvokeAsync)(
+                    context with { ToolDeadlineUtc = deadlineUtc }, tool, deadline.Token);
                 using var pending = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
                 try
                 {
