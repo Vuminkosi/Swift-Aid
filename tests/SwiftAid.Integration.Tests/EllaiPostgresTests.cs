@@ -72,7 +72,12 @@ public sealed class FrameworkPostgresLiveMuseFactAttribute : FactAttribute
 public sealed class EllaiPostgresTests : IAsyncLifetime
 {
     [FrameworkPostgresFact]
-    public async Task FrameworkWorkerPersistsGuidanceAfterUnmatchedCatalogueGoal()
+    public Task FrameworkWorkerPersistsGuidanceAfterUnmatchedCatalogueGoal() => VerifyReportGuidanceAsync(false);
+
+    [FrameworkPostgresLiveMuseFact]
+    public Task LiveMusePersistsReportGuidance() => VerifyReportGuidanceAsync(true);
+
+    private async Task VerifyReportGuidanceAsync(bool liveModel)
     {
         var id = $"framework-fallback-guidance-{Guid.NewGuid():N}";
         _frameworkSessionIds.Add(id);
@@ -96,13 +101,19 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         var registry = new EllaiUiRegistry();
         EllaiReportGuidanceDescriptors.RegisterAll(registry);
         using var model = new FallbackGuidanceClient();
-        await RunFrameworkWorkerAsync(id, "current", model, null, registry: registry);
+        using var live = liveModel ? EllaiMuseChatClientFactory.Create(EllaiOptions.Bind(Environment.GetEnvironmentVariable)) : null;
+        await RunFrameworkWorkerAsync(id, "current", live ?? model, null,
+            executionTimeout: liveModel ? TimeSpan.FromMinutes(2) : null, registry: registry);
         await using var verifyDb = CreateFrameworkDbContext();
         var completed = (await new PostgresEllaiSessionStore(verifyDb).ReadConversationForExecutionAsync(id, Actor.ActorId, "current", default)).Single();
         Assert.Equal("Completed", completed.Outcome);
         Assert.NotNull(completed.UiProposalsJson);
+        var proposal = Assert.Single(EllaiUiProposalPayload.Deserialize(completed.UiProposalsJson));
+        Assert.Equal(UiIntentKind.StartGuidance, proposal.Kind);
+        Assert.Equal("report", proposal.Arguments["feature"]);
         Assert.True(EllaiToolTrace.TryRead(completed.ToolTraceJson!, out var trace));
-        Assert.NotNull(Assert.Single(trace!.Observations).UiCatalogueReplayScope);
+        Assert.Contains(trace!.Observations, observation => observation.ToolName == EllaiToolNames.UiCatalogue &&
+            observation.UiCatalogueReplayScope is not null);
         Assert.DoesNotContain("synthetic unfamiliar goal", completed.ToolTraceJson!);
     }
 
