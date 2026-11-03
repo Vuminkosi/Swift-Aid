@@ -170,6 +170,19 @@ Run the preceding command with the filter changed to this test name and set
 `SWIFTAID_RUN_FRAMEWORK_POSTGRES_FIXTURES=1` and
 `SWIFTAID_FRAMEWORK_POSTGRES_CONNECTION` to the dedicated disposable database.
 
+`FrameworkWorkerRecallsAuthorizedCaseFromPostgresAndQdrant` passed 1/1 using
+the actual outbox worker, scoped broker, PostgreSQL session/topic stores and
+case authorization, plus a disposable Qdrant exact collection. With a
+synthetic streaming model and synthetic case, an initial turn observed the
+authorized case; a follow-up after persisted grant expiry observed an allowed
+empty result without the case. Both turns completed in the same worker process.
+The first fixture attempt timed out because the synthetic processing label
+was ineligible for response publication and the fixture model implemented
+streaming only; the rerun uses the existing typed-turn publication contract.
+This does not establish a live Gateway process, provider, outage, or full
+cutover acceptance. Use both fixture opt-ins above and filter the integration
+test command by this test name.
+
 **Evidence this audit:** `EllaiLiveQueueReadTests` passed 24/24, including
 four framework/broker cases for exact hit, stale reference, index outage and
 wrong epoch, with a fake index and synthetic queue. The focused integration
