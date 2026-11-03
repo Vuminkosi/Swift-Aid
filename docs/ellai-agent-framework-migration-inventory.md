@@ -3317,6 +3317,22 @@ PASS: `dotnet test tests\SwiftAid.Integration.Tests\SwiftAid.Integration.Tests.c
 'FullyQualifiedName~FrameworkWorkerRecallsAuthorizedCaseFromPostgresAndQdrant'
 --logger 'console;verbosity=minimal'` passed 1/1 using a synthetic model and
 disposable PostgreSQL and Qdrant, including its existing revocation-before-final
-scenario. That worker fixture uses its normal provisional callback; a separate
-no-provisional PostgreSQL revocation run and independent security review remain
-NOT VERIFIED. Both disposable containers were removed.
+scenario. That worker fixture uses its normal provisional callback; the later
+runner-level no-provisional PostgreSQL run is described below. Independent
+security review remains NOT VERIFIED. Both disposable containers were removed.
+
+The PostgreSQL/Qdrant fixture now also invokes the actual utterance runner and
+framework executor without provisional or final-text callbacks. With an
+authorized synthetic case, it completes and observes the case; when the case
+grant expires after the tool result and before the final answer, it returns
+`DeniedByPolicy` with no display text. PASS: the same focused
+`FrameworkWorkerRecallsAuthorizedCaseFromPostgresAndQdrant` command above
+passed 1/1 with a synthetic model and disposable stores. This exercises real
+PostgreSQL authorization in the runner; it does not claim a no-provisional
+worker publication or deployed Gateway test.
+
+The initial attempt to put this scenario through the worker timed out because
+the synthetic model supported only streaming. After the fixture gained a
+non-streaming response, that attempt returned `TerminalFailure`: the worker
+also requires the public response-publication policy for completion. The
+runner-level scenario above isolates the final evidence check and passed.

@@ -392,6 +392,31 @@ public sealed class EllaiMemoryIndexTests
                     Assert.Contains(fixture.CaseId.ToString("D"), model.Observation);
                     model.BeforeFinal = null;
                     await fixture.SetGrantExpiryAsync(DateTimeOffset.UtcNow.AddHours(1));
+                    async Task<EllaiUtteranceOutcome> RunWithoutProvisionalAsync()
+                    {
+                        model.Reset();
+                        await using var scope = provider.CreateAsyncScope();
+                        var broker = scope.ServiceProvider.GetRequiredService<EllaiToolBroker>();
+                        var work = new EllaiUtteranceWork(sessionId, context.ScopeEpoch, "Recall again", "cases", null,
+                            EllaiMode.Ask, 1, "no-provisional", actor, true, "consent/0",
+                            EllaiProcessingClassification.UserProvidedNonSensitive, EllaiProcessingClassification.UserProvidedNonSensitive,
+                            new HashSet<string> { EllaiToolNames.Topic }, EllaiConsentPurposes.PublicProductHelp, "no-provisional");
+                        return await EllaiUtteranceRunner.RunOneAsync(work,
+                            new(scope.ServiceProvider.GetRequiredService<IEllaiReasoningExecutor>(), null, null, consent,
+                                InvokeToolAsync: broker.InvokeAsync, CaseQueue: scope.ServiceProvider.GetRequiredService<ICaseQueueQuery>()),
+                            1024, timeout.Token);
+                    }
+                    var allowedWithoutProvisional = await RunWithoutProvisionalAsync();
+                    Assert.True(allowedWithoutProvisional.Completed, allowedWithoutProvisional.StopReason);
+                    Assert.Contains(fixture.CaseId.ToString("D"), model.Observation);
+                    model.BeforeFinal = () => fixture.SetGrantExpiryAsync(DateTimeOffset.UtcNow.AddMinutes(-1));
+                    var revokedWithoutProvisional = await RunWithoutProvisionalAsync();
+                    Assert.False(revokedWithoutProvisional.Completed);
+                    Assert.Null(revokedWithoutProvisional.DisplayText);
+                    Assert.Equal(EllaiToolReasonCodes.DeniedByPolicy, revokedWithoutProvisional.FailureCode);
+                    Assert.Contains(fixture.CaseId.ToString("D"), model.Observation);
+                    model.BeforeFinal = null;
+                    await fixture.SetGrantExpiryAsync(DateTimeOffset.UtcNow.AddHours(1));
                     model.StreamCaseSegment = true;
                     var streamingTurn = RunFollowupAsync("turn-stream-revoked", expectDenied: true);
                     await model.SegmentSent.Task.WaitAsync(timeout.Token);
@@ -471,7 +496,13 @@ public sealed class EllaiMemoryIndexTests
         public TaskCompletionSource SegmentSent { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ReleaseSegment { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public void Reset() { _calls = 0; Observation = ""; }
-        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            var contents = new List<AIContent>();
+            await foreach (var update in GetStreamingResponseAsync(messages, options, cancellationToken))
+                contents.AddRange(update.Contents);
+            return new ChatResponse(new ChatMessage(ChatRole.Assistant, contents));
+        }
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
