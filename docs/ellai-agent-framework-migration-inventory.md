@@ -3122,3 +3122,27 @@ are on the verification branch; the separate `interactive-ellai` checkout
 was not changed. The earlier intermittent integration failure, network
 partition behavior, custom-store cooperative timeout, and deployed
 Gateway/device acceptance remain open as described above.
+
+### Provisional delivery read race — 2026-11-03
+
+A deterministic feed regression reproduced disclosure of a provisional
+segment when its outbox attempt was reclaimed between the conversation and
+session reads. The feed and provisional-audio path now ask a delivery fence
+to check owner, scope, interaction epoch and attempt together before delivery.
+The PostgreSQL implementation uses a single query for that check; the
+in-memory implementation checks under its store lock. If a custom outbox
+does not implement the fence, provisional content is withheld. A changed
+owner also causes the feed to omit the previously read conversation.
+
+PASS: the race regression failed before the correction. After commit
+`964ce63`, nine focused tests passed against in-memory and disposable
+PostgreSQL 17/PostGIS fixtures. They cover reclaim during feed and audio reads,
+owner change, a failed durable check, the PostgreSQL interleaving, and two-host
+audio cancellation and reclaim. Command:
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-build --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter 'FullyQualifiedName~PostgresFeedRejectsAttemptReclaimedDuringRead|FullyQualifiedName~ProvisionalPublicationHoldsSessionAndAttemptFence|FullyQualifiedName~GuestCancellationOnAnotherHostHidesLocalResponseAndAudio|FullyQualifiedName~ReclaimedAttemptOnAnotherHostStopsProvisionalAudio|FullyQualifiedName~FeedHidesProvisionalChunk|FullyQualifiedName~FeedOmitsConversationWhenOwnerChangesDuringRead|FullyQualifiedName~AudioHidesProvisionalChunkWhenAttemptIsReclaimedDuringRead|FullyQualifiedName~ProvisionalDeliveryFailsClosedWhenDurableCheckIsUnavailable' --logger 'console;verbosity=minimal'`.
+The PostgreSQL fixture was tmpfs-backed and removed. The pre-commit worker and
+route filter passed 68, skipped 5. The unavailable-store case is a synthetic
+fault, not a process-level network-partition test; an authorization change
+after a successful check can still race bytes already in flight. Deployed
+Gateway, independent security review, and physical voice-device behavior
+remain NOT VERIFIED.
