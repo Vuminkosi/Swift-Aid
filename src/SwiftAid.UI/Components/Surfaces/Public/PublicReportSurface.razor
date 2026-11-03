@@ -6,6 +6,7 @@
 
 <div class="public-report-surface">
     <GuidedReportStepper Draft="Draft"
+                         TextLimits="TextLimits"
                          CurrentDraftId="CurrentDraftId"
                          Countries="Countries"
                          CountryCatalogueVersion="@CountryCatalogueVersion"
@@ -142,6 +143,7 @@
 </div>
 
 @code {
+    [Parameter] public PublicIntakeTextLimits? TextLimits { get; set; }
     private bool _temporaryCleanupRetrying;
     private bool _temporaryCleanupRetryFailed;
 

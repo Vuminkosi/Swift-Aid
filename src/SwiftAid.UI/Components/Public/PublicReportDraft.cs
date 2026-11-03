@@ -249,9 +249,9 @@ public sealed class PublicReportDraft : IValidatableObject
             confirmations);
     }
 
-    internal bool HasValidObservations(IReadOnlyList<string> observations) =>
-        (ObservationsText?.Length ?? 0) <= 20000 && observations.Count <= 20 &&
-        observations.All(value => value.Length <= 1000);
+    internal bool HasValidObservations(IReadOnlyList<string> observations, int maximumCount = 20, int maximumCharacters = 1000) =>
+        (ObservationsText?.Length ?? 0) <= 20000 && observations.Count <= maximumCount &&
+        observations.All(value => value.Length <= maximumCharacters);
 
     public IReadOnlyList<string> GetObservations() => (ObservationsText ?? string.Empty)
         .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)

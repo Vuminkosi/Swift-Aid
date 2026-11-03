@@ -141,6 +141,7 @@
             </div>
         </MudHidden>
         <PublicReportSurface Countries="_countries"
+                             TextLimits="_textLimits"
                              CountryCatalogueVersion="@_countryCatalogueVersion"
                              CountryCatalogueIsCurrent="_countryCatalogueIsCurrent"
                              PlaceSearchFunc="SearchPlacesAsync"
@@ -216,6 +217,7 @@
     private IReadOnlyList<PublicCountryOption> _countries = [];
     private IReadOnlyList<GeoPlaceCountry> _geoCountries = [];
     private string? _countryCatalogueVersion;
+    private PublicIntakeTextLimits? _textLimits;
     private string? _privacyNoticeReference;
     private string? _privacyNoticeVersion;
     private string? _processingPolicyReference;
@@ -307,9 +309,11 @@
 
     private async Task LoadSubmissionMetadataAsync()
     {
+        _textLimits = null;
         try
         {
             var metadata = await IntakeTransport.GetMetadataAsync(CancellationToken.None);
+            _textLimits = metadata.TextLimits is { } limits && limits.IsValid() ? limits : null;
             _privacyNoticeReference = metadata.PrivacyNoticeReference;
             _privacyNoticeVersion = metadata.PrivacyNoticeVersion;
 

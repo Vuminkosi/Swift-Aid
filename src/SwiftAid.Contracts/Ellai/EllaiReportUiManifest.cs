@@ -67,9 +67,9 @@ public static class EllaiReportUiManifest
         ],
         "report.narrative" =>
         [
-            new("report.original-statement", "Describe what happened", "multiline-text", false, "Details page", "At most 6000 characters; a narrative or at least one observation is required."),
+            new("report.original-statement", "Describe what happened", "multiline-text", false, "Details page", "Follow the current limit shown on the form; a narrative or at least one observation is required."),
             new("report.observation-choices", "Reported observation choices", "multiple-selection", false, "Human or animal choices follow the selected subject", "Select only reported observations. Unselected does not mean absent."),
-            new("report.other-observations", "Add other observations", "multiline-text", false, "Details page", "At most 20000 characters, 20 observations and 1000 characters per observation; a narrative or observation is required.")
+            new("report.other-observations", "Add other observations", "multiline-text", false, "Details page", "Follow the current count and length limits shown on the form; a narrative or observation is required.")
         ],
         "report.time-location" =>
         [

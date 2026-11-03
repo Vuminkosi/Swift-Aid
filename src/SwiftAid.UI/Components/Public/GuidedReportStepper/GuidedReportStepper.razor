@@ -125,7 +125,8 @@
                 @DetailsLeadContent
                 <div data-ellai-control="report.narrative" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.narrative")'>
                     <div data-bonboarding-anchor="ellai-report-original-statement">
-                    <MudTextField T="string" Label="Describe what happened" Variant="Variant.Outlined" Lines="4" MaxLength="6000"
+                    <MudTextField T="string" Label="Describe what happened" Variant="Variant.Outlined" Lines="4" MaxLength="@MaximumNarrativeCharacters"
+                                  HelperText="@($"Up to {MaximumNarrativeCharacters:N0} characters.")"
                                   @bind-Value="Draft.Narrative" For="@(() => Draft.Narrative)" />
                     </div>
                 </div>
@@ -200,7 +201,7 @@
                 </div>
                 <div data-bonboarding-anchor="ellai-report-other-observations">
                 <MudTextField @ref="_observationsField" T="string" Label="Add other observations (optional)"
-                              HelperText="Selected choices appear here. Add other reported observations one per line."
+                              HelperText="@($"One per line; up to {MaximumObservations} observations and {MaximumObservationCharacters:N0} characters each.")"
                               Variant="Variant.Outlined" Lines="3" MaxLength="20000" @bind-Value="Draft.ObservationsText"
                               For="@(() => Draft.ObservationsText)" />
                 </div>
@@ -612,6 +613,9 @@
     public IReadOnlyList<PublicCountryOption> Countries { get; set; } = [];
 
     [Parameter]
+    public PublicIntakeTextLimits? TextLimits { get; set; }
+
+    [Parameter]
     public Func<string, string?, CancellationToken, Task<GeoPlaceQueryResult>>? PlaceSearchFunc { get; set; }
 
     [Parameter]
@@ -750,6 +754,10 @@
         : Countries.FirstOrDefault(country => string.Equals(country.Code, Draft.CountryCode.Trim(), StringComparison.OrdinalIgnoreCase))?.Name
             ?? (HasCountryCatalogue ? "Country choice unavailable — choose again" : "Previously selected; country list unavailable");
 
+    private int MaximumNarrativeCharacters => Math.Min(TextLimits is { } limits && limits.IsValid() ? limits.MaximumNarrativeCharacters : 6000, 6000);
+    private int MaximumObservations => Math.Min(TextLimits is { } limits && limits.IsValid() ? limits.MaximumObservations : 20, 20);
+    private int MaximumObservationCharacters => Math.Min(TextLimits is { } limits && limits.IsValid() ? limits.MaximumObservationCharacters : 300, 1000);
+
     private bool HasCountryCatalogue => CountryCatalogueIsCurrent &&
         Countries.Count > 0 && !string.IsNullOrWhiteSpace(CountryCatalogueVersion);
 
@@ -853,7 +861,11 @@
         _editContext.NotifyFieldChanged(field);
     }
 
-    private bool CanSubmit => OnSubmit.HasDelegate && AttachmentSelectionCount == 0 && HasCountryCatalogue && HasPrivacyNotice && HasProcessingPolicy &&
+    private bool ReportTextIsValid => (Draft.Narrative?.Length ?? 0) <= MaximumNarrativeCharacters &&
+        Draft.HasValidObservations(Draft.GetObservations(), MaximumObservations, MaximumObservationCharacters) &&
+        (!string.IsNullOrWhiteSpace(Draft.Narrative) || Draft.GetObservations().Count > 0);
+
+    private bool CanSubmit => OnSubmit.HasDelegate && AttachmentSelectionCount == 0 && HasCountryCatalogue && HasPrivacyNotice && HasProcessingPolicy && ReportTextIsValid &&
         CanConfirmCountry && Draft.CountryConfirmed &&
         Draft.ProcessingConfirmed && Draft.ReportReviewConfirmed;
 
@@ -1075,15 +1087,15 @@
             isValid = false;
         }
 
-        if ((Draft.Narrative?.Length ?? 0) > 6000)
+        if ((Draft.Narrative?.Length ?? 0) > MaximumNarrativeCharacters)
         {
-            AddError(nameof(Draft.Narrative), "Keep the description under 6,000 characters.");
+            AddError(nameof(Draft.Narrative), $"Keep the description within {MaximumNarrativeCharacters:N0} characters.");
             isValid = false;
         }
 
-        if (!Draft.HasValidObservations(observations))
+        if (!Draft.HasValidObservations(observations, MaximumObservations, MaximumObservationCharacters))
         {
-            AddError(nameof(Draft.ObservationsText), "Use at most 20 observations, 1,000 characters each and 20,000 characters in total.");
+            AddError(nameof(Draft.ObservationsText), $"Use at most {MaximumObservations} observations, {MaximumObservationCharacters:N0} characters each and 20,000 characters in total.");
             isValid = false;
         }
 
@@ -1196,10 +1208,10 @@
                 : Environment.NewLine;
             var updatedText = string.Concat(currentText, separator, observation);
 
-            if (existingObservations.Count >= 20 || updatedText.Length > 20000)
+            if (existingObservations.Count >= MaximumObservations || updatedText.Length > 20000)
             {
-                _observationChoiceMessage = existingObservations.Count >= 20
-                    ? "You can add up to 20 separate observations. Remove one before adding another."
+                _observationChoiceMessage = existingObservations.Count >= MaximumObservations
+                    ? $"You can add up to {MaximumObservations} separate observations. Remove one before adding another."
                     : "There is not enough space for another observation. Shorten or remove one first.";
                 return Task.CompletedTask;
             }

@@ -45,6 +45,7 @@ public partial class GuidedReportStepper
         }
         if (_step == 2)
         {
+            AddIfInvalid(!ReportTextIsValid, "report.text-limits-changed");
             AddIfInvalid(!Draft.ReportReviewConfirmed, "report.review-confirmed");
             AddIfInvalid(HasCountryCatalogue && !CanConfirmCountry, "report.country-required");
             AddIfInvalid(CanConfirmCountry && !Draft.CountryConfirmed, "report.country-confirmed");
@@ -54,8 +55,8 @@ public partial class GuidedReportStepper
         if (_step != 1 || !_detailsValidationAttempted) return [];
         var observations = Draft.GetObservations();
         AddIfInvalid(string.IsNullOrWhiteSpace(Draft.Narrative) && observations.Count == 0 ||
-            (Draft.Narrative?.Length ?? 0) > 6000, "report.original-statement");
-        AddIfInvalid(!Draft.HasValidObservations(observations), "report.other-observations");
+            (Draft.Narrative?.Length ?? 0) > MaximumNarrativeCharacters, "report.original-statement");
+        AddIfInvalid(!Draft.HasValidObservations(observations, MaximumObservations, MaximumObservationCharacters), "report.other-observations");
         AddIfInvalid(Draft.OccurrencePrecision != ReportedTimePrecision.Unknown && !Draft.OccurrenceDate.HasValue,
             "report.occurrence-date");
         AddIfInvalid(Draft.OccurrencePrecision == ReportedTimePrecision.Exact && !TimeOnly.TryParse(Draft.OccurrenceTime, out _),

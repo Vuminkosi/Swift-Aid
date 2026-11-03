@@ -44,6 +44,47 @@ public sealed partial class GuidedReportDraftPersistenceTests
     }
 
     [Fact]
+    public async Task ConfiguredTextLimitsIdentifyInvalidFieldsInOrderAndPreserveEntries()
+    {
+        var draft = CreateDraft();
+        draft.Narrative = new string('n', 101);
+        draft.ObservationsText = new string('o', 251);
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        component.TextLimits = new(100, 2, 250);
+
+        await (Task)Invoke(component, "ContinueFromTypeAsync")!;
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+
+        Assert.Equal(new[] { "report.original-statement", "report.other-observations" },
+            component.GetState().ValidationIssues.Select(issue => issue.InputId));
+        Assert.Equal(101, draft.Narrative.Length);
+        Assert.Equal(251, draft.ObservationsText.Length);
+        draft.Narrative = new string('n', 100);
+        Assert.Equal("report.other-observations", Assert.Single(component.GetState().ValidationIssues).InputId);
+        draft.ObservationsText = new string('o', 250);
+        Assert.Empty(component.GetState().ValidationIssues);
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+        Assert.True(component.GetState().Controls.Single(control => control.ControlId == "report.narrative").CompletionAccepted);
+    }
+
+    [Fact]
+    public void StricterLimitsOnReviewBlockSubmissionWithoutDiscardingText()
+    {
+        var draft = CreateDraft();
+        draft.ObservationsText = new string('o', 301);
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        component.TextLimits = new(6000, 20, 500);
+        SetField(component, "_step", 2);
+        Assert.DoesNotContain(component.GetState().ValidationIssues, issue => issue.InputId == "report.text-limits-changed");
+
+        component.TextLimits = new(6000, 20, 300);
+
+        Assert.Contains(component.GetState().ValidationIssues, issue => issue.InputId == "report.text-limits-changed");
+        Assert.False((bool)typeof(GuidedReportStepper).GetProperty("CanSubmit", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(component)!);
+        Assert.Equal(301, draft.ObservationsText.Length);
+    }
+
+    [Fact]
     public async Task OversizedObservationTextBlocksReviewAndIdentifiesItsField()
     {
         var draft = CreateDraft();
@@ -55,7 +96,7 @@ public sealed partial class GuidedReportDraftPersistenceTests
 
         var issue = Assert.Single(component.GetState().ValidationIssues);
         Assert.Equal("report.other-observations", issue.InputId);
-        Assert.Contains("20,000", issue.Message);
+        Assert.Contains("limits shown", issue.Message);
         Assert.False(component.GetState().Controls.Single(control => control.ControlId == "report.narrative").CompletionAccepted);
         draft.ObservationsText = new string(' ', 20000);
         Assert.Empty(component.GetState().ValidationIssues);
