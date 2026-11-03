@@ -27,7 +27,7 @@ public static class EllaiReasoningRegistration
     }
 
     public static IServiceCollection AddEllaiReasoningExecutor(
-        this IServiceCollection services, EllaiOptions options, string? executionEngine)
+        this IServiceCollection services, EllaiOptions options, string? executionEngine, bool enableKnowledgeSpecialist = false)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(options);
@@ -54,7 +54,8 @@ public static class EllaiReasoningRegistration
         services.AddScoped<IEllaiReasoningExecutor>(sp => new EllaiFrameworkExecutor(
             sp.GetRequiredKeyedService<IChatClient>(FrameworkClientKey), sp.GetRequiredService<EllaiPromptBuilder>(),
             sp.GetRequiredService<EllaiToolBroker>(), sp.GetRequiredService<EllaiUsageLedger>(),
-            sp.GetRequiredService<IEllaiUsageStore>(), agentFactory: sp.GetRequiredService<IEllaiFrameworkAgentFactory>()));
+            sp.GetRequiredService<IEllaiUsageStore>(), agentFactory: sp.GetRequiredService<IEllaiFrameworkAgentFactory>(),
+            enableKnowledgeSpecialist: enableKnowledgeSpecialist));
         return services;
     }
 }

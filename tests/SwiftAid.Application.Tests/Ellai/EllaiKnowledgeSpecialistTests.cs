@@ -110,6 +110,40 @@ public sealed class EllaiKnowledgeSpecialistTests
         }
     }
 
+    [Fact]
+    public async Task SupervisorDelegatesAndRetainsSpecialistEvidenceUnderParentGuard()
+    {
+        using var model = new DelegationClient();
+        var context = Context();
+        var calls = 0;
+        var agent = new EllaiFrameworkAgent(model);
+        var result = await agent.RunAsync(context, "Trusted policy", [new ChatMessage(ChatRole.User, "Find documentation")],
+            512, _ => Task.FromResult(true), (toolContext, request, _) =>
+            {
+                calls++;
+                Assert.Equal(context.SessionId, toolContext.SessionId);
+                Assert.Equal(EllaiToolNames.DocsGet, request.ToolName);
+                return Task.FromResult(new EllaiToolResult(request.ToolName, true, null,
+                    [new EvidenceRef("Documentation", "safe", "v1", null, "proof-1")], "Observed.", 1, false));
+            }, Usage(), default, enableKnowledgeSpecialist: true);
+
+        Assert.NotNull(result);
+        Assert.Equal("proof-1", Assert.Single(Assert.Single(result.Claims).Evidence).EvidenceId);
+        Assert.Equal(1, calls);
+        Assert.Equal(4, model.Calls);
+    }
+
+    [Fact]
+    public async Task SupervisorDoesNotAdvertiseDelegationByDefault()
+    {
+        using var model = new DirectClient();
+        var result = await new EllaiFrameworkAgent(model).RunAsync(Context(), "policy",
+            [new ChatMessage(ChatRole.User, "hello")], 512, _ => Task.FromResult(true),
+            (_, _, _) => throw new InvalidOperationException(), Usage(), default);
+        Assert.NotNull(result);
+        Assert.DoesNotContain("ellai_delegate_knowledge", model.AvailableTools);
+    }
+
     private static EllaiToolContext Context() => new("session", "epoch", "public.product-help", null, 3, true,
         AllowedTools: new HashSet<string> { EllaiToolNames.DocsGet, EllaiToolNames.State });
 
@@ -123,6 +157,49 @@ public sealed class EllaiKnowledgeSpecialistTests
         {
             Calls++;
             return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, "invalid")));
+        }
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    private sealed class DelegationClient : IChatClient
+    {
+        public int Calls { get; private set; }
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            if (Calls == 1)
+                return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                    [new FunctionCallContent("delegate", "ellai_delegate_knowledge", new Dictionary<string, object?> { ["task"] = "Find the reference" })])));
+            if (Calls == 2)
+                return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                    [new FunctionCallContent("lookup", EllaiToolNames.DocsGet, new Dictionary<string, object?> { ["section"] = "safe" })])));
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, """
+                {"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Observed.","spokenText":"Observed.",
+                "claims":[{"claimId":"c1","text":"Observed.","kind":"Observed","evidence":[{"sourceKind":"Documentation","resourceId":"safe","version":"v1","fieldPath":null,"evidenceId":"proof-1"}]}],
+                "questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}
+                """)));
+        }
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    private sealed class DirectClient : IChatClient
+    {
+        public string[] AvailableTools { get; private set; } = [];
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            AvailableTools = options!.Tools!.OfType<AIFunctionDeclaration>().Select(tool => tool.Name).ToArray();
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, """
+                {"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Hello.","spokenText":"Hello.",
+                "claims":[],"questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}
+                """)));
         }
         public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
             ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();

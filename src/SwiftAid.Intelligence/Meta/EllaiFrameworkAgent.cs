@@ -33,7 +33,8 @@ public sealed class EllaiFrameworkAgent
         Func<EllaiToolContext, EllaiToolRequest, CancellationToken, Task<EllaiToolResult>>? revalidateTool = null,
         Func<string, CancellationToken, ValueTask>? onVerifiedStreamSegment = null,
         Func<CancellationToken, Task<bool>>? revalidateStreamObservations = null,
-        string? frameworkSessionJson = null, int maxModelCalls = int.MaxValue)
+        string? frameworkSessionJson = null, int maxModelCalls = int.MaxValue,
+        bool enableKnowledgeSpecialist = false)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(instructions);
@@ -116,7 +117,33 @@ public sealed class EllaiFrameworkAgent
                 invocation.Terminate = true;
             return result;
         }
-        var tools = EllaiFrameworkToolCatalog.Create(context, InvokeGuardedTool);
+        var tools = EllaiFrameworkToolCatalog.Create(context, InvokeGuardedTool).ToList();
+        if (enableKnowledgeSpecialist && context.AllowedTools is { } parentTools &&
+            (parentTools.Contains(EllaiToolNames.DocsSearch) || parentTools.Contains(EllaiToolNames.DocsGet)))
+        {
+            var delegationCount = 0;
+            async Task<string> DelegateKnowledge(string task, CancellationToken token)
+            {
+                token.ThrowIfCancellationRequested();
+                if (Interlocked.Increment(ref delegationCount) != 1)
+                    return "Knowledge delegation limit reached.";
+                try
+                {
+                    var result = await new EllaiKnowledgeSpecialist(_client, _agentFactory).RunAsync(task,
+                        instructions, true, context, usage, Current, InvokeGuardedTool, token).ConfigureAwait(false);
+                    if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
+                        return "Knowledge specialist could not verify an answer.";
+                    var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
+                    return json.Length <= 12000 ? json : "Knowledge specialist result exceeded its limit.";
+                }
+                catch (EllaiFrameworkFailureException)
+                {
+                    return "Knowledge specialist could not complete the request.";
+                }
+            }
+            tools.Add(AIFunctionFactory.Create(DelegateKnowledge, name: "ellai_delegate_knowledge",
+                description: "Delegate one bounded question about approved documentation to the knowledge specialist."));
+        }
         var guardedClient = new ModelCallGuard(_client, Current, usage, maxModelCalls);
         var functionClient = new FunctionInvokingChatClient(guardedClient)
         {
@@ -133,7 +160,7 @@ public sealed class EllaiFrameworkAgent
             Name = "Ellai",
             UseProvidedChatClientAsIs = true,
             ChatHistoryProvider = new InMemoryChatHistoryProvider(),
-            ChatOptions = new ChatOptions { Instructions = instructions, Tools = tools.ToList(), MaxOutputTokens = maxOutputTokens }
+            ChatOptions = new ChatOptions { Instructions = instructions, Tools = tools, MaxOutputTokens = maxOutputTokens }
         });
         var history = messages.Take(messages.Count - 1).ToList();
         var owner = context.Actor?.ActorId;
