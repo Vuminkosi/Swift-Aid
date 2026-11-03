@@ -1,6 +1,6 @@
 # Ellai Agent Framework migration inventory
 
-Status: in progress. The uncommitted framework path has source, synthetic,
+Status: in progress. The framework path on this branch has source, synthetic,
 disposable-service and limited live-provider evidence documented below; the
 complete migration and deployed cutover are not accepted. Baseline: `12e6d7a`
 on `interactive-ellai` (3 November 2026).
@@ -9,7 +9,7 @@ on `interactive-ellai` (3 November 2026).
 
 - `src/SwiftAid.Gateway/Ellai/EllaiUtteranceWorker.cs` resolves the scoped
   `IEllaiReasoningExecutor` and supplies its dependencies to `EllaiUtteranceRunner`.
-  The uncommitted source now defaults to `EllaiFrameworkExecutor` when no
+  The source now defaults to `EllaiFrameworkExecutor` when no
   execution engine is specified; `Ellai:ExecutionEngine=framework` also
   selects it explicitly. The Gateway no longer registers a legacy executor;
   `legacy` and other unsupported values fail at startup. Per the current user
