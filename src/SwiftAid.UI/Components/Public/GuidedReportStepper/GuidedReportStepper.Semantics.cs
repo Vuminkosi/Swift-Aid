@@ -10,7 +10,7 @@ public partial class GuidedReportStepper
     public EllaiUiManifest Describe() => EllaiReportUiManifest.Definition;
 
     public EllaiUiState GetState() => new(ComponentId, _submitting || _saving,
-        _stepError is not null || _submitError is not null,
+        _stepError is not null || _submitError is not null || _saveValidationAttempted && GetValidationGuidance().Count > 0,
         [new("report.entry", UiObservationState.Ready),
          new("report.save", !OnSaveDraft.HasDelegate ? UiObservationState.Unmounted :
              CanSaveDraft && !_saving ? UiObservationState.Ready : UiObservationState.Disabled,
@@ -55,8 +55,26 @@ public partial class GuidedReportStepper
             AddIfInvalid(HasProcessingPolicy && !Draft.ProcessingConfirmed, "report.processing-confirmed");
             return issues;
         }
-        if (_step != 1 || !_detailsValidationAttempted) return [];
+        if (_step != 1 || !_detailsValidationAttempted && !_saveValidationAttempted) return [];
         var observations = Draft.GetObservations();
+        if (_saveValidationAttempted)
+        {
+            var country = Draft.CountryCode?.Trim();
+            AddIfInvalid((Draft.Narrative?.Length ?? 0) > 6000, "report.original-statement-too-long");
+            AddIfInvalid(!string.IsNullOrEmpty(country) && (country.Length != 2 || !country.All(char.IsAsciiLetter)), "report.invalid-draft-country");
+            AddIfInvalid(observations.Count > 20, "report.too-many-observations");
+            AddIfInvalid(observations.Any(value => value.Length > 1000), "report.observation-too-long");
+            AddIfInvalid((Draft.ObservationsText?.Length ?? 0) > 20000, "report.observations-total-too-long");
+            AddIfInvalid(!PublicReportDraft.IsValidPlaceName(Draft.RegionPresence, Draft.Region), "report.region");
+            AddIfInvalid(!PublicReportDraft.IsValidPlaceName(Draft.AreaPresence, Draft.Area), "report.area");
+            AddIfInvalid(!PublicReportDraft.IsValidPlaceName(Draft.LocalityPresence, Draft.Locality), "report.locality");
+            AddIfInvalid(Draft.OccurrencePrecision == ReportedTimePrecision.Exact && !Draft.OccurrenceDate.HasValue, "report.occurrence-date");
+            AddIfInvalid(Draft.OccurrencePrecision == ReportedTimePrecision.Exact && !TimeOnly.TryParse(Draft.OccurrenceTime, out _), "report.occurrence-time");
+            AddIfInvalid(Draft.OccurrencePrecision == ReportedTimePrecision.Exact && !HasValidOccurrenceOffset(), "report.utc-offset");
+            AddIfInvalid(Draft.OccurrencePrecision == ReportedTimePrecision.Exact && Draft.OccurrenceDate.HasValue &&
+                HasValidExactTime() && !Draft.HasValidExactOccurrence(), "report.invalid-exact-occurrence");
+            return issues;
+        }
         AddIfInvalid(string.IsNullOrWhiteSpace(Draft.Narrative) && observations.Count == 0, "report.original-statement");
         AddIfInvalid((Draft.Narrative?.Length ?? 0) > MaximumNarrativeCharacters, "report.original-statement-too-long");
         AddIfInvalid(observations.Count > MaximumObservations, "report.too-many-observations");
@@ -67,6 +85,8 @@ public partial class GuidedReportStepper
         AddIfInvalid(Draft.OccurrencePrecision == ReportedTimePrecision.Exact && !TimeOnly.TryParse(Draft.OccurrenceTime, out _),
             "report.occurrence-time");
         AddIfInvalid(Draft.OccurrencePrecision == ReportedTimePrecision.Exact && !HasValidOccurrenceOffset(), "report.utc-offset");
+        AddIfInvalid(Draft.OccurrencePrecision == ReportedTimePrecision.Exact && Draft.OccurrenceDate.HasValue &&
+            HasValidExactTime() && !Draft.HasValidExactOccurrence(), "report.invalid-exact-occurrence");
         AddIfInvalid(!PublicReportDraft.IsValidPlaceName(Draft.RegionPresence, Draft.Region), "report.region");
         AddIfInvalid(!PublicReportDraft.IsValidPlaceName(Draft.AreaPresence, Draft.Area), "report.area");
         AddIfInvalid(!PublicReportDraft.IsValidPlaceName(Draft.LocalityPresence, Draft.Locality), "report.locality");

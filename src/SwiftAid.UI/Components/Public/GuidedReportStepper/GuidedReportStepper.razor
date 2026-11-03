@@ -444,6 +444,10 @@
             {
                 <span>The save action failed. Your entries remain on this screen. Check saved reports before trying again.</span>
             }
+            else if (_saveState == DraftSaveState.Invalid)
+            {
+                <span>The draft was not saved. @(GetValidationGuidance().FirstOrDefault()?.Message) Your entries remain on this screen.</span>
+            }
             else if (_saveState == DraftSaveState.Unconfirmed)
             {
                 <span>We could not confirm whether your draft was saved. Your entries remain on this screen. Check saved reports before trying again.</span>
@@ -473,6 +477,7 @@
     private int _step;
     private string? _stepError;
     private bool _detailsValidationAttempted;
+    private bool _saveValidationAttempted;
     private bool _showManualPlaces;
     private string? _observationChoiceMessage;
     private string? _submitError;
@@ -715,6 +720,7 @@
             {
                 _step = 0;
                 _detailsValidationAttempted = false;
+                _saveValidationAttempted = false;
                 _saveState = DraftSaveState.Unsaved;
             }
             _subjectCategory = GetSubjectCategory(Draft.SubjectScope);
@@ -1084,6 +1090,7 @@
 
     private bool ValidateDetails()
     {
+        _saveValidationAttempted = false;
         _detailsValidationAttempted = true;
         var hasNarrative = !string.IsNullOrWhiteSpace(Draft.Narrative);
         var observations = Draft.GetObservations();
@@ -1116,6 +1123,12 @@
         if (Draft.OccurrencePrecision == ReportedTimePrecision.Exact && !HasValidExactTime())
         {
             AddError(nameof(Draft.OccurrenceTime), "For an exact time, enter the local time and its offset from UTC.");
+            isValid = false;
+        }
+        if (Draft.OccurrencePrecision == ReportedTimePrecision.Exact && Draft.OccurrenceDate.HasValue &&
+            HasValidExactTime() && !Draft.HasValidExactOccurrence())
+        {
+            AddError(nameof(Draft.OccurrenceDate), "Check that the date, time and UTC offset can be combined.");
             isValid = false;
         }
 
@@ -1313,6 +1326,7 @@
         }
 
         _saving = true;
+        _saveValidationAttempted = false;
         _savingDraftId = CurrentDraftId;
         _pendingDraftRefresh = null;
         _confirmedDraftSave = null;
@@ -1324,13 +1338,31 @@
         var savedStep = _step;
         try
         {
-            var submission = Draft.ToSubmission(
-                CountryCatalogueVersion,
-                ProcessingPolicyReference,
-                ProcessingPolicyVersion,
-                Countries,
-                CountryCatalogueIsCurrent,
-                allowUnverifiedCountryForDraft: true);
+            IntakeSubmission submission;
+            try
+            {
+                submission = Draft.ToSubmission(
+                    CountryCatalogueVersion,
+                    ProcessingPolicyReference,
+                    ProcessingPolicyVersion,
+                    Countries,
+                    CountryCatalogueIsCurrent,
+                    allowUnverifiedCountryForDraft: true);
+            }
+            catch (InvalidOperationException)
+            {
+                _saveValidationAttempted = true;
+                _showManualPlaces |= !PublicReportDraft.IsValidPlaceName(Draft.RegionPresence, Draft.Region) ||
+                    !PublicReportDraft.IsValidPlaceName(Draft.AreaPresence, Draft.Area) ||
+                    !PublicReportDraft.IsValidPlaceName(Draft.LocalityPresence, Draft.Locality);
+                if (_step != 1)
+                {
+                    _step = 1;
+                    _focusStepHeadingAfterRender = true;
+                }
+                _saveState = DraftSaveState.Invalid;
+                return;
+            }
             _savingSnapshot = PublicReportDraft.FromSubmission(submission);
             _activeSaveRequest = new PublicReportSaveRequest(CurrentDraftId, submission);
             await OnSaveDraft.InvokeAsync(_activeSaveRequest);
@@ -1462,6 +1494,7 @@
         Saving,
         Saved,
         Unconfirmed,
+        Invalid,
         Failed
     }
 

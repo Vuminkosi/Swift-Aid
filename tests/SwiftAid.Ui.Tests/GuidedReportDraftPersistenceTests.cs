@@ -109,6 +109,58 @@ public sealed partial class GuidedReportDraftPersistenceTests
     }
 
     [Fact]
+    public async Task InvalidDraftSaveIdentifiesOnlyBlockingTimeFieldsAndKeepsIncompleteReport()
+    {
+        var draft = CreateDraft(string.Empty);
+        draft.OccurrencePrecision = ReportedTimePrecision.Exact;
+        draft.OccurrenceDate = null;
+        draft.OccurrenceTime = "not a time";
+        draft.OccurrenceOffset = "not an offset";
+        var saves = 0;
+        var component = CreateStepper(draft, request =>
+        {
+            saves++;
+            request.ConfirmPersisted(Guid.NewGuid());
+            return Task.CompletedTask;
+        });
+
+        await InvokeSaveDraftAsync(component);
+
+        Assert.Equal(0, saves);
+        Assert.Equal("Invalid", GetSaveState(component));
+        Assert.True(component.GetState().HasValidationErrors);
+        Assert.Equal(1, GetField<int>(component, "_step"));
+        Assert.Equal(new[] { "report.occurrence-date", "report.occurrence-time", "report.utc-offset" },
+            component.GetState().ValidationIssues.Select(issue => issue.InputId));
+        Assert.Equal("not a time", draft.OccurrenceTime);
+        draft.OccurrenceDate = new DateTime(2026, 11, 4);
+        Assert.Equal("report.occurrence-time", component.GetState().ValidationIssues.First().InputId);
+        draft.OccurrenceTime = "08:15";
+        Assert.Equal("report.utc-offset", Assert.Single(component.GetState().ValidationIssues).InputId);
+        draft.OccurrenceOffset = "+02:00";
+        Assert.Empty(component.GetState().ValidationIssues);
+        await InvokeSaveDraftAsync(component);
+        Assert.Equal(1, saves);
+        Assert.Equal("Saved", GetSaveState(component));
+    }
+
+    [Fact]
+    public async Task UnrepresentableExactDateIsIdentifiedBeforeReviewOrSave()
+    {
+        var draft = CreateDraft();
+        draft.OccurrencePrecision = ReportedTimePrecision.Exact;
+        draft.OccurrenceDate = DateTime.MinValue;
+        draft.OccurrenceTime = "00:00";
+        draft.OccurrenceOffset = "+14:00";
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        await InvokeSaveDraftAsync(component);
+        Assert.Equal("report.invalid-exact-occurrence", Assert.Single(component.GetState().ValidationIssues).InputId);
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+        Assert.Equal("report.invalid-exact-occurrence", Assert.Single(component.GetState().ValidationIssues).InputId);
+        Assert.False(component.GetState().Controls.Single(control => control.ControlId == "report.narrative").CompletionAccepted);
+    }
+
+    [Fact]
     public async Task DraftSavePreservesCountryWhenCatalogueIsUnavailableWithoutAuthorizingSubmission()
     {
         var draft = CreateDraft();

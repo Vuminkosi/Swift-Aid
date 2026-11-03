@@ -173,6 +173,34 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
         }
         assert.equal(await page.locator('#submission-count').textContent(), '0');
         console.log('PASS: unavailable submission requirements are identified and highlighted without submitting');
+        await page.goto(base + '/ellai-report-fixture');
+        await page.waitForSelector('[data-fixture-ready=true]');
+        await page.getByRole('button', { name: 'Continue to details' }).click();
+        await page.getByRole('combobox', { name: 'When did this happen?' }).click();
+        await page.getByRole('option', { name: 'Exact time' }).click();
+        await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+        await page.evaluate(async () => { window.fixtureObservations = await import('/_content/SwiftAid.UI/js/ellai-ui-observations.js'); });
+        await page.waitForFunction(() => window.fixtureObservations.collect().validationInputIds?.join(',') ===
+            'report.occurrence-date,report.occurrence-time,report.utc-offset');
+        await page.getByRole('button', { name: 'Guide report details' }).click();
+        await page.locator('.bit-bonboarding-popover').waitFor({ state: 'visible' });
+        for (const [label, anchor, value, nextId] of [
+            ['Reported date', 'ellai-report-occurrence-date', '2026-10-01', 'report.occurrence-time'],
+            ['Reported time', 'ellai-report-occurrence-time', '07:30', 'report.utc-offset'],
+            ['Time difference from UTC', 'ellai-report-utc-offset', '+02:00', null]
+        ]) {
+            await page.getByRole('button', { name: 'Refresh validation target' }).click();
+            await page.waitForFunction(anchorName => {
+                const target = document.querySelector(`[data-bonboarding-anchor="${anchorName}"]`)?.getBoundingClientRect();
+                const spot = document.querySelector('.bit-bonboarding-spotlight')?.getBoundingClientRect();
+                return target && spot && spot.left <= target.left && spot.top <= target.top && spot.right >= target.right && spot.bottom >= target.bottom;
+            }, anchor);
+            await page.getByLabel(label).fill(value);
+            await page.getByLabel(label).press('Tab');
+            await page.waitForFunction(id => (window.fixtureObservations.collect().validationInputIds?.[0] ?? null) === id, nextId);
+        }
+        assert.equal(await page.locator('#submission-count').textContent(), '0');
+        console.log('PASS: incomplete draft time fields are highlighted one by one without requiring a narrative');
         assert.deepEqual(errors, []);
         assert(!output.includes('Unhandled exception'), output);
     } finally {

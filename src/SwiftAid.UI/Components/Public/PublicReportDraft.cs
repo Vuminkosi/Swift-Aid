@@ -261,6 +261,8 @@ public sealed class PublicReportDraft : IValidatableObject
         .Where(value => !string.IsNullOrWhiteSpace(value))
         .ToArray();
 
+    internal bool HasValidExactOccurrence() => TryGetExactOccurrence(out _);
+
     private bool TryGetExactOccurrence(out ReportedTime? occurrence)
     {
         occurrence = null;
