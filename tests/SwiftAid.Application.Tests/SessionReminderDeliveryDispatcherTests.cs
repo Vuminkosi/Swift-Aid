@@ -24,6 +24,19 @@ public sealed class SessionReminderDeliveryDispatcherTests
     }
 
     [Fact]
+    public async Task InvalidLeaseIsNotSent()
+    {
+        var store = new FakeDeliveryStore(CreateLease()) { IsLeaseCurrent = false };
+        var sender = new FakeSender(SessionReminderSendStatus.Accepted);
+        var dispatcher = new SessionReminderDeliveryDispatcher(store, new FakeSubscriptionService(), sender);
+
+        await dispatcher.DispatchAsync(Now, ["Email"], CancellationToken.None);
+
+        Assert.Equal(0, sender.CallCount);
+        Assert.Equal(SessionReminderDeliveryStatus.Suppressed, store.CompletedStatus);
+    }
+
+    [Fact]
     public async Task Not_configured_channel_retries_with_bounded_backoff()
     {
         var store = new FakeDeliveryStore(CreateLease(attemptCount: 3));
@@ -94,6 +107,7 @@ public sealed class SessionReminderDeliveryDispatcherTests
     private sealed class FakeDeliveryStore(SessionReminderDeliveryLease lease) : ISessionReminderDeliveryStore
     {
         public bool ClaimCalled { get; private set; }
+        public bool IsLeaseCurrent { get; init; } = true;
         public SessionReminderDeliveryStatus? CompletedStatus { get; private set; }
         public DateTimeOffset? RetryAtUtc { get; private set; }
 
@@ -112,7 +126,7 @@ public sealed class SessionReminderDeliveryDispatcherTests
         }
 
         public Task<bool> IsLeaseCurrentAsync(Guid deliveryId, Guid leaseId, CancellationToken cancellationToken) =>
-            Task.FromResult(true);
+            Task.FromResult(IsLeaseCurrent);
 
         public Task<bool> CompleteAsync(
             Guid deliveryId,

@@ -4,10 +4,11 @@ using SwiftAid.Application.Sessions;
 namespace SwiftAid.Infrastructure.Persistence.Sessions;
 
 /// <summary>PostgreSQL materialization and leasing for account-scoped session reminder work.</summary>
-public sealed class PostgresSessionReminderDeliveryStore(SwiftAidDbContext dbContext) : ISessionReminderDeliveryStore
+public sealed class PostgresSessionReminderDeliveryStore(SwiftAidDbContext dbContext, TimeProvider? timeProvider = null) : ISessionReminderDeliveryStore
 {
     private const int MaximumBatchSize = 100;
     private readonly SwiftAidDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     public Task<int> MaterializeDueAsync(DateTimeOffset nowUtc, int limit, CancellationToken cancellationToken)
     {
@@ -119,10 +120,13 @@ public sealed class PostgresSessionReminderDeliveryStore(SwiftAidDbContext dbCon
             .ToArray();
     }
 
-    public Task<bool> IsLeaseCurrentAsync(Guid deliveryId, Guid leaseId, CancellationToken cancellationToken) =>
-        _dbContext.SessionReminderDeliveries.AsNoTracking().AnyAsync(item =>
-            item.DeliveryId == deliveryId && item.Status == "InProgress" && item.LeaseId == leaseId,
-            cancellationToken);
+    public Task<bool> IsLeaseCurrentAsync(Guid deliveryId, Guid leaseId, CancellationToken cancellationToken)
+    {
+        var now = _timeProvider.GetUtcNow();
+        return _dbContext.SessionReminderDeliveries.AsNoTracking().AnyAsync(item =>
+            item.DeliveryId == deliveryId && item.Status == "InProgress" && item.LeaseId == leaseId &&
+            item.LeaseUntilUtc > now, cancellationToken);
+    }
 
     public async Task<bool> CompleteAsync(
         Guid deliveryId,

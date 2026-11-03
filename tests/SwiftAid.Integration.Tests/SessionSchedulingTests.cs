@@ -1027,11 +1027,16 @@ public sealed class SessionSchedulingTests
                 .ExecuteUpdateAsync(update => update.SetProperty(
                     item => item.RemindAtUtc, DateTimeOffset.UtcNow.AddMinutes(-1)));
 
-            var deliveryStore = new PostgresSessionReminderDeliveryStore(db);
             var now = DateTimeOffset.UtcNow;
+            var clock = new TestClock(now);
+            var deliveryStore = new PostgresSessionReminderDeliveryStore(db, clock);
             Assert.Equal(1, await deliveryStore.MaterializeDueAsync(now, 10, CancellationToken.None));
             var lease = Assert.Single(await deliveryStore.ClaimDueAsync(
                 now, TimeSpan.FromMinutes(1), 10, ["Email"], CancellationToken.None));
+
+            Assert.True(await deliveryStore.IsLeaseCurrentAsync(lease.DeliveryId, lease.LeaseId, CancellationToken.None));
+            clock.UtcNow = lease.LeaseUntilUtc;
+            Assert.False(await deliveryStore.IsLeaseCurrentAsync(lease.DeliveryId, lease.LeaseId, CancellationToken.None));
 
             Assert.Empty(await deliveryStore.ClaimDueAsync(
                 now.AddMinutes(2), TimeSpan.FromMinutes(1), 10, ["Email"], CancellationToken.None));
