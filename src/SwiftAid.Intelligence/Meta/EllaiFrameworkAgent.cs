@@ -122,9 +122,12 @@ public sealed class EllaiFrameworkAgent
         if (onVerifiedStreamSegment is not null)
             instructions += "\nFor a plain Answer with no UI action or question, put stream_segments first in the final JSON envelope. " +
                 "Each entry is an object with text and claims, where claims use the same GroundedClaim schema and exact evidence as final_decision. " +
-                "Each text is a complete independently supported sentence. The final_decision displayText and spokenText must both equal " +
+                "Each text must exactly match one complete line of every cited tool result. " +
+                "Each segment must have a nonempty claims array; each claim text must equal the segment text and cite observed evidence. " +
+                "If no evidence-backed segment is available, omit stream_segments and return the final_decision normally. " +
+                "The final_decision displayText and spokenText must both equal " +
                 "the segment texts joined by one space. For other decision kinds omit stream_segments. " +
-                "Example shape: {\"stream_segments\":[{\"text\":\"Hello.\",\"claims\":[]}],\"final_decision\":{...}}.";
+                "Do not invent evidence or include a segment without its supporting claim.";
         AIAgent agent = _agentFactory.Create(functionClient, new ChatClientAgentOptions
         {
             Name = "Ellai",

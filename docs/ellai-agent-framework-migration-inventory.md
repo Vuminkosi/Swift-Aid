@@ -3147,6 +3147,38 @@ after a successful check can still race bytes already in flight. Deployed
 Gateway, independent security review, and physical voice-device behavior
 remain NOT VERIFIED.
 
+### Evidence-backed live model streaming — 2026-11-03
+
+The framework streaming instructions previously included an example with an
+empty claims array, although early evidence-backed segments require a claim
+with observed evidence. They now describe the actual guard: each segment must
+copy a complete cited result line, have a matching evidence-backed claim and
+match the final display and speech text; without eligible evidence, the model
+is told to omit segments. This changes instructions, not the publication or
+authorization checks.
+
+PASS: `LiveMuseStreamsEvidenceBackedSegmentBeforeCompletion` passed twice
+against the configured live Muse route using the same execution-schema builder
+as the Gateway and a synthetic tool result. Each run observed the exact
+evidence-backed sentence while the provider stream was still open and checked
+that it matched the final decision. The command was `dotnet test
+tests\SwiftAid.Application.Tests\SwiftAid.Application.Tests.csproj --no-restore
+-m:1 -nr:false --filter 'FullyQualifiedName~LiveMuseStreamsEvidenceBackedSegmentBeforeCompletion'
+--logger 'console;verbosity=minimal'`, with `ELLAI_LIVE=1` and provider settings
+supplied to the process. A separate live evidence-free buffering probe passed
+1/1. The framework, runner and authorization filter passed 177/177; the worker
+filter passed 9/9 with a synthetic model and in-memory stores.
+
+Earlier versions of the live probe used a simplified prompt rather than the
+Gateway schema builder. One run passed after the instruction correction; one
+before and two after that correction failed when the provider attempted an
+unregistered tool call during repair after an invalid decision shape. These observations remain recorded;
+two later passes do not prove reliable generation. The new probe uses a
+synthetic tool and a synthetic revalidator, not PostgreSQL, the deployed
+Gateway, a browser, or audible speech. Ordinary evidence-free answers remain
+buffered until validation, and user-visible model-time streaming and independent
+security review remain NOT VERIFIED.
+
 ### Gateway recovery on the verified branch — 2026-11-03
 
 PASS: on commit `4a09962`, the following focused integration run passed 3/3

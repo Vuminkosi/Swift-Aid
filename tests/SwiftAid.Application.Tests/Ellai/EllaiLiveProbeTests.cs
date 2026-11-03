@@ -65,6 +65,54 @@ public sealed class EllaiLiveProbeTests
     }
 
     [LiveFact]
+    public async Task LiveMuseStreamsEvidenceBackedSegmentBeforeCompletion()
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
+        using var client = EllaiMuseChatClientFactory.Create(LiveOptions(), http);
+        var capture = new CaptureStreamingClient(client);
+        var context = new EllaiToolContext("live-grounded-segment", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string> { EllaiToolNames.State });
+        var evidence = new EvidenceRef("Fixture", "synthetic", "1", null, "synthetic");
+        var segments = new List<string>();
+        var calls = 0;
+        var agent = new EllaiFrameworkAgent(capture);
+        var instructions = new EllaiExecutionPromptBuilder(new EllaiPromptBuilder("Synthetic policy.", "fixture")).Build(
+            new EllaiLoopRequest(context, "Report the synthetic fixture result.", new EllaiRoleOverlay("ask", "Be brief."),
+                "state", 2048, "fixture-cycle", 1)) +
+            "\nUse the available state tool. Copy the tool's resultSummary exactly as the answer. " +
+            "Each segment and the final decision must cite the exact evidence object from the tool. " +
+            "Use claimId fixture, kind Observed, and the copied text for the claim. " +
+            "Return a final_decision with schemaVersion 2, kind Answer, displayText, spokenText, claims, " +
+            "questions, uiIntents, planProposal, topicRefs, resumeSuggestion and stopReason; use empty arrays and null for unused fields.";
+        EllaiDecision? result;
+        try
+        {
+            result = await agent.RunAsync(context, instructions,
+            [new ChatMessage(ChatRole.User, "Use ellai_state with projection feature, then report the synthetic fixture result exactly.")], 2048,
+            _ => Task.FromResult(true), (_, request, _) =>
+            {
+                calls++;
+                return Task.FromResult(new EllaiToolResult(request.ToolName, true, null, [evidence], "The synthetic fixture is ready.", 1, false));
+            }, new EllaiFrameworkUsage(context.SessionId, new EllaiUsageLedger(), new InMemoryEllaiUsageStore()),
+            CancellationToken.None, onVerifiedStreamSegment: (segment, _) =>
+            {
+                Assert.True(capture.CurrentlyStreaming);
+                segments.Add(segment);
+                return ValueTask.CompletedTask;
+            }, revalidateStreamObservations: _ => Task.FromResult(true));
+        }
+        catch (EllaiFrameworkFailureException error)
+        {
+            var diagnostic = EllaiModelTurnParser.DiagnosticCode(EllaiModelTurnParser.Parse(capture.Calls.LastOrDefault()?.ToString() ?? "").Error);
+            throw new InvalidOperationException($"Live grounded stream stopped: {error.Code}; tool calls={calls}; " +
+                $"segments={segments.Count}; provider calls={capture.Calls.Count}; parse={diagnostic}.");
+        }
+        Assert.True(calls > 0);
+        Assert.Equal("The synthetic fixture is ready.", Assert.Single(segments));
+        Assert.Equal(result?.DisplayText, string.Join(" ", segments));
+    }
+
+    [LiveFact]
     public async Task LiveFrameworkStreamsFullDecisionSchemaWithBrokeredTool()
     {
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
@@ -486,6 +534,7 @@ public sealed class EllaiLiveProbeTests
     private sealed class CaptureStreamingClient(IChatClient inner) : DelegatingChatClient(inner)
     {
         public bool Completed { get; private set; }
+        public bool CurrentlyStreaming { get; private set; }
         public System.Text.StringBuilder Text { get; } = new();
         public List<System.Text.StringBuilder> Calls { get; } = [];
         public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
@@ -494,13 +543,18 @@ public sealed class EllaiLiveProbeTests
         {
             var current = new System.Text.StringBuilder();
             Calls.Add(current);
-            await foreach (var update in base.GetStreamingResponseAsync(messages, options, cancellationToken))
+            CurrentlyStreaming = true;
+            try
             {
-                Text.Append(update.Text);
-                current.Append(update.Text);
-                yield return update;
+                await foreach (var update in base.GetStreamingResponseAsync(messages, options, cancellationToken))
+                {
+                    Text.Append(update.Text);
+                    current.Append(update.Text);
+                    yield return update;
+                }
+                Completed = true;
             }
-            Completed = true;
+            finally { CurrentlyStreaming = false; }
         }
     }
 
