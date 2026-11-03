@@ -15,6 +15,30 @@ public sealed class EllaiAgentFrameworkContractTests
         """;
 
     [Fact]
+    public async Task FrameworkStreamingInvokesToolBeforeFinalDecision()
+    {
+        using var client = new ToolStreamingClient();
+        var agent = new EllaiFrameworkAgent(client);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.Now });
+        var store = new InMemoryEllaiUsageStore();
+        var invoked = 0;
+        var fragments = new List<string>();
+        var decision = await agent.RunAsync(context, "Test instructions", [new ChatMessage(ChatRole.User, "test")], 100,
+            _ => Task.FromResult(true), (_, request, _) =>
+            {
+                invoked++;
+                return Task.FromResult(new EllaiToolResult(request.ToolName, true, null, [], "observation", 1, false));
+            }, new EllaiFrameworkUsage("session", new EllaiUsageLedger(), store), CancellationToken.None,
+            (text, _) => { fragments.Add(text); return ValueTask.CompletedTask; });
+        Assert.Equal(1, invoked);
+        Assert.Equal(2, client.Calls);
+        Assert.Equal("Done.", decision?.DisplayText);
+        Assert.Equal("Done.", string.Concat(fragments));
+        Assert.Equal(2, (await store.TotalsAsync("session", CancellationToken.None)).Calls);
+    }
+
+    [Fact]
     public async Task FrameworkStreamingEmitsDecisionTextAndRecordsUsage()
     {
         using var client = new StreamingClient();
@@ -171,6 +195,34 @@ public sealed class EllaiAgentFrameworkContractTests
             cancellationToken.ThrowIfCancellationRequested();
             yield return new ChatResponseUpdate(ChatRole.Assistant, ValidDecision[..60]);
             yield return new ChatResponseUpdate(ChatRole.Assistant, ValidDecision[60..]);
+            yield return new ChatResponseUpdate(ChatRole.Assistant,
+                [new UsageContent(new UsageDetails { InputTokenCount = 3, OutputTokenCount = 2 })]);
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    private sealed class ToolStreamingClient : IChatClient
+    {
+        public int Calls { get; private set; }
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls++;
+            if (Calls == 1)
+            {
+                yield return new ChatResponseUpdate(ChatRole.Assistant, "Checking the tool now.");
+                yield return new ChatResponseUpdate(ChatRole.Assistant,
+                    [new FunctionCallContent("call-1", EllaiToolNames.Now, new Dictionary<string, object?>())]);
+            }
+            else
+                yield return new ChatResponseUpdate(ChatRole.Assistant, ValidDecision);
             yield return new ChatResponseUpdate(ChatRole.Assistant,
                 [new UsageContent(new UsageDetails { InputTokenCount = 3, OutputTokenCount = 2 })]);
         }

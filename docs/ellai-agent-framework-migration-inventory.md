@@ -147,8 +147,13 @@ parser and checks currency and budget before each streamed provider call. It
 records usage from provider usage updates, including usage received before an
 interruption. If a provider ends or is interrupted without sending usage,
 actual billable usage cannot be established from that stream. A deterministic
-text-stream fixture passes; streamed native tool calls, live provider behavior,
-Gateway correlation, interruption, and voice delivery remain unverified.
+text-stream fixture passes. A streamed tool fixture exposed that intermediate
+assistant text could be concatenated with the final decision; the runner now
+validates only the last model call and resets its text parser between calls.
+The live Muse probe then passed with the brokered `ellai_now` tool, a validated
+decision, streamed display text and nonzero recorded usage. This is a synthetic
+isolated runner, not Gateway evidence. Gateway correlation, interruption,
+voice delivery and managed-case access remain unverified.
 The deterministic framework fixture also invokes the real broker's admitted
 public-facts tool and observes its serialized JSON evidence. This is not a live
 provider or managed-case test. The framework and adapter focused tests passed

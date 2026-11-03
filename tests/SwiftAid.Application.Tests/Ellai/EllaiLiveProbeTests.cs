@@ -152,6 +152,70 @@ public sealed class EllaiLiveProbeTests
     }
 
     [LiveFact]
+    public async Task LiveFrameworkRunnerStreamsBrokeredToolDecision()
+    {
+        var options = LiveOptions();
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
+        using var client = EllaiMuseChatClientFactory.Create(options, http);
+        var consent = new EllaiConsentService();
+        consent.Grant("synthetic-session", EllaiConsentDimension.ReasoningText,
+            EllaiToolBroker.ToolReadPurpose, EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromMinutes(5));
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), consent);
+        var context = new EllaiToolContext("synthetic-session", "epoch", "cases", null, 4, true,
+            DataClassification: EllaiProcessingClassification.SyntheticDemo,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.Now });
+        var store = new InMemoryEllaiUsageStore();
+        var invoked = 0;
+        var streamed = new System.Text.StringBuilder();
+        const string instructions = "Use the available tool when asked. Return only this JSON shape: " +
+            "{\"final_decision\":{\"schemaVersion\":2,\"kind\":\"Answer\",\"displayText\":\"...\",\"spokenText\":\"...\",\"claims\":[],\"questions\":[],\"uiIntents\":[],\"planProposal\":null,\"topicRefs\":[],\"resumeSuggestion\":null,\"stopReason\":null}}";
+        var capture = new CaptureStreamingClient(client);
+        var runner = new EllaiFrameworkAgent(capture);
+        try
+        {
+            var result = await runner.RunAsync(context, instructions,
+                [new ChatMessage(ChatRole.User, "Use ellai_now to check the current UTC time and report it.")], 1024,
+                _ => Task.FromResult(true), async (toolContext, request, ct) =>
+                {
+                    invoked++;
+                    return await broker.InvokeAsync(toolContext, request, ct);
+                }, new EllaiFrameworkUsage(context.SessionId, new EllaiUsageLedger(), store), CancellationToken.None,
+                (text, _) => { streamed.Append(text); return ValueTask.CompletedTask; });
+            Assert.True(invoked > 0);
+            var parsed = EllaiModelTurnParser.Parse(capture.Text.ToString());
+            var perCall = string.Join(",", capture.Calls.Select(value => $"{value.Length}:{EllaiModelTurnParser.DiagnosticCode(EllaiModelTurnParser.Parse(value.ToString()).Error)}"));
+            Assert.True(result is not null, $"Decision was rejected: {EllaiModelTurnParser.DiagnosticCode(parsed.Error)}; parsedDecision={parsed.Turn?.FinalDecision is not null}; validationErrors={(parsed.Turn?.FinalDecision is { } d ? EllaiDecisionValidator.Validate(d).Count : -1)}; calls={perCall}.");
+            Assert.Equal(result!.DisplayText, streamed.ToString());
+            var totals = await store.TotalsAsync(context.SessionId, CancellationToken.None);
+            Assert.True(totals.Calls >= 2);
+            Assert.True(totals.TotalTokens > 0);
+        }
+        catch (System.ClientModel.ClientResultException error)
+        {
+            throw new InvalidOperationException($"Provider rejected the streamed framework runner request (HTTP {error.Status}).");
+        }
+    }
+
+    private sealed class CaptureStreamingClient(IChatClient inner) : DelegatingChatClient(inner)
+    {
+        public System.Text.StringBuilder Text { get; } = new();
+        public List<System.Text.StringBuilder> Calls { get; } = [];
+        public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var current = new System.Text.StringBuilder();
+            Calls.Add(current);
+            await foreach (var update in base.GetStreamingResponseAsync(messages, options, cancellationToken))
+            {
+                Text.Append(update.Text);
+                current.Append(update.Text);
+                yield return update;
+            }
+        }
+    }
+
+    [LiveFact]
     public async Task LiveOfficialChatClientStreamsSyntheticText()
     {
         var options = LiveOptions();

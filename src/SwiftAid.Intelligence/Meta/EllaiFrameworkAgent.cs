@@ -53,20 +53,23 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
             ChatOptions = new ChatOptions { Instructions = instructions, Tools = tools.ToList(), MaxOutputTokens = maxOutputTokens }
         });
         var session = await agent.CreateSessionAsync(cancellationToken: ct).ConfigureAwait(false);
-        AgentResponse response;
         EllaiDecisionTextStreamParser? parser = null;
         if (onTextDelta is null)
         {
-            response = await agent.RunAsync(messages, session, cancellationToken: ct).ConfigureAwait(false);
+            await agent.RunAsync(messages, session, cancellationToken: ct).ConfigureAwait(false);
         }
         else
         {
             parser = new EllaiDecisionTextStreamParser();
-            var updates = new List<AgentResponseUpdate>();
             var textLength = 0;
+            var parserCall = 0;
             await foreach (var update in agent.RunStreamingAsync(messages, session, cancellationToken: ct).ConfigureAwait(false))
             {
-                updates.Add(update);
+                if (parserCall != guardedClient.CallSequence)
+                {
+                    parser = new EllaiDecisionTextStreamParser();
+                    parserCall = guardedClient.CallSequence;
+                }
                 textLength += update.Text.Length;
                 if (textLength > 512_000) throw new InvalidOperationException("Ellai response exceeded its stream limit.");
                 foreach (var sentence in parser.Append(update.Text))
@@ -75,11 +78,10 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
                         await onTextDelta(sentence, ct).ConfigureAwait(false);
                 }
             }
-            response = updates.ToAgentResponse();
         }
         if (guard.FailureCode is not null || !await isCurrent(ct).ConfigureAwait(false)) return null;
 
-        var decision = EllaiModelTurnParser.Parse(response.Text).Turn?.FinalDecision;
+        var decision = EllaiModelTurnParser.Parse(guardedClient.LastText).Turn?.FinalDecision;
         if (decision is null || EllaiDecisionValidator.Validate(decision).Count != 0) return null;
         if (decision.Claims.Any(claim => claim?.Evidence is { } refs && refs.Any(reference => reference is null || !evidence.Contains(reference))))
             return null;
@@ -95,6 +97,10 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
     private sealed class ModelCallGuard(IChatClient inner, Func<CancellationToken, Task<bool>> isCurrent,
         EllaiFrameworkUsage usage) : DelegatingChatClient(inner)
     {
+        public int CallSequence { get; private set; }
+        private readonly System.Text.StringBuilder _lastText = new();
+        public string LastText => _lastText.ToString();
+
         public override async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages,
             ChatOptions? options = null, CancellationToken cancellationToken = default)
         {
@@ -103,8 +109,10 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
             var boundedMessages = messages.ToArray();
             if (!usage.CanDispatch(boundedMessages, options))
                 throw new InvalidOperationException("The Ellai session budget is exhausted.");
+            CallSequence++;
             var response = await base.GetResponseAsync(boundedMessages, options, cancellationToken).ConfigureAwait(false);
             await usage.RecordAsync(response, cancellationToken).ConfigureAwait(false);
+            _lastText.Clear().Append(response.Text);
             return response;
         }
 
@@ -117,6 +125,8 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
             var boundedMessages = messages.ToArray();
             if (!usage.CanDispatch(boundedMessages, options))
                 throw new InvalidOperationException("The Ellai session budget is exhausted.");
+            CallSequence++;
+            _lastText.Clear();
             UsageDetails? details = null;
             var completed = false;
             try
@@ -124,6 +134,7 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
                 await foreach (var update in base.GetStreamingResponseAsync(boundedMessages, options, cancellationToken).ConfigureAwait(false))
                 {
                     details = update.Contents.OfType<UsageContent>().LastOrDefault()?.Details ?? details;
+                    _lastText.Append(update.Text);
                     yield return update;
                 }
                 completed = true;
