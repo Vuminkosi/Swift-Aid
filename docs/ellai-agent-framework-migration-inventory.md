@@ -159,6 +159,28 @@ comparison does not independently refresh the principal or detect a grant
 expiry within the same epoch, and it does not resolve the history-provenance
 cutover blocker above.
 
+**Tool-trace foundation, not a replay authorization:** framework execution now
+captures the server-observed tool name, result status, evidence references and
+truncation flag, independent of the model's optional citations. The worker
+stores a versioned, bounded trace with the completed turn in PostgreSQL; it
+records whether prior history was included, but does not yet carry that history's
+transitive provenance. It excludes tool arguments and result text. Legacy,
+oversized, unsupported or incomplete traces remain null/unknown and must not be
+treated as public or authorized. The trace is not returned in the conversation
+client projection. The additive `20261103190000_EllaiTurnToolTrace` migration
+must be applied before the new Gateway code; its Down removes the trace column
+and all trace data. No backfill or new store is introduced. This does not yet
+change replay behavior: fresh authorization, inherited dependencies, other
+sensitive tool types and legacy turns must be handled before cutover.
+
+The migration was applied, rolled back and reapplied on a disposable PostGIS
+database. The real PostgreSQL/Qdrant worker and restart fixtures passed 2/2,
+including persisted tool evidence and the history-included marker. EF's pending
+model check passed. Application tests passed 1,018 with 10 skips; focused
+guest, voice and memory integration tests passed 46 with 12 live tests skipped.
+The observed revoked-content replay remains unfixed and the cutover gate stays
+closed.
+
 **Disposable PostgreSQL recovery evidence:** `FrameworkWorkerRehydratesOwnedConversationAfterWorkerRestart`
 passed (1/1, zero skipped) against a task-owned PostGIS 17 container after 60
 repository migrations. With a deterministic synthetic model, it completed a

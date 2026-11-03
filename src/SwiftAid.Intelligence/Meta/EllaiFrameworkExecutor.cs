@@ -29,6 +29,8 @@ public sealed class EllaiFrameworkExecutor(
             var sequence = 0L;
             var calls = 0;
             var accepted = false;
+            var observations = new List<EllaiObservedToolResult>();
+            var observationTraceComplete = true;
             void Trace(EllaiActivityKind kind, string detail = "", string? toolName = null)
             {
                 var item = new EllaiActivityEvent(request.Context.SessionId, request.ControllerEpoch,
@@ -70,6 +72,14 @@ public sealed class EllaiFrameworkExecutor(
                     var result = await invocation.ConfigureAwait(false);
                     if (deadline.IsCancellationRequested && !token.IsCancellationRequested)
                         return new(tool.ToolName, false, "Tool execution timed out.", [], string.Empty, 0, false, EllaiToolReasonCodes.Unavailable);
+                    if (!revalidation)
+                    {
+                        if (observations.Count >= 256 || result.Evidence.Count > 20)
+                            observationTraceComplete = false;
+                        else
+                            observations.Add(new(tool.ToolName, result.Allowed, result.ReasonCode,
+                                result.Evidence.ToArray(), result.Truncated));
+                    }
                     if (!revalidation && result.Allowed) Trace(EllaiActivityKind.ToolObservationAccepted);
                     return result;
                 }
@@ -110,7 +120,10 @@ public sealed class EllaiFrameworkExecutor(
                 return new(false, null, "The assistant could not produce a verified decision.", agent.LastModelCallCount, calls, agent.LastRepairUsed, code);
             }
             if (accepted) Trace(EllaiActivityKind.CycleCompleted, "verified");
-            return new(true, result, null, agent.LastModelCallCount, calls, agent.LastRepairUsed);
+            return new(true, result, null, agent.LastModelCallCount, calls, agent.LastRepairUsed)
+            {
+                ObservedTools = observationTraceComplete ? observations.ToArray() : null
+            };
         }
         finally
         {

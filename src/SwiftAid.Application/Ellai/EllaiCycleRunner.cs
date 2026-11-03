@@ -10,7 +10,16 @@ public sealed record EllaiCycleOutcome(
     int IterationsUsed,
     int ToolCallsUsed,
     bool RepairUsed,
-    string? FailureCode = null);
+    string? FailureCode = null)
+{
+    /// <summary>Server-observed tool results for this execution. Null means no
+    /// complete observation trace is available; it is never authorization.</summary>
+    public IReadOnlyList<EllaiObservedToolResult>? ObservedTools { get; init; }
+}
+
+/// <summary>Bounded tool provenance, excluding arguments and result text.</summary>
+public sealed record EllaiObservedToolResult(
+    string ToolName, bool Allowed, string ReasonCode, IReadOnlyList<EvidenceRef> Evidence, bool Truncated);
 
 /// <summary>Model-turn delegate: one bounded reasoning step returning either
 /// tool requests or a final decision draft.</summary>

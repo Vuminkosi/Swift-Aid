@@ -11,6 +11,10 @@ public sealed record EllaiUtteranceOutcome(
     /// <summary>The structurally validated reasoning result, retained for authorized downstream
     /// planning. UI proposals are not execution authority and require scope/route validation.</summary>
     public EllaiDecision? Decision { get; init; }
+
+    /// <summary>Internal tool trace; absence does not imply a public-only answer.</summary>
+    public IReadOnlyList<EllaiObservedToolResult>? ObservedTools { get; init; }
+    public bool HistoryIncluded { get; init; }
 }
 
 /// <summary>Dependencies for one background run, resolved per scope by the
@@ -109,11 +113,12 @@ public static class EllaiUtteranceRunner
                     guidanceState = checkpoint.Status;
             }
         }
+        var history = EllaiConversationContext.Build(conversation, work.ClientUtteranceId);
         var request = new EllaiLoopRequest(
             context, reasoningText, ForMode(work.Mode),
             EllaiToolBroker.DescribeCatalogue(work.AllowedTools), maxTokensPerTurn,
             work.CycleId, work.ControllerEpoch,
-            EllaiConversationContext.Build(conversation, work.ClientUtteranceId), work.ActivePage, work.InteractionMode, guidanceState);
+            history, work.ActivePage, work.InteractionMode, guidanceState);
 
         async Task<bool> IsExecutionCurrentAsync(CancellationToken fenceCt)
         {
@@ -189,7 +194,9 @@ public static class EllaiUtteranceRunner
             answer,
             outcome.FailureCode)
         {
-            Decision = outcome.Completed ? outcome.Decision : null
+            Decision = outcome.Completed ? outcome.Decision : null,
+            ObservedTools = outcome.Completed ? outcome.ObservedTools : null,
+            HistoryIncluded = history.Count > 0
         };
     }
 

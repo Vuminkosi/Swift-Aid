@@ -57,6 +57,8 @@ public sealed class EllaiUtteranceEntityConfiguration : IEntityTypeConfiguration
                 "outcome IN ('Queued', 'Processing', 'RetryableFailure', 'Completed', 'TerminalFailure', 'Cancelled', 'LegacyUnknown')");
             table.HasCheckConstraint("ck_ellai_utterances_completed_response",
                 "outcome <> 'Completed' OR (assistant_text IS NOT NULL AND length(btrim(assistant_text)) > 0 AND completed_at_utc IS NOT NULL)");
+            table.HasCheckConstraint("ck_ellai_utterances_tool_trace_size",
+                "tool_trace_json IS NULL OR octet_length(tool_trace_json::text) <= 131072");
             table.HasCheckConstraint(
                 "ck_ellai_utterances_payload_size",
                 $"work_payload_json IS NULL OR octet_length(work_payload_json::text) <= {MaximumWorkPayloadBytes}");
@@ -76,6 +78,7 @@ public sealed class EllaiUtteranceEntityConfiguration : IEntityTypeConfiguration
         builder.Property(entity => entity.Sequence).HasColumnName("sequence");
         builder.Property(entity => entity.UserText).HasColumnName("user_text").HasColumnType("text");
         builder.Property(entity => entity.UiProposalsJson).HasColumnName("ui_proposals_json").HasColumnType("jsonb");
+        builder.Property(entity => entity.ToolTraceJson).HasColumnName("tool_trace_json").HasColumnType("jsonb");
         builder.Property(entity => entity.AssistantText).HasColumnName("assistant_text").HasColumnType("text");
         builder.Property(entity => entity.Outcome).HasColumnName("outcome").HasColumnType("text").HasDefaultValue("Queued");
         builder.Property(entity => entity.LeaseExpiresAtUtc).HasColumnName("lease_expires_at_utc").HasColumnType("timestamp with time zone");

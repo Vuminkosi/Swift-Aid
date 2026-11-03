@@ -125,7 +125,8 @@ public sealed class EllaiUtteranceWorker(
                 && EllaiResponsePublicationPolicy.CanPublish(work)
                 ? EllaiUtteranceResolution.Completed(outcome.DisplayText, work.ControllerEpoch) with
                 {
-                    UiProposalsJson = EllaiUiProposalPayload.Serialize(outcome.Decision?.UiIntents ?? [])
+                    UiProposalsJson = EllaiUiProposalPayload.Serialize(outcome.Decision?.UiIntents ?? []),
+                    ToolTraceJson = EllaiToolTrace.Serialize(outcome.ObservedTools, outcome.HistoryIncluded)
                 }
                 : EllaiUtteranceResolution.Failed with { ExpectedInteractionEpoch = work.ControllerEpoch };
             var providerElapsed = started.Elapsed.TotalMilliseconds;

@@ -214,6 +214,11 @@ public sealed class EllaiMemoryIndexTests
                 } while (turn.CompletedAtUtc is null);
                 Assert.Equal("Completed", turn.Outcome);
                 Assert.True(transport.RecallRequests > recallRequests);
+                var trace = System.Text.Json.JsonSerializer.Deserialize<EllaiToolTrace>(turn.ToolTraceJson!);
+                Assert.NotNull(trace);
+                Assert.False(trace.HistoryIncluded);
+                Assert.Contains(trace.Observations, item => item.ToolName == EllaiToolNames.Topic &&
+                    item.Evidence.Any(reference => reference.ResourceId == fixture.CaseId.ToString("D")));
                 if (liveModel) Assert.Contains(fixture.CaseId.ToString("D"), turn.AssistantText!, StringComparison.OrdinalIgnoreCase);
                 else Assert.Contains(fixture.CaseId.ToString("D"), model.Observation);
                 transport.Unavailable = true;
@@ -244,6 +249,8 @@ public sealed class EllaiMemoryIndexTests
                     } while (turn.CompletedAtUtc is null);
                     Assert.Equal("Completed", turn.Outcome);
                     Assert.True(transport.RecallRequests > priorRecallRequests);
+                    var followupTrace = System.Text.Json.JsonSerializer.Deserialize<EllaiToolTrace>(turn.ToolTraceJson!);
+                    Assert.True(followupTrace!.HistoryIncluded);
                     if (!liveModel) Assert.Contains("\"allowed\":true", model.Observation);
                 }
                 await RunFollowupAsync("turn-2");

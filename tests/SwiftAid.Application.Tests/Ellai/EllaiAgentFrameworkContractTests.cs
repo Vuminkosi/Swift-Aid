@@ -558,12 +558,18 @@ public sealed class EllaiAgentFrameworkContractTests
             AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.Now });
         var request = new EllaiLoopRequest(context, "time?", new EllaiRoleOverlay("ask", "help"), "clock", 100, "cycle", 1);
         var events = new List<EllaiActivityEvent>();
+        var evidence = new EvidenceRef("TestSource", "synthetic-reference", "1", null, "proof");
         var outcome = await executor.RunAsync(request, CancellationToken.None, onActivity: events.Add,
-            invokeToolAsync: (_, tool, _) => Task.FromResult(new EllaiToolResult(tool.ToolName, true, null, [], "observation", 1, false)));
+            invokeToolAsync: (_, tool, _) => Task.FromResult(new EllaiToolResult(tool.ToolName, true, null, [evidence], "observation", 1, false)));
         Assert.True(outcome.Completed);
         Assert.Equal("Done.", outcome.Decision?.DisplayText);
         Assert.Equal(2, outcome.IterationsUsed);
         Assert.Equal(1, outcome.ToolCallsUsed);
+        var observed = Assert.Single(outcome.ObservedTools!);
+        Assert.Equal(EllaiToolNames.Now, observed.ToolName);
+        Assert.True(observed.Allowed);
+        Assert.Equal(evidence, Assert.Single(observed.Evidence));
+        Assert.False(observed.Truncated);
         Assert.Contains(events, item => item.Kind == EllaiActivityKind.ToolStarted && item.ToolName == EllaiToolNames.Now);
         Assert.Contains(events, item => item.Kind == EllaiActivityKind.CycleCompleted);
     }

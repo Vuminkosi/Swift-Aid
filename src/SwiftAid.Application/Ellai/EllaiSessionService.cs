@@ -257,7 +257,7 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
                 .OrderByDescending(pair => pair.Value.Sequence).Take(100).Reverse()
                 .Select(pair => new EllaiConversationTurn(sessionId, pair.Key.ClientUtteranceId,
                     pair.Value.Sequence, pair.Value.UserText, pair.Value.AssistantText,
-                    pair.Value.Outcome, pair.Value.AttemptCount, pair.Value.CompletedAtUtc) { UiProposalsJson = pair.Value.UiProposalsJson }).ToArray());
+                    pair.Value.Outcome, pair.Value.AttemptCount, pair.Value.CompletedAtUtc) { UiProposalsJson = pair.Value.UiProposalsJson, ToolTraceJson = pair.Value.ToolTraceJson }).ToArray());
         }
     }
 
@@ -274,7 +274,7 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
                 .OrderByDescending(pair => pair.Value.Sequence)
                 .Select(pair => new EllaiConversationTurn(sessionId, pair.Key.ClientUtteranceId,
                     pair.Value.Sequence, pair.Value.UserText, pair.Value.AssistantText,
-                    pair.Value.Outcome, pair.Value.AttemptCount, pair.Value.CompletedAtUtc) { UiProposalsJson = pair.Value.UiProposalsJson })
+                    pair.Value.Outcome, pair.Value.AttemptCount, pair.Value.CompletedAtUtc) { UiProposalsJson = pair.Value.UiProposalsJson, ToolTraceJson = pair.Value.ToolTraceJson })
                 .FirstOrDefault();
             return Task.FromResult(turn);
         }
@@ -306,6 +306,7 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
                 {
                     PayloadJson = null, LeaseExpiresAtUtc = null, CompletedAtUtc = completedAtUtc,
                     Outcome = resolution.Outcome, AssistantText = resolution.AssistantText, UiProposalsJson = resolution.UiProposalsJson,
+                    ToolTraceJson = resolution.ToolTraceJson,
                 };
                 return Task.FromResult<EllaiUtteranceResolution?>(resolution);
             }
@@ -344,6 +345,7 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
         public string? UserText { get; init; }
         public string? AssistantText { get; init; }
         public string? UiProposalsJson { get; init; }
+        public string? ToolTraceJson { get; init; }
         public string Outcome { get; init; } = "Queued";
     }
 

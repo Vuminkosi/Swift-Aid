@@ -5,6 +5,8 @@ public sealed record EllaiUtteranceResolution(string Outcome, string? AssistantT
 {
     /// <summary>Bounded model proposals retained for later authorization; never executable receipts.</summary>
     public string? UiProposalsJson { get; init; }
+    /// <summary>Server-observed tool references for this turn, not authorization to replay it.</summary>
+    public string? ToolTraceJson { get; init; }
 
     public static EllaiUtteranceResolution Completed(string text, long epoch)
     {
@@ -17,6 +19,11 @@ public sealed record EllaiUtteranceResolution(string Outcome, string? AssistantT
 
     public void Validate()
     {
+        if (ToolTraceJson is not null)
+        {
+            if (Outcome != "Completed" || !EllaiToolTrace.IsValid(ToolTraceJson))
+                throw new ArgumentException("Only completed decisions may retain a valid bounded tool trace.");
+        }
         if (UiProposalsJson is not null)
         {
             if (Outcome != "Completed") throw new ArgumentException("Only completed decisions may retain UI proposals.");
@@ -37,4 +44,5 @@ public sealed record EllaiConversationTurn(
     string? AssistantText, string Outcome, int AttemptCount, DateTimeOffset? CompletedAtUtc)
 {
     public string? UiProposalsJson { get; init; }
+    public string? ToolTraceJson { get; init; }
 }
