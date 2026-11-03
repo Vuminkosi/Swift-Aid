@@ -61,6 +61,26 @@ public sealed class PostgresCaseCommandUnitOfWork : ICaseCommandUnitOfWork, ICas
                 .ConfigureAwait(false);
             try
             {
+                if (mode == CaseLeaseMode.Read && CaseAuthorityReadDeadline.Current is { } deadline)
+                {
+                    var remaining = deadline - DateTimeOffset.UtcNow;
+                    if (remaining <= TimeSpan.Zero)
+                        throw new OperationCanceledException("The case authority read deadline expired.");
+                    // PostgreSQL 17 terminates the backend at the absolute
+                    // transaction deadline, releasing locks even if a caller
+                    // ignores cancellation. Unsupported servers fail closed.
+                    await using var deadlineCommand = _dbContext.Database.GetDbConnection().CreateCommand();
+                    deadlineCommand.Transaction = transaction.GetDbTransaction();
+                    deadlineCommand.CommandText = "SELECT set_config('transaction_timeout', " +
+                        "(CASE WHEN setting::bigint = 0 THEN @milliseconds ELSE LEAST(setting::bigint, @milliseconds) END)::text || 'ms', true) " +
+                        "FROM pg_settings WHERE name = 'transaction_timeout'";
+                    deadlineCommand.Parameters.Add(new NpgsqlParameter("milliseconds", NpgsqlDbType.Bigint)
+                    {
+                        Value = Math.Max(1, (long)remaining.TotalMilliseconds)
+                    });
+                    if (await deadlineCommand.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is not string)
+                        throw new InvalidOperationException("A bounded case authority read requires PostgreSQL transaction_timeout support.");
+                }
                 var initialOwnerActorId = await ReadCurrentOwnerActorIdAsync(caseId, cancellationToken).ConfigureAwait(false)
                     ?? throw new KeyNotFoundException("The managed case does not exist.");
 

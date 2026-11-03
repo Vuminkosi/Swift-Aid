@@ -97,6 +97,11 @@ internal sealed class CaseAuthorityPostgresFixture : IAsyncDisposable
     {
         var fixture = new CaseAuthorityPostgresFixture(frameworkFixture
             ? GetValidatedFrameworkConnectionString() : GetValidatedConnectionString());
+        if (frameworkFixture)
+        {
+            await using var db = fixture.CreateDbContext();
+            await db.Database.MigrateAsync();
+        }
         await fixture.SeedAsync(
                 makeCurrentActorOwner,
                 actorStatus,
