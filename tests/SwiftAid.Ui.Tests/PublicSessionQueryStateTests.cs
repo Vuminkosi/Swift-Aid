@@ -15,6 +15,26 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed class PublicSessionQueryStateTests
 {
+    [Fact]
+    public async Task UnknownClientTimeZoneDoesNotInventAMonthDateOrDiscardServerFilteredResults()
+    {
+        var session = Session(Guid.NewGuid()) with { TimeZoneId = "Unavailable/Zone" };
+        var component = new PublicSessionsSurface();
+        var period = typeof(PublicSessionsSurface).GetField("_periodFilter", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        period.SetValue(component, Enum.Parse(period.FieldType, "CustomDates"));
+        typeof(PublicSessionsSurface).GetField("_dateFrom", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, session.StartUtc.UtcDateTime.Date);
+        typeof(PublicSessionsSurface).GetProperty(nameof(component.Sessions))!.SetValue(component, new[] { session });
+        Assert.Empty(Property<IReadOnlyList<PublicSessionView>>(component, "FilteredSessions"));
+
+        SetQuery(component, _ => Task.FromResult<PublicSessionPage?>(new PublicSessionPage([session], null)));
+        await InvokeAsync(component, "RefreshQueryAsync");
+        Assert.Equal(session.SessionId, Assert.Single(Property<IReadOnlyList<PublicSessionView>>(component, "FilteredSessions")).SessionId);
+
+        await InvokeAsync(component, "RefreshCalendarMonthAsync");
+        Assert.Empty(Field<HashSet<DateOnly>>(component, "_monthDates"));
+        Assert.True(Field<bool>(component, "_monthHasUnknownLocalDates"));
+    }
+
     [Theory]
     [InlineData("Completed")]
     [InlineData("Cancelled")]

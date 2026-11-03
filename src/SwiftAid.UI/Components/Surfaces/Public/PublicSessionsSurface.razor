@@ -124,6 +124,10 @@
                 {
                     <p>Dots mark dates with published sessions matching the active filters.</p>
                 }
+                @if (_monthHasUnknownLocalDates)
+                {
+                    <p role="status">Some session dates cannot be placed on this calendar because their time zone is unavailable on this device.</p>
+                }
                 <p role="status">@(_calendarSelectedDate is { } selectedDay ? $"Agenda for {selectedDay.ToString("D", CultureInfo.CurrentCulture)}" : "Choose a date to see its agenda.")</p>
             </section>
         }
@@ -510,6 +514,7 @@
     private PublicSessionQuery? _monthQuery;
     private PublicSessionPosition? _monthNext;
     private bool _monthLoading;
+    private bool _monthHasUnknownLocalDates;
     private string? _monthError;
     private long _monthGeneration;
 
@@ -623,7 +628,7 @@
             return VisibleSessions
                 .Where(session => InitialSessionId is { } requestedId
                     ? session.SessionId == requestedId
-                    : MatchesPeriod(session, now))
+                    : (QuerySessionsAsync is not null && _periodFilter == SessionPeriodFilter.CustomDates) || MatchesPeriod(session, now))
                 .Where(session => QuerySessionsAsync is not null || MatchesCategory(session))
                 .Where(session => QuerySessionsAsync is not null || string.IsNullOrWhiteSpace(_languageFilter) ||
                     string.Equals(session.Language, _languageFilter, StringComparison.OrdinalIgnoreCase))
@@ -896,6 +901,7 @@
         if (QuerySessionsAsync is null) return;
         var generation = ++_monthGeneration;
         _monthDates.Clear();
+        _monthHasUnknownLocalDates = false;
         _monthNext = null;
         _monthError = null;
         _monthQuery = new PublicSessionQuery(Search: _searchText, CountryCode: _countryFilter, RegionId: _regionFilter,
@@ -927,7 +933,12 @@
                 return;
             }
             foreach (var session in page.Items)
-                _monthDates.Add(DateOnly.FromDateTime(SessionLocalDate(session)));
+            {
+                if (SessionLocalDate(session) is { } date)
+                    _monthDates.Add(DateOnly.FromDateTime(date));
+                else
+                    _monthHasUnknownLocalDates = true;
+            }
             _monthNext = page.Next;
         }
         catch (Exception)
@@ -1067,6 +1078,8 @@
         if (_periodFilter == SessionPeriodFilter.CustomDates)
         {
             var sessionDate = SessionLocalDate(session);
+            if (sessionDate is null)
+                return _dateFrom is null && _dateTo is null;
             if (_dateFrom is { } from && sessionDate < from.Date)
             {
                 return false;
@@ -1102,7 +1115,7 @@
             session.TopicTags.Any(tag => tag.Contains(search, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static DateTime SessionLocalDate(PublicSessionView session)
+    private static DateTime? SessionLocalDate(PublicSessionView session)
     {
         try
         {
@@ -1111,15 +1124,15 @@
         }
         catch (TimeZoneNotFoundException)
         {
-            return session.StartUtc.UtcDateTime.Date;
+            return null;
         }
         catch (InvalidTimeZoneException)
         {
-            return session.StartUtc.UtcDateTime.Date;
+            return null;
         }
         catch (ArgumentException)
         {
-            return session.StartUtc.UtcDateTime.Date;
+            return null;
         }
     }
 
