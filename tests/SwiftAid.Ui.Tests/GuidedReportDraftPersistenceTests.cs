@@ -1,6 +1,7 @@
 #pragma warning disable BL0005 // Logic tests exercise component save-state transitions directly; production parameters are renderer-owned.
 using System.Reflection;
 using Microsoft.AspNetCore.Components;
+using SwiftAid.Contracts.Geography;
 using SwiftAid.Contracts.Intake;
 using SwiftAid.UI.Components.Public;
 using SwiftAid.UI.Components.Public.GuidedReportStepper;
@@ -9,6 +10,29 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed partial class GuidedReportDraftPersistenceTests
 {
+    [Theory]
+    [InlineData("+-1:00")]
+    [InlineData("+ 2:00")]
+    [InlineData("+02:-1")]
+    [InlineData("+14:01")]
+    public async Task InvalidExactOffsetBlocksReviewAndIdentifiesTheOffset(string offset)
+    {
+        var draft = CreateDraft();
+        draft.OccurrencePrecision = ReportedTimePrecision.Exact;
+        draft.OccurrenceDate = new DateTime(2026, 10, 31);
+        draft.OccurrenceTime = "08:15";
+        draft.OccurrenceOffset = offset;
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+
+        await (Task)Invoke(component, "ContinueFromTypeAsync")!;
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+
+        Assert.Contains(component.GetState().ValidationIssues, issue => issue.InputId == "report.utc-offset");
+        Assert.False(component.GetState().Controls.Single(control => control.ControlId == "report.narrative").CompletionAccepted);
+        Assert.Contains(draft.Validate(new System.ComponentModel.DataAnnotations.ValidationContext(draft)),
+            error => error.MemberNames.Contains(nameof(PublicReportDraft.OccurrenceOffset)));
+    }
+
     [Theory]
     [InlineData(nameof(PublicReportDraft.CountryConfirmed), true)]
     [InlineData(nameof(PublicReportDraft.ProcessingConfirmed), true)]

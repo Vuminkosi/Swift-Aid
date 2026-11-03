@@ -64,4 +64,20 @@ public sealed class PublicReportDraftTimeTests
         Assert.Null(submission.Occurrence.LocalDate);
         Assert.Equal("+02:00", submission.Occurrence.OriginalOffset);
     }
+
+    [Theory]
+    [InlineData("+-1:00")]
+    [InlineData("+ 2:00")]
+    [InlineData("+02:-1")]
+    [InlineData("+14:01")]
+    public void ToSubmission_RejectsMalformedExactOffset(string offset)
+    {
+        var draft = Draft();
+        draft.OccurrencePrecision = ReportedTimePrecision.Exact;
+        draft.OccurrenceDate = new DateTime(2026, 10, 31);
+        draft.OccurrenceTime = "08:15";
+        draft.OccurrenceOffset = offset;
+
+        Assert.Throws<InvalidOperationException>(() => Submit(draft));
+    }
 }

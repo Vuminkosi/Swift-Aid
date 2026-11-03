@@ -1131,16 +1131,7 @@
 
     private bool HasValidOccurrenceOffset()
     {
-        if (Draft.OccurrenceOffset is not { Length: 6 } offset ||
-            offset[0] is not ('+' or '-') || offset[3] != ':' ||
-            !int.TryParse(offset.AsSpan(1, 2), out var hours) ||
-            !int.TryParse(offset.AsSpan(4, 2), out var minutes) ||
-            hours > 14 || minutes > 59 || (hours == 14 && minutes != 0))
-        {
-            return false;
-        }
-
-        return true;
+        return PublicReportDraft.TryParseOffset(Draft.OccurrenceOffset, out _);
     }
 
     private void ClearStepValidation()

@@ -311,11 +311,13 @@ public sealed class PublicReportDraft : IValidatableObject
         return string.Concat(offset < TimeSpan.Zero ? "-" : "+", absolute.ToString(@"hh\:mm"));
     }
 
-    private static bool TryParseOffset(string? value, out TimeSpan offset)
+    internal static bool TryParseOffset(string? value, out TimeSpan offset)
     {
         offset = default;
         if (value is null || value.Length != 6 || value[3] != ':' ||
             value[0] is not ('+' or '-') ||
+            value[1] is < '0' or > '9' || value[2] is < '0' or > '9' ||
+            value[4] is < '0' or > '9' || value[5] is < '0' or > '9' ||
             !int.TryParse(value.AsSpan(1, 2), out var hours) ||
             !int.TryParse(value.AsSpan(4, 2), out var minutes) ||
             hours > 14 || minutes > 59 || (hours == 14 && minutes != 0))
