@@ -6,6 +6,12 @@ using SwiftAid.Application.Ellai;
 using SwiftAid.Contracts.Ellai;
 using SwiftAid.Infrastructure.Persistence;
 using SwiftAid.Infrastructure.Persistence.Ellai;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.AI;
+using SwiftAid.Gateway.Ellai;
+using SwiftAid.Intelligence.Meta;
+using System.Runtime.CompilerServices;
 
 namespace SwiftAid.Integration.Tests;
 
@@ -21,16 +27,122 @@ public sealed class EllaiPostgresFactAttribute : FactAttribute
     }
 }
 
+public sealed class FrameworkPostgresFactAttribute : FactAttribute
+{
+    public FrameworkPostgresFactAttribute()
+    {
+        if (!string.Equals(Environment.GetEnvironmentVariable("SWIFTAID_RUN_FRAMEWORK_POSTGRES_FIXTURES"), "1", StringComparison.Ordinal))
+            Skip = "Set SWIFTAID_RUN_FRAMEWORK_POSTGRES_FIXTURES=1 for the dedicated disposable framework database.";
+    }
+}
+
 /// <summary>Live PostgreSQL gate for the Ellai session store (ELL-T04).
 /// Same approved disposable loopback target as the authority fixtures.
 /// Cleans up its own rows; never touches other data.</summary>
 public sealed class EllaiPostgresTests : IAsyncLifetime
 {
+    [FrameworkPostgresFact]
+    public async Task FrameworkWorkerRehydratesOwnedConversationAfterWorkerRestart()
+    {
+        var id = $"framework-recovery-{Guid.NewGuid():N}";
+        _frameworkSessionIds.Add(id);
+        var session = new EllaiSessionRecord(id, EllaiMode.Ask, "Active", 1, 1, 1, 1, 0, 12,
+            Actor.ActorId, "scope-test", null, null, DateTimeOffset.UtcNow);
+        var first = new EllaiUtteranceWork(id, "scope-test", "First synthetic question", "public.product-help", null,
+            EllaiMode.Ask, 1, "cycle-1", Actor, true, "consent/0", EllaiProcessingClassification.UserProvidedNonSensitive,
+            EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string>(), EllaiConsentPurposes.PublicProductHelp, "turn-1");
+        await using (var db = CreateFrameworkDbContext())
+        {
+            var store = new PostgresEllaiSessionStore(db);
+            await store.CreateAsync(session, default);
+            Assert.NotNull(await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 }, 1,
+                first.ClientUtteranceId, default, EllaiUtteranceWorkEnvelope.Serialize(first, first.ClientUtteranceId)));
+        }
+
+        using var model = new RecoveryClient();
+        await RunFrameworkWorkerAsync(id, "turn-1", model);
+        var second = first with { Utterance = "Second synthetic question", ClientUtteranceId = "turn-2", CycleId = "cycle-2" };
+        await using (var db = CreateFrameworkDbContext())
+        {
+            var store = new PostgresEllaiSessionStore(db);
+            var current = (await store.GetAsync(id, default))!;
+            Assert.NotNull(await store.TryAcceptUtteranceAsync(current with
+                { SessionVersion = current.SessionVersion + 1, CyclesUsed = current.CyclesUsed + 1 }, current.SessionVersion,
+                second.ClientUtteranceId, default, EllaiUtteranceWorkEnvelope.Serialize(second, second.ClientUtteranceId)));
+        }
+        await RunFrameworkWorkerAsync(id, "turn-2", model);
+
+        await using var verifyDb = CreateFrameworkDbContext();
+        var verified = new PostgresEllaiSessionStore(verifyDb);
+        var turns = await verified.ReadConversationAsync(id, Actor.ActorId, default);
+        Assert.Equal(2, turns.Count);
+        Assert.All(turns, turn => Assert.Equal("Completed", turn.Outcome));
+        Assert.Empty(await verified.ReadConversationAsync(id, "different-owner", default));
+        Assert.Contains("First synthetic question", model.LastMessages);
+        Assert.Contains("Synthetic recovered answer.", model.LastMessages);
+        Assert.Contains("Second synthetic question", model.LastMessages);
+        Assert.Equal(2, (await new PostgresEllaiUsageStore(verifyDb).TotalsAsync(id, default)).Calls);
+    }
+
+    private static async Task RunFrameworkWorkerAsync(string sessionId, string turnId, RecoveryClient model)
+    {
+        var consent = new EllaiConsentService();
+        var services = new ServiceCollection();
+        services.AddScoped(_ => CreateFrameworkDbContext());
+        services.AddScoped<PostgresEllaiSessionStore>();
+        services.AddScoped<IEllaiSessionStore>(sp => sp.GetRequiredService<PostgresEllaiSessionStore>());
+        services.AddScoped<IEllaiUtteranceOutboxStore>(sp => sp.GetRequiredService<PostgresEllaiSessionStore>());
+        services.AddScoped<IEllaiUsageStore, PostgresEllaiUsageStore>();
+        services.AddSingleton(consent);
+        services.AddSingleton<EllaiUsageLedger>();
+        services.AddSingleton(new EllaiSessionResponseStore());
+        services.AddScoped(_ => new EllaiToolBroker(new EllaiPolicyService(), consent));
+        services.AddScoped<IEllaiReasoningExecutor>(sp => new EllaiFrameworkExecutor(model,
+            new EllaiPromptBuilder("Synthetic test policy", "fixture"), sp.GetRequiredService<EllaiToolBroker>(),
+            sp.GetRequiredService<EllaiUsageLedger>(), sp.GetRequiredService<IEllaiUsageStore>()));
+        await using var provider = services.BuildServiceProvider();
+        using var worker = new EllaiUtteranceWorker(provider, NullLogger<EllaiUtteranceWorker>.Instance);
+        await worker.StartAsync(default);
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            while (true)
+            {
+                await Task.Delay(25, timeout.Token);
+                await using var db = CreateFrameworkDbContext();
+                var turns = await new PostgresEllaiSessionStore(db).ReadConversationAsync(sessionId, Actor.ActorId, timeout.Token);
+                if (turns.Single(turn => turn.ClientUtteranceId == turnId).CompletedAtUtc is not null) break;
+            }
+        }
+        finally { await worker.StopAsync(CancellationToken.None); }
+    }
+
+    private sealed class RecoveryClient : IChatClient
+    {
+        public IReadOnlyList<string> LastMessages { get; private set; } = [];
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            cancellationToken.ThrowIfCancellationRequested();
+            LastMessages = messages.Where(message => message.Role == ChatRole.User || message.Role == ChatRole.Assistant)
+                .Select(message => message.Text).ToArray();
+            yield return new ChatResponseUpdate(ChatRole.Assistant,
+                """{"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Synthetic recovered answer.","spokenText":"Synthetic recovered answer.","claims":[],"questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}""");
+            yield return new ChatResponseUpdate(ChatRole.Assistant,
+                [new UsageContent(new UsageDetails { InputTokenCount = 5, OutputTokenCount = 4 })]);
+        }
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
     private static readonly ClaimsPrincipal Principal = new(new ClaimsIdentity(
         [new Claim(ClaimTypes.NameIdentifier, "ellai-pg-test-actor"),
             new Claim(ActorContext.AccessEpochClaimType, "1")], "test"));
     private static ActorContext Actor => ActorContext.FromValidatedPrincipal(Principal);
     private readonly List<string> _sessionIds = new();
+    private readonly List<string> _frameworkSessionIds = new();
 
     public Task InitializeAsync() => Task.CompletedTask;
 
@@ -223,9 +335,21 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        if (!Enabled()) return;
-        await using var db = CreateDbContext();
-        foreach (var id in _sessionIds)
+        if (Enabled() && _sessionIds.Count > 0)
+        {
+            await using var db = CreateDbContext();
+            await DeleteSessionsAsync(db, _sessionIds);
+        }
+        if (_frameworkSessionIds.Count > 0)
+        {
+            await using var db = CreateFrameworkDbContext();
+            await DeleteSessionsAsync(db, _frameworkSessionIds);
+        }
+    }
+
+    private static async Task DeleteSessionsAsync(SwiftAidDbContext db, IEnumerable<string> sessionIds)
+    {
+        foreach (var id in sessionIds)
         {
             await db.Set<EllaiUsageSampleEntity>().Where(e => e.SessionId == id).ExecuteDeleteAsync();
             await db.Set<EllaiConsentGrantEntity>().Where(e => e.SessionId == id).ExecuteDeleteAsync();
@@ -417,6 +541,17 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
 
     private static bool Enabled() => string.Equals(
         Environment.GetEnvironmentVariable("SWIFTAID_RUN_SQLAUTH_FIXTURES"), "1", StringComparison.Ordinal);
+
+    private static SwiftAidDbContext CreateFrameworkDbContext()
+    {
+        var value = Environment.GetEnvironmentVariable("SWIFTAID_FRAMEWORK_POSTGRES_CONNECTION");
+        if (string.IsNullOrWhiteSpace(value)) throw new InvalidOperationException("The disposable framework database is required.");
+        var builder = new NpgsqlConnectionStringBuilder(value);
+        if (builder.Host is not ("127.0.0.1" or "localhost" or "::1") || builder.Port is < 1024 or > 65535 ||
+            builder.Database != "swiftaid_framework_fixture" || builder.Username != "p21_migration_owner" || string.IsNullOrWhiteSpace(builder.Password))
+            throw new InvalidOperationException("The framework fixture must use its named disposable loopback database.");
+        return new SwiftAidDbContext(new DbContextOptionsBuilder<SwiftAidDbContext>().UseNpgsql(builder.ConnectionString).Options);
+    }
 
     private static SwiftAidDbContext CreateDbContext()
     {

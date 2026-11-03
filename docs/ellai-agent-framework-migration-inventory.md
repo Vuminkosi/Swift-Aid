@@ -126,6 +126,23 @@ concurrent sessions, cancellation and restart on disposable infrastructure.
 Record exact results; synthetic or adapter-only checks do not satisfy the
 full live Gateway acceptance gate.
 
+**Disposable PostgreSQL recovery evidence:** `FrameworkWorkerRehydratesOwnedConversationAfterWorkerRestart`
+passed (1/1, zero skipped) against a task-owned PostGIS 17 container after 60
+repository migrations. With a deterministic synthetic model, it completed a
+turn, disposed the worker and its service provider, then processed a second
+turn using a new worker and database scope. The model received the prior user
+and assistant messages, another owner could not read the conversation, and
+two usage calls persisted. The fixture removed its own rows; a database query
+confirmed no `framework-recovery-` sessions remained. Command: `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore
+-m:1 -nr:false -p:WasmBuildNative=false --filter
+FullyQualifiedName~FrameworkWorkerRehydratesOwnedConversationAfterWorkerRestart
+--verbosity quiet`, with `SWIFTAID_RUN_FRAMEWORK_POSTGRES_FIXTURES=1` and the
+dedicated loopback `swiftaid_framework_fixture` connection. This exercises a
+worker restart within one test process; a Gateway process restart, live Muse,
+serialized `AgentSession` restoration and real multi-instance behavior remain
+**NOT VERIFIED**.
+
 **Evidence this audit:** `EllaiLiveQueueReadTests` passed 24/24, including
 four framework/broker cases for exact hit, stale reference, index outage and
 wrong epoch, with a fake index and synthetic queue. The focused integration
@@ -188,8 +205,9 @@ owner-filtered completed-turn projection, while the outbox remains the sole
 durable conversation authority. A two-turn in-memory worker fixture confirms
 the previous exchange reaches the next framework session in order. This is
 rehydration from durable-conversation abstractions, not persistence or
-restoration of the framework session's serialized state; PostgreSQL and
-process-restart recovery remain unverified.
+restoration of the framework session's serialized state. A disposable
+PostgreSQL worker-scope recovery test is described below; full process-restart
+recovery remains unverified.
 `EllaiFrameworkExecutor` implements the application execution boundary using
 the shared framework prompt, filtered conversation, tool guard and usage store.
 An in-process fixture verifies a successful tool call and activity event. It
@@ -213,13 +231,13 @@ evidence validation and concurrent session history isolation. Invalid final
 decisions now get at most two model-only framework correction runs in the same
 session, with tool definitions suppressed and one shared model-call limit.
 Tests cover repair success, exhaustion and a rejected streamed draft without
-appending repaired text. Live Muse correction behavior, PostgreSQL recovery,
+appending repaired text. Live Muse correction behavior, full process recovery,
 and complete multi-turn parity remain cutover acceptance requirements.
 Its non-streaming provider calls recheck the supplied currency callback and
 use `EllaiFrameworkUsage` to estimate the prompt and tool-schema budget against
 the existing ledger, then record provider usage through `IEllaiUsageStore`.
 The estimate and recording are covered by an in-memory fixture, not a live
-PostgreSQL restart or multi-instance concurrency test. The existing ledger's
+PostgreSQL process restart or multi-instance concurrency test. The existing ledger's
 `TryReserve` is a check, not an atomic cross-instance reservation. The
 isolated runner now uses framework streaming with the existing decision-text
 parser and checks currency and budget before each streamed provider call. It
