@@ -210,6 +210,24 @@ the integration test command above with filter
 This exercises the same registration as the Gateway but not the Gateway host,
 real provider, or production configuration.
 
+`LiveMuseWorkerRecallsAuthorizedCaseFromPostgresAndQdrant` and its synthetic
+model control passed 2/2, twice, against dedicated disposable PostgreSQL and
+Qdrant containers. The framework worker called the existing topic tool and
+attempted Qdrant exact recall on each turn. Live Muse returned the synthetic
+authorized case identifier from the indexed topic, returned it again after a
+simulated Qdrant transport failure with PostgreSQL fallback, and did not return
+it after the persisted case grant expired. The outage was injected in the HTTP
+transport, not by stopping Qdrant. These two model runs do not prove
+reliability across arbitrary prompts, concurrent revocation, an actual network
+outage, or the deployed Gateway HTTP path. The strengthened rerun counted
+each recall request. Run with `ELLAI_LIVE=1`, `ELLAI_LIVE_QDRANT=1`,
+`SWIFTAID_RUN_FRAMEWORK_POSTGRES_FIXTURES=1`, configured Muse settings,
+`QDRANT_TEST_ENDPOINT` and `SWIFTAID_FRAMEWORK_POSTGRES_CONNECTION` pointing
+to dedicated loopback fixtures, and `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore
+-m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~LiveMuseWorkerRecallsAuthorizedCaseFromPostgresAndQdrant|FullyQualifiedName~FrameworkWorkerRecallsAuthorizedCaseFromPostgresAndQdrant'`.
+
 `GuestHttpTurnsReachFrameworkWorkerAndRetainConversation` passes through the
 real guest HTTP routes in an ASP.NET Core TestServer, cookie and antiforgery
 filters, the worker and the framework registration. Two submitted turns
