@@ -59,6 +59,47 @@ public sealed class PostgresEllaiOperationalScheduleStore(SwiftAidDbContext db)
         }, ct).ConfigureAwait(false);
     }
 
+    /// <summary>Claims one due schedule within an already authorized workspace and role set.
+    /// An empty set grants no work. Callers must derive the set from trusted worker configuration.</summary>
+    public async Task<EllaiOperationalLease?> TryClaimNextAsync(string workspaceId,
+        IReadOnlyCollection<string> allowedRoles, TimeSpan duration, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(allowedRoles);
+        ct.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(workspaceId) || workspaceId.Length > 120 ||
+            !string.Equals(workspaceId, workspaceId.Trim(), StringComparison.Ordinal))
+            throw new ArgumentException("A bounded workspace is required.", nameof(workspaceId));
+        if (duration < TimeSpan.FromSeconds(10) || duration > TimeSpan.FromMinutes(10))
+            throw new ArgumentOutOfRangeException(nameof(duration));
+        if (allowedRoles.Count > Roles.Count || allowedRoles.Any(role => !Roles.Contains(role)))
+            throw new ArgumentException("Only known operational roles are permitted.", nameof(allowedRoles));
+        var roles = allowedRoles.Distinct(StringComparer.Ordinal).ToArray();
+        if (roles.Length == 0) return null;
+        var leaseId = Guid.NewGuid();
+        return await ExecuteAsync(async connection =>
+        {
+            await using var cmd = Command(connection, """
+                WITH candidate AS (
+                    SELECT workspace_id, role_id FROM ellai_operational_schedules
+                    WHERE workspace_id = @workspace AND role_id = ANY(@roles)
+                        AND next_due_utc <= clock_timestamp()
+                        AND (lease_until_utc IS NULL OR lease_until_utc <= clock_timestamp())
+                    ORDER BY next_due_utc, role_id FOR UPDATE SKIP LOCKED LIMIT 1
+                )
+                UPDATE ellai_operational_schedules schedule
+                SET lease_id = @lease, lease_started_utc = clock_timestamp(),
+                    lease_until_utc = clock_timestamp() + @duration, fencing_token = schedule.fencing_token + 1
+                FROM candidate WHERE schedule.workspace_id = candidate.workspace_id AND schedule.role_id = candidate.role_id
+                RETURNING schedule.role_id, schedule.fencing_token, schedule.next_due_utc,
+                    schedule.lease_until_utc, schedule.policy_version
+                """, ("workspace", workspaceId), ("roles", roles), ("lease", leaseId), ("duration", duration));
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            if (!await reader.ReadAsync(ct).ConfigureAwait(false)) return null;
+            return new EllaiOperationalLease(workspaceId, reader.GetString(0), leaseId, reader.GetInt64(1),
+                reader.GetFieldValue<DateTimeOffset>(2), reader.GetFieldValue<DateTimeOffset>(3), reader.GetString(4));
+        }, ct).ConfigureAwait(false);
+    }
+
     public async Task<bool> CompleteAsync(EllaiOperationalLease lease, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(lease);

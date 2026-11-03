@@ -9,6 +9,39 @@ namespace SwiftAid.Integration.Tests;
 public sealed class EllaiOperationalSchedulePostgresTests
 {
     [FrameworkPostgresFact]
+    public async Task DueDiscoveryClaimsOnlyPermittedWorkspaceAndRolesAcrossReplicas()
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
+        await using var firstDb = fixture.CreateDbContext();
+        await using var secondDb = fixture.CreateDbContext();
+        var first = new PostgresEllaiOperationalScheduleStore(firstDb);
+        var second = new PostgresEllaiOperationalScheduleStore(secondDb);
+        var due = DateTimeOffset.UtcNow.AddMinutes(-1);
+        try
+        {
+            Assert.True(await first.CreateAsync(fixture.WorkspaceId, "ops.quality", 4, "policy/1", due, default));
+            Assert.True(await first.CreateAsync(fixture.WorkspaceId, "ops.followup", 4, "policy/1", due, default));
+            Assert.True(await first.CreateAsync(fixture.AlternateWorkspaceId, "ops.quality", 4, "policy/1", due, default));
+            Assert.Null(await first.TryClaimNextAsync(fixture.WorkspaceId, [], TimeSpan.FromMinutes(1), default));
+            await Assert.ThrowsAsync<ArgumentException>(() => first.TryClaimNextAsync(fixture.WorkspaceId,
+                ["ops.unknown"], TimeSpan.FromMinutes(1), default));
+            var permitted = new[] { "ops.quality", "ops.followup" };
+            var claims = await Task.WhenAll(first.TryClaimNextAsync(fixture.WorkspaceId, permitted, TimeSpan.FromMinutes(1), default),
+                second.TryClaimNextAsync(fixture.WorkspaceId, permitted, TimeSpan.FromMinutes(1), default));
+            Assert.All(claims, lease => Assert.NotNull(lease));
+            Assert.All(claims, lease => Assert.Equal(fixture.WorkspaceId, lease!.WorkspaceId));
+            Assert.Equal(2, claims.Select(lease => lease!.RoleId).Distinct(StringComparer.Ordinal).Count());
+            Assert.Null(await first.TryClaimNextAsync(fixture.WorkspaceId, permitted, TimeSpan.FromMinutes(1), default));
+            Assert.Null(await first.TryClaimNextAsync(fixture.AlternateWorkspaceId, ["ops.followup"], TimeSpan.FromMinutes(1), default));
+            Assert.NotNull(await first.TryClaimNextAsync(fixture.AlternateWorkspaceId, ["ops.quality"], TimeSpan.FromMinutes(1), default));
+        }
+        finally
+        {
+            await firstDb.Database.ExecuteSqlInterpolatedAsync($"DELETE FROM ellai_operational_schedules WHERE workspace_id = {fixture.WorkspaceId} OR workspace_id = {fixture.AlternateWorkspaceId}");
+        }
+    }
+
+    [FrameworkPostgresFact]
     public async Task ScheduleClaimsAreScopedFencedAndAdvanceWithoutCatchupStorm()
     {
         await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);

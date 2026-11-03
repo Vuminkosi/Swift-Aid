@@ -6,6 +6,8 @@ It accepts only the six operational role IDs and four- or eight-hour cadences.
 Workspace and role form the schedule identity; policy version is captured in
 each lease. A database-clock lease, unique lease ID and increasing fencing token
 prevent a stale claimant from completing, renewing or abandoning a later claim.
+Due-work discovery requires one trusted workspace and an explicit allowed-role set;
+concurrent claimants skip locked schedules and an empty role set grants no work.
 Renewal cannot extend a work attempt beyond ten minutes. Failed work may abandon
 the lease without advancing the due cursor; successful completion advances from
 the previous due time past missed intervals rather than replaying every missed
