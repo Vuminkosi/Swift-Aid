@@ -2652,14 +2652,15 @@ public sealed partial class EllaiSurfaceLogicTests
         }));
         SetField(host, "_guidanceNarrationRetryPending", true);
         SetField(host, "_guidanceNarrationRetryAtUtc", DateTimeOffset.UtcNow.AddSeconds(10));
-        await InvokeAsync(host, "UpdateValidationGuidanceAsync", CancellationToken.None);
+        await InvokeAsync(host, "RetryGuidanceNarrationAsync", CancellationToken.None);
         Assert.Equal(0, retries);
         SetField(host, "_guidanceNarrationRetryAtUtc", DateTimeOffset.UtcNow.AddSeconds(-1));
-        await InvokeAsync(host, "UpdateValidationGuidanceAsync", CancellationToken.None);
+        await InvokeAsync(host, "RetryGuidanceNarrationAsync", CancellationToken.None);
+        Assert.Equal(1, retries);
+        SetField(host, "_latestGuidanceObservation", Observation("report.occurrence-date"));
+        await InvokeAsync(host, "RetryGuidanceNarrationAsync", CancellationToken.None);
         Assert.Equal(1, retries);
         SetField(host, "_narrateValidation", null);
-
-        SetField(host, "_latestGuidanceObservation", Observation("report.occurrence-date"));
         await InvokeAsync(host, "UpdateValidationGuidanceAsync", CancellationToken.None);
         Assert.Equal("ellai-report-occurrence-date", anchors["report.narrative"]);
         Assert.Contains("reported date", GetField<string>(host, "_validationGuidanceText"));
@@ -2668,6 +2669,37 @@ public sealed partial class EllaiSurfaceLogicTests
         await InvokeAsync(host, "UpdateValidationGuidanceAsync", CancellationToken.None);
         Assert.Equal(EllaiReportUiManifest.AnchorFor("report.narrative"), anchors["report.narrative"]);
         Assert.Null(GetField<string?>(host, "_validationGuidanceText"));
+    }
+
+    [Fact]
+    public async Task OrdinaryGuidanceNarrationRetriesAfterFailureAndStopsWhenCancelled()
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), "");
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = BonboardingTourStatus.Running;
+        proxy.CurrentStep = new BonboardingStepDefinition { Id = "step" };
+        var step = new GuidancePlanStep("step", "report.narrative", "record-observations", PlanStepBehavior.GuideHuman,
+            null, null, [], [], "Complete the report.", null);
+        SetField(host, "_generatedTour", tour);
+        SetField(host, "_generatedPlan", new ValidatedGuidancePlan("plan", 1, null, "Initial", ["step"], [], [], [step], [], "catalogue", "contract"));
+        SetField(host, "_guidanceFeatureId", EllaiReportUiManifest.FeatureId);
+        SetField(host, "_latestGuidanceObservation", new UiObservationReport("view", "context", "web", [], []));
+        var retries = 0;
+        SetField(host, "_narrateValidation", (Func<string?, string?, CancellationToken, Task>)((inputId, stamp, _) =>
+        {
+            Assert.Null(inputId);
+            Assert.Null(stamp);
+            retries++;
+            return Task.CompletedTask;
+        }));
+        SetField(host, "_guidanceNarrationRetryPending", true);
+        SetField(host, "_guidanceNarrationRetryAtUtc", DateTimeOffset.UtcNow.AddSeconds(-1));
+        await InvokeAsync(host, "RetryGuidanceNarrationAsync", CancellationToken.None);
+        Assert.Equal(1, retries);
+        await InvokeAsync(host, "EndGuidanceNarration");
+        await InvokeAsync(host, "RetryGuidanceNarrationAsync", CancellationToken.None);
+        Assert.Equal(1, retries);
     }
 
     [Theory]

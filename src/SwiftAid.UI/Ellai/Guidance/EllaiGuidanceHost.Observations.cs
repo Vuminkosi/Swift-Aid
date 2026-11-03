@@ -42,6 +42,7 @@ public partial class EllaiGuidanceHost
         {
             await ReportCurrentUiAsync(token);
             await UpdateValidationGuidanceAsync(token);
+            await RetryGuidanceNarrationAsync(token);
             UpdateUnavailableGuidanceTarget();
             await AdvanceValidatedInputAsync(token);
         }
@@ -70,9 +71,6 @@ public partial class EllaiGuidanceHost
         var nextId = issue?.InputId;
         if (_validationInputId == nextId && _validationTargetControlId == (issue is null ? null : step.ControlId))
         {
-            if (issue is not null && _guidanceNarrationRetryPending && _guidanceNarrationEventId is null && _guidanceNarrationCts is null &&
-                DateTimeOffset.UtcNow >= _guidanceNarrationRetryAtUtc && _narrateValidation is { } retry)
-                await retry(issue.InputId, observation.ContextStamp, token);
             return;
         }
         if (_validationTargetControlId is { } previous &&
@@ -90,6 +88,20 @@ public partial class EllaiGuidanceHost
         StateHasChanged();
         if (ReferenceEquals(tour, _generatedTour) && _narrateValidation is { } narrate)
             await narrate(issue?.InputId, issue is null ? null : observation.ContextStamp, token);
+    }
+
+    private async Task RetryGuidanceNarrationAsync(CancellationToken token)
+    {
+        if (!_guidanceNarrationRetryPending || _guidanceNarrationEventId is not null || _guidanceNarrationCts is not null ||
+            DateTimeOffset.UtcNow < _guidanceNarrationRetryAtUtc || _narrateValidation is not { } retry ||
+            _generatedTour?.Status != Bit.Bonboarding.BonboardingTourStatus.Running ||
+            CurrentGuidanceStep is not { } step || _latestGuidanceObservation is not { } observation) return;
+        var issue = _guidanceFeatureId == EllaiReportUiManifest.FeatureId
+            ? observation.ValidationInputIds?.Select(EllaiReportValidationGuidance.Find).FirstOrDefault(item => item is not null)
+            : null;
+        if (issue?.InputId != _validationInputId ||
+            issue is not null && _validationTargetControlId != step.ControlId) return;
+        await retry(issue?.InputId, issue is null ? null : observation.ContextStamp, token);
     }
 
 
