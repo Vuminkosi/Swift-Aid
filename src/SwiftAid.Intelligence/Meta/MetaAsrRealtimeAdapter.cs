@@ -1,4 +1,5 @@
 using System.Net.WebSockets;
+using System.Security.Authentication;
 using System.Text;
 using System.Text.Json;
 
@@ -48,6 +49,17 @@ public sealed class MetaAsrRealtimeAdapter(EllaiOptions options)
         var handshake = BuildHandshake();
 
         using var socket = new ClientWebSocket();
+        // The Windows SChannel path repeatedly failed receiving this provider's
+        // WebSocket stream with default TLS negotiation; TLS 1.2 succeeds.
+        using var windowsTransport = OperatingSystem.IsWindows()
+            ? new HttpMessageInvoker(new SocketsHttpHandler
+            {
+                SslOptions = new System.Net.Security.SslClientAuthenticationOptions
+                {
+                    EnabledSslProtocols = SslProtocols.Tls12
+                }
+            })
+            : null;
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(9));
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
         using var handshakeTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(HandshakeTimeoutSeconds));
@@ -56,7 +68,10 @@ public sealed class MetaAsrRealtimeAdapter(EllaiOptions options)
 
         try
         {
-            await socket.ConnectAsync(new Uri(options.AsrWebSocketUrl), handshakeLinked.Token);
+            if (windowsTransport is null)
+                await socket.ConnectAsync(new Uri(options.AsrWebSocketUrl), handshakeLinked.Token);
+            else
+                await socket.ConnectAsync(new Uri(options.AsrWebSocketUrl), windowsTransport, handshakeLinked.Token);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
