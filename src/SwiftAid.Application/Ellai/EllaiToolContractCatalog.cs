@@ -25,6 +25,7 @@ public static class EllaiToolContractCatalog
             ["workflow"] = "Recorded case workflow filter.",
             ["sort"] = "Supported queue ordering.",
             ["field"] = "Optional country, workflow, or recorded clinical classification field for case-results; this is not BART classification evidence.",
+            ["classification_filter"] = "Filter the retained case set by recorded clinical classification, without replacing it. Unknown values are excluded.",
             ["feature"] = "Feature identifier in the current authorized scope.",
             ["receipt"] = "Receipt identifier bound to the current session.",
             ["topic"] = "Optional approved product fact topic.",
@@ -54,7 +55,7 @@ public static class EllaiToolContractCatalog
             [EllaiToolNames.State] = Contract(EllaiToolNames.State,
                 ("projection", false), ("limit", false),
                 ("country", false), ("workflow", false), ("sort", false), ("place_id", false)),
-            [EllaiToolNames.Evidence] = Contract(EllaiToolNames.Evidence, ("ref", true), ("field", false)),
+            [EllaiToolNames.Evidence] = Contract(EllaiToolNames.Evidence, ("ref", true), ("field", false), ("classification_filter", false)),
             [EllaiToolNames.Topic] = Contract(EllaiToolNames.Topic, ("ref", true)),
             [EllaiToolNames.Capabilities] = Contract(EllaiToolNames.Capabilities, ("feature", false)),
             [EllaiToolNames.Receipts] = Contract(EllaiToolNames.Receipts, ("receipt", false)),
@@ -252,6 +253,7 @@ public static class EllaiToolContractCatalog
             (EllaiToolNames.State, "projection") => Array.AsReadOnly(new[] { "feature", "queue" }),
             (EllaiToolNames.State, "workflow") => Array.AsReadOnly(new[] { "Reported", "UnderReview", "Active", "AwaitingFollowUp", "Resolved" }),
             (EllaiToolNames.State, "sort") => Array.AsReadOnly(new[] { "latest-reported", "latest-updated" }),
+            (EllaiToolNames.Evidence, "classification_filter") => Array.AsReadOnly(new[] { "Classified", "Unclassified" }),
             _ => AllowedValues.GetValueOrDefault(argumentName)
         };
 

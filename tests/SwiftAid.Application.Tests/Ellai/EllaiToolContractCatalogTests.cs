@@ -75,6 +75,8 @@ public sealed class EllaiToolContractCatalogTests
         Assert.Equal(new[] { "country", "workflow", "classification" },
             properties.GetProperty("field").GetProperty("enum").EnumerateArray()
                 .Select(value => value.GetString()).ToArray());
+        Assert.Equal(new[] { "Classified", "Unclassified" }, properties.GetProperty("classification_filter")
+            .GetProperty("enum").EnumerateArray().Select(value => value.GetString()).ToArray());
     }
 
     [Fact]

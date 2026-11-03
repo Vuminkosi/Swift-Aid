@@ -35,11 +35,15 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
     }
 
     public async Task<EllaiToolResult> RecallAsync(
-        EllaiToolContext context, CancellationToken ct, string? field = null)
+        EllaiToolContext context, CancellationToken ct, string? field = null, string? classificationFilter = null)
     {
         ct.ThrowIfCancellationRequested();
         if (field is not null && field is not ("country" or "workflow" or "classification"))
             return new(EllaiToolNames.Topic, false, "Unsupported case-result field selector.", [], "", 0, false,
+                EllaiToolReasonCodes.InvalidArguments);
+        if (classificationFilter is not null && (classificationFilter is not ("Classified" or "Unclassified") ||
+            field is not (null or "classification")))
+            return new(EllaiToolNames.Topic, false, "Unsupported case-result classification filter.", [], "", 0, false,
                 EllaiToolReasonCodes.InvalidArguments);
         if (context.Actor is null) return Unavailable();
         EllaiTopicEntry? indexedTopic = null;
@@ -89,7 +93,8 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
               (snapshot.UnknownLocations.Value ? "Some readable cases had unknown or incomplete locations. " : "");
         if (snapshot.Cases.Count == 0)
             return new EllaiToolResult(EllaiToolNames.Topic, true, null, [],
-                completeness + "The last retained case result set was empty.", 0, false)
+                completeness + (classificationFilter is null ? "" : $"Filtered by recorded clinical classification: {classificationFilter}. ") +
+                "The last retained case result set was empty.", 0, false)
                 { HistoryValidUntilUtc = snapshot.ExpiresAtUtc };
 
         var current = await queue.GetMineAsync(context.Actor, 20,
@@ -98,17 +103,29 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
         if (current.Access != CaseQueueAccess.Allowed || current.NextCursor is not null) return Unavailable();
         if (current.Items.Any(item => item.CaseId == Guid.Empty) ||
             current.Items.Select(item => item.CaseId).Distinct().Count() != current.Items.Count) return Unavailable();
-        var rows = snapshot.Cases.Join(current.Items, old => old.Id, row => row.CaseId,
+        var authorizedRows = snapshot.Cases.Join(current.Items, old => old.Id, row => row.CaseId,
             (old, row) => (old, row)).ToArray();
+        var unknownClassification = classificationFilter is not null &&
+            authorizedRows.Any(pair => RecordedClassification(pair.row.Classification) == "unknown");
+        var rows = classificationFilter is null ? authorizedRows : authorizedRows.Where(pair =>
+        {
+            var classification = RecordedClassification(pair.row.Classification);
+            return classificationFilter == "Unclassified" ? classification == "Unclassified" :
+                classification is not ("Unclassified" or "unknown");
+        }).ToArray();
         var evidence = rows.Select(pair => new EvidenceRef("CaseQueue", pair.row.CaseId.ToString("D"),
             pair.row.AggregateVersion.ToString(CultureInfo.InvariantCulture), null, pair.row.CaseId.ToString("D"))).ToArray();
-        var scopedEvidence = field is null
+        var evidenceField = classificationFilter is not null ? "classification" : field;
+        var scopedEvidence = evidenceField is null
             ? evidence
-            : evidence.Select(item => item with { FieldPath = field }).ToArray();
+            : evidence.Select(item => item with { FieldPath = evidenceField }).ToArray();
         var text = completeness + "Previously retrieved cases, checked against current access; this is not a new search. " +
-            "Unavailable records are omitted.\n" + string.Join("\n", rows.Select(pair =>
+            "Unavailable records are omitted. " +
+            (classificationFilter is null ? "" : $"Filtered by recorded clinical classification: {classificationFilter}. ") +
+            (unknownClassification ? "Cases with unknown classification are excluded. " : "") +
+            "\n" + string.Join("\n", rows.Select(pair =>
             {
-                var selectedValue = field switch
+                var selectedValue = evidenceField switch
                 {
                     "country" => $"country {pair.row.CountryCode}",
                     "workflow" => $"workflow {pair.row.Workflow}",

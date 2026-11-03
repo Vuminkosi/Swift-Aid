@@ -186,7 +186,7 @@ public sealed class EllaiToolBroker
     private static readonly string[] ToolDescriptions =
     {
         $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, country?, workflow?, sort?, place_id?) — permitted feature or owned-case queue. country is an uppercase two-letter code (Zimbabwe=ZW, Eswatini=SZ); workflow is Reported, UnderReview, Active, AwaitingFollowUp or Resolved; sort=latest-reported or latest-updated. For an occurrence-place search, select an exact registry ID using ellai_locations and supply country, place_id and sort=latest-reported; workflow is not supported with place_id. Unknown locations and incomplete scans cannot establish a complete list. Reported is a recorded workflow, not proof that no human reviewed a case. Classification review status is not supplied; clarify ambiguous unreviewed requests.",
-        $"{EllaiToolNames.Evidence}(ref=case-results, field=[country|workflow|classification]?) — re-read retained case queue references under current access; classification is a recorded clinical status, not BART output or a new diagnosis.",
+        $"{EllaiToolNames.Evidence}(ref=case-results, field=[country|workflow|classification]?, classification_filter=[Classified|Unclassified]?) — re-read retained case queue references under current access. A classification filter applies only to that retained set and does not replace it; omit the filter to return to the full set. Classification is a recorded clinical status, not BART output or a new diagnosis; clarify which classification the user means.",
         $"{EllaiToolNames.Topic}(ref) — session topic candidates with checkpoints. Use ref=case-results to recall the last retained case list with fresh authorization; never invent a remembered result set.",
         $"{EllaiToolNames.Capabilities}(feature?) — capability readiness, no credentials.",
         $"{EllaiToolNames.Receipts}(receipt?) — durable receipts, session-bound.",
@@ -512,7 +512,7 @@ public sealed class EllaiToolBroker
         try
         {
             var result = await new EllaiCaseResultMemory(_topics, _queue, referenceIndex)
-                .RecallAsync(context, ct, field).ConfigureAwait(false);
+                .RecallAsync(context, ct, field, request.Arguments.GetValueOrDefault("classification_filter")).ConfigureAwait(false);
             return result with { ToolName = request.ToolName };
         }
         catch (OperationCanceledException)

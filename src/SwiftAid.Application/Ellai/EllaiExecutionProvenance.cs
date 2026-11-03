@@ -27,7 +27,8 @@ public sealed record EllaiObservedToolResult(
     string? StaticFeatureVersion = null, DateTimeOffset? CaseSnapshotExpiresAtUtc = null,
     string? ClockVersion = null, EllaiCountReplayScope? CountReplayScope = null,
     EllaiUiCatalogueReplayScope? UiCatalogueReplayScope = null, string? CapabilityVersion = null,
-    string? ReceiptListDigest = null, string? ReceiptLookupId = null, string? CaseListDigest = null)
+    string? ReceiptListDigest = null, string? ReceiptLookupId = null, string? CaseListDigest = null,
+    EllaiRetainedClassificationFilter? RetainedClassificationFilter = null)
 {
     public const string CurrentStaticFeatureVersion = "state-feature/1";
     public const string CurrentClockVersion = "server-clock/1";
@@ -90,7 +91,14 @@ public sealed record EllaiObservedToolResult(
             receiptLookupId,
             caseQuery?.PlaceId is not null && result.Allowed && result.DenialReason is null &&
                 result.ReasonCode == EllaiToolReasonCodes.Ok && result.ItemCount == result.Evidence.Count
-                    ? CaseListFingerprint(result) : null);
+                    ? CaseListFingerprint(result) : null,
+            request.ToolName == EllaiToolNames.Evidence && result.ToolName == request.ToolName && result.Allowed &&
+                result.DenialReason is null && result.ReasonCode == EllaiToolReasonCodes.Ok && !result.Truncated &&
+                result.ItemCount == result.Evidence.Count && result.HistoryValidUntilUtc is not null &&
+                request.Arguments.TryGetValue("classification_filter", out var retainedFilter) &&
+                retainedFilter is "Classified" or "Unclassified" &&
+                request.Arguments.GetValueOrDefault("field") is null or "classification"
+                    ? new EllaiRetainedClassificationFilter(retainedFilter, CaseListFingerprint(result)) : null);
     }
 
     public static bool IsCanonicalReceiptId(string? value) => value is { Length: 37 } &&
@@ -115,6 +123,13 @@ public sealed record EllaiObservedToolResult(
         });
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content));
     }
+}
+
+/// <summary>Revalidates membership, including previously excluded cases, before replaying a filtered retained set.</summary>
+public sealed record EllaiRetainedClassificationFilter(string Filter, string Digest)
+{
+    public bool IsValid() => Filter is "Classified" or "Unclassified" && Digest is { Length: 64 } &&
+        Digest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F');
 }
 
 /// <summary>Only the resolved feature, limit and fingerprint needed to recheck catalogue discovery.</summary>

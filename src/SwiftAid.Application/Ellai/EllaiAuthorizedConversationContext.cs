@@ -252,7 +252,8 @@ public static class EllaiAuthorizedConversationContext
                     }
                     continue;
                 }
-                if (observation.Evidence.Count == 0)
+                if (observation.Evidence.Count == 0 &&
+                    (observation.ToolName != EllaiToolNames.Evidence || observation.RetainedClassificationFilter is null))
                     return decisions[turn.ClientUtteranceId] = false;
                 if (observation.ToolName == EllaiToolNames.ImportStatus)
                 {
@@ -326,6 +327,31 @@ public static class EllaiAuthorizedConversationContext
                     return decisions[turn.ClientUtteranceId] = false;
                 if (observation.CaseSnapshotExpiresAtUtc is not { } expires || expires <= DateTimeOffset.UtcNow)
                     return decisions[turn.ClientUtteranceId] = false;
+                if (observation.RetainedClassificationFilter is { } retainedFilter)
+                {
+                    if (toolContext is null || invokeTool is null || toolContext.SessionId != turn.SessionId ||
+                        toolContext.Actor is null || toolContext.Actor.ActorId != actor.ActorId ||
+                        toolContext.Actor.AccessEpoch != actor.AccessEpoch || !retainedFilter.IsValid())
+                        return decisions[turn.ClientUtteranceId] = false;
+                    try
+                    {
+                        var request = new EllaiToolRequest(EllaiToolNames.Evidence, new Dictionary<string, string>
+                        {
+                            ["ref"] = EllaiCaseResultMemory.Reference,
+                            ["classification_filter"] = retainedFilter.Filter
+                        });
+                        var current = await invokeTool(toolContext, request, ct).ConfigureAwait(false);
+                        ct.ThrowIfCancellationRequested();
+                        if (!current.Allowed || current.Truncated || current.ReasonCode != EllaiToolReasonCodes.Ok ||
+                            current.HistoryValidUntilUtc != expires ||
+                            !current.Evidence.SequenceEqual(observation.Evidence) ||
+                            EllaiObservedToolResult.CaseListFingerprint(current) != retainedFilter.Digest)
+                            return decisions[turn.ClientUtteranceId] = false;
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (Exception error) when (error is not OutOfMemoryException) { return decisions[turn.ClientUtteranceId] = false; }
+                    continue;
+                }
                 foreach (var reference in observation.Evidence)
                 {
                     if (reference.SourceKind != "CaseQueue" ||

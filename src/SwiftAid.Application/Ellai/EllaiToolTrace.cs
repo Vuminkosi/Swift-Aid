@@ -55,6 +55,8 @@ public sealed record EllaiToolTrace(int Version, bool HistoryIncluded, IReadOnly
                     (item.CaseListDigest is null || item.CaseListQuery?.PlaceId is not null &&
                         item.CaseListDigest is { Length: 64 } &&
                         item.CaseListDigest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F')) &&
+                    (item.RetainedClassificationFilter is null || item.ToolName == EllaiToolNames.Evidence &&
+                        item.RetainedClassificationFilter.IsValid() && item.CaseSnapshotExpiresAtUtc is not null) &&
                     (item.StaticFeatureVersion is null || item.ToolName == EllaiToolNames.State && item.CaseListQuery is null &&
                         item.StaticFeatureVersion == EllaiObservedToolResult.CurrentStaticFeatureVersion) &&
                     (item.CaseSnapshotExpiresAtUtc is null || item.ToolName is EllaiToolNames.Topic or EllaiToolNames.Evidence) &&
