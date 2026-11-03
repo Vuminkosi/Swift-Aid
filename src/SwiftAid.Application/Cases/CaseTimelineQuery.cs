@@ -208,6 +208,7 @@ public sealed class CaseTimelineQuery(
         "AssistanceCancelled" => "Assistance request cancelled",
         "CaseEscalationRaised" => "Escalation raised",
         "CaseEscalationAcknowledged" => "Escalation acknowledged",
+        "CaseEscalationActionRecorded" => "Escalation action recorded",
         "CaseEscalationClosed" => "Escalation closed",
         _ => $"Recorded event ({eventType}, schema v{schemaVersion})"
     };

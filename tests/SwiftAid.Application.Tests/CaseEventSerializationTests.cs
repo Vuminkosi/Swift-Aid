@@ -94,6 +94,10 @@ public sealed class CaseEventSerializationTests
             CaseId, 4, 1, Guid.Parse("20000000-0000-0000-0000-000000000013"), "officer-1", null,
             RecordedAtUtc, Guid.Parse("40000000-0000-0000-0000-000000000003"), "supervisor paged", "acknowledged"),
             "case-escalation-acknowledged.v1.json"];
+        yield return [new CaseEscalationActionRecorded(
+            CaseId, 5, 1, Guid.Parse("20000000-0000-0000-0000-000000000015"), "officer-1", null,
+            RecordedAtUtc, Guid.Parse("40000000-0000-0000-0000-000000000003"), "Supervisor paged", "Duty officer coordinated a visit."),
+            "case-escalation-action-recorded.v1.json"];
         yield return [new CaseEscalationClosed(
             CaseId, 5, 1, Guid.Parse("20000000-0000-0000-0000-000000000014"), "officer-1", null,
             RecordedAtUtc, Guid.Parse("40000000-0000-0000-0000-000000000003"), "supervisor visited holding", "resolved"),

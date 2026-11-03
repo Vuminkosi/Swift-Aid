@@ -203,9 +203,13 @@ public sealed class CaseMonitoringQueueQueryTests
             int take, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<MonitoringQueueCandidate>>(open.Take(take).ToArray());
 
-        public Task<IReadOnlyList<MonitoringQueueCandidate>> GetRaisedEscalationsAsync(
+        public Task<IReadOnlyList<MonitoringQueueCandidate>> GetOpenEscalationsAsync(
             int take, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<MonitoringQueueCandidate>>(raised.Take(take).ToArray());
+
+        public Task<MonitoringQueueCandidate> ResolveEscalationStatusAsync(
+            ICaseCommandLease lease, MonitoringQueueCandidate candidate, CancellationToken ct) =>
+            Task.FromResult(candidate);
 
         public Task<IReadOnlyList<MonitoringQueueCandidate>> GetAssignedAssistanceAsync(
             string actorId, int take, CancellationToken ct) => Task.FromResult<IReadOnlyList<MonitoringQueueCandidate>>([]);
@@ -224,8 +228,12 @@ public sealed class CaseMonitoringQueueQueryTests
             int take, CancellationToken ct) =>
             throw new InvalidOperationException("The queue store is unavailable.");
 
-        public Task<IReadOnlyList<MonitoringQueueCandidate>> GetRaisedEscalationsAsync(
+        public Task<IReadOnlyList<MonitoringQueueCandidate>> GetOpenEscalationsAsync(
             int take, CancellationToken ct) =>
+            throw new InvalidOperationException("The queue store is unavailable.");
+
+        public Task<MonitoringQueueCandidate> ResolveEscalationStatusAsync(
+            ICaseCommandLease lease, MonitoringQueueCandidate candidate, CancellationToken ct) =>
             throw new InvalidOperationException("The queue store is unavailable.");
 
         public Task<IReadOnlyList<MonitoringQueueCandidate>> GetAssignedAssistanceAsync(

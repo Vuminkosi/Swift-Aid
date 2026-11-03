@@ -333,6 +333,7 @@ public sealed class CommandBackedWorkManagementClient(
         {
             "Raised" => WorkManagementStatus.Requested,
             "Acknowledged" => WorkManagementStatus.Acknowledged,
+            "ActionRecorded" => WorkManagementStatus.ActionRecorded,
             "Closed" => (WorkManagementStatus?)null,
             _ => null,
         };
@@ -342,9 +343,13 @@ public sealed class CommandBackedWorkManagementClient(
             return null;
         }
 
-        var actions = status == WorkManagementStatus.Requested
-            ? (IReadOnlyList<WorkManagementAction>)[WorkManagementAction.AcknowledgeEscalation]
-            : [];
+        IReadOnlyList<WorkManagementAction> actions = status switch
+        {
+            WorkManagementStatus.Requested => [WorkManagementAction.AcknowledgeEscalation],
+            WorkManagementStatus.Acknowledged => [WorkManagementAction.RecordEscalationAction],
+            WorkManagementStatus.ActionRecorded => [WorkManagementAction.ResolveEscalation],
+            _ => []
+        };
 
         return new WorkManagementItem(
             $"{EscalationPrefix}{item.WorkItemId:D}",
@@ -456,9 +461,12 @@ public sealed class CommandBackedWorkManagementClient(
                 command.ExpectedVersion, EscalationId: escalationId),
         WorkManagementAction.RecordEscalationAction when TryEscalationId(command.WorkKey, out var escalationId) =>
             new CaseCommandInput(
-                "AcknowledgeEscalation", null, WorkspaceReason("Action recorded"), null, null, null,
+                "RecordEscalationAction", null, command.Reason, null, null, null,
                 command.ExpectedVersion, EscalationId: escalationId,
-                ActionSummary: command.Details),
+                ActionSummary: command.EscalationAction is { } kind
+                    ? $"{kind}: {command.Details}"
+                    : command.Details,
+                CommandId: command.CommandId),
         WorkManagementAction.ResolveEscalation when TryEscalationId(command.WorkKey, out var escalationId) =>
             new CaseCommandInput(
                 "CloseEscalation", null, command.Reason, null, null, null,

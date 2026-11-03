@@ -472,7 +472,7 @@
                 "AssistanceProvided" or "AssistanceReceiptConfirmed" or "AssistanceUnfulfilled" or
                 "AssistanceCancelled" => "Assistance",
             "CaseActionRequested" or "CaseActionRequestReviewed" => "Action review",
-            "CaseEscalationRaised" or "CaseEscalationAcknowledged" or "CaseEscalationClosed" => "Escalation",
+            "CaseEscalationRaised" or "CaseEscalationAcknowledged" or "CaseEscalationActionRecorded" or "CaseEscalationClosed" => "Escalation",
             _ => "Case activity"
         };
     }
@@ -507,6 +507,7 @@
             "CaseActionRequestReviewed" => "Action review completed",
             "CaseEscalationRaised" => "Escalation raised",
             "CaseEscalationAcknowledged" => "Escalation acknowledged",
+            "CaseEscalationActionRecorded" => "Escalation action recorded",
             "CaseEscalationClosed" => "Escalation closed",
             _ => "Case activity recorded"
         };

@@ -226,6 +226,14 @@ public static class CaseCommandEndpoints
                 RequireReason(request),
                 request.OccurredAtUtc,
                 recordedAt),
+            "RecordEscalationAction" => new RecordEscalationActionCommand(
+                request.CommandId,
+                request.ExpectedVersion,
+                RequireEscalationId(request),
+                RequireRequiredActionSummary(request.ActionSummary),
+                RequireReason(request),
+                request.OccurredAtUtc,
+                recordedAt),
             "CloseEscalation" => new CloseEscalationCommand(
                 request.CommandId,
                 request.ExpectedVersion,
@@ -599,6 +607,11 @@ public static class CaseCommandEndpoints
 
         return actionSummary;
     }
+
+    private static string RequireRequiredActionSummary(string? actionSummary) =>
+        string.IsNullOrWhiteSpace(actionSummary)
+            ? throw new ArgumentException("An escalation action summary is required.", nameof(actionSummary))
+            : actionSummary;
 
     private static IReadOnlyList<string> RequireEvidenceEventIds(CaseCommandApiRequest request)
     {

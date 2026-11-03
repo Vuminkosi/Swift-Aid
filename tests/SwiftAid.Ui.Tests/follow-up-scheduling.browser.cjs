@@ -77,8 +77,29 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             await page.waitForFunction(() => document.querySelector('#transfer-request')?.textContent === 'synthetic-follow-up-worker:Owner moved teams.');
             assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `transfer form overflow at ${width}px`);
             assert.deepEqual(errors, [], `transfer form browser errors at ${width}px`);
+
+            await page.goto(`${base}/case-follow-up-fixture?Escalation=true`);
+            await page.waitForFunction(() => document.querySelector('#fixture-ready')?.textContent === 'True');
+            await page.getByText('Synthetic operational concern', { exact: true }).first().click();
+            await page.getByLabel('Choose an available action', { exact: true }).click();
+            await page.getByRole('option', { name: 'Record administrative action', exact: true }).click();
+            await page.getByRole('combobox', { name: 'Administrative action recorded' }).click();
+            await page.getByRole('option', { name: 'Team coordination recorded', exact: true }).click();
+            await page.getByLabel('Administrative action details', { exact: true }).fill('Duty officer coordinated a visit.');
+            await page.getByLabel('Reason for recorded action', { exact: true }).fill('The field team requested support.');
+            await page.getByRole('button', { name: 'Review action', exact: true }).click();
+            await page.waitForTimeout(250);
+            const escalationConfirm = page.getByRole('button', { name: 'Confirm action', exact: true });
+            if (!await escalationConfirm.isVisible().catch(() => false)) {
+                throw new Error(`escalation action validation failed; alerts: ${(await page.getByRole('alert').allTextContents()).join(' | ')}; page: ${(await page.locator('body').innerText()).slice(-1400)}; host: ${output.slice(-1200)}`);
+            }
+            await escalationConfirm.click();
+            await page.waitForFunction(() => document.querySelector('#escalation-action-request')?.textContent !== 'None');
+            assert.match(await page.locator('#escalation-action-request').textContent(), /^[0-9a-f-]{36}:CoordinatedWithTeam:Duty officer coordinated a visit\.:The field team requested support\.$/i);
+            assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `escalation form overflow at ${width}px`);
+            assert.deepEqual(errors, [], `escalation form browser errors at ${width}px`);
         }
-        console.log('PASS rendered follow-up assignment, outcome validation, and owner transfer at 390px and 1280px');
+        console.log('PASS rendered follow-up scheduling, outcomes, owner transfer, and escalation action at 390px and 1280px');
     } finally {
         await browser?.close();
         host.kill();

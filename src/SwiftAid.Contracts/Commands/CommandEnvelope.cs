@@ -169,6 +169,17 @@ public sealed record AcknowledgeEscalationCommand(
     DateTimeOffset RecordedAtUtc)
     : CaseCommand(CommandId, ExpectedVersion, OccurredAtUtc, RecordedAtUtc);
 
+/// <summary>Records a concrete administrative response after an escalation has been acknowledged.</summary>
+public sealed record RecordEscalationActionCommand(
+    Guid CommandId,
+    long ExpectedVersion,
+    Guid EscalationId,
+    string ActionSummary,
+    string Reason,
+    DateTimeOffset? OccurredAtUtc,
+    DateTimeOffset RecordedAtUtc)
+    : CaseCommand(CommandId, ExpectedVersion, OccurredAtUtc, RecordedAtUtc);
+
 /// <summary>Closes an acknowledged escalation with a recorded resolution.</summary>
 public sealed record CloseEscalationCommand(
     Guid CommandId,

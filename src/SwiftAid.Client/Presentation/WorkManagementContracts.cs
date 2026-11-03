@@ -229,7 +229,7 @@ public sealed record WorkManagementCommand(
             EscalationReason is { } escalationReason && Enum.IsDefined(escalationReason) && HasText(Reason, 300) && IsEmptyExcept(nameof(EscalationReason), nameof(Reason)),
         WorkManagementAction.AcknowledgeEscalation => IsEmptyExcept(),
         WorkManagementAction.RecordEscalationAction =>
-            EscalationAction is { } escalationAction && Enum.IsDefined(escalationAction) && HasText(Details, 300) && IsEmptyExcept(nameof(Details), nameof(EscalationAction)),
+            EscalationAction is { } escalationAction && Enum.IsDefined(escalationAction) && HasText(Details, 300) && HasText(Reason, 300) && IsEmptyExcept(nameof(Details), nameof(EscalationAction), nameof(Reason)),
         WorkManagementAction.ResolveEscalation =>
             HasText(Reason, 300) && HasText(ResolutionSummary, 300) && IsEmptyExcept(nameof(Reason), nameof(ResolutionSummary)),
         _ => false

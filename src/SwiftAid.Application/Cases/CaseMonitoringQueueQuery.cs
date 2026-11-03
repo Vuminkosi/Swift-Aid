@@ -28,8 +28,11 @@ public interface ICaseMonitoringQueueStore
     Task<IReadOnlyList<MonitoringQueueCandidate>> GetOpenFollowUpsAsync(
         int take, CancellationToken ct);
 
-    Task<IReadOnlyList<MonitoringQueueCandidate>> GetRaisedEscalationsAsync(
+    Task<IReadOnlyList<MonitoringQueueCandidate>> GetOpenEscalationsAsync(
         int take, CancellationToken ct);
+
+    Task<MonitoringQueueCandidate> ResolveEscalationStatusAsync(
+        ICaseCommandLease lease, MonitoringQueueCandidate candidate, CancellationToken ct);
 
     Task<IReadOnlyList<MonitoringQueueCandidate>> GetAssignedAssistanceAsync(
         string actorId, int take, CancellationToken ct);
@@ -48,7 +51,7 @@ public interface ICaseMonitoringQueueQuery
 }
 
 /// <summary>
-/// Authorized monitoring queue. Lists open follow-ups (assigned or all) and raised
+/// Authorized monitoring queue. Lists open follow-ups (assigned or all) and non-closed
 /// escalations ordered by urgency, then enforces <c>ReadCase</c> through the shared
 /// case resource policy inside one read-mode lease per returned case. Denied,
 /// missing, and vanished cases are skipped and never listed.
@@ -98,7 +101,7 @@ public sealed class CaseMonitoringQueueQuery(
         try
         {
             followUps = await _store.GetOpenFollowUpsAsync(take, ct).ConfigureAwait(false);
-            escalations = await _store.GetRaisedEscalationsAsync(take, ct).ConfigureAwait(false);
+            escalations = await _store.GetOpenEscalationsAsync(take, ct).ConfigureAwait(false);
             assistance = await _store.GetOpenAssistanceAsync(take, ct).ConfigureAwait(false);
         }
         catch (Exception)
@@ -150,26 +153,33 @@ public sealed class CaseMonitoringQueueQuery(
                     continue;
                 }
 
+                var visibleCandidate = candidate;
+                if (kind == MonitoringQueueKind.Escalation &&
+                    string.Equals(candidate.Status, nameof(EscalationStatus.Acknowledged), StringComparison.Ordinal))
+                {
+                    visibleCandidate = await _store.ResolveEscalationStatusAsync(lease, candidate, ct).ConfigureAwait(false);
+                }
+
                 await lease.CommitAsync(ct).ConfigureAwait(false);
                 var overdue = kind == MonitoringQueueKind.FollowUp &&
-                    (string.Equals(candidate.Status, nameof(FollowUpStatus.Scheduled), StringComparison.Ordinal) ||
-                     string.Equals(candidate.Status, nameof(FollowUpStatus.Acknowledged), StringComparison.Ordinal)) &&
-                    candidate.DueAtUtc.HasValue &&
-                    candidate.DueAtUtc.Value < utcNow;
+                    (string.Equals(visibleCandidate.Status, nameof(FollowUpStatus.Scheduled), StringComparison.Ordinal) ||
+                     string.Equals(visibleCandidate.Status, nameof(FollowUpStatus.Acknowledged), StringComparison.Ordinal)) &&
+                    visibleCandidate.DueAtUtc.HasValue &&
+                    visibleCandidate.DueAtUtc.Value < utcNow;
                 overdue |= kind == MonitoringQueueKind.Assistance &&
-                    (candidate.Status is nameof(AssistanceStatus.Requested) or nameof(AssistanceStatus.Accepted) or nameof(AssistanceStatus.InProgress)) &&
-                    candidate.DueAtUtc.HasValue && candidate.DueAtUtc.Value < utcNow;
+                    (visibleCandidate.Status is nameof(AssistanceStatus.Requested) or nameof(AssistanceStatus.Accepted) or nameof(AssistanceStatus.InProgress)) &&
+                    visibleCandidate.DueAtUtc.HasValue && visibleCandidate.DueAtUtc.Value < utcNow;
                 items.Add(new MonitoringQueueItem(
-                    candidate.CaseId,
+                    visibleCandidate.CaseId,
                     kind,
-                    candidate.WorkItemId,
-                    candidate.Summary,
-                    candidate.AssigneeActorId,
-                    candidate.DueAtUtc,
-                    candidate.Status,
+                    visibleCandidate.WorkItemId,
+                    visibleCandidate.Summary,
+                    visibleCandidate.AssigneeActorId,
+                    visibleCandidate.DueAtUtc,
+                    visibleCandidate.Status,
                     overdue,
-                    candidate.RecordedAtUtc,
-                    candidate.AggregateVersion));
+                    visibleCandidate.RecordedAtUtc,
+                    visibleCandidate.AggregateVersion));
             }
         }
 

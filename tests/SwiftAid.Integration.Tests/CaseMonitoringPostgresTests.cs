@@ -67,7 +67,7 @@ public sealed class CaseMonitoringPostgresTests
         Assert.Equal(nameof(CaseEventType.CaseFollowUpAcknowledged), eventRow.EventType);
         Assert.Equal("officer-1", eventRow.ActorId);
 
-        var queue = await QueryQueueAsync(actor, FirstDueAtUtc.AddDays(2));
+        var queue = await QueryQueueAsync(actor, FirstDueAtUtc.AddDays(2), keyRing.CreateOptions(), provider);
         var item = Assert.Single(queue.Items);
         Assert.Equal("Acknowledged", item.Status);
         Assert.True(item.IsOverdue);
@@ -114,7 +114,7 @@ public sealed class CaseMonitoringPostgresTests
         Assert.Equal(3, row.ScheduledVersion);
         Assert.Equal(4, row.OutcomeVersion);
 
-        var summary = await QuerySummaryAsync(db, actor, caseId);
+        var summary = await QuerySummaryAsync(db, actor, caseId, keyRing.CreateOptions(), provider);
         Assert.Equal(CaseMonitoringSummaryAccess.Found, summary.Access);
         Assert.NotNull(summary.Summary);
         Assert.Empty(summary.Summary!.OpenFollowUps);
@@ -161,7 +161,7 @@ public sealed class CaseMonitoringPostgresTests
             Assert.Equal(scheduleEventId, row.CurrentScheduleEventId);
         }
 
-        var openAfterMiss = await QuerySummaryAsync(db, actor, caseId);
+        var openAfterMiss = await QuerySummaryAsync(db, actor, caseId, keyRing.CreateOptions(), provider);
         var missedItem = Assert.Single(openAfterMiss.Summary!.OpenFollowUps);
         Assert.Equal(followUpId, missedItem.FollowUpId);
         Assert.Equal("Missed", missedItem.Status);
@@ -194,7 +194,7 @@ public sealed class CaseMonitoringPostgresTests
             Assert.Equal([4L, 5L], outcomeEvents);
         }
 
-        var openAfterReschedule = await QuerySummaryAsync(db, actor, caseId);
+        var openAfterReschedule = await QuerySummaryAsync(db, actor, caseId, keyRing.CreateOptions(), provider);
         var rescheduledItem = Assert.Single(openAfterReschedule.Summary!.OpenFollowUps);
         Assert.Equal(followUpId, rescheduledItem.FollowUpId);
         Assert.Equal("Scheduled", rescheduledItem.Status);
@@ -233,7 +233,7 @@ public sealed class CaseMonitoringPostgresTests
         Assert.Equal(FollowUpStatus.Unreachable, row.Status);
         Assert.Equal(FirstDueAtUtc, row.DueAtUtc);
 
-        var summary = await QuerySummaryAsync(db, actor, caseId);
+        var summary = await QuerySummaryAsync(db, actor, caseId, keyRing.CreateOptions(), provider);
         var item = Assert.Single(summary.Summary!.OpenFollowUps);
         Assert.Equal("Unreachable", item.Status);
     }
@@ -269,16 +269,22 @@ public sealed class CaseMonitoringPostgresTests
 
         var acknowledged = await ProcessCommandAsync(db, actor, caseId,
             new AcknowledgeEscalationCommand(Guid.NewGuid(), 4, escalationId,
-                "supervisor paged", "acknowledged", null, DateTimeOffset.UtcNow),
+                null, "acknowledged", null, DateTimeOffset.UtcNow),
             keyRing.CreateOptions(), provider);
         Assert.Equal(CaseCommandProcessingStatus.Accepted, acknowledged.Status);
 
+        var actionRecorded = await ProcessCommandAsync(db, actor, caseId,
+            new RecordEscalationActionCommand(Guid.NewGuid(), 5, escalationId,
+                "Supervisor paged", "Duty officer coordinated a visit.", null, DateTimeOffset.UtcNow),
+            keyRing.CreateOptions(), provider);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, actionRecorded.Status);
+
         var closed = await ProcessCommandAsync(db, actor, caseId,
-            new CloseEscalationCommand(Guid.NewGuid(), 5, escalationId,
+            new CloseEscalationCommand(Guid.NewGuid(), 6, escalationId,
                 "supervisor visited holding", "resolved", null, DateTimeOffset.UtcNow),
             keyRing.CreateOptions(), provider);
         Assert.Equal(CaseCommandProcessingStatus.Accepted, closed.Status);
-        Assert.Equal(6, closed.AggregateVersion);
+        Assert.Equal(7, closed.AggregateVersion);
 
         await using var verify = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
         var row = await verify.ManagedCaseEscalations.AsNoTracking()
@@ -287,7 +293,9 @@ public sealed class CaseMonitoringPostgresTests
         Assert.Equal(EscalationStatus.Closed, row.Status);
         Assert.Equal(4, row.RaisedVersion);
         Assert.Equal(5, row.AcknowledgedVersion);
-        Assert.Equal(6, row.ClosedVersion);
+        Assert.Equal(6, row.ActionRecordedVersion);
+        Assert.Equal("Supervisor paged", row.ActionSummary);
+        Assert.Equal(7, row.ClosedVersion);
 
         var projection = await verify.ManagedCases.AsNoTracking()
             .SingleAsync(item => item.CaseId == caseId);
@@ -298,7 +306,7 @@ public sealed class CaseMonitoringPostgresTests
             .ToArrayAsync();
         Assert.Equal([7L], epochs);
 
-        var summary = await QuerySummaryAsync(db, actor, caseId);
+        var summary = await QuerySummaryAsync(db, actor, caseId, keyRing.CreateOptions(), provider);
         var item = Assert.Single(summary.Summary!.Escalations);
         Assert.Equal(escalationId, item.EscalationId);
         Assert.Equal("Closed", item.Status);
@@ -342,7 +350,7 @@ public sealed class CaseMonitoringPostgresTests
             Assert.Equal(3, firstRow.AggregateVersion);
         }
 
-        var summary = await QuerySummaryAsync(db, actor, caseId);
+        var summary = await QuerySummaryAsync(db, actor, caseId, keyRing.CreateOptions(), provider);
         Assert.NotNull(summary.Summary!.LatestObservation);
         Assert.Equal(secondId, summary.Summary.LatestObservation!.ObservationId);
         Assert.Equal("water point functional", summary.Summary.LatestObservation.Narrative);
@@ -488,11 +496,11 @@ public sealed class CaseMonitoringPostgresTests
         await using var cleanup = new CaseMonitoringCleanup(caseId, grantGroupId);
         var actor = CreateOfficer("officer-1");
 
-        var denied = await QuerySummaryAsync(db, actor, caseId);
+        var denied = await QuerySummaryAsync(db, actor, caseId, keyRing.CreateOptions(), provider);
         Assert.Equal(CaseMonitoringSummaryAccess.NotFoundOrNotAuthorized, denied.Access);
         Assert.Null(denied.Summary);
 
-        var unknown = await QuerySummaryAsync(db, actor, Guid.NewGuid());
+        var unknown = await QuerySummaryAsync(db, actor, Guid.NewGuid(), keyRing.CreateOptions(), provider);
         Assert.Equal(CaseMonitoringSummaryAccess.NotFoundOrNotAuthorized, unknown.Access);
         Assert.Null(unknown.Summary);
     }
@@ -669,26 +677,30 @@ public sealed class CaseMonitoringPostgresTests
     }
 
     private static async Task<CaseMonitoringSummaryResult> QuerySummaryAsync(
-        SwiftAidDbContext db, ActorContext actor, Guid caseId)
+        SwiftAidDbContext db, ActorContext actor, Guid caseId,
+        ProtectedPayloadOptions options, ProtectedPayloadDataProtectionProvider provider)
     {
         await using var context = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
         var unitOfWork = new PostgresCaseCommandUnitOfWork(context);
         var policy = new CaseAccessPolicy(
             new PostgresCurrentAccessGrantStore(context, unitOfWork),
             new PostgresCaseAccessDescriptorStore(context, unitOfWork));
+        var payloadStore = new PostgresProtectedCaseEventPayloadStore(context, unitOfWork, options, provider);
         var query = new CaseMonitoringSummaryQuery(
-            new PostgresCaseMonitoringSummaryStore(context), policy, unitOfWork);
+            new PostgresCaseMonitoringSummaryStore(context, payloadStore), policy, unitOfWork);
         return await query.GetAsync(actor, caseId, CancellationToken.None);
     }
 
-    private static async Task<MonitoringQueueResult> QueryQueueAsync(ActorContext actor, DateTimeOffset utcNow)
+    private static async Task<MonitoringQueueResult> QueryQueueAsync(
+        ActorContext actor, DateTimeOffset utcNow, ProtectedPayloadOptions options, ProtectedPayloadDataProtectionProvider provider)
     {
         await using var context = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
         var unitOfWork = new PostgresCaseCommandUnitOfWork(context);
         var policy = new CaseAccessPolicy(
             new PostgresCurrentAccessGrantStore(context, unitOfWork),
             new PostgresCaseAccessDescriptorStore(context, unitOfWork));
-        var query = new CaseMonitoringQueueQuery(new PostgresCaseMonitoringQueueStore(context), policy, unitOfWork);
+        var payloadStore = new PostgresProtectedCaseEventPayloadStore(context, unitOfWork, options, provider);
+        var query = new CaseMonitoringQueueQuery(new PostgresCaseMonitoringQueueStore(context, payloadStore), policy, unitOfWork);
         return await query.GetAssignedAsync(actor, null, utcNow, CancellationToken.None);
     }
 

@@ -8,7 +8,7 @@
   "properties": {
     "schemaVersion": { "const": 1 },
     "eventId": { "type": "string", "format": "uuid" },
-    "eventType": { "enum": ["CaseReported", "CaseAssigned", "CaseReportCorrected", "CaseActionRequested", "CaseActionRequestReviewed", "CaseResolved", "CaseReopened", "CaseObservationRecorded", "CaseFollowUpScheduled", "CaseFollowUpAcknowledged", "CaseFollowUpOutcomeRecorded", "CaseEscalationRaised", "CaseEscalationAcknowledged", "CaseEscalationClosed", "CaseAssignmentAcknowledged", "CaseCollaboratorGranted", "CaseCollaboratorRevoked", "AssistanceRequested", "AssistanceAccepted", "AssistanceProgressRecorded", "AssistanceProvided", "AssistanceReceiptConfirmed", "AssistanceUnfulfilled", "AssistanceCancelled", "ActionOwnerChanged"] },
+    "eventType": { "enum": ["CaseReported", "CaseAssigned", "CaseReportCorrected", "CaseActionRequested", "CaseActionRequestReviewed", "CaseResolved", "CaseReopened", "CaseObservationRecorded", "CaseFollowUpScheduled", "CaseFollowUpAcknowledged", "CaseFollowUpOutcomeRecorded", "CaseEscalationRaised", "CaseEscalationAcknowledged", "CaseEscalationClosed", "CaseAssignmentAcknowledged", "CaseCollaboratorGranted", "CaseCollaboratorRevoked", "AssistanceRequested", "AssistanceAccepted", "AssistanceProgressRecorded", "AssistanceProvided", "AssistanceReceiptConfirmed", "AssistanceUnfulfilled", "AssistanceCancelled", "ActionOwnerChanged", "CaseEscalationActionRecorded"] },
     "caseId": { "type": "string", "format": "uuid" },
     "aggregateVersion": { "type": "integer", "minimum": 1 },
     "reportRevision": { "type": "integer", "minimum": 1 },
@@ -31,6 +31,7 @@
         { "$ref": "#/$defs/followUpOutcomeRecorded" },
         { "$ref": "#/$defs/escalationRaised" },
         { "$ref": "#/$defs/escalationAcknowledged" },
+        { "$ref": "#/$defs/escalationActionRecorded" },
         { "$ref": "#/$defs/escalationClosed" },
         { "$ref": "#/$defs/assignmentAcknowledged" },
         { "$ref": "#/$defs/collaboratorGranted" },
@@ -57,6 +58,7 @@
     { "if": { "properties": { "eventType": { "const": "ActionOwnerChanged" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/actionOwnerChanged" } } } },
     { "if": { "properties": { "eventType": { "const": "CaseEscalationRaised" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/escalationRaised" } } } },
     { "if": { "properties": { "eventType": { "const": "CaseEscalationAcknowledged" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/escalationAcknowledged" } } } },
+    { "if": { "properties": { "eventType": { "const": "CaseEscalationActionRecorded" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/escalationActionRecorded" } } } },
     { "if": { "properties": { "eventType": { "const": "CaseEscalationClosed" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/escalationClosed" } } } },
     { "if": { "properties": { "eventType": { "const": "CaseAssignmentAcknowledged" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/assignmentAcknowledged" } } } },
     { "if": { "properties": { "eventType": { "const": "CaseCollaboratorGranted" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/collaboratorGranted" } } } },
@@ -223,6 +225,15 @@
       "properties": {
         "escalationId": { "type": "string", "format": "uuid" },
         "actionSummary": { "type": ["string", "null"], "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "escalationActionRecorded": {
+      "type": "object", "additionalProperties": false,
+      "required": ["escalationId", "actionSummary", "reason"],
+      "properties": {
+        "escalationId": { "type": "string", "format": "uuid" },
+        "actionSummary": { "type": "string", "minLength": 1 },
         "reason": { "type": "string", "minLength": 1 }
       }
     },

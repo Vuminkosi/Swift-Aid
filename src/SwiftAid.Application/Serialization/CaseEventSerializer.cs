@@ -54,6 +54,8 @@ public sealed class CaseEventSerializer
                 new CaseEscalationRaisedPayload(raised.EscalationId, raised.Reason, Array.AsReadOnly(raised.EvidenceEventIds.ToArray()), raised.RecipientRoute)),
             CaseEscalationAcknowledged acknowledged => Serialize(acknowledged, CaseEventType.CaseEscalationAcknowledged,
                 new CaseEscalationAcknowledgedPayload(acknowledged.EscalationId, acknowledged.ActionSummary, acknowledged.Reason)),
+            CaseEscalationActionRecorded action => Serialize(action, CaseEventType.CaseEscalationActionRecorded,
+                new CaseEscalationActionRecordedPayload(action.EscalationId, action.ActionSummary, action.Reason)),
             CaseEscalationClosed closed => Serialize(closed, CaseEventType.CaseEscalationClosed,
                 new CaseEscalationClosedPayload(closed.EscalationId, closed.Resolution, closed.Reason)),
             _ => throw new NotSupportedException($"Event type {@event.GetType().Name} is not supported by the case-event v1 contract.")
@@ -69,7 +71,7 @@ public sealed class CaseEventSerializer
             CaseReportCorrected { CorrectedReportData: CaseReportEventData.HumanV2 or CaseReportEventData.AnimalV2 } => 2,
             CaseReported or CaseAssigned or CaseAssignmentAcknowledged or CaseReportCorrected or CaseActionRequested or CaseActionRequestReviewed or CaseResolved or CaseReopened
             or CaseObservationRecorded or CaseFollowUpScheduled or CaseFollowUpAcknowledged or CaseFollowUpOutcomeRecorded
-            or CaseEscalationRaised or CaseEscalationAcknowledged or CaseEscalationClosed
+            or CaseEscalationRaised or CaseEscalationAcknowledged or CaseEscalationActionRecorded or CaseEscalationClosed
             or CaseCollaboratorGranted or CaseCollaboratorRevoked or AssistanceRequested or AssistanceActivityRecorded or ActionOwnerChanged => 1,
             _ => throw new NotSupportedException($"Event type {@event.GetType().Name} is not supported by the case-event wire contract.")
         };

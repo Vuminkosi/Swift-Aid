@@ -10,6 +10,7 @@
 <output id="request-result">@_result</output>
     <output id="outcome-request">@_outcomeRequest</output>
     <output id="transfer-request">@_transferRequest</output>
+    <output id="escalation-action-request">@_escalationActionRequest</output>
 <OperationsWorkManagementSurface Title="Follow-ups" Description="Synthetic follow-up acknowledgement scenario."
                                  State="OperationsSurfaceState.Populated" Items="Items" CandidatesClient="_candidateClient" OnAction="RecordAction" />
 
@@ -19,12 +20,18 @@
     [SupplyParameterFromQuery(Name = "Schedule")] public bool ScheduleMode { get; set; }
     [SupplyParameterFromQuery(Name = "Outcome")] public bool OutcomeMode { get; set; }
     [SupplyParameterFromQuery(Name = "Transfer")] public bool TransferMode { get; set; }
+    [SupplyParameterFromQuery(Name = "Escalation")] public bool EscalationMode { get; set; }
     private bool _ready;
     private string _result = "Scheduled";
     private string _outcomeRequest = "None";
     private string _transferRequest = "None";
+    private string _escalationActionRequest = "None";
     private readonly ICaseCollaboratorCandidatesClient _candidateClient = new SyntheticCandidateClient();
-    private IReadOnlyList<OperationsWorkItem> Items => TransferMode
+    private IReadOnlyList<OperationsWorkItem> Items => EscalationMode
+        ? [new OperationsWorkItem(CaseId, "esc:33333333-3333-3333-3333-333333333333", 7, "SYNTHETIC-CASE", OperationsWorkKind.Escalation,
+            OperationsWorkStatus.Acknowledged, OperationsAssignmentStatus.Unassigned, "Synthetic operational concern",
+            DateTimeOffset.UtcNow, null, [OperationsWorkAction.RecordEscalationAction], [], null)]
+        : TransferMode
         ? [new OperationsWorkItem(CaseId, $"fu:{FollowUpId:D}", 7, "SYNTHETIC-CASE", OperationsWorkKind.FollowUp,
             OperationsWorkStatus.Scheduled, OperationsAssignmentStatus.Assigned, "Call reporting worker",
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(1), [OperationsWorkAction.TransferFollowUp], [], null,
@@ -55,6 +62,17 @@
 
     private void RecordAction(OperationsWorkActionRequest request)
     {
+        if (EscalationMode)
+        {
+            if (request.CaseId != CaseId || request.WorkKey != "esc:33333333-3333-3333-3333-333333333333" || request.ExpectedVersion != 7 ||
+                request.Action != OperationsWorkAction.RecordEscalationAction || request.EscalationAction != EscalationActionKind.CoordinatedWithTeam ||
+                string.IsNullOrWhiteSpace(request.Details) || string.IsNullOrWhiteSpace(request.Reason) || request.CommandId is null || request.CommandId == Guid.Empty)
+                throw new InvalidOperationException("Unexpected synthetic escalation action request.");
+
+            _escalationActionRequest = $"{request.CommandId:D}:{request.EscalationAction}:{request.Details}:{request.Reason}";
+            return;
+        }
+
         if (TransferMode)
         {
             if (request.CaseId != CaseId || request.WorkKey != $"fu:{FollowUpId:D}" || request.ExpectedVersion != 7 ||

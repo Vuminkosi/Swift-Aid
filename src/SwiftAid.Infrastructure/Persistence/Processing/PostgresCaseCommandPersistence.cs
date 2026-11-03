@@ -407,7 +407,7 @@ public sealed partial class PostgresCaseCommandPersistence : ICaseCommandPersist
             cancellationToken.ThrowIfCancellationRequested();
             if (@event is not (CaseAssigned or CaseReportCorrected or CaseActionRequested or CaseActionRequestReviewed or CaseResolved or CaseReopened
                 or CaseObservationRecorded or CaseFollowUpScheduled or CaseFollowUpAcknowledged or CaseFollowUpOutcomeRecorded
-                or CaseEscalationRaised or CaseEscalationAcknowledged or CaseEscalationClosed or CaseAssignmentAcknowledged
+                or CaseEscalationRaised or CaseEscalationAcknowledged or CaseEscalationActionRecorded or CaseEscalationClosed or CaseAssignmentAcknowledged
                 or CaseCollaboratorGranted or CaseCollaboratorRevoked
                 or AssistanceRequested or AssistanceActivityRecorded or ActionOwnerChanged))
             {
@@ -668,6 +668,21 @@ public sealed partial class PostgresCaseCommandPersistence : ICaseCommandPersist
                         ?? throw InvalidJournal();
                     toAcknowledge.Status = EscalationStatus.Acknowledged;
                     toAcknowledge.AcknowledgedVersion = acknowledged.AggregateVersion;
+                    if (!string.IsNullOrWhiteSpace(acknowledged.ActionSummary))
+                    {
+                        toAcknowledge.Status = EscalationStatus.ActionRecorded;
+                        toAcknowledge.ActionRecordedVersion = acknowledged.AggregateVersion;
+                        toAcknowledge.ActionSummary = acknowledged.ActionSummary;
+                    }
+                    break;
+                case CaseEscalationActionRecorded action:
+                    var toRecordAction = await _dbContext.ManagedCaseEscalations
+                        .SingleOrDefaultAsync(item => item.EscalationId == action.EscalationId, cancellationToken)
+                        .ConfigureAwait(false)
+                        ?? throw InvalidJournal();
+                    toRecordAction.Status = EscalationStatus.ActionRecorded;
+                    toRecordAction.ActionRecordedVersion = action.AggregateVersion;
+                    toRecordAction.ActionSummary = action.ActionSummary;
                     break;
                 case CaseEscalationClosed closed:
                     var toClose = await _dbContext.ManagedCaseEscalations

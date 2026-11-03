@@ -128,6 +128,8 @@ internal static class CaseEventJournalReader
                     ["escalationId", "reason", "evidenceEventIds", "recipientRoute"], ValidateEscalationRaisedPayload),
                 nameof(CaseEventType.CaseEscalationAcknowledged) => Read<CaseEscalationAcknowledgedPayload>(serialized,
                     ["escalationId", "actionSummary", "reason"], ValidateEscalationAcknowledgedPayload),
+                nameof(CaseEventType.CaseEscalationActionRecorded) => Read<CaseEscalationActionRecordedPayload>(serialized,
+                    ["escalationId", "actionSummary", "reason"], ValidateEscalationActionRecordedPayload),
                 nameof(CaseEventType.CaseEscalationClosed) => Read<CaseEscalationClosedPayload>(serialized,
                     ["escalationId", "resolution", "reason"], ValidateEscalationClosedPayload),
                 _ => throw InvalidJournal()
@@ -311,6 +313,10 @@ internal static class CaseEventJournalReader
                 envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
                 envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
                 acknowledged.EscalationId, acknowledged.ActionSummary, acknowledged.Reason),
+            CaseEventType.CaseEscalationActionRecorded when payload is CaseEscalationActionRecordedPayload action => new CaseEscalationActionRecorded(
+                envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
+                envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
+                action.EscalationId, action.ActionSummary, action.Reason),
             CaseEventType.CaseEscalationClosed when payload is CaseEscalationClosedPayload closed => new CaseEscalationClosed(
                 envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
                 envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
@@ -743,6 +749,17 @@ internal static class CaseEventJournalReader
         }
 
         RequireText(value.Resolution);
+        RequireText(value.Reason);
+    }
+
+    private static void ValidateEscalationActionRecordedPayload(JsonElement payload, CaseEscalationActionRecordedPayload value)
+    {
+        if (!IsCanonicalGuid(payload, "escalationId") || value.EscalationId == Guid.Empty)
+        {
+            throw InvalidJournal();
+        }
+
+        RequireText(value.ActionSummary);
         RequireText(value.Reason);
     }
 

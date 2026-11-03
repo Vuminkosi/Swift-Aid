@@ -7,7 +7,7 @@ namespace SwiftAid.Contracts.Cases;
 /// Only routing fields travel here; authorization always derives from the
 /// server-authenticated principal.
 /// </summary>
-/// <param name="CommandType">One of CorrectReport, RequestProtectedAction, ReviewProtectedAction, Resolve, Reopen, RecordObservation, ScheduleFollowUp, AcknowledgeFollowUp, RecordFollowUpOutcome, RaiseEscalation, AcknowledgeEscalation, CloseEscalation, AcknowledgeAssignment, GrantCaseCollaborator, RevokeCaseCollaborator.</param>
+/// <param name="CommandType">One of CorrectReport, RequestProtectedAction, ReviewProtectedAction, Resolve, Reopen, RecordObservation, ScheduleFollowUp, AcknowledgeFollowUp, RecordFollowUpOutcome, RaiseEscalation, AcknowledgeEscalation, RecordEscalationAction, CloseEscalation, AcknowledgeAssignment, GrantCaseCollaborator, RevokeCaseCollaborator.</param>
 /// <param name="Action">Protected-action name (for example Reassign); required by RequestProtectedAction.</param>
 /// <param name="Reason">Operator reason; required except for AcknowledgeAssignment.</param>
 /// <param name="ProposedOwnerId">Reassignment target, reopened-case owner, or accepted owner.</param>
@@ -28,7 +28,7 @@ namespace SwiftAid.Contracts.Cases;
 /// <param name="EscalationId">Escalation key; required by RaiseEscalation, AcknowledgeEscalation, CloseEscalation.</param>
 /// <param name="RecipientRoute">Configured escalation recipient route; required by RaiseEscalation. Never a default.</param>
 /// <param name="Resolution">Escalation resolution; required by CloseEscalation.</param>
-/// <param name="ActionSummary">Optional action summary recorded with an acknowledgement.</param>
+/// <param name="ActionSummary">Optional legacy action summary on acknowledgement; required for RecordEscalationAction.</param>
 /// <param name="EvidenceEventIds">Escalation evidence references for RaiseEscalation.</param>
 /// <param name="AssignmentVersion">Observed assignment event version; required by AcknowledgeAssignment and preserved on retry.</param>
 /// <param name="GrantId">Stable collaborator grant identity; required for grant and revoke.</param>

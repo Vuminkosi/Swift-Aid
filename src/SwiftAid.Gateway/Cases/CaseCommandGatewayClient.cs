@@ -223,6 +223,14 @@ public sealed class CaseCommandGatewayClient(
                 RequireReason(input),
                 null,
                 recordedAt),
+            "RecordEscalationAction" => new RecordEscalationActionCommand(
+                commandId,
+                expectedVersion,
+                RequireIdentifier(input.EscalationId, "An escalation identifier is required."),
+                RequireText(input.ActionSummary, "An escalation action summary is required."),
+                RequireReason(input),
+                null,
+                recordedAt),
             "CloseEscalation" => new CloseEscalationCommand(
                 commandId,
                 expectedVersion,

@@ -10,5 +10,7 @@ public sealed class ManagedCaseEscalationEntity
     public EscalationStatus Status { get; set; }
     public long RaisedVersion { get; set; }
     public long? AcknowledgedVersion { get; set; }
+    public long? ActionRecordedVersion { get; set; }
+    public string? ActionSummary { get; set; }
     public long? ClosedVersion { get; set; }
 }

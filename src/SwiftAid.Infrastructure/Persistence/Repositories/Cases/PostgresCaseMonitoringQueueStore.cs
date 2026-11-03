@@ -1,21 +1,25 @@
 using Microsoft.EntityFrameworkCore;
 using SwiftAid.Application.Cases;
+using SwiftAid.Application.Cases.Commands;
 using SwiftAid.Contracts.Commands;
 using SwiftAid.Contracts.Cases;
 using SwiftAid.Domain.Cases;
 using SwiftAid.Infrastructure.Persistence;
 using SwiftAid.Infrastructure.Persistence.Entities.Cases;
+using SwiftAid.Infrastructure.Persistence.Protection;
 
 namespace SwiftAid.Infrastructure.Persistence.Repositories.Cases;
 
 /// <summary>
 /// Lists open monitoring work due-first from the monitoring projections.
-/// Open follow-ups are Scheduled or Acknowledged; open escalations are Raised.
-/// No sealed payloads are read.
+/// Open follow-ups are Scheduled or Acknowledged; escalations remain open until closed.
 /// </summary>
-public sealed class PostgresCaseMonitoringQueueStore(SwiftAidDbContext dbContext) : ICaseMonitoringQueueStore
+public sealed class PostgresCaseMonitoringQueueStore(
+    SwiftAidDbContext dbContext,
+    IProtectedCaseEventPayloadStore payloadStore) : ICaseMonitoringQueueStore
 {
     private readonly SwiftAidDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+    private readonly IProtectedCaseEventPayloadStore _payloadStore = payloadStore ?? throw new ArgumentNullException(nameof(payloadStore));
 
     public async Task<IReadOnlyList<MonitoringQueueCandidate>> GetAssignedFollowUpsAsync(
         string assigneeActorId, int take, CancellationToken ct)
@@ -105,7 +109,7 @@ public sealed class PostgresCaseMonitoringQueueStore(SwiftAidDbContext dbContext
             .ToArray();
     }
 
-    public async Task<IReadOnlyList<MonitoringQueueCandidate>> GetRaisedEscalationsAsync(
+    public async Task<IReadOnlyList<MonitoringQueueCandidate>> GetOpenEscalationsAsync(
         int take, CancellationToken ct)
     {
         if (take < 1)
@@ -114,7 +118,7 @@ public sealed class PostgresCaseMonitoringQueueStore(SwiftAidDbContext dbContext
         }
 
         var rows = await _dbContext.ManagedCaseEscalations.AsNoTracking()
-            .Where(item => item.Status == EscalationStatus.Raised)
+            .Where(item => item.Status != EscalationStatus.Closed)
             .OrderBy(item => item.RaisedVersion)
             .ThenBy(item => item.EscalationId)
             .Take(take)
@@ -137,13 +141,48 @@ public sealed class PostgresCaseMonitoringQueueStore(SwiftAidDbContext dbContext
                 item.CaseId,
                 nameof(MonitoringQueueKind.Escalation),
                 item.EscalationId,
-                "Escalation raised",
+                item.Status switch
+                {
+                    EscalationStatus.Raised => "Escalation raised",
+                    EscalationStatus.Acknowledged => "Escalation acknowledged",
+                    EscalationStatus.ActionRecorded => "Escalation action recorded",
+                    _ => "Escalation"
+                },
                 null,
                 null,
                 item.Status.ToString(),
                 item.RecordedAtUtc ?? now,
                 item.RaisedVersion))
             .ToArray();
+    }
+
+    public async Task<MonitoringQueueCandidate> ResolveEscalationStatusAsync(
+        ICaseCommandLease lease, MonitoringQueueCandidate candidate, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(lease);
+        ArgumentNullException.ThrowIfNull(candidate);
+        if (!lease.IsActive || lease.Mode != CaseLeaseMode.Read || lease.CaseId != candidate.CaseId ||
+            !string.Equals(candidate.Kind, nameof(MonitoringQueueKind.Escalation), StringComparison.Ordinal) ||
+            candidate.WorkItemId == Guid.Empty ||
+            !string.Equals(candidate.Status, nameof(EscalationStatus.Acknowledged), StringComparison.Ordinal))
+        {
+            throw new UnauthorizedAccessException("An active case read lease is required to resolve an escalation status.");
+        }
+
+        var legacyState = await LegacyEscalationActionReader.ReadAsync(
+            _dbContext, _payloadStore, lease, ct).ConfigureAwait(false);
+        if (!legacyState.AcknowledgedIds.Contains(candidate.WorkItemId))
+        {
+            throw new InvalidDataException("The escalation projection has no matching acknowledgement event.");
+        }
+
+        return !legacyState.ActionRecordedIds.Contains(candidate.WorkItemId)
+            ? candidate
+            : candidate with
+            {
+                Status = nameof(EscalationStatus.ActionRecorded),
+                Summary = "Escalation action recorded"
+            };
     }
 
     public async Task<IReadOnlyList<MonitoringQueueCandidate>> GetAssignedAssistanceAsync(

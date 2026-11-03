@@ -71,7 +71,7 @@ public sealed class CaseMonitoringQueueTests
                 PastDueAtUtc, "missed window", null, DateTimeOffset.UtcNow),
             keyRing.CreateOptions(), provider);
 
-        var result = await CreateQuery(db).GetAssignedAsync(actor, null, QueryNowUtc, CancellationToken.None);
+        var result = await CreateQuery(db, keyRing.CreateOptions(), provider).GetAssignedAsync(actor, null, QueryNowUtc, CancellationToken.None);
 
         Assert.Equal(CaseQueueAccess.Allowed, result.Access);
         Assert.Equal(2, result.Items.Count);
@@ -83,7 +83,7 @@ public sealed class CaseMonitoringQueueTests
     }
 
     [IntakePostgresFact]
-    public async Task OpenScope_ListsRaisedEscalations_ButNotAcknowledged()
+    public async Task OpenScope_ListsEachOpenEscalationAndResolvesLegacyActionSummary()
     {
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
         var grantGroupId = await SeedQueueScopeAsync(db,
@@ -109,14 +109,37 @@ public sealed class CaseMonitoringQueueTests
             new AcknowledgeEscalationCommand(Guid.NewGuid(), 4, ackedId, null, "acknowledged", null, DateTimeOffset.UtcNow),
             keyRing.CreateOptions(), provider);
 
-        var result = await CreateQuery(db).GetOpenAsync(actor, null, QueryNowUtc, CancellationToken.None);
+        var legacyId = Guid.NewGuid();
+        await ProcessCommandAsync(db, actor, caseId,
+            new RaiseEscalationCommand(Guid.NewGuid(), 5, legacyId, "supervisor paged",
+                [], "duty-officer", null, DateTimeOffset.UtcNow),
+            keyRing.CreateOptions(), provider);
+        await ProcessCommandAsync(db, actor, caseId,
+            new AcknowledgeEscalationCommand(Guid.NewGuid(), 6, legacyId, "supervisor paged",
+                "action completed", null, DateTimeOffset.UtcNow),
+            keyRing.CreateOptions(), provider);
+        await db.ManagedCaseEscalations.Where(item => item.EscalationId == legacyId)
+            .ExecuteUpdateAsync(update => update
+                .SetProperty(item => item.Status, EscalationStatus.Acknowledged)
+                .SetProperty(item => item.ActionRecordedVersion, (long?)null)
+                .SetProperty(item => item.ActionSummary, (string?)null));
+
+        var result = await CreateQuery(db, keyRing.CreateOptions(), provider)
+            .GetOpenAsync(actor, null, QueryNowUtc, CancellationToken.None);
 
         Assert.Equal(CaseQueueAccess.Allowed, result.Access);
-        var escalation = Assert.Single(result.Items);
-        Assert.Equal(MonitoringQueueKind.Escalation, escalation.Kind);
-        Assert.Equal(raisedId, escalation.WorkItemId);
-        Assert.Equal("Raised", escalation.Status);
-        Assert.False(escalation.IsOverdue);
+        var statuses = result.Items.ToDictionary(item => item.WorkItemId, item => item.Status);
+        Assert.Equal(3, statuses.Count);
+        Assert.Equal("Acknowledged", statuses[ackedId]);
+        Assert.Equal("ActionRecorded", statuses[legacyId]);
+        Assert.Equal("Raised", statuses[raisedId]);
+        Assert.All(result.Items, item => Assert.False(item.IsOverdue));
+
+        var summary = await CreateSummaryQuery(db, keyRing.CreateOptions(), provider)
+            .GetAsync(actor, caseId, CancellationToken.None);
+        Assert.Equal(CaseMonitoringSummaryAccess.Found, summary.Access);
+        Assert.Contains(summary.Summary!.Escalations,
+            item => item.EscalationId == legacyId && item.Status == "ActionRecorded");
     }
 
     [IntakePostgresFact]
@@ -158,7 +181,7 @@ public sealed class CaseMonitoringQueueTests
         Assert.Null(projection.ReceiptMethod);
         Assert.Null(projection.ReceiptContext);
 
-        var open = await CreateQuery(db).GetAssignedAsync(actor, null, QueryNowUtc, CancellationToken.None);
+        var open = await CreateQuery(db, keyRing.CreateOptions(), provider).GetAssignedAsync(actor, null, QueryNowUtc, CancellationToken.None);
         var item = Assert.Single(open.Items);
         Assert.Equal(MonitoringQueueKind.Assistance, item.Kind);
         Assert.Equal(assistanceId, item.WorkItemId);
@@ -176,7 +199,7 @@ public sealed class CaseMonitoringQueueTests
         Assert.Equal("officer-1", confirmed.ReceiptRecordedByActorId);
         Assert.Equal("In person", confirmed.ReceiptMethod);
         Assert.Equal("At service point", confirmed.ReceiptContext);
-        var closed = await CreateQuery(db).GetAssignedAsync(actor, null, QueryNowUtc, CancellationToken.None);
+        var closed = await CreateQuery(db, keyRing.CreateOptions(), provider).GetAssignedAsync(actor, null, QueryNowUtc, CancellationToken.None);
         Assert.Empty(closed.Items);
     }
 
@@ -209,13 +232,13 @@ public sealed class CaseMonitoringQueueTests
         Assert.Equal(AssistanceStatus.Unfulfilled, projection.Status);
         Assert.Equal("No eligible transport provider was available", projection.LastNote);
 
-        var assigned = await CreateQuery(db).GetAssignedAsync(actor, null, QueryNowUtc, CancellationToken.None);
+        var assigned = await CreateQuery(db, keyRing.CreateOptions(), provider).GetAssignedAsync(actor, null, QueryNowUtc, CancellationToken.None);
         var assignedItem = Assert.Single(assigned.Items);
         Assert.Equal("Unfulfilled", assignedItem.Status);
         Assert.Contains("Transport support", assignedItem.Summary, StringComparison.Ordinal);
         Assert.Contains("No eligible transport provider was available", assignedItem.Summary, StringComparison.Ordinal);
 
-        var open = await CreateQuery(db).GetOpenAsync(actor, null, QueryNowUtc, CancellationToken.None);
+        var open = await CreateQuery(db, keyRing.CreateOptions(), provider).GetOpenAsync(actor, null, QueryNowUtc, CancellationToken.None);
         var openItem = Assert.Single(open.Items);
         Assert.Equal(assistanceId, openItem.WorkItemId);
         Assert.Equal("Unfulfilled", openItem.Status);
@@ -228,9 +251,23 @@ public sealed class CaseMonitoringQueueTests
         await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
         var grantGroupId = await SeedQueueScopeAsync(db,
             [CaseOperation.ReadCase, CaseOperation.ManageFollowUp]);
+        using var keyRing = SyntheticQueueKeyRing.Create();
+        using var provider = ProtectedPayloadDataProtectionProviderFactory.Create(
+            keyRing.CreateOptions(), new TestHostEnvironment(Environments.Production));
         // Owned outside the grant's organization: ReadCase denies, so the queued
         // row must be skipped instead of listed.
-        var foreignCaseId = await IntakeDecisionStoreTests.SeedManagedCaseAsync(db, "org-sz-1");
+        var unusedScopeSeedCaseId = await IntakeDecisionStoreTests.SeedManagedCaseAsync(db, "org-sz-1");
+        var foreignCaseId = await SeedQueueCaseAsync(db, keyRing.CreateOptions(), provider);
+        var currentScheduleEventId = await db.CaseEvents.AsNoTracking()
+            .Where(item => item.CaseId == foreignCaseId && item.AggregateVersion == 2)
+            .Select(item => item.EventId)
+            .SingleAsync();
+        await db.ManagedCases.Where(item => item.CaseId == foreignCaseId)
+            .ExecuteUpdateAsync(update => update
+                .SetProperty(item => item.OrganizationId, "org-sz-1")
+                .SetProperty(item => item.WorkspaceId, "workspace-sz-1")
+                .SetProperty(item => item.CountryCode, "SZ"));
+        await db.ManagedCases.Where(item => item.CaseId == unusedScopeSeedCaseId).ExecuteDeleteAsync();
         db.ManagedCaseFollowUps.Add(new ManagedCaseFollowUpEntity
         {
             FollowUpId = Guid.NewGuid(),
@@ -239,15 +276,17 @@ public sealed class CaseMonitoringQueueTests
             AssigneeActorId = "officer-1",
             DueAtUtc = FutureDueAtUtc,
             Status = FollowUpStatus.Scheduled,
-            ScheduledVersion = 3
+            ScheduledVersion = 2,
+            CurrentScheduleVersion = 2,
+            CurrentScheduleEventId = currentScheduleEventId
         });
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
         await using var cleanup = new QueueCleanup(foreignCaseId, grantGroupId);
 
         var actor = CreateOfficer("officer-1");
-        var assigned = await CreateQuery(db).GetAssignedAsync(actor, null, QueryNowUtc, CancellationToken.None);
-        var open = await CreateQuery(db).GetOpenAsync(actor, null, QueryNowUtc, CancellationToken.None);
+        var assigned = await CreateQuery(db, keyRing.CreateOptions(), provider).GetAssignedAsync(actor, null, QueryNowUtc, CancellationToken.None);
+        var open = await CreateQuery(db, keyRing.CreateOptions(), provider).GetOpenAsync(actor, null, QueryNowUtc, CancellationToken.None);
 
         Assert.Equal(CaseQueueAccess.Allowed, assigned.Access);
         Assert.DoesNotContain(assigned.Items, item => item.CaseId == foreignCaseId);
@@ -407,11 +446,26 @@ public sealed class CaseMonitoringQueueTests
             new Claim(ActorContext.AccessEpochClaimType, "7")
         ], "synthetic-test")));
 
-    private static CaseMonitoringQueueQuery CreateQuery(SwiftAidDbContext db)
+    private static CaseMonitoringQueueQuery CreateQuery(
+        SwiftAidDbContext db, ProtectedPayloadOptions options, ProtectedPayloadDataProtectionProvider provider)
     {
         var unitOfWork = new PostgresCaseCommandUnitOfWork(db);
+        var payloadStore = new PostgresProtectedCaseEventPayloadStore(db, unitOfWork, options, provider);
         return new CaseMonitoringQueueQuery(
-            new PostgresCaseMonitoringQueueStore(db),
+            new PostgresCaseMonitoringQueueStore(db, payloadStore),
+            new CaseAccessPolicy(
+                new PostgresCurrentAccessGrantStore(db, unitOfWork),
+                new PostgresCaseAccessDescriptorStore(db, unitOfWork)),
+            unitOfWork);
+    }
+
+    private static CaseMonitoringSummaryQuery CreateSummaryQuery(
+        SwiftAidDbContext db, ProtectedPayloadOptions options, ProtectedPayloadDataProtectionProvider provider)
+    {
+        var unitOfWork = new PostgresCaseCommandUnitOfWork(db);
+        var payloadStore = new PostgresProtectedCaseEventPayloadStore(db, unitOfWork, options, provider);
+        return new CaseMonitoringSummaryQuery(
+            new PostgresCaseMonitoringSummaryStore(db, payloadStore),
             new CaseAccessPolicy(
                 new PostgresCurrentAccessGrantStore(db, unitOfWork),
                 new PostgresCaseAccessDescriptorStore(db, unitOfWork)),

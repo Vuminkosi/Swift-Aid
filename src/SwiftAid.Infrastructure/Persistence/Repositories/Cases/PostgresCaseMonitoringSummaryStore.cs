@@ -1,18 +1,24 @@
 using Microsoft.EntityFrameworkCore;
 using SwiftAid.Application.Cases;
+using SwiftAid.Application.Cases.Commands;
 using SwiftAid.Domain.Cases;
 using SwiftAid.Infrastructure.Persistence;
+using SwiftAid.Infrastructure.Persistence.Protection;
 
 namespace SwiftAid.Infrastructure.Persistence.Repositories.Cases;
 
 /// <summary>
 /// Reads the managed-case monitoring projections. Open follow-ups are those without a
 /// terminal outcome (Completed or Cancelled); missed and unreachable follow-ups stay
-/// open until rescheduled. No sealed payloads are read.
+/// open until rescheduled. Legacy acknowledgement payloads are opened only when an
+/// acknowledged escalation needs its action state derived from the authoritative journal.
 /// </summary>
-public sealed class PostgresCaseMonitoringSummaryStore(SwiftAidDbContext dbContext) : ICaseMonitoringSummaryStore
+public sealed class PostgresCaseMonitoringSummaryStore(
+    SwiftAidDbContext dbContext,
+    IProtectedCaseEventPayloadStore payloadStore) : ICaseMonitoringSummaryStore
 {
     private readonly SwiftAidDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+    private readonly IProtectedCaseEventPayloadStore _payloadStore = payloadStore ?? throw new ArgumentNullException(nameof(payloadStore));
 
     public async Task<IReadOnlyList<CaseMonitoringFollowUpItem>> GetOpenFollowUpsAsync(Guid caseId, CancellationToken ct)
     {
@@ -31,8 +37,14 @@ public sealed class PostgresCaseMonitoringSummaryStore(SwiftAidDbContext dbConte
         return rows;
     }
 
-    public async Task<IReadOnlyList<CaseMonitoringEscalationItem>> GetEscalationsAsync(Guid caseId, CancellationToken ct)
+    public async Task<IReadOnlyList<CaseMonitoringEscalationItem>> GetEscalationsAsync(
+        ICaseCommandLease lease, Guid caseId, CancellationToken ct)
     {
+        if (lease.CaseId != caseId || !lease.IsActive || lease.Mode != CaseLeaseMode.Read)
+        {
+            throw new UnauthorizedAccessException("An active case read lease is required to read escalation status.");
+        }
+
         var rows = await _dbContext.ManagedCaseEscalations.AsNoTracking()
             .Where(item => item.CaseId == caseId)
             .OrderBy(item => item.RaisedVersion)
@@ -41,7 +53,13 @@ public sealed class PostgresCaseMonitoringSummaryStore(SwiftAidDbContext dbConte
                 item.EscalationId,
                 item.Status.ToString()))
             .ToArrayAsync(ct).ConfigureAwait(false);
-        return rows;
+        var legacyActionRecordedIds = rows.Any(item => item.Status == nameof(EscalationStatus.Acknowledged))
+            ? (await LegacyEscalationActionReader.ReadAsync(_dbContext, _payloadStore, lease, ct).ConfigureAwait(false)).ActionRecordedIds
+            : new HashSet<Guid>();
+        return rows.Select(item => item.Status == nameof(EscalationStatus.Acknowledged) &&
+                legacyActionRecordedIds.Contains(item.EscalationId)
+            ? item with { Status = nameof(EscalationStatus.ActionRecorded) }
+            : item).ToArray();
     }
 
     public Task<CaseMonitoringObservationItem?> GetLatestObservationAsync(Guid caseId, CancellationToken ct) =>

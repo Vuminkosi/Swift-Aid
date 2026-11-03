@@ -46,7 +46,8 @@ public interface ICaseMonitoringSummaryStore
 {
     Task<IReadOnlyList<CaseMonitoringFollowUpItem>> GetOpenFollowUpsAsync(Guid caseId, CancellationToken ct);
 
-    Task<IReadOnlyList<CaseMonitoringEscalationItem>> GetEscalationsAsync(Guid caseId, CancellationToken ct);
+    Task<IReadOnlyList<CaseMonitoringEscalationItem>> GetEscalationsAsync(
+        ICaseCommandLease lease, Guid caseId, CancellationToken ct);
 
     Task<CaseMonitoringObservationItem?> GetLatestObservationAsync(Guid caseId, CancellationToken ct);
 }
@@ -107,7 +108,7 @@ public sealed class CaseMonitoringSummaryQuery(
 
             var observation = await _store.GetLatestObservationAsync(caseId, ct).ConfigureAwait(false);
             var followUps = await _store.GetOpenFollowUpsAsync(caseId, ct).ConfigureAwait(false);
-            var escalations = await _store.GetEscalationsAsync(caseId, ct).ConfigureAwait(false);
+            var escalations = await _store.GetEscalationsAsync(lease, caseId, ct).ConfigureAwait(false);
 
             await lease.CommitAsync(ct).ConfigureAwait(false);
             return new CaseMonitoringSummaryResult(

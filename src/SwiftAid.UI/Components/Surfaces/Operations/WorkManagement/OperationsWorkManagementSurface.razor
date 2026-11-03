@@ -284,6 +284,7 @@
                                             <MudSelectItem T="EscalationActionKind?" Value="@((EscalationActionKind?)type)">@EscalationActionLabel(type)</MudSelectItem>
                                         }
                                     </MudSelect>
+                                    <MudTextField T="string" Value="@_escalationActionReason" ValueChanged="SetEscalationActionReason" Label="Reason for recorded action" Lines="2" MaxLength="300" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" Disabled="@IsBusy" />
                                 }
 
                                 @if (NeedsDetails(action))
@@ -371,6 +372,7 @@
     private string? _resolutionSummary;
     private string? _resolutionReason;
     private EscalationActionKind? _escalationAction;
+    private string? _escalationActionReason;
     private bool _confirmedReceived;
     private string? _assistanceReceiptMethod;
     private string? _assistanceReceiptContext;
@@ -557,7 +559,8 @@
     private void SetCancellationReason(string? reason) { _cancellationReason = reason; _reviewing = false; _validationMessage = null; }
     private void SetResolutionSummary(string? summary) { _resolutionSummary = summary; _reviewing = false; _validationMessage = null; }
     private void SetResolutionReason(string? reason) { _resolutionReason = reason; _reviewing = false; _validationMessage = null; }
-    private void SetEscalationAction(EscalationActionKind? action) { _escalationAction = action; _reviewing = false; _validationMessage = null; }
+    private void SetEscalationAction(EscalationActionKind? action) { _escalationAction = action; _actionCommandId = null; _reviewing = false; _validationMessage = null; }
+    private void SetEscalationActionReason(string? reason) { _escalationActionReason = reason; _actionCommandId = null; _reviewing = false; _validationMessage = null; }
 
     private void ReviewAction(OperationsWorkItem item)
     {
@@ -694,6 +697,12 @@
             return;
         }
 
+        if (action == OperationsWorkAction.RecordEscalationAction && string.IsNullOrWhiteSpace(_escalationActionReason))
+        {
+            _validationMessage = "Enter the reason for the recorded action.";
+            return;
+        }
+
         if (action == OperationsWorkAction.ConfirmAssistanceReceived && !_confirmedReceived)
         {
             _validationMessage = "Confirm that the assistance was received.";
@@ -754,12 +763,13 @@
                 OperationsWorkAction.TransferFollowUp => _details?.Trim(),
                 OperationsWorkAction.RequestEscalation => _escalationReasonText?.Trim(),
                 OperationsWorkAction.ResolveEscalation => _resolutionReason?.Trim(),
+                OperationsWorkAction.RecordEscalationAction => _escalationActionReason?.Trim(),
                 _ => null
             },
             ResolutionSummary: action == OperationsWorkAction.ResolveEscalation ? _resolutionSummary?.Trim() : null,
             AssistanceReceiptMethod: action == OperationsWorkAction.ConfirmAssistanceReceived ? _assistanceReceiptMethod?.Trim() : null,
             AssistanceReceiptContext: action == OperationsWorkAction.ConfirmAssistanceReceived ? _assistanceReceiptContext?.Trim() : null,
-            CommandId: action == OperationsWorkAction.TransferFollowUp
+            CommandId: action is OperationsWorkAction.TransferFollowUp or OperationsWorkAction.RecordEscalationAction
                 ? _actionCommandId ??= Guid.NewGuid()
                 : null));
     }
@@ -787,6 +797,7 @@
         _resolutionSummary = null;
         _resolutionReason = null;
         _escalationAction = null;
+        _escalationActionReason = null;
         _confirmedReceived = false;
         _assistanceReceiptMethod = null;
         _assistanceReceiptContext = null;

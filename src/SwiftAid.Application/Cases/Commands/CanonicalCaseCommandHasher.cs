@@ -91,7 +91,7 @@ public static class CanonicalCaseCommandHasher
 
         if (command is not (CorrectReportCommand or RequestCaseActionCommand or ReviewCaseActionRequestCommand or ResolveCaseCommand or ReopenCaseCommand
             or RecordObservationCommand or ScheduleFollowUpCommand or RecordFollowUpOutcomeCommand or ChangeActionOwnerCommand
-            or RaiseEscalationCommand or AcknowledgeEscalationCommand or CloseEscalationCommand or AcknowledgeAssignmentCommand or AcknowledgeFollowUpCommand
+            or RaiseEscalationCommand or AcknowledgeEscalationCommand or RecordEscalationActionCommand or CloseEscalationCommand or AcknowledgeAssignmentCommand or AcknowledgeFollowUpCommand
             or GrantCaseCollaboratorCommand or RevokeCaseCollaboratorCommand or RequestAssistanceCommand or UpdateAssistanceCommand))
         {
             throw new NotSupportedException($"Command type {command.GetType().Name} is not supported by canonical hash protocol v1.");
@@ -410,6 +410,19 @@ public static class CanonicalCaseCommandHasher
                     writer.WriteStartObject();
                     writer.WriteString("escalationId", closeSnapshot.EscalationId.ToString("D"));
                     writer.WriteString("resolution", closeSnapshot.Resolution);
+                    writer.WriteEndObject();
+                });
+
+            case RecordEscalationActionCommand action:
+                RequireIdentifier(action.EscalationId, nameof(action.EscalationId));
+                RequireText(action.ActionSummary, nameof(action.ActionSummary));
+                RequireText(action.Reason, nameof(action.Reason));
+                var actionSnapshot = action with { OccurredAtUtc = Normalize(action.OccurredAtUtc) };
+                return (actionSnapshot, "RecordEscalationAction", actionSnapshot.Reason, writer =>
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("escalationId", actionSnapshot.EscalationId.ToString("D"));
+                    writer.WriteString("actionSummary", actionSnapshot.ActionSummary);
                     writer.WriteEndObject();
                 });
 

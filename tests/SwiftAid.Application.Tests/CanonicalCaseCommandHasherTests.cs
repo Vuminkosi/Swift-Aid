@@ -308,7 +308,11 @@ public sealed class CanonicalCaseCommandHasherTests
         var closeHash = CreateSnapshot(actor, CaseId, close).CanonicalPayloadHash;
         Assert.NotEqual(closeHash, CreateSnapshot(actor, CaseId, close with { Resolution = "other resolution" }).CanonicalPayloadHash);
 
-        Assert.Distinct([observationHash, scheduleHash, outcomeHash, followUpAcknowledgementHash, escalationHash, acknowledgeHash, closeHash]);
+        var recordedAction = new RecordEscalationActionCommand(CommandId, 3, Guid.NewGuid(), "Supervisor paged", "coordinated response", Now, Now);
+        var recordedActionHash = CreateSnapshot(actor, CaseId, recordedAction).CanonicalPayloadHash;
+        Assert.NotEqual(recordedActionHash, CreateSnapshot(actor, CaseId, recordedAction with { ActionSummary = "Team contacted" }).CanonicalPayloadHash);
+
+        Assert.Distinct([observationHash, scheduleHash, outcomeHash, followUpAcknowledgementHash, escalationHash, acknowledgeHash, closeHash, recordedActionHash]);
 
         var invalidOutcome = outcome with { Outcome = (FollowUpOutcome)999 };
         Assert.Throws<ArgumentOutOfRangeException>(() => CreateSnapshot(actor, CaseId, invalidOutcome));

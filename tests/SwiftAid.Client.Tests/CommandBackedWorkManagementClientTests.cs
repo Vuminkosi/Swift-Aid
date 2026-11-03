@@ -192,6 +192,44 @@ public sealed class CommandBackedWorkManagementClientTests
         Assert.Contains(WorkManagementAction.RecordFollowUpOutcome, followUp.AvailableActions);
     }
 
+    [Theory]
+    [InlineData("Raised", WorkManagementStatus.Requested, WorkManagementAction.AcknowledgeEscalation)]
+    [InlineData("Acknowledged", WorkManagementStatus.Acknowledged, WorkManagementAction.RecordEscalationAction)]
+    [InlineData("ActionRecorded", WorkManagementStatus.ActionRecorded, WorkManagementAction.ResolveEscalation)]
+    public async Task GetAsync_ProjectsEscalationLifecycleWithNextAuthorizedAction(
+        string status, WorkManagementStatus expectedStatus, WorkManagementAction expectedAction)
+    {
+        var client = new CommandBackedWorkManagementClient(new StubCommandClient(),
+            new StubMonitoringClient(escalationStatus: status), new StubTimelineClient());
+
+        var result = await client.GetAsync(CaseId, new WorkManagementQuery(new PageRequest(1, 25)));
+
+        var escalation = Assert.Single(result.Value!.Items.Items, item => item.Kind == WorkManagementKind.Escalation);
+        Assert.Equal(expectedStatus, escalation.Status);
+        Assert.Equal([expectedAction], escalation.AvailableActions);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RecordsEscalationActionAsDistinctCommand()
+    {
+        var commands = new StubCommandClient();
+        var client = new CommandBackedWorkManagementClient(commands,
+            new StubMonitoringClient(), new StubTimelineClient());
+        var commandId = Guid.NewGuid();
+        var result = await client.ExecuteAsync(new WorkManagementCommand(
+            CaseId, $"esc:{EscalationId:D}", WorkManagementAction.RecordEscalationAction, 7,
+            Details: "Duty officer visited.", EscalationAction: WorkManagementEscalationAction.CoordinatedWithTeam,
+            Reason: "The field team requested support.", CommandId: commandId), new WorkManagementQuery(new PageRequest(1, 25)));
+
+        Assert.Equal(UiCapabilityResultCode.Success, result.Code);
+        var command = Assert.Single(commands.Sent).Input;
+        Assert.Equal("RecordEscalationAction", command.CommandType);
+        Assert.Equal("CoordinatedWithTeam: Duty officer visited.", command.ActionSummary);
+        Assert.Equal("The field team requested support.", command.Reason);
+        Assert.Equal(EscalationId, command.EscalationId);
+        Assert.Equal(commandId, command.CommandId);
+    }
+
     [Fact]
     public async Task ExecuteAsync_TransferFollowUp_SendsTypedOwnerChangeWithReason()
     {
@@ -452,7 +490,7 @@ public sealed class CommandBackedWorkManagementClientTests
     }
 
     private sealed class StubMonitoringClient(bool denyAssigned = false, MonitoringQueueItem? assistance = null,
-        string followUpStatus = "Scheduled") : IMonitoringQueueClient
+        string followUpStatus = "Scheduled", string escalationStatus = "Raised") : IMonitoringQueueClient
     {
         public Task<MonitoringQueueResult> GetAssignedAsync(int? limit, CancellationToken cancellationToken = default) =>
             Task.FromResult(new MonitoringQueueResult(denyAssigned ? CaseQueueAccess.Denied : CaseQueueAccess.Allowed,
@@ -460,7 +498,7 @@ public sealed class CommandBackedWorkManagementClientTests
 
         public Task<MonitoringQueueResult> GetOpenAsync(int? limit, CancellationToken cancellationToken = default) =>
             Task.FromResult(new MonitoringQueueResult(CaseQueueAccess.Allowed,
-                assistance is null ? [EscalationItem()] : [EscalationItem(), assistance]));
+                assistance is null ? [EscalationItem(escalationStatus)] : [EscalationItem(escalationStatus), assistance]));
 
         private static MonitoringQueueItem FollowUpItem(string status) => new(
             CaseId,
@@ -474,14 +512,14 @@ public sealed class CommandBackedWorkManagementClientTests
             new DateTimeOffset(2026, 10, 20, 8, 0, 0, TimeSpan.Zero),
             AggregateVersion: 7);
 
-        private static MonitoringQueueItem EscalationItem() => new(
+        private static MonitoringQueueItem EscalationItem(string status) => new(
             CaseId,
             MonitoringQueueKind.Escalation,
             EscalationId,
             "Clinic stock shortage",
             AssigneeActorId: null,
             DueAtUtc: null,
-            "Raised",
+            status,
             IsOverdue: false,
             new DateTimeOffset(2026, 10, 21, 8, 0, 0, TimeSpan.Zero),
             AggregateVersion: 7);

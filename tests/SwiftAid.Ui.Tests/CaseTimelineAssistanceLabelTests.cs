@@ -13,6 +13,13 @@ public sealed class CaseTimelineAssistanceLabelTests
         Assert.Equal("Action ownership", InvokeTimelineMapper("EventCategory", "ActionOwnerChanged"));
     }
 
+    [Fact]
+    public void Escalation_action_event_uses_specific_label_and_category()
+    {
+        Assert.Equal("Escalation action recorded", InvokeTimelineMapper("SafeEventLabel", "CaseEscalationActionRecorded"));
+        Assert.Equal("Escalation", InvokeTimelineMapper("EventCategory", "CaseEscalationActionRecorded"));
+    }
+
     [Theory]
     [InlineData("AssistanceRequested", "Assistance requested")]
     [InlineData("AssistanceAccepted", "Assistance responsibility accepted")]

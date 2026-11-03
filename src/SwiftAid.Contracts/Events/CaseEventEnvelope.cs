@@ -28,7 +28,8 @@ public enum CaseEventType
     AssistanceUnfulfilled,
     AssistanceCancelled,
     CaseFollowUpAcknowledged,
-    ActionOwnerChanged
+    ActionOwnerChanged,
+    CaseEscalationActionRecorded
 }
 
 public abstract record CaseEventPayload;
@@ -100,6 +101,8 @@ public sealed record CaseEscalationRaisedPayload(
     string RecipientRoute) : CaseEventPayload;
 
 public sealed record CaseEscalationAcknowledgedPayload(Guid EscalationId, string? ActionSummary, string Reason) : CaseEventPayload;
+
+public sealed record CaseEscalationActionRecordedPayload(Guid EscalationId, string ActionSummary, string Reason) : CaseEventPayload;
 
 public sealed record CaseEscalationClosedPayload(Guid EscalationId, string Resolution, string Reason) : CaseEventPayload;
 

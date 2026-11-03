@@ -349,6 +349,33 @@ public sealed class CaseMonitoringCommandEndpointTests
     }
 
     [Fact]
+    public async Task RecordEscalationAction_RequiresSummaryAndMapsActorReasonAndEscalation()
+    {
+        await using var host = await TestCommandHost.StartAsync();
+        var escalationId = Guid.NewGuid();
+        var commandId = Guid.NewGuid();
+        using var request = CreateRequest(FixedCaseId, new CaseCommandApiRequest(
+            1, "RecordEscalationAction", commandId, 3, null, "Duty officer coordinated a visit.", null, null, null, null,
+            EscalationId: escalationId, ActionSummary: "Coordinated with team: supervisor paged"));
+
+        using var response = await host.SendBearerAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var command = Assert.IsType<RecordEscalationActionCommand>(host.Processor.LastCommand);
+        Assert.Equal(commandId, command.CommandId);
+        Assert.Equal(escalationId, command.EscalationId);
+        Assert.Equal("Coordinated with team: supervisor paged", command.ActionSummary);
+        Assert.Equal("Duty officer coordinated a visit.", command.Reason);
+
+        using var missingSummary = CreateRequest(FixedCaseId, new CaseCommandApiRequest(
+            1, "RecordEscalationAction", Guid.NewGuid(), 3, null, "reason", null, null, null, null,
+            EscalationId: escalationId));
+        using var invalid = await host.SendBearerAsync(missingSummary);
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        Assert.Equal(1, host.Processor.Calls);
+    }
+
+    [Fact]
     public async Task CloseEscalation_IsAccepted()
     {
         await using var host = await TestCommandHost.StartAsync();

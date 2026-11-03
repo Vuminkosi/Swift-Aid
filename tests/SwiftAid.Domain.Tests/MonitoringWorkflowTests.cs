@@ -241,7 +241,7 @@ public sealed class MonitoringWorkflowTests
     }
 
     [Fact]
-    public void Escalation_RaisedAcknowledgedClosed_KeepsOwnerAccountable()
+    public void Escalation_RaisedAcknowledgedActionRecordedClosed_KeepsOwnerAccountable()
     {
         var (aggregate, events) = AcceptedCase();
         var escalationId = Guid.NewGuid();
@@ -251,9 +251,14 @@ public sealed class MonitoringWorkflowTests
         Assert.Equal(EscalationStatus.Raised, Assert.Single(aggregate.Escalations).Status);
 
         aggregate = Apply(aggregate, events,
-            new AcknowledgeEscalationCommand(Guid.NewGuid(), 0, escalationId, "supervisor paged", "acknowledged", null, RecordedAt),
+            new AcknowledgeEscalationCommand(Guid.NewGuid(), 0, escalationId, null, "acknowledged", null, RecordedAt),
             MonitoringActor());
         Assert.Equal(EscalationStatus.Acknowledged, Assert.Single(aggregate.Escalations).Status);
+
+        aggregate = Apply(aggregate, events,
+            new RecordEscalationActionCommand(Guid.NewGuid(), 0, escalationId, "Supervisor paged", "Duty officer coordinated a visit.", null, RecordedAt),
+            MonitoringActor());
+        Assert.Equal(EscalationStatus.ActionRecorded, Assert.Single(aggregate.Escalations).Status);
 
         aggregate = Apply(aggregate, events,
             new CloseEscalationCommand(Guid.NewGuid(), 0, escalationId, "supervisor visited holding", "resolved", null, RecordedAt),
@@ -281,6 +286,12 @@ public sealed class MonitoringWorkflowTests
 
         aggregate = Apply(aggregate, events,
             new AcknowledgeEscalationCommand(Guid.NewGuid(), 0, escalationId, null, "acknowledged", null, RecordedAt),
+            MonitoringActor());
+        Assert.Throws<InvalidOperationException>(() => Apply(aggregate, events,
+            new CloseEscalationCommand(Guid.NewGuid(), 0, escalationId, "resolution", "reason", null, RecordedAt),
+            MonitoringActor()));
+        aggregate = Apply(aggregate, events,
+            new RecordEscalationActionCommand(Guid.NewGuid(), 0, escalationId, "Reviewed", "No further response required.", null, RecordedAt),
             MonitoringActor());
         Assert.Throws<InvalidOperationException>(() => Apply(aggregate, events,
             new AcknowledgeEscalationCommand(Guid.NewGuid(), 0, escalationId, null, "again", null, RecordedAt),

@@ -115,6 +115,7 @@ public sealed record CaseFollowUpAcknowledged(Guid CaseId, long AggregateVersion
 public sealed record CaseFollowUpOutcomeRecorded(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, Guid FollowUpId, FollowUpOutcome Outcome, string OutcomeNotes, DateTimeOffset PreviousDueAtUtc, DateTimeOffset? NewDueAtUtc, string Reason) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
 public sealed record CaseEscalationRaised(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, Guid EscalationId, string Reason, IReadOnlyList<string> EvidenceEventIds, string RecipientRoute) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
 public sealed record CaseEscalationAcknowledged(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, Guid EscalationId, string? ActionSummary, string Reason) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
+public sealed record CaseEscalationActionRecorded(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, Guid EscalationId, string ActionSummary, string Reason) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
 public sealed record CaseEscalationClosed(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, Guid EscalationId, string Resolution, string Reason) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
 
 /// <summary>Current state of one scheduled follow-up. Rescheduling updates the due time in place; history stays in the event stream.</summary>
@@ -137,7 +138,8 @@ public enum EscalationStatus
 {
     Raised,
     Acknowledged,
-    Closed
+    Closed,
+    ActionRecorded
 }
 
 /// <summary>Immutable case state rebuilt from its ordered event stream.</summary>
@@ -257,6 +259,7 @@ public sealed partial class CaseAggregate
             RecordFollowUpOutcomeCommand outcome => DecideRecordFollowUpOutcome(outcome, actor, version),
             RaiseEscalationCommand escalation => DecideRaiseEscalation(escalation, actor, version),
             AcknowledgeEscalationCommand acknowledge => DecideAcknowledgeEscalation(acknowledge, actor, version),
+            RecordEscalationActionCommand recordAction => DecideRecordEscalationAction(recordAction, actor, version),
             CloseEscalationCommand close => DecideCloseEscalation(close, actor, version),
             AcknowledgeAssignmentCommand acknowledge => DecideAcknowledgeAssignment(acknowledge, actor, version),
             GrantCaseCollaboratorCommand grant => DecideGrantCollaborator(grant, actor, version),
@@ -613,8 +616,20 @@ public sealed partial class CaseAggregate
         RequireText(command.Reason, nameof(command.Reason));
         var escalation = _escalations.SingleOrDefault(item => item.EscalationId == command.EscalationId)
             ?? throw new InvalidOperationException("The escalation does not exist on this case.");
-        if (escalation.Status != EscalationStatus.Acknowledged) throw new InvalidOperationException("Only an acknowledged escalation can be closed.");
+        if (escalation.Status != EscalationStatus.ActionRecorded) throw new InvalidOperationException("Only an escalation with a recorded action can be closed.");
         return Array.AsReadOnly<CaseEvent>([new CaseEscalationClosed(CaseId, version, ReportRevision, command.CommandId, actor.ActorId, command.OccurredAtUtc, command.RecordedAtUtc, command.EscalationId, command.Resolution, command.Reason)]);
+    }
+
+    private IReadOnlyList<CaseEvent> DecideRecordEscalationAction(RecordEscalationActionCommand command, ActorCapabilities actor, long version)
+    {
+        RequireCapability(actor, CaseCapability.ManageEscalation);
+        RequireUnresolvedMonitoringTarget("recording an escalation action");
+        RequireText(command.ActionSummary, nameof(command.ActionSummary));
+        RequireText(command.Reason, nameof(command.Reason));
+        var escalation = _escalations.SingleOrDefault(item => item.EscalationId == command.EscalationId)
+            ?? throw new InvalidOperationException("The escalation does not exist on this case.");
+        if (escalation.Status != EscalationStatus.Acknowledged) throw new InvalidOperationException("Only an acknowledged escalation can have an action recorded.");
+        return Array.AsReadOnly<CaseEvent>([new CaseEscalationActionRecorded(CaseId, version, ReportRevision, command.CommandId, actor.ActorId, command.OccurredAtUtc, command.RecordedAtUtc, command.EscalationId, command.ActionSummary, command.Reason)]);
     }
 
     private IReadOnlyList<CaseEvent> DecideAcknowledgeAssignment(AcknowledgeAssignmentCommand command, ActorCapabilities actor, long version)
@@ -769,20 +784,36 @@ public sealed partial class CaseAggregate
                     ?? throw new InvalidDataException("An acknowledgement must reference an existing escalation.");
                 if (toAcknowledge.Status != EscalationStatus.Raised) throw new InvalidDataException("Only a raised escalation can be acknowledged.");
                 _escalations.Remove(toAcknowledge);
-                _escalations.Add(toAcknowledge with { Status = EscalationStatus.Acknowledged });
+                _escalations.Add(toAcknowledge with
+                {
+                    Status = string.IsNullOrWhiteSpace(acknowledged.ActionSummary)
+                        ? EscalationStatus.Acknowledged
+                        : EscalationStatus.ActionRecorded
+                });
                 break;
             case CaseEscalationAcknowledged:
                 throw new InvalidDataException("An escalation acknowledgement must reference the current report revision and a raised escalation.");
+            case CaseEscalationActionRecorded action when action.ReportRevision == ReportRevision:
+                RequireText(action.ActionSummary, nameof(action.ActionSummary));
+                RequireText(action.Reason, nameof(action.Reason));
+                var toRecordAction = _escalations.SingleOrDefault(item => item.EscalationId == action.EscalationId)
+                    ?? throw new InvalidDataException("An action record must reference an existing escalation.");
+                if (toRecordAction.Status != EscalationStatus.Acknowledged) throw new InvalidDataException("An action can only be recorded for an acknowledged escalation.");
+                _escalations.Remove(toRecordAction);
+                _escalations.Add(toRecordAction with { Status = EscalationStatus.ActionRecorded });
+                break;
+            case CaseEscalationActionRecorded:
+                throw new InvalidDataException("An escalation action record must reference the current report revision and an acknowledged escalation.");
             case CaseEscalationClosed closed when closed.ReportRevision == ReportRevision:
                 RequireText(closed.Resolution, nameof(closed.Resolution));
                 var toClose = _escalations.SingleOrDefault(item => item.EscalationId == closed.EscalationId)
                     ?? throw new InvalidDataException("A closure must reference an existing escalation.");
-                if (toClose.Status != EscalationStatus.Acknowledged) throw new InvalidDataException("Only an acknowledged escalation can be closed.");
+                if (toClose.Status != EscalationStatus.ActionRecorded) throw new InvalidDataException("Only an escalation with a recorded action can be closed.");
                 _escalations.Remove(toClose);
                 _escalations.Add(toClose with { Status = EscalationStatus.Closed });
                 break;
             case CaseEscalationClosed:
-                throw new InvalidDataException("An escalation closure must reference the current report revision and an acknowledged escalation.");
+                throw new InvalidDataException("An escalation closure must reference the current report revision and an escalation with a recorded action.");
             default:
                 throw new InvalidDataException($"Event type {@event.GetType().Name} is unsupported by this aggregate version.");
         }
@@ -953,6 +984,7 @@ public sealed partial class CaseAggregate
         CaseFollowUpOutcomeRecorded outcome => outcome,
         CaseEscalationRaised raised => raised with { EvidenceEventIds = Array.AsReadOnly(raised.EvidenceEventIds.ToArray()) },
         CaseEscalationAcknowledged acknowledged => acknowledged,
+        CaseEscalationActionRecorded action => action,
         CaseEscalationClosed closed => closed,
         _ => throw new InvalidDataException($"Event type {@event.GetType().Name} is unsupported by this aggregate version.")
     };
