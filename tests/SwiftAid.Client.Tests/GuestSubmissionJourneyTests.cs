@@ -31,6 +31,46 @@ public sealed class GuestSubmissionJourneyTests
     }
 
     [Fact]
+    public async Task EditableDraftCanBeRevisedAndExplicitlyCompletedWithoutQueuingRawValues()
+    {
+        var persistence = new MemorySubmissionPersistence();
+        var transport = new ScriptedTransport();
+        var store = new GuestDraftStore(persistence, transport: transport);
+        var firstSnapshot = new GuestDraftFormSnapshot(1, "{\"occurrenceTime\":\"not yet\"}");
+        var created = await store.CreateEditableDraftAsync(ValidSubmission(), firstSnapshot);
+        var loaded = await store.GetEditableDraftAsync(created.ClientSubmissionId);
+        Assert.Equal(firstSnapshot, loaded!.FormSnapshot);
+        Assert.False(loaded.Submission.Confirmations.ReportReviewConfirmed);
+        Assert.False(loaded.Submission.Confirmations.OccurrenceCountryConfirmed);
+        Assert.False(loaded.Submission.Confirmations.ProcessingConfirmed);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.QueueAsync(created.ClientSubmissionId));
+
+        var secondSnapshot = new GuestDraftFormSnapshot(1, "{\"occurrenceTime\":\"still editing\"}");
+        var revised = await store.CreateEditableRevisionAsync(created.ClientSubmissionId, ValidSubmission(), secondSnapshot);
+        Assert.Null(await store.GetEditableDraftAsync(created.ClientSubmissionId));
+        Assert.Equal(secondSnapshot, (await store.GetEditableDraftAsync(revised.ClientSubmissionId))!.FormSnapshot);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.CreateRevisionAsync(revised.ClientSubmissionId, ValidSubmission()));
+
+        var completed = await store.CompleteEditableDraftAsync(revised.ClientSubmissionId, ValidSubmission());
+        Assert.Null(await store.GetEditableDraftAsync(completed.ClientSubmissionId));
+        Assert.NotNull(await store.GetDraftAsync(completed.ClientSubmissionId));
+        Assert.Equal(GuestSubmissionLocalState.Queued, (await store.QueueAsync(completed.ClientSubmissionId)).State);
+        Assert.Equal(0, transport.SubmitCalls);
+    }
+
+    [Theory]
+    [InlineData(2, "{}")]
+    [InlineData(1, "[]")]
+    [InlineData(1, "{")]
+    public async Task InvalidEditableSnapshotsAreRejectedWithoutCreatingDraft(int version, string json)
+    {
+        var persistence = new MemorySubmissionPersistence();
+        var store = new GuestDraftStore(persistence);
+        await Assert.ThrowsAsync<ArgumentException>(() => store.CreateEditableDraftAsync(ValidSubmission(), new(version, json)));
+        Assert.Empty(await store.GetAllAsync());
+    }
+
+    [Fact]
     public async Task SnapshotDraftCannotBeOpenedRevisedOrQueuedByLegacyEditor()
     {
         var persistence = new MemorySubmissionPersistence();

@@ -79,6 +79,10 @@ public sealed record GuestDraftDetails(
     DateTimeOffset UpdatedAtUtc,
     long Version = 1);
 
+/// <summary>Editable local draft including private raw form data; never a server submission.</summary>
+public sealed record GuestEditableDraftDetails(Guid ClientSubmissionId, IntakeSubmission Submission,
+    GuestDraftFormSnapshot FormSnapshot, GuestSubmissionLocalState State, long Version);
+
 /// <summary>A guest submission write guarded by the version the caller previously read.</summary>
 /// <param name="Record">The complete protected record to persist.</param>
 /// <param name="ExpectedVersion">Null requires a new record; a positive value must match the current version.</param>
@@ -125,6 +129,17 @@ public interface IGuestSubmissionPersistence
 public interface IGuestSubmissionStore
 {
     Task<GuestSubmissionSummary> CreateDraftAsync(IntakeSubmission submission, CancellationToken cancellationToken = default);
+
+    Task<GuestSubmissionSummary> CreateEditableDraftAsync(IntakeSubmission carrier, GuestDraftFormSnapshot snapshot,
+        CancellationToken cancellationToken = default);
+
+    Task<GuestSubmissionSummary> CreateEditableRevisionAsync(Guid previousSubmissionId, IntakeSubmission carrier,
+        GuestDraftFormSnapshot snapshot, CancellationToken cancellationToken = default);
+
+    Task<GuestSubmissionSummary> CompleteEditableDraftAsync(Guid previousSubmissionId, IntakeSubmission submission,
+        CancellationToken cancellationToken = default);
+
+    Task<GuestEditableDraftDetails?> GetEditableDraftAsync(Guid clientSubmissionId, CancellationToken cancellationToken = default);
 
     Task<GuestSubmissionSummary> CreateRevisionAsync(
         Guid previousSubmissionId,

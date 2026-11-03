@@ -33,10 +33,41 @@ public sealed class GuestDraftStore(
         }
     }
 
-    public async Task<GuestSubmissionSummary> CreateRevisionAsync(
+    public async Task<GuestSubmissionSummary> CreateEditableDraftAsync(IntakeSubmission carrier,
+        GuestDraftFormSnapshot snapshot, CancellationToken cancellationToken = default)
+    {
+        ValidateSnapshot(snapshot);
+        ArgumentNullException.ThrowIfNull(carrier);
+        var mutationLease = await _mutationGate.AcquireAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var record = CreateRecord(UnconfirmCarrier(carrier), _timeProvider.GetUtcNow()) with { FormSnapshot = snapshot };
+            await persistence.SaveVersionedAsync(record, null, cancellationToken).ConfigureAwait(false);
+            return ToSummary(record);
+        }
+        finally { await mutationLease.DisposeAsync().ConfigureAwait(false); }
+    }
+
+    public Task<GuestSubmissionSummary> CreateRevisionAsync(
         Guid previousSubmissionId,
         IntakeSubmission revisedSubmission,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        CreateRevisionCoreAsync(previousSubmissionId, revisedSubmission, null, false, cancellationToken);
+
+    public Task<GuestSubmissionSummary> CreateEditableRevisionAsync(Guid previousSubmissionId, IntakeSubmission carrier,
+        GuestDraftFormSnapshot snapshot, CancellationToken cancellationToken = default)
+    {
+        ValidateSnapshot(snapshot);
+        return CreateRevisionCoreAsync(previousSubmissionId, UnconfirmCarrier(carrier), snapshot, true, cancellationToken);
+    }
+
+    public Task<GuestSubmissionSummary> CompleteEditableDraftAsync(Guid previousSubmissionId, IntakeSubmission submission,
+        CancellationToken cancellationToken = default) =>
+        CreateRevisionCoreAsync(previousSubmissionId, submission, null, true, cancellationToken);
+
+    private async Task<GuestSubmissionSummary> CreateRevisionCoreAsync(Guid previousSubmissionId,
+        IntakeSubmission revisedSubmission, GuestDraftFormSnapshot? snapshot, bool allowEditable,
+        CancellationToken cancellationToken)
     {
         if (previousSubmissionId == Guid.Empty) throw new ArgumentException("A previous report is required.", nameof(previousSubmissionId));
         ArgumentNullException.ThrowIfNull(revisedSubmission);
@@ -49,11 +80,16 @@ public sealed class GuestDraftStore(
             {
                 throw new InvalidOperationException("A queued or received report cannot be changed. Create a separate report revision instead.");
             }
-            if (previous.FormSnapshot is not null)
+            if (previous.FormSnapshot is not null && !allowEditable)
                 throw new InvalidOperationException("Open this draft in a compatible editor before replacing it.");
+            if (previous.FormSnapshot is { } previousSnapshot && !previousSnapshot.IsValid())
+                throw new InvalidOperationException("This editable draft is invalid or unsupported.");
+            if (allowEditable && snapshot is null && previous.FormSnapshot is null)
+                throw new InvalidOperationException("This report does not contain an editable snapshot.");
 
             var replacement = CreateRecord(revisedSubmission, _timeProvider.GetUtcNow()) with
             {
+                FormSnapshot = snapshot,
                 AudioAssets = (previous.AudioAssets ?? Array.Empty<GuestAudioAsset>())
                     .Where(asset => revisedSubmission.OriginalAudioAttachmentIds.Contains(asset.AttachmentId))
                     .ToArray()
@@ -76,6 +112,24 @@ public sealed class GuestDraftStore(
         {
             await mutationLease.DisposeAsync().ConfigureAwait(false);
         }
+    }
+
+    private static void ValidateSnapshot(GuestDraftFormSnapshot? snapshot)
+    {
+        if (snapshot is null || !snapshot.IsValid())
+            throw new ArgumentException("The editable draft is invalid or unsupported.", nameof(snapshot));
+    }
+
+    private static IntakeSubmission UnconfirmCarrier(IntakeSubmission carrier)
+    {
+        ArgumentNullException.ThrowIfNull(carrier);
+        ArgumentNullException.ThrowIfNull(carrier.Confirmations);
+        return carrier with { Confirmations = carrier.Confirmations with
+        {
+            ReportReviewConfirmed = false,
+            OccurrenceCountryConfirmed = false,
+            ProcessingConfirmed = false
+        } };
     }
 
     public async Task<GuestAudioRetakeResult> RetakeAudioAsync(
@@ -422,6 +476,18 @@ public sealed class GuestDraftStore(
             item.CreatedAtUtc,
             item.UpdatedAtUtc,
             item.Version);
+    }
+
+    public async Task<GuestEditableDraftDetails?> GetEditableDraftAsync(Guid clientSubmissionId,
+        CancellationToken cancellationToken = default)
+    {
+        if (clientSubmissionId == Guid.Empty) throw new ArgumentException("A report identifier is required.", nameof(clientSubmissionId));
+        var item = await persistence.GetAsync(clientSubmissionId, cancellationToken).ConfigureAwait(false);
+        if (item is null || item.State is not (GuestSubmissionLocalState.Draft or GuestSubmissionLocalState.NeedsAttention) ||
+            item.FormSnapshot is null) return null;
+        if (!item.FormSnapshot.IsValid())
+            throw new InvalidOperationException("This editable draft is invalid or unsupported.");
+        return new(item.ClientSubmissionId, item.Submission, item.FormSnapshot, item.State, item.Version);
     }
 
     public async Task<IReadOnlyList<GuestSubmissionSummary>> GetAllAsync(CancellationToken cancellationToken = default)
