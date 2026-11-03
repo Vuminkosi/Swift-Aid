@@ -3237,6 +3237,31 @@ before model completion. Browser playback, microphone capture, deployed Gateway
 and physical-device behavior remain NOT VERIFIED. The loopback relay does not
 change or restart the existing speech service.
 
+### Rendered live grounded playback — 2026-11-03
+
+PASS: the source at `922375a` was published to a separate loopback Gateway and
+run with live Muse, disposable PostgreSQL/NATS and the existing local Kokoro
+service through a task-owned relay. `node
+tests\SwiftAid.Ui.Tests\ellai-sentence-playback.browser.cjs` passed in
+headless Chromium: voice-on multi-sentence playback, voice-off behavior, five
+HTTP 200 audio responses and seven nonzero Web Audio buffers were observed.
+
+The new `ellai-grounded-playback.browser.cjs` passed twice. Its strengthened
+run observed the receipt fact in the feed while the turn was incomplete,
+received HTTP 200 for that exact response sequence's audio, and associated
+nonzero Web Audio buffers with that sequence; all observed buffers ended. The
+first run used a general playback counter before sequence instrumentation was
+added. Both runs used synthetic guest input and public product information.
+The isolated NATS notification consumer reported unavailable; notifications
+were not tested. This check does not establish that playback started before
+model completion, audible quality, microphone capture, physical-device or
+deployed Gateway behavior.
+
+The isolated Gateway, containers and relay were stopped. The candidate
+publish directory remains under the user temporary directory; an earlier
+automatic execution policy rejected recursive removal of task temporary
+directories, so they are retained.
+
 ### Exact final-claim misattribution — 2026-11-03
 
 The final decision validator accepted an exact case or product-fact line when
