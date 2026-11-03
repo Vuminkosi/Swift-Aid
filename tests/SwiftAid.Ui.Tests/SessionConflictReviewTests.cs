@@ -14,6 +14,31 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed class SessionConflictReviewTests
 {
+    [Fact]
+    public async Task RetainedProposalBlocksNavigationUntilLeaveIsConfirmed()
+    {
+        var id = Guid.NewGuid();
+        var input = new UpdateSessionInput("Proposal", "Summary", "Community", [], "Presenter", "en", DateTimeOffset.UtcNow.AddDays(1), 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
+        var page = new SwiftAid.Gateway.Components.Pages.Sessions();
+        var type = page.GetType();
+        type.GetField("_deferredProposal", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, new SessionUpdateSubmission(id, 3, input, "reason"));
+        var navigation = new TestNavigationManager();
+        type.GetProperty("Navigation", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, navigation);
+        using var registration = navigation.RegisterLocationChangingHandler(context =>
+        {
+            type.GetMethod("ConfirmRetainedLeave", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page, [context]);
+            return ValueTask.CompletedTask;
+        });
+
+        Assert.False(await navigation.CanNavigateAsync("http://localhost/other"));
+        Assert.True((bool)type.GetField("_confirmingRetainedLeave", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page)!);
+        type.GetMethod("StayWithRetainedProposal", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page, null);
+        Assert.False(await navigation.CanNavigateAsync("http://localhost/other"));
+        type.GetMethod("LeaveWithRetainedProposal", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page, null);
+        Assert.True(await navigation.CanNavigateAsync("http://localhost/other"));
+        Assert.False(await navigation.CanNavigateAsync("http://localhost/another"));
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -179,6 +204,9 @@ public sealed class SessionConflictReviewTests
     private sealed class TestNavigationManager : NavigationManager
     {
         public TestNavigationManager() => Initialize("http://localhost/", "http://localhost/");
+        public ValueTask<bool> CanNavigateAsync(string target) => NotifyLocationChangingAsync(target, null, false);
+        protected override void SetNavigationLockState(bool value) { }
+        protected override void NavigateToCore(string uri, bool forceLoad) { }
     }
 
     private sealed class StaffClient(CommunitySessionView current, bool canEdit) : IStaffSessionEditorClient

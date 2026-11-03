@@ -8,6 +8,7 @@
 @using SwiftAid.UI.Components.Sessions
 @using Microsoft.AspNetCore.Components
 @using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Routing
 @using SwiftAid.UI.Components.Surfaces.Public
 @inject IPublicCommunitySessionClient PublicSessionClient
 @inject ISubscriptionClient SubscriptionClient
@@ -16,8 +17,18 @@
 @inject AuthenticationStateProvider AuthenticationState
 
 <PageTitle>Community sessions | SwiftAid</PageTitle>
+<NavigationLock OnBeforeInternalNavigation="ConfirmRetainedLeave" ConfirmExternalNavigation="@HasRetainedProposal" />
 
 <div class="community-sessions-page">
+    @if (_confirmingRetainedLeave)
+    {
+        <MudPaper Class="pa-4 mb-4" Elevation="0" role="alertdialog" aria-modal="true" aria-label="Unconfirmed session update">
+            <MudText Typo="Typo.subtitle1">Leave without keeping your session changes?</MudText>
+            <MudText Typo="Typo.body2">The temporary update copy and any unsaved session edits will be lost.</MudText>
+            <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="StayWithRetainedProposal">Stay on this page</MudButton>
+            <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="LeaveWithRetainedProposal">Leave without saving</MudButton>
+        </MudPaper>
+    }
     @if (_deferredProposal is not null)
     {
         <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
@@ -70,6 +81,7 @@
                            CurrentActorId="@_actorId"
                            InitialSession="_staffView"
                            Busy="_busy"
+                           SuppressNavigationPrompt="HasRetainedProposal"
                            ServerError="@_serverError"
                            OnCreate="submission => HandleCreateAsync(submission, editorGeneration)"
                            OnUpdate="submission => HandleUpdateAsync(submission, editorGeneration)"
@@ -105,8 +117,12 @@
     private SessionUpdateSubmission? _deferredProposal;
     private string? _deferredProposalActor;
     private bool _confirmingDeferredDiscard;
+    private bool _confirmingRetainedLeave;
+    private string? _retainedLeaveTarget;
+    private string? _approvedRetainedLeaveTarget;
+    private bool HasRetainedProposal => _deferredProposal is not null || _conflictProposal is not null;
     private SessionEditor? _sessionEditor;
-    private bool HasPendingEditorInput() => _sessionEditor?.HasPendingInput == true;
+    private bool HasPendingEditorInput() => _sessionEditor?.HasPendingInput == true || _conflictProposal is not null;
     private Guid? _loadedRequestId;
     private bool _pageInitialized;
     private long _listGeneration;
@@ -481,6 +497,33 @@
         _deferredProposal = null;
         _deferredProposalActor = null;
         _confirmingDeferredDiscard = false;
+    }
+
+    private void ConfirmRetainedLeave(LocationChangingContext context)
+    {
+        if (_approvedRetainedLeaveTarget is { } approved)
+        {
+            _approvedRetainedLeaveTarget = null;
+            if (string.Equals(approved, context.TargetLocation, StringComparison.Ordinal)) return;
+        }
+        if (!HasRetainedProposal) return;
+        context.PreventNavigation();
+        _retainedLeaveTarget = context.TargetLocation;
+        _confirmingRetainedLeave = true;
+    }
+
+    private void StayWithRetainedProposal()
+    {
+        _confirmingRetainedLeave = false;
+        _retainedLeaveTarget = null;
+    }
+
+    private void LeaveWithRetainedProposal()
+    {
+        if (_retainedLeaveTarget is not { } target) return;
+        StayWithRetainedProposal();
+        _approvedRetainedLeaveTarget = target;
+        Navigation.NavigateTo(target);
     }
 
     private async Task RetryDeferredProposalAsync()
