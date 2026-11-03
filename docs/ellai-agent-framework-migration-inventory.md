@@ -3189,3 +3189,19 @@ supplied privately to the test process.
 NOT VERIFIED: a deployed Gateway, browser or device journey, and a real
 network partition. These are worker-boundary tests and do not demonstrate
 instantaneous revocation of bytes already delivered.
+
+### Authorized analytics — current branch verification
+
+PASS: on commit `ce343af`, the following focused integration run passed 2/2
+in 15 seconds, with no skips:
+
+```powershell
+dotnet test tests\SwiftAid.Integration.Tests\SwiftAid.Integration.Tests.csproj --no-build --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter 'FullyQualifiedName~LiveMuseExecutorUsesAuthorizedCountForOrdinaryQuestion|FullyQualifiedName~LiveMuseUsesAuthorizedPostgresCountAndCitesObservedEvidence' --logger 'console;verbosity=minimal'
+```
+
+Both tests used live Muse, a synthetic case fixture and disposable PostgreSQL.
+They exercised the authorized managed-case count through framework function
+calling and checked the resulting evidence. The executor test also checked a
+follow-up with the same date window and omission of prior context after grant
+expiry. This proves the tested owned-case count; arbitrary aggregations and
+deployed Gateway behavior remain NOT VERIFIED.
