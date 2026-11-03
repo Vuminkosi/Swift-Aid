@@ -106,6 +106,29 @@ public sealed class EllaiUtteranceSubmissionServiceTests
         Assert.Contains(EllaiToolNames.State, envelope.AllowedTools);
     }
 
+    [Theory]
+    [InlineData("access-epoch-1")]
+    [InlineData("ellai-help-identity-epoch-1")]
+    public async Task ChangedAuthenticatedEpochCannotQueueATurn(string scopeEpoch)
+    {
+        var store = new InMemoryEllaiSessionStore();
+        var service = new EllaiUtteranceSubmissionService(store, new EllaiConsentService());
+        var original = AuthenticatedPrincipal("actor-one");
+        var session = await StartSessionAsync(store, original);
+        var current = (await store.GetAsync(session.SessionId, default))!;
+        await store.TryUpdateAsync(current with { ScopeEpoch = scopeEpoch }, current.SessionVersion, default);
+        var newEpoch = new ClaimsPrincipal(new ClaimsIdentity([
+            new Claim(ClaimTypes.NameIdentifier, "actor-one"),
+            new Claim(ActorContext.AccessEpochClaimType, "2")], "test"));
+
+        var result = await service.SubmitAsync(session.SessionId, Request(session, "changed-epoch"), newEpoch, default);
+
+        Assert.Equal(EllaiClientOperationStatus.PolicyBlocked, result.Status);
+        Assert.Null(result.Session);
+        Assert.Null(await store.ClaimNextAsync(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(1), default));
+        Assert.Equal(session.SessionVersion, (await store.GetAsync(session.SessionId, default))!.SessionVersion);
+    }
+
     [Fact]
     public async Task GuestScopeKeepsDynamicIntentWithinPublicCaptureAssistance()
     {

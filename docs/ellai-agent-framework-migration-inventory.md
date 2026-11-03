@@ -149,6 +149,16 @@ tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore
 -m:1 -nr:false -p:WasmBuildNative=false --filter
 FullyQualifiedName~FrameworkWorkerRecallsAuthorizedCaseFromPostgresAndQdrant`.
 
+As a partial scope-change safeguard, utterance admission now rejects a known
+workspace or identity-help session when its stored epoch differs from the
+authenticated principal's epoch, before queuing work. The user must start a
+session under the current scope. Older or nonstandard scope labels retain their
+existing behavior. Focused submission/framework tests passed 52/52; guest-route
+and voice integration tests passed 39 with six opt-in tests skipped. This
+comparison does not independently refresh the principal or detect a grant
+expiry within the same epoch, and it does not resolve the history-provenance
+cutover blocker above.
+
 **Disposable PostgreSQL recovery evidence:** `FrameworkWorkerRehydratesOwnedConversationAfterWorkerRestart`
 passed (1/1, zero skipped) against a task-owned PostGIS 17 container after 60
 repository migrations. With a deterministic synthetic model, it completed a

@@ -50,6 +50,11 @@ public sealed class EllaiUtteranceSubmissionService(
             return new(EllaiClientOperationStatus.Unauthorized, null);
         }
 
+        if (!MatchesAuthenticatedEpoch(current.ScopeEpoch, actor.AccessEpoch))
+        {
+            return new(EllaiClientOperationStatus.PolicyBlocked, null);
+        }
+
         if (current.Status != "Active" || current.Mode != EllaiMode.Ask)
         {
             return new(EllaiClientOperationStatus.PolicyBlocked,
@@ -107,6 +112,17 @@ public sealed class EllaiUtteranceSubmissionService(
 
     private static bool HasWorkspaceScope(string scopeEpoch) =>
         scopeEpoch.StartsWith("access-epoch-", StringComparison.Ordinal);
+
+    private static bool MatchesAuthenticatedEpoch(string scopeEpoch, long accessEpoch)
+    {
+        var epoch = accessEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (scopeEpoch.StartsWith("access-epoch-", StringComparison.Ordinal))
+            return string.Equals(scopeEpoch, "access-epoch-" + epoch, StringComparison.Ordinal);
+        if (scopeEpoch.StartsWith("ellai-help-identity-epoch-", StringComparison.Ordinal))
+            return string.Equals(scopeEpoch, "ellai-help-identity-epoch-" + epoch, StringComparison.Ordinal);
+        // Preserve existing behavior for older or nonstandard session scope labels.
+        return true;
+    }
 
     private static bool IsValid(string routeSessionId, SubmitUtteranceRequest? request) =>
         !string.IsNullOrWhiteSpace(routeSessionId)
