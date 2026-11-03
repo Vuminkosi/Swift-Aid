@@ -8,6 +8,7 @@ using System.Text.Json.Schema;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using SwiftAid.Contracts.Ellai;
+using StreamingChatCompletionUpdate = OpenAI.Chat.StreamingChatCompletionUpdate;
 
 namespace SwiftAid.Application.Tests.Ellai;
 
@@ -556,6 +557,40 @@ public sealed class EllaiLiveProbeTests
             }
             finally { CurrentlyStreaming = false; }
         }
+    }
+
+    [LiveFact]
+    public async Task LiveMuseReportsStreamingToolNameFragmentShape()
+    {
+        var options = LiveOptions();
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
+        using var client = EllaiMuseChatClientFactory.Create(options, http);
+        var tool = AIFunctionFactory.Create((string value) => value, "fixture_echo", "Echo a synthetic value.");
+        var fragments = new List<int>();
+        var calls = new List<FunctionCallContent>();
+        try
+        {
+            await foreach (var update in client.GetStreamingResponseAsync(
+                [new ChatMessage(ChatRole.User, "Call fixture_echo exactly once with value banana. Do not answer directly.")],
+                new ChatOptions { MaxOutputTokens = 1024, Tools = [tool], ToolMode = ChatToolMode.Auto }))
+            {
+                if (update.RawRepresentation is StreamingChatCompletionUpdate raw)
+                    fragments.AddRange(raw.ToolCallUpdates.Where(part => !string.IsNullOrEmpty(part.FunctionName))
+                        .Select(part => part.FunctionName.Length));
+                calls.AddRange(update.Contents.OfType<FunctionCallContent>());
+            }
+        }
+        catch (System.ClientModel.ClientResultException error)
+        {
+            throw new InvalidOperationException($"Provider rejected the streaming tool-call probe (HTTP {error.Status}).");
+        }
+        var call = Assert.Single(calls);
+        Assert.Equal("fixture_echo", call.Name);
+        Assert.False(string.IsNullOrWhiteSpace(call.CallId));
+        Assert.Null(call.Exception);
+        Assert.Equal("banana", call.Arguments?["value"]?.ToString());
+        Assert.NotEmpty(fragments);
+        Console.WriteLine($"Synthetic tool-name fragment count: {fragments.Count}; fragment lengths: {string.Join(',', fragments)}.");
     }
 
     [LiveFact]

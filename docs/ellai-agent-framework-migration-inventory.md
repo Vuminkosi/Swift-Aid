@@ -1963,6 +1963,19 @@ the configured live Muse route and the correction enabled. These tests do not
 establish how often live Muse splits function names, live Ollama compatibility,
 deployed Gateway behavior or an independent security review.
 
+The opt-in `LiveMuseReportsStreamingToolNameFragmentShape` probe was run twice
+against the configured live Muse route using synthetic `fixture_echo` input.
+Both runs passed with one completed, named function call; the second also
+checked the `banana` argument. The first recorded one nonempty name fragment
+of 12 characters. The second run's fragment-count output was truncated by the
+test harness, so its shape is not recorded here. Command: `dotnet test
+tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj --no-restore
+-m:1 -nr:false --filter 'FullyQualifiedName~LiveMuseReportsStreamingToolNameFragmentShape'
+--logger 'console;verbosity=normal'`, with `ELLAI_LIVE=1` and the existing
+Gateway's Ellai settings copied into the test process without printing them.
+With `ELLAI_LIVE=0`, the probe correctly skipped. These two calls do not prove
+Muse never fragments names or establish production-provider reliability.
+
 At revision `a0c9396`, a separately published Release Gateway using the
 corrected adapter ran on loopback with disposable PostgreSQL and NATS and the
 configured live Muse route. PASS: the opt-in headless Chromium
