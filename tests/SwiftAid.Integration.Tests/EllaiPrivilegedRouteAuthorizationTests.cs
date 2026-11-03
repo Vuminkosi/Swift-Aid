@@ -21,11 +21,99 @@ using SwiftAid.Contracts.Ellai;
 using SwiftAid.Gateway.Endpoints;
 using SwiftAid.Gateway.Ellai;
 using SwiftAid.UI.Ellai;
+using Microsoft.Extensions.AI;
+using SwiftAid.Intelligence.Meta;
+using System.Runtime.CompilerServices;
 
 namespace SwiftAid.Integration.Tests;
 
 public sealed class EllaiPrivilegedRouteAuthorizationTests
 {
+    [Fact]
+    public async Task GuestHttpTurnsReachFrameworkWorkerAndRetainConversation()
+    {
+        await using var app = await StartApplicationAsync(frameworkWorker: true);
+        using var client = app.GetTestClient();
+        var cookies = new Dictionary<string, string>(StringComparer.Ordinal);
+        void Merge(HttpResponseMessage response)
+        {
+            if (!response.Headers.TryGetValues("Set-Cookie", out var values)) return;
+            foreach (var value in values)
+            {
+                var pair = value.Split(';', 2)[0];
+                var index = pair.IndexOf('=');
+                if (index > 0) cookies[pair[..index]] = pair[(index + 1)..];
+            }
+        }
+        string CookieHeader() => string.Join("; ", cookies.Select(item => $"{item.Key}={item.Value}"));
+        async Task<HttpResponseMessage> PostAsync<T>(string path, T body, string token)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = JsonContent.Create(body) };
+            request.Headers.TryAddWithoutValidation("Cookie", CookieHeader());
+            request.Headers.TryAddWithoutValidation("X-CSRF-TOKEN", token);
+            return await client.SendAsync(request);
+        }
+        using var antiforgery = await client.GetAsync("/api/v1/ellai/guest/antiforgery");
+        Assert.Equal(System.Net.HttpStatusCode.OK, antiforgery.StatusCode);
+        Merge(antiforgery);
+        var token = (await antiforgery.Content.ReadFromJsonAsync<EllaiGuestAntiforgeryToken>())!.RequestToken;
+        using var started = await PostAsync("/api/v1/ellai/guest/sessions",
+            new StartSessionRequest(EllaiMode.Ask, "framework-http", null, null, null, null), token);
+        Assert.Equal(System.Net.HttpStatusCode.OK, started.StatusCode);
+        Merge(started);
+        var session = (await started.Content.ReadFromJsonAsync<EllaiSessionView>())!;
+        var store = app.Services.GetRequiredService<CountingEllaiSessionStore>();
+        async Task<EllaiSessionView> SendTurnAsync(string id, string text, EllaiSessionView current, int ordinal)
+        {
+            using var response = await PostAsync($"/api/v1/ellai/guest/sessions/{session.SessionId}/utterances",
+                new SubmitUtteranceRequest(id, session.SessionId, current.SessionVersion, text, null, "typed", ordinal), token);
+            Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+            var accepted = (await response.Content.ReadFromJsonAsync<EllaiSessionView>())!;
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            EllaiConversationTurn turn;
+            do
+            {
+                await Task.Delay(25, timeout.Token);
+                var saved = (await store.GetAsync(session.SessionId, timeout.Token))!;
+                turn = (await store.ReadConversationAsync(session.SessionId, saved.OwnerActorId!, timeout.Token))
+                    .Single(item => item.ClientUtteranceId == id);
+            } while (turn.CompletedAtUtc is null);
+            Assert.Equal("Completed", turn.Outcome);
+            Assert.Equal("Synthetic HTTP answer.", turn.AssistantText);
+            return accepted;
+        }
+        var first = await SendTurnAsync("http-turn-1", "First question", session, 1);
+        await SendTurnAsync("http-turn-2", "Follow-up question", first, 2);
+        var model = app.Services.GetRequiredService<FrameworkHttpClient>();
+        Assert.Contains("First question", model.LastMessages);
+        Assert.Contains("Synthetic HTTP answer.", model.LastMessages);
+        Assert.Contains("Follow-up question", model.LastMessages);
+        using var feedRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/ellai/guest/sessions/{session.SessionId}/responses?cursor=0");
+        feedRequest.Headers.TryAddWithoutValidation("Cookie", CookieHeader());
+        using var feed = await client.SendAsync(feedRequest);
+        Assert.Equal(System.Net.HttpStatusCode.OK, feed.StatusCode);
+        Assert.Contains("Synthetic HTTP answer.", await feed.Content.ReadAsStringAsync());
+        using var stranger = await client.GetAsync($"/api/v1/ellai/guest/sessions/{session.SessionId}/responses?cursor=0");
+        Assert.Equal(System.Net.HttpStatusCode.Unauthorized, stranger.StatusCode);
+    }
+
+    private sealed class FrameworkHttpClient : IChatClient
+    {
+        public IReadOnlyList<string> LastMessages { get; private set; } = [];
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            cancellationToken.ThrowIfCancellationRequested();
+            LastMessages = messages.Where(message => message.Role == ChatRole.User || message.Role == ChatRole.Assistant)
+                .Select(message => message.Text).ToArray();
+            yield return new ChatResponseUpdate(ChatRole.Assistant, """{"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Synthetic HTTP answer.","spokenText":"Synthetic HTTP answer.","claims":[],"questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}""");
+            yield return new ChatResponseUpdate(ChatRole.Assistant, [new UsageContent(new UsageDetails { InputTokenCount = 5, OutputTokenCount = 4 })]);
+        }
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
     [Fact]
     public async Task SessionHistoryListsOnlyTheCurrentOwnersSessions()
     {
@@ -584,7 +672,7 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
 
     private static async Task<WebApplication> StartApplicationAsync(
         string sessionOwnerId = "test-owner", string sessionStatus = "Active",
-        bool hasCurrentScope = false)
+        bool hasCurrentScope = false, bool frameworkWorker = false)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
@@ -647,6 +735,21 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
         builder.Services.AddTransient<IEllaiSpeechSynthesisClient>(services =>
             services.GetRequiredService<EllaiSpeechSynthesisClient>());
         builder.Services.AddSingleton<IEllaiApprovalStore, EllaiReceiptStore>();
+        if (frameworkWorker)
+        {
+            builder.Services.AddSingleton<FrameworkHttpClient>();
+            builder.Services.AddSingleton<EllaiUsageLedger>();
+            builder.Services.AddSingleton<IEllaiUsageStore, InMemoryEllaiUsageStore>();
+            builder.Services.AddScoped(_ => new EllaiPromptBuilder("Synthetic test policy", "fixture"));
+            builder.Services.AddScoped(sp => new EllaiToolBroker(new EllaiPolicyService(), sp.GetRequiredService<EllaiConsentService>()));
+            builder.Services.AddEllaiReasoningExecutor(new EllaiOptions
+            {
+                Enabled = true, ApiKey = "synthetic", ApiUrl = "https://fixture.invalid", ReasoningModel = "fixture"
+            }, "framework");
+            builder.Services.AddKeyedSingleton<IChatClient>(EllaiReasoningRegistration.FrameworkClientKey,
+                (sp, _) => sp.GetRequiredService<FrameworkHttpClient>());
+            builder.Services.AddHostedService<EllaiUtteranceWorker>();
+        }
 
         var app = builder.Build();
         app.UseAuthentication();

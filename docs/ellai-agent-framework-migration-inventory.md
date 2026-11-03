@@ -181,6 +181,18 @@ the integration test command above with filter
 This exercises the same registration as the Gateway but not the Gateway host,
 real provider, or production configuration.
 
+`GuestHttpTurnsReachFrameworkWorkerAndRetainConversation` passes through the
+real guest HTTP routes in an ASP.NET Core TestServer, cookie and antiforgery
+filters, the worker and the framework registration. Two submitted turns
+complete, the second model request contains the earlier exchange, the response
+feed returns the answer to its owner, and a request without the guest cookie is
+rejected. The model and persistence are synthetic/in-memory; this is not a
+production Gateway process or a real provider/device test. The enclosing
+`EllaiPrivilegedRouteAuthorizationTests` suite passed 21/21 with
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-build --no-restore -m:1 -nr:false --filter
+FullyQualifiedName~EllaiPrivilegedRouteAuthorizationTests --verbosity quiet`.
+
 `FrameworkWorkerRecallsAuthorizedCaseFromPostgresAndQdrant` passed 1/1 using
 the actual outbox worker, scoped broker, PostgreSQL session/topic stores and
 case authorization, plus a disposable Qdrant exact collection. With a
