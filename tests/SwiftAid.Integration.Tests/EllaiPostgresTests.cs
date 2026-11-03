@@ -72,6 +72,64 @@ public sealed class FrameworkPostgresLiveMuseFactAttribute : FactAttribute
 public sealed class EllaiPostgresTests : IAsyncLifetime
 {
     [FrameworkPostgresFact]
+    public async Task FrameworkWorkerPersistsGuidanceAfterUnmatchedCatalogueGoal()
+    {
+        var id = $"framework-fallback-guidance-{Guid.NewGuid():N}";
+        _frameworkSessionIds.Add(id);
+        var now = DateTimeOffset.UtcNow;
+        var work = new EllaiUtteranceWork(id, "scope-test", "Show me how to save a report draft.", "public.product-help", null,
+            EllaiMode.Ask, 1, "cycle-current", Actor, true, "consent/0", EllaiProcessingClassification.UserProvidedNonSensitive,
+            EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string> { EllaiToolNames.UiCatalogue },
+            EllaiConsentPurposes.PublicProductHelp, "current");
+        await using (var db = CreateFrameworkDbContext())
+        {
+            await db.Database.MigrateAsync();
+            await new PostgresEllaiSessionStore(db).CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1, 0, 12,
+                Actor.ActorId, "scope-test", null, null, now), default);
+            db.Set<EllaiUtteranceEntity>().Add(new()
+            {
+                SessionId = id, ClientUtteranceId = "current", Sequence = 1, UserText = work.Utterance,
+                Outcome = "Queued", AcceptedAtUtc = now, WorkPayloadJson = EllaiUtteranceWorkEnvelope.Serialize(work, "current")
+            });
+            await db.SaveChangesAsync();
+        }
+        var registry = new EllaiUiRegistry();
+        EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        using var model = new FallbackGuidanceClient();
+        await RunFrameworkWorkerAsync(id, "current", model, null, registry: registry);
+        await using var verifyDb = CreateFrameworkDbContext();
+        var completed = (await new PostgresEllaiSessionStore(verifyDb).ReadConversationForExecutionAsync(id, Actor.ActorId, "current", default)).Single();
+        Assert.Equal("Completed", completed.Outcome);
+        Assert.NotNull(completed.UiProposalsJson);
+        Assert.True(EllaiToolTrace.TryRead(completed.ToolTraceJson!, out var trace));
+        Assert.NotNull(Assert.Single(trace!.Observations).UiCatalogueReplayScope);
+        Assert.DoesNotContain("synthetic unfamiliar goal", completed.ToolTraceJson!);
+    }
+
+    private sealed class FallbackGuidanceClient : IChatClient
+    {
+        private int _calls;
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            if (++_calls == 1)
+                yield return new ChatResponseUpdate(ChatRole.Assistant,
+                    [new FunctionCallContent("discover", EllaiToolNames.UiCatalogue,
+                        new Dictionary<string, object?> { ["feature"] = "report", ["goal"] = "synthetic unfamiliar goal" })]);
+            else
+                yield return new ChatResponseUpdate(ChatRole.Assistant,
+                    """{"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Let me show you the report form.","spokenText":"Let me show you the report form.","claims":[],"questions":[],"uiIntents":[{"kind":"StartGuidance","featureId":"ellai.guidance","resourceId":null,"controlId":null,"arguments":{"feature":"report","objective":"Open the report form"}}],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}""");
+            yield return new ChatResponseUpdate(ChatRole.Assistant,
+                [new UsageContent(new UsageDetails { InputTokenCount = 5, OutputTokenCount = 4 })]);
+        }
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    [FrameworkPostgresFact]
     public async Task PartialCaseConversationRevalidatesAfterPostgresTopicIsReopened()
     {
         var sessionId = $"partial-history-{Guid.NewGuid():N}";
@@ -1014,7 +1072,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
     }
 
     private static async Task RunFrameworkWorkerAsync(string sessionId, string turnId, IChatClient model, ICacheStore? cache,
-        TimeSpan? executionTimeout = null)
+        TimeSpan? executionTimeout = null, EllaiUiRegistry? registry = null)
     {
         var consent = new EllaiConsentService();
         var services = new ServiceCollection();
@@ -1028,7 +1086,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         services.AddEllaiUsageAccounting(new EllaiOptions { SpendingCapDollars = 70m,
             PricingInputPer1KTokens = 0.001m, PricingOutputPer1KTokens = 0.002m });
         services.AddSingleton(new EllaiSessionResponseStore());
-        services.AddScoped(_ => new EllaiToolBroker(new EllaiPolicyService(), consent));
+        services.AddScoped(_ => new EllaiToolBroker(new EllaiPolicyService(), consent, uiRegistry: registry));
         services.AddScoped(_ => new EllaiPromptBuilder("Synthetic test policy", "fixture"));
         services.AddEllaiReasoningExecutor(new EllaiOptions
         {
