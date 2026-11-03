@@ -230,6 +230,25 @@ public sealed class CommunitySessionServiceTests
     }
 
     [Fact]
+    public async Task RescheduleDoesNotRecreateRemindersAlreadyDueAtRevisionTime()
+    {
+        var services = CreateServices();
+        var id = Guid.NewGuid();
+        await PublishAsync(services.Service, id, SessionVisibility.Public);
+        var revisionTime = Start.AddHours(-2);
+        await services.Service.ExecuteAsync(UpdateDraft(id, 3) with
+        {
+            Title = "Malaria prevention talk",
+            StartUtc = Start.AddMinutes(30),
+            RecordedAtUtc = revisionTime
+        }, "officer-1", CancellationToken.None);
+
+        var occurrence = Assert.Single(services.Store.LastOccurrences);
+        Assert.Equal(1, occurrence.LeadHours);
+        Assert.True(occurrence.RemindAtUtc > revisionTime);
+    }
+
+    [Fact]
     public async Task SchedulingFailsClosedWithoutMaterialEligibilityAuthority()
     {
         var store = new FakeSessionStore();

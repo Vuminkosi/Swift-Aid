@@ -20,6 +20,39 @@ namespace SwiftAid.Integration.Tests;
 public sealed class SessionSchedulingTests
 {
     [IntakePostgresFact]
+    public async Task ReschedulingDoesNotPersistPastReminderOccurrences()
+    {
+        var id = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var start = now.AddHours(2);
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var service = new CommunitySessionService(new PostgresCommunitySessionStore(db), new FixtureMaterialEligibility());
+        try
+        {
+            await service.ExecuteAsync(CreateDraft(id, "officer-1") with { StartUtc = start.AddHours(1), RecordedAtUtc = now.AddDays(-2) }, "officer-1", CancellationToken.None);
+            await service.ExecuteAsync(new ReviewSessionCommand(id, 1, false, "review", now.AddDays(-2)), "officer-2", CancellationToken.None);
+            await service.ExecuteAsync(new ScheduleSessionCommand(id, 2, "schedule", now.AddDays(-2)), "officer-2", CancellationToken.None);
+            await service.ExecuteAsync(UpdateDraft(id, 3, "Malaria prevention talk") with
+            {
+                StartUtc = start,
+                DurationMinutes = 60,
+                RecordedAtUtc = now
+            }, "officer-2", CancellationToken.None);
+
+            var pending = await db.SessionReminderOccurrences.AsNoTracking()
+                .Where(row => row.SessionId == id && row.Status == "Pending").ToListAsync();
+            var occurrence = Assert.Single(pending);
+            Assert.Equal(1, occurrence.LeadHours);
+            Assert.True(occurrence.RemindAtUtc > now);
+            Assert.Equal(4, occurrence.Version);
+        }
+        finally
+        {
+            await CleanupAsync(id);
+        }
+    }
+
+    [IntakePostgresFact]
     public async Task DestinationEndpointRejectsPersistedRevisionAndCancellation()
     {
         var sessionId = Guid.NewGuid();

@@ -79,7 +79,7 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
                     ? SessionReminderSync.Recompute
                     : SessionReminderSync.None;
                 var occurrences = sync == SessionReminderSync.Recompute
-                    ? session.ComputeReminderOccurrences(session.ScheduledAtUtc!.Value)
+                    ? session.ComputeReminderOccurrences(command.RecordedAtUtc)
                     : null;
                 await _store.UpdateAsync(session, command.ExpectedVersion, actorId, command.Reason,
                     command.RecordedAtUtc, sync, occurrences, ct).ConfigureAwait(false);
