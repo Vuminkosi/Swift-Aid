@@ -24,10 +24,10 @@ public static class CommunitySessionSharing
         };
         var duration = TimeSpan.FromMinutes(session.DurationMinutes);
         var builder = new StringBuilder();
-        builder.AppendLine("BEGIN:VCALENDAR");
-        builder.AppendLine("VERSION:2.0");
-        builder.AppendLine("PRODID:-//SwiftAid//Community Session//EN");
-        builder.AppendLine("BEGIN:VEVENT");
+        builder.Append("BEGIN:VCALENDAR\r\n");
+        builder.Append("VERSION:2.0\r\n");
+        builder.Append("PRODID:-//SwiftAid//Community Session//EN\r\n");
+        builder.Append("BEGIN:VEVENT\r\n");
         AppendFolded(builder, "UID", $"swiftaid-community-session-{session.SessionId:D}");
         AppendFolded(builder, "DTSTAMP", FormatUtc(generatedAtUtc));
         AppendFolded(builder, "DTSTART", FormatUtc(session.StartUtc));
@@ -43,7 +43,7 @@ public static class CommunitySessionSharing
         AppendFolded(builder, "SEQUENCE", session.IcsSequence.ToString(System.Globalization.CultureInfo.InvariantCulture));
         AppendFolded(builder, "STATUS", status);
         AppendFolded(builder, "TRANSP", "OPAQUE");
-        builder.AppendLine("END:VEVENT");
+        builder.Append("END:VEVENT\r\n");
         builder.Append("END:VCALENDAR\r\n");
         return builder.ToString();
     }
@@ -95,11 +95,11 @@ public static class CommunitySessionSharing
     private static string Describe(CommunitySession session)
     {
         var builder = new StringBuilder(session.Summary);
-        builder.Append("\\nPresenter: ").Append(session.Presenter);
-        builder.Append("\\nLanguage: ").Append(session.Language);
+        builder.Append("\nPresenter: ").Append(session.Presenter);
+        builder.Append("\nLanguage: ").Append(session.Language);
         if (session.Status == CommunitySessionStatus.Cancelled)
         {
-            builder.Append("\\nStatus: cancelled. Reason: ").Append(session.CancellationReason ?? "not recorded");
+            builder.Append("\nStatus: cancelled. Reason: ").Append(session.CancellationReason ?? "not recorded");
         }
 
         return builder.ToString();
@@ -118,6 +118,7 @@ public static class CommunitySessionSharing
         var escaped = value
             .Replace("\\", "\\\\", StringComparison.Ordinal)
             .Replace("\r\n", "\\n", StringComparison.Ordinal)
+            .Replace("\r", "\\n", StringComparison.Ordinal)
             .Replace("\n", "\\n", StringComparison.Ordinal)
             .Replace(";", "\\;", StringComparison.Ordinal)
             .Replace(",", "\\,", StringComparison.Ordinal);
@@ -143,7 +144,7 @@ public static class CommunitySessionSharing
     private static byte[] TakeBytes(byte[] source, int max)
     {
         var length = Math.Min(max, source.Length);
-        while (length > 0 && (source[length - 1] & 0xC0) == 0x80)
+        while (length > 0 && length < source.Length && (source[length] & 0xC0) == 0x80)
         {
             length--;
         }

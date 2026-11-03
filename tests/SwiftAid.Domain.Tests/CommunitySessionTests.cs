@@ -185,6 +185,29 @@ public sealed class CommunitySessionTests
     }
 
     [Fact]
+    public void Ics_FoldsUnicodeWithoutCorruptionAndUsesCalendarLineEndings()
+    {
+        var session = CreateDraft();
+        var title = new string('A', 66) + "€🌍 community";
+        session.UpdateDetails(title, session.Summary, session.AudienceDescription, [.. session.TopicTags],
+            session.Presenter, session.Language, session.StartUtc, session.DurationMinutes, session.Capacity,
+            [.. session.Materials], session.Visibility, session.ChannelType, session.ChannelLink,
+            [.. session.ReminderLeadHours], CreatedAt);
+        session.Review("officer-2", false, CreatedAt.AddHours(1));
+        session.Schedule("officer-2", CreatedAt.AddHours(2));
+
+        var ics = CommunitySessionSharing.BuildIcs(session, CreatedAt.AddHours(3));
+        var unfolded = ics.Replace("\r\n ", "", StringComparison.Ordinal);
+
+        Assert.DoesNotContain('\uFFFD', ics);
+        Assert.Contains($"SUMMARY:{title}", unfolded, StringComparison.Ordinal);
+        Assert.Contains($"{session.Summary}\\nPresenter:", unfolded, StringComparison.Ordinal);
+        Assert.DoesNotContain('\n', ics.Replace("\r\n", "", StringComparison.Ordinal));
+        Assert.DoesNotContain('\r', ics.Replace("\r\n", "", StringComparison.Ordinal));
+        Assert.All(ics.Split("\r\n"), line => Assert.True(System.Text.Encoding.UTF8.GetByteCount(line) <= 75));
+    }
+
+    [Fact]
     public void Ics_DraftSession_IsRejected()
     {
         Assert.Throws<InvalidOperationException>(() => CommunitySessionSharing.BuildIcs(CreateDraft(), CreatedAt));
