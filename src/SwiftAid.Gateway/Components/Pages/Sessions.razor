@@ -91,7 +91,7 @@
         string.Equals(RequestedTab, "reminders", StringComparison.OrdinalIgnoreCase);
     private bool IsCalendarRoute => string.Equals(Navigation.ToAbsoluteUri(Navigation.Uri).AbsolutePath.TrimEnd('/'),
         "/sessions/calendar", StringComparison.OrdinalIgnoreCase);
-    private Func<Guid, Task<string?>> InvitationLoader => LoadInvitationAsync;
+    private Func<Guid, long, Task<string?>> InvitationLoader => LoadInvitationAsync;
     private async Task<PublicSessionPage?> QuerySessionsAsync(PublicSessionQuery query)
     {
         var result = await PublicSessionClient.QueryPublicAsync(query);
@@ -478,11 +478,11 @@
         }
     }
 
-    private async Task<string?> LoadInvitationAsync(Guid sessionId)
+    private async Task<string?> LoadInvitationAsync(Guid sessionId, long expectedVersion)
     {
         try
         {
-            var result = await PublicSessionClient.GetInvitationTextAsync(sessionId);
+            var result = await PublicSessionClient.GetInvitationTextForVersionAsync(sessionId, expectedVersion);
             return result.Code == UiCapabilityResultCode.Success
                 ? result.Value
                 : null;

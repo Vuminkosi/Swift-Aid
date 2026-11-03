@@ -88,6 +88,18 @@ public sealed class CommunitySessionEndpointTests
     }
 
     [Fact]
+    public async Task VersionedInvitationRequiresMatchingVersionAndConfirmsTheCheck()
+    {
+        await using var host = await TestSessionHost.StartAsync(withPublished: true);
+        using var current = await host.Client.GetAsync($"/public/v1/sessions/{KnownSessionId:D}/invitation?version=3");
+        Assert.Equal(HttpStatusCode.OK, current.StatusCode);
+        Assert.Contains(PublicSessionInvitationFeatures.Version, current.Headers.GetValues(PublicSessionInvitationFeatures.HeaderName));
+
+        using var stale = await host.Client.GetAsync($"/public/v1/sessions/{KnownSessionId:D}/invitation?version=2");
+        Assert.Equal(HttpStatusCode.NotFound, stale.StatusCode);
+    }
+
+    [Fact]
     public void OfficerRoutesRequireAuthenticationAndScopedCapabilityMetadata()
     {
         var builder = WebApplication.CreateBuilder();
@@ -831,6 +843,9 @@ public sealed class CommunitySessionEndpointTests
                 WithPublished && sessionId == CommunitySessionEndpointTests.KnownSessionId
                     ? PublishedInvitation
                     : null);
+
+        public Task<string?> GetInvitationTextForVersionAsync(Guid sessionId, long expectedVersion, CancellationToken ct) =>
+            Task.FromResult<string?>(WithPublished && sessionId == KnownSessionId && expectedVersion == 3 ? PublishedInvitation : null);
     }
 
     private sealed class TestSessionHost : IAsyncDisposable

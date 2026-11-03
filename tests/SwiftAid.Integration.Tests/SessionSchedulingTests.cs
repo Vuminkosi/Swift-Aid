@@ -44,10 +44,18 @@ public sealed class SessionSchedulingTests
             Assert.Equal(HttpStatusCode.Redirect, first.StatusCode);
             Assert.Equal("https://chat.example/join/abc", first.Headers.Location?.AbsoluteUri);
             Assert.True(first.Headers.CacheControl?.NoStore);
+            var invitationPath = $"/public/v1/sessions/{sessionId:D}/invitation?version=";
+            using var firstInvitation = await client.GetAsync(invitationPath + "3");
+            Assert.Equal(HttpStatusCode.OK, firstInvitation.StatusCode);
+            Assert.Contains(PublicSessionInvitationFeatures.Version, firstInvitation.Headers.GetValues(PublicSessionInvitationFeatures.HeaderName));
 
             await service.ExecuteAsync(UpdateDraft(sessionId, 3, "Malaria prevention talk") with { DurationMinutes = 60 }, "officer-2", CancellationToken.None);
             using var stale = await client.GetAsync(path + "3");
             Assert.Equal(HttpStatusCode.NotFound, stale.StatusCode);
+            using var staleInvitation = await client.GetAsync(invitationPath + "3");
+            Assert.Equal(HttpStatusCode.NotFound, staleInvitation.StatusCode);
+            using var revisedInvitation = await client.GetAsync(invitationPath + "4");
+            Assert.Equal(HttpStatusCode.OK, revisedInvitation.StatusCode);
             using var revised = await client.GetAsync(path + "4");
             Assert.Equal(HttpStatusCode.Redirect, revised.StatusCode);
 

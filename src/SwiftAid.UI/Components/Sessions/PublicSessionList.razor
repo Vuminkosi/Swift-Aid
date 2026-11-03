@@ -220,7 +220,7 @@
     [Parameter] public EventCallback OnRetry { get; set; }
 
     /// <summary>Loads the plain-text invitation for a session. Absent when copying is unavailable.</summary>
-    [Parameter] public Func<Guid, Task<string?>>? LoadInvitationTextAsync { get; set; }
+    [Parameter] public Func<Guid, long, Task<string?>>? LoadInvitationTextAsync { get; set; }
 
     /// <summary>Opens the device share sheet with the given text. Web hosts leave this unset.</summary>
     [Parameter] public Func<string, Task>? ShareTextAsync { get; set; }
@@ -308,7 +308,7 @@
     {
         _invitationError = null;
         _copiedSessionId = null;
-        var text = await LoadTextAsync(session.SessionId);
+        var text = await LoadTextAsync(session);
         if (text is null)
         {
             return;
@@ -333,7 +333,7 @@
     private async Task ShareInvitationAsync(PublicSessionView session)
     {
         _invitationError = null;
-        var text = await LoadTextAsync(session.SessionId);
+        var text = await LoadTextAsync(session);
         if (text is null || ShareTextAsync is null)
         {
             return;
@@ -351,7 +351,7 @@
         }
     }
 
-    private async Task<string?> LoadTextAsync(Guid sessionId)
+    private async Task<string?> LoadTextAsync(PublicSessionView session)
     {
         if (LoadInvitationTextAsync is null)
         {
@@ -360,12 +360,12 @@
 
         try
         {
-            var text = await LoadInvitationTextAsync(sessionId);
+            var text = await LoadInvitationTextAsync(session.SessionId, session.Version);
             if (string.IsNullOrWhiteSpace(text))
             {
-                _openInvitationId = sessionId;
+                _openInvitationId = session.SessionId;
                 _openInvitationText = null;
-                _invitationError = "The invitation is unavailable right now. Please try again later.";
+                _invitationError = "The invitation is unavailable or the session changed. Refresh the session and try again.";
                 return null;
             }
 
@@ -373,9 +373,9 @@
         }
         catch (Exception)
         {
-            _openInvitationId = sessionId;
+            _openInvitationId = session.SessionId;
             _openInvitationText = null;
-            _invitationError = "The invitation is unavailable right now. Please try again later.";
+            _invitationError = "The invitation is unavailable or the session changed. Refresh the session and try again.";
             return null;
         }
     }

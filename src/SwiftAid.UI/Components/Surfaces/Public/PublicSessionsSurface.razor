@@ -454,7 +454,7 @@
     [Parameter] public string? SubscriptionsHref { get; set; }
     [Parameter] public Func<PublicSessionQuery, Task<PublicSessionPage?>>? QuerySessionsAsync { get; set; }
     [Parameter] public bool InitialCalendarView { get; set; }
-    [Parameter] public Func<Guid, Task<string?>>? LoadInvitationTextAsync { get; set; }
+    [Parameter] public Func<Guid, long, Task<string?>>? LoadInvitationTextAsync { get; set; }
     [Parameter] public Func<string, Task>? ShareTextAsync { get; set; }
     [Parameter] public Func<Guid, Task<SessionSubscriptionPanelState?>>? LoadSubscriptionStateAsync { get; set; }
     [Parameter] public Func<SessionSubscriptionAction, Task<SessionSubscriptionPanelState?>>? ExecuteSubscriptionActionAsync { get; set; }

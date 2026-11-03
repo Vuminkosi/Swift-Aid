@@ -124,7 +124,7 @@ public sealed class PublicSessionQueryStateTests
                 {
                     [nameof(PublicSessionsSurface.Sessions)] = new[] { session },
                     [nameof(PublicSessionsSurface.InitialSessionId)] = session.SessionId,
-                    [nameof(PublicSessionsSurface.LoadInvitationTextAsync)] = (Func<Guid, Task<string?>>)(_ => Task.FromResult<string?>("invitation"))
+                    [nameof(PublicSessionsSurface.LoadInvitationTextAsync)] = (Func<Guid, long, Task<string?>>)((_, _) => Task.FromResult<string?>("invitation"))
                 }));
             return component.ToHtmlString();
         });
@@ -333,7 +333,7 @@ public sealed class PublicSessionQueryStateTests
         var session = Session(Guid.NewGuid());
         var list = new PublicSessionList();
         typeof(PublicSessionList).GetProperty(nameof(list.LoadInvitationTextAsync))!.SetValue(list,
-            (Func<Guid, Task<string?>>)(_ => Task.FromResult<string?>("Public invitation")));
+            (Func<Guid, long, Task<string?>>)((_, _) => Task.FromResult<string?>("Public invitation")));
         typeof(PublicSessionList).GetProperty("Js", BindingFlags.Instance | BindingFlags.NonPublic)!
             .SetValue(list, new UnavailableClipboard());
         var copy = typeof(PublicSessionList).GetMethod("CopyInvitationAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
@@ -342,6 +342,27 @@ public sealed class PublicSessionQueryStateTests
 
         Assert.Equal(session.SessionId, typeof(PublicSessionList).GetField("_openInvitationId", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
         Assert.Equal("Public invitation", typeof(PublicSessionList).GetField("_openInvitationText", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
+    }
+
+    [Fact]
+    public async Task CopyInvitationRequestsTheDisplayedVersionAndDoesNotCopyAnUnavailableResult()
+    {
+        var session = Session(Guid.NewGuid());
+        var list = new PublicSessionList();
+        (Guid Id, long Version)? requested = null;
+        typeof(PublicSessionList).GetProperty(nameof(list.LoadInvitationTextAsync))!.SetValue(list,
+            (Func<Guid, long, Task<string?>>)((id, version) =>
+            {
+                requested = (id, version);
+                return Task.FromResult<string?>(null);
+            }));
+        var copy = typeof(PublicSessionList).GetMethod("CopyInvitationAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        await (Task)copy.Invoke(list, [session])!;
+
+        Assert.Equal((session.SessionId, session.Version), requested);
+        Assert.Null(typeof(PublicSessionList).GetField("_copiedSessionId", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
+        Assert.Contains("session changed", (string)typeof(PublicSessionList).GetField("_invitationError", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list)!, StringComparison.Ordinal);
     }
 
     [Fact]

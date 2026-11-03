@@ -22,4 +22,11 @@ public interface IPublicCommunitySessionClient
     Task<UiCapabilityResult<string>> GetInvitationTextAsync(
         Guid sessionId,
         CancellationToken cancellationToken = default);
+
+    Task<UiCapabilityResult<string>> GetInvitationTextForVersionAsync(
+        Guid sessionId, long expectedVersion, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(UiCapabilityResults.Unavailable<string>("public-community-session-invitation"));
+    }
 }

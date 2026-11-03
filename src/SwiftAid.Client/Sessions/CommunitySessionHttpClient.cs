@@ -143,6 +143,17 @@ public sealed class CommunitySessionHttpClient(HttpClient httpClient)
     /// <summary>Typed invitation-text result; missing and unavailable are not reported as successful empty content.</summary>
     public async Task<UiCapabilityResult<string>> GetInvitationTextResultAsync(
         Guid sessionId, CancellationToken cancellationToken = default)
+        => await GetInvitationTextCoreAsync(sessionId, null, cancellationToken).ConfigureAwait(false);
+
+    public async Task<UiCapabilityResult<string>> GetInvitationTextForVersionResultAsync(
+        Guid sessionId, long expectedVersion, CancellationToken cancellationToken = default)
+    {
+        if (expectedVersion < 1) return UiCapabilityResults.Unavailable<string>("public-community-session-invitation");
+        return await GetInvitationTextCoreAsync(sessionId, expectedVersion, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<UiCapabilityResult<string>> GetInvitationTextCoreAsync(
+        Guid sessionId, long? expectedVersion, CancellationToken cancellationToken)
     {
         if (sessionId == Guid.Empty)
             return new UiCapabilityResult<string>(UiCapabilityResultCode.InvalidRequest, null,
@@ -151,9 +162,14 @@ public sealed class CommunitySessionHttpClient(HttpClient httpClient)
             return UiCapabilityResults.Unavailable<string>("public-community-session-invitation");
         try
         {
-            using var response = await httpClient.GetAsync($"public/v1/sessions/{sessionId:D}/invitation", cancellationToken)
+            var suffix = expectedVersion is { } version ? $"?version={version.ToString(CultureInfo.InvariantCulture)}" : string.Empty;
+            using var response = await httpClient.GetAsync($"public/v1/sessions/{sessionId:D}/invitation{suffix}", cancellationToken)
                 .ConfigureAwait(false);
             if (response.StatusCode != HttpStatusCode.OK)
+                return UiCapabilityResults.Unavailable<string>("public-community-session-invitation");
+            if (expectedVersion is not null &&
+                (!response.Headers.TryGetValues(PublicSessionInvitationFeatures.HeaderName, out var values) ||
+                 !values.Contains(PublicSessionInvitationFeatures.Version, StringComparer.Ordinal)))
                 return UiCapabilityResults.Unavailable<string>("public-community-session-invitation");
             var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             return Success(text, "public-community-session-invitation");

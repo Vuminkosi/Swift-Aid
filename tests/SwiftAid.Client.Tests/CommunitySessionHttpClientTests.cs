@@ -196,6 +196,25 @@ public sealed class CommunitySessionHttpClientTests
     }
 
     [Fact]
+    public async Task VersionedInvitationRequiresServerConfirmation()
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("Invitation") };
+        response.Headers.Add(PublicSessionInvitationFeatures.HeaderName, PublicSessionInvitationFeatures.Version);
+        var handler = new CapturingHandler(response);
+        var client = new CommunitySessionHttpClient(new HttpClient(handler) { BaseAddress = new Uri("https://gateway.test/") });
+
+        var current = await client.GetInvitationTextForVersionResultAsync(KnownSessionId, 3);
+        Assert.True(current.Succeeded);
+        Assert.Equal("Invitation", current.Value);
+        Assert.Equal($"/public/v1/sessions/{KnownSessionId:D}/invitation?version=3", handler.LastRequest!.RequestUri!.PathAndQuery);
+
+        var olderServer = Create(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("Unverified invitation") });
+        var unverified = await olderServer.GetInvitationTextForVersionResultAsync(KnownSessionId, 3);
+        Assert.False(unverified.Succeeded);
+        Assert.Null(unverified.Value);
+    }
+
+    [Fact]
     public async Task GetCalendarFile_ReturnsDownload()
     {
         var ics = "BEGIN:VCALENDAR\r\nUID:swiftaid-community-session-test\r\nSEQUENCE:1\r\nEND:VCALENDAR\r\n";

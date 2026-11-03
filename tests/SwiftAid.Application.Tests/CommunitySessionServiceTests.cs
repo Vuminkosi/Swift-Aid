@@ -95,6 +95,20 @@ public sealed class CommunitySessionServiceTests
     }
 
     [Fact]
+    public async Task InvitationForDisplayedVersionRejectsARevision()
+    {
+        var services = CreateServices();
+        var id = Guid.NewGuid();
+        await PublishAsync(services.Service, id, SessionVisibility.Public);
+        Assert.NotNull(await services.Service.GetInvitationTextForVersionAsync(id, 3, CancellationToken.None));
+        await services.Service.ExecuteAsync(UpdateDraft(id, 3) with { Title = "Malaria prevention talk" }, "officer-2", CancellationToken.None);
+
+        Assert.Null(await services.Service.GetInvitationTextForVersionAsync(id, 3, CancellationToken.None));
+        Assert.NotNull(await services.Service.GetInvitationTextForVersionAsync(id, 4, CancellationToken.None));
+        Assert.NotNull(await services.Service.GetInvitationTextAsync(id, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task CompletedPublishedSessionsRemainDiscoverableButInternalSessionsDoNot()
     {
         var services = CreateServices();

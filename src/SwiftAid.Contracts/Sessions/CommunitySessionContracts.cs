@@ -186,6 +186,13 @@ public static class PublicSessionQueryFeatures
     public const string StatusFilter = "status-v1";
 }
 
+/// <summary>Confirms that invitation text was checked against the requested session version.</summary>
+public static class PublicSessionInvitationFeatures
+{
+    public const string HeaderName = "X-SwiftAid-Invitation-Version-Checked";
+    public const string Version = "1";
+}
+
 /// <summary>Position for the next page of a public session query.</summary>
 public sealed record PublicSessionPosition(DateTimeOffset StartUtc, Guid SessionId);
 
@@ -210,4 +217,10 @@ public interface ICommunitySessionService
     Task<string?> GetIcsAsync(Guid sessionId, DateTimeOffset generatedAtUtc, CancellationToken ct);
 
     Task<string?> GetInvitationTextAsync(Guid sessionId, CancellationToken ct);
+
+    Task<string?> GetInvitationTextForVersionAsync(Guid sessionId, long expectedVersion, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult<string?>(null);
+    }
 }

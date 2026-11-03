@@ -218,9 +218,9 @@ else
         return result.Succeeded ? result.Value : null;
     }
 
-    private async Task<string?> LoadPublicInvitationAsync(Guid sessionId)
+    private async Task<string?> LoadPublicInvitationAsync(Guid sessionId, long expectedVersion)
     {
-        var result = await PublicCommunitySessions.GetInvitationTextAsync(sessionId);
+        var result = await PublicCommunitySessions.GetInvitationTextForVersionAsync(sessionId, expectedVersion);
         return result.Succeeded ? result.Value : null;
     }
 

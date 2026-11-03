@@ -264,9 +264,18 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
     }
 
     public async Task<string?> GetInvitationTextAsync(Guid sessionId, CancellationToken ct)
+        => await GetInvitationTextCoreAsync(sessionId, null, ct).ConfigureAwait(false);
+
+    public async Task<string?> GetInvitationTextForVersionAsync(Guid sessionId, long expectedVersion, CancellationToken ct)
+    {
+        if (expectedVersion < 1) return null;
+        return await GetInvitationTextCoreAsync(sessionId, expectedVersion, ct).ConfigureAwait(false);
+    }
+
+    private async Task<string?> GetInvitationTextCoreAsync(Guid sessionId, long? expectedVersion, CancellationToken ct)
     {
         var session = await _store.LoadAsync(sessionId, ct).ConfigureAwait(false);
-        if (session is null || !IsListedPublicly(session))
+        if (session is null || !IsListedPublicly(session) || (expectedVersion is not null && session.Version != expectedVersion))
         {
             return null;
         }

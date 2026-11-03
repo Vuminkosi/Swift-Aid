@@ -75,6 +75,24 @@ public sealed class SessionGatewayClient(
         }
     }
 
+    public async Task<string?> GetInvitationTextForVersionAsync(Guid sessionId, long expectedVersion, CancellationToken cancellationToken = default)
+    {
+        var service = _serviceProvider.GetService<ICommunitySessionService>();
+        if (service is null || expectedVersion < 1) return null;
+        try
+        {
+            return await service.GetInvitationTextForVersionAsync(sessionId, expectedVersion, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     /// <summary>Loads the staff view used to prefill the editor; null when unavailable.</summary>
     public async Task<CommunitySessionView?> GetStaffAsync(
         Guid sessionId,

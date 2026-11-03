@@ -125,6 +125,29 @@ public sealed class WebPublicCommunitySessionClient(SessionGatewayClient session
         }
     }
 
+    public async Task<UiCapabilityResult<string>> GetInvitationTextForVersionAsync(
+        Guid sessionId, long expectedVersion, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (sessionId == Guid.Empty || expectedVersion < 1)
+            return UiCapabilityResults.Unavailable<string>("public-community-session-invitation");
+        try
+        {
+            var invitation = await _sessions.GetInvitationTextForVersionAsync(sessionId, expectedVersion, cancellationToken).ConfigureAwait(false);
+            return invitation is null
+                ? UiCapabilityResults.Unavailable<string>("public-community-session-invitation")
+                : new UiCapabilityResult<string>(UiCapabilityResultCode.Success, invitation, LiveMetadata("public-community-session-invitation"));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return UiCapabilityResults.Unavailable<string>("public-community-session-invitation");
+        }
+    }
+
     private static UiCapabilityMetadata LiveMetadata(string capability) => new(
         capability,
         UiCapabilityResults.ContractVersion,

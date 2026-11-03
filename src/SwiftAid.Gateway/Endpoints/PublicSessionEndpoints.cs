@@ -257,12 +257,25 @@ public static class PublicSessionEndpoints
 
         try
         {
-            var invitation = await service.GetInvitationTextAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            string? invitation;
+            var hasVersion = context.Request.Query.TryGetValue("version", out var versionValues);
+            if (hasVersion)
+            {
+                if (versionValues.Count != 1 || !long.TryParse(versionValues[0], NumberStyles.None,
+                        CultureInfo.InvariantCulture, out var expectedVersion) || expectedVersion < 1)
+                    return MapMissing();
+                invitation = await service.GetInvitationTextForVersionAsync(sessionId, expectedVersion, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                invitation = await service.GetInvitationTextAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            }
             if (invitation is null)
             {
                 return MapMissing();
             }
 
+            if (hasVersion) context.Response.Headers[PublicSessionInvitationFeatures.HeaderName] = PublicSessionInvitationFeatures.Version;
             return Results.Content(invitation, "text/plain; charset=utf-8");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
