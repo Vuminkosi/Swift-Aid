@@ -13,6 +13,47 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiAuthorizedConversationContextTests
 {
     [Fact]
+    public async Task PartialRetainedResultHistoryRequiresIdenticalCurrentlyAuthorizedRecall()
+    {
+        var consent = new EllaiConsentService();
+        consent.Grant("session", EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
+        var queue = new BatchQueue();
+        var topics = new EllaiTopicService();
+        var actor = Actor();
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            DataClassification: EllaiProcessingClassification.SyntheticDemo, Actor: actor,
+            AllowedTools: new HashSet<string> { EllaiToolNames.Evidence });
+        var id = Guid.NewGuid();
+        var row = new CaseQueueItem(id, "Reported", "SZ", actor.ActorId, 3, DateTimeOffset.UtcNow);
+        var memory = new EllaiCaseResultMemory(topics, queue);
+        await memory.RememberAsync(context, [row], default, searchIncomplete: true);
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue, topics: topics);
+        var request = new EllaiToolRequest(EllaiToolNames.Evidence, new Dictionary<string, string> { ["ref"] = "case-results" });
+        var result = await broker.InvokeAsync(context, request, default);
+        var observation = EllaiObservedToolResult.From(request, result);
+        Assert.True(result.Truncated);
+        Assert.NotNull(observation.RetainedCaseReplay);
+        var trace = EllaiToolTrace.SerializeFlattened([observation], false, []);
+        Assert.NotNull(trace);
+        Assert.DoesNotContain(result.ResultSummary, trace);
+        var turns = new[] { Turn("prior", 1, "cases?", "partial case answer", trace),
+            Turn("current", 2, "follow-up", null, null) };
+        async Task<bool> Retained(EllaiToolContext currentContext) =>
+            (await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", actor, queue, default,
+                toolContext: currentContext, invokeTool: broker.InvokeAsync)).Messages.Any(message => message.Content == "partial case answer");
+
+        Assert.True(await Retained(context));
+        Assert.False(await Retained(context with { Actor = Actor("other") }));
+        Assert.False(await Retained(context with { AllowedTools = new HashSet<string>() }));
+        queue.Revoked = id;
+        Assert.False(await Retained(context));
+        queue.Revoked = null;
+        await memory.RememberAsync(context, [], default, searchIncomplete: true);
+        Assert.False(await Retained(context));
+    }
+
+    [Fact]
     public async Task LongAuthorizedHistoryIsNotDiscardedAtFormerCharacterThreshold()
     {
         var trace = EllaiToolTrace.Serialize([], false);

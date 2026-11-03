@@ -59,10 +59,36 @@ public static class EllaiAuthorizedConversationContext
             var references = new Dictionary<Guid, long>();
             foreach (var observation in trace.Observations)
             {
-                if (!observation.Allowed || observation.Truncated &&
+                if (!observation.Allowed || observation.Truncated && observation.RetainedCaseReplay is null &&
                     (observation.ToolName != EllaiToolNames.State || observation.CaseListQuery is null) ||
                     toolContext?.AllowedTools is { } allowedTools && !allowedTools.Contains(observation.ToolName))
                     return decisions[turn.ClientUtteranceId] = false;
+                if (observation.RetainedCaseReplay is { } retainedCase)
+                {
+                    if (!retainedCase.IsValid() || !observation.Truncated ||
+                        observation.CaseSnapshotExpiresAtUtc is not { } expiry || expiry <= DateTimeOffset.UtcNow ||
+                        toolContext is null || invokeTool is null || toolContext.SessionId != turn.SessionId ||
+                        toolContext.Actor is null || toolContext.Actor.ActorId != actor.ActorId ||
+                        toolContext.Actor.AccessEpoch != actor.AccessEpoch)
+                        return decisions[turn.ClientUtteranceId] = false;
+                    try
+                    {
+                        var arguments = new Dictionary<string, string> { ["ref"] = retainedCase.Reference };
+                        if (retainedCase.Field is not null) arguments["field"] = retainedCase.Field;
+                        var current = await invokeTool(toolContext with { RevalidationOnly = true },
+                            new EllaiToolRequest(observation.ToolName, arguments), ct).ConfigureAwait(false);
+                        ct.ThrowIfCancellationRequested();
+                        if (current.ToolName != observation.ToolName || !current.Allowed || !current.Truncated ||
+                            current.DenialReason is not null || current.ReasonCode != EllaiToolReasonCodes.Ok ||
+                            current.HistoryValidUntilUtc != expiry || current.ItemCount != observation.Evidence.Count ||
+                            !current.Evidence.SequenceEqual(observation.Evidence) ||
+                            EllaiObservedToolResult.CaseListFingerprint(current) != retainedCase.Digest)
+                            return decisions[turn.ClientUtteranceId] = false;
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (Exception error) when (error is not OutOfMemoryException) { return decisions[turn.ClientUtteranceId] = false; }
+                    continue;
+                }
                 // This validator returns only a format verdict about the model's
                 // own input; it does not query a private data source.
                 if (observation.ToolName == EllaiToolNames.ValidateObservations &&
