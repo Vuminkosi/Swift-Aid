@@ -3411,3 +3411,23 @@ limit. The exact failing test passed 1/1 when rerun unchanged, in 31 seconds.
 The initial failure remains evidence of live model variability, not a passing
 full run. The probes used synthetic data and process-local provider settings;
 they do not prove deployed Gateway or device behavior.
+
+### Truncation and UI-report race checks — 2026-11-03
+
+PASS: the focused `TruncatedNonStreaming` and
+`TruncatedStreamingToolCallIsNotExecutedOrPublished` application filter passed
+4/4 on the current branch. The synthetic tests cover bounded retry, usage
+accounting, authorization before retry and rejection of a truncated streamed
+tool call. They do not resolve the live provider's intermittent output-limit
+failure or prove that arbitrary prompts fit the provider's context.
+
+The framework worker fixture now changes a synthetic client UI report after
+the `ellai_ui_observe` result is delivered to the model but before the model
+returns its final answer. PASS: `dotnet test
+tests\SwiftAid.Integration.Tests\SwiftAid.Integration.Tests.csproj --no-restore
+-m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~WorkerRunsFrameworkExecutorAndPersistsAndStreamsAnswer'
+--logger 'console;verbosity=minimal'` passed 9/9. The changed-report turn
+ended in `TerminalFailure` without publishing or storing the synthetic answer;
+the unchanged-report case continued to pass. This uses an in-memory store and
+synthetic model, not a deployed client or independent security review.

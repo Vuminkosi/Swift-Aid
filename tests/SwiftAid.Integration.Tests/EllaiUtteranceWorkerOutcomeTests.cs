@@ -718,15 +718,17 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
     }
 
     [Theory]
-    [InlineData(null, false, false)]
-    [InlineData(EllaiToolNames.Now, false, false)]
-    [InlineData(EllaiToolNames.Capabilities, false, false)]
-    [InlineData(EllaiToolNames.Receipts, false, false)]
-    [InlineData(EllaiToolNames.UiCatalogue, false, false)]
-    [InlineData(EllaiToolNames.UiCatalogue, true, false)]
-    [InlineData(EllaiToolNames.UiCatalogue, false, true)]
-    [InlineData(EllaiToolNames.UiObserve, false, false)]
-    public async Task WorkerRunsFrameworkExecutorAndPersistsAndStreamsAnswer(string? toolName, bool changeCatalogue, bool filterGoal)
+    [InlineData(null, false, false, false)]
+    [InlineData(EllaiToolNames.Now, false, false, false)]
+    [InlineData(EllaiToolNames.Capabilities, false, false, false)]
+    [InlineData(EllaiToolNames.Receipts, false, false, false)]
+    [InlineData(EllaiToolNames.UiCatalogue, false, false, false)]
+    [InlineData(EllaiToolNames.UiCatalogue, true, false, false)]
+    [InlineData(EllaiToolNames.UiCatalogue, false, true, false)]
+    [InlineData(EllaiToolNames.UiObserve, false, false, false)]
+    [InlineData(EllaiToolNames.UiObserve, false, false, true)]
+    public async Task WorkerRunsFrameworkExecutorAndPersistsAndStreamsAnswer(string? toolName, bool changeCatalogue, bool filterGoal,
+        bool changeObservationBeforeAnswer)
     {
         var store = new InMemoryEllaiSessionStore();
         var responses = new EllaiSessionResponseStore();
@@ -753,6 +755,9 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
         var uiObservations = new InMemoryEllaiUiObservationStore();
         await uiObservations.RecordAsync(new(session.SessionId, "view-1", "context-1", "web", ["report.entry"],
             DateTimeOffset.UtcNow, [new("report.entry", UiObservationState.Ready)]), CancellationToken.None);
+        if (changeObservationBeforeAnswer)
+            model.BeforeAnswer = () => uiObservations.RecordAsync(new(session.SessionId, "view-2", "context-2", "web", [],
+                DateTimeOffset.UtcNow), CancellationToken.None);
         var registrations = new ServiceCollection()
             .AddSingleton<IEllaiSessionStore>(store).AddSingleton<IEllaiUtteranceOutboxStore>(store)
             .AddSingleton(responses).AddSingleton(consent).AddSingleton<EllaiUsageLedger>()
@@ -778,6 +783,15 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
                 await Task.Delay(10, timeout.Token);
                 turn = Assert.Single(await store.ReadConversationAsync(session.SessionId, actor.ActorId, timeout.Token));
             } while (turn.CompletedAtUtc is null);
+            if (changeObservationBeforeAnswer)
+            {
+                Assert.Contains("\"allowed\":true", model.ToolResult);
+                Assert.Equal("TerminalFailure", turn.Outcome);
+                Assert.Null(turn.AssistantText);
+                Assert.DoesNotContain(responses.ReadSince(session.SessionId, 0).Responses,
+                    item => item.Text.Contains("Synthetic answer.", StringComparison.Ordinal));
+                return;
+            }
             Assert.Equal("Completed", turn.Outcome);
             Assert.Equal("Synthetic answer.", turn.AssistantText);
             var published = responses.ReadSince(session.SessionId, 0).Responses;
@@ -835,6 +849,7 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
     {
         public int Calls { get; private set; }
         public string ToolResult { get; private set; } = string.Empty;
+        public Func<Task>? BeforeAnswer { get; set; }
         public IReadOnlyList<string> LastMessages { get; private set; } = [];
         public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
             CancellationToken cancellationToken = default) => throw new NotSupportedException();
@@ -860,6 +875,7 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
             {
                 ToolResult = string.Join(" ", messages.SelectMany(message => message.Contents)
                     .OfType<FunctionResultContent>().Select(content => content.Result?.ToString()));
+                if (BeforeAnswer is not null) await BeforeAnswer();
                 yield return new ChatResponseUpdate(ChatRole.Assistant, Answer);
             }
             yield return new ChatResponseUpdate(ChatRole.Assistant,
