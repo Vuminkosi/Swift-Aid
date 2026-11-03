@@ -24,7 +24,7 @@ public sealed class EllaiAgentFrameworkContractTests
         var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
             AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.OwnedCaseCount });
         var reference = new EvidenceRef("DashboardAggregate", "owned-cases", "v1", null, "proof");
-        const string authorized = "2 managed case records in the authorized window.";
+        const string authorized = "2 managed case(s) in the authorized window.";
         var chunks = new List<string>();
         var result = await agent.RunAsync(context, "Test policy", [new ChatMessage(ChatRole.User, "Count")], 100,
             _ => Task.FromResult(true), (_, request, _) => Task.FromResult(new EllaiToolResult(request.ToolName,
@@ -36,6 +36,27 @@ public sealed class EllaiAgentFrameworkContractTests
         Assert.Equal(authorized, result.SpokenText);
         Assert.Equal(authorized, string.Concat(chunks));
         Assert.Contains(reference, Assert.Single(result.Claims).Evidence);
+    }
+
+    [Fact]
+    public async Task CountChangedBeforePublicationIsNotPublished()
+    {
+        using var client = new CountStreamingClient();
+        var agent = new EllaiFrameworkAgent(client);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.OwnedCaseCount });
+        var calls = 0;
+        var chunks = new List<string>();
+        var result = await agent.RunAsync(context, "Test policy", [new ChatMessage(ChatRole.User, "Count")], 100,
+            _ => Task.FromResult(true), (_, request, _) => Task.FromResult(new EllaiToolResult(request.ToolName, true, null,
+                [new EvidenceRef("DashboardAggregate", "owned-cases", "v1", null, "proof")],
+                ++calls == 1 ? "2 managed case(s) in scope." : "0 managed case(s) in scope.", 1, false)),
+            new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default,
+            (text, _) => { chunks.Add(text); return ValueTask.CompletedTask; });
+        Assert.Null(result);
+        Assert.Empty(chunks);
+        Assert.Equal(2, calls);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, agent.LastFailureCode);
     }
 
     [Fact]

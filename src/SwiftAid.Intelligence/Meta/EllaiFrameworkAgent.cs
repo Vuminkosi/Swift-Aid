@@ -40,6 +40,7 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
 
         var evidence = new HashSet<EvidenceRef>();
         EllaiToolResult? countResult = null;
+        EllaiToolRequest? countRequest = null;
         var toolCalls = 0;
         var bufferForCount = context.AllowedTools is null || context.AllowedTools.Contains(EllaiToolNames.OwnedCaseCount);
         var guard = new EllaiFrameworkToolGuard(Math.Min(context.RemainingCalls, EllaiCycleRunner.MaxToolCalls),
@@ -47,7 +48,11 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
             {
                 var result = await invoke(toolContext, request, token).ConfigureAwait(false);
                 toolCalls++;
-                if (request.ToolName == EllaiToolNames.OwnedCaseCount && result.Allowed) countResult = result;
+                if (request.ToolName == EllaiToolNames.OwnedCaseCount && result.Allowed)
+                {
+                    countResult = result;
+                    countRequest = request;
+                }
                 if (result.Allowed)
                     foreach (var reference in result.Evidence.Take(20)) evidence.Add(reference);
                 return result;
@@ -127,6 +132,18 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
                 LastFailureCode = EllaiToolReasonCodes.Unavailable;
                 return null;
             }
+            // Re-read through the same scoped, authorized broker immediately before
+            // publication; the session fence alone does not detect grant changes.
+            var fresh = await invoke(context, countRequest!, ct).ConfigureAwait(false);
+            if (!fresh.Allowed || fresh.Evidence.Count != 1 ||
+                !TryCount(countResult.ResultSummary, out var previousCount) ||
+                !TryCount(fresh.ResultSummary, out var freshCount) || previousCount != freshCount ||
+                !await isCurrent(ct).ConfigureAwait(false))
+            {
+                LastFailureCode = EllaiToolReasonCodes.Unavailable;
+                return null;
+            }
+            countResult = fresh;
             decision = decision with
             {
                 Kind = DecisionKind.Answer,
@@ -153,6 +170,15 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
         else if (!emittedProvisional && onTextDelta is not null && await isCurrent(ct).ConfigureAwait(false))
             await onTextDelta(decision.DisplayText, ct).ConfigureAwait(false);
         return decision;
+    }
+
+    private static bool TryCount(string summary, out int count)
+    {
+        const string marker = " managed case(s) ";
+        var end = summary.IndexOf(marker, StringComparison.Ordinal);
+        count = 0;
+        return end > 0 && int.TryParse(summary.AsSpan(0, end), System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out count) && count >= 0;
     }
 
     private sealed class ModelCallGuard(IChatClient inner, Func<CancellationToken, Task<bool>> isCurrent,

@@ -12,6 +12,34 @@ namespace SwiftAid.Integration.Tests;
 
 public sealed class EllaiOwnedCaseCountPostgresTests
 {
+    [FrameworkPostgresFact]
+    public async Task FrameworkWithholdsCountWhenGrantExpiresBeforePublication()
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
+        await using var db = fixture.CreateDbContext();
+        var unit = new PostgresCaseCommandUnitOfWork(db);
+        var query = new DashboardAggregateQuery(new PostgresDashboardAggregateStore(db),
+            new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(db, unit), new PostgresCaseAccessDescriptorStore(db, unit)),
+            unit, TimeProvider.System);
+        var context = new EllaiToolContext("count-fixture", "scope", "cases", null, 4, true,
+            "consent/0", EllaiProcessingClassification.UserProvidedNonSensitive, fixture.CreateActor(),
+            new HashSet<string> { EllaiToolNames.OwnedCaseCount }, EllaiConsentPurposes.PublicProductHelp);
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService(), dashboard: query);
+        using var model = new CountClient();
+        var agent = new EllaiFrameworkAgent(model);
+        var calls = 0;
+        var decision = await agent.RunAsync(context, "Synthetic policy", [new ChatMessage(ChatRole.User, "Count my cases")], 200,
+            _ => Task.FromResult(true), async (toolContext, request, ct) =>
+            {
+                var result = await broker.InvokeAsync(toolContext, request, ct);
+                if (++calls == 1) await fixture.SetGrantExpiryAsync(DateTimeOffset.UtcNow.AddMinutes(-1));
+                return result;
+            }, new EllaiFrameworkUsage(context.SessionId, new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default);
+        Assert.Null(decision);
+        Assert.Equal(2, calls);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, agent.LastFailureCode);
+    }
+
     private sealed class LiveCountFactAttribute : FactAttribute
     {
         public LiveCountFactAttribute()

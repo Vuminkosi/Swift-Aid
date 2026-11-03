@@ -416,6 +416,16 @@ returns a policy denial. It does not prove that a database grant revocation
 changes that callback during an in-flight count. The framework contract suite
 passed 25/25; the initial test expectation was corrected to match the agent's
 safe denial exception.
+The framework now repeats the same authorized count read immediately before
+publication and withholds the answer if the count changes, the recheck fails,
+or execution is no longer current. This is an additional server-side read,
+not a model-visible tool invocation. A disposable PostgreSQL test expired the
+actual grant after the first read and verified the answer was withheld; it and
+the ordinary authorization fixture passed 2/2 after 60 migrations. The check
+and publication are not atomic, and same-count changes are not detected; a
+grant can still change after the recheck. The model may already have received
+the earlier authorized observation. Live Gateway and voice behavior remain
+**NOT VERIFIED**.
 
 An opt-in Gateway execution selection has been added; its default remains the
 existing loop. Invalid selection and unconfigured or unsupported framework
