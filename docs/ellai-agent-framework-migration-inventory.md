@@ -400,6 +400,16 @@ environment variables, the dedicated PostgreSQL fixture opt-in and
 --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
 FullyQualifiedName~LiveMuseUsesAuthorizedPostgresCountAndCitesObservedEvidence`.
 
+**Analytics cutover gap:** `EllaiFrameworkAgent` checks that each cited
+evidence reference was returned by an allowed tool, but does not compare a
+numeric claim or displayed answer with the count in that tool's observation.
+A model can therefore cite genuine evidence while stating a different count;
+the live fixture checks its particular answer but is not a runtime correctness
+guard. Provisional streamed text may also be published before the final
+decision is validated. Verified analytics requires a deterministic binding
+between the authorized aggregate and user-visible text, including streaming
+and speech, plus tests for incorrect values and revoked access before cutover.
+
 An opt-in Gateway execution selection has been added; its default remains the
 existing loop. Invalid selection and unconfigured or unsupported framework
 provider routes fail closed. The registration and worker fixtures passed 6/6
