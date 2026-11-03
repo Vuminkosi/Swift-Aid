@@ -74,7 +74,10 @@ builder.Services.AddScoped<ICaseCorrectionReadClient, CaseCorrectionReadGatewayC
 
 builder.Services.AddScoped<IAiInvestigationClient, UnavailableInvestigationClient>();
 builder.Services.AddScoped<IOrganizationManagementClient, UnavailableOrganizationManagementClient>();
-builder.Services.AddScoped<IAccountPresentationClient, GatewayAccountPresentationClient>();
+if (builder.Configuration.GetValue<bool>("Identity:Enabled") || builder.Configuration.GetValue<bool>("Federation:Enabled"))
+    builder.Services.AddScoped<IAccountPresentationClient, GatewayAccountPresentationClient>();
+else
+    builder.Services.AddScoped<IAccountPresentationClient, UnavailableAccountPresentationClient>();
 builder.Services.AddScoped<IWorkspaceAccessClient, GatewayWorkspaceAccessClient>();
 builder.Services.AddScoped<IStaffSessionEditorClient, GatewayStaffSessionEditorClient>();
 builder.Services.AddScoped<IMapAggregateClient, MapAggregateGatewayClient>();
