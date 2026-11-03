@@ -318,6 +318,7 @@
         <MudPaper Class="public-session-subscription" Elevation="0" Outlined="true" aria-labelledby="public-session-subscription-title">
             <MudText id="public-session-subscription-title" Typo="Typo.subtitle1" HtmlTag="h2">Session reminders</MudText>
             <MudText Typo="Typo.body2" Color="Color.Secondary">Choose whether to receive reminders about @selected.Title.</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Delivery depends on an available reminder service and a usable contact or device. Saving a preference does not confirm delivery.</MudText>
 
             @if (_subscriptionLoading)
             {
@@ -350,7 +351,7 @@
             else if (_subscriptionState.Status == SessionSubscriptionStatus.Active && !_editingReminder)
             {
                 <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" role="status">
-                    Reminders are enabled for this session.
+                    Your reminder preference is saved for this session.
                     @if (_subscriptionState.CurrentChannel is { } currentChannel)
                     {
                         <span>Current method: @ReminderChannelLabel(currentChannel).</span>

@@ -48,6 +48,8 @@ public sealed class PublicSessionQueryStateTests
         });
 
         Assert.Contains("Turn off reminders", markup, StringComparison.Ordinal);
+        Assert.Contains("Your reminder preference is saved", markup, StringComparison.Ordinal);
+        Assert.Contains("Saving a preference does not confirm delivery", markup, StringComparison.Ordinal);
         Assert.Contains("Current method: Mobile notification", markup, StringComparison.Ordinal);
         Assert.Equal(current, markup.Contains("Change reminder method", StringComparison.Ordinal));
     }
