@@ -51,8 +51,9 @@ else if (_isSessions)
 {
     <PublicWebsiteShell>
         <ChildContent>
-            <PublicSessionsSurface @key="(_requestedSessionId, _isCalendarRoute)" Sessions="_publicSessions"
+            <PublicSessionsSurface @key="(_requestedSessionId, _isCalendarRoute, _initialRemindersView)" Sessions="_publicSessions"
                                    InitialSessionId="_requestedSessionId"
+                                   InitialRemindersView="_initialRemindersView"
                                    InitialCalendarView="@(_isCalendarRoute && !_hasSessionParameter)"
                                    Loading="_publicSessionsLoading"
                                    ErrorMessage="@_publicSessionsError"
@@ -175,6 +176,7 @@ else
     private bool _publicSessionsLoading;
     private string? _publicSessionsError;
     private Guid? _requestedSessionId;
+    private bool _initialRemindersView;
     private bool _isCalendarRoute;
     private bool _hasSessionParameter;
     private long _publicSessionsGeneration;
@@ -228,7 +230,7 @@ else
 
     private Task RequestSessionSignInAsync(Guid sessionId)
     {
-        var returnUrl = $"/sessions?sessionId={sessionId:D}";
+        var returnUrl = $"/sessions?sessionId={sessionId:D}&tab=reminders";
         Navigation.NavigateTo($"/sign-in?returnUrl={Uri.EscapeDataString(returnUrl)}", forceLoad: true);
         return Task.CompletedTask;
     }
@@ -552,17 +554,21 @@ else
         var query = Uri.UnescapeDataString(uri.Query);
         _requestedSessionId = null;
         _hasSessionParameter = false;
+        _initialRemindersView = false;
         foreach (var item in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
         {
             var pair = item.Split('=', 2);
-            if (string.Equals(Uri.UnescapeDataString(pair[0]), "sessionId", StringComparison.OrdinalIgnoreCase))
+            if (!_hasSessionParameter && string.Equals(Uri.UnescapeDataString(pair[0]), "sessionId", StringComparison.OrdinalIgnoreCase))
             {
                 _hasSessionParameter = true;
                 if (pair.Length == 2 && Guid.TryParse(Uri.UnescapeDataString(pair[1]), out var id) && id != Guid.Empty)
                     _requestedSessionId = id;
-                break;
             }
+            else if (pair.Length == 2 && string.Equals(Uri.UnescapeDataString(pair[0]), "tab", StringComparison.OrdinalIgnoreCase) &&
+                     string.Equals(Uri.UnescapeDataString(pair[1]), "reminders", StringComparison.OrdinalIgnoreCase))
+                _initialRemindersView = true;
         }
+        _initialRemindersView &= _requestedSessionId is not null;
         _isHome = path.Length == 0;
         _isCalendarRoute = string.Equals(path, "/sessions/calendar", StringComparison.OrdinalIgnoreCase);
         _isSessions = _isCalendarRoute || string.Equals(path, "/sessions", StringComparison.OrdinalIgnoreCase);

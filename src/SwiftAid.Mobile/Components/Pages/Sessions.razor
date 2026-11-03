@@ -11,8 +11,9 @@
 
 <PageTitle>Community sessions | SwiftAid</PageTitle>
 
-<PublicSessionsSurface @key="(RequestedSessionId, IsCalendarRoute)" Sessions="_sessions"
+<PublicSessionsSurface @key="(RequestedSessionId, IsCalendarRoute, InitialRemindersView)" Sessions="_sessions"
                        InitialSessionId="RequestedSessionId"
+                       InitialRemindersView="InitialRemindersView"
                        InitialCalendarView="@(IsCalendarRoute && RequestedSessionId is null)"
                        Loading="_loading"
                        ErrorMessage="@_listError"
@@ -28,6 +29,10 @@
 @code {
     [SupplyParameterFromQuery(Name = "sessionId")]
     private Guid? RequestedSessionId { get; set; }
+    [SupplyParameterFromQuery(Name = "tab")]
+    private string? RequestedTab { get; set; }
+    private bool InitialRemindersView => RequestedSessionId is not null &&
+        string.Equals(RequestedTab, "reminders", StringComparison.OrdinalIgnoreCase);
     private bool IsCalendarRoute => string.Equals(Navigation.ToAbsoluteUri(Navigation.Uri).AbsolutePath.TrimEnd('/'),
         "/sessions/calendar", StringComparison.OrdinalIgnoreCase);
 
@@ -211,7 +216,7 @@
 
     private Task RequestSignInAsync(Guid sessionId)
     {
-        var returnUrl = $"/sessions?sessionId={sessionId:D}";
+        var returnUrl = $"/sessions?sessionId={sessionId:D}&tab=reminders";
         Navigation.NavigateTo($"/sign-in?returnUrl={Uri.EscapeDataString(returnUrl)}");
         return Task.CompletedTask;
     }

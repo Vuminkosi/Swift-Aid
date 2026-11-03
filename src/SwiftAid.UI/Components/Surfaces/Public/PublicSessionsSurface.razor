@@ -424,6 +424,7 @@
     [Parameter] public Func<SessionSubscriptionAction, Task<SessionSubscriptionPanelState?>>? ExecuteSubscriptionActionAsync { get; set; }
     [Parameter] public EventCallback<Guid> OnRequestSignIn { get; set; }
     [Parameter] public Guid? InitialSessionId { get; set; }
+    [Parameter] public bool InitialRemindersView { get; set; }
     [Parameter] public Func<Guid?, long?, Task<SessionManagementPresentation>>? LoadManagementCapabilitiesAsync { get; set; }
     [Parameter] public EventCallback<Guid?> OnManageSession { get; set; }
     [Parameter] public RenderFragment<SessionManagementPresentation>? StaffSessionEditorContent { get; set; }
@@ -442,6 +443,7 @@
     private bool _reminderConsentAccepted;
     private bool _subscriptionLoading;
     private bool _initialSelectionApplied;
+    private bool _initialRemindersApplied;
     private long _subscriptionRequestGeneration;
     private Guid? _subscriptionBusySessionId;
     private long _subscriptionBusyGeneration;
@@ -632,6 +634,12 @@
         }
 
         EnsureSelectedSession();
+        if (InitialRemindersView && !_initialRemindersApplied && InitialSessionId is { } requestedId &&
+            SelectedSession?.SessionId == requestedId)
+        {
+            _activeTabIndex = 1;
+            _initialRemindersApplied = true;
+        }
         await EnsureSubscriptionForSelectionAsync();
     }
 

@@ -15,6 +15,29 @@ namespace SwiftAid.Ui.Tests;
 public sealed class PublicSessionQueryStateTests
 {
     [Fact]
+    public async Task ReminderReturnSelectsTheRequestedSessionAndReloadsItsState()
+    {
+        var session = Session(Guid.NewGuid());
+        Guid? loadedSession = null;
+        var component = new PublicSessionsSurface();
+        typeof(PublicSessionsSurface).GetProperty(nameof(component.Sessions))!.SetValue(component, new[] { session });
+        typeof(PublicSessionsSurface).GetProperty(nameof(component.InitialSessionId))!.SetValue(component, session.SessionId);
+        typeof(PublicSessionsSurface).GetProperty(nameof(component.InitialRemindersView))!.SetValue(component, true);
+        typeof(PublicSessionsSurface).GetProperty(nameof(component.LoadSubscriptionStateAsync))!.SetValue(component,
+            (Func<Guid, Task<PublicSessionsSurface.SessionSubscriptionPanelState?>>)(id =>
+            {
+                loadedSession = id;
+                return Task.FromResult<PublicSessionsSurface.SessionSubscriptionPanelState?>(null);
+            }));
+
+        await InvokeAsync(component, "OnParametersSetAsync");
+
+        Assert.Equal(session.SessionId, Field<Guid>(component, "_selectedSessionId"));
+        Assert.Equal(1, Field<int>(component, "_activeTabIndex"));
+        Assert.Equal(session.SessionId, loadedSession);
+    }
+
+    [Fact]
     public void AnonymousCalendarRouteUsesTheGuestEntry()
     {
         var app = new SwiftAid.Gateway.Components.App();

@@ -18,7 +18,7 @@
 <PageTitle>Community sessions | SwiftAid</PageTitle>
 
 <div class="community-sessions-page">
-    <PublicSessionsSurface @key="(RequestedSessionId, IsCalendarRoute)" Sessions="_sessions"
+    <PublicSessionsSurface @key="(RequestedSessionId, IsCalendarRoute, InitialRemindersView)" Sessions="_sessions"
                            Loading="_loadingList"
                            ErrorMessage="@ListError"
                            OnRetry="LoadListAsync"
@@ -29,6 +29,7 @@
                            ExecuteSubscriptionActionAsync="ExecuteSubscriptionActionAsync"
                            OnRequestSignIn="RequestSubscriptionSignInAsync"
                            InitialSessionId="RequestedSessionId"
+                           InitialRemindersView="InitialRemindersView"
                            LoadManagementCapabilitiesAsync="LoadManagementCapabilitiesAsync"
                            OnManageSession="ManageSessionAsync"
                            StaffEditorCapabilities="_managementCapabilities">
@@ -79,6 +80,9 @@
     private bool _pageInitialized;
     private long _listGeneration;
     [SupplyParameterFromQuery(Name = "sessionId")] public Guid? RequestedSessionId { get; set; }
+    [SupplyParameterFromQuery(Name = "tab")] public string? RequestedTab { get; set; }
+    private bool InitialRemindersView => RequestedSessionId is not null &&
+        string.Equals(RequestedTab, "reminders", StringComparison.OrdinalIgnoreCase);
     private bool IsCalendarRoute => string.Equals(Navigation.ToAbsoluteUri(Navigation.Uri).AbsolutePath.TrimEnd('/'),
         "/sessions/calendar", StringComparison.OrdinalIgnoreCase);
     private Func<Guid, Task<string?>> InvitationLoader => LoadInvitationAsync;
@@ -600,7 +604,7 @@
 
     private Task RequestSubscriptionSignInAsync(Guid sessionId)
     {
-        var returnUrl = $"/sessions?sessionId={sessionId:D}";
+        var returnUrl = $"/sessions?sessionId={sessionId:D}&tab=reminders";
         Navigation.NavigateTo($"/sign-in?returnUrl={Uri.EscapeDataString(returnUrl)}");
         return Task.CompletedTask;
     }
