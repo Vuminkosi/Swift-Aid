@@ -312,7 +312,8 @@ public sealed class EllaiMemoryIndexTests
                 Enabled = true, ApiKey = "synthetic", ApiUrl = "https://fixture.invalid", ReasoningModel = "fixture"
             };
             services.AddEllaiReasoningExecutor(modelOptions, "framework");
-            if (!liveModel) services.AddKeyedSingleton<IChatClient>(EllaiReasoningRegistration.FrameworkClientKey, model);
+            using var diagnostics = liveModel ? new LiveDecisionDiagnosticsClient(EllaiMuseChatClientFactory.Create(modelOptions)) : null;
+            services.AddKeyedSingleton<IChatClient>(EllaiReasoningRegistration.FrameworkClientKey, diagnostics ?? (IChatClient)model);
             await using var provider = services.BuildServiceProvider();
             using (var scope = provider.CreateScope())
                 Assert.IsType<EllaiFrameworkExecutor>(scope.ServiceProvider.GetRequiredService<IEllaiReasoningExecutor>());
@@ -330,7 +331,9 @@ public sealed class EllaiMemoryIndexTests
                     await using var db = fixture.CreateDbContext();
                     turn = Assert.Single(await new PostgresEllaiSessionStore(db).ReadConversationAsync(sessionId, actor.ActorId, timeout.Token));
                 } while (turn.CompletedAtUtc is null);
-                Assert.Equal("Completed", turn.Outcome);
+                var provisional = provider.GetRequiredService<EllaiSessionResponseStore>().ReadSince(sessionId, 0).Responses
+                    .Count(item => !item.IsFinal && item.Progress is null && !string.IsNullOrWhiteSpace(item.Text));
+                Assert.True(turn.Outcome == "Completed", $"Initial outcome: {turn.Outcome}; provisional={provisional}; {diagnostics?.Summary ?? "scripted model"}");
                 Assert.True(transport.RecallRequests > recallRequests);
                 var trace = System.Text.Json.JsonSerializer.Deserialize<EllaiToolTrace>(turn.ToolTraceJson!);
                 Assert.NotNull(trace);
@@ -372,7 +375,9 @@ public sealed class EllaiMemoryIndexTests
                         Assert.Null(turn.AssistantText);
                         return;
                     }
-                    Assert.Equal("Completed", turn.Outcome);
+                    var provisionalCount = provider.GetRequiredService<EllaiSessionResponseStore>().ReadSince(sessionId, 0).Responses
+                        .Count(item => item.ClientUtteranceId == turnId && !item.IsFinal && item.Progress is null && !string.IsNullOrWhiteSpace(item.Text));
+                    Assert.True(turn.Outcome == "Completed", $"Follow-up outcome: {turn.Outcome}; provisional={provisionalCount}; {diagnostics?.Summary ?? "scripted model"}");
                     if (removeTopicTool) Assert.Equal(priorRecallRequests, transport.RecallRequests);
                     else Assert.True(transport.RecallRequests > priorRecallRequests);
                     var followupTrace = System.Text.Json.JsonSerializer.Deserialize<EllaiToolTrace>(turn.ToolTraceJson!);
@@ -481,6 +486,58 @@ public sealed class EllaiMemoryIndexTests
             if (!string.IsNullOrWhiteSpace(key)) delete.Headers.TryAddWithoutValidation("api-key", key);
             using var result = await http.SendAsync(delete);
             Assert.True(result.IsSuccessStatusCode);
+        }
+    }
+
+    // Capture only bounded shape diagnostics, never model text, tool arguments or case identifiers.
+    private sealed class LiveDecisionDiagnosticsClient(IChatClient inner) : DelegatingChatClient(inner)
+    {
+        private readonly List<string> _calls = [];
+        public string Summary => string.Join("; ", _calls);
+
+        public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var text = new System.Text.StringBuilder();
+            var toolCalls = 0;
+            var overflow = false;
+            try
+            {
+                await foreach (var update in base.GetStreamingResponseAsync(messages, options, cancellationToken).ConfigureAwait(false))
+                {
+                    toolCalls += update.Contents.OfType<FunctionCallContent>().Count();
+                    if (update.Text.Length <= 512_000 - text.Length) text.Append(update.Text);
+                    else overflow = true;
+                    yield return update;
+                }
+            }
+            finally
+            {
+                var value = text.ToString();
+                var parsed = EllaiModelTurnParser.Parse(value);
+                var decision = parsed.Turn?.FinalDecision;
+                var validationCount = decision is null ? -1 : EllaiDecisionValidator.Validate(decision).Count;
+                var segmentCount = -1;
+                var displayMatches = false;
+                var speechMatches = false;
+                try
+                {
+                    using var json = System.Text.Json.JsonDocument.Parse(value);
+                    if (json.RootElement.TryGetProperty("stream_segments", out var segments) && segments.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    {
+                        var parts = segments.EnumerateArray().Select(segment =>
+                            segment.TryGetProperty("text", out var item) && item.ValueKind == System.Text.Json.JsonValueKind.String
+                                ? item.GetString() ?? string.Empty : string.Empty).ToArray();
+                        segmentCount = parts.Length;
+                        var joined = string.Join(" ", parts);
+                        displayMatches = decision is not null && joined == decision.DisplayText.Trim();
+                        speechMatches = decision is not null && joined == decision.SpokenText?.Trim();
+                    }
+                }
+                catch (Exception error) when (error is System.Text.Json.JsonException or InvalidOperationException) { }
+                _calls.Add($"chars={text.Length},overflow={overflow},toolCalls={toolCalls},parse={(decision is null ? EllaiModelTurnParser.DiagnosticCode(parsed.Error) : "decision")},validation={validationCount},segments={segmentCount},displayMatches={displayMatches},speechMatches={speechMatches}");
+            }
         }
     }
 

@@ -94,6 +94,13 @@ membership-change count filter passed 2/2 with disposable Qdrant. The live
 follow-up failure remains unexplained; a separate individual live run passed,
 which does not establish that the intermittent provider decision failure is
 resolved. The captured TRX contained synthetic fixture output only.
+After the fixture fix, the combined authority filter was rerun against an
+already-migrated disposable database: 2 passed and the live recall case failed
+on its first turn with `InvalidDecision`. This confirms the live failure is
+not explained by the fresh-database migration race.
+An instrumented repeat captured one verified provisional segment followed by
+malformed final JSON; the live count case passed. Diagnostics recorded only
+structural metadata, not provider text or case identifiers.
 
 ## Provider observations and open checks
 
