@@ -332,6 +332,7 @@ public sealed class PublicSessionQueryStateTests
     {
         var session = Session(Guid.NewGuid());
         var list = new PublicSessionList();
+        typeof(PublicSessionList).GetProperty(nameof(list.Sessions))!.SetValue(list, new[] { session });
         typeof(PublicSessionList).GetProperty(nameof(list.LoadInvitationTextAsync))!.SetValue(list,
             (Func<Guid, long, Task<string?>>)((_, _) => Task.FromResult<string?>("Public invitation")));
         typeof(PublicSessionList).GetProperty("Js", BindingFlags.Instance | BindingFlags.NonPublic)!
@@ -342,6 +343,28 @@ public sealed class PublicSessionQueryStateTests
 
         Assert.Equal(session.SessionId, typeof(PublicSessionList).GetField("_openInvitationId", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
         Assert.Equal("Public invitation", typeof(PublicSessionList).GetField("_openInvitationText", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
+    }
+
+    [Fact]
+    public async Task InvitationIsNotSharedIfTheDisplayedSessionChangesWhileLoading()
+    {
+        var session = Session(Guid.NewGuid());
+        var list = new PublicSessionList();
+        var pending = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var shared = false;
+        typeof(PublicSessionList).GetProperty(nameof(list.Sessions))!.SetValue(list, new[] { session });
+        typeof(PublicSessionList).GetProperty(nameof(list.LoadInvitationTextAsync))!.SetValue(list,
+            (Func<Guid, long, Task<string?>>)((_, _) => pending.Task));
+        typeof(PublicSessionList).GetProperty(nameof(list.ShareTextAsync))!.SetValue(list,
+            (Func<string, Task>)(_ => { shared = true; return Task.CompletedTask; }));
+        var share = typeof(PublicSessionList).GetMethod("ShareInvitationAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var request = (Task)share.Invoke(list, [session])!;
+        typeof(PublicSessionList).GetProperty(nameof(list.Sessions))!.SetValue(list, new[] { session with { Version = session.Version + 1 } });
+        pending.SetResult("Old invitation");
+        await request;
+
+        Assert.False(shared);
+        Assert.Contains("session changed", (string)typeof(PublicSessionList).GetField("_invitationError", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list)!, StringComparison.Ordinal);
     }
 
     [Fact]

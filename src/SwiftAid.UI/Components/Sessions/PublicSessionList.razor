@@ -361,7 +361,8 @@
         try
         {
             var text = await LoadInvitationTextAsync(session.SessionId, session.Version);
-            if (string.IsNullOrWhiteSpace(text))
+            if (string.IsNullOrWhiteSpace(text) || !Sessions.Any(current =>
+                    current.SessionId == session.SessionId && current.Version == session.Version && IsScheduled(current)))
             {
                 _openInvitationId = session.SessionId;
                 _openInvitationText = null;
