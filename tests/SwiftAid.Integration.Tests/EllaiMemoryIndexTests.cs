@@ -171,7 +171,7 @@ public sealed class EllaiMemoryIndexTests
                 Assert.NotNull(await index.FindExactAsync("case-results", sessionId, context.ScopeEpoch, default));
             }
             var consent = new EllaiConsentService();
-            using var model = new WorkerRecallClient();
+            using var model = new WorkerRecallClient(fixture.CaseId);
             var services = new ServiceCollection();
             services.AddScoped(_ => fixture.CreateDbContext());
             services.AddScoped<PostgresEllaiSessionStore>();
@@ -253,12 +253,18 @@ public sealed class EllaiMemoryIndexTests
                 {
                     Assert.Contains(fixture.CaseId.ToString("D"), model.Observation);
                     Assert.Contains("Recall my cases", model.FirstMessages);
-                    Assert.Contains("Done.", model.FirstMessages);
+                    Assert.Contains(model.FirstMessages, text => text.Contains("Done.", StringComparison.Ordinal));
                 }
                 await fixture.SetGrantExpiryAsync(DateTimeOffset.UtcNow.AddMinutes(-1));
                 await RunFollowupAsync("turn-3");
                 if (liveModel) Assert.DoesNotContain(fixture.CaseId.ToString("D"), turn.AssistantText!, StringComparison.OrdinalIgnoreCase);
-                else Assert.DoesNotContain(fixture.CaseId.ToString("D"), model.Observation);
+                else
+                {
+                    Assert.DoesNotContain(fixture.CaseId.ToString("D"), model.Observation);
+                    // Current behavior: the earlier assistant answer remains in the
+                    // next model request even after the underlying grant expires.
+                    Assert.Contains(model.FirstMessages, text => text.Contains(fixture.CaseId.ToString("D"), StringComparison.OrdinalIgnoreCase));
+                }
             }
             finally { await worker.StopAsync(CancellationToken.None); }
         }
@@ -278,7 +284,7 @@ public sealed class EllaiMemoryIndexTests
         }
     }
 
-    private sealed class WorkerRecallClient : IChatClient
+    private sealed class WorkerRecallClient(Guid syntheticCaseId) : IChatClient
     {
         private int _calls;
         public string Observation { get; private set; } = "";
@@ -300,7 +306,11 @@ public sealed class EllaiMemoryIndexTests
             else
             {
                 Observation = string.Join(" ", messages.SelectMany(message => message.Contents).OfType<FunctionResultContent>().Select(content => content.Result?.ToString()));
-                yield return new ChatResponseUpdate(ChatRole.Assistant, """{"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Done.","spokenText":"Done.","claims":[],"questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}""");
+                var answer = Observation.Contains(syntheticCaseId.ToString("D"), StringComparison.OrdinalIgnoreCase)
+                    ? "Done. " + syntheticCaseId.ToString("D") : "Done.";
+                yield return new ChatResponseUpdate(ChatRole.Assistant,
+                    """{"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Done.","spokenText":"Done.","claims":[],"questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}"""
+                        .Replace("Done.", answer, StringComparison.Ordinal));
             }
             yield return new ChatResponseUpdate(ChatRole.Assistant, [new UsageContent(new UsageDetails { InputTokenCount = 5, OutputTokenCount = 4 })]);
         }

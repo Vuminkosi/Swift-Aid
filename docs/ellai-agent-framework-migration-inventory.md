@@ -128,6 +128,27 @@ concurrent sessions, cancellation and restart on disposable infrastructure.
 Record exact results; synthetic or adapter-only checks do not satisfy the
 full live Gateway acceptance gate.
 
+**Cutover blocker — previously authorized content in conversation history:**
+`FrameworkWorkerRecallsAuthorizedCaseFromPostgresAndQdrant` now demonstrates
+that, after the synthetic PostgreSQL grant expires, the fresh Qdrant/topic
+recall omits the case identifier but the next framework model request still
+contains that identifier in an earlier assistant answer. The test used a
+synthetic model and disposable PostgreSQL/Qdrant stores; no real case data or
+live provider was involved. `EllaiConversationContext.Build` replays prior
+completed user/assistant text, and the persisted conversation projection does
+not retain the evidence needed to reauthorize individual past assertions.
+Consequently, the successful fresh-recall check alone does not establish that
+revoked content is absent from model context. Before framework cutover,
+implement and test a provenance-aware, current-authority context policy that
+preserves permitted multi-turn reasoning, including legacy history, revocation,
+scope changes and service failure. Do not treat this regression fixture as an
+acceptable security behavior. The opt-in test passed 1/1 with
+`SWIFTAID_RUN_FRAMEWORK_POSTGRES_FIXTURES=1`, `ELLAI_LIVE_QDRANT=1`, dedicated
+loopback PostgreSQL and Qdrant endpoints, and `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore
+-m:1 -nr:false -p:WasmBuildNative=false --filter
+FullyQualifiedName~FrameworkWorkerRecallsAuthorizedCaseFromPostgresAndQdrant`.
+
 **Disposable PostgreSQL recovery evidence:** `FrameworkWorkerRehydratesOwnedConversationAfterWorkerRestart`
 passed (1/1, zero skipped) against a task-owned PostGIS 17 container after 60
 repository migrations. With a deterministic synthetic model, it completed a
