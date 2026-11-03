@@ -95,6 +95,9 @@ public sealed class ClassificationRegistry(
         if (result is not null) await LockAsync($"classification-result:{result.Id}", ct);
         // Refresh after waiting for a completion transaction.
         if (result is not null) await db.Entry(result).ReloadAsync(ct);
+        // A contended inbox, fingerprint, or result lock may take longer than
+        // a lease. Decide availability and issue its deadline using fresh time.
+        now = clock.GetUtcNow();
         var created = result is null;
         result ??= new() { Id = Guid.NewGuid(), Fingerprint = fingerprint, OrganizationId = header.OrganizationId,
             WorkspaceId = header.WorkspaceId, ConfigurationId = config, ContentHash = ClassificationFingerprint.Hash(text),

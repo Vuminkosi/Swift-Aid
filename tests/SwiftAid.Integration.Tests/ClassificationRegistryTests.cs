@@ -250,6 +250,48 @@ public sealed class ClassificationRegistryTests
     }
 
     [IntakePostgresFact]
+    public async Task Claim_lease_starts_after_waiting_for_inbox_lock()
+    {
+        await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
+        var notice = await ImportAsync(fixture);
+        var options = Settings();
+        var clock = new MutableClock();
+        await using var blockedDb = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        await using var connection = new Npgsql.NpgsqlConnection(fixture.Db.Database.GetConnectionString());
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await using (var acquire = new Npgsql.NpgsqlCommand("SELECT pg_advisory_xact_lock(hashtextextended(@key, 0))", connection, transaction))
+        {
+            acquire.Parameters.AddWithValue("key", $"classification-inbox:{notice.MessageId}:{options.Profile.Hash}");
+            await acquire.ExecuteNonQueryAsync();
+        }
+        var registry = Registry(fixture, blockedDb, options, clock);
+        var pending = registry.ClaimAsync(notice, default);
+        var observedWait = false;
+        try
+        {
+            await using var probe = new Npgsql.NpgsqlConnection(fixture.Db.Database.GetConnectionString());
+            await probe.OpenAsync();
+            await using var waiting = new Npgsql.NpgsqlCommand(
+                "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event = 'advisory' AND query LIKE '%pg_advisory_xact_lock%'",
+                probe);
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (!(observedWait = Convert.ToInt64(await waiting.ExecuteScalarAsync()) > 0) && DateTime.UtcNow < deadline)
+                await Task.Delay(25);
+            clock.Now = clock.Now.AddMinutes(5);
+        }
+        finally
+        {
+            await transaction.RollbackAsync();
+        }
+        var claim = await pending.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(observedWait, "The competing claim did not reach the database lock.");
+        Assert.Equal("Leased", claim.State);
+        Assert.True(claim.Lease!.LeaseUntilUtc > clock.Now);
+        Assert.Equal("Completed", await registry.CompleteAsync(Completion(claim.Lease), default));
+    }
+
+    [IntakePostgresFact]
     public async Task Completed_artifacts_and_source_associations_are_immutable_in_postgres()
     {
         await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
