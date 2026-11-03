@@ -234,6 +234,37 @@ public sealed partial class EllaiSurfaceLogicTests
     }
 
     [Fact]
+    public async Task UiObservationsContinueWhileGuidancePlanningIsPending()
+    {
+        var pending = new TaskCompletionSource<EllaiGuidancePlanDto?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var observed = 0;
+        var client = new FakeReviewClient
+        {
+            GuidancePlanHandler = () => pending.Task,
+            ObservationHandler = () => { observed++; return Task.FromResult(true); }
+        };
+        using var host = await CreateHost(client, CreateSession(1), string.Empty);
+        SetField(host, "_uiObservationModule", new ObservationJsModule());
+        try
+        {
+            await InvokeAsync(host, "ObserveGuidanceProposal", GuidanceTurn(), true);
+            Assert.Equal(1, client.GuidancePlanCalls);
+            var before = observed;
+            await InvokeAsync(host, "ObserveGuidanceIterationAsync", CancellationToken.None);
+            await InvokeAsync(host, "ObserveGuidanceIterationAsync", CancellationToken.None);
+
+            Assert.Equal(before + 2, observed);
+            Assert.False(pending.Task.IsCompleted);
+            Assert.Equal("context", GetField<UiObservationReport>(host, "_latestGuidanceObservation").ContextStamp);
+        }
+        finally
+        {
+            pending.TrySetResult(new("NeedsObservation"));
+            await host.Dispatcher.InvokeAsync(() => Task.CompletedTask);
+        }
+    }
+
+    [Fact]
     public async Task ObservedPendingTurnStartsGuidanceEvenAfterResponseTextSettlesThinking()
     {
         var client = new FakeReviewClient();
