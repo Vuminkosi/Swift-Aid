@@ -15,6 +15,37 @@ namespace SwiftAid.Ui.Tests;
 public sealed class SessionConflictReviewTests
 {
     [Fact]
+    public async Task OldAccountUpdateResponseCannotRestoreProposalAfterIdentityChanges()
+    {
+        var id = Guid.NewGuid();
+        var start = DateTimeOffset.UtcNow.AddDays(1);
+        var current = new CommunitySessionView(id, 3, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
+        var input = new UpdateSessionInput("Proposal", "Summary", "Community", [], "Presenter", "en", start, 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
+        var proposal = new SessionUpdateSubmission(id, 3, input, "reason");
+        var page = new SwiftAid.Gateway.Components.Pages.Sessions();
+        var type = page.GetType();
+        var completion = new TaskCompletionSource<UiCapabilityResult<SessionCommandResult>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var client = new StaffClient(current, true) { Execution = completion };
+        type.GetProperty("StaffSessionEditor", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, client);
+        type.GetField("_actorId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, "officer");
+        type.GetField("_editingSessionId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, id);
+        type.GetField("_editingVersion", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, 3L);
+        type.GetField("_editingStatus", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, "Scheduled");
+
+        var pending = (Task)type.GetMethod("RunCommandAsync", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(page, [input.ToCommand(id, 3, "reason", DateTimeOffset.UtcNow), proposal])!;
+        type.GetField("_identityEpoch", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, 1L);
+        type.GetMethod("ClearEditorState", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page, null);
+        type.GetField("_actorId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, "another-officer");
+        completion.SetException(new InvalidOperationException("Simulated response failure"));
+        await pending;
+
+        Assert.Null(type.GetField("_deferredProposal", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
+        Assert.Null(type.GetField("_conflictProposal", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
+        Assert.Equal("another-officer", type.GetField("_actorId", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
+    }
+
+    [Fact]
     public async Task RetainedProposalBlocksNavigationUntilLeaveIsConfirmed()
     {
         var id = Guid.NewGuid();
@@ -213,6 +244,7 @@ public sealed class SessionConflictReviewTests
     {
         public bool ReadUnavailable { get; set; }
         public string ActorId { get; set; } = "officer";
+        public TaskCompletionSource<UiCapabilityResult<SessionCommandResult>>? Execution { get; set; }
         private static UiCapabilityResult<T> Success<T>(T value) => new(UiCapabilityResultCode.Success, value,
             new UiCapabilityMetadata("editor", "1", UiCapabilityProvenance.LiveService, DateTimeOffset.UtcNow, true));
 
@@ -221,7 +253,8 @@ public sealed class SessionConflictReviewTests
             Task.FromResult(ReadUnavailable ? UiCapabilityResults.Unavailable<CommunitySessionView>("editor") : Success(current));
         public Task<UiCapabilityResult<StaffSessionManagementCapabilities>> GetManagementCapabilitiesAsync(Guid? sessionId, long? expectedVersion, CancellationToken cancellationToken = default) =>
             Task.FromResult(Success(new StaffSessionManagementCapabilities(false, canEdit, false, false, false, false, current.SessionId, current.Version, current.Status, true)));
-        public Task<UiCapabilityResult<SessionCommandResult>> ExecuteAsync(SessionCommand command, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<UiCapabilityResult<SessionCommandResult>> ExecuteAsync(SessionCommand command, CancellationToken cancellationToken = default) =>
+            Execution?.Task ?? throw new NotSupportedException();
     }
 
     private sealed class NoOpJsRuntime : JSRuntime

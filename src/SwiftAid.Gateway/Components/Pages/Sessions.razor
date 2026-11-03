@@ -102,6 +102,8 @@
     private bool _canManageSessions;
     private long _staffLoadGeneration;
     private long _accessGeneration;
+    private long _identityEpoch;
+    private bool _disposed;
     private long _capabilityRequestGeneration;
     private long _editorGeneration;
     private string? _serverError;
@@ -361,7 +363,10 @@
     private async Task LoadStaffSessionAsync(Guid sessionId)
     {
         var generation = Interlocked.Increment(ref _staffLoadGeneration);
-        if (sessionId == Guid.Empty || !await RefreshStaffIdentityAsync() || string.IsNullOrWhiteSpace(_actorId))
+        var identityEpoch = Volatile.Read(ref _identityEpoch);
+        var identityAvailable = sessionId != Guid.Empty && await RefreshStaffIdentityAsync();
+        if (!IsCurrentIdentityEpoch(identityEpoch)) return;
+        if (!identityAvailable || string.IsNullOrWhiteSpace(_actorId))
         {
             ClearEditorState();
             return;
@@ -373,7 +378,7 @@
         try
         {
             var result = await StaffSessionEditor.GetStaffAsync(sessionId);
-            if (generation != Volatile.Read(ref _staffLoadGeneration) ||
+            if (!IsCurrentIdentityEpoch(identityEpoch) || generation != Volatile.Read(ref _staffLoadGeneration) ||
                 identityGeneration != Volatile.Read(ref _accessGeneration))
             {
                 return;
@@ -383,7 +388,7 @@
                 result.Value is { Version: > 0 } session)
             {
                 var capabilityResult = await StaffSessionEditor.GetManagementCapabilitiesAsync(session.SessionId, session.Version);
-                if (generation != Volatile.Read(ref _staffLoadGeneration) ||
+                if (!IsCurrentIdentityEpoch(identityEpoch) || generation != Volatile.Read(ref _staffLoadGeneration) ||
                     identityGeneration != Volatile.Read(ref _accessGeneration)) return;
                 if (capabilityResult.Code != UiCapabilityResultCode.Success || !capabilityResult.Metadata.IsAvailable ||
                     capabilityResult.Value is not { IsCurrent: true } capabilities ||
@@ -437,7 +442,7 @@
         }
         catch (Exception)
         {
-            if (generation == Volatile.Read(ref _staffLoadGeneration))
+            if (IsCurrentIdentityEpoch(identityEpoch) && generation == Volatile.Read(ref _staffLoadGeneration))
             {
                 ClearEditorState();
                 _managementCapabilities = SessionManagementPresentation.Unavailable(
@@ -448,7 +453,7 @@
         }
         finally
         {
-            if (generation == Volatile.Read(ref _staffLoadGeneration))
+            if (IsCurrentIdentityEpoch(identityEpoch) && generation == Volatile.Read(ref _staffLoadGeneration))
             {
                 _busy = false;
             }
@@ -473,11 +478,20 @@
 
     private void OnAuthenticationStateChanged(Task<AuthenticationState> authenticationStateTask)
     {
+        var authEpoch = Interlocked.Increment(ref _identityEpoch);
+        Interlocked.Increment(ref _accessGeneration);
+        Interlocked.Increment(ref _capabilityRequestGeneration);
+        Interlocked.Increment(ref _staffLoadGeneration);
         _ = InvokeAsync(async () =>
         {
+            if (!IsCurrentIdentityEpoch(authEpoch)) return;
             ClearDeferredProposal();
+            ClearEditorState();
+            _actorId = null;
             _ = await authenticationStateTask;
+            if (!IsCurrentIdentityEpoch(authEpoch)) return;
             await RefreshStaffAccessAsync(_editingSessionId, _editingSessionId is null ? null : _editingVersion);
+            if (!IsCurrentIdentityEpoch(authEpoch)) return;
             if (_canManageSessions && RequestedSessionId is { } id && id != Guid.Empty)
             {
                 await LoadStaffSessionAsync(id);
@@ -488,9 +502,16 @@
 
     public void Dispose()
     {
+        _disposed = true;
+        Interlocked.Increment(ref _identityEpoch);
+        Interlocked.Increment(ref _accessGeneration);
+        Interlocked.Increment(ref _capabilityRequestGeneration);
+        Interlocked.Increment(ref _staffLoadGeneration);
         ClearDeferredProposal();
         AuthenticationState.AuthenticationStateChanged -= OnAuthenticationStateChanged;
     }
+
+    private bool IsCurrentIdentityEpoch(long epoch) => !_disposed && epoch == Volatile.Read(ref _identityEpoch);
 
     private void ClearDeferredProposal()
     {
@@ -824,6 +845,7 @@
 
     private async Task RecoverConflictAsync(SessionUpdateSubmission proposal, string? originalActorId, bool outcomeUnknown = false)
     {
+        var identityEpoch = Volatile.Read(ref _identityEpoch);
         if (string.IsNullOrWhiteSpace(originalActorId) || !string.Equals(_actorId, originalActorId, StringComparison.Ordinal))
             return;
 
@@ -834,7 +856,7 @@
         }
 
         await LoadStaffSessionAsync(proposal.SessionId);
-        if (string.Equals(_actorId, originalActorId, StringComparison.Ordinal) &&
+        if (IsCurrentIdentityEpoch(identityEpoch) && string.Equals(_actorId, originalActorId, StringComparison.Ordinal) &&
             _editingSessionId == proposal.SessionId && (outcomeUnknown || _editingVersion != proposal.ExpectedVersion) &&
             _staffView is not null && _managementCapabilities.CanEdit && CanRenderEditor(_managementCapabilities))
         {
@@ -856,8 +878,11 @@
         }
         var isCreate = command is CreateSessionDraftCommand;
         var originalActorId = _actorId;
-        if (!await RefreshStaffAccessAsync(isCreate ? null : command.SessionId,
-                isCreate ? null : command.ExpectedVersion) || !CanPerformCommand(command))
+        var identityEpoch = Volatile.Read(ref _identityEpoch);
+        var accessAvailable = await RefreshStaffAccessAsync(isCreate ? null : command.SessionId,
+            isCreate ? null : command.ExpectedVersion);
+        if (!IsCurrentIdentityEpoch(identityEpoch)) return;
+        if (!accessAvailable || !CanPerformCommand(command))
         {
             ClearEditorState();
             _serverError ??= "Session management is unavailable for this account.";
@@ -870,6 +895,7 @@
         try
         {
             var outcome = await StaffSessionEditor.ExecuteAsync(command);
+            if (!IsCurrentIdentityEpoch(identityEpoch)) return;
             if (outcome.Code == UiCapabilityResultCode.Success && outcome.Metadata.IsAvailable && outcome.Value is { } result)
             {
                 _conflictProposal = null;
@@ -898,6 +924,7 @@
         }
         catch (Exception)
         {
+            if (!IsCurrentIdentityEpoch(identityEpoch)) return;
             ClearEditorState();
             _managementCapabilities = SessionManagementPresentation.Unavailable(
                 "The session change could not be confirmed.");
@@ -908,7 +935,7 @@
         }
         finally
         {
-            _busy = false;
+            if (IsCurrentIdentityEpoch(identityEpoch)) _busy = false;
         }
     }
 
