@@ -795,6 +795,22 @@ public sealed class EllaiAuthorizedConversationContextTests
     }
 
     [Fact]
+    public async Task CappedCaseListReplaysOnlyWhenRowsAndContinuationStatusMatch()
+    {
+        var id = Guid.NewGuid();
+        var evidence = new EvidenceRef("CaseQueue", id.ToString("D"), "3", null, id.ToString("D"));
+        var query = new EllaiCaseListQuery(1, "ZW", "Reported", "latest-reported");
+        var trace = EllaiToolTrace.SerializeFlattened([new(EllaiToolNames.State, true, "Ok", [evidence], true, CaseListQuery: query)], false, []);
+        var turns = new[] { Turn("prior", 1, "latest case", "First case.", trace), Turn("current", 2, "next", null, null) };
+        var queue = new ListQueue(id) { NextCursor = "next" };
+        var unchanged = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), queue, default);
+        Assert.Contains(unchanged.Messages, item => item.Content == "First case.");
+        queue.NextCursor = null;
+        var complete = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), queue, default);
+        Assert.DoesNotContain(complete.Messages, item => item.Content == "First case.");
+    }
+
+    [Fact]
     public async Task DuplicateCaseEvidenceIsReadOncePerPassAndRecheckedOnTheNextPass()
     {
         var id = Guid.NewGuid();
@@ -990,6 +1006,7 @@ public sealed class EllaiAuthorizedConversationContextTests
     private sealed class ListQueue(Guid id) : ICaseQueueQuery
     {
         public bool IncludeNewCase { get; set; }
+        public string? NextCursor { get; set; }
         public CaseQueueFilter? LastFilter { get; private set; }
         public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CancellationToken ct) => throw new NotSupportedException();
         public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CaseQueueFilter filter, CancellationToken ct)
@@ -997,7 +1014,7 @@ public sealed class EllaiAuthorizedConversationContextTests
             LastFilter = filter;
             var items = new List<CaseQueueItem> { new(id, "Reported", "ZW", actor.ActorId, 3, DateTimeOffset.UtcNow) };
             if (IncludeNewCase) items.Add(new(Guid.NewGuid(), "Reported", "ZW", actor.ActorId, 1, DateTimeOffset.UtcNow));
-            return Task.FromResult(new CaseQueueResult(CaseQueueAccess.Allowed, items));
+            return Task.FromResult(new CaseQueueResult(CaseQueueAccess.Allowed, items, NextCursor));
         }
     }
 

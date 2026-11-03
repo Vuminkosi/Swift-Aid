@@ -59,7 +59,8 @@ public static class EllaiAuthorizedConversationContext
             var references = new Dictionary<Guid, long>();
             foreach (var observation in trace.Observations)
             {
-                if (!observation.Allowed || observation.Truncated ||
+                if (!observation.Allowed || observation.Truncated &&
+                    (observation.ToolName != EllaiToolNames.State || observation.CaseListQuery is null) ||
                     toolContext?.AllowedTools is { } allowedTools && !allowedTools.Contains(observation.ToolName))
                     return decisions[turn.ClientUtteranceId] = false;
                 // This validator returns only a format verdict about the model's
@@ -160,8 +161,10 @@ public static class EllaiAuthorizedConversationContext
                             });
                             var current = await invokeTool(toolContext, request, ct).ConfigureAwait(false);
                             ct.ThrowIfCancellationRequested();
-                            if (!current.Allowed || current.Truncated || current.ReasonCode != EllaiToolReasonCodes.Ok ||
-                                current.ItemCount != observation.Evidence.Count || !current.Evidence.SequenceEqual(observation.Evidence))
+                            if (!current.Allowed || current.Truncated != observation.Truncated || current.ReasonCode != EllaiToolReasonCodes.Ok ||
+                                current.ItemCount != observation.Evidence.Count || !current.Evidence.SequenceEqual(observation.Evidence) ||
+                                (observation.Truncated && observation.CaseListDigest is null) ||
+                                (observation.CaseListDigest is not null && observation.CaseListDigest != EllaiObservedToolResult.CaseListFingerprint(current)))
                                 return decisions[turn.ClientUtteranceId] = false;
                         }
                         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
@@ -176,8 +179,9 @@ public static class EllaiAuthorizedConversationContext
                                 new CaseQueueFilter(query.Country, query.Workflow, query.Sort == "latest-reported"), ct).ConfigureAwait(false);
                         ct.ThrowIfCancellationRequested();
                         var items = current.Items.Take(query.Limit).ToArray();
-                        if (current.Access != CaseQueueAccess.Allowed || current.NextCursor is not null ||
-                            current.Items.Count > query.Limit || items.Length != observation.Evidence.Count ||
+                        if (current.Access != CaseQueueAccess.Allowed ||
+                            (current.NextCursor is not null || current.Items.Count > query.Limit) != observation.Truncated ||
+                            items.Length != observation.Evidence.Count ||
                             items.Where((item, index) => observation.Evidence[index] != new EvidenceRef("CaseQueue",
                                 item.CaseId.ToString("D"), item.AggregateVersion.ToString(CultureInfo.InvariantCulture), null,
                                 item.CaseId.ToString("D"))).Any())

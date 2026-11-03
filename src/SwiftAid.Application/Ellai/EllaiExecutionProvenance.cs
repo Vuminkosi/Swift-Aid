@@ -27,7 +27,7 @@ public sealed record EllaiObservedToolResult(
     string? StaticFeatureVersion = null, DateTimeOffset? CaseSnapshotExpiresAtUtc = null,
     string? ClockVersion = null, EllaiCountReplayScope? CountReplayScope = null,
     EllaiUiCatalogueReplayScope? UiCatalogueReplayScope = null, string? CapabilityVersion = null,
-    string? ReceiptListDigest = null, string? ReceiptLookupId = null)
+    string? ReceiptListDigest = null, string? ReceiptLookupId = null, string? CaseListDigest = null)
 {
     public const string CurrentStaticFeatureVersion = "state-feature/1";
     public const string CurrentClockVersion = "server-clock/1";
@@ -87,7 +87,10 @@ public sealed record EllaiObservedToolResult(
                 result.ReasonCode == EllaiToolReasonCodes.Ok && !result.Truncated &&
                 result.ItemCount == result.Evidence.Count && result.Evidence.Count <= 20
                     ? ReceiptListFingerprint(result) : null,
-            receiptLookupId);
+            receiptLookupId,
+            caseQuery?.PlaceId is not null && result.Allowed && result.DenialReason is null &&
+                result.ReasonCode == EllaiToolReasonCodes.Ok && result.ItemCount == result.Evidence.Count
+                    ? CaseListFingerprint(result) : null);
     }
 
     public static bool IsCanonicalReceiptId(string? value) => value is { Length: 37 } &&
@@ -98,6 +101,15 @@ public sealed record EllaiObservedToolResult(
     public static string ReceiptListFingerprint(EllaiToolResult result)
     {
         var content = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new { result.ResultSummary, result.ItemCount, result.Evidence });
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content));
+    }
+
+    public static string CaseListFingerprint(EllaiToolResult result)
+    {
+        var content = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            result.ResultSummary, result.ItemCount, result.Evidence, result.Truncated
+        });
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content));
     }
 }

@@ -89,6 +89,40 @@ public sealed class EllaiLiveQueueReadTests
         Assert.DoesNotContain(moved.Messages, message => message.Content == "one case");
     }
 
+    [Fact]
+    public async Task CappedPlaceSearchReplaysOnlyWhileTheSameBoundedResultRemainsValid()
+    {
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [Row("01", 7), Row("02", 8)]) };
+        var locations = new OccurrenceLocation();
+        var consent = new EllaiConsentService();
+        consent.Grant("session-1", EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue, occurrenceLocations: locations);
+        var context = Context with { Actor = TestActor() };
+        var request = new EllaiToolRequest(EllaiToolNames.State, Args(("projection", "queue"), ("limit", "1"),
+            ("country", "US"), ("sort", "latest-reported"), ("place_id", "region-1")));
+        var result = await broker.InvokeAsync(context, request, default);
+        Assert.True(result.Truncated);
+        var observation = EllaiObservedToolResult.From(request, result);
+        Assert.NotNull(observation.CaseListDigest);
+        var trace = EllaiToolTrace.SerializeFlattened([observation], false, []);
+        var turns = new[]
+        {
+            new EllaiConversationTurn("session-1", "previous", 1, "list", "first case", "Completed", 1, DateTimeOffset.UtcNow) { ToolTraceJson = trace },
+            new EllaiConversationTurn("session-1", "current", 2, "next", null, "Queued", 1, null)
+        };
+        async Task<EllaiAuthorizedConversationContext.Result> Read() =>
+            await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", context.Actor!, queue, default,
+                toolContext: context, invokeTool: broker.InvokeAsync);
+        Assert.Contains((await Read()).Messages, item => item.Content == "first case");
+        queue.Result = new(CaseQueueAccess.Allowed, [Row("01", 7)]);
+        Assert.DoesNotContain((await Read()).Messages, item => item.Content == "first case");
+        queue.Result = new(CaseQueueAccess.Allowed, [Row("02", 8), Row("01", 7)]);
+        Assert.DoesNotContain((await Read()).Messages, item => item.Content == "first case");
+        turns[0] = turns[0] with { ToolTraceJson = EllaiToolTrace.SerializeFlattened([observation with { CaseListDigest = null }], false, []) };
+        Assert.DoesNotContain((await Read()).Messages, item => item.Content == "first case");
+    }
+
     private sealed class FakeIndex(EllaiExactMemoryReference? hit, bool fail = false) : IEllaiExactReferenceIndex
     {
         public int Reads { get; private set; }
