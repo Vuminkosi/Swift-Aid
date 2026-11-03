@@ -43,7 +43,9 @@ public sealed class EllaiKnowledgeSpecialist(IChatClient client, IEllaiFramework
             "Return an answer grounded in observed evidence; do not request actions or invent sources.",
             [new ChatMessage(ChatRole.User, task)], 512, isCurrent, invoke, usage, ct).ConfigureAwait(false);
         if (decision is null || decision.Kind != DecisionKind.Answer || decision.Claims.Count == 0 ||
-            decision.Claims.Any(claim => claim.Evidence.Count == 0))
+            decision.UiIntents.Count != 0 || decision.PlanProposal is not null ||
+            decision.Claims.Any(claim => claim.Kind is not (ClaimKind.Observed or ClaimKind.ProductFact) ||
+                claim.Evidence.Count == 0 || claim.Evidence.Any(reference => reference.SourceKind != "Documentation")))
             return new(EllaiSpecialistOutcome.Unverified, null);
 
         return new(EllaiSpecialistOutcome.Completed, decision);

@@ -23,7 +23,7 @@ public sealed class EllaiKnowledgeSpecialistTests
                 Assert.Equal(EllaiToolNames.DocsGet, request.ToolName);
                 Assert.DoesNotContain(EllaiToolNames.State, context.AllowedTools!);
                 return Task.FromResult(new EllaiToolResult(request.ToolName, true, null,
-                    [new EvidenceRef("Document", "safe", "v1", null, "proof-1")], "Observed.", 1, false));
+                    [new EvidenceRef("Documentation", "safe", "v1", null, "proof-1")], "Observed.", 1, false));
             }, default);
 
         Assert.Equal(EllaiSpecialistOutcome.Completed, result.Outcome);
@@ -61,12 +61,50 @@ public sealed class EllaiKnowledgeSpecialistTests
         Assert.Equal(0, model.Calls);
     }
 
+    [Fact]
+    public async Task NonDocumentationEvidenceCannotProduceKnowledgeResult()
+    {
+        using var model = new DocumentationClient("CaseQueue");
+        var specialist = new EllaiKnowledgeSpecialist(model);
+        var result = await specialist.RunAsync("question", "policy", true, Context(), Usage(),
+            _ => Task.FromResult(true), (_, request, _) => Task.FromResult(new EllaiToolResult(request.ToolName,
+                true, null, [new EvidenceRef("CaseQueue", "safe", "v1", null, "proof-1")], "Observed.", 1, false)), default);
+        Assert.Equal(EllaiSpecialistOutcome.Unverified, result.Outcome);
+        Assert.Null(result.Decision);
+    }
+
+    [Fact]
+    public async Task FrameworkSpecialistUsesRealBrokerConsentAndDocumentRevision()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"ellai-specialist-{Guid.NewGuid():N}.md");
+        try
+        {
+            await File.WriteAllTextAsync(path, "# Reference\n\n**Status: Approved.**\n\n## 1. Safe\n\nObserved.\n");
+            var docs = new EllaiTechnicalDocs(path);
+            var consent = new EllaiConsentService();
+            consent.Grant("session", EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+                EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromMinutes(5));
+            var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, docs);
+            using var model = new DocumentationClient("Documentation", "1-safe", docs.Revision(), "1-safe");
+            var parent = Context() with { DataClassification = EllaiProcessingClassification.SyntheticDemo };
+            var result = await new EllaiKnowledgeSpecialist(model).RunAsync("Read the reference", "Trusted policy",
+                true, parent, Usage(), _ => Task.FromResult(true), broker.InvokeAsync, default);
+            Assert.Equal(EllaiSpecialistOutcome.Completed, result.Outcome);
+            Assert.Equal(docs.Revision(), Assert.Single(Assert.Single(result.Decision!.Claims).Evidence).Version);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     private static EllaiToolContext Context() => new("session", "epoch", "public.product-help", null, 3, true,
         AllowedTools: new HashSet<string> { EllaiToolNames.DocsGet, EllaiToolNames.State });
 
     private static EllaiFrameworkUsage Usage() => new("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
 
-    private sealed class DocumentationClient : IChatClient
+    private sealed class DocumentationClient(string sourceKind = "Documentation", string section = "safe",
+        string version = "v1", string evidenceId = "proof-1") : IChatClient
     {
         public int Calls { get; private set; }
         public string[] AvailableTools { get; private set; } = [];
@@ -78,13 +116,16 @@ public sealed class EllaiKnowledgeSpecialistTests
             {
                 AvailableTools = options!.Tools!.OfType<AIFunctionDeclaration>().Select(tool => tool.Name).ToArray();
                 return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
-                    [new FunctionCallContent("lookup", EllaiToolNames.DocsGet, new Dictionary<string, object?> { ["section"] = "safe" })])));
+                    [new FunctionCallContent("lookup", EllaiToolNames.DocsGet, new Dictionary<string, object?> { ["section"] = section })])));
             }
             return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, """
                 {"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Observed.","spokenText":"Observed.",
-                "claims":[{"claimId":"c1","text":"Observed.","kind":"Observed","evidence":[{"sourceKind":"Document","resourceId":"safe","version":"v1","fieldPath":null,"evidenceId":"proof-1"}]}],
+                "claims":[{"claimId":"c1","text":"Observed.","kind":"Observed","evidence":[{"sourceKind":"SOURCE_KIND","resourceId":"SECTION_ID","version":"VERSION_ID","fieldPath":null,"evidenceId":"EVIDENCE_ID"}]}],
                 "questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}
-                """)));
+                """.Replace("SOURCE_KIND", sourceKind, StringComparison.Ordinal)
+                    .Replace("SECTION_ID", section, StringComparison.Ordinal)
+                    .Replace("VERSION_ID", version, StringComparison.Ordinal)
+                    .Replace("EVIDENCE_ID", evidenceId, StringComparison.Ordinal))));
         }
         public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
             ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
