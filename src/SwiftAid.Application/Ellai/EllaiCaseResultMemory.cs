@@ -21,6 +21,8 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
     {
         ct.ThrowIfCancellationRequested();
         if (context.Actor is null) return;
+        if (items.Any(item => item.CaseId == Guid.Empty) || items.Select(item => item.CaseId).Distinct().Count() != items.Count)
+            throw new ArgumentException("Case result references must be distinct and nonempty.", nameof(items));
         var snapshot = new Snapshot(context.Actor.ActorId, context.ScopeEpoch, DateTimeOffset.UtcNow.AddHours(24),
             items.Take(20).Select(item => new CaseReference(item.CaseId, item.AggregateVersion)).ToArray());
         await topics.TrackAsync(context.SessionId, TopicTitle, [Reference],
@@ -72,7 +74,8 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
         catch (JsonException) { return Unavailable(); }
         if (snapshot is null || snapshot.ActorId != context.Actor.ActorId || snapshot.ScopeEpoch != context.ScopeEpoch
             || snapshot.ExpiresAtUtc <= DateTimeOffset.UtcNow || snapshot.Cases is null || snapshot.Cases.Count > 20
-            || snapshot.Cases.Any(item => item is null || item.Id == Guid.Empty))
+            || snapshot.Cases.Any(item => item is null || item.Id == Guid.Empty)
+            || snapshot.Cases.Select(item => item.Id).Distinct().Count() != snapshot.Cases.Count)
             return Unavailable();
         if (snapshot.Cases.Count == 0)
             return new EllaiToolResult(EllaiToolNames.Topic, true, null, [], "The last retained case result set was empty.", 0, false)
@@ -81,7 +84,9 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
         var current = await queue.GetMineAsync(context.Actor, 20,
             new CaseQueueFilter(CaseIds: snapshot.Cases.Select(item => item.Id).ToArray()), ct).ConfigureAwait(false);
         ct.ThrowIfCancellationRequested();
-        if (current.Access != CaseQueueAccess.Allowed) return Unavailable();
+        if (current.Access != CaseQueueAccess.Allowed || current.NextCursor is not null) return Unavailable();
+        if (current.Items.Any(item => item.CaseId == Guid.Empty) ||
+            current.Items.Select(item => item.CaseId).Distinct().Count() != current.Items.Count) return Unavailable();
         var rows = snapshot.Cases.Join(current.Items, old => old.Id, row => row.CaseId,
             (old, row) => (old, row)).ToArray();
         var evidence = rows.Select(pair => new EvidenceRef("CaseQueue", pair.row.CaseId.ToString("D"),

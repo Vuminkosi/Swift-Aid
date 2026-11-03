@@ -154,7 +154,7 @@ public static class EllaiAuthorizedConversationContext
                         ct.ThrowIfCancellationRequested();
                         var items = current.Items.Take(query.Limit).ToArray();
                         if (current.Access != CaseQueueAccess.Allowed || current.NextCursor is not null ||
-                            items.Length >= query.Limit || items.Length != observation.Evidence.Count ||
+                            current.Items.Count > query.Limit || items.Length != observation.Evidence.Count ||
                             items.Where((item, index) => observation.Evidence[index] != new EvidenceRef("CaseQueue",
                                 item.CaseId.ToString("D"), item.AggregateVersion.ToString(CultureInfo.InvariantCulture), null,
                                 item.CaseId.ToString("D"))).Any())

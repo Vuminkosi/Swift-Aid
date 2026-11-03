@@ -319,6 +319,42 @@ public sealed class EllaiLiveQueueReadTests
     }
 
     [Fact]
+    public async Task DuplicateQueueRowsAreNotReportedAsDistinctCases()
+    {
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [Row("01", 7), Row("01", 7)]) };
+        var result = await GrantedBroker(queue, new EllaiTopicService()).InvokeAsync(Context with { Actor = TestActor() },
+            new(EllaiToolNames.State, Args(("projection", "queue"))), CancellationToken.None);
+        Assert.False(result.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, result.ReasonCode);
+        Assert.Empty(result.Evidence);
+    }
+
+    [Fact]
+    public async Task DuplicateStoredOrReauthorizedReferencesCannotInflateRecall()
+    {
+        var topics = new EllaiTopicService();
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [Row("01", 7)]) };
+        var context = Context with { Actor = TestActor() };
+        var row = Row("01", 7);
+        var snapshot = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            ActorId = context.Actor!.ActorId, context.ScopeEpoch, ExpiresAtUtc = DateTimeOffset.UtcNow.AddHours(1),
+            Cases = new[] { new { Id = row.CaseId, Version = 7L }, new { Id = row.CaseId, Version = 7L } }
+        });
+        await topics.TrackAsync(context.SessionId, EllaiCaseResultMemory.TopicTitle, ["case-results"], snapshot, "case-results/1");
+        var memory = new EllaiCaseResultMemory(topics, queue);
+        Assert.False((await memory.RecallAsync(context, default)).Allowed);
+        Assert.Null(queue.LastActor);
+
+        await memory.RememberAsync(context, [row], default);
+        queue.Result = new(CaseQueueAccess.Allowed, [row, row]);
+        var recalled = await memory.RecallAsync(context, default);
+        Assert.False(recalled.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, recalled.ReasonCode);
+        Assert.Empty(recalled.Evidence);
+    }
+
+    [Fact]
     public async Task ResultRecallReauthorizesIdsAndUsesCurrentVersions()
     {
         var topics = new EllaiTopicService();
@@ -432,6 +468,23 @@ public sealed class EllaiLiveQueueReadTests
         await memory.RememberAsync(context, queue.Result.Items, CancellationToken.None);
         queue.Result = new(CaseQueueAccess.Unavailable, []);
         var recalled = await memory.RecallAsync(context, CancellationToken.None);
+        Assert.False(recalled.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, recalled.ReasonCode);
+        Assert.Empty(recalled.Evidence);
+    }
+
+    [Fact]
+    public async Task ResultRecallRejectsAnIncompleteAuthorizationPage()
+    {
+        var topics = new EllaiTopicService();
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [Row("01", 7), Row("02", 8)]) };
+        var context = Context with { Actor = TestActor() };
+        var memory = new EllaiCaseResultMemory(topics, queue);
+        await memory.RememberAsync(context, queue.Result.Items, CancellationToken.None);
+
+        queue.Result = new(CaseQueueAccess.Allowed, [Row("01", 7)], "next-page");
+        var recalled = await memory.RecallAsync(context, CancellationToken.None);
+
         Assert.False(recalled.Allowed);
         Assert.Equal(EllaiToolReasonCodes.Unavailable, recalled.ReasonCode);
         Assert.Empty(recalled.Evidence);
@@ -638,5 +691,20 @@ public sealed class EllaiLiveQueueReadTests
         var omitted = await EllaiAuthorizedConversationContext.BuildAsync([history[0] with { ToolTraceJson = oldTrace }, history[1]],
             "current", TestActor(), null, CancellationToken.None);
         Assert.DoesNotContain(omitted.Messages, item => item.Content == "The feature projection was checked.");
+    }
+
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("next-page", true)]
+    public async Task QueueProjectionUsesContinuationToIdentifyAnIncompleteFullPage(string? cursor, bool truncated)
+    {
+        var rows = Enumerable.Range(1, 5).Select(i => Row(i.ToString("D2"), i)).ToArray();
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, rows, cursor) };
+        var result = await GrantedBroker(queue).InvokeAsync(Context with { Actor = TestActor() },
+            new(EllaiToolNames.State, Args(("projection", "queue"), ("limit", "5"))), CancellationToken.None);
+
+        Assert.True(result.Allowed);
+        Assert.Equal(5, result.ItemCount);
+        Assert.Equal(truncated, result.Truncated);
     }
 }

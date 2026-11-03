@@ -778,6 +778,23 @@ public sealed class EllaiAuthorizedConversationContextTests
     }
 
     [Fact]
+    public async Task CompleteCaseListAtTheRequestedLimitRemainsAvailableInHistory()
+    {
+        var id = Guid.NewGuid();
+        var evidence = new EvidenceRef("CaseQueue", id.ToString("D"), "3", null, id.ToString("D"));
+        var query = new EllaiCaseListQuery(1, "ZW", "Reported", "latest-reported");
+        var trace = EllaiToolTrace.SerializeFlattened([new(EllaiToolNames.State, true, "Ok", [evidence], false, CaseListQuery: query)], false, []);
+        var turns = new[] { Turn("prior", 1, "list cases", "One case was listed.", trace), Turn("current", 2, "what now?", null, null) };
+        var queue = new ListQueue(id);
+
+        var unchanged = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), queue, default);
+        Assert.Contains(unchanged.Messages, item => item.Content == "One case was listed.");
+        queue.IncludeNewCase = true;
+        var changed = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), queue, default);
+        Assert.DoesNotContain(changed.Messages, item => item.Content == "One case was listed.");
+    }
+
+    [Fact]
     public async Task DuplicateCaseEvidenceIsReadOncePerPassAndRecheckedOnTheNextPass()
     {
         var id = Guid.NewGuid();

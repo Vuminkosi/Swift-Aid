@@ -719,6 +719,8 @@ public sealed class EllaiToolBroker
         }
 
         var items = result.Items.Take(limit).ToList();
+        if (items.Any(item => item.CaseId == Guid.Empty) || items.Select(item => item.CaseId).Distinct().Count() != items.Count)
+            return Deny(request.ToolName, "The work queue returned an inconsistent result. Try again.", EllaiToolReasonCodes.Unavailable);
         var recallNotice = "";
         if (_topics is not null)
         {
@@ -740,7 +742,7 @@ public sealed class EllaiToolBroker
         return new EllaiToolResult(request.ToolName, true, null, evidence,
             "Owned cases only; review status is not supplied." + recallNotice + "\n" +
             (items.Count == 0 ? "The permitted work queue is empty." : string.Join("\n", lines)),
-            items.Count, items.Count >= limit, EllaiToolReasonCodes.Ok);
+            items.Count, result.NextCursor is not null || result.Items.Count > limit, EllaiToolReasonCodes.Ok);
     }
 
     /// <summary>Measures the model-visible envelope exactly as serialized for
