@@ -10,6 +10,36 @@ namespace SwiftAid.Client.Tests;
 public sealed class GuestDraftAudioRetakePersistenceTests
 {
     [Fact]
+    public async Task EditableRevisionAndCompletionPreserveExistingOriginalAudio()
+    {
+        using var root = new TemporaryRoot();
+        var keys = new TestInstallKeyStore();
+        var persistence = new EncryptedGuestSubmissionStore(root.Path, keys);
+        var audio = new EncryptedGuestAudioStore(root.Path, keys, persistence);
+        var drafts = new GuestDraftStore(persistence, audioStore: audio);
+        var attachmentId = Guid.NewGuid();
+        var initial = CreateSubmission(attachmentId);
+        var created = await drafts.CreateDraftAsync(initial);
+        byte[] original = [0x52, 0x49, 0x46, 0x46, 0x01, 0x02];
+        await audio.SaveOriginalAsync(created.ClientSubmissionId, attachmentId, "audio/wav", 900, new MemoryStream(original));
+        var carrier = initial with { OriginalAudioAttachmentIds = [] };
+        var snapshot = new GuestDraftFormSnapshot(1, "{\"occurrenceTime\":\"unfinished\"}");
+
+        var editable = await drafts.CreateEditableRevisionAsync(created.ClientSubmissionId, carrier, snapshot);
+        var editableRecord = (await persistence.GetAsync(editable.ClientSubmissionId, default))!;
+        Assert.Contains(attachmentId, editableRecord.Submission.OriginalAudioAttachmentIds);
+        Assert.Contains(editableRecord.AudioAssets!, item => item.AttachmentId == attachmentId);
+        Assert.Equal(original, await audio.ReadOriginalAsync(editable.ClientSubmissionId, attachmentId));
+        Assert.Equal(snapshot, (await drafts.GetEditableDraftAsync(editable.ClientSubmissionId))!.FormSnapshot);
+
+        var completed = await drafts.CompleteEditableDraftAsync(editable.ClientSubmissionId, carrier);
+        var completedRecord = (await persistence.GetAsync(completed.ClientSubmissionId, default))!;
+        Assert.Contains(attachmentId, completedRecord.Submission.OriginalAudioAttachmentIds);
+        Assert.Contains(completedRecord.AudioAssets!, item => item.AttachmentId == attachmentId);
+        Assert.Equal(original, await audio.ReadOriginalAsync(completed.ClientSubmissionId, attachmentId));
+    }
+
+    [Fact]
     public async Task RetakePersistsSupersededAndReplacementRevisionsWithCorrectPayloadHashes()
     {
         using var root = new TemporaryRoot();
