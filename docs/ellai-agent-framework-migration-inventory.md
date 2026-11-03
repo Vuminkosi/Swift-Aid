@@ -389,6 +389,16 @@ FullyQualifiedName~EllaiVoiceTranscriptionServiceTests --verbosity quiet`.
 This is not live transcription, actual Kokoro inference, browser playback,
 device capture or a deployed Gateway check.
 
+`RecordedVoiceFrameworkResponseUsesLiveSpeech` passed 1/1 against the local
+`swiftaid/ellai-tts:kokoro-mms-local` service through a task-owned loopback
+proxy. The framework worker's synthetic response was synthesized with the
+`af_heart` profile and returned nonzero PCM; ASR, model and session storage
+were synthetic/in-memory. The companion synthetic test also passed (2/2
+together). Use `SWIFTAID_TEST_LIVE_SPEECH=1`, the loopback speech endpoint and
+its internal key with the integration test filter for this test. Credentials
+were supplied only in process. This does not verify live transcription,
+audio quality or browser/device playback.
+
 The analytics acceptance requirement previously had no complete aggregate
 tool: `ellai_state` returns a bounded case page, which is not a total. The new
 `ellai_owned_case_count` adapts the existing `IDashboardAggregateQuery` for a

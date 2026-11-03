@@ -18,13 +18,28 @@ using SwiftAid.Intelligence.Meta;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Runtime.CompilerServices;
+using Microsoft.Extensions.Configuration;
 
 namespace SwiftAid.Integration.Tests;
 
 public sealed class EllaiVoiceTranscriptionServiceTests
 {
     [Fact]
-    public async Task RecordedVoiceFlowsThroughFrameworkWorkerToPreparedSpeech()
+    public Task RecordedVoiceFlowsThroughFrameworkWorkerToPreparedSpeech() => RunRecordedFrameworkVoiceAsync(false);
+
+    private sealed class LiveSpeechFactAttribute : FactAttribute
+    {
+        public LiveSpeechFactAttribute()
+        {
+            if (Environment.GetEnvironmentVariable("SWIFTAID_TEST_LIVE_SPEECH") != "1")
+                Skip = "Requires an explicitly configured local speech fixture.";
+        }
+    }
+
+    [LiveSpeechFact]
+    public Task RecordedVoiceFrameworkResponseUsesLiveSpeech() => RunRecordedFrameworkVoiceAsync(true);
+
+    private static async Task RunRecordedFrameworkVoiceAsync(bool liveSpeech)
     {
         const string sessionId = "framework-recorded-voice";
         var options = new EllaiOptions { Enabled = true, ApiKey = "synthetic", AsrModel = "fixture",
@@ -35,7 +50,17 @@ public sealed class EllaiVoiceTranscriptionServiceTests
         await store.CreateAsync(new(sessionId, EllaiMode.Ask, "Active", 1, 1, 1, 1, 0, 12,
             "voice-owner", "ellai-help-identity-epoch-1", null, null, DateTimeOffset.UtcNow), default);
         var consent = new EllaiConsentService();
-        var speech = new FixtureSpeech();
+        var fixtureSpeech = new FixtureSpeech();
+        using var speechHttp = new HttpClient();
+        var endpoint = Environment.GetEnvironmentVariable("SWIFTAID_TEST_SPEECH_ENDPOINT");
+        if (liveSpeech && (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri) || !uri.IsLoopback))
+            throw new InvalidOperationException("Live speech fixture requires a loopback endpoint.");
+        var settings = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["EllaiTts:Endpoint"] = endpoint,
+            ["EllaiTts:InternalKey"] = Environment.GetEnvironmentVariable("SWIFTAID_TEST_SPEECH_KEY")
+        }).Build();
+        IEllaiSpeechSynthesisClient speech = liveSpeech ? new EllaiSpeechSynthesisClient(speechHttp, settings) : fixtureSpeech;
         using var prepared = new EllaiPreparedResponseAudio(speech, NullLogger<EllaiPreparedResponseAudio>.Instance);
         await prepared.StartAsync(default);
         var responses = new EllaiSessionResponseStore(audioPreparation: prepared);
@@ -64,7 +89,7 @@ public sealed class EllaiVoiceTranscriptionServiceTests
             var result = await voice.TranscribeAsync(sessionId, EllaiVoiceCaptureMode.Recorded, audio, audio.Length,
                 default, "fixture-capture", submissionPrincipal: principal);
             Assert.Equal(EllaiClientOperationStatus.Accepted, result!.Admission!.Status);
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(liveSpeech ? 90 : 10));
             EllaiConversationTurn turn;
             do
             {
@@ -76,8 +101,18 @@ public sealed class EllaiVoiceTranscriptionServiceTests
             var chunk = Assert.Single(responses.ReadSince(sessionId, 0).Responses,
                 item => !item.IsFinal && item.Progress is null);
             using var pcm = await prepared.OpenAsync(sessionId, chunk.Sequence, timeout.Token);
-            Assert.Equal(new byte[] { 0, 0, 0, 0 }, await pcm.Content.ReadAsByteArrayAsync(timeout.Token));
-            Assert.Equal("Synthetic voice answer.", speech.Text);
+            var bytes = await pcm.Content.ReadAsByteArrayAsync(timeout.Token);
+            if (liveSpeech)
+            {
+                Assert.True(bytes.Length > 100);
+                Assert.Contains(bytes, value => value != 0);
+                Assert.Equal("af_heart", Assert.Single(pcm.Headers.GetValues("X-SwiftAid-Voice-Id")));
+            }
+            else
+            {
+                Assert.Equal(new byte[] { 0, 0, 0, 0 }, bytes);
+                Assert.Equal("Synthetic voice answer.", fixtureSpeech.Text);
+            }
         }
         finally
         {
