@@ -97,12 +97,6 @@ public static class CommunitySessionSharing
         var builder = new StringBuilder(session.Summary);
         builder.Append("\\nPresenter: ").Append(session.Presenter);
         builder.Append("\\nLanguage: ").Append(session.Language);
-        if (session.Materials.Count > 0)
-        {
-            builder.Append("\\nMaterials: ");
-            builder.Append(string.Join(", ", session.Materials.Select(material => $"{material.MaterialId} v{material.SourceVersion}")));
-        }
-
         if (session.Status == CommunitySessionStatus.Cancelled)
         {
             builder.Append("\\nStatus: cancelled. Reason: ").Append(session.CancellationReason ?? "not recorded");

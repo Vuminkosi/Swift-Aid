@@ -136,6 +136,7 @@ public sealed class CommunitySessionTests
         Assert.Contains("SEQUENCE:0", first);
         Assert.Contains("STATUS:CONFIRMED", first);
         Assert.DoesNotContain("attendee", first, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(session.Materials[0].MaterialId, first, StringComparison.Ordinal);
 
         session.UpdateDetails(
             session.Title, session.Summary, session.AudienceDescription,
