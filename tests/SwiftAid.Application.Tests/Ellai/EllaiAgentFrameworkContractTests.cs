@@ -468,6 +468,52 @@ public sealed class EllaiAgentFrameworkContractTests
     }
 
     [Fact]
+    public async Task InFlightFrameworkStreamReservesBudgetAndCancellationReleasesIt()
+    {
+        using var client = new BlockingStreamingClient();
+        var ledger = new EllaiUsageLedger(sessionTokenBudget: 15_000);
+        var store = new InMemoryEllaiUsageStore();
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal));
+        using var cancellation = new CancellationTokenSource();
+        Task<EllaiDecision?> RunAsync(CancellationToken token) => new EllaiFrameworkAgent(client).RunAsync(
+            context, "policy", [new ChatMessage(ChatRole.User, "hello")], 10_000,
+            _ => Task.FromResult(true), (_, _, _) => throw new InvalidOperationException(),
+            new EllaiFrameworkUsage("session", ledger, store), token, (_, _) => ValueTask.CompletedTask);
+
+        var first = RunAsync(cancellation.Token);
+        await client.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var failure = await Assert.ThrowsAsync<EllaiFrameworkFailureException>(() => RunAsync(default));
+        Assert.Equal(EllaiToolReasonCodes.BudgetExceeded, failure.Code);
+        Assert.Equal(1, client.Calls);
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first.WaitAsync(TimeSpan.FromSeconds(5)));
+        using var reservation = ledger.TryBeginModelCall("session", 15_000);
+        Assert.NotNull(reservation);
+        Assert.Equal(0, (await store.TotalsAsync("session", default)).Calls);
+    }
+
+    [Fact]
+    public async Task ProviderUsageIsPersistedWhenCallerCancelsAfterResponse()
+    {
+        using var cancellation = new CancellationTokenSource();
+        using var client = new CancelAfterResponseClient(cancellation);
+        var ledger = new EllaiUsageLedger();
+        var store = new CancellationAwareUsageStore();
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            new EllaiFrameworkAgent(client).RunAsync(context, "policy",
+                [new ChatMessage(ChatRole.User, "hello")], 100, _ => Task.FromResult(true),
+                (_, _, _) => throw new InvalidOperationException(), new EllaiFrameworkUsage("session", ledger, store),
+                cancellation.Token));
+        var totals = await store.TotalsAsync("session", default);
+        Assert.Equal(1, totals.Calls);
+        Assert.Equal(7, totals.PromptTokens);
+        Assert.Equal(3, totals.CompletionTokens);
+    }
+
+    [Fact]
     public async Task ProviderFailureReleasesFrameworkBudgetReservation()
     {
         using var client = new FailingClient();
@@ -730,6 +776,55 @@ public sealed class EllaiAgentFrameworkContractTests
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
         public void Dispose() { }
+    }
+
+    private sealed class BlockingStreamingClient : IChatClient
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int Calls { get; private set; }
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            Started.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            yield break;
+        }
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    private sealed class CancelAfterResponseClient(CancellationTokenSource cancellation) : IChatClient
+    {
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            cancellation.Cancel();
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, ValidDecision))
+            {
+                Usage = new UsageDetails { InputTokenCount = 7, OutputTokenCount = 3 }
+            });
+        }
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    private sealed class CancellationAwareUsageStore : IEllaiUsageStore
+    {
+        private readonly InMemoryEllaiUsageStore _inner = new();
+        public Task RecordAsync(StoredUsageSample sample, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            return _inner.RecordAsync(sample, ct);
+        }
+        public Task<EllaiUsageTotals> TotalsAsync(string sessionId, CancellationToken ct) => _inner.TotalsAsync(sessionId, ct);
+        public Task<decimal> SpendForAsync(string sessionId, CancellationToken ct) => _inner.SpendForAsync(sessionId, ct);
+        public Task<decimal> TotalSpendAsync(CancellationToken ct) => _inner.TotalSpendAsync(ct);
     }
 
     private sealed class DependentToolClient(bool citeRealEvidence) : IChatClient

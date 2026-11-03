@@ -231,7 +231,10 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
             try { response = await base.GetResponseAsync(boundedMessages, options, cancellationToken).ConfigureAwait(false); }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception error) when (error is not OutOfMemoryException) { throw new EllaiFrameworkFailureException("ProviderUnavailable"); }
-            await usage.RecordAsync(response, cancellationToken).ConfigureAwait(false);
+            // Once the provider has responded, retain its reported usage even if
+            // the caller cancels before the durable usage write completes.
+            await usage.RecordAsync(response, CancellationToken.None).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
             ValidateToolCalls(response.Messages.SelectMany(message => message.Contents), options);
             _lastText.Clear().Append(response.Text);
             return response;

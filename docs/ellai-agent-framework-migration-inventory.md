@@ -374,6 +374,14 @@ still cannot establish actual billable usage. Focused ledger/framework tests
 passed 49/49, including simultaneous reservations and release after provider
 failure. Registration, worker and guest-route tests passed 27 with three
 opt-in tests skipped.
+An additional framework streaming test holds a model call open, confirms a
+second call cannot reserve the same session capacity, and verifies cancellation
+releases the reservation. When a non-streaming provider returns usage after the
+caller cancels, the framework now records that usage with a non-cancelled token
+before propagating cancellation, matching its streaming usage-write behavior.
+The focused ledger and framework suite passed 48/48. An interrupted stream with
+no provider usage still has unknown actual cost; the cancellation test does
+not establish real-provider billing or distributed coordination.
 
 Framework tool execution now requests cancellation after 30 seconds and rejects results
 that arrive after that deadline as unavailable. This new bound addresses the
