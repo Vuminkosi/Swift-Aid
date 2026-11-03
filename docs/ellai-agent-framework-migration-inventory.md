@@ -61,6 +61,22 @@ An additional runner-level synthetic case test confirms that removing topic
 tool admission excludes the prior case answer before the case queue is queried;
 the focused history-authorization suite passed 47/47.
 
+On 2026-11-04 at revision `28e8b42d`, the framework case-recall and authorized
+count fixtures were rerun with synthetic records in disposable PostgreSQL and
+Qdrant. A combined three-test run failed 3/3: the live worker logged
+`InvalidDecision` on its first turn; the other two failure details were lost
+to output truncation. The same three cases were then run individually with
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-build --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~<test-name>' --logger 'console;verbosity=normal'` and each
+passed 1/1: `FrameworkWorkerRecallsAuthorizedCaseFromPostgresAndQdrant`,
+`LiveMuseWorkerRecallsAuthorizedCaseFromPostgresAndQdrant`, and
+`LiveMuseExecutorUsesAuthorizedCountForOrdinaryQuestion`. The live recall
+follow-up also exercised the index-failure fallback and expired-grant path.
+Both stores contained zero Ellai sessions or test collections after cleanup.
+The individual successes do not explain the combined failures or establish
+reliable live-provider behavior, deployed Gateway routes or real-record access.
+
 ## Provider observations and open checks
 
 `EllaiReasoningRouter` selects Meta, Ollama or an explicitly enabled serverless
