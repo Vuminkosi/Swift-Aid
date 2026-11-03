@@ -1,5 +1,6 @@
 using System.Reflection;
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Routing;
 using SwiftAid.Contracts.Sessions;
 using SwiftAid.UI.Components.Sessions;
 
@@ -7,6 +8,47 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed class SessionEditorTimeTests
 {
+    [Fact]
+    public async Task NavigationIsStoppedWhileDraftHasUnsavedInput()
+    {
+        var editor = new SessionEditor();
+        Invoke(editor, "OnParametersSet");
+        Set(editor, "_title", "Draft in progress");
+        var navigation = new TestNavigationManager();
+        using var registration = navigation.RegisterLocationChangingHandler(context =>
+        {
+            typeof(SessionEditor).GetMethod("ConfirmLeaveAsync", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(editor, [context]);
+            return ValueTask.CompletedTask;
+        });
+
+        Assert.False(await navigation.CanNavigateAsync("https://example.test/other"));
+        Assert.True((bool)typeof(SessionEditor).GetField("_confirmingLeave", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(editor)!);
+        Invoke(editor, "StayOnEditor");
+        Assert.False((bool)typeof(SessionEditor).GetField("_confirmingLeave", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(editor)!);
+        Assert.False(await navigation.CanNavigateAsync("https://example.test/other"));
+        typeof(SessionEditor).GetProperty("Navigation", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(editor, navigation);
+        Invoke(editor, "LeaveEditor");
+        Assert.Equal("https://example.test/other", navigation.RequestedUri);
+        Assert.True(await navigation.CanNavigateAsync("https://example.test/other"));
+        Assert.False(await navigation.CanNavigateAsync("https://example.test/another"));
+    }
+
+    [Fact]
+    public void NewSessionTracksUnsavedDraftInput()
+    {
+        var editor = new SessionEditor();
+        Invoke(editor, "OnParametersSet");
+        var pending = typeof(SessionEditor).GetProperty("HasPendingInput", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        Assert.False((bool)pending.GetValue(editor)!);
+
+        Set(editor, "_title", "Draft in progress");
+        Assert.True((bool)pending.GetValue(editor)!);
+        Set(editor, "_title", string.Empty);
+        Set(editor, "_reason", "Planning notes");
+        Assert.True((bool)pending.GetValue(editor)!);
+    }
+
     [Fact]
     public async Task CancellationRequiresItsReasonsButNotEditableSessionFields()
     {
@@ -140,4 +182,16 @@ public sealed class SessionEditorTimeTests
 
     private static object? Invoke(SessionEditor editor, string name) =>
         typeof(SessionEditor).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(editor, null);
+
+    private sealed class TestNavigationManager : NavigationManager
+    {
+        public TestNavigationManager() => Initialize("https://example.test/", "https://example.test/sessions");
+        public string? RequestedUri { get; private set; }
+
+        public ValueTask<bool> CanNavigateAsync(string target) => NotifyLocationChangingAsync(target, null, false);
+
+        protected override void SetNavigationLockState(bool value) { }
+
+        protected override void NavigateToCore(string uri, bool forceLoad) => RequestedUri = uri;
+    }
 }

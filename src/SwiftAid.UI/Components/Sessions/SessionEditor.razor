@@ -1,6 +1,19 @@
 @using SwiftAid.Contracts.Sessions
+@using Microsoft.AspNetCore.Components.Routing
+@inject NavigationManager Navigation
+
+<NavigationLock OnBeforeInternalNavigation="ConfirmLeaveAsync" ConfirmExternalNavigation="@HasPendingInput" />
 
 <section class="session-editor" aria-label="Community session editor">
+    @if (_confirmingLeave)
+    {
+        <MudPaper Class="pa-4 mb-4" Elevation="0" role="alertdialog" aria-modal="true" aria-label="Unsaved session changes">
+            <MudText Typo="Typo.subtitle1">Leave without saving your session changes?</MudText>
+            <MudText Typo="Typo.body2">Your unsaved entries will be lost.</MudText>
+            <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="StayOnEditor">Stay on this page</MudButton>
+            <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="LeaveEditor">Leave without saving</MudButton>
+        </MudPaper>
+    }
     <MudText Typo="Typo.h6" HtmlTag="h2">@(IsNew ? "Plan a new community session" : $"Edit community session")</MudText>
 
     @if (!IsNew)
@@ -32,7 +45,7 @@
     @if (HasUnsavedChanges)
     {
         <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status" Class="mt-2">
-            You have unsaved changes. Save them before recording a review or publishing the schedule.
+            You have unsaved changes.@if (!IsNew) { <span> Save them before recording a review or publishing the schedule.</span> }
         </MudAlert>
     }
 
@@ -291,12 +304,17 @@
     private Guid? _loadedForSessionId;
     private string?[]? _savedFields;
     private bool _storedTimeZoneUnavailable;
+    private bool _confirmingLeave;
+    private string? _approvedLocation;
+    private string? _pendingLocation;
     private readonly Dictionary<string, string> _errors = new(StringComparer.Ordinal);
 
     private bool IsNew => SessionId is null;
     private bool IsScheduled => string.Equals(Status, "Scheduled", StringComparison.OrdinalIgnoreCase);
     private bool IsDraft => string.Equals(Status, "Draft", StringComparison.OrdinalIgnoreCase);
-    private bool HasUnsavedChanges => !IsNew && _savedFields is not null && !CaptureFields().SequenceEqual(_savedFields);
+    private bool HasUnsavedChanges => _savedFields is not null && !CaptureFields().SequenceEqual(_savedFields);
+    private bool HasPendingInput => HasUnsavedChanges || !string.IsNullOrWhiteSpace(_reason) ||
+        !string.IsNullOrWhiteSpace(_cancellationReason) || _acknowledgeSelfReview;
     private bool HasCurrentCapabilities => ManagementCapabilities is { } capabilities &&
         capabilities.Matches(SessionId, IsNew ? null : ExpectedVersion, Status);
     private bool CanCreate => IsNew && HasCurrentCapabilities && ManagementCapabilities!.CanCreate;
@@ -322,6 +340,38 @@
         {
             _loadedForSessionId = null;
         }
+        else if (InitialSession is null && _savedFields is null)
+        {
+            _savedFields = CaptureFields();
+        }
+    }
+
+    private void ConfirmLeaveAsync(LocationChangingContext context)
+    {
+        if (_approvedLocation is { } approved)
+        {
+            _approvedLocation = null;
+            if (string.Equals(approved, context.TargetLocation, StringComparison.Ordinal)) return;
+        }
+        if (!HasPendingInput) return;
+        context.PreventNavigation();
+        _pendingLocation = context.TargetLocation;
+        _confirmingLeave = true;
+    }
+
+    private void StayOnEditor()
+    {
+        _confirmingLeave = false;
+        _pendingLocation = null;
+    }
+
+    private void LeaveEditor()
+    {
+        if (_pendingLocation is not { } target) return;
+        _confirmingLeave = false;
+        _pendingLocation = null;
+        _approvedLocation = target;
+        Navigation.NavigateTo(target);
     }
 
     private void Prefill(CommunitySessionView view)
