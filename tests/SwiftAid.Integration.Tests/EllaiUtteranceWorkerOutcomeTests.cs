@@ -1253,13 +1253,15 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
         await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 }, 1, "u-1",
             CancellationToken.None, EllaiUtteranceWorkEnvelope.Serialize(work, "u-1"));
         var consent = new EllaiConsentService();
-        using var client = new OutcomeChatClient(valid ? Answer : "{}", superseded ? async () =>
+        // Invalid JSON is retried under the configured advisory usage policy. An oversized
+        // response exercises the terminal-failure path without relying on a retry ceiling.
+        using var client = new OutcomeChatClient(valid ? Answer : new string('x', 512_001), superseded ? async () =>
         {
             await store.TryUpdateAsync(session with { SessionVersion = 3, InteractionEpoch = 2 },
                 2, CancellationToken.None);
         } : null);
         var loop = new EllaiFrameworkExecutor(client, new EllaiPromptBuilder("Synthetic test policy", "v-test"),
-            new EllaiToolBroker(new EllaiPolicyService(), consent), new EllaiUsageLedger(sessionTokenBudget: 10_000), new InMemoryEllaiUsageStore());
+            new EllaiToolBroker(new EllaiPolicyService(), consent), new EllaiUsageLedger(sessionTokenBudget: 10_000, enforceLimits: false), new InMemoryEllaiUsageStore());
         await using var services = new ServiceCollection()
             .AddSingleton<IEllaiSessionStore>(store).AddSingleton<IEllaiUtteranceOutboxStore>(store)
             .AddSingleton(responses).AddSingleton(consent).AddSingleton<IEllaiReasoningExecutor>(loop).BuildServiceProvider();
