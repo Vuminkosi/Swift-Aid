@@ -21,7 +21,7 @@ The cards are evidence about the named repositories, not legal advice or a grant
 
 - `docs/RIGHTS-REGISTER.md` still records unresolved creator/license/redistribution evidence for the owner-supplied brand icon and loader assets, health/veterinary source material, package transitive notices/SBOM, and Qdrant image.
 - No signed/recorded consent and provenance entry exists for any demo speaker recording. Source scripts are not consent evidence.
-- The checklist's 16 claimed source attachments remain unavailable, so the promised source-by-source rights comparison is incomplete.
+- The source set is available in `spec.md`, `implementation.md` and 25 Markdown files under `designs/`, as confirmed by the owner. Rights comparison remains incomplete because the creator/license/provenance evidence identified above is absent.
 - This review did not inspect all packages, source datasets, bundled media, every fixture value, downstream translations, or applicable jurisdictional terms.
 
 ## Checklist result
