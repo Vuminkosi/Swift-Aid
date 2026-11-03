@@ -321,12 +321,19 @@ public sealed class EllaiFrameworkAgent
             LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
             return null;
         }
-        if (onTextDelta is not null && streamedSegments.Count == 0 && !await PublishValidatedTextAsync(decision.DisplayText, onTextDelta, Current, ct).ConfigureAwait(false))
+        async Task<bool> PublicationCurrent(CancellationToken token)
+        {
+            if (!await Current(token).ConfigureAwait(false)) return false;
+            if (!streamSafeToolObservations && (revalidateStreamObservations is null ||
+                !await revalidateStreamObservations(token).ConfigureAwait(false))) return false;
+            return streamSafeToolObservations || await Current(token).ConfigureAwait(false);
+        }
+        if (onTextDelta is not null && streamedSegments.Count == 0 && !await PublishValidatedTextAsync(decision.DisplayText, onTextDelta, PublicationCurrent, ct).ConfigureAwait(false))
         {
             LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
             return null;
         }
-        if (!await Current(ct).ConfigureAwait(false))
+        if (!await PublicationCurrent(ct).ConfigureAwait(false))
         {
             LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
             return null;

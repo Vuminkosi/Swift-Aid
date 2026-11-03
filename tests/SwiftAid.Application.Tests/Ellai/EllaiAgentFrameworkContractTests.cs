@@ -1980,7 +1980,7 @@ public sealed class EllaiAgentFrameworkContractTests
             }
             if (omitSegment)
             {
-                yield return new ChatResponseUpdate(ChatRole.Assistant, ValidDecision);
+                yield return new ChatResponseUpdate(ChatRole.Assistant, finalDecision ?? ValidDecision);
                 yield break;
             }
             yield return new ChatResponseUpdate(ChatRole.Assistant, segmentPrefix ?? "{\"stream_segments\":[{\"text\":\"Done.\",\"claims\":[]}]");
@@ -1990,6 +1990,42 @@ public sealed class EllaiAgentFrameworkContractTests
         }
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
         public void Dispose() { }
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task BufferedPrivateAnswerRechecksAuthorityDuringPublication(int revokeAfterChunk)
+    {
+        const string answer = "First private sentence. Second private sentence.";
+        using var client = new PrivateSegmentStreamingClient(omitSegment: true,
+            finalDecision: ValidDecision.Replace("Done.", answer, StringComparison.Ordinal));
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string> { EllaiToolNames.State });
+        var agent = new EllaiFrameworkAgent(client);
+        var authorized = true;
+        var published = new List<string>();
+        var result = await agent.RunAsync(context, "Test instructions", [new ChatMessage(ChatRole.User, "test")], 100,
+            _ => Task.FromResult(true), (_, request, _) => Task.FromResult(new EllaiToolResult(request.ToolName,
+                true, null, [StreamEvidence], "Synthetic private observation.", 1, false)),
+            new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None,
+            onTextDelta: (text, _) =>
+            {
+                published.Add(text);
+                if (published.Count == revokeAfterChunk) authorized = false;
+                return ValueTask.CompletedTask;
+            },
+            revalidateStreamObservations: _ => Task.FromResult(authorized));
+
+        Assert.Equal(revokeAfterChunk == 0 ? 2 : revokeAfterChunk, published.Count);
+        Assert.Equal("First private sentence.", published[0]);
+        if (revokeAfterChunk == 0) Assert.Equal(answer, result?.DisplayText);
+        else
+        {
+            Assert.Null(result);
+            Assert.Equal(EllaiToolReasonCodes.DeniedByPolicy, agent.LastFailureCode);
+        }
     }
 
     [Theory]
