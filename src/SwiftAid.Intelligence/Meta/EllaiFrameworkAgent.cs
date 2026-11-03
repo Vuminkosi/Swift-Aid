@@ -11,6 +11,7 @@ namespace SwiftAid.Intelligence.Meta;
 public sealed class EllaiFrameworkAgent(IChatClient client)
 {
     private readonly IChatClient _client = client ?? throw new ArgumentNullException(nameof(client));
+    public int LastModelCallCount { get; private set; }
 
     public async Task<EllaiDecision?> RunAsync(
         EllaiToolContext context, string instructions, IReadOnlyList<ChatMessage> messages, int maxOutputTokens,
@@ -79,6 +80,7 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
                 }
             }
         }
+        LastModelCallCount = guardedClient.CallSequence;
         if (guard.FailureCode is not null || !await isCurrent(ct).ConfigureAwait(false)) return null;
 
         var decision = EllaiModelTurnParser.Parse(guardedClient.LastText).Turn?.FinalDecision;

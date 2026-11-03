@@ -15,6 +15,28 @@ public sealed class EllaiAgentFrameworkContractTests
         """;
 
     [Fact]
+    public async Task FrameworkExecutorUsesApplicationBoundaryAndPublishesToolActivity()
+    {
+        using var client = new ScriptedClient(EllaiToolNames.Now, "unused", "example", ValidDecision, noArguments: true);
+        var consent = new EllaiConsentService();
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), consent);
+        IEllaiReasoningExecutor executor = new EllaiFrameworkExecutor(client, new EllaiPromptBuilder("Policy text.", "test"),
+            broker, new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.Now });
+        var request = new EllaiLoopRequest(context, "time?", new EllaiRoleOverlay("ask", "help"), "clock", 100, "cycle", 1);
+        var events = new List<EllaiActivityEvent>();
+        var outcome = await executor.RunAsync(request, CancellationToken.None, onActivity: events.Add,
+            invokeToolAsync: (_, tool, _) => Task.FromResult(new EllaiToolResult(tool.ToolName, true, null, [], "observation", 1, false)));
+        Assert.True(outcome.Completed);
+        Assert.Equal("Done.", outcome.Decision?.DisplayText);
+        Assert.Equal(2, outcome.IterationsUsed);
+        Assert.Equal(1, outcome.ToolCallsUsed);
+        Assert.Contains(events, item => item.Kind == EllaiActivityKind.ToolStarted && item.ToolName == EllaiToolNames.Now);
+        Assert.Contains(events, item => item.Kind == EllaiActivityKind.CycleCompleted);
+    }
+
+    [Fact]
     public async Task FrameworkStreamingInvokesToolBeforeFinalDecision()
     {
         using var client = new ToolStreamingClient();

@@ -142,6 +142,12 @@ unknown-tool handling, durable sessions,
 streaming, timeout and audit integration remain incomplete. It currently
 creates a new framework session per invocation, so it is not yet the required
 durable conversation implementation.
+`EllaiFrameworkExecutor` implements the application execution boundary using
+the shared framework prompt, filtered conversation, tool guard and usage store.
+An in-process fixture verifies a successful tool call and activity event. It
+is not Gateway-registered: pending-progress parity, precise blocked failure
+codes, exception sanitization, unknown-tool handling, durable framework
+sessions and worker-level acceptance still require verification.
 Its non-streaming provider calls recheck the supplied currency callback and
 use `EllaiFrameworkUsage` to estimate the prompt and tool-schema budget against
 the existing ledger, then record provider usage through `IEllaiUsageStore`.
