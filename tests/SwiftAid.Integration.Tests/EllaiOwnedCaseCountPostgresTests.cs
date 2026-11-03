@@ -14,6 +14,45 @@ namespace SwiftAid.Integration.Tests;
 public sealed class EllaiOwnedCaseCountPostgresTests
 {
     [FrameworkPostgresFact]
+    public async Task FrameworkStopsCountPublicationWhenPostgresGrantExpiresAfterFirstChunk()
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
+        await using var db = fixture.CreateDbContext();
+        var unit = new PostgresCaseCommandUnitOfWork(db);
+        var query = new DashboardAggregateQuery(new PostgresDashboardAggregateStore(db),
+            new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(db, unit), new PostgresCaseAccessDescriptorStore(db, unit)),
+            unit, TimeProvider.System);
+        var context = new EllaiToolContext("count-publication-fixture", "scope", "cases", null, 4, true,
+            "consent/0", EllaiProcessingClassification.UserProvidedNonSensitive, fixture.CreateActor(),
+            new HashSet<string> { EllaiToolNames.OwnedCaseCount }, EllaiConsentPurposes.PublicProductHelp);
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService(), dashboard: query);
+        using var model = new CountClient();
+        var agent = new EllaiFrameworkAgent(model);
+        var observations = new List<EllaiToolResult>();
+        var chunks = new List<string>();
+        var decision = await agent.RunAsync(context, "Synthetic policy", [new ChatMessage(ChatRole.User, "Count my cases")], 200,
+            _ => Task.FromResult(true), async (toolContext, request, ct) =>
+            {
+                var result = await broker.InvokeAsync(toolContext, request, ct);
+                observations.Add(result);
+                return result;
+            }, new EllaiFrameworkUsage(context.SessionId, new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default,
+            onTextDelta: async (text, _) =>
+            {
+                chunks.Add(text);
+                if (chunks.Count == 1) await fixture.SetGrantExpiryAsync(DateTimeOffset.UtcNow.AddMinutes(-1));
+            });
+
+        Assert.Single(chunks);
+        Assert.Equal(3, observations.Count);
+        Assert.StartsWith("2 managed case(s)", chunks[0]);
+        Assert.StartsWith("2 managed case(s)", observations[1].ResultSummary);
+        Assert.StartsWith("0 managed case(s)", observations[2].ResultSummary);
+        Assert.Null(decision);
+        Assert.Equal(EllaiToolReasonCodes.DeniedByPolicy, agent.LastFailureCode);
+    }
+
+    [FrameworkPostgresFact]
     public async Task FrameworkWithholdsUnchangedCountWhenPostgresMembershipChanges()
     {
         await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
@@ -282,8 +321,20 @@ public sealed class EllaiOwnedCaseCountPostgresTests
                         new Dictionary<string, object?> { ["window_days"] = "30" })])));
             throw new InvalidOperationException("The verified count must not require a second model call.");
         }
-        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
-            ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            cancellationToken.ThrowIfCancellationRequested();
+            if (++_calls == 1)
+            {
+                yield return new ChatResponseUpdate(ChatRole.Assistant,
+                    [new FunctionCallContent("count", EllaiToolNames.OwnedCaseCount,
+                        new Dictionary<string, object?> { ["window_days"] = "30" })]);
+                yield break;
+            }
+            throw new InvalidOperationException("The verified count must not require a second model call.");
+        }
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
         public void Dispose() { }
     }
