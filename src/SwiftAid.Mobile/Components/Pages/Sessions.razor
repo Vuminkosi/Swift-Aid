@@ -139,11 +139,11 @@
             await Task.WhenAll(subscriptionTask, optionsTask);
             var subscription = await subscriptionTask;
             var options = await optionsTask;
-            var status = subscription.Code switch
+            var status = SessionSubscriptionPresentation.Status(subscription) switch
             {
-                UiCapabilityResultCode.Denied => PublicSessionsSurface.SessionSubscriptionStatus.RequiresAuthentication,
-                UiCapabilityResultCode.Success when subscription.Value?.Status == SubscriptionStatus.Active => PublicSessionsSurface.SessionSubscriptionStatus.Active,
-                UiCapabilityResultCode.Success => PublicSessionsSurface.SessionSubscriptionStatus.Unsubscribed,
+                SubscriptionStatus.RequiresAuthentication => PublicSessionsSurface.SessionSubscriptionStatus.RequiresAuthentication,
+                SubscriptionStatus.Active => PublicSessionsSurface.SessionSubscriptionStatus.Active,
+                SubscriptionStatus.Unsubscribed => PublicSessionsSurface.SessionSubscriptionStatus.Unsubscribed,
                 _ => PublicSessionsSurface.SessionSubscriptionStatus.Unavailable
             };
 
