@@ -13,18 +13,22 @@ public sealed class SessionSubscriptionLookupTests
         var found = Guid.NewGuid();
         var unavailable = Guid.NewGuid();
         var inactive = Guid.NewGuid();
+        var stale = Guid.NewGuid();
         var client = new DetailClient(found);
         var summaries = await SessionSubscriptionLookup.ResolveAsync(
             [new(found, SubscriptionStatus.Active, 7, false, SubscriptionChannel.Email),
              new(unavailable, SubscriptionStatus.Active, 8, false),
-             new(inactive, SubscriptionStatus.Unsubscribed, 9, false)], client);
+             new(inactive, SubscriptionStatus.Unsubscribed, 9, false),
+             new(stale, SubscriptionStatus.Unsubscribed, 10, false, HasInactiveStoredConsent: true)], client);
 
-        Assert.Equal(2, summaries.Count);
+        Assert.Equal(3, summaries.Count);
         Assert.Equal("Workshop", summaries[0].Title);
         Assert.Equal("Email reminders", summaries[0].ChannelLabel);
         Assert.Null(summaries[1].Title);
         Assert.Equal(8, summaries[1].Version);
-        Assert.Equal(2, client.Calls);
+        Assert.True(summaries[2].HasInactiveStoredConsent);
+        Assert.Null(summaries[2].Title);
+        Assert.Equal(3, client.Calls);
     }
 
     private sealed class DetailClient(Guid found) : IPublicCommunitySessionClient

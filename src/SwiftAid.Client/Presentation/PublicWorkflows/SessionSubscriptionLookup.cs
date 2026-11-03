@@ -3,7 +3,7 @@ using SwiftAid.Client.Presentation.PublicWorkflows;
 
 namespace SwiftAid.Client.Presentation.PublicWorkflows;
 
-public sealed record SessionSubscriptionDetails(Guid SessionId, long Version, string? Title, DateTimeOffset? StartsAtUtc, string? TimeZoneId, string? ChannelLabel);
+public sealed record SessionSubscriptionDetails(Guid SessionId, long Version, string? Title, DateTimeOffset? StartsAtUtc, string? TimeZoneId, string? ChannelLabel, bool HasInactiveStoredConsent = false);
 
 /// <summary>Resolves each owned subscription through the public detail boundary.</summary>
 public static class SessionSubscriptionLookup
@@ -13,7 +13,7 @@ public static class SessionSubscriptionLookup
         IPublicCommunitySessionClient sessions,
         CancellationToken cancellationToken = default)
     {
-        var active = subscriptions.Where(item => item.Status == SubscriptionStatus.Active).ToArray();
+        var active = subscriptions.Where(item => item.Status == SubscriptionStatus.Active || item.HasInactiveStoredConsent).ToArray();
         var results = new SessionSubscriptionDetails[active.Length];
         await Parallel.ForEachAsync(Enumerable.Range(0, active.Length),
             new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = cancellationToken },
@@ -42,7 +42,7 @@ public static class SessionSubscriptionLookup
                         SubscriptionChannel.Email => "Email reminders",
                         SubscriptionChannel.MobilePush => "Mobile notifications",
                         _ => null
-                    });
+                    }, item.HasInactiveStoredConsent);
             });
         return results;
     }

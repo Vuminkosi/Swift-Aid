@@ -105,6 +105,16 @@ public sealed class NotificationsSurfaceTests
     }
 
     [Fact]
+    public async Task NotificationsSurface_ShowsInactiveSavedConsentWithWithdrawalAction()
+    {
+        var markup = await RenderAsync(NotificationsSnapshot.Unavailable, "/sessions",
+            [new SessionSubscriptionSummary(Guid.NewGuid(), 2, null, null, null, null, true)]);
+
+        Assert.Contains("Reminders are inactive", markup, StringComparison.Ordinal);
+        Assert.Contains("Unsubscribe", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task NotificationsSurface_OmitsSessionsLinkWhenHostHasNoRoute()
     {
         var markup = await RenderAsync(

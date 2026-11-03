@@ -65,7 +65,7 @@ else
         }
         else
         {
-            <MudList T="SessionSubscriptionSummary" aria-label="My active session subscriptions">
+            <MudList T="SessionSubscriptionSummary" aria-label="My session subscriptions">
                 @foreach (var subscription in Subscriptions)
                 {
                     <MudListItem T="SessionSubscriptionSummary" Class="px-0">
@@ -83,6 +83,10 @@ else
                                         <span> · @subscription.ChannelLabel</span>
                                     }
                                 </MudText>
+                                @if (subscription.HasInactiveStoredConsent)
+                                {
+                                    <MudText Typo="Typo.caption">Reminders are inactive. You can remove your saved subscription.</MudText>
+                                }
                             </div>
                             <MudButton Variant="Variant.Outlined" Color="Color.Primary"
                                        Disabled="@(_unsubscribingSessionId == subscription.SessionId)"

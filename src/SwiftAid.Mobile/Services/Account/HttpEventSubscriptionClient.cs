@@ -127,7 +127,7 @@ public sealed class HttpEventSubscriptionClient(CookieSessionHttpClient session)
         subscription.Status == EventSubscriptionStatus.Active && subscription.Channels.Count > 0 &&
         Enum.TryParse(subscription.Channels[0], ignoreCase: true, out SubscriptionChannel channel) && Enum.IsDefined(channel)
             ? channel
-            : null);
+            : null, subscription.HasInactiveStoredConsent);
 
     private static UiCapabilityResult<T> Success<T>(T value) => new(UiCapabilityResultCode.Success, value, Metadata(true));
 

@@ -102,7 +102,7 @@ public sealed class EventSubscriptionServiceTests
     [Fact]
     public async Task Own_subscription_list_masks_stale_session_consent()
     {
-        var (service, sessions, _) = Create();
+        var (service, sessions, store) = Create();
         var options = Assert.IsType<EventSubscriptionOptions>(await service.GetOptionsAsync(SessionId, AccountId, default));
         await service.SubscribeAsync(SessionId, AccountId, options.SessionVersion,
             options.ConsentReference, "Email", default);
@@ -115,6 +115,29 @@ public sealed class EventSubscriptionServiceTests
         Assert.Equal(EventSubscriptionStatus.Unsubscribed, item.Status);
         Assert.Empty(item.Channels);
         Assert.Null(item.ConsentReference);
+        Assert.True(item.HasInactiveStoredConsent);
+        Assert.False(await service.CanDispatchReminderAsync(SessionId, AccountId, options.SessionVersion,
+            options.ConsentReference, "Email", default));
+        await service.UnsubscribeAsync(SessionId, AccountId, item.Version, default);
+        Assert.Equal(EventSubscriptionStatus.Unsubscribed, (await store.GetAsync(SessionId, AccountId, default))!.Status);
+        Assert.False(Assert.Single(await service.ListMineAsync(AccountId, default)).HasInactiveStoredConsent);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Ineligible_or_unavailable_session_keeps_saved_consent_withdrawable(bool unavailable)
+    {
+        var (service, sessions, store) = Create();
+        var options = Assert.IsType<EventSubscriptionOptions>(await service.GetOptionsAsync(SessionId, AccountId, default));
+        await service.SubscribeAsync(SessionId, AccountId, options.SessionVersion, options.ConsentReference, "Email", default);
+        sessions.PublicSession = unavailable ? null : PublicSession(status: "Cancelled");
+
+        var item = Assert.Single(await service.ListMineAsync(AccountId, default));
+        Assert.True(item.HasInactiveStoredConsent);
+        Assert.Empty(item.Channels);
+        await service.UnsubscribeAsync(SessionId, AccountId, item.Version, default);
+        Assert.Equal(EventSubscriptionStatus.Unsubscribed, (await store.GetAsync(SessionId, AccountId, default))!.Status);
     }
 
     [Theory]

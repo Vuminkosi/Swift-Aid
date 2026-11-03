@@ -7,4 +7,5 @@ public sealed record SessionSubscriptionSummary(
     string? Title,
     DateTimeOffset? StartsAtUtc,
     string? TimeZoneId,
-    string? ChannelLabel);
+    string? ChannelLabel,
+    bool HasInactiveStoredConsent = false);

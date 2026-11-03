@@ -141,7 +141,7 @@ public sealed class GatewaySubscriptionClient(
         subscription.Version, false,
         subscription.Status == EventSubscriptionStatus.Active && subscription.Channels.Count > 0
             ? ParseChannel(subscription.Channels[0])
-            : null);
+            : null, subscription.HasInactiveStoredConsent);
 
     private static SubscriptionChannel ParseChannel(string channel) => Enum.Parse<SubscriptionChannel>(channel, ignoreCase: false);
 

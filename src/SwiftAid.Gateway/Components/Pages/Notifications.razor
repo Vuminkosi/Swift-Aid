@@ -114,7 +114,7 @@
                 var details = await SessionSubscriptionLookup.ResolveAsync(values, SessionClient);
                 if (_disposed || generation != Volatile.Read(ref _subscriptionGeneration)) return;
                 _subscriptions = details.Select(item => new SessionSubscriptionSummary(item.SessionId, item.Version,
-                    item.Title, item.StartsAtUtc, item.TimeZoneId, item.ChannelLabel)).ToArray();
+                    item.Title, item.StartsAtUtc, item.TimeZoneId, item.ChannelLabel, item.HasInactiveStoredConsent)).ToArray();
             }
             else
             {

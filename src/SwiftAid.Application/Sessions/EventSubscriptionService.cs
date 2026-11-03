@@ -98,7 +98,7 @@ public sealed class EventSubscriptionService(
         if (current.Status == EventSubscriptionStatus.Active &&
             (!IsSubscribable(session) || !IsCurrentConsent(current.ConsentReference, sessionId, session.Version)))
         {
-            return current with { Status = EventSubscriptionStatus.Unsubscribed, Channels = [], ConsentReference = null };
+            return current with { Status = EventSubscriptionStatus.Unsubscribed, Channels = [], ConsentReference = null, HasInactiveStoredConsent = true };
         }
 
         return current;
@@ -128,7 +128,8 @@ public sealed class EventSubscriptionService(
                 {
                     Status = EventSubscriptionStatus.Unsubscribed,
                     Channels = [],
-                    ConsentReference = null
+                    ConsentReference = null,
+                    HasInactiveStoredConsent = true
                 });
             }
             else
