@@ -145,6 +145,22 @@ worker restart within one test process; a Gateway process restart, live Muse,
 serialized `AgentSession` restoration and real multi-instance behavior remain
 **NOT VERIFIED**.
 
+`GuestHttpLiveMuseRecoversConversationAfterTestHostRestart` passed alongside
+the synthetic-model restart test (2/2, no skips). With a task-owned PostGIS
+database and configured live Muse route, the first ASP.NET Core TestServer
+accepted a guest turn through the HTTP route; after that host was disposed,
+a second host used the same data-protection provider and PostgreSQL store.
+The owner recovered the prior response, an unauthenticated request was denied,
+and Muse answered the next turn using the word supplied before restart. The
+test removed its session data and the task-owned database container was removed.
+Command: `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+FullyQualifiedName~GuestHttpLiveMuseRecoversConversationAfterTestHostRestart|FullyQualifiedName~GuestHttpConversationRecoversAfterTestHostRestartWithPostgres`,
+with `ELLAI_LIVE=1`, `SWIFTAID_RUN_FRAMEWORK_POSTGRES_FIXTURES=1`, the
+dedicated loopback PostgreSQL connection and the configured provider settings.
+The hosts ran in one test process; deployed Gateway process restart, persistent
+production data-protection keys and browser behavior remain **NOT VERIFIED**.
+
 `FrameworkWorkerRecoversPostgresConversationWhileRedisIsUnavailable` passed
 alongside the normal recovery fixture (2/2, zero skips) against a disposable
 PostgreSQL database and a deliberately stopped disposable Redis container.

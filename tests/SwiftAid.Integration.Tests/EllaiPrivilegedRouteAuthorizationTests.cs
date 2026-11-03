@@ -129,7 +129,14 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
         }
     }
     [FrameworkPostgresFact]
-    public async Task GuestHttpConversationRecoversAfterTestHostRestartWithPostgres()
+    public Task GuestHttpConversationRecoversAfterTestHostRestartWithPostgres() =>
+        RunGuestHttpConversationRecoveryAsync(liveModel: false);
+
+    [LiveFrameworkHttpFact]
+    public Task GuestHttpLiveMuseRecoversConversationAfterTestHostRestart() =>
+        RunGuestHttpConversationRecoveryAsync(liveModel: true);
+
+    private static async Task RunGuestHttpConversationRecoveryAsync(bool liveModel)
     {
         await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
         var protection = new EphemeralDataProtectionProvider();
@@ -153,9 +160,9 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             request.Headers.TryAddWithoutValidation("X-CSRF-TOKEN", token);
             return await http.SendAsync(request);
         }
-        async Task WaitForTurnAsync(string id)
+        async Task<string> WaitForTurnAsync(string id)
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(liveModel ? 90 : 10));
             while (true)
             {
                 await Task.Delay(25, timeout.Token);
@@ -166,15 +173,16 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
                     .Single(item => item.ClientUtteranceId == id);
                 if (turn.CompletedAtUtc is null) continue;
                 Assert.Equal("Completed", turn.Outcome);
-                Assert.Equal("Synthetic HTTP answer.", turn.AssistantText);
-                return;
+                Assert.False(string.IsNullOrWhiteSpace(turn.AssistantText));
+                if (!liveModel) Assert.Equal("Synthetic HTTP answer.", turn.AssistantText);
+                return turn.AssistantText!;
             }
         }
         try
         {
             EllaiSessionView accepted;
             await using (var firstHost = await StartApplicationAsync(frameworkWorker: true, frameworkFixture: fixture,
-                protection: protection))
+                protection: protection, liveModel: liveModel))
             {
                 using var http = firstHost.GetTestClient();
                 using var antiforgery = await http.GetAsync("/api/v1/ellai/guest/antiforgery");
@@ -187,13 +195,14 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
                 var session = (await started.Content.ReadFromJsonAsync<EllaiSessionView>())!;
                 sessionId = session.SessionId;
                 using var submitted = await PostAsync(http, $"/api/v1/ellai/guest/sessions/{sessionId}/utterances",
-                    new SubmitUtteranceRequest("durable-turn-1", sessionId, session.SessionVersion, "First durable question", null, "typed", 1), token);
+                    new SubmitUtteranceRequest("durable-turn-1", sessionId, session.SessionVersion,
+                        liveModel ? "Remember the word cobalt for our conversation. Reply briefly." : "First durable question", null, "typed", 1), token);
                 Assert.Equal(System.Net.HttpStatusCode.OK, submitted.StatusCode);
                 accepted = (await submitted.Content.ReadFromJsonAsync<EllaiSessionView>())!;
                 await WaitForTurnAsync("durable-turn-1");
             }
             await using (var secondHost = await StartApplicationAsync(frameworkWorker: true, frameworkFixture: fixture,
-                protection: protection))
+                protection: protection, liveModel: liveModel))
             {
                 using var http = secondHost.GetTestClient();
                 using var feedRequest = new HttpRequestMessage(HttpMethod.Get,
@@ -201,7 +210,7 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
                 feedRequest.Headers.TryAddWithoutValidation("Cookie", CookieHeader());
                 using var feed = await http.SendAsync(feedRequest);
                 Assert.Equal(System.Net.HttpStatusCode.OK, feed.StatusCode);
-                Assert.Contains("Synthetic HTTP answer.", await feed.Content.ReadAsStringAsync());
+                Assert.Contains(liveModel ? "durable-turn-1" : "Synthetic HTTP answer.", await feed.Content.ReadAsStringAsync());
                 using var stranger = await http.GetAsync($"/api/v1/ellai/guest/sessions/{sessionId}/responses?cursor=0");
                 Assert.Equal(System.Net.HttpStatusCode.Unauthorized, stranger.StatusCode);
                 using var tokenRequest = new HttpRequestMessage(HttpMethod.Get, "/api/v1/ellai/guest/antiforgery");
@@ -210,13 +219,21 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
                 Merge(antiforgery);
                 var token = (await antiforgery.Content.ReadFromJsonAsync<EllaiGuestAntiforgeryToken>())!.RequestToken;
                 using var submitted = await PostAsync(http, $"/api/v1/ellai/guest/sessions/{sessionId}/utterances",
-                    new SubmitUtteranceRequest("durable-turn-2", sessionId!, accepted.SessionVersion, "Second durable question", null, "typed", 2), token);
+                    new SubmitUtteranceRequest("durable-turn-2", sessionId!, accepted.SessionVersion,
+                        liveModel ? "What word did I ask you to remember?" : "Second durable question", null, "typed", 2), token);
                 Assert.Equal(System.Net.HttpStatusCode.OK, submitted.StatusCode);
-                await WaitForTurnAsync("durable-turn-2");
-                var model = secondHost.Services.GetRequiredService<FrameworkHttpClient>();
-                Assert.Contains("First durable question", model.LastMessages);
-                Assert.Contains("Synthetic HTTP answer.", model.LastMessages);
-                Assert.Contains("Second durable question", model.LastMessages);
+                var answer = await WaitForTurnAsync("durable-turn-2");
+                if (liveModel)
+                {
+                    Assert.Contains("cobalt", answer, StringComparison.OrdinalIgnoreCase);
+                }
+                else
+                {
+                    var model = secondHost.Services.GetRequiredService<FrameworkHttpClient>();
+                    Assert.Contains("First durable question", model.LastMessages);
+                    Assert.Contains("Synthetic HTTP answer.", model.LastMessages);
+                    Assert.Contains("Second durable question", model.LastMessages);
+                }
             }
         }
         finally
