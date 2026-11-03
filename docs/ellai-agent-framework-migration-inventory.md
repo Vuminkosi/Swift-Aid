@@ -3273,6 +3273,22 @@ files. Command: `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integrati
 with `OS=Windows_NT`. This demonstrates a shared local file key ring across
 test processes, not shared key configuration or behavior in a deployed cluster.
 
+The protected location observation has now also been saved through the actual
+PostgreSQL session/outbox store. A follow-up using a newly created database
+context, store and file-key-ring provider retained the prior answer when the
+scripted registry result matched, and withheld it from the model when that
+result changed. The separate PostgreSQL-registry mutation case is described
+above; this history test uses a scripted registry and model. PASS: with the
+disposable intake PostgreSQL fixture and `OS=Windows_NT`, `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-build
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~EllaiLocationReplayTests' --logger 'console;verbosity=minimal'`
+passed 12, failed 0 and skipped the child-only case in the parent; the key-ring
+parent ran that child in a separate process. An initial history test omitted
+the runner's outbox dependency and failed its history assertion; the corrected
+fixture passed. This does not establish an independently restarted Gateway,
+live model behavior or deployed key-ring configuration.
+
 ### Grounded audio timing probe — 2026-11-03
 
 PASS: `SWIFTAID_RUN_LIVE_ELLAI=1 SWIFTAID_REQUIRE_AUDIO_BEFORE_COMPLETION=1

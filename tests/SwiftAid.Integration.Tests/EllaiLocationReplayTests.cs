@@ -16,6 +16,8 @@ using SwiftAid.Contracts.Geography;
 using SwiftAid.Gateway.Ellai;
 using SwiftAid.Intelligence.Meta;
 using SwiftAid.Infrastructure.Intake.Geography;
+using SwiftAid.Infrastructure.Persistence;
+using SwiftAid.Infrastructure.Persistence.Ellai;
 
 namespace SwiftAid.Integration.Tests;
 
@@ -155,6 +157,87 @@ public sealed class EllaiLocationReplayTests
         }
     }
 
+    [IntakePostgresFact]
+    public async Task PostgresHistoryRechecksProtectedLocationAfterStoreAndProviderRecreation()
+    {
+        await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
+        var root = PrivateKeyRingTestDirectory.CreateRoot("swiftaid-location-history");
+        var keys = PrivateKeyRingTestDirectory.CreateKeyDirectory(root);
+        var actor = Actor("location-history-owner");
+        var session = new EllaiSessionRecord("location-history-" + Guid.NewGuid().ToString("N"), EllaiMode.Ask, "Active",
+            1, 1, 1, 1, 0, 12, actor.ActorId, "scope", null, null, DateTimeOffset.UtcNow);
+        var store = new PostgresEllaiSessionStore(fixture.Db);
+        try
+        {
+            EllaiUtteranceWork Work(string id, string text) => new(session.SessionId, session.ScopeEpoch, text,
+                "public.product-help", null, EllaiMode.Ask, 1, "cycle-" + id, actor, true, "consent/0",
+                EllaiProcessingClassification.UserProvidedNonSensitive, EllaiProcessingClassification.UserProvidedNonSensitive,
+                new HashSet<string> { EllaiToolNames.Locations }, EllaiConsentService.PublicProductHelpPurpose, id);
+            EllaiLocationReplayProtector CreateProtector() => new(DataProtectionProvider.Create(new DirectoryInfo(keys),
+                builder => builder.SetApplicationName("location-history-fixture")));
+            var initialProtector = CreateProtector();
+            var initialBroker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService(),
+                geography: new Registry(false, false), locationReplayProtector: initialProtector);
+            using var initialModel = new LocationClient();
+            var executor = new EllaiFrameworkExecutor(initialModel, new EllaiPromptBuilder("Synthetic policy", "fixture"),
+                initialBroker, new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
+            var prior = Work("prior", "Find a place.");
+            var first = await EllaiUtteranceRunner.RunOneAsync(prior,
+                new EllaiUtteranceServices(executor, null, null, new EllaiConsentService(), InvokeToolAsync: initialBroker.InvokeAsync,
+                    LocationReplayProtector: initialProtector), 1024, default);
+            Assert.True(first.Completed);
+            var trace = EllaiToolTrace.SerializeFlattened(first.ObservedTools, false, []);
+            Assert.NotNull(trace);
+            Assert.DoesNotContain("private-search-phrase", trace);
+            await store.CreateAsync(session, default);
+            var afterPrior = session with { SessionVersion = 2, CyclesUsed = 1 };
+            Assert.NotNull(await store.TryAcceptUtteranceAsync(afterPrior, 1, "prior", default,
+                EllaiUtteranceWorkEnvelope.Serialize(prior, "prior")));
+            var claim = (await store.ClaimNextAsync(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(1), default))!;
+            Assert.NotNull(await store.CompleteAsync(session.SessionId, "prior", claim.AttemptCount, DateTimeOffset.UtcNow, default,
+                EllaiUtteranceResolution.Completed(first.DisplayText!, 1) with { ToolTraceJson = trace }));
+            var current = Work("current", "What did you find?");
+            Assert.NotNull(await store.TryAcceptUtteranceAsync(afterPrior with { SessionVersion = 3, CyclesUsed = 2 }, 2,
+                "current", default, EllaiUtteranceWorkEnvelope.Serialize(current, "current")));
+
+            var options = new DbContextOptionsBuilder<SwiftAidDbContext>()
+                .UseNpgsql(fixture.Db.Database.GetConnectionString()).UseOpenIddict().Options;
+            await using var reconnected = new SwiftAidDbContext(options);
+            var restoredStore = new PostgresEllaiSessionStore(reconnected);
+            var saved = await restoredStore.ReadConversationForExecutionAsync(session.SessionId, actor.ActorId, "current", default);
+            var savedTrace = saved.Single(turn => turn.ClientUtteranceId == "prior").ToolTraceJson;
+            Assert.NotNull(savedTrace);
+            Assert.DoesNotContain("private-search-phrase", savedTrace);
+            Assert.True(EllaiToolTrace.TryRead(savedTrace, out _));
+            foreach (var changed in new[] { false, true })
+            {
+                var restoredProtector = CreateProtector();
+                var restoredBroker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService(),
+                    geography: new Registry(changed, false), locationReplayProtector: restoredProtector);
+                var replayContext = new EllaiToolContext(session.SessionId, session.ScopeEpoch, current.FeatureId, null, 4, true,
+                    Actor: actor, DataClassification: EllaiProcessingClassification.UserProvidedNonSensitive,
+                    AllowedTools: current.AllowedTools, ConsentPurpose: EllaiConsentService.PublicProductHelpPurpose);
+                var replay = await EllaiAuthorizedConversationContext.BuildAsync(saved, "current", actor, null, default,
+                    toolContext: replayContext, invokeTool: restoredBroker.InvokeAsync, locationReplayProtector: restoredProtector);
+                Assert.Equal(!changed, replay.RetainedTurnIds.Contains("prior"));
+                using var model = new HistoryClient();
+                var restoredExecutor = new EllaiFrameworkExecutor(model, new EllaiPromptBuilder("Synthetic policy", "fixture"),
+                    restoredBroker, new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
+                var result = await EllaiUtteranceRunner.RunOneAsync(current,
+                    new EllaiUtteranceServices(restoredExecutor, null, null, new EllaiConsentService(), Sessions: restoredStore,
+                        Outbox: restoredStore, InvokeToolAsync: restoredBroker.InvokeAsync, LocationReplayProtector: restoredProtector), 1024, default);
+                Assert.True(result.Completed, result.FailureCode);
+                Assert.True(model.Messages.Any(message => message.Contains(first.DisplayText!, StringComparison.Ordinal)) == !changed,
+                    $"changed={changed}; messages={string.Join(" | ", model.Messages)}");
+            }
+        }
+        finally
+        {
+            try { await fixture.Db.Set<EllaiSessionEntity>().Where(item => item.SessionId == session.SessionId).ExecuteDeleteAsync(); }
+            finally { RemovePrivateKeyFixture(root, keys); }
+        }
+    }
+
     [Fact]
     public async Task GatewayWorkerUsesProtectedReplayAndPersistsTrace()
     {
@@ -273,13 +356,18 @@ public sealed class EllaiLocationReplayTests
         }
         finally
         {
-            foreach (var file in Directory.EnumerateFiles(keys, "key-*.xml", SearchOption.TopDirectoryOnly))
-                File.Delete(file);
-            foreach (var file in Directory.EnumerateFiles(keys, "revocation-*.xml", SearchOption.TopDirectoryOnly))
-                File.Delete(file);
-            Directory.Delete(keys);
-            Directory.Delete(root);
+            RemovePrivateKeyFixture(root, keys);
         }
+    }
+
+    private static void RemovePrivateKeyFixture(string root, string keys)
+    {
+        foreach (var file in Directory.EnumerateFiles(keys, "key-*.xml", SearchOption.TopDirectoryOnly))
+            File.Delete(file);
+        foreach (var file in Directory.EnumerateFiles(keys, "revocation-*.xml", SearchOption.TopDirectoryOnly))
+            File.Delete(file);
+        Directory.Delete(keys);
+        Directory.Delete(root);
     }
 
     private static async Task VerifyInSeparateProcessAsync(string keys, string original, string rotated)
@@ -370,6 +458,23 @@ public sealed class EllaiLocationReplayTests
             var response = await GetResponseAsync(messages, options, cancellationToken);
             yield return new ChatResponseUpdate(ChatRole.Assistant, response.Messages[0].Contents);
         }
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    private sealed class HistoryClient : IChatClient
+    {
+        public IReadOnlyList<string> Messages { get; private set; } = [];
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Messages = messages.Select(message => message.Text).ToArray();
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                """{"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Follow-up complete.","spokenText":"Follow-up complete.","claims":[],"questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}""")));
+        }
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
         public void Dispose() { }
     }
