@@ -109,8 +109,14 @@ public sealed class CommunitySessionServiceTests
         var list = await services.Service.ListPublicAsync(null, CancellationToken.None);
         var query = await services.Service.QueryPublicAsync(new PublicSessionQuery(), CancellationToken.None);
         Assert.Equal("Completed", detail!.Status);
+        Assert.Null(detail.ChannelLink);
+        Assert.NotNull((await services.Service.GetStaffAsync(publicId, "officer-2", CancellationToken.None))!.ChannelLink);
+        Assert.Null(await services.Service.GetInvitationTextAsync(publicId, CancellationToken.None));
+        Assert.DoesNotContain("https://chat.example/join/abc", (await services.Service.GetIcsAsync(publicId, Start.AddHours(2), CancellationToken.None))!, StringComparison.Ordinal);
         Assert.Contains(list, item => item.SessionId == publicId && item.Status == "Completed");
+        Assert.Null(Assert.Single(list, item => item.SessionId == publicId).ChannelLink);
         Assert.Contains(query.Items, item => item.SessionId == publicId && item.Status == "Completed");
+        Assert.Null(Assert.Single(query.Items, item => item.SessionId == publicId).ChannelLink);
         Assert.DoesNotContain(list, item => item.SessionId == internalId);
         Assert.DoesNotContain(query.Items, item => item.SessionId == internalId);
     }

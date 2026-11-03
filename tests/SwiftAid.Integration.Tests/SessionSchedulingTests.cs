@@ -41,6 +41,10 @@ public sealed class SessionSchedulingTests
             var result = Assert.Single(page.Items);
             Assert.Equal(ids[0], result.SessionId);
             Assert.Equal("Completed", result.Status);
+            Assert.Null(result.ChannelLink);
+            Assert.NotNull((await service.GetStaffAsync(ids[0], "officer-2", CancellationToken.None))!.ChannelLink);
+            Assert.DoesNotContain("https://chat.example/join/abc", (await service.GetIcsAsync(ids[0], start.AddHours(2), CancellationToken.None))!, StringComparison.Ordinal);
+            Assert.Null(await service.GetInvitationTextAsync(ids[0], CancellationToken.None));
             var listed = await service.ListPublicAsync(100, CancellationToken.None);
             Assert.Contains(listed, item => item.SessionId == ids[0] && item.Status == "Completed");
             Assert.DoesNotContain(listed, item => item.SessionId == ids[1]);

@@ -35,7 +35,7 @@ public static class CommunitySessionSharing
         AppendFolded(builder, "SUMMARY", session.Title);
         AppendFolded(builder, "DESCRIPTION", Describe(session));
         AppendFolded(builder, "LOCATION", Locate(session));
-        if (session.Status != CommunitySessionStatus.Cancelled && session.PublicChannelLink is { } publicLink)
+        if (session.Status == CommunitySessionStatus.Scheduled && session.PublicChannelLink is { } publicLink)
         {
             AppendFolded(builder, "URL", publicLink);
         }
