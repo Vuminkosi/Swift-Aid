@@ -1,6 +1,6 @@
 # Community sessions: repository map
 
-Baseline: `community-sessions` at `20e6d09f0c3436cf288123b15cdfee05dd41ce57`. Requirements: `designs/community-sessions/requirements.md` outside this worktree; product authority remains root `spec.md` and `implementation.md`. Reference images 01–05 are in the same designs directory. The worktree was clean at baseline. Current snapshot: `121aaa9` on `community-sessions`; the work remains PARTIAL. The evidence below is scoped to the checks described, not full acceptance.
+Baseline: `community-sessions` at `20e6d09f0c3436cf288123b15cdfee05dd41ce57`. Requirements: `designs/community-sessions/requirements.md` outside this worktree; product authority remains root `spec.md` and `implementation.md`. Reference images 01–05 are in the same designs directory. The worktree was clean at baseline. Current snapshot: `ff7bcde` on `community-sessions`; the work remains PARTIAL. The evidence below is scoped to the checks described, not full acceptance.
 
 | Area | Existing implementation and host | Decision and gap | Relevant tests |
 | --- | --- | --- | --- |
@@ -144,3 +144,8 @@ The shared detail panel displays the selected public session's title, status and
 - `14ec2ac` keeps published completed sessions in public discovery and labels them; `121aaa9` suppresses their join destination in public projections and ICS. PASS: 32 application, 21 domain and 23 UI tests across the slices; 22 disposable PostgreSQL scheduling tests for discovery and a focused persisted-record test after the last commit. The containers were removed.
 
 The public UI, filtered month overview and account subscription list have not been validated in a real browser or Android device. The local task capture directory contains an invalid initial screenshot and browser profiles; they are not visual acceptance evidence. The user-facing work is incomplete until authorization, material governance, reviewed revisions, mobile staff support and required live/device checks are resolved.
+
+## Subsequent verification through ff7bcde
+
+- `71d46b5` preserves an owner-facing withdrawal action when saved subscription consent is no longer eligible for reminders. PASS: application service tests 11/11, UI notification and subscription lookup tests 11/11, Android compile with zero warnings/errors. `ff7bcde` adds an authenticated in-process HTTP serialization test; `EventSubscriptionEndpointTests` PASS 5/5 with a fake service. Live account-to-database withdrawal, browser and device journeys, and independent security review remain NOT VERIFIED.
+- The staff endpoint filter still denies all management commands and the Gateway cannot establish action-specific authority. Android has no staff editor route. Material review and publication remain gated without an authoritative approval and withdrawal provider. These are implementation gaps, not merely unverified deployment details.
