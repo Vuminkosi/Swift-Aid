@@ -52,6 +52,7 @@ execute/approve/sql/shell.
 | `ellai_imports` | At most 20 actor-owned recent imports for an explicit organization/workspace/country, with current membership and access checks. |
 | `ellai_import_status` | Durable actor-owned import counts, checkpoint and state; no original source content. Import completion does not establish intelligence-processing completion. |
 | `ellai_classification_evidence` | Persisted semantic scores, source-event references, language, model/taxonomy versions and processing outcomes for an authorized current case revision. Rechecks current case access; never runs inference or changes clinical classification. |
+| `ellai_owned_case_count` | Counts current-actor owned and readable managed case records created since a required 1–365 day lookback, through the existing dashboard authorization query. Rejects truncated or unavailable results; it is not incidence or an animal count. |
 | `ellai_now` | Current server time (UTC, round-trip + unix ms); no domain data. |
 | `ellai_docs_search` | Search this approved reference by topic/section id. |
 | `ellai_docs_get` | Retrieve one approved section excerpt with provenance. |

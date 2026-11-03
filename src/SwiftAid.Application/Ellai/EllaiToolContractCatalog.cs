@@ -38,6 +38,7 @@ public static class EllaiToolContractCatalog
             ["organization_id"] = "Authorized destination organization identifier.",
             ["import_id"] = "Canonical import identifier.",
             ["case_id"] = "Canonical case identifier.",
+            ["window_days"] = "Required whole-day lookback window from 1 to 365 days.",
         };
 
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> AllowedValues =
@@ -69,6 +70,7 @@ public static class EllaiToolContractCatalog
             [EllaiToolNames.Imports] = Contract(EllaiToolNames.Imports, ("workspace_id", true), ("organization_id", true), ("country", true)),
             [EllaiToolNames.ImportStatus] = Contract(EllaiToolNames.ImportStatus, ("import_id", true)),
             [EllaiToolNames.ClassificationEvidence] = Contract(EllaiToolNames.ClassificationEvidence, ("case_id", true)),
+            [EllaiToolNames.OwnedCaseCount] = Contract(EllaiToolNames.OwnedCaseCount, ("window_days", true)),
         });
 
     /// <summary>Read-only contracts indexed by canonical advertised tool name.</summary>
@@ -260,6 +262,7 @@ public static class EllaiToolContractCatalog
             (EllaiToolNames.State, "limit") or (EllaiToolNames.UiCatalogue, "limit") => "^([1-9]|1[0-9]|20)$",
             (EllaiToolNames.DocsSearch, "limit") => "^([1-9]|1[0-9]|20)$",
             (EllaiToolNames.Locations, "limit") => "^([1-9]|10)$",
+            (EllaiToolNames.OwnedCaseCount, "window_days") => "^([1-9]|[1-9][0-9]|[12][0-9]{2}|3[0-5][0-9]|36[0-5])$",
             _ => null
         };
 }

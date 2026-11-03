@@ -376,6 +376,20 @@ serialization to preserve evidence in the model-facing observation.
 
 ## Rollback and outstanding work
 
+The analytics acceptance requirement previously had no complete aggregate
+tool: `ellai_state` returns a bounded case page, which is not a total. The new
+`ellai_owned_case_count` adapts the existing `IDashboardAggregateQuery` for a
+required 1–365 day lookback. It returns only a count of managed records owned
+by the current actor and authorized by that query, labels the creation-time
+lower bound and query time, and returns unavailable for denied, failed or
+truncated results. It is absent from the guest allowlist; it is not an
+incidence, diagnosis or animal count. Framework execution against disposable
+PostgreSQL passed 1/1: the count matched the authorized query and fell to zero
+after grant expiry without exposing case IDs. Application tests passed
+996/1006, with 10 opt-in skips. The first full run failed two catalogue/document
+sync tests, corrected before the passing rerun. Live provider and Gateway
+end-to-end analytics remain **NOT VERIFIED**.
+
 An opt-in Gateway execution selection has been added; its default remains the
 existing loop. Invalid selection and unconfigured or unsupported framework
 provider routes fail closed. The registration and worker fixtures passed 6/6

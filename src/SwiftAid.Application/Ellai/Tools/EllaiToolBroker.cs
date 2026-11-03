@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Globalization;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases;
 using SwiftAid.Contracts.Cases;
@@ -48,12 +49,13 @@ public static class EllaiToolNames
     public const string Imports = "ellai_imports";
     public const string ImportStatus = "ellai_import_status";
     public const string ClassificationEvidence = "ellai_classification_evidence";
+    public const string OwnedCaseCount = "ellai_owned_case_count";
 
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
     {
         State, Evidence, Topic, Capabilities, Receipts, ProductFacts, Now,
         DocsSearch, DocsGet, UiCatalogue, UiObserve, IngestionSchema, ValidateObservations, Locations,
-        ImportDestinations, Imports, ImportStatus, ClassificationEvidence
+        ImportDestinations, Imports, ImportStatus, ClassificationEvidence, OwnedCaseCount
     };
 }
 
@@ -183,6 +185,7 @@ public sealed class EllaiToolBroker
         $"{EllaiToolNames.Imports}(workspace_id, organization_id, country) — the current user's recent imports in one permitted destination; staff only.",
         $"{EllaiToolNames.ImportStatus}(import_id) — the current user's durable import state and saved/rejected/retry counts; no case contents and no submission.",
         $"{EllaiToolNames.ClassificationEvidence}(case_id) — persisted semantic classification evidence for an authorized current case revision; no inference, diagnosis or clinical probability.",
+        $"{EllaiToolNames.OwnedCaseCount}(window_days) — count current-actor owned, readable managed cases created within 1..365 days; rejects incomplete results. This is a case count, not a diagnosis, incidence or animal count.",
     };
 
     /// <summary>Returns the existing model-facing description for a canonical tool.</summary>
@@ -226,6 +229,7 @@ public sealed class EllaiToolBroker
     private readonly ICaseImportWorkspaceReader? _importWorkspaces;
     private readonly SwiftAid.Application.Classification.ICaseClassificationQuery? _classification;
     private readonly SwiftAid.Application.Surveillance.ISignalReviewService? _signals;
+    private readonly IDashboardAggregateQuery? _dashboard;
 
     /// <summary>Consent infrastructure is mandatory for consent-scoped reads.
     /// Ordinary typed messages use their own explicit classification and do
@@ -246,7 +250,8 @@ public sealed class EllaiToolBroker
         ICaseImportStore? imports = null, ICaseImportWorkspaceReader? importWorkspaces = null,
         SwiftAid.Application.Classification.ICaseClassificationQuery? classification = null,
         SwiftAid.Application.Surveillance.ISignalReviewService? signals = null,
-        EllaiUiAuthorityResolver? uiAuthority = null, IEllaiExactReferenceIndex? referenceIndex = null)
+        EllaiUiAuthorityResolver? uiAuthority = null, IEllaiExactReferenceIndex? referenceIndex = null,
+        IDashboardAggregateQuery? dashboard = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _consent = consent ?? throw new ArgumentNullException(nameof(consent));
@@ -255,6 +260,7 @@ public sealed class EllaiToolBroker
         _receipts = receipts;
         _topics = topics;
         _referenceIndex = referenceIndex;
+        _dashboard = dashboard;
         _uiAuthority = uiAuthority ?? new EllaiUiAuthorityResolver();
         _uiRegistry = uiRegistry;
         _uiDiscovery = uiDiscovery;
@@ -377,6 +383,8 @@ public sealed class EllaiToolBroker
             return Bound(await ReadClassificationAsync(context, request, ct).ConfigureAwait(false));
         if (canonical == EllaiToolNames.Evidence)
             return Bound(await ReadEvidenceAsync(context, request, ct).ConfigureAwait(false));
+        if (canonical == EllaiToolNames.OwnedCaseCount)
+            return Bound(await ReadOwnedCaseCountAsync(context, request, ct).ConfigureAwait(false));
 
         return Bound(canonical switch
         {
@@ -389,6 +397,34 @@ public sealed class EllaiToolBroker
             EllaiToolNames.ValidateObservations => ValidateObservations(request),
             _ => Deny(request.ToolName, "Unregistered tool.", EllaiToolReasonCodes.UnregisteredTool)
         });
+    }
+
+    private async Task<EllaiToolResult> ReadOwnedCaseCountAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
+    {
+        if (context.Actor is null || _dashboard is null)
+            return Deny(request.ToolName, "The authorized case count is unavailable.", EllaiToolReasonCodes.Unavailable);
+        if (!request.Arguments.TryGetValue("window_days", out var value) ||
+            !int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var days) || days is < 1 or > 365)
+            return Deny(request.ToolName, "Choose a window of 1 to 365 days.", EllaiToolReasonCodes.InvalidArguments);
+
+        DashboardAggregateResult result;
+        try { result = await _dashboard.GetAsync(context.Actor, TimeSpan.FromDays(days), ct).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            return Deny(request.ToolName, "The authorized case count is unavailable.", EllaiToolReasonCodes.Unavailable);
+        }
+        ct.ThrowIfCancellationRequested();
+        if (result.Access != DashboardAggregateAccess.Allowed || result.Truncated)
+            return Deny(request.ToolName, "A complete authorized case count is unavailable for this window.", EllaiToolReasonCodes.Unavailable);
+
+        var asOf = result.AsOfUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+        var since = result.AsOfUtc.ToUniversalTime().AddDays(-days).ToString("O", CultureInfo.InvariantCulture);
+        var evidence = new EvidenceRef("DashboardAggregate", "owned-cases", asOf, null, Guid.NewGuid().ToString("N"));
+        var summary = $"{result.Rows.Count} managed case(s) currently owned by the requesting officer and readable now, " +
+            $"created on or after {since} (a {days}-day lookback; query started {asOf}). " +
+            "Unit: managed case records; not incidence or animal counts.";
+        return new(request.ToolName, true, null, [evidence], summary, 1, false, EllaiToolReasonCodes.Ok);
     }
 
     private static EllaiToolResult ReadIngestionSchema(EllaiToolRequest request)
