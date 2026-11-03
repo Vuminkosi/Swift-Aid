@@ -367,6 +367,12 @@ can still hold the run and its service scope open, although its late result is
 not accepted. Focused synthetic tests cover cooperative cancellation, deadline
 expiry and a late successful result. Live outage and long-running real tool
 behavior remain unverified.
+Focused framework tests also exercise both synchronously thrown and faulted
+tool tasks containing a synthetic secret. Both return an unavailable outcome
+without a decision, and the synthetic secret appears neither in the outcome nor
+in tool results observed by the test model. The framework contract suite passed
+33/33. This verifies synthetic exceptions, not a real service outage or a
+non-cooperative tool deadline.
 An in-memory worker integration fixture now runs this executor with a
 deterministic streaming `IChatClient`, checks the owner-filtered completed
 turn, response chunk, final reconciliation and usage sample. It does not test

@@ -386,6 +386,28 @@ public sealed class EllaiAgentFrameworkContractTests
         Assert.Equal(EllaiToolReasonCodes.Unavailable, outcome.FailureCode);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FrameworkToolFailuresAreSanitizedAndCannotProduceAnAnswer(bool asynchronous)
+    {
+        using var client = new ScriptedClient(EllaiToolNames.Now, "unused", "example", ValidDecision, noArguments: true);
+        var executor = new EllaiFrameworkExecutor(client, new EllaiPromptBuilder("Policy text.", "test"),
+            new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService()), new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.Now });
+        var outcome = await executor.RunAsync(new EllaiLoopRequest(context, "time?", new EllaiRoleOverlay("ask", "help"),
+            "clock", 100, "cycle", 1), CancellationToken.None,
+            invokeToolAsync: (_, _, _) => asynchronous
+                ? Task.FromException<EllaiToolResult>(new InvalidOperationException("synthetic-tool-secret"))
+                : throw new InvalidOperationException("synthetic-tool-secret"));
+        Assert.False(outcome.Completed);
+        Assert.Null(outcome.Decision);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, outcome.FailureCode);
+        Assert.DoesNotContain("synthetic-tool-secret", outcome.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("synthetic-tool-secret", client.ToolResult, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task CancellingFrameworkRunCancelsInFlightToolBeforeFurtherModelCalls()
     {
