@@ -60,6 +60,25 @@ public sealed class EventSubscriptionEndpointTests
     }
 
     [Fact]
+    public async Task MySubscriptions_ExposesInactiveStoredConsentOnlyToAuthenticatedOwner()
+    {
+        await using var host = await HostFixture.StartAsync();
+        host.Service.InactiveStoredConsent = true;
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/my/session-subscriptions");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", TestAuthenticationHandler.BearerToken);
+
+        using var response = await host.Client.SendAsync(request);
+        var item = Assert.Single((await response.Content.ReadFromJsonAsync<EventSubscription[]>())!);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("actor-1", item.AccountId);
+        Assert.Equal(EventSubscriptionStatus.Unsubscribed, item.Status);
+        Assert.True(item.HasInactiveStoredConsent);
+        Assert.Empty(item.Channels);
+        Assert.Null(item.ConsentReference);
+    }
+
+    [Fact]
     public async Task AuthenticatedMutation_WithoutAntiforgeryProof_IsRejectedBeforeService()
     {
         await using var host = await HostFixture.StartAsync();
@@ -122,6 +141,7 @@ public sealed class EventSubscriptionEndpointTests
     private sealed class FakeSubscriptionService : IEventSubscriptionService
     {
         public string? LastAccountId { get; private set; }
+        public bool InactiveStoredConsent { get; set; }
 
         public Task<EventSubscriptionOptions?> GetOptionsAsync(Guid sessionId, string accountId, CancellationToken cancellationToken)
         {
@@ -140,7 +160,9 @@ public sealed class EventSubscriptionEndpointTests
         {
             LastAccountId = accountId;
             return Task.FromResult<IReadOnlyList<EventSubscription>>(
-                [new(SessionId, accountId, EventSubscriptionStatus.Active, ["Email"], "consent-reference", 2)]);
+                [InactiveStoredConsent
+                    ? new(SessionId, accountId, EventSubscriptionStatus.Unsubscribed, [], null, 2, true)
+                    : new(SessionId, accountId, EventSubscriptionStatus.Active, ["Email"], "consent-reference", 2)]);
         }
 
         public Task<EventSubscription> SubscribeAsync(Guid sessionId, string accountId, long expectedSessionVersion,
