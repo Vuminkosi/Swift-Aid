@@ -100,6 +100,31 @@ public sealed class EllaiLiveQueueReadTests
         }
     }
 
+    private sealed class CompetingTopicStore : IEllaiTopicStore
+    {
+        public Task<EllaiTopicEntry> RecordAsync(string sessionId, string title, IReadOnlyList<string> aliases,
+            string? entityRef, string? entityVersion, string? checkpointId, DateTimeOffset now, CancellationToken ct) =>
+            Task.FromResult(new EllaiTopicEntry("topic-winner", sessionId, title, aliases, "another snapshot",
+                entityVersion, "Partial", checkpointId, now, now));
+
+        public Task<IReadOnlyList<EllaiTopicEntry>> ListAsync(string sessionId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<EllaiTopicEntry>>([]);
+    }
+
+    [Fact]
+    public async Task CompetingTopicWriteDoesNotClaimTheCurrentResultsWereRemembered()
+    {
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [Row("01", 7)]) };
+        var broker = GrantedBroker(queue, new EllaiTopicService(new CompetingTopicStore()));
+        var result = await broker.InvokeAsync(Context with { Actor = TestActor() },
+            new(EllaiToolNames.State, Args(("projection", "queue"))), CancellationToken.None);
+
+        Assert.True(result.Allowed);
+        Assert.Single(result.Evidence);
+        Assert.Contains("could not be retained", result.ResultSummary, StringComparison.Ordinal);
+        Assert.DoesNotContain("Result references retained", result.ResultSummary, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task CancelledQueueReadDoesNotWriteCaseRecallWhenDependencyReturnsLate()
     {

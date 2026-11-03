@@ -25,8 +25,12 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
             throw new ArgumentException("Case result references must be distinct and nonempty.", nameof(items));
         var snapshot = new Snapshot(context.Actor.ActorId, context.ScopeEpoch, DateTimeOffset.UtcNow.AddHours(24),
             items.Take(20).Select(item => new CaseReference(item.CaseId, item.AggregateVersion)).ToArray());
-        await topics.TrackAsync(context.SessionId, TopicTitle, [Reference],
-            JsonSerializer.Serialize(snapshot), "case-results/1", cancellationToken: ct).ConfigureAwait(false);
+        var serialized = JsonSerializer.Serialize(snapshot);
+        var stored = await topics.TrackAsync(context.SessionId, TopicTitle, [Reference],
+            serialized, "case-results/1", cancellationToken: ct).ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
+        if (stored.Title != TopicTitle || stored.EntityVersion != "case-results/1" || stored.EntityRef != serialized)
+            throw new InvalidOperationException("The case result references were not retained.");
     }
 
     public async Task<EllaiToolResult> RecallAsync(
