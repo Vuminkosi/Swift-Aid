@@ -130,6 +130,9 @@ public sealed class SessionSchedulingTests
             Assert.Equal(ids.Take(2).Order().ToArray(), first.Items.Concat(second.Items).Select(item => item.SessionId).Order().ToArray());
             Assert.Empty((await service.QueryPublicAsync(query with { Language = "not-a-language" }, CancellationToken.None)).Items);
             Assert.NotEmpty((await service.QueryPublicAsync(query with { Category = "humanhealth" }, CancellationToken.None)).Items);
+            Assert.NotEmpty((await service.QueryPublicAsync(query with { Sector = "humanhealth", Topic = "malaria" }, CancellationToken.None)).Items);
+            Assert.Empty((await service.QueryPublicAsync(query with { Sector = "another-sector", Topic = "malaria" }, CancellationToken.None)).Items);
+            Assert.Empty((await service.QueryPublicAsync(query with { Sector = "humanhealth", Topic = "Malaria" }, CancellationToken.None)).Items);
             Assert.Null(await service.GetPublicAsync(ids[3], CancellationToken.None));
             Assert.DoesNotContain(await service.ListPublicAsync(null, CancellationToken.None), item => item.SessionId == ids[3]);
         }

@@ -122,7 +122,7 @@
                 }
                 else
                 {
-                    <p>Dots mark dates with published sessions matching the search and location, category and language filters.</p>
+                    <p>Dots mark dates with published sessions matching the search, location, category, sector, topic and language filters.</p>
                 }
                 <p role="status">@(_calendarSelectedDate is { } selectedDay ? $"Agenda for {selectedDay.ToString("D", CultureInfo.CurrentCulture)}" : "Choose a date to see its agenda.")</p>
             </section>
@@ -144,7 +144,7 @@
                 <div class="public-sessions-filters__controls">
             @if (QuerySessionsAsync is not null)
             {
-                <span class="public-sessions-hint">Enter a sector or an exact, case-sensitive topic, and a language. Dates use each session's time zone.</span>
+                <span class="public-sessions-hint">The category field matches a sector or an exact topic. Additional sector and topic filters must both match. Topics are case-sensitive; dates use each session's time zone.</span>
             }
             <div class="public-sessions-filters__row">
                 <MudSelect T="SessionPeriodFilter" Label="When" data-ellai-control="community-sessions.period" data-bonboarding-anchor="ellai-community-period" Value="@_periodFilter" ValueChanged="PeriodChangedAsync"
@@ -180,6 +180,12 @@
 
             @if (QuerySessionsAsync is not null)
             {
+                <div class="public-sessions-filters__row">
+                    <MudTextField T="string" Label="Sector" Value="@_sectorFilter" ValueChanged="SectorChangedAsync"
+                                  Variant="Variant.Outlined" Immediate="true" DebounceInterval="400" Clearable="true" MaxLength="120" />
+                    <MudTextField T="string" Label="Exact topic" Value="@_topicFilter" ValueChanged="TopicChangedAsync"
+                                  Variant="Variant.Outlined" Immediate="true" DebounceInterval="400" Clearable="true" MaxLength="120" />
+                </div>
                 <div class="public-sessions-filters__row">
                     <MudTextField T="string" Label="Country code" Value="@_countryFilter" ValueChanged="CountryChangedAsync"
                                   Variant="Variant.Outlined" Immediate="true" DebounceInterval="400" Clearable="true" MaxLength="120" />
@@ -451,6 +457,8 @@
     private Guid _selectedSessionId;
     private string _searchText = string.Empty;
     private string? _categoryFilter;
+    private string? _sectorFilter;
+    private string? _topicFilter;
     private string? _languageFilter;
     private string? _countryFilter;
     private string? _regionFilter;
@@ -619,6 +627,8 @@
 
     private bool HasActiveFilters => !string.IsNullOrWhiteSpace(_searchText) ||
         !string.IsNullOrWhiteSpace(_categoryFilter) ||
+        !string.IsNullOrWhiteSpace(_sectorFilter) ||
+        !string.IsNullOrWhiteSpace(_topicFilter) ||
         !string.IsNullOrWhiteSpace(_languageFilter) ||
         !string.IsNullOrWhiteSpace(_countryFilter) ||
         !string.IsNullOrWhiteSpace(_regionFilter) ||
@@ -627,6 +637,8 @@
     private int ActiveFilterCount =>
         (string.IsNullOrWhiteSpace(_searchText) ? 0 : 1) +
         (string.IsNullOrWhiteSpace(_categoryFilter) ? 0 : 1) +
+        (string.IsNullOrWhiteSpace(_sectorFilter) ? 0 : 1) +
+        (string.IsNullOrWhiteSpace(_topicFilter) ? 0 : 1) +
         (string.IsNullOrWhiteSpace(_languageFilter) ? 0 : 1) +
         (string.IsNullOrWhiteSpace(_countryFilter) ? 0 : 1) +
         (string.IsNullOrWhiteSpace(_regionFilter) ? 0 : 1) +
@@ -729,6 +741,26 @@
         await EnsureSubscriptionForSelectionAsync();
     }
 
+    private async Task SectorChangedAsync(string? value)
+    {
+        _sectorFilter = value;
+        var monthTask = _calendarVisible ? RefreshCalendarMonthAsync() : Task.CompletedTask;
+        await RefreshQueryAsync();
+        await monthTask;
+        EnsureSelectedSession();
+        await EnsureSubscriptionForSelectionAsync();
+    }
+
+    private async Task TopicChangedAsync(string? value)
+    {
+        _topicFilter = value;
+        var monthTask = _calendarVisible ? RefreshCalendarMonthAsync() : Task.CompletedTask;
+        await RefreshQueryAsync();
+        await monthTask;
+        EnsureSelectedSession();
+        await EnsureSubscriptionForSelectionAsync();
+    }
+
     private async Task CountryChangedAsync(string? value)
     {
         _countryFilter = value;
@@ -783,6 +815,8 @@
     {
         _searchText = string.Empty;
         _categoryFilter = null;
+        _sectorFilter = null;
+        _topicFilter = null;
         _languageFilter = null;
         _countryFilter = null;
         _regionFilter = null;
@@ -841,7 +875,7 @@
         _monthNext = null;
         _monthError = null;
         _monthQuery = new PublicSessionQuery(Search: _searchText, CountryCode: _countryFilter, RegionId: _regionFilter,
-            Category: _categoryFilter, Language: _languageFilter,
+            Category: _categoryFilter, Sector: _sectorFilter, Topic: _topicFilter, Language: _languageFilter,
             LocalDateFrom: DateOnly.FromDateTime(_calendarMonth),
             LocalDateTo: DateOnly.FromDateTime(_calendarMonth.AddMonths(1).AddDays(-1)),
             StartFromUtc: _periodFilter == SessionPeriodFilter.Upcoming ? DateTimeOffset.UtcNow : null,
@@ -902,6 +936,8 @@
             CountryCode: _countryFilter,
             RegionId: _regionFilter,
             Category: _categoryFilter,
+            Sector: _sectorFilter,
+            Topic: _topicFilter,
             Language: _languageFilter,
             LocalDateFrom: _periodFilter == SessionPeriodFilter.CustomDates && _dateFrom is { } from ? DateOnly.FromDateTime(from) : null,
             LocalDateTo: _periodFilter == SessionPeriodFilter.CustomDates && _dateTo is { } to ? DateOnly.FromDateTime(to) : null,
