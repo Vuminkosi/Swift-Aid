@@ -1147,3 +1147,4 @@ verified_at_utc: null
 - [ ] **REL-03** — Conditional P1/Gate features are demonstrably disabled when unapproved, including APIs/tools/workers and all claims.
 - [ ] **REL-04** — All unresolved requirements, skipped tests and approval/rights gaps are documented honestly and not disguised as Passed.
 - [ ] **REL-05** — Complete traceability and reproducible evidence package delivered with actual commit/test/benchmark summary.
+SW-01-004 update (3 November 2026): added audio/session lifecycle crosswalk and EV-089 evidence. Focused audio Integration tests 33/33 and speech-event contract tests 4/4 pass. Checkbox remains unchecked: full producer/consumer/schema/persistence reconciliation, live client/provider/device and recovery evidence remain incomplete. See [contract map](docs/SW-01-004-CONTRACT-MAP.md).
