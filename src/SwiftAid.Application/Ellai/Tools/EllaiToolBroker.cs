@@ -714,6 +714,7 @@ public sealed class EllaiToolBroker
             return new(request.ToolName, true, null, foundEvidence,
                 "Owned readable cases matching the recorded occurrence place. " +
                 (found.UnknownLocations ? "Some readable cases have unknown or incomplete locations. " : "") +
+                (found.LocationReadUnavailable ? "A case location could not be checked; remaining cases were not searched. " : "") +
                 (found.Truncated ? "The scan or result is incomplete. " : "") + placeRecallNotice + "\n" + string.Join("\n", foundLines),
                 foundItems.Length, found.Truncated || found.UnknownLocations);
         }

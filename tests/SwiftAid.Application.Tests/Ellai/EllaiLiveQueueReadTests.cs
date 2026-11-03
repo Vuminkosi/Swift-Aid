@@ -51,9 +51,31 @@ public sealed class EllaiLiveQueueReadTests
     private sealed class OccurrenceLocation : ICaseOccurrenceLocationQuery
     {
         public string RegionId { get; set; } = "region-1";
+        public Guid? UnavailableCaseId { get; set; }
         public Task<CaseOccurrenceLocationResult> GetLocationAsync(ActorContext actor, Guid caseId, CancellationToken ct) =>
-            Task.FromResult(new CaseOccurrenceLocationResult(CaseOccurrenceLocationAccess.Allowed, 1,
-                new("US", "Synthetic", "Area", "Locality", RegionId, "area-1", "locality-1")));
+            Task.FromResult(caseId == UnavailableCaseId
+                ? new CaseOccurrenceLocationResult(CaseOccurrenceLocationAccess.Unavailable, null, null)
+                : new CaseOccurrenceLocationResult(CaseOccurrenceLocationAccess.Allowed, 1,
+                    new("US", "Synthetic", "Area", "Locality", RegionId, "area-1", "locality-1")));
+    }
+
+    [Fact]
+    public async Task PlaceSearchReportsAStoppedScanAlongsideVerifiedMatches()
+    {
+        var first = Row("01", 7); var second = Row("02", 8);
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [first, second]) };
+        var consent = new EllaiConsentService();
+        consent.Grant("session-1", EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue,
+            occurrenceLocations: new OccurrenceLocation { UnavailableCaseId = second.CaseId });
+        var result = await broker.InvokeAsync(Context with { Actor = TestActor() }, new(EllaiToolNames.State,
+            Args(("projection", "queue"), ("country", "US"), ("sort", "latest-reported"), ("place_id", "region-1"))), default);
+        Assert.True(result.Allowed);
+        Assert.True(result.Truncated);
+        Assert.Equal(first.CaseId.ToString("D"), Assert.Single(result.Evidence).ResourceId);
+        Assert.Contains("remaining cases were not searched", result.ResultSummary);
+        Assert.DoesNotContain(second.CaseId.ToString("D"), result.ResultSummary);
     }
 
     private sealed class CountingClassificationQuery : SwiftAid.Application.Classification.ICaseClassificationQuery

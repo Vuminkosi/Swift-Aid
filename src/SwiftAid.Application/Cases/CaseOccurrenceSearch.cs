@@ -41,7 +41,9 @@ public sealed class CaseOccurrenceSearch(ICaseQueueQuery queue, ICaseOccurrenceL
                     var location = await locations.GetLocationAsync(actor, item.CaseId, ct).ConfigureAwait(false);
                     ct.ThrowIfCancellationRequested();
                     if (location.Access == CaseOccurrenceLocationAccess.Unavailable)
-                        return new(CaseQueueAccess.Unavailable, [], false, false);
+                        return matches.Count == 0
+                            ? new(CaseQueueAccess.Unavailable, [], false, false)
+                            : new(CaseQueueAccess.Allowed, matches, true, unknown, LocationReadUnavailable: true);
                     if (location.Access != CaseOccurrenceLocationAccess.Allowed) continue;
                     if (location.Location is null) { unknown = true; continue; }
                     var place = location.Location;
@@ -72,4 +74,4 @@ public sealed class CaseOccurrenceSearch(ICaseQueueQuery queue, ICaseOccurrenceL
 
 public sealed record CaseOccurrenceMatch(CaseQueueItem Case, long ReportRevision);
 public sealed record CaseOccurrenceSearchResult(CaseQueueAccess Access, IReadOnlyList<CaseOccurrenceMatch> Items,
-    bool Truncated, bool UnknownLocations);
+    bool Truncated, bool UnknownLocations, bool LocationReadUnavailable = false);

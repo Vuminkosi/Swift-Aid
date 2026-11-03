@@ -65,6 +65,22 @@ public sealed class CaseOccurrenceSearchTests
     }
 
     [Fact]
+    public async Task LaterLocationFailureReturnsOnlyVerifiedMatchesAndMarksTheScanIncomplete()
+    {
+        var first = Row(1); var second = Row(2); var third = Row(3);
+        var locations = new Locations();
+        locations.Results[first.CaseId] = new(CaseOccurrenceLocationAccess.Allowed, 1,
+            new("SZ", "Manzini", "Area", "Locality", "region-1", "area-1", "locality-1"));
+        locations.Results[second.CaseId] = new(CaseOccurrenceLocationAccess.Unavailable, null, null);
+        var result = await new CaseOccurrenceSearch(new Queue(new CaseQueueResult(CaseQueueAccess.Allowed, [first, second, third])), locations)
+            .SearchAsync(Actor(), "SZ", "region-1", 5, default);
+        Assert.Equal(CaseQueueAccess.Allowed, result.Access);
+        Assert.Equal(first.CaseId, Assert.Single(result.Items).Case.CaseId);
+        Assert.True(result.Truncated);
+        Assert.True(result.LocationReadUnavailable);
+    }
+
+    [Fact]
     public async Task RepeatedPageCursorCannotProduceAnApparentlyCompleteResult()
     {
         var first = Row(1); var second = Row(2);
