@@ -120,6 +120,14 @@ skipped using `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application
 809 with 334 skipped using the corresponding integration project, the same
 flags, `-p:WasmBuildNative=false`, and `OS=Windows_NT`. These local results do
 not turn skipped, deployed, or independent-review checks into passes.
+Subsequent framework contract review found malformed claim text could throw
+while grounding and a null evidence collection on an unknown claim could pass
+validation. Claim validation now requires an identifier, text, a defined kind,
+and a non-null evidence array without null entries. The focused framework,
+decision-contract and parser filter passed 144/144; after adding identifier and
+null-entry cases, the malformed-claim filter passed 5/5, including a post-commit
+rerun. These scripted model tests verify repair of malformed claim shapes; they
+do not prove that all generated factual claims are grounded.
 
 ## Provider observations and open checks
 
