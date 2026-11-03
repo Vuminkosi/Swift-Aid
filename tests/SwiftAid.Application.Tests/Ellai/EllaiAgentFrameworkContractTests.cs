@@ -16,6 +16,69 @@ public sealed class EllaiAgentFrameworkContractTests
          "topicRefs":[],"resumeSuggestion":null,"stopReason":null}}
         """;
 
+    [Fact]
+    public async Task CountAnswerAndStreamUseOnlyAuthorizedObservationEvenWhenModelInventsValue()
+    {
+        using var client = new CountStreamingClient();
+        var agent = new EllaiFrameworkAgent(client);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.OwnedCaseCount });
+        var reference = new EvidenceRef("DashboardAggregate", "owned-cases", "v1", null, "proof");
+        const string authorized = "2 managed case records in the authorized window.";
+        var chunks = new List<string>();
+        var result = await agent.RunAsync(context, "Test policy", [new ChatMessage(ChatRole.User, "Count")], 100,
+            _ => Task.FromResult(true), (_, request, _) => Task.FromResult(new EllaiToolResult(request.ToolName,
+                true, null, [reference], authorized, 1, false)),
+            new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default,
+            (text, _) => { chunks.Add(text); return ValueTask.CompletedTask; });
+        Assert.NotNull(result);
+        Assert.Equal(authorized, result.DisplayText);
+        Assert.Equal(authorized, result.SpokenText);
+        Assert.Equal(authorized, string.Concat(chunks));
+        Assert.Contains(reference, Assert.Single(result.Claims).Evidence);
+    }
+
+    [Fact]
+    public async Task CountMixedWithAnotherToolDoesNotPublishUnverifiedAnswer()
+    {
+        using var client = new CountStreamingClient(mixed: true);
+        var agent = new EllaiFrameworkAgent(client);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.OwnedCaseCount, EllaiToolNames.Now });
+        var reference = new EvidenceRef("DashboardAggregate", "owned-cases", "v1", null, "proof");
+        var chunks = new List<string>();
+        var result = await agent.RunAsync(context, "Test policy", [new ChatMessage(ChatRole.User, "Count")], 100,
+            _ => Task.FromResult(true), (_, request, _) => Task.FromResult(new EllaiToolResult(request.ToolName,
+                true, null, [reference], "2 managed case records.", 1, false)),
+            new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default,
+            (text, _) => { chunks.Add(text); return ValueTask.CompletedTask; });
+        Assert.Null(result);
+        Assert.Empty(chunks);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, agent.LastFailureCode);
+    }
+
+    private sealed class CountStreamingClient(bool mixed = false) : IChatClient
+    {
+        private int _calls;
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            if (++_calls == 1)
+            {
+                var calls = new List<AIContent> { new FunctionCallContent("count", EllaiToolNames.OwnedCaseCount,
+                    new Dictionary<string, object?> { ["window_days"] = "30" }) };
+                if (mixed) calls.Add(new FunctionCallContent("now", EllaiToolNames.Now, new Dictionary<string, object?>()));
+                yield return new ChatResponseUpdate(ChatRole.Assistant, calls);
+            }
+            else
+                yield return new ChatResponseUpdate(ChatRole.Assistant, ValidDecision.Replace("Done.", "There are 999 cases.", StringComparison.Ordinal));
+        }
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

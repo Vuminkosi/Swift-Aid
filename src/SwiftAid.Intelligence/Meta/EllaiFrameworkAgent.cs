@@ -39,10 +39,15 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
         if (!await isCurrent(ct).ConfigureAwait(false)) { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
 
         var evidence = new HashSet<EvidenceRef>();
+        EllaiToolResult? countResult = null;
+        var toolCalls = 0;
+        var bufferForCount = context.AllowedTools is null || context.AllowedTools.Contains(EllaiToolNames.OwnedCaseCount);
         var guard = new EllaiFrameworkToolGuard(Math.Min(context.RemainingCalls, EllaiCycleRunner.MaxToolCalls),
             isCurrent, async (toolContext, request, token) =>
             {
                 var result = await invoke(toolContext, request, token).ConfigureAwait(false);
+                toolCalls++;
+                if (request.ToolName == EllaiToolNames.OwnedCaseCount && result.Allowed) countResult = result;
                 if (result.Allowed)
                     foreach (var reference in result.Evidence.Take(20)) evidence.Add(reference);
                 return result;
@@ -85,7 +90,7 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
                 if (textLength > 512_000) throw new InvalidOperationException("Ellai response exceeded its stream limit.");
                 foreach (var sentence in parser.Append(update.Text))
                 {
-                    if (guard.FailureCode is null && await isCurrent(ct).ConfigureAwait(false))
+                    if (!bufferForCount && guard.FailureCode is null && await isCurrent(ct).ConfigureAwait(false))
                     {
                         await onTextDelta(sentence, ct).ConfigureAwait(false);
                         emittedProvisional = true;
@@ -115,6 +120,30 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
             parser = null;
         }
         if (decision is null) return null;
+        if (countResult is not null)
+        {
+            if (toolCalls != 1 || countResult.Evidence.Count != 1 || !await isCurrent(ct).ConfigureAwait(false))
+            {
+                LastFailureCode = EllaiToolReasonCodes.Unavailable;
+                return null;
+            }
+            decision = decision with
+            {
+                Kind = DecisionKind.Answer,
+                DisplayText = countResult.ResultSummary,
+                SpokenText = countResult.ResultSummary,
+                Claims = [new GroundedClaim("owned-case-count", countResult.ResultSummary, ClaimKind.Observed, countResult.Evidence)],
+                Questions = [], UiIntents = [], PlanProposal = null, TopicRefs = [], ResumeSuggestion = null, StopReason = null
+            };
+            if (onTextDelta is not null && await isCurrent(ct).ConfigureAwait(false))
+                await onTextDelta(decision.DisplayText, ct).ConfigureAwait(false);
+            return decision;
+        }
+        if (bufferForCount && onTextDelta is not null && await isCurrent(ct).ConfigureAwait(false))
+        {
+            await onTextDelta(decision.DisplayText, ct).ConfigureAwait(false);
+            return decision;
+        }
         if (parser is not null && onTextDelta is not null)
         {
             var remainder = parser.FlushVerified(decision.DisplayText);
