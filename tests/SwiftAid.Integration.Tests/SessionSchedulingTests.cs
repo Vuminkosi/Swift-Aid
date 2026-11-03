@@ -344,6 +344,35 @@ public sealed class SessionSchedulingTests
     }
 
     [IntakePostgresFact]
+    public async Task Public_cancelled_session_does_not_expose_staff_cancellation_reason()
+    {
+        var sessionId = Guid.NewGuid();
+        const string reason = "Private coordination note";
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var setup = CreateService(db);
+        var service = new CommunitySessionService(new PostgresCommunitySessionStore(db), new FixtureMaterialEligibility());
+        try
+        {
+            await PublishAsync(setup, sessionId, SessionVisibility.Public);
+            await setup.ExecuteAsync(new CancelSessionCommand(sessionId, 3, reason, "cancel", DateTimeOffset.UtcNow),
+                "officer-2", CancellationToken.None);
+
+            Assert.Equal(reason, (await service.GetStaffAsync(sessionId, "officer-1", CancellationToken.None))!.CancellationReason);
+            var publicSession = await service.GetPublicAsync(sessionId, CancellationToken.None);
+            Assert.Equal("Cancelled", publicSession!.Status);
+            Assert.Null(publicSession.CancellationReason);
+            var calendar = (await service.GetIcsAsync(sessionId, DateTimeOffset.UtcNow, CancellationToken.None))!;
+            Assert.Contains("STATUS:CANCELLED", calendar, StringComparison.Ordinal);
+            Assert.DoesNotContain(reason, calendar, StringComparison.Ordinal);
+            Assert.DoesNotContain(reason, (await service.GetInvitationTextAsync(sessionId, CancellationToken.None))!, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await CleanupAsync(sessionId);
+        }
+    }
+
+    [IntakePostgresFact]
     public async Task Schedule_update_advances_ICS_and_invitation_is_manual_copy()
     {
         var sessionId = Guid.NewGuid();

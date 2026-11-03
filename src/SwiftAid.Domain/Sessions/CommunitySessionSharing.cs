@@ -35,7 +35,7 @@ public static class CommunitySessionSharing
         AppendFolded(builder, "SUMMARY", session.Title);
         AppendFolded(builder, "DESCRIPTION", Describe(session));
         AppendFolded(builder, "LOCATION", Locate(session));
-        if (session.PublicChannelLink is { } publicLink)
+        if (session.Status != CommunitySessionStatus.Cancelled && session.PublicChannelLink is { } publicLink)
         {
             AppendFolded(builder, "URL", publicLink);
         }
@@ -68,14 +68,15 @@ public static class CommunitySessionSharing
 
         var localStart = TimeZoneInfo.ConvertTime(session.StartUtc, zone);
         var builder = new StringBuilder();
-        builder.Append("You are invited: ").AppendLine(session.Title);
+        builder.Append(session.Status == CommunitySessionStatus.Cancelled ? "Session cancelled: " : "You are invited: ")
+            .AppendLine(session.Title);
         builder.Append("When: ").Append(localStart.ToString("f", System.Globalization.CultureInfo.InvariantCulture))
             .Append(" (").Append(session.TimeZoneId).Append(", UTC")
             .Append(localStart.ToString("zzz", System.Globalization.CultureInfo.InvariantCulture)).AppendLine(")");
         builder.Append("Duration: ").Append(session.DurationMinutes
             .ToString(System.Globalization.CultureInfo.InvariantCulture)).AppendLine(" minutes");
         builder.Append("Presenter: ").AppendLine(session.Presenter);
-        if (session.PublicChannelLink is { } publicLink)
+        if (session.Status != CommunitySessionStatus.Cancelled && session.PublicChannelLink is { } publicLink)
         {
             builder.Append("Join: ").AppendLine(publicLink);
         }
@@ -87,7 +88,7 @@ public static class CommunitySessionSharing
         builder.AppendLine(session.Summary);
         if (session.Status == CommunitySessionStatus.Cancelled)
         {
-            builder.Append("Status: cancelled. Reason: ").AppendLine(session.CancellationReason ?? "not recorded");
+            builder.AppendLine("Status: cancelled.");
         }
 
         return builder.ToString();
@@ -100,7 +101,7 @@ public static class CommunitySessionSharing
         builder.Append("\nLanguage: ").Append(session.Language);
         if (session.Status == CommunitySessionStatus.Cancelled)
         {
-            builder.Append("\nStatus: cancelled. Reason: ").Append(session.CancellationReason ?? "not recorded");
+            builder.Append("\nStatus: cancelled.");
         }
 
         return builder.ToString();

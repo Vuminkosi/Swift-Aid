@@ -332,7 +332,7 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
         // Preserve staff references, but do not serialize unverified references publicly.
         Array.Empty<StoredSessionMaterial>(),
         ToContractChannel(session.ChannelType), session.PublicChannelLink,
-        session.Status.ToString(), session.CancellationReason, session.IcsSequence);
+        session.Status.ToString(), null, session.IcsSequence);
 
     private static DomainVisibility ToDomainVisibility(Contracts.Sessions.SessionVisibility visibility) =>
         visibility switch

@@ -221,6 +221,9 @@ public sealed class CommunitySessionTests
         var ics = CommunitySessionSharing.BuildIcs(session, CreatedAt.AddHours(4));
         Assert.Contains("STATUS:CANCELLED", ics);
         Assert.Contains("cancelled", ics, StringComparison.OrdinalIgnoreCase);
+        var invitation = CommunitySessionSharing.BuildInvitationText(session);
+        Assert.StartsWith("Session cancelled:", invitation, StringComparison.Ordinal);
+        Assert.DoesNotContain("venue flooded", invitation, StringComparison.Ordinal);
     }
 
     [Fact]

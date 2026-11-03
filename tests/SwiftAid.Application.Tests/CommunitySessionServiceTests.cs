@@ -282,6 +282,27 @@ public sealed class CommunitySessionServiceTests
     }
 
     [Fact]
+    public async Task CancellationReasonIsRestrictedToStaffViews()
+    {
+        var services = CreateServices();
+        var id = Guid.NewGuid();
+        const string reason = "Private coordination note";
+        await PublishAsync(services.Service, id, SessionVisibility.Public);
+        await services.Service.ExecuteAsync(new CancelSessionCommand(id, 3, reason, "cancel", Now), "officer-2", CancellationToken.None);
+
+        Assert.Equal(reason, (await services.Service.GetStaffAsync(id, "officer-1", CancellationToken.None))!.CancellationReason);
+        Assert.Null((await services.Service.GetPublicAsync(id, CancellationToken.None))!.CancellationReason);
+        Assert.Null(Assert.Single(await services.Service.ListPublicAsync(null, CancellationToken.None)).CancellationReason);
+        Assert.Null(Assert.Single((await services.Service.QueryPublicAsync(new PublicSessionQuery(), CancellationToken.None)).Items).CancellationReason);
+        var calendar = (await services.Service.GetIcsAsync(id, Now, CancellationToken.None))!;
+        var invitation = (await services.Service.GetInvitationTextAsync(id, CancellationToken.None))!;
+        Assert.DoesNotContain(reason, calendar, StringComparison.Ordinal);
+        Assert.DoesNotContain("URL:", calendar, StringComparison.Ordinal);
+        Assert.DoesNotContain(reason, invitation, StringComparison.Ordinal);
+        Assert.DoesNotContain("Join:", invitation, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Cancelling_a_reviewed_unpublished_session_never_exposes_it_publicly()
     {
         var services = CreateServices();
