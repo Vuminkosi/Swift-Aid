@@ -58,11 +58,24 @@ alias is host-specific (`implementation.md` section 14.9).
 existing configured Meta endpoint, model and key. It is not registered in the
 Gateway. A synthetic HTTP handler verified the request path, bearer header,
 model, tool declaration and native tool-call response parsing. The SDK sends
-`max_completion_tokens`; the existing Meta adapter sends `max_tokens`. Live
-Muse support for the SDK's field and remaining protocol behavior are unknown.
-Validate safe error handling, SDK logging, usage, streaming and token limits
-before routing production traffic through it. The OpenAI SDK here is a wire
+`max_completion_tokens`; the existing Meta adapter sends `max_tokens`.
+Validate safe error handling, SDK logging and remaining usage and token-limit
+behavior before routing production traffic through it. The OpenAI SDK here is a wire
 protocol adapter, not OpenAI Swarm or an alternate agent framework.
+
+Live synthetic probes on 3 November 2026 used the running Gateway container's
+configured Meta route without printing credentials. The official client
+returned ordinary text with the configured model and nonzero token usage;
+streaming produced the expected text. With `max_completion_tokens=1024`,
+both requests succeeded. A native function declaration with automatic tool
+choice returned the requested structured tool call. The same request with
+`ChatToolMode.RequireAny` returned HTTP 400. The error body was deliberately
+not recorded, so the precise rejection cause is unknown; this result does not
+establish that all structured schemas, forced tool choices, context sizes or
+streaming tool-call deltas are supported. A framework agent also invoked a
+synthetic function through the live provider and used the result in its final
+answer. These probes did not exercise SwiftAid tools or the Gateway worker. The opt-in tests are in
+`EllaiLiveProbeTests`; default execution skips them.
 
 The official NuGet feed resolved `Microsoft.Agents.AI` version `1.27.0` on
 3 November 2026. The Intelligence project references this version; the

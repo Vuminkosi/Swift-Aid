@@ -1,4 +1,6 @@
 using SwiftAid.Intelligence.Meta;
+using Microsoft.Extensions.AI;
+using Microsoft.Agents.AI;
 
 namespace SwiftAid.Application.Tests.Ellai;
 
@@ -33,6 +35,104 @@ public sealed class EllaiLiveProbeTests
                 Skip = "Set ELLAI_LIVE=1 with Ellai configuration present to run live provider probes.";
             }
         }
+    }
+
+    [LiveFact]
+    public async Task LiveOfficialChatClientReturnsSyntheticText()
+    {
+        var options = LiveOptions();
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
+        using var client = EllaiMuseChatClientFactory.Create(options, http);
+        ChatResponse response;
+        try
+        {
+            response = await client.GetResponseAsync(
+                [new ChatMessage(ChatRole.User, "Reply with the single word: ok")],
+                new ChatOptions { MaxOutputTokens = 1024 });
+        }
+        catch (System.ClientModel.ClientResultException error)
+        {
+            // Never place a provider response body or credential in test output.
+            throw new InvalidOperationException($"Provider rejected the official chat client request (HTTP {error.Status}).");
+        }
+
+        Assert.Contains("ok", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(options.ReasoningModel, response.ModelId);
+        Assert.True(response.Usage?.TotalTokenCount > 0);
+    }
+
+    [LiveFact]
+    public async Task LiveOfficialChatClientReturnsNativeToolCall()
+    {
+        var options = LiveOptions();
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
+        using var client = EllaiMuseChatClientFactory.Create(options, http);
+        var tool = AIFunctionFactory.Create((string value) => value, "fixture_echo", "Echo a synthetic value.");
+        ChatResponse response;
+        try
+        {
+            response = await client.GetResponseAsync(
+                [new ChatMessage(ChatRole.User, "Call fixture_echo with value equal to banana. Do not answer directly.")],
+                new ChatOptions { MaxOutputTokens = 1024, Tools = [tool], ToolMode = ChatToolMode.Auto });
+        }
+        catch (System.ClientModel.ClientResultException error)
+        {
+            throw new InvalidOperationException($"Provider rejected the official tool-call request (HTTP {error.Status}).");
+        }
+
+        var call = Assert.Single(response.Messages.SelectMany(message => message.Contents).OfType<FunctionCallContent>());
+        Assert.Equal("fixture_echo", call.Name);
+        Assert.False(string.IsNullOrWhiteSpace(call.CallId));
+        Assert.NotNull(call.Arguments);
+        Assert.Contains("banana", call.Arguments["value"]?.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [LiveFact]
+    public async Task LiveFrameworkAgentInvokesSyntheticTool()
+    {
+        var options = LiveOptions();
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
+        using var client = EllaiMuseChatClientFactory.Create(options, http);
+        var invoked = 0;
+        var tool = AIFunctionFactory.Create((string value) =>
+        {
+            Interlocked.Increment(ref invoked);
+            return $"The synthetic result is {value}.";
+        }, "fixture_echo", "Echo a synthetic value.");
+        AIAgent agent = client.AsAIAgent(name: "EllaiSyntheticProbe", tools: [tool]);
+        var session = await agent.CreateSessionAsync();
+        try
+        {
+            var response = await agent.RunAsync("Use fixture_echo with value banana, then report its result.", session);
+            Assert.Equal(1, invoked);
+            Assert.Contains("banana", response.Text, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (System.ClientModel.ClientResultException error)
+        {
+            throw new InvalidOperationException($"Provider rejected the framework agent request (HTTP {error.Status}).");
+        }
+    }
+
+    [LiveFact]
+    public async Task LiveOfficialChatClientStreamsSyntheticText()
+    {
+        var options = LiveOptions();
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
+        using var client = EllaiMuseChatClientFactory.Create(options, http);
+        var text = new System.Text.StringBuilder();
+        try
+        {
+            await foreach (var update in client.GetStreamingResponseAsync(
+                [new ChatMessage(ChatRole.User, "Reply with the single word: ok")],
+                new ChatOptions { MaxOutputTokens = 1024 }))
+                text.Append(update.Text);
+        }
+        catch (System.ClientModel.ClientResultException error)
+        {
+            throw new InvalidOperationException($"Provider rejected the official streaming request (HTTP {error.Status}).");
+        }
+
+        Assert.Contains("ok", text.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     [LiveFact]
