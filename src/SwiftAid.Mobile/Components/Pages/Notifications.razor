@@ -133,8 +133,7 @@
         {
             var result = await SubscriptionClient.UnsubscribeAsync(subscription.SessionId, subscription.Version);
             if (_disposed || identity != Volatile.Read(ref _identityGeneration)) return;
-            var message = result.Succeeded ? "You are unsubscribed from this session." :
-                result.Message ?? result.Metadata.Notice ?? "We could not update this subscription. Refresh and try again.";
+            var message = SessionSubscriptionPresentation.UnsubscribeMessage(result, subscription.SessionId);
             await RefreshSubscriptionsAsync();
             if (!_disposed && identity == Volatile.Read(ref _identityGeneration)) _subscriptionMessage = message;
         }

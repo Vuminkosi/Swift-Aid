@@ -35,4 +35,20 @@ public sealed class SessionSubscriptionPresentationTests
 
         Assert.Null(SessionSubscriptionPresentation.Status(result));
     }
+
+    [Theory]
+    [InlineData(SubscriptionStatus.RequiresAuthentication, false)]
+    [InlineData(SubscriptionStatus.Active, false)]
+    [InlineData(SubscriptionStatus.Unsubscribed, true)]
+    public void UnsubscribeConfirmationRequiresMatchingUnsubscribedResult(SubscriptionStatus status, bool confirms)
+    {
+        var sessionId = Guid.NewGuid();
+        var value = new SubscriptionView(sessionId, status, 1, false);
+        var result = new UiCapabilityResult<SubscriptionView>(UiCapabilityResultCode.Success, value,
+            UiCapabilityResults.UnavailableMetadata("session-subscriptions", "Test state"));
+
+        Assert.Equal(confirms, SessionSubscriptionPresentation.UnsubscribeMessage(result, sessionId)
+            .Contains("You are unsubscribed", StringComparison.Ordinal));
+        Assert.DoesNotContain("You are unsubscribed", SessionSubscriptionPresentation.UnsubscribeMessage(result, Guid.NewGuid()), StringComparison.Ordinal);
+    }
 }
