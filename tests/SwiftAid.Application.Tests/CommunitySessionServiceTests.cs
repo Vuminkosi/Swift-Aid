@@ -119,6 +119,10 @@ public sealed class CommunitySessionServiceTests
         Assert.Null(Assert.Single(query.Items, item => item.SessionId == publicId).ChannelLink);
         Assert.DoesNotContain(list, item => item.SessionId == internalId);
         Assert.DoesNotContain(query.Items, item => item.SessionId == internalId);
+        Assert.Single((await services.Service.QueryPublicAsync(new PublicSessionQuery(Status: "completed"), CancellationToken.None)).Items);
+        Assert.Empty((await services.Service.QueryPublicAsync(new PublicSessionQuery(Status: "Scheduled"), CancellationToken.None)).Items);
+        await Assert.ThrowsAsync<ArgumentException>(() => services.Service.QueryPublicAsync(new PublicSessionQuery(Status: "Draft"), CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(() => services.Service.QueryPublicAsync(new PublicSessionQuery(Status: "Reviewed"), CancellationToken.None));
     }
 
     [Fact]
@@ -588,6 +592,8 @@ public sealed class CommunitySessionServiceTests
         {
             var results = _sessions.Values.Where(item => item.Visibility == DomainSessions.SessionVisibility.Public &&
                 (item.Status == DomainSessions.CommunitySessionStatus.Scheduled || item.Status == DomainSessions.CommunitySessionStatus.Cancelled || item.Status == DomainSessions.CommunitySessionStatus.Completed));
+            if (query.Status is { } status)
+                results = results.Where(item => item.Status.ToString() == status);
             if (query.AfterStartUtc is { } after && query.AfterSessionId is { } afterId)
                 results = results.Where(item => item.StartUtc > after || item.StartUtc == after && item.SessionId.CompareTo(afterId) > 0);
             return Task.FromResult<IReadOnlyList<DomainSessions.CommunitySession>>(results

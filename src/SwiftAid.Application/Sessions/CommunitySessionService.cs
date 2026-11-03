@@ -152,7 +152,7 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
             query.AfterSessionId == Guid.Empty ||
             query.StartFromUtc >= query.StartBeforeUtc ||
             query.LocalDateFrom > query.LocalDateTo ||
-            new[] { query.Search, query.CountryCode, query.RegionId, query.Sector, query.Language, query.Topic, query.Category }
+            new[] { query.Search, query.CountryCode, query.RegionId, query.Sector, query.Language, query.Topic, query.Category, query.Status }
                 .Any(value => value is { Length: > 120 }))
         {
             throw new ArgumentException("The public session query is invalid.", nameof(query));
@@ -167,6 +167,7 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
             Language = Normalize(query.Language),
             Topic = Normalize(query.Topic),
             Category = Normalize(query.Category),
+            Status = NormalizePublicStatus(query.Status),
             StartFromUtc = query.StartFromUtc?.ToUniversalTime(),
             StartBeforeUtc = query.StartBeforeUtc?.ToUniversalTime(),
             AfterStartUtc = query.AfterStartUtc?.ToUniversalTime()
@@ -224,6 +225,16 @@ public sealed class CommunitySessionService(ICommunitySessionStore store, ISessi
 
     private static string? Normalize(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string? NormalizePublicStatus(string? value)
+    {
+        var status = Normalize(value);
+        if (status is null) return null;
+        if (string.Equals(status, "Scheduled", StringComparison.OrdinalIgnoreCase)) return "Scheduled";
+        if (string.Equals(status, "Completed", StringComparison.OrdinalIgnoreCase)) return "Completed";
+        if (string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase)) return "Cancelled";
+        throw new ArgumentException("The public session status filter is invalid.", nameof(value));
+    }
 
     public async Task<PublicSessionView?> GetPublicAsync(Guid sessionId, CancellationToken ct)
     {

@@ -41,6 +41,8 @@ public sealed class SessionSchedulingTests
             var result = Assert.Single(page.Items);
             Assert.Equal(ids[0], result.SessionId);
             Assert.Equal("Completed", result.Status);
+            Assert.Single((await service.QueryPublicAsync(new PublicSessionQuery(Search: marker, Status: "completed"), CancellationToken.None)).Items);
+            Assert.Empty((await service.QueryPublicAsync(new PublicSessionQuery(Search: marker, Status: "Scheduled"), CancellationToken.None)).Items);
             Assert.Null(result.ChannelLink);
             Assert.NotNull((await service.GetStaffAsync(ids[0], "officer-2", CancellationToken.None))!.ChannelLink);
             Assert.DoesNotContain("https://chat.example/join/abc", (await service.GetIcsAsync(ids[0], start.AddHours(2), CancellationToken.None))!, StringComparison.Ordinal);
@@ -133,6 +135,9 @@ public sealed class SessionSchedulingTests
             Assert.NotEmpty((await service.QueryPublicAsync(query with { Sector = "humanhealth", Topic = "malaria" }, CancellationToken.None)).Items);
             Assert.Empty((await service.QueryPublicAsync(query with { Sector = "another-sector", Topic = "malaria" }, CancellationToken.None)).Items);
             Assert.Empty((await service.QueryPublicAsync(query with { Sector = "humanhealth", Topic = "Malaria" }, CancellationToken.None)).Items);
+            Assert.NotEmpty((await service.QueryPublicAsync(query with { Status = "scheduled" }, CancellationToken.None)).Items);
+            Assert.Empty((await service.QueryPublicAsync(query with { Status = "completed" }, CancellationToken.None)).Items);
+            await Assert.ThrowsAsync<ArgumentException>(() => service.QueryPublicAsync(query with { Status = "Draft" }, CancellationToken.None));
             Assert.Null(await service.GetPublicAsync(ids[3], CancellationToken.None));
             Assert.DoesNotContain(await service.ListPublicAsync(null, CancellationToken.None), item => item.SessionId == ids[3]);
         }

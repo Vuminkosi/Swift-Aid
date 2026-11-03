@@ -46,12 +46,12 @@ public sealed class CommunitySessionHttpClientTests
         var handler = new CapturingHandler(JsonResponse(HttpStatusCode.OK, page));
         var client = new CommunitySessionHttpClient(new HttpClient(handler) { BaseAddress = new Uri("https://gateway.test/") });
 
-        var result = await client.QueryPublicResultAsync(new PublicSessionQuery(Search: "water & health", Sector: "Human Health", Topic: "Water & food", Language: "en", Limit: 1, Category: "Food & water", LocalDateFrom: new DateOnly(2026, 11, 1)));
+        var result = await client.QueryPublicResultAsync(new PublicSessionQuery(Search: "water & health", Sector: "Human Health", Topic: "Water & food", Language: "en", Limit: 1, Category: "Food & water", LocalDateFrom: new DateOnly(2026, 11, 1), Status: "Completed"));
 
         Assert.True(result.Succeeded);
         Assert.Equal(view.SessionId, Assert.Single(result.Value!.Items).SessionId);
         Assert.Equal(view.SessionId, result.Value.Next!.SessionId);
-        Assert.Equal("/public/v1/sessions/search?search=water%20%26%20health&sector=Human%20Health&language=en&topic=Water%20%26%20food&category=Food%20%26%20water&localFrom=2026-11-01&limit=1", handler.LastRequest!.RequestUri!.PathAndQuery);
+        Assert.Equal("/public/v1/sessions/search?search=water%20%26%20health&sector=Human%20Health&language=en&topic=Water%20%26%20food&category=Food%20%26%20water&status=Completed&localFrom=2026-11-01&limit=1", handler.LastRequest!.RequestUri!.PathAndQuery);
     }
 
     [Fact]

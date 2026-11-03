@@ -71,6 +71,7 @@ public sealed class CommunitySessionHttpClient(HttpClient httpClient)
         Add("language", query.Language);
         Add("topic", query.Topic);
         Add("category", query.Category);
+        Add("status", query.Status);
         Add("localFrom", query.LocalDateFrom?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
         Add("localTo", query.LocalDateTo?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
         Add("from", query.StartFromUtc?.ToString("O", CultureInfo.InvariantCulture));

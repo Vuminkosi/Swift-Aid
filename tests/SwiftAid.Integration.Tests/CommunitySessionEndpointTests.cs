@@ -324,7 +324,7 @@ public sealed class CommunitySessionEndpointTests
     public async Task PublicSearch_UsesPublicProjectionAndPassesFilters()
     {
         await using var host = await TestSessionHost.StartAsync(withPublished: true);
-        using var response = await host.Client.GetAsync("/public/v1/sessions/search?search=water&country=ZW&category=Nutrition&language=en&localFrom=2026-11-01&limit=1");
+        using var response = await host.Client.GetAsync("/public/v1/sessions/search?search=water&country=ZW&category=Nutrition&language=en&status=Completed&localFrom=2026-11-01&limit=1");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var page = JsonSerializer.Deserialize<PublicSessionPage>(await response.Content.ReadAsStringAsync(), JsonOptions);
@@ -334,6 +334,7 @@ public sealed class CommunitySessionEndpointTests
         Assert.Equal("ZW", host.Service.LastQuery?.CountryCode);
         Assert.Equal("Nutrition", host.Service.LastQuery?.Category);
         Assert.Equal("en", host.Service.LastQuery?.Language);
+        Assert.Equal("Completed", host.Service.LastQuery?.Status);
         Assert.Equal(new DateOnly(2026, 11, 1), host.Service.LastQuery?.LocalDateFrom);
         Assert.Equal(1, host.Service.LastQuery?.Limit);
     }

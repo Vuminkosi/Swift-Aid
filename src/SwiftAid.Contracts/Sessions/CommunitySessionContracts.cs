@@ -176,7 +176,8 @@ public sealed record PublicSessionQuery(
     int Limit = 25,
     string? Category = null,
     DateOnly? LocalDateFrom = null,
-    DateOnly? LocalDateTo = null);
+    DateOnly? LocalDateTo = null,
+    string? Status = null);
 
 /// <summary>Position for the next page of a public session query.</summary>
 public sealed record PublicSessionPosition(DateTimeOffset StartUtc, Guid SessionId);

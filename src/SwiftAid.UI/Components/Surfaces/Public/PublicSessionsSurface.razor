@@ -122,7 +122,7 @@
                 }
                 else
                 {
-                    <p>Dots mark dates with published sessions matching the search, location, category, sector, topic and language filters.</p>
+                    <p>Dots mark dates with published sessions matching the active filters.</p>
                 }
                 <p role="status">@(_calendarSelectedDate is { } selectedDay ? $"Agenda for {selectedDay.ToString("D", CultureInfo.CurrentCulture)}" : "Choose a date to see its agenda.")</p>
             </section>
@@ -185,6 +185,14 @@
                                   Variant="Variant.Outlined" Immediate="true" DebounceInterval="400" Clearable="true" MaxLength="120" />
                     <MudTextField T="string" Label="Exact topic" Value="@_topicFilter" ValueChanged="TopicChangedAsync"
                                   Variant="Variant.Outlined" Immediate="true" DebounceInterval="400" Clearable="true" MaxLength="120" />
+                </div>
+                <div class="public-sessions-filters__row">
+                    <MudSelect T="string" Label="Status" Value="@_statusFilter" ValueChanged="StatusChangedAsync"
+                               Variant="Variant.Outlined" Clearable="true" HelperText="Combine with the date filter to find past sessions.">
+                        <MudSelectItem T="string" Value="@("Scheduled")">Scheduled</MudSelectItem>
+                        <MudSelectItem T="string" Value="@("Completed")">Completed</MudSelectItem>
+                        <MudSelectItem T="string" Value="@("Cancelled")">Cancelled</MudSelectItem>
+                    </MudSelect>
                 </div>
                 <div class="public-sessions-filters__row">
                     <MudTextField T="string" Label="Country code" Value="@_countryFilter" ValueChanged="CountryChangedAsync"
@@ -459,6 +467,7 @@
     private string? _categoryFilter;
     private string? _sectorFilter;
     private string? _topicFilter;
+    private string? _statusFilter;
     private string? _languageFilter;
     private string? _countryFilter;
     private string? _regionFilter;
@@ -631,6 +640,7 @@
         !string.IsNullOrWhiteSpace(_categoryFilter) ||
         !string.IsNullOrWhiteSpace(_sectorFilter) ||
         !string.IsNullOrWhiteSpace(_topicFilter) ||
+        !string.IsNullOrWhiteSpace(_statusFilter) ||
         !string.IsNullOrWhiteSpace(_languageFilter) ||
         !string.IsNullOrWhiteSpace(_countryFilter) ||
         !string.IsNullOrWhiteSpace(_regionFilter) ||
@@ -641,6 +651,7 @@
         (string.IsNullOrWhiteSpace(_categoryFilter) ? 0 : 1) +
         (string.IsNullOrWhiteSpace(_sectorFilter) ? 0 : 1) +
         (string.IsNullOrWhiteSpace(_topicFilter) ? 0 : 1) +
+        (string.IsNullOrWhiteSpace(_statusFilter) ? 0 : 1) +
         (string.IsNullOrWhiteSpace(_languageFilter) ? 0 : 1) +
         (string.IsNullOrWhiteSpace(_countryFilter) ? 0 : 1) +
         (string.IsNullOrWhiteSpace(_regionFilter) ? 0 : 1) +
@@ -763,6 +774,16 @@
         await EnsureSubscriptionForSelectionAsync();
     }
 
+    private async Task StatusChangedAsync(string? value)
+    {
+        _statusFilter = value;
+        var monthTask = _calendarVisible ? RefreshCalendarMonthAsync() : Task.CompletedTask;
+        await RefreshQueryAsync();
+        await monthTask;
+        EnsureSelectedSession();
+        await EnsureSubscriptionForSelectionAsync();
+    }
+
     private async Task CountryChangedAsync(string? value)
     {
         _countryFilter = value;
@@ -819,6 +840,7 @@
         _categoryFilter = null;
         _sectorFilter = null;
         _topicFilter = null;
+        _statusFilter = null;
         _languageFilter = null;
         _countryFilter = null;
         _regionFilter = null;
@@ -877,7 +899,7 @@
         _monthNext = null;
         _monthError = null;
         _monthQuery = new PublicSessionQuery(Search: _searchText, CountryCode: _countryFilter, RegionId: _regionFilter,
-            Category: _categoryFilter, Sector: _sectorFilter, Topic: _topicFilter, Language: _languageFilter,
+            Category: _categoryFilter, Sector: _sectorFilter, Topic: _topicFilter, Language: _languageFilter, Status: _statusFilter,
             LocalDateFrom: DateOnly.FromDateTime(_calendarMonth),
             LocalDateTo: DateOnly.FromDateTime(_calendarMonth.AddMonths(1).AddDays(-1)),
             StartFromUtc: _periodFilter == SessionPeriodFilter.Upcoming ? DateTimeOffset.UtcNow : null,
@@ -940,6 +962,7 @@
             Category: _categoryFilter,
             Sector: _sectorFilter,
             Topic: _topicFilter,
+            Status: _statusFilter,
             Language: _languageFilter,
             LocalDateFrom: _periodFilter == SessionPeriodFilter.CustomDates && _dateFrom is { } from ? DateOnly.FromDateTime(from) : null,
             LocalDateTo: _periodFilter == SessionPeriodFilter.CustomDates && _dateTo is { } to ? DateOnly.FromDateTime(to) : null,

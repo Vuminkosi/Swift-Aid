@@ -12,8 +12,8 @@ namespace SwiftAid.Gateway.Endpoints;
 /// <remarks>
 /// Only the service-published projection is reachable here: a session that is not
 /// published with public visibility resolves to the same generic 404 as an unknown
-/// identifier, so the response never reveals draft, reviewed, internal, or completed
-/// work. No attendee, case, or audit data leaves through these routes. A deployment
+/// identifier, so the response never reveals draft, reviewed, or internal work.
+/// Previously published completed sessions remain public. No attendee, case, or audit data leaves through these routes. A deployment
 /// without the session pipeline fails closed with the same generic 404.
 /// </remarks>
 public static class PublicSessionEndpoints
@@ -77,7 +77,7 @@ public static class PublicSessionEndpoints
             StartFromUtc: from, StartBeforeUtc: before, AfterStartUtc: afterStart,
             AfterSessionId: Guid.TryParse(values["afterId"], out var afterId) ? afterId : null,
             Limit: int.TryParse(values["limit"], out var limit) ? limit : 25,
-            Category: values["category"], LocalDateFrom: localFrom, LocalDateTo: localTo);
+            Category: values["category"], LocalDateFrom: localFrom, LocalDateTo: localTo, Status: values["status"]);
         var service = context.RequestServices.GetService<ICommunitySessionService>();
         if (service is null)
         {

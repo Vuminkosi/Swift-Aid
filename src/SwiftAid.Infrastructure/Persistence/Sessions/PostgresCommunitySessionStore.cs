@@ -136,6 +136,8 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
             var exactTopic = JsonSerializer.Serialize(new[] { topic });
             rows = rows.Where(item => EF.Functions.JsonContains(item.TopicTagsJson, exactTopic));
         }
+        if (query.Status is { } status)
+            rows = rows.Where(item => item.Status == status);
         if (query.StartFromUtc is { } from)
             rows = rows.Where(item => item.StartUtc >= from);
         if (query.StartBeforeUtc is { } before)

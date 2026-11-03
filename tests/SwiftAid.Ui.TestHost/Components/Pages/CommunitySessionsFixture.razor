@@ -39,6 +39,7 @@
                 (string.IsNullOrWhiteSpace(query.Language) || string.Equals(session.Language, query.Language, StringComparison.OrdinalIgnoreCase)) &&
                 (string.IsNullOrWhiteSpace(query.Topic) || session.TopicTags.Contains(query.Topic, StringComparer.OrdinalIgnoreCase)) &&
                 (string.IsNullOrWhiteSpace(query.Category) || session.TopicTags.Contains(query.Category, StringComparer.OrdinalIgnoreCase)) &&
+                (string.IsNullOrWhiteSpace(query.Status) || string.Equals(session.Status, query.Status, StringComparison.OrdinalIgnoreCase)) &&
                 (query.LocalDateFrom is null || date >= query.LocalDateFrom) &&
                 (query.LocalDateTo is null || date <= query.LocalDateTo) &&
                 (query.StartFromUtc is null || session.StartUtc >= query.StartFromUtc) &&

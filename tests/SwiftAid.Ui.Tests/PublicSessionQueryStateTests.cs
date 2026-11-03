@@ -264,6 +264,7 @@ public sealed class PublicSessionQueryStateTests
         typeof(PublicSessionsSurface).GetField("_regionFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "hhohho");
         typeof(PublicSessionsSurface).GetField("_sectorFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "Education");
         typeof(PublicSessionsSurface).GetField("_topicFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "Water");
+        typeof(PublicSessionsSurface).GetField("_statusFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "Completed");
         SetQuery(component, query =>
         {
             requests.Add(query);
@@ -283,6 +284,7 @@ public sealed class PublicSessionQueryStateTests
         Assert.Equal("hhohho", requests[0].RegionId);
         Assert.Equal("Education", requests[0].Sector);
         Assert.Equal("Water", requests[0].Topic);
+        Assert.Equal("Completed", requests[0].Status);
         Assert.Equal(position.SessionId, requests[1].AfterSessionId);
         Assert.Equal(new[] { new DateOnly(2026, 11, 2), new DateOnly(2026, 11, 19) }, Field<HashSet<DateOnly>>(component, "_monthDates").Order().ToArray());
         Assert.Null(Field<PublicSessionPosition?>(component, "_monthNext"));
@@ -427,6 +429,7 @@ public sealed class PublicSessionQueryStateTests
         typeof(PublicSessionsSurface).GetField("_regionFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "harare");
         typeof(PublicSessionsSurface).GetField("_sectorFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "HumanHealth");
         typeof(PublicSessionsSurface).GetField("_topicFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "Malaria");
+        typeof(PublicSessionsSurface).GetField("_statusFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "Completed");
 
         await InvokeAsync(component, "RefreshQueryAsync");
 
@@ -436,12 +439,14 @@ public sealed class PublicSessionQueryStateTests
         Assert.Equal("harare", observed.RegionId);
         Assert.Equal("HumanHealth", observed.Sector);
         Assert.Equal("Malaria", observed.Topic);
-        Assert.Equal(6, Property<int>(component, "ActiveFilterCount"));
+        Assert.Equal("Completed", observed.Status);
+        Assert.Equal(7, Property<int>(component, "ActiveFilterCount"));
         await InvokeAsync(component, "ClearFiltersAsync");
         Assert.Null(observed!.CountryCode);
         Assert.Null(observed.RegionId);
         Assert.Null(observed.Sector);
         Assert.Null(observed.Topic);
+        Assert.Null(observed.Status);
         Assert.Equal(0, Property<int>(component, "ActiveFilterCount"));
     }
 
