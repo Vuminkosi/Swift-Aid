@@ -106,6 +106,19 @@ public static class EllaiDecisionValidator
                     continue;
                 }
 
+                if (string.IsNullOrWhiteSpace(claim.ClaimId) || string.IsNullOrWhiteSpace(claim.Text))
+                {
+                    errors.Add("Claims require an identifier and text.");
+                }
+                if (!Enum.IsDefined(claim.Kind))
+                {
+                    errors.Add("Claims require a supported kind.");
+                }
+                if (claim.Evidence is null || claim.Evidence.Any(reference => reference is null))
+                {
+                    errors.Add("Claim evidence must be an array of references.");
+                }
+
                 if (claim.Kind is not ClaimKind.Unknown
                     && claim.Kind is not ClaimKind.Proposed
                     && (claim.Evidence is null || claim.Evidence.Count == 0))

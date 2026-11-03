@@ -301,6 +301,44 @@ public sealed class EllaiAgentFrameworkContractTests
         public void Dispose() { }
     }
 
+    [Theory]
+    [InlineData("{\"claimId\":\"c\",\"text\":null,\"kind\":\"Unknown\",\"evidence\":[]}")]
+    [InlineData("{\"claimId\":null,\"text\":\"Uncertain.\",\"kind\":\"Unknown\",\"evidence\":[]}")]
+    [InlineData("{\"claimId\":\"c\",\"text\":\"Uncertain.\",\"kind\":\"Unknown\",\"evidence\":null}")]
+    [InlineData("{\"claimId\":\"c\",\"text\":\"Uncertain.\",\"kind\":\"Unknown\",\"evidence\":[null]}")]
+    [InlineData("{\"claimId\":\"c\",\"text\":\"Uncertain.\",\"kind\":99,\"evidence\":[]}")]
+    public async Task MalformedClaimIsRepairedBeforeGroundingOrPublication(string claim)
+    {
+        using var model = new MalformedClaimClient(claim);
+        var agent = new EllaiFrameworkAgent(model);
+        var context = new EllaiToolContext("session", "epoch", "public.product-help", null, 10, true,
+            AllowedTools: new HashSet<string>());
+        var result = await agent.RunAsync(context, "Synthetic policy", [new ChatMessage(ChatRole.User, "Help")], 256,
+            _ => Task.FromResult(true), (_, _, _) => throw new InvalidOperationException(),
+            new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default);
+
+        Assert.Equal("Done.", result?.DisplayText);
+        Assert.True(agent.LastRepairUsed);
+        Assert.Equal(2, model.Calls);
+    }
+
+    private sealed class MalformedClaimClient(string claim) : IChatClient
+    {
+        public int Calls { get; private set; }
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            var response = ++Calls == 1
+                ? ValidDecision.Replace("\"claims\":[]", "\"claims\":[" + claim + "]", StringComparison.Ordinal)
+                : ValidDecision;
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, response)));
+        }
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
     [Fact]
     public async Task FrameworkRepairsMalformedToolArgumentsBeforeBrokerInvocation()
     {
