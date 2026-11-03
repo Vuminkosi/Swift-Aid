@@ -69,7 +69,7 @@ public sealed record EllaiObservedToolResult(
             receiptLookupId = candidateReceipt;
         return new(request.ToolName, result.Allowed, result.ReasonCode, result.Evidence.ToArray(), result.Truncated,
             scope, caseQuery, staticFeature ? CurrentStaticFeatureVersion : null,
-            request.ToolName is EllaiToolNames.Topic or EllaiToolNames.Evidence ? result.HistoryValidUntilUtc : null,
+            request.ToolName is EllaiToolNames.Topic or EllaiToolNames.Evidence or EllaiToolNames.CaseTimeline ? result.HistoryValidUntilUtc : null,
             request.ToolName == EllaiToolNames.Now && result.Allowed && result.ReasonCode == EllaiToolReasonCodes.Ok &&
                 result.Evidence.Count == 0 && !result.Truncated && request.Arguments.Count == 0 &&
                 result.HistoryReplayVersion == CurrentClockVersion ? CurrentClockVersion : null,

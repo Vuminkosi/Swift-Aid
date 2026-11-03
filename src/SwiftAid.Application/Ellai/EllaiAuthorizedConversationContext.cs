@@ -295,7 +295,7 @@ public static class EllaiAuthorizedConversationContext
                         return decisions[turn.ClientUtteranceId] = false;
                     continue;
                 }
-                if (observation.ToolName is not (EllaiToolNames.Topic or EllaiToolNames.Evidence))
+                if (observation.ToolName is not (EllaiToolNames.Topic or EllaiToolNames.Evidence or EllaiToolNames.CaseTimeline))
                     return decisions[turn.ClientUtteranceId] = false;
                 if (observation.CaseSnapshotExpiresAtUtc is not { } expires || expires <= DateTimeOffset.UtcNow)
                     return decisions[turn.ClientUtteranceId] = false;

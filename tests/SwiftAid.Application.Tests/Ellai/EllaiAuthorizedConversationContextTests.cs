@@ -13,6 +13,32 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiAuthorizedConversationContextTests
 {
     [Fact]
+    public async Task TimelineHistoryIsDroppedWhenCaseAccessIsRevokedOrSnapshotExpires()
+    {
+        var id = Guid.NewGuid();
+        var observation = new EllaiObservedToolResult(EllaiToolNames.CaseTimeline, true, "Ok",
+            [new EvidenceRef("CaseQueue", id.ToString("D"), "3", null, id.ToString("D"))], false,
+            CaseSnapshotExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(5));
+        var trace = EllaiToolTrace.SerializeFlattened([observation], false, []);
+        Assert.NotNull(trace);
+        var turns = new[] { Turn("prior", 1, "timeline", "private timeline", trace),
+            Turn("current", 2, "follow-up", null, null) };
+        var queue = new BatchQueue();
+        var allowed = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), queue, default);
+        Assert.Contains(allowed.Messages, message => message.Content == "private timeline");
+        queue.Revoked = id;
+        var revoked = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), queue, default);
+        Assert.DoesNotContain(revoked.Messages, message => message.Content == "private timeline");
+        var expiredTrace = EllaiToolTrace.SerializeFlattened([observation with
+            { CaseSnapshotExpiresAtUtc = DateTimeOffset.UtcNow.AddSeconds(-1) }], false, []);
+        var expiredTurns = new[] { Turn("prior", 1, "timeline", "private timeline", expiredTrace),
+            Turn("current", 2, "follow-up", null, null) };
+        queue.Revoked = null;
+        var expired = await EllaiAuthorizedConversationContext.BuildAsync(expiredTurns, "current", Actor(), queue, default);
+        Assert.DoesNotContain(expired.Messages, message => message.Content == "private timeline");
+    }
+
+    [Fact]
     public async Task LongAuthorizedHistoryIsNotDiscardedAtFormerCharacterThreshold()
     {
         var trace = EllaiToolTrace.Serialize([], false);

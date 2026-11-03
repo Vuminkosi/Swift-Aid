@@ -105,15 +105,16 @@ public sealed class EllaiReadToolTests
                 if (tool == EllaiToolNames.ValidateObservations) args["observations_json"] = "[\"Reported concern\"]";
                 if (tool == EllaiToolNames.Locations) args["q"] = "Rusape";
                 if (tool == EllaiToolNames.OwnedCaseCount) args["window_days"] = "30";
+                if (tool == EllaiToolNames.CaseTimeline) args["case_id"] = "00000000-0000-0000-0000-000000000001";
                 var result = await broker.InvokeAsync(
                     Context, new EllaiToolRequest(tool, args),
                     CancellationToken.None);
                 var requiresStaffActor = tool is EllaiToolNames.ImportDestinations or EllaiToolNames.Imports or EllaiToolNames.ImportStatus or EllaiToolNames.ClassificationEvidence;
-                var requiresActor = requiresStaffActor || tool is EllaiToolNames.Evidence or EllaiToolNames.OwnedCaseCount;
+                var requiresActor = requiresStaffActor || tool is EllaiToolNames.Evidence or EllaiToolNames.OwnedCaseCount or EllaiToolNames.CaseTimeline;
                 Assert.Equal(!requiresActor, result.Allowed);
                 Assert.Equal(requiresStaffActor ? EllaiToolReasonCodes.DeniedByPolicy :
                     tool == EllaiToolNames.Evidence ? EllaiToolReasonCodes.DeniedByPolicy :
-                    tool == EllaiToolNames.OwnedCaseCount ? EllaiToolReasonCodes.Unavailable : EllaiToolReasonCodes.Ok,
+                    tool is EllaiToolNames.OwnedCaseCount or EllaiToolNames.CaseTimeline ? EllaiToolReasonCodes.Unavailable : EllaiToolReasonCodes.Ok,
                     result.ReasonCode);
                 Assert.True(result.ItemCount <= EllaiToolBroker.MaxItems);
                 Assert.True(EllaiToolBroker.MeasureEnvelopeBytes(result) <= EllaiToolBroker.MaxResultBytes);

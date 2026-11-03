@@ -50,12 +50,13 @@ public static class EllaiToolNames
     public const string ImportStatus = "ellai_import_status";
     public const string ClassificationEvidence = "ellai_classification_evidence";
     public const string OwnedCaseCount = "ellai_owned_case_count";
+    public const string CaseTimeline = "ellai_case_timeline";
 
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
     {
         State, Evidence, Topic, Capabilities, Receipts, ProductFacts, Now,
         DocsSearch, DocsGet, UiCatalogue, UiObserve, IngestionSchema, ValidateObservations, Locations,
-        ImportDestinations, Imports, ImportStatus, ClassificationEvidence, OwnedCaseCount
+        ImportDestinations, Imports, ImportStatus, ClassificationEvidence, OwnedCaseCount, CaseTimeline
     };
 }
 
@@ -203,6 +204,7 @@ public sealed class EllaiToolBroker
         $"{EllaiToolNames.ImportStatus}(import_id) — the current user's durable import state and saved/rejected/retry counts; no case contents and no submission.",
         $"{EllaiToolNames.ClassificationEvidence}(case_id) — persisted semantic classification evidence for an authorized current case revision; no inference, diagnosis or clinical probability.",
         $"{EllaiToolNames.OwnedCaseCount}(window_days) — count current-actor owned, readable managed cases created within 1..365 days; rejects incomplete results. This is a case count, not a diagnosis, incidence or animal count.",
+        $"{EllaiToolNames.CaseTimeline}(case_id) — read the most recent authorized case history; older entries may exist.",
     };
 
     /// <summary>Returns the existing model-facing description for a canonical tool.</summary>
@@ -247,6 +249,7 @@ public sealed class EllaiToolBroker
     private readonly SwiftAid.Application.Classification.ICaseClassificationQuery? _classification;
     private readonly SwiftAid.Application.Surveillance.ISignalReviewService? _signals;
     private readonly IDashboardAggregateQuery? _dashboard;
+    private readonly ICaseTimelineQuery? _timeline;
 
     /// <summary>Consent infrastructure is mandatory for consent-scoped reads.
     /// Ordinary typed messages use their own explicit classification and do
@@ -268,7 +271,7 @@ public sealed class EllaiToolBroker
         SwiftAid.Application.Classification.ICaseClassificationQuery? classification = null,
         SwiftAid.Application.Surveillance.ISignalReviewService? signals = null,
         EllaiUiAuthorityResolver? uiAuthority = null, IEllaiExactReferenceIndex? referenceIndex = null,
-        IDashboardAggregateQuery? dashboard = null)
+        IDashboardAggregateQuery? dashboard = null, ICaseTimelineQuery? timeline = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _consent = consent ?? throw new ArgumentNullException(nameof(consent));
@@ -278,6 +281,7 @@ public sealed class EllaiToolBroker
         _topics = topics;
         _referenceIndex = referenceIndex;
         _dashboard = dashboard;
+        _timeline = timeline;
         _uiAuthority = uiAuthority ?? new EllaiUiAuthorityResolver();
         _uiRegistry = uiRegistry;
         _uiDiscovery = uiDiscovery;
@@ -412,6 +416,9 @@ public sealed class EllaiToolBroker
         if (canonical == EllaiToolNames.OwnedCaseCount)
             return Bound(await ReadOwnedCaseCountAsync(context, request, ct).ConfigureAwait(false));
 
+        if (canonical == EllaiToolNames.CaseTimeline)
+            return Bound(await ReadCaseTimelineAsync(context, request, ct).ConfigureAwait(false));
+
         return Bound(canonical switch
         {
             EllaiToolNames.Capabilities => Allow(request.ToolName, "Current capability descriptors.", 1, false),
@@ -424,6 +431,45 @@ public sealed class EllaiToolBroker
             EllaiToolNames.ValidateObservations => ValidateObservations(request),
             _ => Deny(request.ToolName, "Unregistered tool.", EllaiToolReasonCodes.UnregisteredTool)
         });
+    }
+
+    private async Task<EllaiToolResult> ReadCaseTimelineAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
+    {
+        if (context.Actor is null || _timeline is null)
+            return Deny(request.ToolName, "The case timeline is unavailable for this session.", EllaiToolReasonCodes.Unavailable);
+        if (!request.Arguments.TryGetValue("case_id", out var value) ||
+            !Guid.TryParseExact(value, "D", out var caseId) || caseId == Guid.Empty)
+            return Deny(request.ToolName, "A valid case ID is required.", EllaiToolReasonCodes.InvalidArguments);
+
+        CaseTimelineResult result;
+        try
+        {
+            result = await _timeline.GetAsync(context.Actor, caseId, MaxItems, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            return Deny(request.ToolName, "The case timeline is unavailable.", EllaiToolReasonCodes.Unavailable);
+        }
+        ct.ThrowIfCancellationRequested();
+        if (result.Access != CaseTimelineAccess.Found || result.Timeline is not { } timeline ||
+            timeline.Header.CaseId != caseId || timeline.Header.AggregateVersion < 1)
+            return Deny(request.ToolName, "The case was not found or is not accessible.", EllaiToolReasonCodes.DeniedByPolicy);
+
+        var entries = timeline.Entries.Where(entry => entry.Kind == CaseTimelineEntryKind.Authoritative)
+            .Take(MaxItems).ToArray();
+        var lines = entries.Select(entry => $"{entry.RecordedAtUtc:O}: {entry.Label} (v{entry.AggregateVersion})");
+        var id = caseId.ToString("D");
+        var evidence = new EvidenceRef("CaseQueue", id,
+            timeline.Header.AggregateVersion.ToString(CultureInfo.InvariantCulture), null, id);
+        return new EllaiToolResult(request.ToolName, true, null, [evidence],
+            "Authorized case history; sealed report content and actor identifiers are not included. " +
+            (timeline.HasOlderEntries ? "Older entries exist.\n" : "\n") +
+            (entries.Length == 0 ? "No authoritative entries were returned." : string.Join("\n", lines)),
+            entries.Length, timeline.HasOlderEntries, EllaiToolReasonCodes.Ok)
+        {
+            HistoryValidUntilUtc = DateTimeOffset.UtcNow.AddMinutes(5)
+        };
     }
 
     private async Task<EllaiToolResult> ReadOwnedCaseCountAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
