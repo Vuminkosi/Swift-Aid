@@ -48,6 +48,10 @@ else
         </MudButton>
         <MudText Typo="Typo.caption">External channels follow your device settings.</MudText>
     </MudPaper>
+}
+
+@if (Snapshot.ViewState is NotificationsViewState.Ready or NotificationsViewState.Unavailable)
+{
     <MudPaper Class="pa-4 mb-4" Elevation="0">
         <MudText Typo="Typo.subtitle1">My subscriptions</MudText>
         @if (Subscriptions is null)

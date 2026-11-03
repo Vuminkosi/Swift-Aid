@@ -49,8 +49,15 @@
 
     private async Task RefreshPreferencesAsync()
     {
-        var result = await PreferenceClient.GetAsync();
-        _snapshot = Map(result, result.Value);
+        try
+        {
+            var result = await PreferenceClient.GetAsync();
+            _snapshot = Map(result, result.Value);
+        }
+        catch (Exception)
+        {
+            _snapshot = NotificationsSnapshot.Unavailable;
+        }
     }
 
     private async Task RefreshSubscriptionsAsync()

@@ -5,12 +5,28 @@ using Microsoft.Extensions.Logging;
 using Microsoft.JSInterop;
 using Microsoft.JSInterop.Infrastructure;
 using MudBlazor.Services;
+using System.Reflection;
+using SwiftAid.Client.Presentation;
 using SwiftAid.UI.Components.Surfaces.Account;
 
 namespace SwiftAid.Ui.Tests;
 
 public sealed class NotificationsSurfaceTests
 {
+    [Fact]
+    public async Task GatewayPreferenceExceptionBecomesAnUnavailableState()
+    {
+        using var services = new ServiceCollection()
+            .AddSingleton<INotificationPreferenceClient>(new ThrowingPreferenceClient())
+            .BuildServiceProvider();
+        var page = new SwiftAid.Gateway.Components.Pages.Notifications();
+        var type = page.GetType();
+        type.GetProperty("ServiceProvider", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, services);
+        await (Task)type.GetMethod("RefreshPreferencesAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page, null)!;
+        var snapshot = (NotificationsSnapshot)type.GetField("_snapshot", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page)!;
+        Assert.Equal(NotificationsViewState.Unavailable, snapshot.ViewState);
+    }
+
     [Fact]
     public async Task NotificationsSurface_SignedOutOffersSignIn()
     {
@@ -72,6 +88,27 @@ public sealed class NotificationsSurfaceTests
         Assert.DoesNotContain("/sessions", markup, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task NotificationsSurface_ShowsSubscriptionsWhenPreferencesAreUnavailable()
+    {
+        var markup = await RenderAsync(NotificationsSnapshot.Unavailable, "/sessions",
+            [new SessionSubscriptionSummary(Guid.NewGuid(), 2, "Community workshop", null, null, "Email reminders")]);
+
+        Assert.Contains("temporarily unavailable", markup, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Community workshop", markup, StringComparison.Ordinal);
+        Assert.Contains("Unsubscribe", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task NotificationsSurface_DoesNotDisplaySubscriptionsInSignedOutState()
+    {
+        var markup = await RenderAsync(NotificationsSnapshot.SignedOut, "/sessions",
+            [new SessionSubscriptionSummary(Guid.NewGuid(), 2, "Private session label", null, null, null)]);
+
+        Assert.DoesNotContain("Private session label", markup, StringComparison.Ordinal);
+        Assert.Contains("Sign in", markup, StringComparison.Ordinal);
+    }
+
     private static async Task<string> RenderAsync(
         NotificationsSnapshot snapshot,
         string? sessionsHref = null,
@@ -111,6 +148,12 @@ public sealed class NotificationsSurfaceTests
     private sealed class TestNavigationManager : NavigationManager
     {
         public TestNavigationManager() => Initialize("http://localhost/", "http://localhost/");
+    }
+
+    private sealed class ThrowingPreferenceClient : INotificationPreferenceClient
+    {
+        public Task<UiCapabilityResult<NotificationPreferenceState>> GetAsync(CancellationToken cancellationToken = default) => throw new InvalidOperationException("unavailable");
+        public Task<UiCapabilityResult<NotificationPreferenceState>> SaveAsync(NotificationPreferenceEdit edit, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
     private sealed class NoOpJsRuntime : JSRuntime
