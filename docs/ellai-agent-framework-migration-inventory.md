@@ -211,8 +211,11 @@ the configured `muse-spark-1.3-contributor` endpoint and a disposable
 PostgreSQL database after 60 migrations. Through the guest HTTP routes, test
 host, worker and framework registration, two synthetic turns completed; the
 second answer recalled the word from the first, its response feed contained a
-non-final text chunk, and PostgreSQL recorded at least two model calls with
-nonzero usage. The provider route was supplied in process without committing
+non-final text chunk, and a third turn invoked the admitted public-facts tool:
+the feed reported its specific acknowledgement and PostgreSQL recorded at
+least four model calls with nonzero usage. The first extended run failed its
+progress assertion because the feed excludes progress by default; after
+requesting `includeProgress=true`, the live test passed. The provider route was supplied in process without committing
 credentials. Run the integration test filtered by this name with
 `ELLAI_LIVE=1`, the configured Ellai environment variables, and the dedicated
 PostgreSQL fixture opt-in. This was ASP.NET Core TestServer, not a deployed

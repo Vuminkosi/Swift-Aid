@@ -101,15 +101,18 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             var first = await SendTurnAsync("live-turn-1", "Remember the word cobalt for our conversation. Reply briefly.", session, 1);
             var second = await SendTurnAsync("live-turn-2", "What word did I ask you to remember?", first.Session, 2);
             Assert.Contains("cobalt", second.Answer, StringComparison.OrdinalIgnoreCase);
-            using var feedRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/ellai/guest/sessions/{sessionId}/responses?cursor=0");
+            await SendTurnAsync("live-turn-3", "Use the ellai_product_facts tool with topic receipt, then explain what an intake receipt means.", second.Session, 3);
+            using var feedRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/ellai/guest/sessions/{sessionId}/responses?cursor=0&includeProgress=true");
             feedRequest.Headers.TryAddWithoutValidation("Cookie", string.Join("; ", cookies.Select(item => $"{item.Key}={item.Value}")));
             using var feed = await http.SendAsync(feedRequest);
             Assert.Equal(System.Net.HttpStatusCode.OK, feed.StatusCode);
             var page = (await feed.Content.ReadFromJsonAsync<EllaiSessionResponsePageDto>())!;
             Assert.Contains(page.Responses, item => item.ClientUtteranceId == "live-turn-2" && !item.IsFinal && !string.IsNullOrWhiteSpace(item.Text));
+            Assert.Contains(page.Responses, item => item.ClientUtteranceId == "live-turn-3" &&
+                item.Progress is { State: "Acknowledgement", Operation: "Checking SwiftAid information" });
             await using var verify = fixture.CreateDbContext();
             var usage = await new PostgresEllaiUsageStore(verify).TotalsAsync(sessionId, default);
-            Assert.True(usage.Calls >= 2);
+            Assert.True(usage.Calls >= 4);
             Assert.True(usage.TotalTokens > 0);
         }
         finally
