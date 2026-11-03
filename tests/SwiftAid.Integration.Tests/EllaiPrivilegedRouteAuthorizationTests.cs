@@ -183,6 +183,94 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             }
         }
     }
+    [LiveFrameworkHttpFact]
+    public async Task GuestHttpReceivesLiveMuseEvidenceSegmentBeforeTurnCompletes()
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
+        string? sessionId = null;
+        try
+        {
+            await using var host = await StartApplicationAsync(frameworkWorker: true, frameworkFixture: fixture, liveModel: true,
+                advisoryThresholds: true);
+            using var http = host.GetTestClient();
+            var cookies = new Dictionary<string, string>(StringComparer.Ordinal);
+            void Merge(HttpResponseMessage response)
+            {
+                if (!response.Headers.TryGetValues("Set-Cookie", out var values)) return;
+                foreach (var value in values)
+                {
+                    var pair = value.Split(';', 2)[0];
+                    var index = pair.IndexOf('=');
+                    if (index > 0) cookies[pair[..index]] = pair[(index + 1)..];
+                }
+            }
+            async Task<HttpResponseMessage> PostAsync<T>(string path, T body, string token)
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = JsonContent.Create(body) };
+                request.Headers.TryAddWithoutValidation("Cookie", string.Join("; ", cookies.Select(item => $"{item.Key}={item.Value}")));
+                request.Headers.TryAddWithoutValidation("X-CSRF-TOKEN", token);
+                return await http.SendAsync(request);
+            }
+            using var antiforgery = await http.GetAsync("/api/v1/ellai/guest/antiforgery");
+            Merge(antiforgery);
+            var token = (await antiforgery.Content.ReadFromJsonAsync<EllaiGuestAntiforgeryToken>())!.RequestToken;
+            using var started = await PostAsync("/api/v1/ellai/guest/sessions",
+                new StartSessionRequest(EllaiMode.Ask, "live-grounded-stream", null, null, null, null), token);
+            Assert.Equal(System.Net.HttpStatusCode.OK, started.StatusCode);
+            Merge(started);
+            var session = (await started.Content.ReadFromJsonAsync<EllaiSessionView>())!;
+            sessionId = session.SessionId;
+            var fact = Assert.Single(new EllaiProductFactCatalog().Find("receipt"));
+            const string turnId = "live-grounded-turn";
+            using var submitted = await PostAsync($"/api/v1/ellai/guest/sessions/{sessionId}/utterances",
+                new SubmitUtteranceRequest(turnId, sessionId, session.SessionVersion,
+                    "Use ellai_productfacts with topic receipt. Copy the complete receipt fact exactly, cite its matching evidence, and stream that exact fact.",
+                    null, "typed", 1), token);
+            Assert.Equal(System.Net.HttpStatusCode.OK, submitted.StatusCode);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            var sawEarly = false;
+            EllaiConversationTurnDto? completed = null;
+            while (!timeout.IsCancellationRequested)
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get,
+                    $"/api/v1/ellai/guest/sessions/{sessionId}/responses?cursor=0&includeProgress=true");
+                request.Headers.TryAddWithoutValidation("Cookie", string.Join("; ", cookies.Select(item => $"{item.Key}={item.Value}")));
+                using var response = await http.SendAsync(request, timeout.Token);
+                response.EnsureSuccessStatusCode();
+                var page = (await response.Content.ReadFromJsonAsync<EllaiSessionResponsePageDto>(cancellationToken: timeout.Token))!;
+                var turn = page.Conversation?.SingleOrDefault(item => item.ClientUtteranceId == turnId);
+                if (turn is { CompletedAtUtc: null } && page.Responses.Any(item => item.ClientUtteranceId == turnId &&
+                    !item.IsFinal && item.Progress is null && item.Text == fact.Text)) sawEarly = true;
+                if (turn?.CompletedAtUtc is not null) { completed = turn; break; }
+                await Task.Delay(25, timeout.Token);
+            }
+            Assert.NotNull(completed);
+            Assert.Equal("Completed", completed.Outcome);
+            Assert.Equal(fact.Text, completed.AssistantText);
+            Assert.True(sawEarly, "The exact fact was not observed in the feed before durable completion.");
+            await using var verify = fixture.CreateDbContext();
+            var store = new PostgresEllaiSessionStore(verify);
+            var saved = (await store.GetAsync(sessionId, timeout.Token))!;
+            var savedTurn = (await store.ReadConversationAsync(sessionId, saved.OwnerActorId!, timeout.Token))
+                .Single(item => item.ClientUtteranceId == turnId);
+            Assert.True(EllaiToolTrace.TryRead(savedTurn.ToolTraceJson!, out var trace));
+            Assert.Contains(trace!.Observations, item => item.ToolName == EllaiToolNames.ProductFacts &&
+                item.Evidence.Any(reference => reference.SourceKind == "ProductFact" && reference.ResourceId == fact.FactId));
+        }
+        finally
+        {
+            if (sessionId is not null)
+            {
+                await using var db = fixture.CreateDbContext();
+                await db.Set<EllaiUsageSampleEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+                await db.Set<EllaiConsentGrantEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+                await db.Set<EllaiUtteranceEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+                await db.Set<EllaiCheckpointEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+                await db.Set<EllaiSessionEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+            }
+        }
+    }
+
     [FrameworkPostgresFact]
     public Task GuestHttpConversationRecoversAfterTestHostRestartWithPostgres() =>
         RunGuestHttpConversationRecoveryAsync(liveModel: false);

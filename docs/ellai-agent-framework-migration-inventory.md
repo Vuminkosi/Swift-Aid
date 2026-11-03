@@ -3199,6 +3199,27 @@ were removed. This change strengthens provisional publication only. It does
 not establish semantic support for all final claims, live Gateway model-time
 delivery, or an independent security review.
 
+### Live Gateway evidence-backed feed — 2026-11-03
+
+PASS: `GuestHttpReceivesLiveMuseEvidenceSegmentBeforeTurnCompletes` exercised
+the current framework worker through an in-process Gateway, live Muse, and a
+disposable PostgreSQL database. The HTTP response feed exposed the exact
+approved receipt fact as a non-final segment while the durable turn was still
+incomplete; the turn then completed with the same text. The final test also
+checked the persisted trace for the matching product-fact evidence. The test
+uses a synthetic guest session and public product data.
+
+The first run passed without the added persisted-trace assertion. An intermediate
+build failed with CS0136 due to a test-local variable name; after renaming it,
+the expanded test passed 1/1. Command: `dotnet test
+tests\SwiftAid.Integration.Tests\SwiftAid.Integration.Tests.csproj --no-restore
+-m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~GuestHttpReceivesLiveMuseEvidenceSegmentBeforeTurnCompletes'
+--logger 'console;verbosity=minimal'`, with live Muse and the dedicated
+framework PostgreSQL fixture enabled. The temporary database was removed.
+This demonstrates the tested feed path, not a deployed Gateway, browser
+playback, physical device, or reliable generation for every request.
+
 ### Gateway recovery on the verified branch — 2026-11-03
 
 PASS: on commit `4a09962`, the following focused integration run passed 3/3
