@@ -17,9 +17,15 @@ The intended starting cadences from the design are four hours for enrichment,
 quality and follow-up; eight hours for organization, correlation and spatial
 analysis. These are not enabled defaults. Authorized workspace provisioning,
 role-specific batch capacities, jitter, retry limits, worker identity, case
-authorization, work-turn sessions, telemetry, model-cost ceilings and a worker
-that connects the fence to atomic domain changes remain to be implemented.
-This lease alone does not authorize access to cases or fence downstream writes.
+authorization, work-turn sessions, telemetry, model-cost ceilings and role
+handlers remain to be implemented. Trusted database-only handlers may use
+the fenced transaction boundary, which rechecks lease expiry before commit and
+rolls back no-change work. They must use the supplied transaction and enforce
+domain authorization; the schedule lease itself grants no case access and does
+not fence external effects.
+Each handler must also implement durable operation idempotency and commit any
+case activity with its domain change; the transaction boundary does not supply
+those records automatically.
 
 Disposable PostgreSQL coverage exercises concurrent claims, workspace scoping,
 expiry and replacement, stale-fence refusal, renewal deadline, abandon/reclaim,

@@ -1,11 +1,14 @@
 using System.Data;
 using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace SwiftAid.Infrastructure.Persistence.Ellai;
 
 public sealed record EllaiOperationalLease(string WorkspaceId, string RoleId, Guid LeaseId,
     long FencingToken, DateTimeOffset DueAtUtc, DateTimeOffset LeaseUntilUtc, string PolicyVersion);
+
+public enum EllaiFencedWorkOutcome { Committed, NoChange, StaleLease }
 
 /// <summary>Durable scoped schedule and lease coordination. This store does not start work
 /// or grant a worker access to any case; the caller must supply trusted scope and authorization.</summary>
@@ -118,6 +121,44 @@ public sealed class PostgresEllaiOperationalScheduleStore(SwiftAidDbContext db)
                 ("fence", lease.FencingToken), ("policy", lease.PolicyVersion));
             return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) == 1;
         }, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Runs trusted database-only work under the schedule row lock. The callback must use
+    /// the supplied connection and transaction, authorize every domain operation, and not perform
+    /// external effects. A false result rolls back all writes. The lease is checked again against
+    /// the database clock immediately before commit.</summary>
+    public async Task<EllaiFencedWorkOutcome> ExecuteFencedAsync(EllaiOperationalLease lease,
+        Func<DbConnection, DbTransaction, CancellationToken, Task<bool>> work, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(lease);
+        ArgumentNullException.ThrowIfNull(work);
+        ValidateScope(lease.WorkspaceId, lease.RoleId);
+        if (db.Database.CurrentTransaction is not null)
+            throw new InvalidOperationException("A separate operational work transaction is required.");
+        await using var transaction = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
+        var connection = db.Database.GetDbConnection();
+        var underlying = transaction.GetDbTransaction();
+        async Task<bool> CurrentAsync(bool acquireLock)
+        {
+            await using var cmd = Command(connection, """
+                SELECT 1 FROM ellai_operational_schedules
+                WHERE workspace_id = @workspace AND role_id = @role AND lease_id = @lease
+                    AND fencing_token = @fence AND policy_version = @policy AND lease_until_utc > clock_timestamp()
+                """ + (acquireLock ? " FOR UPDATE" : ""),
+                ("workspace", lease.WorkspaceId), ("role", lease.RoleId), ("lease", lease.LeaseId),
+                ("fence", lease.FencingToken), ("policy", lease.PolicyVersion));
+            cmd.Transaction = underlying;
+            return await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false) is not null;
+        }
+
+        if (!await CurrentAsync(true).ConfigureAwait(false))
+            return EllaiFencedWorkOutcome.StaleLease;
+        var changed = await work(connection, underlying, ct).ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
+        if (!changed) return EllaiFencedWorkOutcome.NoChange;
+        if (!await CurrentAsync(false).ConfigureAwait(false)) return EllaiFencedWorkOutcome.StaleLease;
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
+        return EllaiFencedWorkOutcome.Committed;
     }
 
     public async Task<bool> RenewAsync(EllaiOperationalLease lease, TimeSpan duration, CancellationToken ct)

@@ -9,6 +9,60 @@ namespace SwiftAid.Integration.Tests;
 public sealed class EllaiOperationalSchedulePostgresTests
 {
     [FrameworkPostgresFact]
+    public async Task FencedWorkCommitsChangesOnlyWhileLeaseIsCurrent()
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
+        await using var db = fixture.CreateDbContext();
+        var store = new PostgresEllaiOperationalScheduleStore(db);
+        const string role = "ops.quality";
+        await db.Database.OpenConnectionAsync();
+        await db.Database.ExecuteSqlRawAsync("CREATE TEMP TABLE ellai_fenced_test (value integer NOT NULL)");
+        try
+        {
+            Assert.True(await store.CreateAsync(fixture.WorkspaceId, role, 4, "policy/1", DateTimeOffset.UtcNow.AddMinutes(-1), default));
+            var lease = await store.TryClaimAsync(fixture.WorkspaceId, role, TimeSpan.FromMinutes(1), default);
+            Assert.NotNull(lease);
+            async Task<bool> Write(System.Data.Common.DbConnection connection, System.Data.Common.DbTransaction tx,
+                CancellationToken ct, bool changed, bool delay = false)
+            {
+                await using var command = connection.CreateCommand();
+                command.Transaction = tx;
+                command.CommandText = delay
+                    ? "INSERT INTO ellai_fenced_test VALUES (2); SELECT pg_sleep(0.5)"
+                    : "INSERT INTO ellai_fenced_test VALUES (1)";
+                await command.ExecuteNonQueryAsync(ct);
+                return changed;
+            }
+            var noChange = await store.ExecuteFencedAsync(lease, (c, t, ct) => Write(c, t, ct, false), default);
+            Assert.Equal(EllaiFencedWorkOutcome.NoChange, noChange);
+            Assert.Equal(0, await db.Database.SqlQueryRaw<int>("SELECT count(*)::integer AS \"Value\" FROM ellai_fenced_test").SingleAsync());
+            var committed = await store.ExecuteFencedAsync(lease, (c, t, ct) => Write(c, t, ct, true), default);
+            Assert.Equal(EllaiFencedWorkOutcome.Committed, committed);
+            await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE ellai_operational_schedules SET lease_until_utc = clock_timestamp() + interval '0.2 seconds' WHERE workspace_id = {fixture.WorkspaceId} AND role_id = {role}");
+            var expired = await store.ExecuteFencedAsync(lease, (c, t, ct) => Write(c, t, ct, true, true), default);
+            Assert.Equal(EllaiFencedWorkOutcome.StaleLease, expired);
+            Assert.Equal(1, await db.Database.SqlQueryRaw<int>("SELECT count(*)::integer AS \"Value\" FROM ellai_fenced_test").SingleAsync());
+            var called = false;
+            var rejected = await store.ExecuteFencedAsync(lease, (_, _, _) => { called = true; return Task.FromResult(true); }, default);
+            Assert.Equal(EllaiFencedWorkOutcome.StaleLease, rejected);
+            Assert.False(called);
+            var replacement = await store.TryClaimAsync(fixture.WorkspaceId, role, TimeSpan.FromMinutes(1), default);
+            Assert.NotNull(replacement);
+            var oldFence = await store.ExecuteFencedAsync(lease, (_, _, _) => { called = true; return Task.FromResult(true); }, default);
+            Assert.Equal(EllaiFencedWorkOutcome.StaleLease, oldFence);
+            Assert.False(called);
+            using var cancellation = new CancellationTokenSource();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => store.ExecuteFencedAsync(replacement,
+                async (c, t, ct) => { await Write(c, t, ct, true); cancellation.Cancel(); return true; }, cancellation.Token));
+            Assert.Equal(1, await db.Database.SqlQueryRaw<int>("SELECT count(*)::integer AS \"Value\" FROM ellai_fenced_test").SingleAsync());
+        }
+        finally
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync($"DELETE FROM ellai_operational_schedules WHERE workspace_id = {fixture.WorkspaceId} AND role_id = {role}");
+        }
+    }
+
+    [FrameworkPostgresFact]
     public async Task DueDiscoveryClaimsOnlyPermittedWorkspaceAndRolesAcrossReplicas()
     {
         await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
