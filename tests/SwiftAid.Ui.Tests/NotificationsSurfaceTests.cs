@@ -51,6 +51,7 @@ public sealed class NotificationsSurfaceTests
         Assert.Contains("Community workshop", markup, StringComparison.Ordinal);
         Assert.Contains("Africa/Mbabane", markup, StringComparison.Ordinal);
         Assert.Contains("Email reminders", markup, StringComparison.Ordinal);
+        Assert.Contains($"/sessions?sessionId={sessionId:D}", markup, StringComparison.Ordinal);
         Assert.Contains("Unsubscribe", markup, StringComparison.Ordinal);
         Assert.Contains("/sessions", markup, StringComparison.Ordinal);
     }

@@ -53,6 +53,7 @@ else
         @if (Subscriptions is null)
         {
             <MudText Typo="Typo.body2" role="status">Your session subscriptions could not be loaded. Retry to check again.</MudText>
+            <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="OnRefresh" StartIcon="@Icons.Material.Filled.Refresh">Retry</MudButton>
         }
         else if (Subscriptions.Count == 0)
         {
@@ -67,6 +68,10 @@ else
                         <div class="d-flex flex-column flex-sm-row align-center justify-space-between gap-2 w-100">
                             <div>
                                 <MudText Typo="Typo.body1">@(subscription.Title ?? "Session details unavailable")</MudText>
+                                @if (subscription.Title is not null && !string.IsNullOrWhiteSpace(SessionsHref))
+                                {
+                                    <MudLink Href="@($"{SessionsHref}?sessionId={subscription.SessionId:D}")">View session</MudLink>
+                                }
                                 <MudText Typo="Typo.caption">
                                     @FormatStart(subscription)
                                     @if (!string.IsNullOrWhiteSpace(subscription.ChannelLabel))

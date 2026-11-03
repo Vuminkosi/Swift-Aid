@@ -53,30 +53,12 @@
         _subscriptionMessage = null;
         try
         {
-            var subscriptionsTask = SubscriptionClient.ListMineAsync();
-            var sessionsTask = SessionClient.ListPublicAsync();
-            await Task.WhenAll(subscriptionsTask, sessionsTask);
-            var subscriptions = await subscriptionsTask;
-            var sessions = await sessionsTask;
+            var subscriptions = await SubscriptionClient.ListMineAsync();
             if (subscriptions.Succeeded && subscriptions.Value is { } values)
             {
-                var sessionsById = sessions.Succeeded && sessions.Value is { } publicSessions
-                    ? publicSessions.ToDictionary(item => item.SessionId)
-                    : new Dictionary<Guid, SwiftAid.Contracts.Sessions.PublicSessionView>();
-                _subscriptions = values
-                    .Where(item => item.Status == SubscriptionStatus.Active)
-                    .Select(item =>
-                    {
-                        sessionsById.TryGetValue(item.SessionId, out var session);
-                        return new SessionSubscriptionSummary(
-                            item.SessionId,
-                            item.Version,
-                            session?.Title,
-                            session?.StartUtc,
-                            session?.TimeZoneId,
-                            ChannelLabel(item.Channel));
-                    })
-                    .ToArray();
+                var details = await SessionSubscriptionLookup.ResolveAsync(values, SessionClient);
+                _subscriptions = details.Select(item => new SessionSubscriptionSummary(item.SessionId, item.Version,
+                    item.Title, item.StartsAtUtc, item.TimeZoneId, item.ChannelLabel)).ToArray();
             }
             else
             {
@@ -106,13 +88,6 @@
         await RefreshSubscriptionsAsync();
         _subscriptionMessage = message;
     }
-
-    private static string? ChannelLabel(SubscriptionChannel? channel) => channel switch
-    {
-        SubscriptionChannel.Email => "Email reminders",
-        SubscriptionChannel.MobilePush => "Mobile notifications",
-        _ => null
-    };
 
     private async Task SaveAsync(NotificationPreferenceChange change)
     {
