@@ -3220,6 +3220,23 @@ framework PostgreSQL fixture enabled. The temporary database was removed.
 This demonstrates the tested feed path, not a deployed Gateway, browser
 playback, physical device, or reliable generation for every request.
 
+### Exact final-claim misattribution — 2026-11-03
+
+The final decision validator accepted an exact case or product-fact line when
+the claim cited only a different observed item. It now detects this bounded,
+unambiguous mismatch using the reference-bound lines already used for
+provisional output and requests a tool-free decision repair. If provisional
+speech was already published, the existing rule stops instead of replacing it.
+Correctly cited exact lines continue to pass.
+
+The two wrong-reference regressions failed before the fix; the matching cases
+passed. After the fix, the framework contract suite passed 107/107. The live
+Muse in-process Gateway feed test passed 1/1 with correctly cited public fact
+text and a disposable PostgreSQL database, which was removed. This check only
+recognizes exact known lines: it does not prove semantic support for paraphrases,
+claims omitted from the claim array, or unrelated assertions. Those remain
+NOT VERIFIED, as do deployed behavior and independent security review.
+
 ### Gateway recovery on the verified branch — 2026-11-03
 
 PASS: on commit `4a09962`, the following focused integration run passed 3/3

@@ -220,7 +220,8 @@ public sealed class EllaiFrameworkAgent
             if (!await Current(ct).ConfigureAwait(false)) { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
             decision = EllaiModelTurnParser.Parse(guardedClient.LastText).Turn?.FinalDecision;
             if (decision is not null && EllaiDecisionValidator.Validate(decision).Count == 0 &&
-                !decision.Claims.Any(claim => claim?.Evidence is { } refs && refs.Any(reference => reference is null || !evidence.Contains(reference))))
+                !decision.Claims.Any(claim => claim?.Evidence is { } refs && refs.Any(reference => reference is null || !evidence.Contains(reference))) &&
+                !HasKnownMisattribution(decision, evidenceSources))
                 break;
             decision = null;
             // Published speech cannot be retracted or replaced by a repaired
@@ -352,6 +353,23 @@ public sealed class EllaiFrameworkAgent
                 line.StartsWith(prefix + " ·", StringComparison.Ordinal)))
                 yield return line;
         }
+    }
+
+    private static bool HasKnownMisattribution(EllaiDecision decision, IReadOnlyDictionary<EvidenceRef, List<string>> sources)
+    {
+        foreach (var claim in decision.Claims)
+        {
+            var text = claim.Text.Trim();
+            bool Matches(EvidenceRef reference, IReadOnlyList<string> lines) =>
+                (reference.SourceKind == "ProductFact" || reference.SourceKind == "CaseQueue" &&
+                    (text.StartsWith($"case {reference.ResourceId};", StringComparison.Ordinal) ||
+                     text.StartsWith($"case {reference.ResourceId} ·", StringComparison.Ordinal))) &&
+                lines.Contains(text, StringComparer.Ordinal);
+            if (sources.Any(item => Matches(item.Key, item.Value)) &&
+                !claim.Evidence.Any(reference => sources.TryGetValue(reference, out var lines) && Matches(reference, lines)))
+                return true;
+        }
+        return false;
     }
 
     private static async Task<bool> PublishValidatedTextAsync(string text,

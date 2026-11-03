@@ -1804,13 +1804,15 @@ public sealed class EllaiAgentFrameworkContractTests
         var segment = "{\"stream_segments\":[{\"text\":" + text + ",\"claims\":[" + claim + "]}]";
         var final = ValidDecision.Replace("\"Done.\"", text, StringComparison.Ordinal)
             .Replace("\"claims\":[]", "\"claims\":[" + claim + "]", StringComparison.Ordinal);
-        using var client = new PrivateSegmentStreamingClient(segmentPrefix: segment, finalDecision: final, toolName: EllaiToolNames.ProductFacts);
+        using var client = new PrivateSegmentStreamingClient(segmentPrefix: segment, finalDecision: final,
+            toolName: EllaiToolNames.ProductFacts, repairWithSafeDecision: true);
         var context = new EllaiToolContext("session", "epoch", "public.product-help", null, 4, true,
             DataClassification: EllaiProcessingClassification.UserProvidedNonSensitive,
             AllowedTools: new HashSet<string> { EllaiToolNames.ProductFacts }, ConsentPurpose: EllaiConsentService.PublicProductHelpPurpose);
         var broker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService());
         var published = new List<string>();
-        var run = new EllaiFrameworkAgent(client).RunAsync(context, "Test instructions", [new ChatMessage(ChatRole.User, "test")], 100,
+        var agent = new EllaiFrameworkAgent(client);
+        var run = agent.RunAsync(context, "Test instructions", [new ChatMessage(ChatRole.User, "test")], 100,
             _ => Task.FromResult(true), broker.InvokeAsync,
             new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None,
             onVerifiedStreamSegment: (value, _) => { published.Add(value); return ValueTask.CompletedTask; },
@@ -1821,7 +1823,9 @@ public sealed class EllaiAgentFrameworkContractTests
             Assert.Equal(correctReference ? new[] { chosen.Text } : Array.Empty<string>(), published);
         }
         finally { client.Release.TrySetResult(); }
-        Assert.NotNull(await run);
+        var decision = await run;
+        Assert.Equal(correctReference ? chosen.Text : "Done.", decision?.DisplayText);
+        Assert.Equal(!correctReference, agent.LastRepairUsed);
     }
 
     [Theory]
@@ -1841,11 +1845,12 @@ public sealed class EllaiAgentFrameworkContractTests
         var segment = "{\"stream_segments\":[{\"text\":" + text + ",\"claims\":[" + claim + "]}]";
         var final = ValidDecision.Replace("\"Done.\"", text, StringComparison.Ordinal)
             .Replace("\"claims\":[]", "\"claims\":[" + claim + "]", StringComparison.Ordinal);
-        using var client = new PrivateSegmentStreamingClient(segmentPrefix: segment, finalDecision: final);
+        using var client = new PrivateSegmentStreamingClient(segmentPrefix: segment, finalDecision: final, repairWithSafeDecision: true);
         var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
             AllowedTools: new HashSet<string> { EllaiToolNames.State });
         var published = new List<string>();
-        var run = new EllaiFrameworkAgent(client).RunAsync(context, "Test instructions", [new ChatMessage(ChatRole.User, "test")], 100,
+        var agent = new EllaiFrameworkAgent(client);
+        var run = agent.RunAsync(context, "Test instructions", [new ChatMessage(ChatRole.User, "test")], 100,
             _ => Task.FromResult(true), (_, request, _) => Task.FromResult(new EllaiToolResult(request.ToolName,
                 true, null, [first, second], line + $"\ncase {secondId}; country SZ; workflow Active; v1", 2, false)),
             new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None,
@@ -1857,17 +1862,21 @@ public sealed class EllaiAgentFrameworkContractTests
             Assert.Equal(correctReference ? new[] { line } : Array.Empty<string>(), published);
         }
         finally { client.Release.TrySetResult(); }
-        Assert.NotNull(await run);
+        var decision = await run;
+        Assert.Equal(correctReference ? line : "Done.", decision?.DisplayText);
+        Assert.Equal(!correctReference, agent.LastRepairUsed);
     }
 
     private sealed class PrivateSegmentStreamingClient(bool omitSegment = false, string? segmentPrefix = null, string? finalDecision = null,
-        string toolName = EllaiToolNames.State) : IChatClient
+        string toolName = EllaiToolNames.State, bool repairWithSafeDecision = false) : IChatClient
     {
         private int _calls;
         public TaskCompletionSource SegmentSent { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
-            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            CancellationToken cancellationToken = default) => repairWithSafeDecision
+                ? Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, ValidDecision)))
+                : throw new NotSupportedException();
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
             ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
