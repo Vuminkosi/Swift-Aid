@@ -194,6 +194,36 @@ public sealed partial class GuidedReportDraftPersistenceTests
     }
 
     [Theory]
+    [InlineData("country", "report.country-catalogue-unavailable", "ellai-report-country-confirmed")]
+    [InlineData("privacy", "report.privacy-notice-unavailable", "ellai-report-privacy-unavailable")]
+    [InlineData("policy", "report.processing-policy-unavailable", "ellai-report-policy-unavailable")]
+    public void UnavailableSubmissionRequirementsHaveSpecificGuidance(string unavailable, string inputId, string anchor)
+    {
+        var draft = CreateDraft();
+        draft.CountryCode = "SZ";
+        draft.CountryConfirmed = draft.ReportReviewConfirmed = draft.ProcessingConfirmed = true;
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        component.Countries = [new("SZ", "Eswatini")];
+        component.CountryCatalogueVersion = "test-v1";
+        component.CountryCatalogueIsCurrent = unavailable != "country";
+        component.PrivacyNoticeReference = "/privacy";
+        component.PrivacyNoticeIsCurrent = unavailable != "privacy";
+        component.ProcessingPolicyReference = "/policy";
+        component.ProcessingPolicyVersion = unavailable == "policy" ? null : "test-v1";
+        component.OnSubmit = EventCallback.Factory.Create<IntakeSubmission>(this, _ => { });
+        SetField(component, "_step", 2);
+
+        var issue = Assert.Single(component.GetState().ValidationIssues);
+        Assert.Equal(inputId, issue.InputId);
+        Assert.Equal(anchor, issue.Anchor);
+        Assert.Contains("unavailable", issue.Message);
+        Assert.Contains("cannot be sent", issue.Message);
+        Assert.False((bool)typeof(GuidedReportStepper).GetProperty("CanSubmit", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(component)!);
+        Assert.False(component.GetState().Controls.Single(control => control.ControlId == "report.submit").CompletionAccepted);
+        Assert.NotNull(draft.Narrative);
+    }
+
+    [Theory]
     [InlineData(0, true, false)]
     [InlineData(1, true, false)]
     [InlineData(3, true, false)]

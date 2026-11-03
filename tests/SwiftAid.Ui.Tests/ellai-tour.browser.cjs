@@ -145,6 +145,34 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
         await page.waitForFunction(() => window.fixtureObservations.collect().validationInputIds?.length === 0);
         assert.equal(await page.locator('#submission-count').textContent(), '0');
         console.log('PASS: observation count and length errors identify and highlight the input in order');
+        await page.goto(base + '/ellai-report-fixture');
+        await page.waitForSelector('[data-fixture-ready=true]');
+        await page.getByRole('button', { name: 'Continue to details' }).click();
+        await page.getByLabel('Describe what happened').fill('Synthetic description');
+        await page.getByLabel('Describe what happened').press('Tab');
+        await page.getByRole('button', { name: 'Guide report details' }).click();
+        await page.locator('.bit-bonboarding-popover').waitFor({ state: 'visible' });
+        await page.getByRole('button', { name: 'Review report', exact: true }).click();
+        await page.evaluate(async () => { window.fixtureObservations = await import('/_content/SwiftAid.UI/js/ellai-ui-observations.js'); });
+        for (const [toggle, inputId, anchor] of [
+            ['Toggle country availability', 'report.country-catalogue-unavailable', 'ellai-report-country-confirmed'],
+            ['Toggle privacy availability', 'report.privacy-notice-unavailable', 'ellai-report-privacy-unavailable'],
+            ['Toggle policy availability', 'report.processing-policy-unavailable', 'ellai-report-policy-unavailable']
+        ]) {
+            await page.getByRole('button', { name: toggle }).click();
+            await page.waitForFunction(id => window.fixtureObservations.collect().validationInputIds?.[0] === id, inputId);
+            await page.getByRole('button', { name: 'Refresh validation target' }).click();
+            await page.waitForFunction(anchorName => {
+                const target = document.querySelector(`[data-bonboarding-anchor="${anchorName}"]`)?.getBoundingClientRect();
+                const spot = document.querySelector('.bit-bonboarding-spotlight')?.getBoundingClientRect();
+                return target && spot && spot.left <= target.left && spot.top <= target.top && spot.right >= target.right && spot.bottom >= target.bottom;
+            }, anchor);
+            assert(await page.getByRole('button', { name: 'Send report', exact: true }).isDisabled());
+            await page.getByRole('button', { name: toggle }).click();
+            await page.waitForFunction(id => !window.fixtureObservations.collect().validationInputIds?.includes(id), inputId);
+        }
+        assert.equal(await page.locator('#submission-count').textContent(), '0');
+        console.log('PASS: unavailable submission requirements are identified and highlighted without submitting');
         assert.deepEqual(errors, []);
         assert(!output.includes('Unhandled exception'), output);
     } finally {

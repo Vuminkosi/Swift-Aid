@@ -194,7 +194,8 @@ public sealed class EllaiGuidanceAdmissionHttpTests
                 Assert.Contains(speech.Requests, item => item.RequestId.StartsWith($"owned-{nextValidation.Sequence}-", StringComparison.Ordinal) &&
                     item.Text.Contains("reported date", StringComparison.Ordinal) && item.VoiceId == "am_michael");
                 foreach (var inputId in new[] { "report.original-statement-too-long", "report.too-many-observations",
-                             "report.observation-too-long", "report.observations-total-too-long" })
+                             "report.observation-too-long", "report.observations-total-too-long",
+                             "report.country-catalogue-unavailable", "report.privacy-notice-unavailable", "report.processing-policy-unavailable" })
                 {
                     var contextStamp = $"context-{inputId}";
                     using var issueObservation = await client.PostAsJsonAsync("/sessions/owned/ui-observations",
