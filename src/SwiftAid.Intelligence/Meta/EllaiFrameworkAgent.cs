@@ -51,20 +51,23 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
         {
             Name = "Ellai",
             UseProvidedChatClientAsIs = true,
+            ChatHistoryProvider = new InMemoryChatHistoryProvider(),
             ChatOptions = new ChatOptions { Instructions = instructions, Tools = tools.ToList(), MaxOutputTokens = maxOutputTokens }
         });
         var session = await agent.CreateSessionAsync(cancellationToken: ct).ConfigureAwait(false);
+        session.SetInMemoryChatHistory(messages.Take(messages.Count - 1).ToList());
+        var currentMessage = messages[^1];
         EllaiDecisionTextStreamParser? parser = null;
         if (onTextDelta is null)
         {
-            await agent.RunAsync(messages, session, cancellationToken: ct).ConfigureAwait(false);
+            await agent.RunAsync(currentMessage, session, cancellationToken: ct).ConfigureAwait(false);
         }
         else
         {
             parser = new EllaiDecisionTextStreamParser();
             var textLength = 0;
             var parserCall = 0;
-            await foreach (var update in agent.RunStreamingAsync(messages, session, cancellationToken: ct).ConfigureAwait(false))
+            await foreach (var update in agent.RunStreamingAsync(currentMessage, session, cancellationToken: ct).ConfigureAwait(false))
             {
                 if (parserCall != guardedClient.CallSequence)
                 {

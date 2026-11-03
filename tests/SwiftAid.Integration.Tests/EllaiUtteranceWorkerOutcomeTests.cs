@@ -68,6 +68,26 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
                 Assert.Contains("\"allowed\":true", model.ToolResult);
                 Assert.Contains(published, item => item.Progress?.State == "Acknowledgement");
             }
+            if (!useTool)
+            {
+                var current = await store.GetAsync(session.SessionId, timeout.Token);
+                Assert.NotNull(current);
+                var next = work with { Utterance = "Follow-up question", ClientUtteranceId = "framework-u2", CycleId = "cycle-2" };
+                Assert.NotNull(await store.TryAcceptUtteranceAsync(current with
+                    { SessionVersion = current.SessionVersion + 1, CyclesUsed = current.CyclesUsed + 1 }, current.SessionVersion,
+                    next.ClientUtteranceId, timeout.Token, EllaiUtteranceWorkEnvelope.Serialize(next, next.ClientUtteranceId)));
+                EllaiConversationTurn nextTurn;
+                do
+                {
+                    await Task.Delay(10, timeout.Token);
+                    nextTurn = (await store.ReadConversationAsync(session.SessionId, actor.ActorId, timeout.Token))
+                        .Single(item => item.ClientUtteranceId == next.ClientUtteranceId);
+                } while (nextTurn.CompletedAtUtc is null);
+                Assert.Equal("Completed", nextTurn.Outcome);
+                Assert.Contains("Synthetic question", model.LastMessages);
+                Assert.Contains("Synthetic answer.", model.LastMessages);
+                Assert.Contains("Follow-up question", model.LastMessages);
+            }
         }
         finally { await worker.StopAsync(CancellationToken.None); }
     }
@@ -76,6 +96,7 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
     {
         public int Calls { get; private set; }
         public string ToolResult { get; private set; } = string.Empty;
+        public IReadOnlyList<string> LastMessages { get; private set; } = [];
         public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
             CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
@@ -84,6 +105,8 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
             await Task.Yield();
             cancellationToken.ThrowIfCancellationRequested();
             Calls++;
+            LastMessages = messages.Where(message => message.Role == ChatRole.User || message.Role == ChatRole.Assistant)
+                .Select(message => message.Text).ToArray();
             if (useTool && Calls == 1)
                 yield return new ChatResponseUpdate(ChatRole.Assistant,
                     [new FunctionCallContent("call-1", EllaiToolNames.Now, new Dictionary<string, object?>())]);

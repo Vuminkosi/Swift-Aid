@@ -15,6 +15,23 @@ public sealed class EllaiAgentFrameworkContractTests
         """;
 
     [Fact]
+    public async Task FrameworkSessionRestoresOnlyProvidedConversationHistory()
+    {
+        using var client = new ScriptedClient(EllaiToolNames.Now, "unused", "example", ValidDecision, noArguments: true);
+        var agent = new EllaiFrameworkAgent(client);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.Now });
+        var messages = new[] { new ChatMessage(ChatRole.User, "earlier question"),
+            new ChatMessage(ChatRole.Assistant, "earlier answer"), new ChatMessage(ChatRole.User, "current question") };
+        var result = await agent.RunAsync(context, "Test instructions", messages, 100, _ => Task.FromResult(true),
+            (_, request, _) => Task.FromResult(new EllaiToolResult(request.ToolName, true, null, [], "observation", 1, false)),
+            new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None);
+        Assert.NotNull(result);
+        var relevant = client.FirstMessages.Where(message => message.Role == ChatRole.User || message.Role == ChatRole.Assistant).ToArray();
+        Assert.Equal(new[] { "earlier question", "earlier answer", "current question" }, relevant.Select(message => message.Text));
+    }
+
+    [Fact]
     public async Task FrameworkExecutorUsesApplicationBoundaryAndPublishesToolActivity()
     {
         using var client = new ScriptedClient(EllaiToolNames.Now, "unused", "example", ValidDecision, noArguments: true);
@@ -192,6 +209,7 @@ public sealed class EllaiAgentFrameworkContractTests
     {
         public int Calls { get; private set; }
         public string ToolResult { get; private set; } = string.Empty;
+        public IReadOnlyList<ChatMessage> FirstMessages { get; private set; } = [];
 
         public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
             CancellationToken cancellationToken = default)
@@ -200,6 +218,7 @@ public sealed class EllaiAgentFrameworkContractTests
             Calls++;
             if (Calls == 1)
             {
+                FirstMessages = messages.ToArray();
                 Assert.Contains(options!.Tools!, tool => tool.Name == toolName);
                 return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
                     [new FunctionCallContent("call-1", toolName, noArguments ? new Dictionary<string, object?>() : new Dictionary<string, object?> { [argumentName] = argumentValue })])));

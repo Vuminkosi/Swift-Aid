@@ -140,8 +140,14 @@ cover an allowed call and rejection after a broker denial. It is a building
 block, not the Gateway execution path: trusted full policy/context, per-model
 unknown-tool handling, durable sessions,
 streaming, timeout and audit integration remain incomplete. It currently
-creates a new framework session per invocation, so it is not yet the required
-durable conversation implementation.
+creates a new framework session per invocation. The session is seeded through
+the framework's in-memory chat-history provider from the existing bounded,
+owner-filtered completed-turn projection, while the outbox remains the sole
+durable conversation authority. A two-turn in-memory worker fixture confirms
+the previous exchange reaches the next framework session in order. This is
+rehydration from durable-conversation abstractions, not persistence or
+restoration of the framework session's serialized state; PostgreSQL and
+process-restart recovery remain unverified.
 `EllaiFrameworkExecutor` implements the application execution boundary using
 the shared framework prompt, filtered conversation, tool guard and usage store.
 An in-process fixture verifies a successful tool call and activity event. It
@@ -151,7 +157,7 @@ sessions and worker-level acceptance still require verification.
 An in-memory worker integration fixture now runs this executor with a
 deterministic streaming `IChatClient`, checks the owner-filtered completed
 turn, response chunk, final reconciliation and usage sample. It does not test
-PostgreSQL persistence, a live Gateway process, or a restored framework
+PostgreSQL persistence, a live Gateway process, or a serialized framework
 session. A second deterministic worker case invokes the real scoped
 `ellai_now` broker and verifies its observation and progress acknowledgement.
 The framework model-call guard rejects named tool calls outside the advertised
