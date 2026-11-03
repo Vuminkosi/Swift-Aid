@@ -3274,3 +3274,21 @@ notification consumer reported unavailable; notifications, cancellation while
 the model is still running, actual devices and deployed behavior were not
 verified by these browser runs. The test-owned Gateway and containers stopped;
 the previously retained candidate and key/module directories remain.
+
+### Rendered cancellation during processing — 2026-11-03
+
+PASS: `node tests\SwiftAid.Ui.Tests\ellai-cancel-rendered.browser.cjs`, with
+`SWIFTAID_RUN_LIVE_ELLAI=1` and the isolated loopback Gateway URL, exercised
+the rendered guest End control after a synthetic turn reached `Processing`.
+The test observed HTTP 200, a durable `Cancelled` session and turn, no stored
+assistant answer and no visible answer chunks. It used headless Chromium, the
+previously published `f922c62` Gateway, live Muse configuration, a newly
+migrated disposable PostGIS database and task-owned NATS. `Processing` alone
+does not prove that the provider had received the request before cancellation.
+
+The first test attempt failed while the harness read the session-start
+response body; it was corrected to use the client's persisted session ID and
+the rerun passed. The fixture's NATS notification consumer was unavailable.
+The Gateway and disposable containers were stopped. The previously retained
+candidate and key/module directories remain; physical-device and deployed
+behavior are NOT VERIFIED by this test.
