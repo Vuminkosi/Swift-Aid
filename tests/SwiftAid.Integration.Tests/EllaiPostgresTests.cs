@@ -72,6 +72,37 @@ public sealed class FrameworkPostgresLiveMuseFactAttribute : FactAttribute
 public sealed class EllaiPostgresTests : IAsyncLifetime
 {
     [FrameworkPostgresFact]
+    public async Task AtomicTopicPayloadUpdateFencesConcurrentWritersAcrossContexts()
+    {
+        var sessionId = $"topic-cas-{Guid.NewGuid():N}";
+        await using var initialDb = CreateFrameworkDbContext();
+        await initialDb.Database.MigrateAsync();
+        var initial = await new PostgresEllaiTopicStore(initialDb).RecordAsync(sessionId, "History", [],
+            "before", "v1", null, DateTimeOffset.UtcNow, default);
+        try
+        {
+            await using var firstDb = CreateFrameworkDbContext();
+            await using var secondDb = CreateFrameworkDbContext();
+            var first = new PostgresEllaiTopicStore(firstDb);
+            var second = new PostgresEllaiTopicStore(secondDb);
+            var writes = await Task.WhenAll(
+                first.CompareExchangePayloadAsync(sessionId, initial.TopicId, "before", "v1", "first", "v2", DateTimeOffset.UtcNow, default),
+                second.CompareExchangePayloadAsync(sessionId, initial.TopicId, "before", "v1", "second", "v2", DateTimeOffset.UtcNow, default));
+            Assert.Single(writes, result => result);
+            await using var verifyDb = CreateFrameworkDbContext();
+            var stored = await new PostgresEllaiTopicStore(verifyDb).GetAsync(sessionId, initial.TopicId, default);
+            Assert.Contains(stored!.EntityRef, new[] { "first", "second" });
+            Assert.Equal("v2", stored.EntityVersion);
+            Assert.False(await first.CompareExchangePayloadAsync("another-session", initial.TopicId, stored.EntityRef, "v2", "foreign", "v3", DateTimeOffset.UtcNow, default));
+        }
+        finally
+        {
+            await using var cleanupDb = CreateFrameworkDbContext();
+            await cleanupDb.Set<EllaiTopicEntity>().Where(topic => topic.SessionId == sessionId && topic.TopicId == initial.TopicId).ExecuteDeleteAsync();
+        }
+    }
+
+    [FrameworkPostgresFact]
     public Task FrameworkHistoryRetainsTwelveShortOwnedTurns() => VerifyLongFrameworkHistoryAsync(false);
 
     [FrameworkPostgresLiveMuseFact]

@@ -33,6 +33,11 @@ public interface IEllaiTopicStore
 
     async Task<EllaiTopicEntry?> GetAsync(string sessionId, string topicId, CancellationToken ct) =>
         (await ListAsync(sessionId, ct).ConfigureAwait(false)).SingleOrDefault(topic => topic.TopicId == topicId);
+
+    /// <summary>Atomically replace an existing topic payload only when its prior payload and version still match.</summary>
+    Task<bool> CompareExchangePayloadAsync(string sessionId, string topicId, string? expectedRef,
+        string? expectedVersion, string newRef, string newVersion, DateTimeOffset now, CancellationToken ct) =>
+        throw new NotSupportedException("Atomic topic payload updates are unavailable.");
 }
 
 /// <summary>Thread-safe in-memory topic store with the same semantics as the
@@ -83,6 +88,25 @@ public sealed class InMemoryEllaiTopicStore : IEllaiTopicStore
                     .Where(e => string.Equals(e.SessionId, sessionId, StringComparison.Ordinal))
                     .OrderBy(e => e.CreatedAtUtc)
                     .ToList());
+        }
+    }
+
+    public Task<bool> CompareExchangePayloadAsync(string sessionId, string topicId, string? expectedRef,
+        string? expectedVersion, string newRef, string newVersion, DateTimeOffset now, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(topicId);
+        ArgumentNullException.ThrowIfNull(newRef);
+        ArgumentException.ThrowIfNullOrWhiteSpace(newVersion);
+        lock (_gate)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!_byId.TryGetValue(topicId, out var current) || current.SessionId != sessionId ||
+                current.EntityRef != expectedRef || current.EntityVersion != expectedVersion)
+                return Task.FromResult(false);
+            _byId[topicId] = current with { EntityRef = newRef, EntityVersion = newVersion, UpdatedAtUtc = now };
+            return Task.FromResult(true);
         }
     }
 

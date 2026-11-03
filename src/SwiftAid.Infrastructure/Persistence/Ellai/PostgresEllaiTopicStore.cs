@@ -82,6 +82,23 @@ public sealed class PostgresEllaiTopicStore(SwiftAidDbContext dbContext) : IElla
         return row is null ? null : ToEntry(row);
     }
 
+    public async Task<bool> CompareExchangePayloadAsync(string sessionId, string topicId, string? expectedRef,
+        string? expectedVersion, string newRef, string newVersion, DateTimeOffset now, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(topicId);
+        ArgumentNullException.ThrowIfNull(newRef);
+        ArgumentException.ThrowIfNullOrWhiteSpace(newVersion);
+        var changed = await _dbContext.Set<EllaiTopicEntity>()
+            .Where(topic => topic.SessionId == sessionId && topic.TopicId == topicId &&
+                topic.EntityRef == expectedRef && topic.EntityVersion == expectedVersion)
+            .ExecuteUpdateAsync(update => update
+                .SetProperty(topic => topic.EntityRef, newRef)
+                .SetProperty(topic => topic.EntityVersion, newVersion)
+                .SetProperty(topic => topic.UpdatedAtUtc, now), ct).ConfigureAwait(false);
+        return changed == 1;
+    }
+
     private static EllaiTopicEntry ToEntry(EllaiTopicEntity entity) => new(
         entity.TopicId, entity.SessionId, entity.Title,
         JsonSerializer.Deserialize<List<string>>(entity.AliasesJson) ?? new List<string>(),
