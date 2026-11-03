@@ -97,7 +97,8 @@ public sealed class CaseCommandHttpClient(HttpClient httpClient) : ICaseCommandC
                     input.EvidenceEventIds,
                     input.AssignmentVersion, input.GrantId, input.CollaboratorActorId, input.CollaborationActions, input.ExpiresAtUtc,
                     input.AssistanceId, input.AssistanceNeed, input.ResponsibleActorId, input.AssistanceStatus?.ToString(),
-                    input.AssistanceNote, input.ReceiptMethod, input.ReceiptContext),
+                    input.AssistanceNote, input.ReceiptMethod, input.ReceiptContext,
+                    input.ActionOwnerKind, input.ActionId),
                 JsonOptions,
                 cancellationToken).ConfigureAwait(false);
 
@@ -229,7 +230,9 @@ public sealed class CaseCommandHttpClient(HttpClient httpClient) : ICaseCommandC
         string? AssistanceStatus,
         string? AssistanceNote,
         string? ReceiptMethod,
-        string? ReceiptContext);
+        string? ReceiptContext,
+        SwiftAid.Contracts.Commands.ActionOwnerKind? ActionOwnerKind,
+        Guid? ActionId);
 
     /// <summary>Accepted case-command receipt as returned by the endpoint.</summary>
     private sealed record CaseCommandWireResponse(

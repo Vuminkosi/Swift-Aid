@@ -9,6 +9,7 @@
 <output id="fixture-ready">@_ready</output>
 <output id="request-result">@_result</output>
     <output id="outcome-request">@_outcomeRequest</output>
+    <output id="transfer-request">@_transferRequest</output>
 <OperationsWorkManagementSurface Title="Follow-ups" Description="Synthetic follow-up acknowledgement scenario."
                                  State="OperationsSurfaceState.Populated" Items="Items" CandidatesClient="_candidateClient" OnAction="RecordAction" />
 
@@ -17,11 +18,18 @@
     private static readonly Guid FollowUpId = Guid.Parse("f4410000-4444-4444-8444-444444444444");
     [SupplyParameterFromQuery(Name = "Schedule")] public bool ScheduleMode { get; set; }
     [SupplyParameterFromQuery(Name = "Outcome")] public bool OutcomeMode { get; set; }
+    [SupplyParameterFromQuery(Name = "Transfer")] public bool TransferMode { get; set; }
     private bool _ready;
     private string _result = "Scheduled";
     private string _outcomeRequest = "None";
+    private string _transferRequest = "None";
     private readonly ICaseCollaboratorCandidatesClient _candidateClient = new SyntheticCandidateClient();
-    private IReadOnlyList<OperationsWorkItem> Items => ScheduleMode
+    private IReadOnlyList<OperationsWorkItem> Items => TransferMode
+        ? [new OperationsWorkItem(CaseId, $"fu:{FollowUpId:D}", 7, "SYNTHETIC-CASE", OperationsWorkKind.FollowUp,
+            OperationsWorkStatus.Scheduled, OperationsAssignmentStatus.Assigned, "Call reporting worker",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(1), [OperationsWorkAction.TransferFollowUp], [], null,
+            AssignedWorkerKey: "current-synthetic-owner")]
+        : ScheduleMode
         ?
         [
             new OperationsWorkItem(CaseId, "new", 7, "SYNTHETIC-CASE", OperationsWorkKind.FollowUp,
@@ -47,6 +55,17 @@
 
     private void RecordAction(OperationsWorkActionRequest request)
     {
+        if (TransferMode)
+        {
+            if (request.CaseId != CaseId || request.WorkKey != $"fu:{FollowUpId:D}" || request.ExpectedVersion != 7 ||
+                request.Action != OperationsWorkAction.TransferFollowUp || request.WorkerKey != "synthetic-follow-up-worker" ||
+                string.IsNullOrWhiteSpace(request.Reason) || request.Details is not null)
+                throw new InvalidOperationException("Unexpected synthetic follow-up transfer request.");
+
+            _transferRequest = $"{request.WorkerKey}:{request.Reason}";
+            return;
+        }
+
         if (OutcomeMode)
         {
             if (request.CaseId != CaseId || request.WorkKey != $"fu:{FollowUpId:D}" || request.ExpectedVersion != 7 ||

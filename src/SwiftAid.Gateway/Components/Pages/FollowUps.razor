@@ -260,7 +260,8 @@
             item.DueAtUtc,
             actions,
             history,
-            item.EligibleWorkers.Select(worker => new OperationsWorkManagementSurface.WorkOption(worker.Key, worker.DisplayName)).ToArray());
+            item.EligibleWorkers.Select(worker => new OperationsWorkManagementSurface.WorkOption(worker.Key, worker.DisplayName)).ToArray(),
+            AssignedWorkerKey: item.AssignedWorkerKey);
     }
 
     private static TEnum? ParseNullable<TEnum>(object? value) where TEnum : struct, Enum =>

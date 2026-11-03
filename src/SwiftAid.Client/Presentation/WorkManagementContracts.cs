@@ -58,6 +58,7 @@ public enum WorkManagementAction
     RecordAssistanceUnmet,
     CancelAssistance,
     ScheduleFollowUp,
+    TransferFollowUp,
     AcknowledgeFollowUp,
     RescheduleFollowUp,
     CancelFollowUp,
@@ -198,6 +199,8 @@ public sealed record WorkManagementCommand(
             HasText(WorkerKey, 100) && IsEmptyExcept(nameof(WorkerKey)),
         WorkManagementAction.AcknowledgeAssignment => IsEmptyExcept(),
         WorkManagementAction.AcknowledgeFollowUp => IsEmptyExcept(),
+        WorkManagementAction.TransferFollowUp => HasText(WorkerKey, 200) && HasText(Reason, 300) &&
+            IsEmptyExcept(nameof(WorkerKey), nameof(Reason)),
         WorkManagementAction.RequestAssistance =>
             AssistanceNeed is { } need && Enum.IsDefined(need) && HasText(Details, 300) && IsEmptyExcept(nameof(AssistanceNeed), nameof(Details)),
         WorkManagementAction.AcceptAssistance or WorkManagementAction.RecordAssistanceProgress or WorkManagementAction.CancelAssistance =>

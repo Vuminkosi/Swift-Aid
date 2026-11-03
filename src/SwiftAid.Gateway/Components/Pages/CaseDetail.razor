@@ -458,7 +458,8 @@
         }
 
         mapped = new OperationsWorkManagementSurface.OperationsWorkItem(snapshot.CaseId, item.WorkKey, snapshot.Version,
-            item.DisplayReference, kind, status, assignment, item.Summary, item.UpdatedAtUtc, item.DueAtUtc, actions, history, workers);
+            item.DisplayReference, kind, status, assignment, item.Summary, item.UpdatedAtUtc, item.DueAtUtc, actions, history, workers,
+            AssignedWorkerKey: item.AssignedWorkerKey);
         return true;
     }
 

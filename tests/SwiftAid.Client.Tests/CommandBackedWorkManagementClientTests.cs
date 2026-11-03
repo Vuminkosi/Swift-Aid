@@ -168,6 +168,7 @@ public sealed class CommandBackedWorkManagementClientTests
         Assert.Equal($"fu:{FollowUpId:D}", followUp.WorkKey);
         Assert.Contains(WorkManagementAction.RecordFollowUpOutcome, followUp.AvailableActions);
         Assert.Contains(WorkManagementAction.AcknowledgeFollowUp, followUp.AvailableActions);
+        Assert.Contains(WorkManagementAction.TransferFollowUp, followUp.AvailableActions);
         Assert.Contains(WorkManagementAction.RescheduleFollowUp, followUp.AvailableActions);
         Assert.Contains(WorkManagementAction.CancelFollowUp, followUp.AvailableActions);
 
@@ -187,7 +188,38 @@ public sealed class CommandBackedWorkManagementClientTests
 
         Assert.Equal(WorkManagementStatus.Acknowledged, followUp.Status);
         Assert.DoesNotContain(WorkManagementAction.AcknowledgeFollowUp, followUp.AvailableActions);
+        Assert.Contains(WorkManagementAction.TransferFollowUp, followUp.AvailableActions);
         Assert.Contains(WorkManagementAction.RecordFollowUpOutcome, followUp.AvailableActions);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_TransferFollowUp_SendsTypedOwnerChangeWithReason()
+    {
+        var commands = new StubCommandClient();
+        var commandId = Guid.NewGuid();
+        var client = new CommandBackedWorkManagementClient(
+            commands, new StubMonitoringClient(), new StubTimelineClient());
+        var command = new WorkManagementCommand(
+            CaseId,
+            $"fu:{FollowUpId:D}",
+            WorkManagementAction.TransferFollowUp,
+            ExpectedVersion: 7,
+            WorkerKey: "eligible-staff-2",
+            Reason: "Current owner moved to another duty area.",
+            CommandId: commandId);
+
+        Assert.True(command.IsValid);
+        var result = await client.ExecuteAsync(command, new WorkManagementQuery(new PageRequest(1, 25)));
+
+        Assert.Equal(UiCapabilityResultCode.Success, result.Code);
+        var sent = Assert.Single(commands.Sent).Input;
+        Assert.Equal("ChangeActionOwner", sent.CommandType);
+        Assert.Equal(ActionOwnerKind.FollowUp, sent.ActionOwnerKind);
+        Assert.Equal(FollowUpId, sent.ActionId);
+        Assert.Equal("eligible-staff-2", sent.ProposedOwnerId);
+        Assert.Equal("Current owner moved to another duty area.", sent.Reason);
+        Assert.Equal(7, sent.ExpectedVersion);
+        Assert.Equal(commandId, sent.CommandId);
     }
 
     [Fact]

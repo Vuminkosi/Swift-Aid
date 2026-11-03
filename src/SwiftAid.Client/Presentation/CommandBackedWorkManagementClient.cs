@@ -294,6 +294,7 @@ public sealed class CommandBackedWorkManagementClient(
         var actions = status == WorkManagementStatus.Scheduled
             ? (IReadOnlyList<WorkManagementAction>)[
                 WorkManagementAction.ScheduleFollowUp,
+                WorkManagementAction.TransferFollowUp,
                 WorkManagementAction.RescheduleFollowUp,
                 WorkManagementAction.RecordFollowUpOutcome,
                 WorkManagementAction.CancelFollowUp]
@@ -304,7 +305,7 @@ public sealed class CommandBackedWorkManagementClient(
         }
         else if (status == WorkManagementStatus.Acknowledged)
         {
-            actions = [WorkManagementAction.RescheduleFollowUp, WorkManagementAction.RecordFollowUpOutcome, WorkManagementAction.CancelFollowUp];
+            actions = [WorkManagementAction.TransferFollowUp, WorkManagementAction.RescheduleFollowUp, WorkManagementAction.RecordFollowUpOutcome, WorkManagementAction.CancelFollowUp];
         }
 
         return new WorkManagementItem(
@@ -416,6 +417,13 @@ public sealed class CommandBackedWorkManagementClient(
                     : command.Details.Trim(),
                 AssigneeActorId: assignee,
                 DueAtUtc: due),
+        WorkManagementAction.TransferFollowUp when TryFollowUpId(command.WorkKey, out var transferFollowUpId) =>
+            new CaseCommandInput(
+                "ChangeActionOwner", null, command.Reason, command.WorkerKey, null, null,
+                command.ExpectedVersion, FollowUpId: transferFollowUpId,
+                ActionOwnerKind: ActionOwnerKind.FollowUp,
+                ActionId: transferFollowUpId,
+                CommandId: command.CommandId),
         WorkManagementAction.AcknowledgeFollowUp when TryFollowUpId(command.WorkKey, out var acknowledgeFollowUpId) =>
             new CaseCommandInput("AcknowledgeFollowUp", null, null, null, null, null,
                 command.ExpectedVersion, FollowUpId: acknowledgeFollowUpId),

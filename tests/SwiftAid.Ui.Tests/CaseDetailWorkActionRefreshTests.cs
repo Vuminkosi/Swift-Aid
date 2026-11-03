@@ -64,6 +64,64 @@ public sealed class CaseDetailWorkActionRefreshTests
     }
 
     [Fact]
+    public async Task FollowUpTransfer_RequiresDifferentEligibleOwnerAndReason()
+    {
+        var caseId = Guid.NewGuid();
+        const string actorId = "eligible-follow-up-actor";
+        const string currentOwnerId = "current-follow-up-owner";
+        var candidates = new FakeFollowUpCandidateClient();
+        OperationsWorkManagementSurface.OperationsWorkActionRequest? captured = null;
+        var commandIds = new List<Guid?>();
+        var component = new OperationsWorkManagementSurface();
+        var item = new OperationsWorkManagementSurface.OperationsWorkItem(
+            caseId, "fu:synthetic", 2, "Case follow-up", OperationsWorkManagementSurface.OperationsWorkKind.FollowUp,
+            OperationsWorkManagementSurface.OperationsWorkStatus.Scheduled, OperationsWorkManagementSurface.OperationsAssignmentStatus.Assigned,
+            "Synthetic follow-up context", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(1),
+            [OperationsWorkManagementSurface.OperationsWorkAction.TransferFollowUp], [], AssignedWorkerKey: currentOwnerId);
+        SetParameter(component, nameof(OperationsWorkManagementSurface.Items), new[] { item });
+        SetParameter(component, nameof(OperationsWorkManagementSurface.CandidatesClient), candidates);
+        SetParameter(component, nameof(OperationsWorkManagementSurface.OnAction),
+            EventCallback.Factory.Create<OperationsWorkManagementSurface.OperationsWorkActionRequest>(
+                new object(), request => { captured = request; commandIds.Add(request.CommandId); }));
+        SetPrivateField(component, "_selectedWorkKey", $"{caseId:N}|{item.WorkKey}");
+
+        await (Task)typeof(OperationsWorkManagementSurface)
+            .GetMethod("SetActionAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(component, [OperationsWorkManagementSurface.OperationsWorkAction.TransferFollowUp])!;
+
+        Assert.Equal(caseId, candidates.CaseId);
+        Assert.True(candidates.FollowUpAssigneesOnly);
+        var selectOwner = typeof(OperationsWorkManagementSurface)
+            .GetMethod("SetFollowUpAssignee", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        selectOwner.Invoke(component, [currentOwnerId]);
+        SetPrivateField(component, "_details", "Owner has moved to another duty area.");
+        typeof(OperationsWorkManagementSurface).GetMethod("ReviewAction", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(component, [item]);
+        Assert.False((bool)GetPrivateField(component, "_reviewing")!);
+        Assert.Equal("Choose a different staff member from the current owner.", GetPrivateField(component, "_validationMessage"));
+
+        selectOwner.Invoke(component, [actorId]);
+        typeof(OperationsWorkManagementSurface).GetMethod("ReviewAction", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(component, [item]);
+        Assert.True((bool)GetPrivateField(component, "_reviewing")!, (string?)GetPrivateField(component, "_validationMessage"));
+        await InvokePrivateWithArgumentAsync(component, "ConfirmActionAsync", item);
+
+        Assert.NotNull(captured);
+        Assert.Equal(OperationsWorkManagementSurface.OperationsWorkAction.TransferFollowUp, captured!.Action);
+        Assert.Equal(actorId, captured.WorkerKey);
+        Assert.Null(captured.Details);
+        Assert.Equal("Owner has moved to another duty area.", captured.Reason);
+        Assert.Null(captured.DueAtUtc);
+
+        typeof(OperationsWorkManagementSurface).GetMethod("ReviewAction", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(component, [item]);
+        await InvokePrivateWithArgumentAsync(component, "ConfirmActionAsync", item);
+        Assert.Equal(2, commandIds.Count);
+        Assert.NotNull(commandIds[0]);
+        Assert.Equal(commandIds[0], commandIds[1]);
+    }
+
+    [Fact]
     public async Task AssistanceRequest_UsesCurrentVersionAndStableRequestIdentity()
     {
         var caseId = Guid.NewGuid();
@@ -282,7 +340,10 @@ public sealed class CaseDetailWorkActionRefreshTests
     private sealed class FakeFollowUpCandidateClient : ICaseCollaboratorCandidatesClient
     {
         private readonly CaseCollaboratorCandidatePage _page = new(
-            [new("scope-1", "eligible-follow-up-actor", "Synthetic colleague", ["ReadCase", "ManageFollowUp"])], null);
+            [
+                new("scope-1", "eligible-follow-up-actor", "Synthetic colleague", ["ReadCase", "ManageFollowUp"]),
+                new("scope-1", "current-follow-up-owner", "Current owner", ["ReadCase", "ManageFollowUp"])
+            ], null);
         public Guid CaseId { get; private set; }
         public bool FollowUpAssigneesOnly { get; private set; }
         public Task<CaseCollaboratorCandidatePage?> GetAsync(Guid caseId, string? search, string? after,

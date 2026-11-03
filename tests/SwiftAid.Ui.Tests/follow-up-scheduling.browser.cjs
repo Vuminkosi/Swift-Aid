@@ -61,8 +61,24 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             await page.getByRole('alert').getByText('Select a follow-up date and time.', { exact: true }).waitFor();
             assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `outcome form overflow at ${width}px`);
             assert.deepEqual(errors, [], `outcome form browser errors at ${width}px`);
+
+            await page.goto(`${base}/case-follow-up-fixture?Transfer=true`);
+            await page.waitForFunction(() => document.querySelector('#fixture-ready')?.textContent === 'True');
+            await page.getByText('Call reporting worker', { exact: true }).first().click();
+            await page.getByLabel('Choose an available action', { exact: true }).click();
+            await page.getByRole('option', { name: 'Change follow-up owner', exact: true }).click();
+            await page.getByLabel('New responsible staff member', { exact: true }).click();
+            await page.getByRole('option', { name: 'Synthetic colleague', exact: true }).click();
+            await page.getByLabel('Reason for changing the owner', { exact: true }).fill('Owner moved teams.');
+            await page.getByRole('button', { name: 'Review action', exact: true }).click();
+            await page.getByRole('status').getByText('Review change follow-up owner for SYNTHETIC-CASE. New owner: Synthetic colleague. Reason: Owner moved teams. Confirm submits this request.', { exact: true }).waitFor();
+            assert.equal(await page.getByLabel('Follow-up date', { exact: true }).count(), 0);
+            await page.getByRole('button', { name: 'Confirm action', exact: true }).click();
+            await page.waitForFunction(() => document.querySelector('#transfer-request')?.textContent === 'synthetic-follow-up-worker:Owner moved teams.');
+            assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `transfer form overflow at ${width}px`);
+            assert.deepEqual(errors, [], `transfer form browser errors at ${width}px`);
         }
-        console.log('PASS rendered follow-up assignee validation and outcome reschedule controls/validation at 390px and 1280px');
+        console.log('PASS rendered follow-up assignment, outcome validation, and owner transfer at 390px and 1280px');
     } finally {
         await browser?.close();
         host.kill();

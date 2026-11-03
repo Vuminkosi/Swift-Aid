@@ -170,7 +170,7 @@ PASS - `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.
 ## Gaps and follow-up
 
 - Build a generated or maintained crosswalk of every command/event/job/tool/audio/UI/public-projection type to schema version, authoritative owner, producer, consumer, persistence form, compatibility policy and relevant tests.
-- Event-name reconciliation is recorded in the `Implementation §6.4 event requirement reconciliation` section and EV-092. Ten required concepts remain without a matching current event or confirmed semantic equivalent; resolve contract ownership and implementation before claiming event requirements complete.
+- Event-name reconciliation is recorded in the `Implementation §6.4 event requirement reconciliation` section and EV-092. Nine required concepts remain without a matching current event or confirmed semantic equivalent; resolve contract ownership and implementation before claiming event requirements complete.
 - Document the worker job type registry and distinguish envelope validation from execution, durable acknowledgement and retry behavior.
 - Trace each audio/session version from client capture through Gateway, storage, response preparation and cancellation/error paths.
 - Complete the remaining endpoint projection inventory; add focused serialization/privacy assertions where route tests do not currently prove the DTO boundary.

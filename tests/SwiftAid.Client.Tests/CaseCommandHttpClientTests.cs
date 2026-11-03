@@ -46,6 +46,30 @@ public sealed class CaseCommandHttpClientTests
         Assert.Equal("At the agreed service point", root.GetProperty("receiptContext").GetString());
     }
 
+    [Fact]
+    public async Task Action_owner_change_transmits_kind_id_target_reason_and_stable_command_id()
+    {
+        var caseId = Guid.NewGuid();
+        var actionId = Guid.NewGuid();
+        var commandId = Guid.NewGuid();
+        var handler = new ScriptedHandler([JsonResponse(HttpStatusCode.Conflict, new { })]);
+        var client = Create(handler);
+
+        await client.SendAsync(caseId, new CaseCommandInput(
+            "ChangeActionOwner", null, "Current owner moved teams.", "eligible-owner-2", null, null, 8,
+            CommandId: commandId, ActionOwnerKind: SwiftAid.Contracts.Commands.ActionOwnerKind.FollowUp,
+            ActionId: actionId));
+
+        using var body = JsonDocument.Parse(await Assert.Single(handler.Requests).Content!.ReadAsStringAsync());
+        var root = body.RootElement;
+        Assert.Equal(commandId, root.GetProperty("commandId").GetGuid());
+        Assert.Equal("ChangeActionOwner", root.GetProperty("commandType").GetString());
+        Assert.Equal((int)SwiftAid.Contracts.Commands.ActionOwnerKind.FollowUp, root.GetProperty("actionOwnerKind").GetInt32());
+        Assert.Equal(actionId, root.GetProperty("actionId").GetGuid());
+        Assert.Equal("eligible-owner-2", root.GetProperty("proposedOwnerId").GetString());
+        Assert.Equal("Current owner moved teams.", root.GetProperty("reason").GetString());
+    }
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     [Fact]

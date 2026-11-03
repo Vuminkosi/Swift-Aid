@@ -171,6 +171,29 @@
                                     <MudTextField T="string" @bind-Value="_assistanceReceiptContext" Label="Receipt confirmation context" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" Disabled="@IsBusy" />
                                 }
 
+                                @if (action == OperationsWorkAction.TransferFollowUp)
+                                {
+                                    <MudTextField T="string" Value="@_followUpAssigneeSearch" ValueChanged="SetFollowUpAssigneeSearch" Label="Search eligible staff" HelperText="Staff must have case read and follow-up access." Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" Disabled="@(_loadingFollowUpAssignees || IsBusy)" />
+                                    <MudButton Variant="Variant.Outlined" Disabled="@(_loadingFollowUpAssignees || IsBusy)" OnClick="LoadFollowUpAssigneesAsync">Search eligible staff</MudButton>
+                                    @if (_loadingFollowUpAssignees) { <MudText Typo="Typo.caption" role="status">Loading eligible staff…</MudText> }
+                                    @if (_followUpAssigneeCandidates.Count > 0)
+                                    {
+                                        <MudSelect T="string" Value="@_followUpAssigneeActorId" ValueChanged="SetFollowUpAssignee" Label="New responsible staff member" Variant="Variant.Outlined" Margin="Margin.Dense" Class="operations-work-management__field" Disabled="@IsBusy">
+                                            @foreach (var candidate in _followUpAssigneeCandidates)
+                                            {
+                                                if (candidate.SafeDisplayLabel is not null)
+                                                {
+                                                    <MudSelectItem Value="@candidate.ActorId">@candidate.SafeDisplayLabel</MudSelectItem>
+                                                }
+                                            }
+                                        </MudSelect>
+                                    }
+                                    else if (_followUpAssigneeSearchLoaded && !_loadingFollowUpAssignees)
+                                    {
+                                        <MudText Typo="Typo.caption">No eligible staff were found for this case.</MudText>
+                                    }
+                                }
+
                                 @if (RequiresFollowUpSchedule(action))
                                 {
                                     @if (action == OperationsWorkAction.ScheduleFollowUp)
@@ -328,6 +351,7 @@
     private string? _selectedWorkKey;
     private long? _selectedVersion;
     private OperationsWorkAction? _selectedAction;
+    private Guid? _actionCommandId;
     private int? _workerOptionIndex;
     private AssistanceNeed? _assistanceNeed;
     private string? _details;
@@ -477,7 +501,7 @@
     {
         _selectedAction = action;
         ResetForm();
-        if (action == OperationsWorkAction.ScheduleFollowUp)
+        if (action is OperationsWorkAction.ScheduleFollowUp or OperationsWorkAction.TransferFollowUp)
         {
             await LoadFollowUpAssigneesAsync();
         }
@@ -485,9 +509,9 @@
 
     private void SetWorker(int? index) { _workerOptionIndex = index; _reviewing = false; _validationMessage = null; }
     private void SetAssistanceNeed(AssistanceNeed? need) { _assistanceNeed = need; _reviewing = false; _validationMessage = null; }
-    private void SetDetails(string? details) { _details = details; _reviewing = false; _validationMessage = null; }
+    private void SetDetails(string? details) { _details = details; _actionCommandId = null; _reviewing = false; _validationMessage = null; }
     private void SetFollowUpAssigneeSearch(string? search) { _followUpAssigneeSearch = search ?? ""; _reviewing = false; _validationMessage = null; }
-    private void SetFollowUpAssignee(string? actorId) { _followUpAssigneeActorId = actorId; _reviewing = false; _validationMessage = null; }
+    private void SetFollowUpAssignee(string? actorId) { _followUpAssigneeActorId = actorId; _actionCommandId = null; _reviewing = false; _validationMessage = null; }
 
     private async Task LoadFollowUpAssigneesAsync()
     {
@@ -562,9 +586,18 @@
             return;
         }
 
-        if (action == OperationsWorkAction.ScheduleFollowUp && SelectedFollowUpAssignee is null)
+        if (action is OperationsWorkAction.ScheduleFollowUp or OperationsWorkAction.TransferFollowUp && SelectedFollowUpAssignee is null)
         {
-            _validationMessage = "Choose an eligible staff member before reviewing the schedule.";
+            _validationMessage = action == OperationsWorkAction.ScheduleFollowUp
+                ? "Choose an eligible staff member before reviewing the schedule."
+                : "Choose an eligible staff member before reviewing the owner change.";
+            return;
+        }
+
+        if (action == OperationsWorkAction.TransferFollowUp &&
+            string.Equals(SelectedFollowUpAssignee?.ActorId, item.AssignedWorkerKey, StringComparison.Ordinal))
+        {
+            _validationMessage = "Choose a different staff member from the current owner.";
             return;
         }
 
@@ -702,9 +735,9 @@
             item.WorkKey,
             item.Version,
             action,
-            action == OperationsWorkAction.ScheduleFollowUp ? SelectedFollowUpAssignee?.ActorId : SelectedWorker(item)?.Key,
+            action is OperationsWorkAction.ScheduleFollowUp or OperationsWorkAction.TransferFollowUp ? SelectedFollowUpAssignee?.ActorId : SelectedWorker(item)?.Key,
             _assistanceNeed,
-            _details?.Trim(),
+            action == OperationsWorkAction.TransferFollowUp ? null : _details?.Trim(),
             _followUpOutcome,
             _escalationReason,
             _escalationAction,
@@ -718,13 +751,17 @@
             CancellationReason: action == OperationsWorkAction.CancelFollowUp ? _cancellationReason?.Trim() : null,
             Reason: action switch
             {
+                OperationsWorkAction.TransferFollowUp => _details?.Trim(),
                 OperationsWorkAction.RequestEscalation => _escalationReasonText?.Trim(),
                 OperationsWorkAction.ResolveEscalation => _resolutionReason?.Trim(),
                 _ => null
             },
             ResolutionSummary: action == OperationsWorkAction.ResolveEscalation ? _resolutionSummary?.Trim() : null,
             AssistanceReceiptMethod: action == OperationsWorkAction.ConfirmAssistanceReceived ? _assistanceReceiptMethod?.Trim() : null,
-            AssistanceReceiptContext: action == OperationsWorkAction.ConfirmAssistanceReceived ? _assistanceReceiptContext?.Trim() : null));
+            AssistanceReceiptContext: action == OperationsWorkAction.ConfirmAssistanceReceived ? _assistanceReceiptContext?.Trim() : null,
+            CommandId: action == OperationsWorkAction.TransferFollowUp
+                ? _actionCommandId ??= Guid.NewGuid()
+                : null));
     }
 
     private void EditAction() => _reviewing = false;
@@ -732,6 +769,7 @@
     private void ResetForm()
     {
         _workerOptionIndex = null;
+        _actionCommandId = null;
         _assistanceNeed = null;
         _details = null;
         _followUpAssigneeSearch = "";
@@ -784,6 +822,7 @@
 
     private static bool NeedsDetails(OperationsWorkAction action) => action is
         OperationsWorkAction.ScheduleFollowUp or
+        OperationsWorkAction.TransferFollowUp or
         OperationsWorkAction.RequestAssistance or
         OperationsWorkAction.AcceptAssistance or
         OperationsWorkAction.RecordAssistanceProgress or
@@ -797,6 +836,7 @@
     private static string DetailsLabel(OperationsWorkAction action) => action switch
     {
         OperationsWorkAction.ScheduleFollowUp => "What this follow-up is for",
+        OperationsWorkAction.TransferFollowUp => "Reason for changing the owner",
         OperationsWorkAction.RequestAssistance => "Describe the requested assistance",
         OperationsWorkAction.AcceptAssistance => "Describe the acceptance of responsibility",
         OperationsWorkAction.RecordAssistanceProgress => "Describe the progress made",
@@ -828,6 +868,10 @@
             {
                 message += $" Assigned to {SelectedFollowUpAssignee?.SafeDisplayLabel ?? "no eligible staff selected"}.";
             }
+        }
+        else if (action == OperationsWorkAction.TransferFollowUp)
+        {
+            message += $" New owner: {SelectedFollowUpAssignee?.SafeDisplayLabel ?? "no eligible staff selected"}. Reason: {_details?.Trim()}";
         }
         else if (action == OperationsWorkAction.CancelFollowUp)
         {
@@ -1007,6 +1051,7 @@
         OperationsWorkAction.RecordAssistanceUnmet => "Record unmet assistance need",
         OperationsWorkAction.CancelAssistance => "Cancel assistance request",
         OperationsWorkAction.ScheduleFollowUp => "Schedule follow-up",
+        OperationsWorkAction.TransferFollowUp => "Change follow-up owner",
         OperationsWorkAction.AcknowledgeFollowUp => "Acknowledge follow-up",
         OperationsWorkAction.RescheduleFollowUp => "Reschedule follow-up",
         OperationsWorkAction.CancelFollowUp => "Cancel follow-up",
@@ -1058,7 +1103,7 @@
     public enum OperationsWorkKind { Assignment, Assistance, FollowUp, Escalation }
     public enum OperationsWorkStatus { Open, Pending, AcknowledgementPending, Accepted, InProgress, Provided, ReceiptConfirmed, Unfulfilled, Assigned, Acknowledged, Requested, Scheduled, Rescheduled, Missed, Unreachable, Cancelled, Completed, Resolved, NeedsReview, Unavailable }
     public enum OperationsAssignmentStatus { Unassigned, AcknowledgementPending, AssignedToYou, Assigned, Unavailable }
-    public enum OperationsWorkAction { AssignWorker, ReassignWorker, RequestAssistance, AcceptAssistance, RecordAssistanceProgress, RecordAssistanceProvided, ConfirmAssistanceReceived, RecordAssistanceUnmet, CancelAssistance, ScheduleFollowUp, AcknowledgeFollowUp, RescheduleFollowUp, CancelFollowUp, RecordFollowUpOutcome, RequestEscalation, AcknowledgeEscalation, RecordEscalationAction, ResolveEscalation, AcknowledgeAssignment }
+    public enum OperationsWorkAction { AssignWorker, ReassignWorker, RequestAssistance, AcceptAssistance, RecordAssistanceProgress, RecordAssistanceProvided, ConfirmAssistanceReceived, RecordAssistanceUnmet, CancelAssistance, ScheduleFollowUp, TransferFollowUp, AcknowledgeFollowUp, RescheduleFollowUp, CancelFollowUp, RecordFollowUpOutcome, RequestEscalation, AcknowledgeEscalation, RecordEscalationAction, ResolveEscalation, AcknowledgeAssignment }
     public enum AssistanceNeed { Transport, Supplies, SpecialistSupport, Other }
     public enum FollowUpOutcome { ContactMade, NoContact, NeedsAnotherFollowUp, ReferredForReview, Unreachable }
     public enum EscalationReason { NeedsSupervisorReview, ServiceBarrier, TimeSensitive, Other }
@@ -1098,7 +1143,8 @@
         DateTimeOffset? DueAtUtc,
         IReadOnlyList<OperationsWorkAction> AvailableActions,
         IReadOnlyList<WorkHistoryEntry> History,
-        IReadOnlyList<WorkOption>? EligibleWorkers = null);
+        IReadOnlyList<WorkOption>? EligibleWorkers = null,
+        string? AssignedWorkerKey = null);
     public sealed record OperationsWorkActionRequest(
         Guid CaseId,
         string WorkKey,
