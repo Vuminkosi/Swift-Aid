@@ -150,7 +150,7 @@ public static class ServiceCollectionExtensions
         intakeMetadataOptions.Validate();
         services.TryAddSingleton(intakeMetadataOptions);
         services.TryAddSingleton<IIntakePublicMetadataProvider>(
-            _ => new IntakePublicMetadataProvider(intakeMetadataOptions));
+            _ => new IntakePublicMetadataProvider(intakeMetadataOptions, intakeLimits));
         var demoDataOptions = ReadDemoDataOptions(configuration);
         demoDataOptions.Validate();
         services.TryAddSingleton(demoDataOptions);

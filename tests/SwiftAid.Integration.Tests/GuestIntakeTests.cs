@@ -27,6 +27,22 @@ public sealed class GuestIntakeTests
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
 
     [Fact]
+    public void PublicMetadataExposesTheConfiguredTextLimitsAndRemainsCompatibleWithOlderPayloads()
+    {
+        var limits = new SwiftAid.Domain.Intake.IntakeLimits(MaximumNarrativeCharacters: 1200,
+            MaximumObservations: 7, MaximumObservationCharacters: 250);
+        var provider = new SwiftAid.Infrastructure.Intake.IntakePublicMetadataProvider(
+            new SwiftAid.Infrastructure.Intake.IntakeMetadataOptions(), limits);
+        var metadata = provider.GetMetadata();
+        Assert.Equal(new PublicIntakeTextLimits(1200, 7, 250), metadata.TextLimits);
+        var roundTrip = JsonSerializer.Deserialize<PublicIntakeMetadata>(JsonSerializer.Serialize(metadata, JsonOptions), JsonOptions);
+        Assert.Equal(metadata.TextLimits, roundTrip!.TextLimits);
+        var older = JsonSerializer.Deserialize<PublicIntakeMetadata>(
+            """{"version":"v1","countryCatalogueVersion":"v1","countryCatalogueReference":"/countries","privacyNoticeVersion":"v1","privacyNoticeReference":"/privacy"}""", JsonOptions);
+        Assert.Null(older!.TextLimits);
+    }
+
+    [Fact]
     public void MappedRoutes_AreAnonymousWithBoundedBodies()
     {
         var builder = WebApplication.CreateBuilder();

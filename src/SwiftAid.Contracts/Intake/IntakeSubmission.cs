@@ -76,7 +76,18 @@ public sealed record PublicIntakeMetadata(
     string CountryCatalogueVersion,
     string CountryCatalogueReference,
     string PrivacyNoticeVersion,
-    string PrivacyNoticeReference);
+    string PrivacyNoticeReference)
+{
+    /// <summary>Current server-side text limits; null when served by an older Gateway.</summary>
+    public PublicIntakeTextLimits? TextLimits { get; init; }
+}
+
+/// <summary>Public, non-sensitive validation bounds for report text.</summary>
+public sealed record PublicIntakeTextLimits(int MaximumNarrativeCharacters, int MaximumObservations, int MaximumObservationCharacters)
+{
+    public bool IsValid() => MaximumNarrativeCharacters is >= 1 and <= 20000 &&
+        MaximumObservations is >= 1 and <= 100 && MaximumObservationCharacters is >= 1 and <= 2000;
+}
 
 public sealed record PublicIntakeCountry(string Code, string Label);
 
