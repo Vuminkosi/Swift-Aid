@@ -53,6 +53,17 @@ provider-specific investigation and live compatibility evidence. Do not copy
 credentials into this document or tests. The supplied guide's Baseten model
 alias is host-specific (`implementation.md` section 14.9).
 
+`EllaiMuseChatClientFactory` creates an official `IChatClient` through
+`Microsoft.Extensions.AI.OpenAI` 10.10.1 and OpenAI SDK 2.14.0, using the
+existing configured Meta endpoint, model and key. It is not registered in the
+Gateway. A synthetic HTTP handler verified the request path, bearer header,
+model, tool declaration and native tool-call response parsing. The SDK sends
+`max_completion_tokens`; the existing Meta adapter sends `max_tokens`. Live
+Muse support for the SDK's field and remaining protocol behavior are unknown.
+Validate safe error handling, SDK logging, usage, streaming and token limits
+before routing production traffic through it. The OpenAI SDK here is a wire
+protocol adapter, not OpenAI Swarm or an alternate agent framework.
+
 The official NuGet feed resolved `Microsoft.Agents.AI` version `1.27.0` on
 3 November 2026. The Intelligence project references this version; the
 Gateway's non-native WebAssembly build succeeds with it. Microsoft documents
