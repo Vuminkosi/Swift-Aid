@@ -72,7 +72,8 @@ public sealed record EllaiToolTrace(int Version, bool HistoryIncluded, IReadOnly
                     (item.ClassificationReplayScope is null || item.ToolName == EllaiToolNames.ClassificationEvidence && item.ClassificationReplayScope.IsValid()) &&
                     (item.ImportDestinationsDigest is null || item.ToolName == EllaiToolNames.ImportDestinations &&
                         item.ImportDestinationsDigest is { Length: 64 } &&
-                        item.ImportDestinationsDigest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F')));
+                        item.ImportDestinationsDigest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F')) &&
+                    (item.LocationReplayScope is null || item.ToolName == EllaiToolNames.Locations && item.LocationReplayScope.IsValid()));
             if (valid) trace = parsed;
             return valid;
         }

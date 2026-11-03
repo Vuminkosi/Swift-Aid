@@ -133,6 +133,9 @@ public sealed record EllaiToolResult(
     public EllaiUiCatalogueReplayScope? UiCatalogueReplayScope { get; init; }
     [System.Text.Json.Serialization.JsonIgnore]
     public EllaiUiObservationReplayScope? UiObservationReplayScope { get; init; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public EllaiLocationReplayScope? LocationReplayScope { get; init; }
 }
 
 /// <summary>Authorized typed evidence/app-state tool broker (ELL-T07 groundwork).
@@ -254,6 +257,7 @@ public sealed class EllaiToolBroker
     private readonly SwiftAid.Application.Classification.ICaseClassificationQuery? _classification;
     private readonly SwiftAid.Application.Surveillance.ISignalReviewService? _signals;
     private readonly IDashboardAggregateQuery? _dashboard;
+    private readonly IEllaiLocationReplayProtector? _locationReplayProtector;
 
     /// <summary>Consent infrastructure is mandatory for consent-scoped reads.
     /// Ordinary typed messages use their own explicit classification and do
@@ -275,7 +279,7 @@ public sealed class EllaiToolBroker
         SwiftAid.Application.Classification.ICaseClassificationQuery? classification = null,
         SwiftAid.Application.Surveillance.ISignalReviewService? signals = null,
         EllaiUiAuthorityResolver? uiAuthority = null, IEllaiExactReferenceIndex? referenceIndex = null,
-        IDashboardAggregateQuery? dashboard = null)
+        IDashboardAggregateQuery? dashboard = null, IEllaiLocationReplayProtector? locationReplayProtector = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _consent = consent ?? throw new ArgumentNullException(nameof(consent));
@@ -285,6 +289,7 @@ public sealed class EllaiToolBroker
         _topics = topics;
         _referenceIndex = referenceIndex;
         _dashboard = dashboard;
+        _locationReplayProtector = locationReplayProtector;
         _uiAuthority = uiAuthority ?? new EllaiUiAuthorityResolver();
         _uiRegistry = uiRegistry;
         _uiDiscovery = uiDiscovery;
@@ -410,7 +415,7 @@ public sealed class EllaiToolBroker
         }
 
         if (canonical == EllaiToolNames.Locations)
-            return Bound(await ReadLocationsAsync(request, ct).ConfigureAwait(false));
+            return Bound(await ReadLocationsAsync(context, request, ct).ConfigureAwait(false));
 
         if (canonical is EllaiToolNames.ImportDestinations or EllaiToolNames.Imports or EllaiToolNames.ImportStatus)
             return Bound(await ReadImportsAsync(context, request, ct).ConfigureAwait(false));
@@ -619,7 +624,7 @@ public sealed class EllaiToolBroker
         }
     }
 
-    private async Task<EllaiToolResult> ReadLocationsAsync(EllaiToolRequest request, CancellationToken ct)
+    private async Task<EllaiToolResult> ReadLocationsAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
     {
         if (request.Arguments.Keys.Any(key => key is not ("q" or "country" or "limit")) ||
             !request.Arguments.TryGetValue("q", out var query) || string.IsNullOrWhiteSpace(query))
@@ -635,10 +640,17 @@ public sealed class EllaiToolBroker
         {
             var matches = await _geography.SearchAsync(query, country, limit, ct).ConfigureAwait(false);
             var items = matches.Results.Take(limit).Select(item => new { item.Id, item.Name, item.CountryCode, item.Ancestors }).ToArray();
-            return new(request.ToolName, true, null,
+            var result = new EllaiToolResult(request.ToolName, true, null,
                 items.Select(item => new EvidenceRef("GeographicRegistry", item.Id, matches.RegistryVersion, "name", item.Id)).ToArray(),
                 JsonSerializer.Serialize(new { matches.RegistryVersion, matches = items, requiresUserSelection = true }),
                 items.Length, matches.TotalCount > items.Length);
+            if (!result.Truncated && _locationReplayProtector is not null)
+            {
+                var token = _locationReplayProtector.Protect(context, request.Arguments);
+                var scope = new EllaiLocationReplayScope(token, EllaiObservedToolResult.ResultFingerprint(result));
+                if (scope.IsValid()) result = result with { LocationReplayScope = scope };
+            }
+            return result;
         }
         catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
         {

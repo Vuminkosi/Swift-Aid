@@ -30,7 +30,8 @@ public sealed record EllaiObservedToolResult(
     string? ReceiptListDigest = null, string? ReceiptLookupId = null,
     EllaiUiObservationReplayScope? UiObservationReplayScope = null,
     EllaiClassificationReplayScope? ClassificationReplayScope = null,
-    string? ImportDestinationsDigest = null)
+    string? ImportDestinationsDigest = null,
+    EllaiLocationReplayScope? LocationReplayScope = null)
 {
     public const string CurrentStaticFeatureVersion = "state-feature/1";
     public const string CurrentClockVersion = "server-clock/1";
@@ -101,7 +102,11 @@ public sealed record EllaiObservedToolResult(
             request.ToolName == EllaiToolNames.ImportDestinations && result.ToolName == request.ToolName &&
                 result.Allowed && result.DenialReason is null && result.ReasonCode == EllaiToolReasonCodes.Ok &&
                 !result.Truncated && result.Evidence.Count == 0 && result.ItemCount is >= 0 and <= 20 &&
-                request.Arguments.Count == 0 ? ResultFingerprint(result) : null);
+                request.Arguments.Count == 0 ? ResultFingerprint(result) : null,
+            request.ToolName == EllaiToolNames.Locations && result.ToolName == request.ToolName && result.Allowed &&
+                result.DenialReason is null && result.ReasonCode == EllaiToolReasonCodes.Ok && !result.Truncated &&
+                result.LocationReplayScope is { } locationScope && locationScope.IsValid() &&
+                locationScope.ResultDigest == ResultFingerprint(result) ? locationScope : null);
     }
 
     public static bool IsCanonicalReceiptId(string? value) => value is { Length: 37 } &&
@@ -123,6 +128,13 @@ public sealed record EllaiClassificationReplayScope(Guid CaseId, string ResultDi
 {
     public bool IsValid() => CaseId != Guid.Empty && ResultDigest is { Length: 64 } &&
         ResultDigest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F');
+}
+
+/// <summary>Protected search arguments and a fingerprint of the complete bounded registry result.</summary>
+public sealed record EllaiLocationReplayScope(string ProtectedArguments, string ResultDigest)
+{
+    public bool IsValid() => !string.IsNullOrWhiteSpace(ProtectedArguments) && ProtectedArguments.Length <= 4096 &&
+        ResultDigest is { Length: 64 } && ResultDigest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F');
 }
 
 /// <summary>Registry-owned observation references and a fingerprint of the client report.</summary>

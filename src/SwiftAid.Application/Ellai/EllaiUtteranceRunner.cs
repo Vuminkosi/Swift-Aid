@@ -38,7 +38,8 @@ public sealed record EllaiUtteranceServices(
     SwiftAid.Application.Intake.Imports.ICaseImportStore? Imports = null,
     SwiftAid.Application.Intake.Imports.ICaseImportWorkspaceReader? ImportWorkspaces = null,
     SwiftAid.Application.Cases.IDashboardAggregateQuery? Dashboard = null,
-    Func<string, CancellationToken, ValueTask>? OnVerifiedStreamSegment = null);
+    Func<string, CancellationToken, ValueTask>? OnVerifiedStreamSegment = null,
+    IEllaiLocationReplayProtector? LocationReplayProtector = null);
 
 /// <summary>Background execution of one accepted utterance with ledger,
 /// activity and journal wiring. Ordinary typed messages need no separate
@@ -129,7 +130,7 @@ public static class EllaiUtteranceRunner
         var authorizedHistory = services.Loop is IEllaiHistoryAuthorizationRequired
             ? await EllaiAuthorizedConversationContext.BuildAsync(conversation, work.ClientUtteranceId,
                 work.Actor, services.CaseQueue, ct, services.TechnicalDocs, services.Imports, services.ImportWorkspaces,
-                services.Dashboard, context, services.InvokeToolAsync).ConfigureAwait(false) : null;
+                services.Dashboard, context, services.InvokeToolAsync, services.LocationReplayProtector).ConfigureAwait(false) : null;
         var history = authorizedHistory?.Messages ?? EllaiConversationContext.Build(conversation, work.ClientUtteranceId);
         var request = new EllaiLoopRequest(
             context, reasoningText, ForMode(work.Mode),
@@ -147,7 +148,7 @@ public static class EllaiUtteranceRunner
             {
                 var currentHistory = await EllaiAuthorizedConversationContext.BuildAsync(conversation, work.ClientUtteranceId,
                     work.Actor, services.CaseQueue, fenceCt, services.TechnicalDocs, services.Imports, services.ImportWorkspaces,
-                    services.Dashboard, context, services.InvokeToolAsync).ConfigureAwait(false);
+                    services.Dashboard, context, services.InvokeToolAsync, services.LocationReplayProtector).ConfigureAwait(false);
                 fenceCt.ThrowIfCancellationRequested();
                 var currentlyAuthorizedIds = currentHistory.RetainedTurnIds.ToHashSet(StringComparer.Ordinal);
                 if (authorizedHistory.RetainedTurnIds.Any(id => !currentlyAuthorizedIds.Contains(id)))
@@ -190,7 +191,8 @@ public static class EllaiUtteranceRunner
                     "Current", null, "Processing", 1, null);
                 var checkedEvidence = await EllaiAuthorizedConversationContext.BuildAsync([previous, currentTurn],
                     currentTurn.ClientUtteranceId, work.Actor, services.CaseQueue, segmentCt, services.TechnicalDocs,
-                    services.Imports, services.ImportWorkspaces, services.Dashboard, context, services.InvokeToolAsync).ConfigureAwait(false);
+                    services.Imports, services.ImportWorkspaces, services.Dashboard, context, services.InvokeToolAsync,
+                    services.LocationReplayProtector).ConfigureAwait(false);
                 return checkedEvidence.RetainedTurnIds.Contains(previous.ClientUtteranceId, StringComparer.Ordinal);
             }, OnVerifiedStreamSegment = services.OnVerifiedStreamSegment is null || languages.OutputLanguage != "eng" ? null : async (text, segmentCt) =>
             {

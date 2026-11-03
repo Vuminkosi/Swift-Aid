@@ -3218,7 +3218,34 @@ with `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.cs
 --no-restore -m:1 -nr:false --filter
 'FullyQualifiedName~EllaiAuthorizedConversationContextTests|FullyQualifiedName~EllaiAgentFrameworkContractTests'
 --logger 'console;verbosity=minimal'`. The remaining location-search replay
-gap is separate and remains open.
+gap was separate; its later remediation is recorded below.
+
+### Protected location-search replay — 2026-11-04
+
+Location observations previously failed the runner's authorization recheck.
+The Gateway now protects the exact bounded search arguments with its data
+protection provider, scoped to the session and actor. The internal token is
+excluded from model-visible tool results. The observation trace stores that
+token and a digest, and the runner decrypts and repeats the search through the
+authorized broker before publication or history replay. Changed, truncated,
+unavailable, legacy or undecryptable observations fail closed; this includes
+empty results. Cross-process replay requires the same durable key ring.
+
+PASS: the `EllaiLocationReplayTests|EllaiReasoningRegistrationTests` filter
+passed 19/19 with `OS=Windows_NT`, the disposable intake PostgreSQL fixture,
+and `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~EllaiLocationReplayTests|FullyQualifiedName~EllaiReasoningRegistrationTests'
+--logger 'console;verbosity=minimal'`. It covers streaming and non-streaming
+runner paths, empty and populated results, changes, missing/wrong keys, token
+tampering, session and actor separation, a synthetic Gateway worker and a
+changed PostgreSQL registry row. The database mutation is restored in `finally`;
+the database test passed again on the same fixture. PASS: the application
+authorization, framework and ingestion filters passed 172/172. The initial
+PostgreSQL test did not restore its synthetic row; its rerun failed until the
+disposable fixture was recreated and the restoration was added. Durable keys
+across independent deployed processes, browser behavior, real provider output,
+and an independent security review remain NOT VERIFIED.
 
 ### Grounded audio timing probe — 2026-11-03
 

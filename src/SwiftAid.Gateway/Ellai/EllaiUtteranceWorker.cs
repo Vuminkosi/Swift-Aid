@@ -362,7 +362,8 @@ public sealed class EllaiUtteranceWorker(
             scopedServices.GetService<SwiftAid.Application.Intake.Imports.ICaseImportStore>(),
             scopedServices.GetService<SwiftAid.Application.Intake.Imports.ICaseImportWorkspaceReader>(),
             scopedServices.GetService<SwiftAid.Application.Cases.IDashboardAggregateQuery>(),
-            CreateTextDeltaCollector(work, item, responseStore, responseGeneration, answerChunks));
+            CreateTextDeltaCollector(work, item, responseStore, responseGeneration, answerChunks),
+            scopedServices.GetService<IEllaiLocationReplayProtector>());
         return await EllaiUtteranceRunner.RunOneAsync(
             work, dependencies, MaxTokensPerTurn, stoppingToken).ConfigureAwait(false);
     }

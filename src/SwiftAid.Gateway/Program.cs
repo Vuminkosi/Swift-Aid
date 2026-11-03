@@ -113,6 +113,7 @@ builder.Services.AddEllaiPersistence();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiSessionService>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiUtteranceSubmissionService>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiPolicyService>();
+builder.Services.AddScoped<SwiftAid.Application.Ellai.IEllaiLocationReplayProtector, SwiftAid.Gateway.Ellai.EllaiLocationReplayProtector>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiToolBroker>();
 builder.Services.AddScoped(_ => new SwiftAid.Application.Ellai.EllaiTechnicalDocs(
     SwiftAid.Application.Ellai.EllaiTechnicalDocs.TryResolvePath(
