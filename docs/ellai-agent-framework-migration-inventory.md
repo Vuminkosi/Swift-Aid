@@ -8,8 +8,10 @@ migration or live-provider acceptance has passed. Baseline: `12e6d7a` on
 
 - `src/SwiftAid.Gateway/Ellai/EllaiUtteranceWorker.cs` resolves the scoped
   `IEllaiReasoningExecutor` and supplies its dependencies to `EllaiUtteranceRunner`.
-  Gateway currently registers the existing `EllaiReasoningLoop` for that
-  interface; the framework implementation is not yet registered.
+  Gateway defaults to the existing `EllaiReasoningLoop` for that interface.
+  `Ellai:ExecutionEngine=framework` explicitly selects the framework executor;
+  keep this opt-in disabled until the cutover acceptance gates below pass.
+  Set `Ellai:ExecutionEngine=legacy` or remove the setting to roll back.
   The worker claims and completes outbox work, checks the session, hydrates
   consent and usage, and publishes correlated response chunks.
 - `src/SwiftAid.Application/Ellai/EllaiUtteranceRunner.cs` obtains the
@@ -23,7 +25,7 @@ migration or live-provider acceptance has passed. Baseline: `12e6d7a` on
 - `EllaiExecutionPromptBuilder` now shares that trusted policy, contextual and
   guidance construction. Its framework variant instructs native function
   calling while retaining the final-decision schema and evidence rules. The
-  framework executor has not yet been wired to this builder in the Gateway.
+  framework executor uses this builder when the opt-in path is selected.
 - `src/SwiftAid.Application/Ellai/EllaiCycleRunner.cs` controls iterations,
   tool-call and repair limits, reauthorization, cancellation, activity and
   tool observations. Framework execution must retain the relevant limits,
@@ -61,8 +63,8 @@ alias is host-specific (`implementation.md` section 14.9).
 
 `EllaiMuseChatClientFactory` creates an official `IChatClient` through
 `Microsoft.Extensions.AI.OpenAI` 10.10.1 and OpenAI SDK 2.14.0, using the
-existing configured Meta endpoint, model and key. It is not registered in the
-Gateway. A synthetic HTTP handler verified the request path, bearer header,
+existing configured Meta endpoint, model and key. The Gateway registers it
+only for the explicit framework selection. A synthetic HTTP handler verified the request path, bearer header,
 model, tool declaration and native tool-call response parsing. The SDK sends
 `max_completion_tokens`; the existing Meta adapter sends `max_tokens`.
 Validate safe error handling, SDK logging and remaining usage and token-limit
@@ -223,7 +225,8 @@ This fixture does not invoke SwiftAid tools or establish production execution.
 validates string arguments and calls a server-supplied invocation delegate.
 `EllaiFrameworkToolTests` cover schema parity, a real broker consent denial,
 malformed arguments and cancellation before invocation. This adapter is not
-registered in the Gateway. The production caller must still provide admitted
+registered independently in the Gateway; the opt-in executor constructs it.
+The production caller must still provide admitted
 tools, current-scope checks, bounded execution, denial termination, evidence
 collection, progress and audit handling before it can be used safely.
 `EllaiFrameworkToolCatalog` snapshots the existing server-owned allowed-tool
@@ -233,16 +236,16 @@ and recheck current authorization; catalogue membership is not authorization.
 `EllaiFrameworkToolGuard` provides a per-run shared call budget and serial
 invocation fence, checks execution currency before and after each call, and
 suppresses the result when currency is lost. Its sticky failure code must be
-checked by the future agent runner before accepting any final answer; the guard
-is not registered or wired into the Gateway. It does not itself implement
+checked by the agent runner before accepting any final answer; the opt-in
+executor constructs it through `EllaiFrameworkAgent`. It does not itself implement
 model-call budgets, evidence validation, progress, timeout or audit handling.
 `EllaiFrameworkAgent` now constructs a framework agent with framework-managed
 function invocation and a 12-iteration limit, applies the guard, and validates
 the final Ellai decision and cited tool evidence. Its deterministic tests
 cover an allowed call and rejection after a broker denial. It is a building
-block, not the Gateway execution path: trusted full policy/context, per-model
-unknown-tool handling, durable sessions,
-streaming, timeout and audit integration remain incomplete. It currently
+block used by the opt-in Gateway execution path. Full end-to-end validation of
+policy/context, per-model unknown-tool handling, durable sessions,
+streaming, timeout and audit integration remains incomplete. It currently
 creates a new framework session per invocation. The session is seeded through
 the framework's in-memory chat-history provider from the existing bounded,
 owner-filtered completed-turn projection, while the outbox remains the sole
@@ -255,8 +258,8 @@ recovery remains unverified.
 `EllaiFrameworkExecutor` implements the application execution boundary using
 the shared framework prompt, filtered conversation, tool guard and usage store.
 An in-process fixture verifies a successful tool call and activity event. It
-is not Gateway-registered: durable framework sessions and worker-level
-acceptance still require verification. The executor emits pending-tool events,
+is available through the explicit Gateway selection: durable framework sessions
+and end-to-end Gateway acceptance still require verification. The executor emits pending-tool events,
 maps known authorization and budget denials to safe blocked codes, and
 sanitizes model-provider exceptions while preserving worker retry behavior.
 Focused tests cover denial and synthetic provider failures. Framework tool
@@ -311,8 +314,14 @@ serialization to preserve evidence in the model-facing observation.
 
 ## Rollback and outstanding work
 
-No runtime path or schema changes have been made. Keep the current execution
-path available until the framework path and its safety,
+An opt-in Gateway execution selection has been added; its default remains the
+existing loop. Invalid selection and unconfigured or unsupported framework
+provider routes fail closed. The registration and worker fixtures passed 6/6
+using `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~EllaiReasoningRegistrationTests|FullyQualifiedName~WorkerRunsFrameworkExecutorAndPersistsAndStreamsAnswer'
+--verbosity quiet`. The worker test uses a synthetic model and in-memory stores,
+not a running Gateway. Keep the current execution path available until the framework path and its safety,
 persistence and client acceptance tests pass. No obsolete orchestration has
 been removed. Production framework-controlled execution, provider
 compatibility, acceptance tests and deployment are **NOT VERIFIED**.

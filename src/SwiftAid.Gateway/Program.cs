@@ -196,9 +196,8 @@ builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiTrainingVerifier>();
         var runtimePolicy = SwiftAid.Application.Ellai.EllaiRuntimePolicy.Load(policyPath, ellai.PolicyVersion);
         builder.Services.AddSingleton(runtimePolicy);
         builder.Services.AddScoped(sp => new SwiftAid.Application.Ellai.EllaiPromptBuilder(runtimePolicy.Text, runtimePolicy.Version));
-        builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiReasoningLoop>();
-        builder.Services.AddScoped<SwiftAid.Application.Ellai.IEllaiReasoningExecutor>(sp =>
-            sp.GetRequiredService<SwiftAid.Application.Ellai.EllaiReasoningLoop>());
+        SwiftAid.Gateway.Ellai.EllaiReasoningRegistration.AddEllaiReasoningExecutor(
+            builder.Services, ellai, builder.Configuration["Ellai:ExecutionEngine"]);
     }
 
     if (ellai.HasUploadAsrRoute)

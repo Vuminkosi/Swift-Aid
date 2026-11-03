@@ -38,13 +38,19 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
         var consent = new EllaiConsentService();
         var usage = new InMemoryEllaiUsageStore();
         using var model = new FrameworkStreamingClient(useTool);
-        IEllaiReasoningExecutor executor = new EllaiFrameworkExecutor(model,
-            new EllaiPromptBuilder("Synthetic test policy", "v-test"),
-            new EllaiToolBroker(new EllaiPolicyService(), consent), new EllaiUsageLedger(), usage);
-        await using var services = new ServiceCollection()
+        var registrations = new ServiceCollection()
             .AddSingleton<IEllaiSessionStore>(store).AddSingleton<IEllaiUtteranceOutboxStore>(store)
-            .AddSingleton(responses).AddSingleton(consent).AddSingleton(executor)
-            .AddScoped(_ => new EllaiToolBroker(new EllaiPolicyService(), consent)).BuildServiceProvider();
+            .AddSingleton(responses).AddSingleton(consent).AddSingleton<EllaiUsageLedger>()
+            .AddSingleton<IEllaiUsageStore>(usage).AddScoped(_ => new EllaiPromptBuilder("Synthetic test policy", "v-test"))
+            .AddScoped(_ => new EllaiToolBroker(new EllaiPolicyService(), consent));
+        registrations.AddEllaiReasoningExecutor(new EllaiOptions
+        {
+            Enabled = true, ApiKey = "synthetic", ApiUrl = "https://fixture.invalid", ReasoningModel = "fixture"
+        }, "framework");
+        registrations.AddKeyedSingleton<IChatClient>(EllaiReasoningRegistration.FrameworkClientKey, model);
+        await using var services = registrations.BuildServiceProvider();
+        using (var scope = services.CreateScope())
+            Assert.IsType<EllaiFrameworkExecutor>(scope.ServiceProvider.GetRequiredService<IEllaiReasoningExecutor>());
         using var worker = new EllaiUtteranceWorker(services, NullLogger<EllaiUtteranceWorker>.Instance);
         await worker.StartAsync(CancellationToken.None);
         try
