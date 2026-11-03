@@ -137,6 +137,8 @@ public sealed class PublicSessionQueryStateTests
         typeof(PublicSessionsSurface).GetField("_calendarMonth", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, new DateTime(2026, 11, 1));
         typeof(PublicSessionsSurface).GetField("_searchText", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "water");
         typeof(PublicSessionsSurface).GetField("_languageFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "en");
+        typeof(PublicSessionsSurface).GetField("_countryFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "SZ");
+        typeof(PublicSessionsSurface).GetField("_regionFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "hhohho");
         SetQuery(component, query =>
         {
             requests.Add(query);
@@ -152,6 +154,8 @@ public sealed class PublicSessionQueryStateTests
         Assert.Equal(new DateOnly(2026, 11, 30), requests[0].LocalDateTo);
         Assert.Equal("water", requests[0].Search);
         Assert.Equal("en", requests[0].Language);
+        Assert.Equal("SZ", requests[0].CountryCode);
+        Assert.Equal("hhohho", requests[0].RegionId);
         Assert.Equal(position.SessionId, requests[1].AfterSessionId);
         Assert.Equal(new[] { new DateOnly(2026, 11, 2), new DateOnly(2026, 11, 19) }, Field<HashSet<DateOnly>>(component, "_monthDates").Order().ToArray());
         Assert.Null(Field<PublicSessionPosition?>(component, "_monthNext"));
@@ -292,11 +296,18 @@ public sealed class PublicSessionQueryStateTests
         });
         typeof(PublicSessionsSurface).GetField("_categoryFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "Nutrition");
         typeof(PublicSessionsSurface).GetField("_languageFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "en");
+        typeof(PublicSessionsSurface).GetField("_countryFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "ZW");
+        typeof(PublicSessionsSurface).GetField("_regionFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "harare");
 
         await InvokeAsync(component, "RefreshQueryAsync");
 
         Assert.Equal("Nutrition", observed!.Category);
         Assert.Equal("en", observed.Language);
+        Assert.Equal("ZW", observed.CountryCode);
+        Assert.Equal("harare", observed.RegionId);
+        await InvokeAsync(component, "ClearFiltersAsync");
+        Assert.Null(observed!.CountryCode);
+        Assert.Null(observed.RegionId);
     }
 
     [Fact]

@@ -116,7 +116,7 @@
                 }
                 else
                 {
-                    <p>Dots mark dates with published sessions matching the search, category and language filters.</p>
+                    <p>Dots mark dates with published sessions matching the search and location, category and language filters.</p>
                 }
                 <p role="status">@(_calendarSelectedDate is { } selectedDay ? $"Agenda for {selectedDay.ToString("D", CultureInfo.CurrentCulture)}" : "Choose a date to see its agenda.")</p>
             </section>
@@ -171,6 +171,17 @@
                 </MudSelect>
                 }
             </div>
+
+            @if (QuerySessionsAsync is not null)
+            {
+                <div class="public-sessions-filters__row">
+                    <MudTextField T="string" Label="Country code" Value="@_countryFilter" ValueChanged="CountryChangedAsync"
+                                  Variant="Variant.Outlined" Immediate="true" DebounceInterval="400" Clearable="true" MaxLength="120" />
+                    <MudTextField T="string" Label="Region identifier" Value="@_regionFilter" ValueChanged="RegionChangedAsync"
+                                  Variant="Variant.Outlined" Immediate="true" DebounceInterval="400" Clearable="true" MaxLength="120" />
+                </div>
+                <span class="public-sessions-hint">Use the session's country code and exact region identifier. Available sessions do not imply service coverage.</span>
+            }
 
             @if (_periodFilter == SessionPeriodFilter.CustomDates)
             {
@@ -434,6 +445,8 @@
     private string _searchText = string.Empty;
     private string? _categoryFilter;
     private string? _languageFilter;
+    private string? _countryFilter;
+    private string? _regionFilter;
     private SessionPeriodFilter _periodFilter = SessionPeriodFilter.Upcoming;
     private DateTime? _dateFrom;
     private DateTime? _dateTo;
@@ -597,12 +610,16 @@
     private bool HasActiveFilters => !string.IsNullOrWhiteSpace(_searchText) ||
         !string.IsNullOrWhiteSpace(_categoryFilter) ||
         !string.IsNullOrWhiteSpace(_languageFilter) ||
+        !string.IsNullOrWhiteSpace(_countryFilter) ||
+        !string.IsNullOrWhiteSpace(_regionFilter) ||
         _periodFilter != SessionPeriodFilter.Upcoming;
 
     private int ActiveFilterCount =>
         (string.IsNullOrWhiteSpace(_searchText) ? 0 : 1) +
         (string.IsNullOrWhiteSpace(_categoryFilter) ? 0 : 1) +
         (string.IsNullOrWhiteSpace(_languageFilter) ? 0 : 1) +
+        (string.IsNullOrWhiteSpace(_countryFilter) ? 0 : 1) +
+        (string.IsNullOrWhiteSpace(_regionFilter) ? 0 : 1) +
         (_periodFilter == SessionPeriodFilter.Upcoming ? 0 : 1);
 
     private string EmptyResultsTitle => _nextPage is not null
@@ -702,6 +719,26 @@
         await EnsureSubscriptionForSelectionAsync();
     }
 
+    private async Task CountryChangedAsync(string? value)
+    {
+        _countryFilter = value;
+        var monthTask = _calendarVisible ? RefreshCalendarMonthAsync() : Task.CompletedTask;
+        await RefreshQueryAsync();
+        await monthTask;
+        EnsureSelectedSession();
+        await EnsureSubscriptionForSelectionAsync();
+    }
+
+    private async Task RegionChangedAsync(string? value)
+    {
+        _regionFilter = value;
+        var monthTask = _calendarVisible ? RefreshCalendarMonthAsync() : Task.CompletedTask;
+        await RefreshQueryAsync();
+        await monthTask;
+        EnsureSelectedSession();
+        await EnsureSubscriptionForSelectionAsync();
+    }
+
     private async Task PeriodChangedAsync(SessionPeriodFilter value)
     {
         _periodFilter = value;
@@ -737,6 +774,8 @@
         _searchText = string.Empty;
         _categoryFilter = null;
         _languageFilter = null;
+        _countryFilter = null;
+        _regionFilter = null;
         _periodFilter = SessionPeriodFilter.Upcoming;
         _dateFrom = null;
         _dateTo = null;
@@ -791,7 +830,8 @@
         _monthDates.Clear();
         _monthNext = null;
         _monthError = null;
-        _monthQuery = new PublicSessionQuery(Search: _searchText, Category: _categoryFilter, Language: _languageFilter,
+        _monthQuery = new PublicSessionQuery(Search: _searchText, CountryCode: _countryFilter, RegionId: _regionFilter,
+            Category: _categoryFilter, Language: _languageFilter,
             LocalDateFrom: DateOnly.FromDateTime(_calendarMonth),
             LocalDateTo: DateOnly.FromDateTime(_calendarMonth.AddMonths(1).AddDays(-1)),
             StartFromUtc: _periodFilter == SessionPeriodFilter.Upcoming ? DateTimeOffset.UtcNow : null,
@@ -849,6 +889,8 @@
         var now = DateTimeOffset.UtcNow;
         var query = new PublicSessionQuery(
             Search: _searchText,
+            CountryCode: _countryFilter,
+            RegionId: _regionFilter,
             Category: _categoryFilter,
             Language: _languageFilter,
             LocalDateFrom: _periodFilter == SessionPeriodFilter.CustomDates && _dateFrom is { } from ? DateOnly.FromDateTime(from) : null,
