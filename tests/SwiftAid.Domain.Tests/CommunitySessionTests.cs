@@ -103,6 +103,20 @@ public sealed class CommunitySessionTests
         Assert.Equal(originalReviewer, session.ReviewedByActorId);
     }
 
+    [Theory]
+    [InlineData("https://user:password@example.test/session")]
+    [InlineData("https://example.test/session\r\nJoin a different event")]
+    public void PublicDestinationRejectsCredentialsAndControlCharacters(string link)
+    {
+        var session = CreateDraft();
+
+        Assert.Throws<ArgumentException>(() => session.UpdateDetails(
+            session.Title, session.Summary, session.AudienceDescription, [.. session.TopicTags],
+            session.Presenter, session.Language, session.StartUtc, session.DurationMinutes, session.Capacity,
+            [.. session.Materials], session.Visibility, SessionChannelType.Other, link,
+            [.. session.ReminderLeadHours], CreatedAt));
+    }
+
     [Fact]
     public void Update_OnScheduledSession_BumpsIcsSequence()
     {

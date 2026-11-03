@@ -366,10 +366,10 @@ public sealed class CommunitySession
         }
 
         RequireText(channelLink!, nameof(channelLink));
-        if (!Uri.TryCreate(channelLink, UriKind.Absolute, out var uri) ||
-            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        if (channelLink!.Any(char.IsControl) || !Uri.TryCreate(channelLink, UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) || !string.IsNullOrEmpty(uri.UserInfo))
         {
-            throw new ArgumentException("A channel link must be an absolute http(s) URL.", nameof(channelLink));
+            throw new ArgumentException("A channel link must be an absolute http(s) URL without credentials or control characters.", nameof(channelLink));
         }
 
         return channelLink;
