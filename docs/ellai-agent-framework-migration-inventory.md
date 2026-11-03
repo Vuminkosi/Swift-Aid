@@ -399,6 +399,16 @@ its internal key with the integration test filter for this test. Credentials
 were supplied only in process. This does not verify live transcription,
 audio quality or browser/device playback.
 
+`RecordedVoiceUsesLiveMuseAndSpeech` passed 1/1 with the configured
+`muse-spark-1.3-contributor` route and local Kokoro speech service together.
+A synthetic recorded-audio fixture and synthetic ASR result were admitted to
+the framework worker; its live model response produced nonzero `af_heart` PCM.
+Session storage was in memory and speech was accessed through a task-owned
+loopback proxy. Run the integration test filtered by this name with both
+`ELLAI_LIVE=1` and `SWIFTAID_TEST_LIVE_SPEECH=1`, the provider settings and
+the loopback speech fixture. This is not live microphone capture, real ASR,
+browser/device playback or a deployed Gateway process test.
+
 The analytics acceptance requirement previously had no complete aggregate
 tool: `ellai_state` returns a bounded case page, which is not a total. The new
 `ellai_owned_case_count` adapts the existing `IDashboardAggregateQuery` for a

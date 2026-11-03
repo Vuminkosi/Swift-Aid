@@ -39,7 +39,20 @@ public sealed class EllaiVoiceTranscriptionServiceTests
     [LiveSpeechFact]
     public Task RecordedVoiceFrameworkResponseUsesLiveSpeech() => RunRecordedFrameworkVoiceAsync(true);
 
-    private static async Task RunRecordedFrameworkVoiceAsync(bool liveSpeech)
+    private sealed class LiveMuseSpeechFactAttribute : FactAttribute
+    {
+        public LiveMuseSpeechFactAttribute()
+        {
+            if (Environment.GetEnvironmentVariable("SWIFTAID_TEST_LIVE_SPEECH") != "1" ||
+                Environment.GetEnvironmentVariable("ELLAI_LIVE") != "1")
+                Skip = "Requires configured local speech and live Muse fixtures.";
+        }
+    }
+
+    [LiveMuseSpeechFact]
+    public Task RecordedVoiceUsesLiveMuseAndSpeech() => RunRecordedFrameworkVoiceAsync(true, liveModel: true);
+
+    private static async Task RunRecordedFrameworkVoiceAsync(bool liveSpeech, bool liveModel = false)
     {
         const string sessionId = "framework-recorded-voice";
         var options = new EllaiOptions { Enabled = true, ApiKey = "synthetic", AsrModel = "fixture",
@@ -72,9 +85,12 @@ public sealed class EllaiVoiceTranscriptionServiceTests
         registrations.AddSingleton(responses).AddSingleton<EllaiUsageLedger>().AddSingleton<IEllaiUsageStore, InMemoryEllaiUsageStore>();
         registrations.AddScoped(_ => new EllaiPromptBuilder("Synthetic policy", "fixture"));
         registrations.AddScoped(_ => new EllaiToolBroker(new EllaiPolicyService(), consent));
-        registrations.AddEllaiReasoningExecutor(new EllaiOptions { Enabled = true, ApiKey = "synthetic",
-            ApiUrl = "https://fixture.invalid", ReasoningModel = "fixture" }, "framework");
-        registrations.AddKeyedSingleton<IChatClient>(EllaiReasoningRegistration.FrameworkClientKey, model);
+        var modelOptions = liveModel ? EllaiOptions.Bind(Environment.GetEnvironmentVariable) : new EllaiOptions
+        {
+            Enabled = true, ApiKey = "synthetic", ApiUrl = "https://fixture.invalid", ReasoningModel = "fixture"
+        };
+        registrations.AddEllaiReasoningExecutor(modelOptions, "framework");
+        if (!liveModel) registrations.AddKeyedSingleton<IChatClient>(EllaiReasoningRegistration.FrameworkClientKey, model);
         await using var provider = registrations.BuildServiceProvider();
         var voice = new EllaiVoiceTranscriptionService(consent, new InMemoryEllaiConsentStore(), options, provider);
         await voice.GrantVoiceConsentAsync(sessionId, default);
@@ -97,9 +113,10 @@ public sealed class EllaiVoiceTranscriptionServiceTests
                 turn = Assert.Single(await store.ReadConversationAsync(sessionId, "voice-owner", timeout.Token));
             } while (turn.CompletedAtUtc is null);
             Assert.Equal("Completed", turn.Outcome);
-            Assert.Contains("recognized fallback words", model.Messages);
-            var chunk = Assert.Single(responses.ReadSince(sessionId, 0).Responses,
-                item => !item.IsFinal && item.Progress is null);
+            Assert.Equal("recognized fallback words", turn.UserText);
+            if (!liveModel) Assert.Contains("recognized fallback words", model.Messages);
+            var chunk = responses.ReadSince(sessionId, 0).Responses.First(
+                item => !item.IsFinal && item.Progress is null && !string.IsNullOrWhiteSpace(item.Text));
             using var pcm = await prepared.OpenAsync(sessionId, chunk.Sequence, timeout.Token);
             var bytes = await pcm.Content.ReadAsByteArrayAsync(timeout.Token);
             if (liveSpeech)
