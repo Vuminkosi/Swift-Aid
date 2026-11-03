@@ -159,7 +159,7 @@ public static class EllaiAuthorizedConversationContext
                                 ["projection"] = "queue", ["limit"] = query.Limit.ToString(CultureInfo.InvariantCulture),
                                 ["country"] = query.Country!, ["sort"] = "latest-reported", ["place_id"] = query.PlaceId
                             });
-                            var current = await invokeTool(toolContext, request, ct).ConfigureAwait(false);
+                            var current = await invokeTool(toolContext with { RevalidationOnly = true }, request, ct).ConfigureAwait(false);
                             ct.ThrowIfCancellationRequested();
                             if (!current.Allowed || current.Truncated != observation.Truncated || current.ReasonCode != EllaiToolReasonCodes.Ok ||
                                 current.ItemCount != observation.Evidence.Count || !current.Evidence.SequenceEqual(observation.Evidence) ||

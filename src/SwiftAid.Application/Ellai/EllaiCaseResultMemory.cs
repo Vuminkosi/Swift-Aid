@@ -37,7 +37,7 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
         EllaiToolContext context, CancellationToken ct, string? field = null)
     {
         ct.ThrowIfCancellationRequested();
-        if (field is not null && field is not ("country" or "workflow"))
+        if (field is not null && field is not ("country" or "workflow" or "classification"))
             return new(EllaiToolNames.Topic, false, "Unsupported case-result field selector.", [], "", 0, false,
                 EllaiToolReasonCodes.InvalidArguments);
         if (context.Actor is null) return Unavailable();
@@ -105,6 +105,7 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
                 {
                     "country" => $"country {pair.row.CountryCode}",
                     "workflow" => $"workflow {pair.row.Workflow}",
+                    "classification" => $"recorded clinical classification {RecordedClassification(pair.row.Classification)}",
                     _ => $"country {pair.row.CountryCode}; workflow {pair.row.Workflow}"
                 };
                 return $"case {pair.row.CaseId:D}; {selectedValue}; v{pair.row.AggregateVersion}" +
@@ -116,6 +117,9 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
 
     public static string SourceVersion(string snapshot) => Convert.ToHexString(
         System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(snapshot)));
+
+    public static string RecordedClassification(string? value) => value is
+        "Unclassified" or "Suspected" or "Probable" or "Confirmed" or "RuledOut" ? value : "unknown";
 
     private static EllaiToolResult Unavailable() => new(EllaiToolNames.Topic, false,
         "No current, permitted case result set is available to recall. Run the case search again.", [], "", 0, false,

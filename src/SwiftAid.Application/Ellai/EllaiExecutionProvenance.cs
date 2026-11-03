@@ -108,7 +108,10 @@ public sealed record EllaiObservedToolResult(
     {
         var content = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
         {
-            result.ResultSummary, result.ItemCount, result.Evidence, result.Truncated
+            ResultSummary = result.ResultSummary
+                .Replace(" Result references retained for this session; recall with ellai_evidence(ref=case-results).", "", StringComparison.Ordinal)
+                .Replace(" Result references could not be retained; do not claim they were remembered.", "", StringComparison.Ordinal),
+            result.ItemCount, result.Evidence, result.Truncated
         });
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content));
     }

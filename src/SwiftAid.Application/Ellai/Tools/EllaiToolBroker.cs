@@ -89,7 +89,8 @@ public sealed record EllaiToolContext(
     string DataClassification = EllaiProcessingClassification.UnknownOrigin,
     ActorContext? Actor = null,
     IReadOnlySet<string>? AllowedTools = null,
-    string ConsentPurpose = EllaiToolBroker.ToolReadPurpose);
+    string ConsentPurpose = EllaiToolBroker.ToolReadPurpose,
+    bool RevalidationOnly = false);
 
 /// <summary>Tool request with bounded arguments. <see cref="CallId"/> is the
 /// model-assigned call correlation id: it travels untouched through
@@ -185,7 +186,7 @@ public sealed class EllaiToolBroker
     private static readonly string[] ToolDescriptions =
     {
         $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, country?, workflow?, sort?, place_id?) — permitted feature or owned-case queue. country is an uppercase two-letter code (Zimbabwe=ZW, Eswatini=SZ); workflow is Reported, UnderReview, Active, AwaitingFollowUp or Resolved; sort=latest-reported or latest-updated. For an occurrence-place search, select an exact registry ID using ellai_locations and supply country, place_id and sort=latest-reported; workflow is not supported with place_id. Unknown locations and incomplete scans cannot establish a complete list. Reported is a recorded workflow, not proof that no human reviewed a case. Classification review status is not supplied; clarify ambiguous unreviewed requests.",
-        $"{EllaiToolNames.Evidence}(ref=case-results, field=[country|workflow]?) — re-read retained case queue references under current access.",
+        $"{EllaiToolNames.Evidence}(ref=case-results, field=[country|workflow|classification]?) — re-read retained case queue references under current access; classification is a recorded clinical status, not BART output or a new diagnosis.",
         $"{EllaiToolNames.Topic}(ref) — session topic candidates with checkpoints. Use ref=case-results to recall the last retained case list with fresh authorization; never invent a remembered result set.",
         $"{EllaiToolNames.Capabilities}(feature?) — capability readiness, no credentials.",
         $"{EllaiToolNames.Receipts}(receipt?) — durable receipts, session-bound.",
@@ -502,9 +503,9 @@ public sealed class EllaiToolBroker
         }
 
         var field = request.Arguments.GetValueOrDefault("field");
-        if (field is not null && field is not ("country" or "workflow"))
+        if (field is not null && field is not ("country" or "workflow" or "classification"))
         {
-            return Deny(request.ToolName, "field must be country or workflow.",
+            return Deny(request.ToolName, "field must be country, workflow or classification.",
                 EllaiToolReasonCodes.InvalidArguments);
         }
 
@@ -701,13 +702,26 @@ public sealed class EllaiToolBroker
             if (found.Access != CaseQueueAccess.Allowed)
                 return Deny(request.ToolName, "Occurrence location search is unavailable.", EllaiToolReasonCodes.Unavailable);
             var foundItems = found.Items.Select(item => item.Case).ToArray();
+            var placeRecallNotice = "";
+            if (_topics is not null && !context.RevalidationOnly)
+            {
+                try
+                {
+                    await new EllaiCaseResultMemory(_topics, queue, _referenceIndex).RememberAsync(context, foundItems, ct).ConfigureAwait(false);
+                    placeRecallNotice = " Result references retained for this session; recall with ellai_evidence(ref=case-results).";
+                }
+                catch (Exception error) when (error is not OperationCanceledException and not OutOfMemoryException)
+                {
+                    placeRecallNotice = " Result references could not be retained; do not claim they were remembered.";
+                }
+            }
             var foundEvidence = foundItems.Select(item => new EvidenceRef("CaseQueue", item.CaseId.ToString("D"),
                 item.AggregateVersion.ToString(System.Globalization.CultureInfo.InvariantCulture), null, item.CaseId.ToString("D"))).ToArray();
-            var foundLines = foundItems.Select(item => $"case {item.CaseId:D}; workflow {item.Workflow}; country {item.CountryCode}; v{item.AggregateVersion}");
+            var foundLines = foundItems.Select(item => $"case {item.CaseId:D}; workflow {item.Workflow}; country {item.CountryCode}; recorded clinical classification {EllaiCaseResultMemory.RecordedClassification(item.Classification)}; v{item.AggregateVersion}");
             return new(request.ToolName, true, null, foundEvidence,
                 "Owned readable cases matching the recorded occurrence place. " +
                 (found.UnknownLocations ? "Some readable cases have unknown or incomplete locations. " : "") +
-                (found.Truncated ? "The scan or result is incomplete. " : "") + string.Join("\n", foundLines),
+                (found.Truncated ? "The scan or result is incomplete. " : "") + placeRecallNotice + "\n" + string.Join("\n", foundLines),
                 foundItems.Length, found.Truncated || found.UnknownLocations);
         }
 
@@ -759,7 +773,7 @@ public sealed class EllaiToolBroker
             }
         }
         var lines = items.Select(item =>
-            $"case {item.CaseId:D} · workflow {item.Workflow}; country {item.CountryCode} · v{item.AggregateVersion} · updated {item.UpdatedAtUtc:O}");
+            $"case {item.CaseId:D} · workflow {item.Workflow}; country {item.CountryCode}; recorded clinical classification {EllaiCaseResultMemory.RecordedClassification(item.Classification)} · v{item.AggregateVersion} · updated {item.UpdatedAtUtc:O}");
         var evidence = items.Select(item => new EvidenceRef(
             "CaseQueue", item.CaseId.ToString("D"), item.AggregateVersion.ToString(System.Globalization.CultureInfo.InvariantCulture), null,
             item.CaseId.ToString("D"))).ToList();

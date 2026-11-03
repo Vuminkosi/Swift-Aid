@@ -123,6 +123,44 @@ public sealed class EllaiLiveQueueReadTests
         Assert.DoesNotContain((await Read()).Messages, item => item.Content == "first case");
     }
 
+    [Fact]
+    public async Task PlaceSearchRetainsItsRowsAndReplayDoesNotOverwriteNewerResults()
+    {
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed,
+            [Row("01", 7) with { Classification = "Unclassified" }, Row("02", 8) with { Classification = "Confirmed" }]) };
+        var locations = new OccurrenceLocation();
+        var consent = new EllaiConsentService();
+        consent.Grant("session-1", EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue,
+            occurrenceLocations: locations, topics: new EllaiTopicService());
+        var context = Context with { Actor = TestActor() };
+        var request = new EllaiToolRequest(EllaiToolNames.State, Args(("projection", "queue"), ("limit", "1"),
+            ("country", "US"), ("sort", "latest-reported"), ("place_id", "region-1")));
+        var first = await broker.InvokeAsync(context, request, default);
+        Assert.Contains("recorded clinical classification Unclassified", first.ResultSummary);
+        var recalled = await broker.InvokeAsync(context, new(EllaiToolNames.Evidence,
+            Args(("ref", "case-results"), ("field", "classification"))), default);
+        Assert.Contains("recorded clinical classification Unclassified", recalled.ResultSummary);
+        Assert.Equal("classification", Assert.Single(recalled.Evidence).FieldPath);
+
+        await broker.InvokeAsync(context, new(EllaiToolNames.State, Args(("projection", "queue"))), default);
+        var observation = EllaiObservedToolResult.From(request, first);
+        var trace = EllaiToolTrace.SerializeFlattened([observation], false, []);
+        var turns = new[]
+        {
+            new EllaiConversationTurn("session-1", "previous", 1, "list", "first case", "Completed", 1, DateTimeOffset.UtcNow) { ToolTraceJson = trace },
+            new EllaiConversationTurn("session-1", "current", 2, "next", null, "Queued", 1, null)
+        };
+        var history = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", context.Actor!, queue, default,
+            toolContext: context, invokeTool: broker.InvokeAsync);
+        Assert.Contains(history.Messages, item => item.Content == "first case");
+        var latest = await broker.InvokeAsync(context, new(EllaiToolNames.Evidence,
+            Args(("ref", "case-results"), ("field", "classification"))), default);
+        Assert.Equal(2, latest.ItemCount);
+        Assert.Contains("recorded clinical classification Confirmed", latest.ResultSummary);
+    }
+
     private sealed class FakeIndex(EllaiExactMemoryReference? hit, bool fail = false) : IEllaiExactReferenceIndex
     {
         public int Reads { get; private set; }

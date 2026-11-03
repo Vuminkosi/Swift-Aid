@@ -24,7 +24,7 @@ public static class EllaiToolContractCatalog
             ["place_id"] = "Exact selected occurrence-place identifier from the geographic registry; requires country and latest-reported ordering.",
             ["workflow"] = "Recorded case workflow filter.",
             ["sort"] = "Supported queue ordering.",
-            ["field"] = "Optional country or workflow field selector for case-results.",
+            ["field"] = "Optional country, workflow, or recorded clinical classification field for case-results; this is not BART classification evidence.",
             ["feature"] = "Feature identifier in the current authorized scope.",
             ["receipt"] = "Receipt identifier bound to the current session.",
             ["topic"] = "Optional approved product fact topic.",
@@ -45,7 +45,7 @@ public static class EllaiToolContractCatalog
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> AllowedValues =
         new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal)
         {
-            ["field"] = Array.AsReadOnly(new[] { "country", "workflow" })
+            ["field"] = Array.AsReadOnly(new[] { "country", "workflow", "classification" })
         };
 
     private static readonly IReadOnlyDictionary<string, ToolContract> Contracts =

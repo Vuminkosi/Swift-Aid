@@ -72,7 +72,7 @@ public sealed class EllaiToolContractCatalogTests
             EllaiToolContractCatalog.ToJsonSchema(EllaiToolNames.Evidence));
         var properties = schema.RootElement.GetProperty("properties");
         Assert.Equal("case-results", properties.GetProperty("ref").GetProperty("enum")[0].GetString());
-        Assert.Equal(new[] { "country", "workflow" },
+        Assert.Equal(new[] { "country", "workflow", "classification" },
             properties.GetProperty("field").GetProperty("enum").EnumerateArray()
                 .Select(value => value.GetString()).ToArray());
     }
