@@ -8,6 +8,37 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiFrameworkToolTests
 {
     [Fact]
+    public async Task CatalogueUsesSnapshotOfServerProfileAndBrokerStillChecksIt()
+    {
+        var allowed = new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.ProductFacts };
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: allowed);
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService());
+        var tools = EllaiFrameworkToolCatalog.Create(context, broker.InvokeAsync);
+        allowed.Add(EllaiToolNames.State);
+
+        var function = Assert.IsType<EllaiFrameworkTool>(Assert.Single(tools));
+        Assert.Equal(EllaiToolNames.ProductFacts, function.Name);
+        Assert.Equal(EllaiToolBroker.DescribeTool(EllaiToolNames.ProductFacts), function.Description);
+        var result = Assert.IsType<string>(await function.InvokeAsync(new AIFunctionArguments()));
+        using var json = JsonDocument.Parse(result);
+        Assert.False(json.RootElement.GetProperty("allowed").GetBoolean());
+        Assert.Equal(EllaiToolReasonCodes.ConsentMissing, json.RootElement.GetProperty("reasonCode").GetString());
+    }
+
+    [Fact]
+    public void CatalogueDoesNotAdvertiseUnknownToolsAndDescriptionsCoverCanonicalContracts()
+    {
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal) { "ellai_sql" });
+        Assert.Empty(EllaiFrameworkToolCatalog.Create(context, (ctx, req, ct) => throw new InvalidOperationException()));
+        var all = EllaiFrameworkToolCatalog.Create(context with { AllowedTools = null },
+            (ctx, req, ct) => throw new InvalidOperationException());
+        Assert.Equal(EllaiToolContractCatalog.All.Count, all.Count);
+        Assert.All(all, tool => Assert.StartsWith(tool.Name + "(", tool.Description));
+    }
+
+    [Fact]
     public async Task UsesCanonicalSchemaAndPreservesBrokerDenial()
     {
         var broker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService());

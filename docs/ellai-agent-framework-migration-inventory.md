@@ -90,6 +90,10 @@ malformed arguments and cancellation before invocation. This adapter is not
 registered in the Gateway. The production caller must still provide admitted
 tools, current-scope checks, bounded execution, denial termination, evidence
 collection, progress and audit handling before it can be used safely.
+`EllaiFrameworkToolCatalog` snapshots the existing server-owned allowed-tool
+profile, advertises only registered canonical tools and retains the broker's
+model-facing descriptions. Its invocation delegate must still reach the broker
+and recheck current authorization; catalogue membership is not authorization.
 The deterministic framework fixture also invokes the real broker's admitted
 public-facts tool and observes its serialized JSON evidence. This is not a live
 provider or managed-case test. The framework and adapter focused tests passed

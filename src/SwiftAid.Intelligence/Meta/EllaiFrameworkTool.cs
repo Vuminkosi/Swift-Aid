@@ -25,7 +25,7 @@ public sealed class EllaiFrameworkTool : AIFunction
 
     public override string Name { get; }
 
-    public override string Description => $"SwiftAid authorized read: {Name}.";
+    public override string Description => EllaiToolBroker.DescribeTool(Name);
 
     public override JsonElement JsonSchema => _schema;
 

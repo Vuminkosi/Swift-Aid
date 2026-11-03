@@ -185,6 +185,12 @@ public sealed class EllaiToolBroker
         $"{EllaiToolNames.ClassificationEvidence}(case_id) — persisted semantic classification evidence for an authorized current case revision; no inference, diagnosis or clinical probability.",
     };
 
+    /// <summary>Returns the existing model-facing description for a canonical tool.</summary>
+    public static string DescribeTool(string toolName) =>
+        ToolDescriptions.FirstOrDefault(description =>
+            description.StartsWith(toolName + "(", StringComparison.Ordinal))
+        ?? throw new ArgumentException("Tool has no registered description.", nameof(toolName));
+
     public static string DescribeCatalogue(IReadOnlySet<string>? allowedTools = null) =>
         string.Join("\n", ToolDescriptions.Where(description =>
         {
