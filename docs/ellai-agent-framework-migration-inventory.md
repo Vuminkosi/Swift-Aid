@@ -3304,6 +3304,20 @@ a restarted Gateway, physical-device or deployed-cluster verification. The
 fixture's notification change consumer reported `NatsJSApiException`, outside
 the exercised Ellai path. The existing running Gateway was not restarted.
 
+An additional local live-Muse run exercised a real process restart between
+turns. PASS: with `SWIFTAID_WAIT_FOR_GATEWAY_RESTART=1`, the same headless
+Chromium conversation test paused after a completed location turn. The
+isolated Release Gateway was stopped and started again against its same
+disposable PostgreSQL, NATS and private test key ring; after the signal, the
+browser refreshed, restored the same guest session, completed a follow-up
+that recalled the place, and cancelled the session. The first turn completed
+in 25,145 ms and the browser reported zero page errors. PostgreSQL showed the
+protected `ellai_locations` observation in both completed traces and no
+plaintext place name in either trace. The local fixture had the same unrelated
+notification-consumer `NatsJSApiException`. This is one synthetic prompt and
+one local process restart, not a deployed-cluster, device or provider
+reliability test; the existing running Gateway was not restarted.
+
 ### Grounded audio timing probe — 2026-11-03
 
 PASS: `SWIFTAID_RUN_LIVE_ELLAI=1 SWIFTAID_REQUIRE_AUDIO_BEFORE_COMPLETION=1

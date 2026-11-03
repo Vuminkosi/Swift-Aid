@@ -66,6 +66,18 @@ async function main() {
         const originalSession = await page.evaluate(() => localStorage.getItem("swiftaid.ellai.session"));
         assert.ok(originalSession);
         if (sessionId) assert.equal(originalSession, sessionId);
+        if (process.env.SWIFTAID_WAIT_FOR_GATEWAY_RESTART === "1") {
+            console.log(JSON.stringify({ checkpoint: "ready-for-isolated-gateway-restart", sessionId: originalSession }));
+            await new Promise((resolve, reject) => {
+                const cleanup = () => { clearTimeout(timeout); process.stdin.pause(); process.stdin.removeListener("data", onData); process.stdin.removeListener("end", onEnd); };
+                const onData = () => { cleanup(); resolve(); };
+                const onEnd = () => { cleanup(); reject(new Error("Gateway restart signal closed.")); };
+                const timeout = setTimeout(() => { cleanup(); reject(new Error("Gateway restart was not signalled within 60 seconds.")); }, 60000);
+                process.stdin.once("data", onData);
+                process.stdin.once("end", onEnd);
+                process.stdin.resume();
+            });
+        }
         latestPage = null;
         await page.reload();
         await input.waitFor();
