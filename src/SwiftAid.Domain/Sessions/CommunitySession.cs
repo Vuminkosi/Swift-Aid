@@ -236,20 +236,25 @@ public sealed class CommunitySession
         if (durationMinutes < 1 || durationMinutes > 1440) throw new ArgumentOutOfRangeException(nameof(durationMinutes), "Duration must be between 1 and 1440 minutes.");
         if (capacity is not null && capacity < 1) throw new ArgumentOutOfRangeException(nameof(capacity), "Capacity must be positive when set.");
 
+        var checkedTags = CheckTags(topicTags);
+        var checkedMaterials = CheckMaterials(materials);
+        var checkedChannelLink = CheckChannelLink(channelType, channelLink);
+        var checkedReminderLeadHours = CheckReminderLeads(reminderLeadHours);
+
         Title = title;
         Summary = summary;
         AudienceDescription = audienceDescription;
-        TopicTags = CheckTags(topicTags);
+        TopicTags = checkedTags;
         Presenter = presenter;
         Language = language;
         StartUtc = startUtc.ToUniversalTime();
         DurationMinutes = durationMinutes;
         Capacity = capacity;
-        Materials = CheckMaterials(materials);
+        Materials = checkedMaterials;
         Visibility = visibility;
         ChannelType = channelType;
-        ChannelLink = CheckChannelLink(channelType, channelLink);
-        ReminderLeadHours = CheckReminderLeads(reminderLeadHours);
+        ChannelLink = checkedChannelLink;
+        ReminderLeadHours = checkedReminderLeadHours;
         if (Status == CommunitySessionStatus.Reviewed)
         {
             Status = CommunitySessionStatus.Draft;

@@ -83,6 +83,27 @@ public sealed class CommunitySessionTests
     }
 
     [Fact]
+    public void InvalidEditDoesNotChangeReviewedSessionOrItsReview()
+    {
+        var session = CreateDraft();
+        session.Review("officer-2", false, CreatedAt.AddHours(1));
+        var originalTitle = session.Title;
+        var originalVersion = session.Version;
+        var originalReviewer = session.ReviewedByActorId;
+
+        Assert.Throws<ArgumentException>(() => session.UpdateDetails(
+            "Changed title", session.Summary, session.AudienceDescription, [.. session.TopicTags],
+            session.Presenter, session.Language, session.StartUtc, session.DurationMinutes, session.Capacity,
+            [new SessionMaterialRef("", "v1")], session.Visibility, session.ChannelType, session.ChannelLink,
+            [.. session.ReminderLeadHours], CreatedAt.AddHours(2)));
+
+        Assert.Equal(originalTitle, session.Title);
+        Assert.Equal(originalVersion, session.Version);
+        Assert.Equal(CommunitySessionStatus.Reviewed, session.Status);
+        Assert.Equal(originalReviewer, session.ReviewedByActorId);
+    }
+
+    [Fact]
     public void Update_OnScheduledSession_BumpsIcsSequence()
     {
         var session = CreateDraft();
