@@ -152,15 +152,37 @@ public sealed class CommunitySessionTests
         Assert.Equal(0, session.IcsSequence);
 
         session.UpdateDetails(
-            "Title v2", "summary", "audience", [], "presenter", "en",
-            StartAt.AddDays(1), 60, null,
-            [new SessionMaterialRef("mat-1", "v3")],
-            SessionVisibility.Public, SessionChannelType.None, null, [],
+            session.Title, session.Summary, session.AudienceDescription, [.. session.TopicTags], session.Presenter, session.Language,
+            StartAt.AddDays(1), session.DurationMinutes, session.Capacity,
+            [.. session.Materials],
+            session.Visibility, session.ChannelType, session.ChannelLink, [.. session.ReminderLeadHours],
             StartAt);
 
         Assert.Equal(publishedVersion + 1, session.Version);
         Assert.Equal(1, session.IcsSequence);
         Assert.Equal(StartAt.AddDays(1), session.StartUtc);
+    }
+
+    [Fact]
+    public void ScheduledSessionRejectsUnreviewedContentChangesWithoutMutatingThePublishedVersion()
+    {
+        var session = CreateDraft();
+        session.Review("officer-2", false, CreatedAt.AddHours(1));
+        session.Schedule("officer-2", CreatedAt.AddHours(2));
+        var version = session.Version;
+        var originalTitle = session.Title;
+        var originalStart = session.StartUtc;
+
+        Assert.Throws<InvalidOperationException>(() => session.UpdateDetails(
+            "Unreviewed title", session.Summary, session.AudienceDescription, [.. session.TopicTags],
+            session.Presenter, session.Language, session.StartUtc.AddDays(1), session.DurationMinutes,
+            session.Capacity, [.. session.Materials], session.Visibility, session.ChannelType,
+            session.ChannelLink, [.. session.ReminderLeadHours], CreatedAt.AddHours(3)));
+
+        Assert.Equal(version, session.Version);
+        Assert.Equal(originalTitle, session.Title);
+        Assert.Equal(originalStart, session.StartUtc);
+        Assert.Equal(CommunitySessionStatus.Scheduled, session.Status);
     }
 
     [Fact]

@@ -244,6 +244,18 @@ public sealed class CommunitySession
         var checkedChannelLink = CheckChannelLink(channelType, channelLink);
         var checkedReminderLeadHours = CheckReminderLeads(reminderLeadHours);
 
+        // A time change may be applied to a published session, but the ordinary
+        // update command cannot stand in for review of new public content.
+        if (Status == CommunitySessionStatus.Scheduled &&
+            (title != Title || summary != Summary || audienceDescription != AudienceDescription ||
+             !checkedTags.SequenceEqual(TopicTags) || presenter != Presenter || language != Language ||
+             durationMinutes != DurationMinutes || capacity != Capacity ||
+             !checkedMaterials.SequenceEqual(Materials) || visibility != Visibility ||
+             channelType != ChannelType || checkedChannelLink != ChannelLink))
+        {
+            throw new InvalidOperationException("Changes to published session content require a reviewed revision.");
+        }
+
         Title = title;
         Summary = summary;
         AudienceDescription = audienceDescription;

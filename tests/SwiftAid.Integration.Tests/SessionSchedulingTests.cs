@@ -320,7 +320,7 @@ public sealed class SessionSchedulingTests
 
             Assert.Equal(2, await service.StoreCountPendingRemindersAsync(sessionId, CancellationToken.None));
 
-            var update = UpdateDraft(sessionId, 3, "Malaria prevention talk (revised)");
+            var update = UpdateDraft(sessionId, 3, "Malaria prevention talk") with { DurationMinutes = 60 };
             await service.ExecuteAsync(update, "officer-2", CancellationToken.None);
             Assert.Equal(2, await service.StoreCountPendingRemindersAsync(sessionId, CancellationToken.None));
 
@@ -397,7 +397,10 @@ public sealed class SessionSchedulingTests
             Assert.NotNull(firstIcs);
             Assert.Contains("SEQUENCE:0", firstIcs, StringComparison.Ordinal);
 
-            await service.ExecuteAsync(UpdateDraft(sessionId, 3, "Malaria prevention talk (revised)"), "officer-2", CancellationToken.None);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.ExecuteAsync(
+                UpdateDraft(sessionId, 3, "Unreviewed content") with { DurationMinutes = 60 }, "officer-2", CancellationToken.None));
+            Assert.Equal(3, await service.StoreCountRevisionsAsync(sessionId, CancellationToken.None));
+            await service.ExecuteAsync(UpdateDraft(sessionId, 3, "Malaria prevention talk") with { DurationMinutes = 60 }, "officer-2", CancellationToken.None);
 
             var secondIcs = await service.GetIcsAsync(sessionId, DateTimeOffset.UtcNow, CancellationToken.None);
             Assert.NotNull(secondIcs);

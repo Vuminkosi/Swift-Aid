@@ -10,6 +10,13 @@
         </MudText>
     }
 
+    @if (string.Equals(Status, "Scheduled", StringComparison.OrdinalIgnoreCase))
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status" Class="mt-2">
+            You can change the start time and reminder timing. Changes to published content require a reviewed revision, which is not yet available here.
+        </MudAlert>
+    }
+
     @if (ServerError is not null)
     {
         <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" role="alert" Class="mt-2">@ServerError</MudAlert>

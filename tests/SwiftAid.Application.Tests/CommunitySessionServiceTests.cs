@@ -162,6 +162,29 @@ public sealed class CommunitySessionServiceTests
     }
 
     [Fact]
+    public async Task PublishedContentCannotChangeWithoutReviewButReschedulingKeepsTheReviewedContent()
+    {
+        var services = CreateServices();
+        var id = Guid.NewGuid();
+        await PublishAsync(services.Service, id, SessionVisibility.Public);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            services.Service.ExecuteAsync(UpdateDraft(id, 3), "officer-1", CancellationToken.None));
+        var unchanged = await services.Service.GetPublicAsync(id, CancellationToken.None);
+        Assert.Equal("Malaria prevention talk", unchanged!.Title);
+        Assert.Equal(Start, unchanged.StartUtc);
+        Assert.Equal(3, unchanged.Version);
+
+        var result = await services.Service.ExecuteAsync(
+            UpdateDraft(id, 3) with { Title = unchanged.Title }, "officer-1", CancellationToken.None);
+        var rescheduled = await services.Service.GetPublicAsync(id, CancellationToken.None);
+        Assert.Equal(4, result.Version);
+        Assert.Equal(Start.AddDays(1), rescheduled!.StartUtc);
+        Assert.Equal(unchanged.Title, rescheduled.Title);
+        Assert.Equal(SessionReminderSync.Recompute, services.Store.LastSync);
+    }
+
+    [Fact]
     public async Task SchedulingFailsClosedWithoutMaterialEligibilityAuthority()
     {
         var store = new FakeSessionStore();
