@@ -14,6 +14,38 @@ namespace SwiftAid.Ui.Tests;
 public sealed class NotificationsSurfaceTests
 {
     [Fact]
+    public async Task OlderSubscriptionRefreshCannotReplaceNewerAccountState()
+    {
+        var client = new RacingSubscriptionClient();
+        var page = new SwiftAid.Gateway.Components.Pages.Notifications();
+        var type = page.GetType();
+        type.GetProperty("SubscriptionClient", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, client);
+        var refresh = type.GetMethod("RefreshSubscriptionsAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var older = (Task)refresh.Invoke(page, null)!;
+        var newer = (Task)refresh.Invoke(page, null)!;
+        client.Second.SetResult(Success<IReadOnlyList<SubscriptionView>>([]));
+        await newer;
+        client.First.SetResult(Success<IReadOnlyList<SubscriptionView>>([new SubscriptionView(Guid.NewGuid(), SubscriptionStatus.Active, 1, false)]));
+        await older;
+        var result = (IReadOnlyList<SessionSubscriptionSummary>)type.GetField("_subscriptions", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page)!;
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public async Task DisposedAccountPageRejectsAnInFlightSubscriptionResponse()
+    {
+        var client = new RacingSubscriptionClient();
+        var page = new SwiftAid.Gateway.Components.Pages.Notifications();
+        var type = page.GetType();
+        type.GetProperty("SubscriptionClient", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, client);
+        var refresh = (Task)type.GetMethod("RefreshSubscriptionsAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page, null)!;
+        page.Dispose();
+        client.First.SetResult(Success<IReadOnlyList<SubscriptionView>>([new SubscriptionView(Guid.NewGuid(), SubscriptionStatus.Active, 1, false)]));
+        await refresh;
+        Assert.Null(type.GetField("_subscriptions", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
+    }
+
+    [Fact]
     public async Task GatewayPreferenceExceptionBecomesAnUnavailableState()
     {
         using var services = new ServiceCollection()
@@ -154,6 +186,20 @@ public sealed class NotificationsSurfaceTests
     {
         public Task<UiCapabilityResult<NotificationPreferenceState>> GetAsync(CancellationToken cancellationToken = default) => throw new InvalidOperationException("unavailable");
         public Task<UiCapabilityResult<NotificationPreferenceState>> SaveAsync(NotificationPreferenceEdit edit, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private static UiCapabilityResult<T> Success<T>(T value) => new(UiCapabilityResultCode.Success, value,
+        new UiCapabilityMetadata("test", "1", UiCapabilityProvenance.LiveService, DateTimeOffset.UtcNow, true));
+
+    private sealed class RacingSubscriptionClient : ISubscriptionClient
+    {
+        public TaskCompletionSource<UiCapabilityResult<IReadOnlyList<SubscriptionView>>> First { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<UiCapabilityResult<IReadOnlyList<SubscriptionView>>> Second { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _calls;
+        public Task<UiCapabilityResult<IReadOnlyList<SubscriptionView>>> ListMineAsync(CancellationToken cancellationToken = default) => ++_calls == 1 ? First.Task : Second.Task;
+        public Task<UiCapabilityResult<SubscriptionView>> GetAsync(Guid sessionId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<UiCapabilityResult<SubscriptionView>> SubscribeAsync(SubscriptionRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<UiCapabilityResult<SubscriptionView>> UnsubscribeAsync(Guid sessionId, long expectedVersion, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
     private sealed class NoOpJsRuntime : JSRuntime

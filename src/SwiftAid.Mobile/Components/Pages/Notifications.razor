@@ -1,9 +1,11 @@
 @page "/notifications"
+@implements IDisposable
 @using SwiftAid.Client.Authentication
 @using SwiftAid.Client.Presentation
 @using SwiftAid.Client.Presentation.PublicWorkflows
 @using SwiftAid.Mobile.Services.Account
 @using SwiftAid.Mobile.Services.Http
+@using SwiftAid.Mobile.Services.Authentication
 @using SwiftAid.UI.Components.Surfaces.Account
 @inject IServiceProvider ServiceProvider
 @inject ISubscriptionClient SubscriptionClient
@@ -19,6 +21,11 @@
     private NotificationsSnapshot _snapshot = NotificationsSnapshot.Loading;
     private IReadOnlyList<SessionSubscriptionSummary>? _subscriptions;
     private string? _subscriptionMessage;
+    private long _identityGeneration;
+    private long _preferenceGeneration;
+    private long _subscriptionGeneration;
+    private bool _disposed;
+    private IMobileAuthenticationSession? _authentication;
 
     private INotificationPreferenceClient PreferenceClient =>
         (INotificationPreferenceClient?)ServiceProvider.GetService(typeof(INotificationPreferenceClient))
@@ -34,7 +41,38 @@
             : new HttpNotificationPreferenceClient(CookieSessionHttpClient.Shared(address));
     }
 
-    protected override async Task OnInitializedAsync() => await RefreshAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        _authentication = (IMobileAuthenticationSession?)ServiceProvider.GetService(typeof(IMobileAuthenticationSession));
+        if (_authentication is not null) _authentication.AuthenticationStateChanged += AuthenticationChanged;
+        await RefreshAsync();
+    }
+
+    private void AuthenticationChanged(object? sender, EventArgs args)
+    {
+        var identity = Interlocked.Increment(ref _identityGeneration);
+        Interlocked.Increment(ref _preferenceGeneration);
+        Interlocked.Increment(ref _subscriptionGeneration);
+        _ = InvokeAsync(async () =>
+        {
+            if (_disposed || identity != Volatile.Read(ref _identityGeneration)) return;
+            _snapshot = NotificationsSnapshot.Loading;
+            _subscriptions = null;
+            _subscriptionMessage = null;
+            StateHasChanged();
+            await RefreshAsync();
+            if (!_disposed && identity == Volatile.Read(ref _identityGeneration)) StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        Interlocked.Increment(ref _identityGeneration);
+        Interlocked.Increment(ref _preferenceGeneration);
+        Interlocked.Increment(ref _subscriptionGeneration);
+        if (_authentication is not null) _authentication.AuthenticationStateChanged -= AuthenticationChanged;
+    }
 
     private async Task RefreshAsync()
     {
@@ -43,27 +81,33 @@
 
     private async Task RefreshPreferencesAsync()
     {
+        var generation = Interlocked.Increment(ref _preferenceGeneration);
         try
         {
             var result = await PreferenceClient.GetAsync();
-            _snapshot = Map(result, result.Value);
+            if (!_disposed && generation == Volatile.Read(ref _preferenceGeneration))
+                _snapshot = Map(result, result.Value);
         }
         catch (Exception)
         {
-            _snapshot = NotificationsSnapshot.Unavailable;
+            if (!_disposed && generation == Volatile.Read(ref _preferenceGeneration))
+                _snapshot = NotificationsSnapshot.Unavailable;
         }
     }
 
     private async Task RefreshSubscriptionsAsync()
     {
+        var generation = Interlocked.Increment(ref _subscriptionGeneration);
         _subscriptions = null;
         _subscriptionMessage = null;
         try
         {
             var subscriptions = await SubscriptionClient.ListMineAsync();
+            if (_disposed || generation != Volatile.Read(ref _subscriptionGeneration)) return;
             if (subscriptions.Succeeded && subscriptions.Value is { } values)
             {
                 var details = await SessionSubscriptionLookup.ResolveAsync(values, SessionClient);
+                if (_disposed || generation != Volatile.Read(ref _subscriptionGeneration)) return;
                 _subscriptions = details.Select(item => new SessionSubscriptionSummary(item.SessionId, item.Version,
                     item.Title, item.StartsAtUtc, item.TimeZoneId, item.ChannelLabel)).ToArray();
             }
@@ -75,6 +119,7 @@
         }
         catch (Exception)
         {
+            if (_disposed || generation != Volatile.Read(ref _subscriptionGeneration)) return;
             _subscriptions = null;
             _subscriptionMessage = "Your session subscriptions are temporarily unavailable. Retry to check again.";
         }
@@ -82,26 +127,42 @@
 
     private async Task UnsubscribeAsync(SessionSubscriptionSummary subscription)
     {
-        var result = await SubscriptionClient.UnsubscribeAsync(subscription.SessionId, subscription.Version);
-        if (result.Succeeded)
+        var identity = Volatile.Read(ref _identityGeneration);
+        Interlocked.Increment(ref _subscriptionGeneration);
+        try
         {
-            _subscriptions = _subscriptions?.Where(item => item.SessionId != subscription.SessionId).ToArray();
-            _subscriptionMessage = "You are unsubscribed from this session.";
-            return;
+            var result = await SubscriptionClient.UnsubscribeAsync(subscription.SessionId, subscription.Version);
+            if (_disposed || identity != Volatile.Read(ref _identityGeneration)) return;
+            var message = result.Succeeded ? "You are unsubscribed from this session." :
+                result.Message ?? result.Metadata.Notice ?? "We could not update this subscription. Refresh and try again.";
+            await RefreshSubscriptionsAsync();
+            if (!_disposed && identity == Volatile.Read(ref _identityGeneration)) _subscriptionMessage = message;
         }
-
-        var message = result.Message ?? result.Metadata.Notice ??
-            "We could not update this subscription. Refresh and try again.";
-        await RefreshSubscriptionsAsync();
-        _subscriptionMessage = message;
+        catch (Exception)
+        {
+            if (!_disposed && identity == Volatile.Read(ref _identityGeneration))
+            {
+                await RefreshSubscriptionsAsync();
+                if (!_disposed && identity == Volatile.Read(ref _identityGeneration))
+                    _subscriptionMessage = "We could not confirm the update. Refresh and try again.";
+            }
+        }
     }
 
     private async Task SaveAsync(NotificationPreferenceChange change)
     {
+        var generation = Interlocked.Increment(ref _preferenceGeneration);
         _snapshot = _snapshot with { IsSaving = true, StatusMessage = null, StatusIsError = false };
-        var result = await PreferenceClient.SaveAsync(
-            new NotificationPreferenceEdit(change.WorkReminders, change.SessionUpdates));
-        _snapshot = Map(result, result.Value);
+        try
+        {
+            var result = await PreferenceClient.SaveAsync(
+                new NotificationPreferenceEdit(change.WorkReminders, change.SessionUpdates));
+            if (!_disposed && generation == Volatile.Read(ref _preferenceGeneration)) _snapshot = Map(result, result.Value);
+        }
+        catch (Exception)
+        {
+            if (!_disposed && generation == Volatile.Read(ref _preferenceGeneration)) _snapshot = NotificationsSnapshot.Unavailable;
+        }
     }
 
     private static NotificationsSnapshot Map(
