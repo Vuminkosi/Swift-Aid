@@ -1963,6 +1963,19 @@ the configured live Muse route and the correction enabled. These tests do not
 establish how often live Muse splits function names, live Ollama compatibility,
 deployed Gateway behavior or an independent security review.
 
+At revision `a0c9396`, a separately published Release Gateway using the
+corrected adapter ran on loopback with disposable PostgreSQL and NATS and the
+configured live Muse route. PASS: the opt-in headless Chromium
+`ellai-conversation.browser.cjs` run completed a synthetic location search and
+a follow-up recalling the place, restored the conversation after refresh, and
+cancelled the session with zero page errors. PostgreSQL recorded an
+`ellai_locations` observation with a protected scope in both completed turn
+traces, without the plaintext place name in either trace. The first turn took
+41,272 ms. The test did not capture whether Muse split the name; split-name
+behavior itself remains proven only by the synthetic provider fixtures. The
+fixture's notification consumer reported `NatsJSApiException`, outside this
+check. This is one local prompt, not deployed or latency acceptance evidence.
+
 After the blank-name guard change, `LiveFrameworkRunnerStreamsBrokeredToolDecision`
 passed 1/1 against the configured live Muse route with a synthetic prompt,
 the real brokered clock tool and an in-memory usage store. The run set
