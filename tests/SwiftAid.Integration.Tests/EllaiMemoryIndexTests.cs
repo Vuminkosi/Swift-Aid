@@ -193,6 +193,28 @@ public sealed class EllaiMemoryIndexTests
     }
 
     [Fact]
+    public async Task SearchRejectsForeignOrUnscopedPayloadsEvenWhenIndexReturnsThem()
+    {
+        const string response = """{"result":[{"id":"foreign","payload":{"session_id":"other","scope_epoch":"epoch-1"}},{"id":"revoked","payload":{"session_id":"sess-1","scope_epoch":"other"}},{"id":"missing","payload":{"session_id":"sess-1"}},{"id":"own","payload":{"session_id":"sess-1","scope_epoch":"epoch-1"}},{"id":"extra","payload":{"session_id":"sess-1","scope_epoch":"epoch-1"}}]}""";
+        var handler = new CaptureHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            Content = new StringContent(response)
+        });
+        var points = await Index(handler).SearchAsync([0.1f], "sess-1", "epoch-1", 1, CancellationToken.None);
+        Assert.Equal("own", Assert.Single(points).Id);
+    }
+
+    [Theory]
+    [InlineData("", "epoch-1")]
+    [InlineData("sess-1", " ")]
+    public async Task SearchDoesNotContactIndexWithoutCompleteScope(string sessionId, string scopeEpoch)
+    {
+        var handler = new CaptureHandler(_ => throw new InvalidOperationException("Unexpected request."));
+        Assert.Empty(await Index(handler).SearchAsync([0.1f], sessionId, scopeEpoch, 5, CancellationToken.None));
+        Assert.Empty(handler.Seen);
+    }
+
+    [Fact]
     public async Task TransportFailureFailsClosedWithEmptyRecall()
     {
         var handler = new CaptureHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.ServiceUnavailable));
@@ -621,26 +643,31 @@ public sealed class EllaiMemoryIndexTests
         var endpoint = Environment.GetEnvironmentVariable("QDRANT_TEST_ENDPOINT");
         var key = Environment.GetEnvironmentVariable("QDRANT_TEST_API_KEY");
         Assert.False(string.IsNullOrWhiteSpace(endpoint));
+        Assert.True(new Uri(endpoint!).IsLoopback, "The live fixture requires a disposable loopback Qdrant instance.");
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
-        var index = new EllaiMemoryIndex(http, endpoint!, key ?? string.Empty, "ellai-memory-live-test");
+        var collection = "ellai-memory-test-" + Guid.NewGuid().ToString("N");
+        var index = new EllaiMemoryIndex(http, endpoint!, key ?? string.Empty, collection);
+        try
+        {
+            Assert.True(await index.EnsureCollectionAsync(4, CancellationToken.None));
+            var vector = new[] { 1f, 0f, 0f, 0f };
+            Assert.True(await index.UpsertAsync(
+                new EllaiMemoryPoint("live-1", "sess-live", "epoch-live", "topic-live",
+                    "live round-trip", new[] { "e1" }, DateTimeOffset.UtcNow),
+                vector, CancellationToken.None));
 
-        Assert.True(await index.EnsureCollectionAsync(4, CancellationToken.None));
-        var vector = new[] { 1f, 0f, 0f, 0f };
-        Assert.True(await index.UpsertAsync(
-            new EllaiMemoryPoint("live-1", "sess-live", "epoch-live", "topic-live",
-                "live round-trip", new[] { "e1" }, DateTimeOffset.UtcNow),
-            vector, CancellationToken.None));
-
-        var points = await index.SearchAsync(vector, "sess-live", "epoch-live", 5, CancellationToken.None);
-        Assert.Contains(points, p => p.Id == "live-1" && p.SessionId == "sess-live");
-
-        var otherScope = await index.SearchAsync(vector, "sess-live", "epoch-other", 5, CancellationToken.None);
-        Assert.DoesNotContain(otherScope, p => p.Id == "live-1");
-
-        using var delete = new HttpRequestMessage(HttpMethod.Delete, endpoint!.TrimEnd('/') + "/collections/ellai-memory-live-test");
-        if (!string.IsNullOrWhiteSpace(key)) delete.Headers.TryAddWithoutValidation("api-key", key);
-        using var response = await http.SendAsync(delete, CancellationToken.None);
-        Assert.True(response.IsSuccessStatusCode);
+            var points = await index.SearchAsync(vector, "sess-live", "epoch-live", 5, CancellationToken.None);
+            Assert.Contains(points, p => p.Id == "live-1" && p.SessionId == "sess-live");
+            Assert.Empty(await index.SearchAsync(vector, "sess-live", "epoch-other", 5, CancellationToken.None));
+            Assert.Empty(await index.SearchAsync(vector, "sess-other", "epoch-live", 5, CancellationToken.None));
+        }
+        finally
+        {
+            using var delete = new HttpRequestMessage(HttpMethod.Delete, endpoint!.TrimEnd('/') + "/collections/" + collection);
+            if (!string.IsNullOrWhiteSpace(key)) delete.Headers.TryAddWithoutValidation("api-key", key);
+            using var response = await http.SendAsync(delete, CancellationToken.None);
+            Assert.True(response.IsSuccessStatusCode);
+        }
     }
 
     [Fact]

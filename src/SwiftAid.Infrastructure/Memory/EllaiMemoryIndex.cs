@@ -108,7 +108,8 @@ public sealed partial class EllaiMemoryIndex(HttpClient http, string endpoint, s
     public async Task<IReadOnlyList<EllaiMemoryPoint>> SearchAsync(
         IReadOnlyList<float> vector, string sessionId, string scopeEpoch, int limit, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(endpoint) || vector.Count == 0 || limit is < 1 or > 20)
+        if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(sessionId) ||
+            string.IsNullOrWhiteSpace(scopeEpoch) || vector.Count == 0 || limit is < 1 or > 20)
         {
             return Array.Empty<EllaiMemoryPoint>();
         }
@@ -142,7 +143,11 @@ public sealed partial class EllaiMemoryIndex(HttpClient http, string endpoint, s
             }
 
             var body = await response.Content.ReadAsStringAsync(ct);
-            return ParsePoints(body);
+            return ParsePoints(body)
+                .Where(point => string.Equals(point.SessionId, sessionId, StringComparison.Ordinal) &&
+                    string.Equals(point.ScopeEpoch, scopeEpoch, StringComparison.Ordinal))
+                .Take(limit)
+                .ToArray();
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
