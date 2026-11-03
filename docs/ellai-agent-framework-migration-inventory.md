@@ -114,6 +114,12 @@ tests, with live provider and fixture environment variables enabled). This
 single successful rerun does not establish provider reliability or deployment
 acceptance. Repair attempts remain subject to cancellation rather than a fixed
 attempt ceiling.
+On the committed repair, the full application suite passed 1,203 with 19
+skipped using `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj
+--no-build --no-restore -m:1 -nr:false`. The default integration suite passed
+809 with 334 skipped using the corresponding integration project, the same
+flags, `-p:WasmBuildNative=false`, and `OS=Windows_NT`. These local results do
+not turn skipped, deployed, or independent-review checks into passes.
 
 ## Provider observations and open checks
 
