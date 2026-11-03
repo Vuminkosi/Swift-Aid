@@ -1016,7 +1016,7 @@
         {
             var timeZone = TimeZoneInfo.FindSystemTimeZoneById(session.TimeZoneId);
             var local = TimeZoneInfo.ConvertTime(session.StartUtc, timeZone);
-            return $"{local:dddd, d MMM yyyy · HH:mm} ({session.TimeZoneId})";
+            return $"{local:dddd, d MMM yyyy · HH:mm} ({session.TimeZoneId}, UTC{local:zzz})";
         }
         catch (TimeZoneNotFoundException)
         {

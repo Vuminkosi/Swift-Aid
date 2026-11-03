@@ -259,7 +259,7 @@
         {
             var zone = TimeZoneInfo.FindSystemTimeZoneById(session.TimeZoneId);
             var local = TimeZoneInfo.ConvertTime(session.StartUtc, zone);
-            return $"{local:dddd, d MMMM yyyy h:mm tt} ({session.TimeZoneId}) · {session.DurationMinutes} minutes";
+            return $"{local:dddd, d MMMM yyyy h:mm tt} ({session.TimeZoneId}, UTC{local:zzz}) · {session.DurationMinutes} minutes";
         }
         catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException or ArgumentException)
         {

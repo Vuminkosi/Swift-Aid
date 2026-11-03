@@ -266,6 +266,25 @@ public sealed class CommunitySessionTests
     }
 
     [Fact]
+    public void InvitationsDistinguishRepeatedLocalTimesDuringDaylightSavingFallback()
+    {
+        var first = CreateDraft(startUtc: new DateTimeOffset(2026, 11, 1, 5, 30, 0, TimeSpan.Zero), timeZoneId: "America/New_York");
+        var second = CreateDraft(startUtc: new DateTimeOffset(2026, 11, 1, 6, 30, 0, TimeSpan.Zero), timeZoneId: "America/New_York");
+        foreach (var session in new[] { first, second })
+        {
+            session.Review("officer-2", false, CreatedAt.AddHours(1));
+            session.Schedule("officer-2", CreatedAt.AddHours(2));
+        }
+
+        var firstText = CommunitySessionSharing.BuildInvitationText(first);
+        var secondText = CommunitySessionSharing.BuildInvitationText(second);
+
+        Assert.Contains("America/New_York, UTC-04:00", firstText, StringComparison.Ordinal);
+        Assert.Contains("America/New_York, UTC-05:00", secondText, StringComparison.Ordinal);
+        Assert.NotEqual(firstText, secondText);
+    }
+
+    [Fact]
     public void ReminderOccurrences_OnlyIncludeFutureLeads()
     {
         var session = CreateDraft(reminderLeadHours: [72, 24, 1]);

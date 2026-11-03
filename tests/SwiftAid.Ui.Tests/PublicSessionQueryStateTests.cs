@@ -15,6 +15,22 @@ namespace SwiftAid.Ui.Tests;
 public sealed class PublicSessionQueryStateTests
 {
     [Fact]
+    public void SessionDetailsDisambiguateRepeatedLocalTime()
+    {
+        var session = Session(Guid.NewGuid()) with
+        {
+            StartUtc = new DateTimeOffset(2026, 11, 1, 5, 30, 0, TimeSpan.Zero),
+            TimeZoneId = "America/New_York"
+        };
+        var format = typeof(PublicSessionsSurface).GetMethod("FormatDetailsWhen", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var first = (string)format.Invoke(null, [session])!;
+        var second = (string)format.Invoke(null, [session with { StartUtc = session.StartUtc.AddHours(1) }])!;
+
+        Assert.Contains("UTC-04:00", first, StringComparison.Ordinal);
+        Assert.Contains("UTC-05:00", second, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ReminderReturnSelectsTheRequestedSessionAndReloadsItsState()
     {
         var session = Session(Guid.NewGuid());

@@ -70,7 +70,8 @@ public static class CommunitySessionSharing
         var builder = new StringBuilder();
         builder.Append("You are invited: ").AppendLine(session.Title);
         builder.Append("When: ").Append(localStart.ToString("f", System.Globalization.CultureInfo.InvariantCulture))
-            .Append(" (").Append(session.TimeZoneId).AppendLine(")");
+            .Append(" (").Append(session.TimeZoneId).Append(", UTC")
+            .Append(localStart.ToString("zzz", System.Globalization.CultureInfo.InvariantCulture)).AppendLine(")");
         builder.Append("Duration: ").Append(session.DurationMinutes
             .ToString(System.Globalization.CultureInfo.InvariantCulture)).AppendLine(" minutes");
         builder.Append("Presenter: ").AppendLine(session.Presenter);
