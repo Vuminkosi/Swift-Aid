@@ -615,6 +615,12 @@ public sealed class SessionSchedulingTests
                 sessionId, accountId, options.SessionVersion, options.ConsentReference, "Email", CancellationToken.None);
             var secondSubscription = await subscriptionService.SubscribeAsync(
                 sessionId, secondAccountId, options.SessionVersion, options.ConsentReference, "Email", CancellationToken.None);
+            var legacyConsent = $"session-reminder-consent-v1:{sessionId:N}:{options.SessionVersion}";
+            await db.CommunitySessionSubscriptions
+                .Where(item => item.SessionId == sessionId && item.AccountId == secondAccountId)
+                .ExecuteUpdateAsync(update => update.SetProperty(item => item.ConsentReference, legacyConsent));
+            Assert.True(await subscriptionService.CanDispatchReminderAsync(sessionId, secondAccountId,
+                options.SessionVersion, legacyConsent, "Email", CancellationToken.None));
 
             await db.SessionReminderOccurrences
                 .Where(item => item.SessionId == sessionId)
@@ -637,7 +643,8 @@ public sealed class SessionSchedulingTests
                 Assert.Contains(delivery.AccountId, new[] { accountId, secondAccountId });
                 Assert.Equal("Email", delivery.Channel);
                 Assert.Equal(options.SessionVersion, delivery.SessionVersion);
-                Assert.Equal(options.ConsentReference, delivery.ConsentReference);
+                Assert.Equal(delivery.AccountId == secondAccountId ? legacyConsent : options.ConsentReference,
+                    delivery.ConsentReference);
                 Assert.Equal("Pending", delivery.Status);
             });
             Assert.Equal(subscription.Version, deliveries.Single(item => item.AccountId == accountId).SubscriptionVersion);
