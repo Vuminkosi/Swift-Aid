@@ -438,7 +438,9 @@ public sealed class EllaiFrameworkAgent
             System.Globalization.CultureInfo.InvariantCulture, out count) && count >= 0;
     }
 
-    private static bool HasCountEvidence(EllaiToolResult result) => result.Evidence.Count == 1 &&
+    private static bool HasCountEvidence(EllaiToolResult result) => result.Allowed && !result.Truncated &&
+        result.ToolName == EllaiToolNames.OwnedCaseCount && result.ReasonCode == EllaiToolReasonCodes.Ok &&
+        result.Evidence.Count == 1 &&
         result.Evidence[0] is { SourceKind: "DashboardAggregate", ResourceId: "owned-cases" };
 
     private sealed class ModelCallGuard(IChatClient inner, Func<CancellationToken, Task<bool>> isCurrent,

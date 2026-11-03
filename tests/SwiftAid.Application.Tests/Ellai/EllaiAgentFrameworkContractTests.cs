@@ -958,6 +958,40 @@ public sealed class EllaiAgentFrameworkContractTests
         else Assert.Null(result);
     }
 
+    [Theory]
+    [InlineData(1, "truncated")]
+    [InlineData(2, "truncated")]
+    [InlineData(3, "truncated")]
+    [InlineData(1, "reason")]
+    [InlineData(2, "reason")]
+    [InlineData(3, "reason")]
+    [InlineData(1, "tool")]
+    [InlineData(2, "tool")]
+    [InlineData(3, "tool")]
+    public async Task CountRejectsIncompleteOrInconsistentResultAtEveryPublicationFence(int badCall, string defect)
+    {
+        using var client = new CountStreamingClient();
+        var agent = new EllaiFrameworkAgent(client);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string> { EllaiToolNames.OwnedCaseCount });
+        var calls = 0;
+        var published = new List<string>();
+        var evidence = new EvidenceRef("DashboardAggregate", "owned-cases", "v1", null, "proof");
+        var result = await agent.RunAsync(context, "policy", [new ChatMessage(ChatRole.User, "Count")], 100,
+            _ => Task.FromResult(true), (_, request, _) =>
+            {
+                var bad = ++calls == badCall;
+                return Task.FromResult(new EllaiToolResult(bad && defect == "tool" ? EllaiToolNames.Now : request.ToolName,
+                    true, null, [evidence], "2 managed case(s) in scope. Unit: managed case records.", 1,
+                    bad && defect == "truncated", bad && defect == "reason" ? EllaiToolReasonCodes.Unavailable : EllaiToolReasonCodes.Ok)
+                    { CountReplayScope = CountScope });
+            }, new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None,
+            onTextDelta: (text, _) => { published.Add(text); return ValueTask.CompletedTask; });
+
+        Assert.Null(result);
+        Assert.Equal(badCall == 3 ? 1 : 0, published.Count);
+    }
+
     [Fact]
     public async Task CountRevalidationTimeoutWithholdsAnswerAndKeepsToolAccounting()
     {
