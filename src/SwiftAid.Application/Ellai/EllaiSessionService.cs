@@ -116,6 +116,13 @@ public interface IEllaiProvisionalPublicationFence
         string scopeEpoch, long interactionEpoch, Func<bool> publish, CancellationToken ct);
 }
 
+/// <summary>Checks session and utterance ownership in one consistent read before provisional delivery.</summary>
+public interface IEllaiProvisionalDeliveryFence
+{
+    Task<bool> CanDeliverProvisionalAsync(string sessionId, string utteranceId, int attempt, string actorId,
+        string scopeEpoch, long interactionEpoch, CancellationToken ct);
+}
+
 /// <summary>Stores case-result references only while the claimed turn and session remain current.</summary>
 public interface IEllaiCaseResultSnapshotFence
 {
@@ -129,7 +136,7 @@ public interface IEllaiCaseResultSnapshotFence
 /// <summary>Thread-safe in-memory store for tests and local development.
 /// Production persistence (PostgreSQL, ELL-T04) must implement the same
 /// interface with transactional outbox writes.</summary>
-public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUtteranceOutboxStore, IEllaiUtteranceLeaseRenewal, IEllaiProvisionalPublicationFence
+public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUtteranceOutboxStore, IEllaiUtteranceLeaseRenewal, IEllaiProvisionalPublicationFence, IEllaiProvisionalDeliveryFence
 {
     private readonly object _gate = new();
     private readonly Dictionary<string, EllaiSessionRecord> _sessions = new(StringComparer.Ordinal);
@@ -306,6 +313,23 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
                 return Task.FromResult(false);
             ct.ThrowIfCancellationRequested();
             return Task.FromResult(publish());
+        }
+    }
+
+    public Task<bool> CanDeliverProvisionalAsync(string sessionId, string utteranceId, int attempt, string actorId,
+        string scopeEpoch, long interactionEpoch, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            var allowed = _sessions.TryGetValue(sessionId, out var session) && session.Status != "Cancelled" &&
+                session.OwnerActorId == actorId && session.ScopeEpoch == scopeEpoch && session.InteractionEpoch == interactionEpoch &&
+                _utterances.TryGetValue((sessionId, utteranceId), out var entry) && entry.AttemptCount == attempt &&
+                (entry.Outcome == "Completed" && entry.CompletedAtUtc is not null ||
+                 entry.Outcome == "Processing" && entry.CompletedAtUtc is null && entry.PayloadJson is not null &&
+                 entry.LeaseExpiresAtUtc > DateTimeOffset.UtcNow);
+            ct.ThrowIfCancellationRequested();
+            return Task.FromResult(allowed);
         }
     }
 

@@ -23,6 +23,7 @@ using StackExchange.Redis;
 using System.Net;
 using System.Data.Common;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.AspNetCore.Http;
 
 namespace SwiftAid.Integration.Tests;
 
@@ -884,6 +885,65 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
     }
 
     [FrameworkPostgresFact]
+    public async Task PostgresFeedRejectsAttemptReclaimedDuringRead()
+    {
+        var id = $"framework-feed-race-{Guid.NewGuid():N}";
+        _frameworkSessionIds.Add(id);
+        var now = DateTimeOffset.UtcNow;
+        await using (var setup = CreateFrameworkDbContext())
+        {
+            await setup.Database.MigrateAsync();
+            var store = new PostgresEllaiSessionStore(setup);
+            await store.CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
+                0, 12, Actor.ActorId, "scope-test", null, null, now), default);
+            setup.Set<EllaiUtteranceEntity>().Add(new()
+            {
+                SessionId = id, ClientUtteranceId = "turn", Sequence = 1, UserText = "synthetic",
+                Outcome = "Queued", AttemptCount = 0, AcceptedAtUtc = now, WorkPayloadJson = "{}"
+            });
+            await setup.SaveChangesAsync();
+        }
+
+        await using var feedDb = CreateFrameworkDbContext();
+        await using var reclaimDb = CreateFrameworkDbContext();
+        var feedStore = new PostgresEllaiSessionStore(feedDb);
+        var reclaimStore = new PostgresEllaiSessionStore(reclaimDb);
+        Assert.NotNull(await feedStore.ClaimNextAsync(now, now.AddMinutes(1), default));
+        var responses = new EllaiSessionResponseStore();
+        var generation = responses.CaptureGeneration(id);
+        Assert.True(responses.PublishProvisional(id, generation, "turn", 1, "scope-test", 1, 1, "private segment"));
+        var outbox = new ReclaimAfterReadOutbox(feedStore, async () =>
+            Assert.NotNull(await reclaimStore.ClaimNextAsync(now.AddMinutes(2), now.AddMinutes(3), default)));
+        var result = await EllaiConversationFeed.ReadAsync(new DefaultHttpContext { User = Principal },
+            id, 0, null, outbox, responses, feedStore, default);
+        var page = (EllaiSessionResponsePageDto)((IValueHttpResult)result).Value!;
+        Assert.DoesNotContain(page.Responses, item => item.Text == "private segment");
+    }
+
+    private sealed class ReclaimAfterReadOutbox(PostgresEllaiSessionStore inner, Func<Task> afterRead)
+        : IEllaiUtteranceOutboxStore, IEllaiProvisionalDeliveryFence
+    {
+        public async Task<IReadOnlyList<EllaiConversationTurn>> ReadConversationAsync(string sessionId, string ownerActorId, CancellationToken ct)
+        {
+            var result = await inner.ReadConversationAsync(sessionId, ownerActorId, ct);
+            await afterRead();
+            return result;
+        }
+        public Task<bool> CanDeliverProvisionalAsync(string sessionId, string utteranceId, int attempt, string actorId,
+            string scopeEpoch, long interactionEpoch, CancellationToken ct) =>
+            inner.CanDeliverProvisionalAsync(sessionId, utteranceId, attempt, actorId, scopeEpoch, interactionEpoch, ct);
+        public Task<EllaiConversationTurn?> ReadLatestGuidanceTurnAsync(string sessionId, string ownerActorId, CancellationToken ct) =>
+            inner.ReadLatestGuidanceTurnAsync(sessionId, ownerActorId, ct);
+        public Task<EllaiUtteranceOutboxItem?> ClaimNextAsync(DateTimeOffset nowUtc, DateTimeOffset leaseExpiresAtUtc, CancellationToken ct) =>
+            inner.ClaimNextAsync(nowUtc, leaseExpiresAtUtc, ct);
+        public Task<EllaiUtteranceResolution?> CompleteAsync(string sessionId, string clientUtteranceId, int attemptCount,
+            DateTimeOffset completedAtUtc, CancellationToken ct, EllaiUtteranceResolution? resolution = null) =>
+            inner.CompleteAsync(sessionId, clientUtteranceId, attemptCount, completedAtUtc, ct, resolution);
+        public Task FailAsync(string sessionId, string clientUtteranceId, int attemptCount, DateTimeOffset retryAtUtc,
+            bool terminal, CancellationToken ct) => inner.FailAsync(sessionId, clientUtteranceId, attemptCount, retryAtUtc, terminal, ct);
+    }
+
+    [FrameworkPostgresFact]
     public async Task ProvisionalPublicationHoldsSessionAndAttemptFence()
     {
         var id = $"framework-publication-{Guid.NewGuid():N}";
@@ -909,6 +969,9 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         var currentTurn = Assert.Single(await publisher.ReadConversationAsync(id, Actor.ActorId, default));
         Assert.Equal(1, currentTurn.AttemptCount);
         Assert.True(currentTurn.LeaseExpiresAtUtc > now);
+        Assert.True(await publisher.CanDeliverProvisionalAsync(id, "turn", 1, Actor.ActorId, "scope-test", 1, default));
+        Assert.False(await publisher.CanDeliverProvisionalAsync(id, "turn", 1, "another-actor", "scope-test", 1, default));
+        Assert.False(await publisher.CanDeliverProvisionalAsync(id, "turn", 1, Actor.ActorId, "another-scope", 1, default));
         Assert.False(await publisher.PublishIfCurrentAsync(id, "turn", 1, "another-actor", "scope-test", 1,
             () => throw new InvalidOperationException("foreign publication"), default));
         Assert.False(await publisher.PublishIfCurrentAsync(id, "turn", 1, Actor.ActorId, "another-scope", 1,
@@ -928,14 +991,20 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
             release.Set();
             Assert.True(await publication);
             Assert.NotNull(await cancel);
+            Assert.False(await publisher.CanDeliverProvisionalAsync(id, "turn", 1, Actor.ActorId, "scope-test", 1, default));
             Assert.False(await publisher.PublishIfCurrentAsync(id, "turn", 1, Actor.ActorId, "scope-test", 1,
                 () => throw new InvalidOperationException("stale publication"), default));
             await cancelDb.Set<EllaiUtteranceEntity>().Where(turn => turn.SessionId == id && turn.ClientUtteranceId == "turn")
                 .ExecuteUpdateAsync(update => update.SetProperty(turn => turn.AttemptCount, 2));
             Assert.False(await publisher.PublishIfCurrentAsync(id, "turn", 1, Actor.ActorId, "scope-test", 2,
                 () => throw new InvalidOperationException("reclaimed publication"), default));
+            Assert.False(await publisher.CanDeliverProvisionalAsync(id, "turn", 1, Actor.ActorId, "scope-test", 2, default));
+            Assert.True(await publisher.CanDeliverProvisionalAsync(id, "turn", 2, Actor.ActorId, "scope-test", 2, default));
             Assert.True(await publisher.PublishIfCurrentAsync(id, "turn", 2, Actor.ActorId, "scope-test", 2,
                 () => true, default));
+            Assert.NotNull(await publisher.CompleteAsync(id, "turn", 2, DateTimeOffset.UtcNow, default,
+                EllaiUtteranceResolution.Completed("synthetic", 2)));
+            Assert.True(await publisher.CanDeliverProvisionalAsync(id, "turn", 2, Actor.ActorId, "scope-test", 2, default));
         }
         finally { release.Set(); }
     }

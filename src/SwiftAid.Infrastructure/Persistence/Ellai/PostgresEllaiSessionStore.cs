@@ -12,7 +12,7 @@ namespace SwiftAid.Infrastructure.Persistence.Ellai;
 /// version yields null instead of overwriting newer state. Checkpoints are
 /// idempotent by checkpoint ID. Provider calls never run inside these
 /// transactions; callers keep them short.</summary>
-public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext, TimeSpan? snapshotTransactionLimit = null) : IEllaiSessionStore, IEllaiUtteranceOutboxStore, IEllaiUtteranceLeaseRenewal, IEllaiProvisionalPublicationFence, IEllaiCaseResultSnapshotFence
+public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext, TimeSpan? snapshotTransactionLimit = null) : IEllaiSessionStore, IEllaiUtteranceOutboxStore, IEllaiUtteranceLeaseRenewal, IEllaiProvisionalPublicationFence, IEllaiCaseResultSnapshotFence, IEllaiProvisionalDeliveryFence
 {
     private readonly SwiftAidDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     private readonly TimeSpan _snapshotTransactionLimit = snapshotTransactionLimit is null ? TimeSpan.FromSeconds(35)
@@ -401,6 +401,19 @@ public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext, TimeS
         var result = publish();
         await transaction.CommitAsync(ct).ConfigureAwait(false);
         return result;
+    }
+
+    public Task<bool> CanDeliverProvisionalAsync(string sessionId, string utteranceId, int attempt, string actorId,
+        string scopeEpoch, long interactionEpoch, CancellationToken ct)
+    {
+        return _dbContext.Set<EllaiUtteranceEntity>().AsNoTracking().AnyAsync(turn =>
+            turn.SessionId == sessionId && turn.ClientUtteranceId == utteranceId && turn.AttemptCount == attempt &&
+            (turn.Outcome == "Completed" && turn.CompletedAtUtc != null ||
+             turn.Outcome == "Processing" && turn.CompletedAtUtc == null && turn.WorkPayloadJson != null &&
+             turn.LeaseExpiresAtUtc > DateTimeOffset.UtcNow) &&
+            _dbContext.Set<EllaiSessionEntity>().Any(session => session.SessionId == sessionId &&
+                session.Status != "Cancelled" && session.OwnerActorId == actorId &&
+                session.ScopeEpoch == scopeEpoch && session.InteractionEpoch == interactionEpoch), ct);
     }
 
     public bool CanFenceTopicStore(IEllaiTopicStore? store) =>

@@ -247,6 +247,23 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null,
         }
     }
 
+    public bool TryGetProvisionalFence(string sessionId, long sequence, out int attempt, out string scopeEpoch, out long interactionEpoch)
+    {
+        lock (_gate)
+        {
+            attempt = 0;
+            scopeEpoch = string.Empty;
+            interactionEpoch = 0;
+            if (!_sessions.TryGetValue(sessionId, out var session) ||
+                !session.Items.Any(item => item.Sequence == sequence) ||
+                !session.ProvisionalFences.TryGetValue(sequence, out var fence)) return false;
+            attempt = fence.Attempt;
+            scopeEpoch = fence.ScopeEpoch;
+            interactionEpoch = fence.Epoch;
+            return true;
+        }
+    }
+
     public bool CanDeliver(string sessionId, EllaiSessionResponseDto response, string scopeEpoch, long interactionEpoch,
         IReadOnlyList<EllaiConversationTurn> conversation, DateTimeOffset now)
     {
