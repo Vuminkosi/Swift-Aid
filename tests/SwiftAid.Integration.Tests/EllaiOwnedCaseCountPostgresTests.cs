@@ -18,7 +18,12 @@ namespace SwiftAid.Integration.Tests;
 public sealed class EllaiOwnedCaseCountPostgresTests
 {
     [FrameworkPostgresFact]
-    public async Task WorkerDoesNotCommitCountWhenPostgresGrantExpiresDuringPublication()
+    public Task WorkerDoesNotCommitCountWhenPostgresGrantExpiresDuringPublication() => RunWorkerCountAsync(revoke: true);
+
+    [FrameworkPostgresFact]
+    public Task WorkerCommitsAuthorizedCountToPostgresAndResponseFeed() => RunWorkerCountAsync(revoke: false);
+
+    private static async Task RunWorkerCountAsync(bool revoke)
     {
         await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
         var sessionId = "count-worker-" + Guid.NewGuid().ToString("N");
@@ -73,7 +78,7 @@ public sealed class EllaiOwnedCaseCountPostgresTests
             var responses = provider.GetRequiredService<EllaiSessionResponseStore>();
             var provisional = responses.ReadSince(sessionId, 0, take: 64).Responses;
             Assert.DoesNotContain(provisional, item => item.Text.Contains("managed case(s)", StringComparison.Ordinal));
-            await fixture.SetGrantExpiryAsync(DateTimeOffset.UtcNow.AddMinutes(-1));
+            if (revoke) await fixture.SetGrantExpiryAsync(DateTimeOffset.UtcNow.AddMinutes(-1));
             barrier.Release.TrySetResult();
             EllaiConversationTurn turn;
             do
@@ -82,10 +87,28 @@ public sealed class EllaiOwnedCaseCountPostgresTests
                 await using var db = fixture.CreateDbContext();
                 turn = Assert.Single(await new PostgresEllaiSessionStore(db).ReadConversationAsync(sessionId, actor.ActorId, timeout.Token));
             } while (turn.CompletedAtUtc is null);
-            Assert.NotEqual("Completed", turn.Outcome);
-            Assert.Null(turn.AssistantText);
-            Assert.DoesNotContain(responses.ReadSince(sessionId, 0, take: 64).Responses,
-                item => item.Text.Contains("managed case(s)", StringComparison.Ordinal));
+            if (revoke)
+            {
+                Assert.NotEqual("Completed", turn.Outcome);
+                Assert.Null(turn.AssistantText);
+                Assert.DoesNotContain(responses.ReadSince(sessionId, 0, take: 64).Responses,
+                    item => item.Text.Contains("managed case(s)", StringComparison.Ordinal));
+            }
+            else
+            {
+                Assert.Equal("Completed", turn.Outcome);
+                Assert.StartsWith("2 managed case(s)", turn.AssistantText);
+                var trace = System.Text.Json.JsonSerializer.Deserialize<EllaiToolTrace>(turn.ToolTraceJson!);
+                Assert.Contains(trace!.Observations, item => item.ToolName == EllaiToolNames.OwnedCaseCount &&
+                    item.Evidence.Any(reference => reference.SourceKind == "DashboardAggregate"));
+                EllaiSessionResponseDto[] published;
+                do
+                {
+                    await Task.Delay(50, timeout.Token);
+                    published = responses.ReadSince(sessionId, 0, take: 64).Responses.ToArray();
+                } while (!published.Any(item => item.IsFinal && item.Outcome == "Completed"));
+                Assert.Contains(published, item => item.Text.StartsWith("2 managed case(s)", StringComparison.Ordinal));
+            }
         }
         finally
         {
