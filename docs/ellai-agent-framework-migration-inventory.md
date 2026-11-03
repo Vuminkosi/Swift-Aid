@@ -139,6 +139,17 @@ tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore
 use synthetic callbacks, and these checks do not establish deployed revocation
 behavior. Rechecks add query work per output chunk and are not atomic with
 delivery; load and independent security review remain open.
+The aggregate boundary now also rejects truncated results, mismatched tool
+names and inconsistent success codes at the initial observation and each
+recheck. Nine synthetic cases reproduced the omissions before the fix; the
+framework contract filter passed 134/134 afterwards. A PostgreSQL-backed
+framework-agent and broker test then expired a synthetic grant after the first
+count chunk, observed the next aggregate fall from two to zero, and verified
+that the remaining text and completion were withheld. That test and two
+existing membership and revoked-access cases passed 3/3 against disposable
+PostGIS; the new test also passed 1/1 after commit. The first attempt used an
+incorrect one-case fixture expectation and failed; the fixture contains two
+cases. These checks do not establish deployed Gateway behavior.
 
 ## Provider observations and open checks
 
