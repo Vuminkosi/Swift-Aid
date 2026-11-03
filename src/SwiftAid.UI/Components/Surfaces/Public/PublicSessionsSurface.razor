@@ -405,6 +405,10 @@
                     {
                         <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="ReloadSubscriptionAsync" StartIcon="@Icons.Material.Filled.Refresh">Refresh choices</MudButton>
                     }
+                    @if (_editingReminder && _subscriptionState.Status == SessionSubscriptionStatus.Active)
+                    {
+                        <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="CancelReminderChange">Back to reminders</MudButton>
+                    }
                 </MudAlert>
             }
 

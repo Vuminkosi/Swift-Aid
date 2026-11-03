@@ -16,6 +16,43 @@ namespace SwiftAid.Ui.Tests;
 public sealed class PublicSessionQueryStateTests
 {
     [Fact]
+    public async Task ChangedReminderTermsRequireConsentAgainAfterConflict()
+    {
+        var component = new PublicSessionsSurface();
+        var type = typeof(PublicSessionsSurface);
+        var id = Guid.NewGuid();
+        var oldOptions = new PublicSessionsSurface.SessionSubscriptionOptions(id, "old-consent", 7,
+            "Old terms", [PublicSessionsSurface.SessionReminderChannel.Email], true);
+        var freshOptions = oldOptions with { ConsentReference = "new-consent", ConsentText = "New terms" };
+        var state = new PublicSessionsSurface.SessionSubscriptionPanelState(id,
+            PublicSessionsSurface.SessionSubscriptionStatus.Active, 3, oldOptions, null);
+        type.GetField("_selectedSessionId", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, id);
+        type.GetField("_subscriptionSessionId", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, id);
+        type.GetField("_subscriptionState", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, state);
+        type.GetField("_selectedReminderChannel", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(component, PublicSessionsSurface.SessionReminderChannel.Email);
+        var calls = 0;
+        type.GetProperty(nameof(component.ExecuteSubscriptionActionAsync))!.SetValue(component,
+            (Func<PublicSessionsSurface.SessionSubscriptionAction, Task<PublicSessionsSurface.SessionSubscriptionPanelState?>>)(_ =>
+            {
+                calls++;
+                return Task.FromResult<PublicSessionsSurface.SessionSubscriptionPanelState?>(state with
+                {
+                    Options = freshOptions, IsError = true, Message = "Terms changed"
+                });
+            }));
+
+        type.GetMethod("BeginReminderChange", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(component, null);
+        type.GetField("_reminderConsentAccepted", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, true);
+        await InvokeAsync(component, "SubscribeAsync");
+        await InvokeAsync(component, "SubscribeAsync");
+
+        Assert.Equal(1, calls);
+        Assert.False(Field<bool>(component, "_reminderConsentAccepted"));
+        Assert.Equal("new-consent", Field<PublicSessionsSurface.SessionSubscriptionPanelState>(component, "_subscriptionState").Options!.ConsentReference);
+    }
+
+    [Fact]
     public async Task ChangingReminderMethodRequiresFreshConsentAndSubmitsCurrentOptions()
     {
         var component = new PublicSessionsSurface();
