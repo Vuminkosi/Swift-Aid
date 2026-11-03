@@ -16,6 +16,57 @@ namespace SwiftAid.Integration.Tests;
 public sealed class DisabledIdentityChallengeTests
 {
     [Fact]
+    public void GuestAntiforgeryUsesClientHeaderWhenIdentityIsDisabled()
+    {
+        var services = new ServiceCollection();
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Identity:Enabled"] = "false",
+            ["Federation:Enabled"] = "false"
+        }).Build();
+        Assert.False(GatewayAuthenticationRegistration.Configure(services, configuration));
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Antiforgery.AntiforgeryOptions>>();
+        Assert.Equal("X-CSRF-TOKEN", options.Value.HeaderName);
+    }
+
+    [Fact]
+    public async Task IdentityDisabledAcceptsGuestClientAntiforgeryHeaderAndRejectsInvalidToken()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Identity:Enabled"] = "false",
+            ["Federation:Enabled"] = "false"
+        });
+        GatewayAuthenticationRegistration.Configure(builder.Services, builder.Configuration);
+        await using var application = builder.Build();
+        application.MapGet("/fixture/token", (HttpContext http, Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery) =>
+            Results.Text(antiforgery.GetAndStoreTokens(http).RequestToken!));
+        application.MapPost("/fixture/guest", async (HttpContext http, Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery) =>
+        {
+            try { await antiforgery.ValidateRequestAsync(http); return Results.Ok(); }
+            catch (Microsoft.AspNetCore.Antiforgery.AntiforgeryValidationException) { return Results.BadRequest(); }
+        });
+        await application.StartAsync();
+        using var http = application.GetTestClient();
+        using var tokenResponse = await http.GetAsync("/fixture/token");
+        var token = await tokenResponse.Content.ReadAsStringAsync();
+        var cookie = Assert.Single(tokenResponse.Headers.GetValues("Set-Cookie")).Split(';', 2)[0];
+        async Task<HttpStatusCode> SubmitAsync(string requestToken)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/fixture/guest");
+            request.Headers.Add("Cookie", cookie);
+            request.Headers.Add("X-CSRF-TOKEN", requestToken);
+            using var response = await http.SendAsync(request);
+            return response.StatusCode;
+        }
+        Assert.Equal(HttpStatusCode.OK, await SubmitAsync(token));
+        Assert.Equal(HttpStatusCode.BadRequest, await SubmitAsync("invalid"));
+    }
+
+    [Fact]
     public async Task ClassificationEndpointUsesConfiguredStaffPolicyWithoutLocalBearerHandler()
     {
         var builder = WebApplication.CreateBuilder();

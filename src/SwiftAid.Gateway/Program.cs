@@ -341,6 +341,9 @@ public static class GatewayAuthenticationRegistration
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
+        // Guest Ellai uses this header even when the optional Identity stack is disabled.
+        services.AddAntiforgery(options => options.HeaderName = "X-CSRF-TOKEN");
+
         var identityServerEnabled = configuration.GetValue<bool>("Identity:Enabled");
         var federationEnabled = configuration.GetValue<bool>("Federation:Enabled");
         var identityEnabled = identityServerEnabled || federationEnabled;
