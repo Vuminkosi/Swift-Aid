@@ -43,9 +43,15 @@ public sealed class EllaiKnowledgeSpecialist(IChatClient client, IEllaiFramework
         try
         {
             decision = await agent.RunAsync(context, trustedPolicy +
-                "\nYou are a bounded knowledge specialist. Use only the supplied approved documentation tools. " +
-                "Return an answer grounded in observed evidence; do not request actions or invent sources.",
-                [new ChatMessage(ChatRole.User, task)], 512, isCurrent, invoke, usage, ct, maxModelCalls: 3).ConfigureAwait(false);
+                "\nYou are the knowledge specialist, not the supervisor. Delegation is unavailable here: " +
+                "never call ellai_delegate_knowledge. Use only the supplied approved documentation tools. " +
+                "Return an answer grounded in observed evidence; do not request actions or invent sources. " +
+                "Return only a JSON object with final_decision containing schemaVersion 2, kind Answer, displayText, " +
+                "spokenText, claims, questions, uiIntents, planProposal, topicRefs, resumeSuggestion and stopReason. " +
+                "Each factual claim must have claimId, text, kind Observed, and evidence copied exactly from a tool result. " +
+                "Each evidence entry has sourceKind, resourceId, version, fieldPath and evidenceId. " +
+                "Use empty arrays for unused collections and null for unused optional values.",
+                [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, invoke, usage, ct, maxModelCalls: 3).ConfigureAwait(false);
         }
         finally
         {

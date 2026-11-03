@@ -21,6 +21,75 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiLiveProbeTests
 {
     [LiveFact]
+    public async Task LiveSupervisorDelegatesToKnowledgeSpecialistWithBrokeredEvidence()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"ellai-live-knowledge-{Guid.NewGuid():N}.md");
+        try
+        {
+            await File.WriteAllTextAsync(path, "# Reference\n\n**Status: Approved.**\n\n## 1. Synthetic rule\n\nThe synthetic reference code is BLUEBIRD.\n");
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
+            using var client = EllaiMuseChatClientFactory.Create(LiveOptions(), http);
+            var consent = new EllaiConsentService();
+            consent.Grant("live-knowledge", EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+                EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromMinutes(5));
+            var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, new EllaiTechnicalDocs(path));
+            var context = new EllaiToolContext("live-knowledge", "epoch", "public.product-help", null, 4, true,
+                DataClassification: EllaiProcessingClassification.SyntheticDemo,
+                AllowedTools: new HashSet<string> { EllaiToolNames.DocsGet });
+            var store = new InMemoryEllaiUsageStore();
+            var invocations = 0;
+            const string instructions = "If ellai_delegate_knowledge is available, call it for the question before answering. " +
+                "Otherwise call ellai_docs_get with section 1-synthetic-rule before answering. " +
+                "Cite the exact returned evidence in an Observed claim. Return only JSON with final_decision containing " +
+                "schemaVersion 2, kind Answer, displayText, spokenText, claims, questions, uiIntents, planProposal, " +
+                "topicRefs, resumeSuggestion and stopReason; use empty arrays and null for unused fields.";
+            using var observed = new KnowledgeProbeClient(client);
+            var agent = new EllaiFrameworkAgent(observed);
+            EllaiDecision? result;
+            try
+            {
+                result = await agent.RunAsync(context, instructions,
+                [new ChatMessage(ChatRole.User, "Find the synthetic reference code using the available specialist.")], 2048,
+                _ => Task.FromResult(true), async (toolContext, request, ct) =>
+                {
+                    invocations++;
+                    return await broker.InvokeAsync(toolContext, request, ct);
+                }, new EllaiFrameworkUsage(context.SessionId, new EllaiUsageLedger(), store), default,
+                enableKnowledgeSpecialist: true);
+            }
+            catch (EllaiFrameworkFailureException error)
+            {
+                throw new InvalidOperationException($"Live knowledge delegation failed: {error.Code}; calls: {string.Join(";", observed.Steps)}");
+            }
+            Assert.NotNull(result);
+            Assert.True(invocations > 0);
+            Assert.True(agent.LastModelCallCount >= 4);
+            Assert.Contains(observed.Steps, step => step.Contains("tools=ellai_delegate_knowledge", StringComparison.Ordinal));
+            Assert.Contains(observed.Steps, step => step.Contains("tools=ellai_docs_get", StringComparison.Ordinal));
+            Assert.Contains(result!.Claims.SelectMany(claim => claim.Evidence), evidence => evidence.SourceKind == "Documentation");
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    private sealed class KnowledgeProbeClient(IChatClient inner) : DelegatingChatClient(inner)
+    {
+        public List<string> Steps { get; } = [];
+        public override async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            var response = await base.GetResponseAsync(messages, options, cancellationToken);
+            var functions = response.Messages.SelectMany(message => message.Contents).OfType<FunctionCallContent>()
+                .Select(call => call.Name).ToArray();
+            var parsed = EllaiModelTurnParser.Parse(response.Text);
+            Steps.Add($"finish={response.FinishReason},tools={string.Join(",", functions)},allowed={options?.Tools?.Count ?? 0},parse={EllaiModelTurnParser.DiagnosticCode(parsed.Error)},decision={parsed.Turn?.FinalDecision is not null}");
+            return response;
+        }
+    }
+
+    [LiveFact]
     public async Task LiveFrameworkRestoresSerializedOwnedSessionForNextTurn()
     {
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
