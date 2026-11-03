@@ -3387,3 +3387,16 @@ state-change assertions. PASS: the framework worker and guidance projection
 filter passed 9/9 with a synthetic model and in-memory stores, including a
 real `ellai_ui_observe` call and a restored follow-up. This does not verify
 a deployed browser, physical device, or independent security review.
+
+### Full application regression after final evidence guard — 2026-11-03
+
+The first full application run after the agent-level final revalidation change
+failed three direct-agent case-recall fixture variants: they did not supply the
+newly required revalidator. The fixture now re-invokes the broker and compares
+the fresh result and evidence, and verifies that an allowed lookup reaches the
+index twice. Its four scope, stale-index and outage variants passed 4/4.
+
+PASS: `dotnet test tests\SwiftAid.Application.Tests\SwiftAid.Application.Tests.csproj
+--no-restore -m:1 -nr:false --logger 'console;verbosity=quiet'` passed 1,181,
+failed 0 and skipped 17. The first full run had 1,178 passed, 3 failed and
+17 skipped; the skipped live-provider tests are not evidence from this run.

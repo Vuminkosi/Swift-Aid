@@ -198,12 +198,26 @@ public sealed class EllaiLiveQueueReadTests
         using var client = new RecallClient();
         var agent = new EllaiFrameworkAgent(client);
         var context = wrongScope ? owner with { ScopeEpoch = "other-epoch" } : owner;
+        EllaiToolRequest? invoked = null;
+        EllaiToolResult? observed = null;
         var result = await agent.RunAsync(context, "Synthetic policy", [new ChatMessage(ChatRole.User, "recall")], 300,
-            _ => Task.FromResult(true), broker.InvokeAsync,
-            new EllaiFrameworkUsage(owner.SessionId, new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None);
+            _ => Task.FromResult(true), async (toolContext, request, ct) =>
+            {
+                invoked = request;
+                return observed = await broker.InvokeAsync(toolContext, request, ct);
+            },
+            new EllaiFrameworkUsage(owner.SessionId, new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None,
+            revalidateStreamObservations: async ct =>
+            {
+                if (invoked is null || observed is null) return false;
+                var current = await broker.InvokeAsync(context, invoked, ct);
+                return current.Allowed && current.ResultSummary == observed.ResultSummary &&
+                    current.Evidence.SequenceEqual(observed.Evidence);
+            });
 
         Assert.Equal(!wrongScope, result is not null);
-        Assert.Equal(1, index.Reads);
+        if (!wrongScope) Assert.Equal(2, index.Reads);
+        else Assert.InRange(index.Reads, 1, 2);
         if (!wrongScope) Assert.Contains(Row("01", 7).CaseId.ToString("D"), client.Observation);
         else Assert.DoesNotContain(Row("01", 7).CaseId.ToString("D"), client.Observation);
     }
