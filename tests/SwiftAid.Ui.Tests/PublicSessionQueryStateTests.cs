@@ -411,6 +411,44 @@ public sealed class PublicSessionQueryStateTests
     }
 
     [Fact]
+    public async Task InvitationRefreshInvokesTheHostAndClearsStaleFeedback()
+    {
+        var list = new PublicSessionList();
+        var refreshed = 0;
+        typeof(PublicSessionList).GetProperty(nameof(list.OnRetry))!.SetValue(list,
+            EventCallback.Factory.Create(new object(), () => { refreshed++; }));
+        typeof(PublicSessionList).GetField("_invitationError", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(list, "Session changed");
+        typeof(PublicSessionList).GetField("_openInvitationId", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(list, Guid.NewGuid());
+        var refresh = typeof(PublicSessionList).GetMethod("RefreshInvitationSessionAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        await (Task)refresh.Invoke(list, null)!;
+
+        Assert.Equal(1, refreshed);
+        Assert.Null(typeof(PublicSessionList).GetField("_invitationError", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
+        Assert.Null(typeof(PublicSessionList).GetField("_openInvitationId", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(list));
+    }
+
+    [Fact]
+    public async Task RetryRefreshesTheListAndMonthWithTheExistingFilters()
+    {
+        var component = new PublicSessionsSurface();
+        var requests = new List<PublicSessionQuery>();
+        typeof(PublicSessionsSurface).GetField("_calendarVisible", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, true);
+        typeof(PublicSessionsSurface).GetField("_topicFilter", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, "Water");
+        SetQuery(component, query =>
+        {
+            requests.Add(query);
+            return Task.FromResult<PublicSessionPage?>(new PublicSessionPage([], null));
+        });
+
+        await InvokeAsync(component, "RetryAsync");
+
+        Assert.Equal(2, requests.Count);
+        Assert.All(requests, query => Assert.Equal("Water", query.Topic));
+        Assert.Contains(requests, query => query.LocalDateFrom is not null && query.LocalDateTo is not null);
+    }
+
+    [Fact]
     public async Task EmptyBoundedSearchOffersContinuationBeforeReportingNoMatches()
     {
         var position = new PublicSessionPosition(DateTimeOffset.UtcNow, Guid.NewGuid());

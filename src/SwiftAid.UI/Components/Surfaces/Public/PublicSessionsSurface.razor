@@ -238,6 +238,7 @@
                            Loading="IsLoading"
                            ErrorMessage="@DisplayError"
                            OnRetry="RetryAsync"
+                           CanRefresh="@(QuerySessionsAsync is not null || OnRetry.HasDelegate)"
                            PublicBasePath="@PublicSessionBasePath"
                            LoadInvitationTextAsync="LoadInvitationTextAsync"
                            ShareTextAsync="ShareTextAsync" />
@@ -1060,7 +1061,13 @@
         if (ErrorMessage is not null || QuerySessionsAsync is null)
             await OnRetry.InvokeAsync();
         else
+        {
+            var monthTask = _calendarVisible ? RefreshCalendarMonthAsync() : Task.CompletedTask;
             await RefreshQueryAsync();
+            await monthTask;
+            EnsureSelectedSession();
+            await EnsureSubscriptionForSelectionAsync();
+        }
     }
 
     private bool MatchesPeriod(PublicSessionView session, DateTimeOffset now)

@@ -111,7 +111,13 @@
                                 }
                                 @if (_openInvitationId == session.SessionId && _invitationError is not null)
                                 {
-                                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true">@_invitationError</MudAlert>
+                                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true">
+                                        @_invitationError
+                                        @if (CanRefresh)
+                                        {
+                                            <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="RefreshInvitationSessionAsync">Refresh sessions</MudButton>
+                                        }
+                                    </MudAlert>
                                 }
                             </div>
                         </MudHidden>
@@ -206,7 +212,13 @@
                         }
                         @if (_openInvitationId == session.SessionId && _invitationError is not null)
                         {
-                            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true">@_invitationError</MudAlert>
+                            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true">
+                                @_invitationError
+                                @if (CanRefresh)
+                                {
+                                    <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="RefreshInvitationSessionAsync">Refresh sessions</MudButton>
+                                }
+                            </MudAlert>
                         }
                         </MudHidden>
                     </MudCardContent>
@@ -229,6 +241,8 @@
 
     [Parameter] public EventCallback OnRetry { get; set; }
 
+    [Parameter] public bool CanRefresh { get; set; }
+
     /// <summary>Loads the plain-text invitation for a session. Absent when copying is unavailable.</summary>
     [Parameter] public Func<Guid, long, Task<string?>>? LoadInvitationTextAsync { get; set; }
 
@@ -250,6 +264,16 @@
     private string DestinationHref(PublicSessionView session) => $"{PublicBasePath?.TrimEnd('/')}/{session.SessionId:D}/destination?version={session.Version.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
 
     private static string DetailHref(Guid sessionId) => $"/sessions?sessionId={sessionId:D}";
+
+    private async Task RefreshInvitationSessionAsync()
+    {
+        _invitationError = null;
+        _openInvitationId = null;
+        _openInvitationText = null;
+        _copiedSessionId = null;
+        _shareRequestSessionId = null;
+        await OnRetry.InvokeAsync();
+    }
 
     private static string FormatLocation(PublicSessionView session)
     {
