@@ -66,6 +66,10 @@ public sealed class CaseEventSerializationTests
             RecordedAtUtc, Guid.Parse("40000000-0000-0000-0000-000000000002"), "revisit holding", "worker-1",
             new DateTimeOffset(2026, 10, 30, 8, 0, 0, TimeSpan.Zero)),
             "case-follow-up-scheduled.v1.json"];
+        yield return [new ActionOwnerChanged(
+            CaseId, 4, 1, Guid.Parse("20000000-0000-0000-0000-000000000016"), "officer-1", null,
+            RecordedAtUtc, ActionOwnerKind.FollowUp, Guid.Parse("40000000-0000-0000-0000-000000000002"),
+            "worker-1", "worker-2", "coverage handoff"), "action-owner-changed.v1.json"];
         yield return [new CaseFollowUpAcknowledged(
             CaseId, 4, 1, Guid.Parse("20000000-0000-0000-0000-000000000015"), "worker-1", null, RecordedAtUtc,
             Guid.Parse("40000000-0000-0000-0000-000000000002")),

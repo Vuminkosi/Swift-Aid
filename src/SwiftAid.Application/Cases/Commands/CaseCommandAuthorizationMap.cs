@@ -17,6 +17,7 @@ public static class CaseCommandAuthorizationMap
             AcknowledgeAssignmentCommand => Requirement(CaseOperation.AcknowledgeAssignment, CaseCapability.AcknowledgeAssignment),
             GrantCaseCollaboratorCommand or RevokeCaseCollaboratorCommand => Requirement(CaseOperation.ManageCollaborators, CaseCapability.ManageCollaborators),
             RequestAssistanceCommand or UpdateAssistanceCommand => Requirement(CaseOperation.ManageAssistance, CaseCapability.ManageAssistance),
+            ChangeActionOwnerCommand change => ResolveActionOwnerChange(change),
             CorrectReportCommand => Requirement(CaseOperation.CorrectReport, CaseCapability.CorrectReport),
             RecordObservationCommand => Requirement(CaseOperation.RecordObservation, CaseCapability.RecordObservation),
             ScheduleFollowUpCommand or AcknowledgeFollowUpCommand or RecordFollowUpOutcomeCommand => Requirement(CaseOperation.ManageFollowUp, CaseCapability.ManageFollowUp),
@@ -27,6 +28,18 @@ public static class CaseCommandAuthorizationMap
             ReopenCaseCommand => Requirement(CaseOperation.ReopenCase, CaseCapability.ReopenCase),
             AcceptCaseCommand => throw new NotSupportedException("Case creation is not supported by the non-creation command authorization map."),
             _ => throw new NotSupportedException($"Command type {command.GetType().Name} is not supported.")
+        };
+    }
+
+    private static CaseCommandAuthorizationRequirement ResolveActionOwnerChange(ChangeActionOwnerCommand change)
+    {
+        if (!Enum.IsDefined(change.ActionKind))
+            throw new InvalidDataException("The action owner change uses an unknown action kind.");
+        return change.ActionKind switch
+        {
+            ActionOwnerKind.FollowUp => Requirement(CaseOperation.ManageFollowUp, CaseCapability.ManageFollowUp),
+            ActionOwnerKind.Assistance => Requirement(CaseOperation.ManageAssistance, CaseCapability.ManageAssistance),
+            _ => throw new InvalidDataException("The action owner change uses an unsupported action kind.")
         };
     }
 

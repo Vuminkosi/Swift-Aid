@@ -120,6 +120,12 @@ public sealed class CaseCommandGatewayClient(
                 commandId, expectedVersion,
                 input.GrantId ?? throw new ArgumentException("A grant identifier is required."),
                 RequireReason(input), null, recordedAt),
+            "ChangeActionOwner" => new ChangeActionOwnerCommand(
+                commandId, expectedVersion,
+                input.ActionOwnerKind is { } kind && Enum.IsDefined(kind) ? kind : throw new ArgumentException("An action kind is required."),
+                RequireIdentifier(input.ActionId, "An action identifier is required."),
+                RequireText(input.ProposedOwnerId, "A new action owner is required."),
+                RequireReason(input), null, recordedAt),
             "AcknowledgeAssignment" => new AcknowledgeAssignmentCommand(
                 commandId,
                 expectedVersion,

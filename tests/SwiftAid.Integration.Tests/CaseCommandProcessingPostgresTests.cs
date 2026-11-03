@@ -27,6 +27,75 @@ namespace SwiftAid.Integration.Tests;
 public sealed partial class CaseCommandProcessingPostgresTests
 {
     [CaseAuthorityPostgresFact]
+    public async Task Action_owner_transfer_updates_persisted_owner_and_replay_from_journal()
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync().ConfigureAwait(false);
+        await using var cleanup = new CaseCommandProcessingCleanup(fixture);
+        await AddOperationsAsync(fixture, [CaseOperation.ManageFollowUp, CaseOperation.ManageAssistance]).ConfigureAwait(false);
+        var targetGrantGroupId = await AddEligibleTargetGrantAsync(fixture).ConfigureAwait(false);
+        cleanup.TrackTargetGrant(targetGrantGroupId);
+        await using (var scope = fixture.CreateDbContext())
+        {
+            scope.AccessGrantOperations.Add(new AccessGrantOperationEntity
+            {
+                GrantGroupId = targetGrantGroupId,
+                Operation = CaseOperation.ManageFollowUp
+            });
+            scope.AccessGrantOperations.Add(new AccessGrantOperationEntity
+            {
+                GrantGroupId = targetGrantGroupId,
+                Operation = CaseOperation.ManageAssistance
+            });
+            await scope.SaveChangesAsync().ConfigureAwait(false);
+        }
+
+        await SetInitialWorkflowVersionAsync(fixture).ConfigureAwait(false);
+        using var keyRing = SyntheticPayloadKeyRing.Create();
+        using var provider = ProtectedPayloadDataProtectionProviderFactory.Create(
+            keyRing.CreateOptions(), new TestHostEnvironment(Environments.Production));
+        await SeedInitialJournalAsync(fixture, keyRing.CreateOptions(), provider).ConfigureAwait(false);
+        var actor = fixture.CreateActor();
+        var followUpId = Guid.NewGuid();
+        var scheduled = await ProcessCommandAsync(fixture, actor,
+            new ScheduleFollowUpCommand(Guid.NewGuid(), 2, followUpId, "Synthetic callback", fixture.ActorId,
+                DateTimeOffset.UtcNow.AddDays(1), "Synthetic schedule", null, DateTimeOffset.UtcNow),
+            keyRing.CreateOptions(), provider).ConfigureAwait(false);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, scheduled.Status);
+
+        var transferred = await ProcessCommandAsync(fixture, actor,
+            new ChangeActionOwnerCommand(Guid.NewGuid(), 3, ActionOwnerKind.FollowUp, followUpId,
+                fixture.NewOwnerActorId, "Synthetic coverage transfer", null, DateTimeOffset.UtcNow),
+            keyRing.CreateOptions(), provider).ConfigureAwait(false);
+
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, transferred.Status);
+        Assert.Equal(4, transferred.AggregateVersion);
+        var assistanceId = Guid.NewGuid();
+        var requested = await ProcessCommandAsync(fixture, actor,
+            new RequestAssistanceCommand(Guid.NewGuid(), 4, assistanceId, "Synthetic transport request",
+                fixture.ActorId, null, null, DateTimeOffset.UtcNow), keyRing.CreateOptions(), provider).ConfigureAwait(false);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, requested.Status);
+        var assistanceTransfer = await ProcessCommandAsync(fixture, actor,
+            new ChangeActionOwnerCommand(Guid.NewGuid(), 5, ActionOwnerKind.Assistance, assistanceId,
+                fixture.NewOwnerActorId, "Synthetic assistance coverage transfer", null, DateTimeOffset.UtcNow),
+            keyRing.CreateOptions(), provider).ConfigureAwait(false);
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, assistanceTransfer.Status);
+        Assert.Equal(6, assistanceTransfer.AggregateVersion);
+        await using var verify = fixture.CreateDbContext();
+        var projection = await verify.ManagedCaseFollowUps.AsNoTracking().SingleAsync(item => item.FollowUpId == followUpId)
+            .ConfigureAwait(false);
+        Assert.Equal(fixture.NewOwnerActorId, projection.AssigneeActorId);
+        var eventRow = await verify.CaseEvents.AsNoTracking().SingleAsync(item => item.CaseId == fixture.CaseId && item.AggregateVersion == 4)
+            .ConfigureAwait(false);
+        Assert.Equal("ActionOwnerChanged", eventRow.EventType);
+        var replayed = await ReadAggregateAsync(fixture, actor, keyRing.CreateOptions(), provider).ConfigureAwait(false);
+        Assert.Equal(fixture.NewOwnerActorId, Assert.Single(replayed.FollowUps).AssigneeActorId);
+        Assert.Equal(fixture.NewOwnerActorId, Assert.Single(replayed.Assistance).ResponsibleActorId);
+        var assistanceProjection = await verify.ManagedCaseAssistance.AsNoTracking().SingleAsync(item => item.AssistanceId == assistanceId)
+            .ConfigureAwait(false);
+        Assert.Equal(fixture.NewOwnerActorId, assistanceProjection.ResponsibleActorId);
+    }
+
+    [CaseAuthorityPostgresFact]
     public async Task Revoking_expired_grant_does_not_remove_its_replacement_or_change_recipient_epoch()
     {
         await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync();
@@ -885,6 +954,8 @@ public sealed partial class CaseCommandProcessingPostgresTests
         await dbContext.DomainOutbox.Where(entity => eventIds.Contains(entity.EventId))
             .ExecuteDeleteAsync().ConfigureAwait(false);
         await dbContext.ManagedCaseFollowUps.Where(entity => entity.CaseId == fixture.CaseId)
+            .ExecuteDeleteAsync().ConfigureAwait(false);
+        await dbContext.ManagedCaseAssistance.Where(entity => entity.CaseId == fixture.CaseId)
             .ExecuteDeleteAsync().ConfigureAwait(false);
         await dbContext.CaseEvents.Where(entity => entity.CaseId == fixture.CaseId)
             .ExecuteDeleteAsync().ConfigureAwait(false);

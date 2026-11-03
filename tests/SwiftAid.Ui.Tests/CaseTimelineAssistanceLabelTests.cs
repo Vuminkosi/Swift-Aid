@@ -6,6 +6,13 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed class CaseTimelineAssistanceLabelTests
 {
+    [Fact]
+    public void Action_owner_transfer_uses_specific_label_and_category()
+    {
+        Assert.Equal("Action owner changed", InvokeTimelineMapper("SafeEventLabel", "ActionOwnerChanged"));
+        Assert.Equal("Action ownership", InvokeTimelineMapper("EventCategory", "ActionOwnerChanged"));
+    }
+
     [Theory]
     [InlineData("AssistanceRequested", "Assistance requested")]
     [InlineData("AssistanceAccepted", "Assistance responsibility accepted")]

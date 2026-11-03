@@ -122,6 +122,8 @@ internal static class CaseEventJournalReader
                     ["followUpId"], ValidateFollowUpAcknowledgedPayload),
                 nameof(CaseEventType.CaseFollowUpOutcomeRecorded) => Read<CaseFollowUpOutcomeRecordedPayload>(serialized,
                     ["followUpId", "outcome", "outcomeNotes", "previousDueAtUtc", "newDueAtUtc", "reason"], ValidateFollowUpOutcomePayload),
+                nameof(CaseEventType.ActionOwnerChanged) => Read<ActionOwnerChangedPayload>(serialized,
+                    ["actionKind", "actionId", "previousOwnerId", "newOwnerId", "reason"], ValidateActionOwnerChangedPayload),
                 nameof(CaseEventType.CaseEscalationRaised) => Read<CaseEscalationRaisedPayload>(serialized,
                     ["escalationId", "reason", "evidenceEventIds", "recipientRoute"], ValidateEscalationRaisedPayload),
                 nameof(CaseEventType.CaseEscalationAcknowledged) => Read<CaseEscalationAcknowledgedPayload>(serialized,
@@ -288,6 +290,10 @@ internal static class CaseEventJournalReader
                 envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
                 envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc,
                 scheduled.FollowUpId, scheduled.Purpose, scheduled.AssigneeActorId, scheduled.DueAtUtc),
+            CaseEventType.ActionOwnerChanged when payload is ActionOwnerChangedPayload ownerChange => new ActionOwnerChanged(
+                envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
+                envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc, ownerChange.ActionKind,
+                ownerChange.ActionId, ownerChange.PreviousOwnerId, ownerChange.NewOwnerId, ownerChange.Reason),
             CaseEventType.CaseFollowUpAcknowledged when payload is CaseFollowUpAcknowledgedPayload acknowledgement => new CaseFollowUpAcknowledged(
                 envelope.CaseId, envelope.AggregateVersion, envelope.ReportRevision, envelope.CommandId,
                 envelope.ActorId, envelope.OccurredAtUtc, envelope.RecordedAtUtc, acknowledgement.FollowUpId),
@@ -678,6 +684,18 @@ internal static class CaseEventJournalReader
         {
             throw InvalidJournal();
         }
+    }
+
+    private static void ValidateActionOwnerChangedPayload(JsonElement payload, ActionOwnerChangedPayload value)
+    {
+        if (!IsExactEnumValue(payload, "actionKind", value.ActionKind) ||
+            !IsCanonicalGuid(payload, "actionId") || value.ActionId == Guid.Empty ||
+            !Enum.IsDefined(value.ActionKind))
+            throw InvalidJournal();
+        RequireIdentifier(value.PreviousOwnerId);
+        RequireIdentifier(value.NewOwnerId);
+        RequireText(value.Reason);
+        if (StringComparer.Ordinal.Equals(value.PreviousOwnerId, value.NewOwnerId)) throw InvalidJournal();
     }
 
     private static void ValidateEscalationRaisedPayload(JsonElement payload, CaseEscalationRaisedPayload value)

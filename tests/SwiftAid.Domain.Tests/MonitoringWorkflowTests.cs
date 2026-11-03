@@ -78,6 +78,41 @@ public sealed class MonitoringWorkflowTests
     }
 
     [Fact]
+    public void ChangeActionOwner_TransfersOpenFollowUpExplicitlyAndReplayPreservesTransfer()
+    {
+        var (aggregate, events) = AcceptedCase();
+        var followUpId = Guid.NewGuid();
+        aggregate = Apply(aggregate, events,
+            new ScheduleFollowUpCommand(Guid.NewGuid(), 0, followUpId, "callback", "worker-1", DueAt, "assign", null, RecordedAt),
+            MonitoringActor());
+
+        aggregate = Apply(aggregate, events,
+            new ChangeActionOwnerCommand(Guid.NewGuid(), 0, ActionOwnerKind.FollowUp, followUpId, "worker-2", "coverage handoff", null, RecordedAt),
+            MonitoringActor());
+
+        var changed = Assert.IsType<ActionOwnerChanged>(events[^1]);
+        Assert.Equal("worker-1", changed.PreviousOwnerId);
+        Assert.Equal("worker-2", changed.NewOwnerId);
+        Assert.Equal("worker-2", Assert.Single(aggregate.FollowUps).AssigneeActorId);
+        Assert.Equal(aggregate.FollowUps, CaseAggregate.Replay(events).FollowUps);
+    }
+
+    [Fact]
+    public void ChangeActionOwner_RejectsWrongPreviousOwnerDuringReplay()
+    {
+        var (aggregate, events) = AcceptedCase();
+        var followUpId = Guid.NewGuid();
+        aggregate = Apply(aggregate, events,
+            new ScheduleFollowUpCommand(Guid.NewGuid(), 0, followUpId, "callback", "worker-1", DueAt, "assign", null, RecordedAt),
+            MonitoringActor());
+
+        var invalid = new ActionOwnerChanged(Guid.NewGuid(), aggregate.AggregateVersion + 1, aggregate.ReportRevision,
+            Guid.NewGuid(), "officer-1", null, RecordedAt, ActionOwnerKind.FollowUp, followUpId,
+            "worker-stale", "worker-2", "handoff");
+        Assert.Throws<InvalidDataException>(() => CaseAggregate.Replay([.. events, invalid]));
+    }
+
+    [Fact]
     public void FollowUpAcknowledgement_IsRecordedOnceByAssignedWorkerAndPreservesOpenWork()
     {
         var (aggregate, events) = AcceptedCase();

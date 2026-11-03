@@ -21,6 +21,26 @@ namespace SwiftAid.Integration.Tests;
 
 public sealed class CaseCommandEndpointTests
 {
+    [Fact]
+    public async Task Action_owner_change_requires_typed_action_and_maps_target_and_reason()
+    {
+        await using var host = await TestCommandHost.StartAsync();
+        var body = new CaseCommandApiRequest(1, "ChangeActionOwner", Guid.NewGuid(), 3, null,
+            "coverage handoff", "worker-3", null, null, null,
+            ActionOwnerKind: ActionOwnerKind.FollowUp, ActionId: Guid.NewGuid());
+        using var response = await host.SendBearerAsync(CreateRequest(FixedCaseId, body));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var command = Assert.IsType<ChangeActionOwnerCommand>(host.Processor.LastCommand);
+        Assert.Equal(ActionOwnerKind.FollowUp, command.ActionKind);
+        Assert.Equal(body.ActionId, command.ActionId);
+        Assert.Equal("worker-3", command.NewOwnerId);
+        Assert.Equal("coverage handoff", command.Reason);
+
+        using var invalid = await host.SendBearerAsync(CreateRequest(FixedCaseId, body with { ActionOwnerKind = null }));
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        Assert.Equal(1, host.Processor.Calls);
+    }
+
     [Theory]
     [InlineData("recipient")]
     [InlineData("actions")]

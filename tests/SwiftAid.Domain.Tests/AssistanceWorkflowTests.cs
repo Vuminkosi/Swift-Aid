@@ -23,6 +23,24 @@ public sealed class AssistanceWorkflowTests
             status == AssistanceStatus.ReceiptConfirmed ? "Worker records recipient statement" : null,
             status == AssistanceStatus.ReceiptConfirmed ? "Synthetic telephone report; not independently verified" : null, null, Now);
 
+    [Fact]
+    public void Action_owner_change_TransfersOpenAssistanceAndPreservesRequesterOnReplay()
+    {
+        var aggregate = Create();
+        var id = Request(aggregate);
+        var command = new ChangeActionOwnerCommand(Guid.NewGuid(), aggregate.AggregateVersion,
+            ActionOwnerKind.Assistance, id, "responsible-worker-2", "coverage transfer", null, Now);
+        Assert.Throws<UnauthorizedAccessException>(() => aggregate.Decide(command,
+            new ActorCapabilities("officer", CaseCapability.ManageFollowUp)));
+
+        aggregate.Apply(Assert.Single(aggregate.Decide(command, Worker("officer"))));
+
+        var state = Assert.Single(CaseAggregate.Replay(aggregate.Events).Assistance);
+        Assert.Equal("responsible-worker-2", state.ResponsibleActorId);
+        Assert.Equal("requester", state.RequestedByActorId);
+        Assert.IsType<ActionOwnerChanged>(aggregate.Events[^1]);
+    }
+
     [Theory]
     [InlineData(CaseKind.Human)]
     [InlineData(CaseKind.Animal)]

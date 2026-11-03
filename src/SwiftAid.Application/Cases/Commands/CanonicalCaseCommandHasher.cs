@@ -90,7 +90,7 @@ public static class CanonicalCaseCommandHasher
         }
 
         if (command is not (CorrectReportCommand or RequestCaseActionCommand or ReviewCaseActionRequestCommand or ResolveCaseCommand or ReopenCaseCommand
-            or RecordObservationCommand or ScheduleFollowUpCommand or RecordFollowUpOutcomeCommand
+            or RecordObservationCommand or ScheduleFollowUpCommand or RecordFollowUpOutcomeCommand or ChangeActionOwnerCommand
             or RaiseEscalationCommand or AcknowledgeEscalationCommand or CloseEscalationCommand or AcknowledgeAssignmentCommand or AcknowledgeFollowUpCommand
             or GrantCaseCollaboratorCommand or RevokeCaseCollaboratorCommand or RequestAssistanceCommand or UpdateAssistanceCommand))
         {
@@ -103,6 +103,20 @@ public static class CanonicalCaseCommandHasher
     {
         switch (command)
         {
+            case ChangeActionOwnerCommand ownerChange:
+                if (!Enum.IsDefined(ownerChange.ActionKind)) throw new ArgumentOutOfRangeException(nameof(ownerChange.ActionKind));
+                RequireIdentifier(ownerChange.ActionId, nameof(ownerChange.ActionId));
+                RequireText(ownerChange.NewOwnerId, nameof(ownerChange.NewOwnerId));
+                RequireText(ownerChange.Reason, nameof(ownerChange.Reason));
+                var ownerChangeSnapshot = ownerChange with { OccurredAtUtc = Normalize(ownerChange.OccurredAtUtc) };
+                return (ownerChangeSnapshot, "ChangeActionOwner", ownerChangeSnapshot.Reason, writer =>
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("actionKind", ownerChangeSnapshot.ActionKind.ToString());
+                    writer.WriteString("actionId", ownerChangeSnapshot.ActionId.ToString("D"));
+                    writer.WriteString("newOwnerId", ownerChangeSnapshot.NewOwnerId);
+                    writer.WriteEndObject();
+                });
             case RequestAssistanceCommand request:
                 RequireIdentifier(request.AssistanceId, nameof(request.AssistanceId));
                 RequireText(request.Need, nameof(request.Need));

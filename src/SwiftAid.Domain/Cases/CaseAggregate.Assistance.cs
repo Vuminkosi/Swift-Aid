@@ -55,6 +55,42 @@ public sealed partial class CaseAggregate
     private readonly List<AssistanceState> _assistance = [];
     public IReadOnlyList<AssistanceState> Assistance => _assistance.AsReadOnly();
 
+    private void ApplyActionOwnerChanged(ActionOwnerChanged changed)
+    {
+        if (changed.ReportRevision != ReportRevision || changed.ActionId == Guid.Empty ||
+            !Enum.IsDefined(changed.ActionKind))
+            throw new InvalidDataException("The action owner change event is invalid.");
+        try
+        {
+            RequireText(changed.PreviousOwnerId, nameof(changed.PreviousOwnerId));
+            RequireText(changed.NewOwnerId, nameof(changed.NewOwnerId));
+            RequireText(changed.Reason, nameof(changed.Reason));
+            if (StringComparer.Ordinal.Equals(changed.PreviousOwnerId, changed.NewOwnerId))
+                throw new InvalidOperationException("An owner change must change the owner.");
+            switch (changed.ActionKind)
+            {
+                case ActionOwnerKind.FollowUp:
+                    var followUpIndex = _followUps.FindIndex(item => item.FollowUpId == changed.ActionId);
+                    if (followUpIndex < 0 || _followUps[followUpIndex].Status is FollowUpStatus.Completed or FollowUpStatus.Cancelled ||
+                        !StringComparer.Ordinal.Equals(_followUps[followUpIndex].AssigneeActorId, changed.PreviousOwnerId))
+                        throw new InvalidOperationException("The follow-up owner change does not match current open state.");
+                    _followUps[followUpIndex] = _followUps[followUpIndex] with { AssigneeActorId = changed.NewOwnerId };
+                    break;
+                case ActionOwnerKind.Assistance:
+                    var assistanceIndex = _assistance.FindIndex(item => item.AssistanceId == changed.ActionId);
+                    if (assistanceIndex < 0 || _assistance[assistanceIndex].Status is AssistanceStatus.ReceiptConfirmed or AssistanceStatus.Unfulfilled or AssistanceStatus.Cancelled ||
+                        !StringComparer.Ordinal.Equals(_assistance[assistanceIndex].ResponsibleActorId, changed.PreviousOwnerId))
+                        throw new InvalidOperationException("The assistance owner change does not match current open state.");
+                    _assistance[assistanceIndex] = _assistance[assistanceIndex] with { ResponsibleActorId = changed.NewOwnerId };
+                    break;
+            }
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            throw new InvalidDataException("The action owner change event is invalid.", exception);
+        }
+    }
+
     private IReadOnlyList<CaseEvent> DecideRequestAssistance(RequestAssistanceCommand command, ActorCapabilities actor, long version)
     {
         RequireCapability(actor, CaseCapability.ManageAssistance);

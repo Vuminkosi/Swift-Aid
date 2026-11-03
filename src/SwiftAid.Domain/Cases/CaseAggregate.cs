@@ -106,6 +106,11 @@ public sealed record CaseResolved(Guid CaseId, long AggregateVersion, long Repor
 public sealed record CaseReopened(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, string Reason, string AccountableOwnerId) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
 public sealed record CaseObservationRecorded(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, Guid ObservationId, string Narrative, string Source) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
 public sealed record CaseFollowUpScheduled(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, Guid FollowUpId, string Purpose, string AssigneeActorId, DateTimeOffset DueAtUtc) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
+
+public sealed record ActionOwnerChanged(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId,
+    string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, ActionOwnerKind ActionKind,
+    Guid ActionId, string PreviousOwnerId, string NewOwnerId, string Reason)
+    : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
 public sealed record CaseFollowUpAcknowledged(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, Guid FollowUpId) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
 public sealed record CaseFollowUpOutcomeRecorded(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, Guid FollowUpId, FollowUpOutcome Outcome, string OutcomeNotes, DateTimeOffset PreviousDueAtUtc, DateTimeOffset? NewDueAtUtc, string Reason) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
 public sealed record CaseEscalationRaised(Guid CaseId, long AggregateVersion, long ReportRevision, Guid CommandId, string ActorId, DateTimeOffset? OccurredAtUtc, DateTimeOffset RecordedAtUtc, Guid EscalationId, string Reason, IReadOnlyList<string> EvidenceEventIds, string RecipientRoute) : CaseEvent(CaseId, AggregateVersion, ReportRevision, CommandId, ActorId, OccurredAtUtc, RecordedAtUtc);
@@ -247,6 +252,7 @@ public sealed partial class CaseAggregate
             ReopenCaseCommand reopening => DecideReopen(reopening, actor, version),
             RecordObservationCommand observation => DecideRecordObservation(observation, actor, version),
             ScheduleFollowUpCommand schedule => DecideScheduleFollowUp(schedule, actor, version),
+            ChangeActionOwnerCommand ownerChange => DecideChangeActionOwner(ownerChange, actor, version),
             AcknowledgeFollowUpCommand acknowledge => DecideAcknowledgeFollowUp(acknowledge, actor, version),
             RecordFollowUpOutcomeCommand outcome => DecideRecordFollowUpOutcome(outcome, actor, version),
             RaiseEscalationCommand escalation => DecideRaiseEscalation(escalation, actor, version),
@@ -493,6 +499,42 @@ public sealed partial class CaseAggregate
         return Array.AsReadOnly<CaseEvent>([new CaseFollowUpScheduled(CaseId, version, ReportRevision, command.CommandId, actor.ActorId, command.OccurredAtUtc, command.RecordedAtUtc, command.FollowUpId, command.Purpose, command.AssigneeActorId, command.DueAtUtc)]);
     }
 
+    private IReadOnlyList<CaseEvent> DecideChangeActionOwner(ChangeActionOwnerCommand command, ActorCapabilities actor, long version)
+    {
+        if (!Enum.IsDefined(command.ActionKind)) throw new ArgumentOutOfRangeException(nameof(command.ActionKind));
+        if (command.ActionId == Guid.Empty) throw new ArgumentException("An action identifier is required.", nameof(command.ActionId));
+        RequireText(command.NewOwnerId, nameof(command.NewOwnerId));
+        RequireText(command.Reason, nameof(command.Reason));
+        string previousOwner;
+        switch (command.ActionKind)
+        {
+            case ActionOwnerKind.FollowUp:
+                RequireCapability(actor, CaseCapability.ManageFollowUp);
+                var followUp = _followUps.SingleOrDefault(item => item.FollowUpId == command.ActionId)
+                    ?? throw new InvalidOperationException("The follow-up does not exist on this case.");
+                if (followUp.Status is FollowUpStatus.Completed or FollowUpStatus.Cancelled)
+                    throw new InvalidOperationException("A closed follow-up cannot be transferred.");
+                previousOwner = followUp.AssigneeActorId;
+                break;
+            case ActionOwnerKind.Assistance:
+                RequireCapability(actor, CaseCapability.ManageAssistance);
+                var assistance = _assistance.SingleOrDefault(item => item.AssistanceId == command.ActionId)
+                    ?? throw new InvalidOperationException("The assistance request does not exist on this case.");
+                if (assistance.Status is AssistanceStatus.ReceiptConfirmed or AssistanceStatus.Unfulfilled or AssistanceStatus.Cancelled)
+                    throw new InvalidOperationException("A closed assistance request cannot be transferred.");
+                previousOwner = assistance.ResponsibleActorId;
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(command.ActionKind));
+        }
+
+        if (StringComparer.Ordinal.Equals(previousOwner, command.NewOwnerId))
+            throw new ArgumentException("The new owner must differ from the current owner.", nameof(command.NewOwnerId));
+        return [new ActionOwnerChanged(CaseId, version, ReportRevision, command.CommandId, actor.ActorId,
+            command.OccurredAtUtc, command.RecordedAtUtc, command.ActionKind, command.ActionId,
+            previousOwner, command.NewOwnerId, command.Reason)];
+    }
+
     private IReadOnlyList<CaseEvent> DecideRecordFollowUpOutcome(RecordFollowUpOutcomeCommand command, ActorCapabilities actor, long version)
     {
         RequireCapability(actor, CaseCapability.ManageFollowUp);
@@ -595,6 +637,9 @@ public sealed partial class CaseAggregate
                 break;
             case AssistanceActivityRecorded activity:
                 ApplyAssistanceActivity(activity);
+                break;
+            case ActionOwnerChanged ownerChanged:
+                ApplyActionOwnerChanged(ownerChanged);
                 break;
             case CaseCollaboratorGranted grant:
                 ApplyCollaboratorGrant(grant);
@@ -891,6 +936,7 @@ public sealed partial class CaseAggregate
     {
         AssistanceRequested requested => requested,
         AssistanceActivityRecorded activity => activity,
+        ActionOwnerChanged ownerChanged => ownerChanged,
         CaseCollaboratorGranted grant => grant,
         CaseCollaboratorRevoked revoke => revoke,
         CaseReported reported => reported with { ReportData = SnapshotReportData(reported.ReportData) },

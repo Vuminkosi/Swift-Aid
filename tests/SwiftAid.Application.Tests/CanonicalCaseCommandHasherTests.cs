@@ -10,6 +10,22 @@ namespace SwiftAid.Application.Tests;
 public sealed class CanonicalCaseCommandHasherTests
 {
     [Fact]
+    public void Action_owner_change_hash_binds_action_kind_identity_target_and_reason()
+    {
+        var actor = CreateActor("officer");
+        var command = new ChangeActionOwnerCommand(CommandId, 3, ActionOwnerKind.FollowUp,
+            Guid.NewGuid(), "worker-2", "coverage transfer", null, Now);
+        var hash = CreateSnapshot(actor, CaseId, command).CanonicalPayloadHash;
+        Assert.Equal(hash, CreateSnapshot(actor, CaseId, command with { RecordedAtUtc = Now.AddMinutes(1) }).CanonicalPayloadHash);
+        Assert.NotEqual(hash, CreateSnapshot(actor, CaseId, command with { ActionKind = ActionOwnerKind.Assistance }).CanonicalPayloadHash);
+        Assert.NotEqual(hash, CreateSnapshot(actor, CaseId, command with { ActionId = Guid.NewGuid() }).CanonicalPayloadHash);
+        Assert.NotEqual(hash, CreateSnapshot(actor, CaseId, command with { NewOwnerId = "worker-3" }).CanonicalPayloadHash);
+        Assert.NotEqual(hash, CreateSnapshot(actor, CaseId, command with { Reason = "different reason" }).CanonicalPayloadHash);
+        Assert.Throws<ArgumentOutOfRangeException>(() => CreateSnapshot(actor, CaseId, command with { ActionKind = (ActionOwnerKind)99 }));
+        Assert.Throws<ArgumentException>(() => CreateSnapshot(actor, CaseId, command with { ActionId = Guid.Empty }));
+    }
+
+    [Fact]
     public void Collaborator_hash_binds_target_scope_expiry_and_grant_identity()
     {
         var actor = CreateActor("officer");

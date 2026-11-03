@@ -26,7 +26,7 @@ public sealed class CaseEventTypeConstraintPostgresTests
         Assert.NotNull(definition);
 
         var eventTypes = Enum.GetNames<CaseEventType>();
-        Assert.Equal(24, eventTypes.Length);
+        Assert.Equal(25, eventTypes.Length);
         Assert.All(eventTypes, eventType => Assert.Contains($"'{eventType}'", definition, StringComparison.Ordinal));
 
         var rejected = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"""

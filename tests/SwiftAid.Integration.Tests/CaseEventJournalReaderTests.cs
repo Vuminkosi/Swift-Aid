@@ -14,6 +14,27 @@ namespace SwiftAid.Integration.Tests;
 public sealed class CaseEventJournalReaderTests
 {
     [Fact]
+    public void ActionOwnerChanged_RoundTripsAndReplaysExplicitTransfer()
+    {
+        var initial = CaseAggregate.CreateManagedCase(Guid.NewGuid(), Guid.NewGuid(), "workspace-1", CreateHumanReport(),
+            null, RecordedAtUtc, new ActorCapabilities("worker-1", CaseCapability.AcceptReport));
+        var aggregate = CaseAggregate.Replay(initial);
+        var followUpId = Guid.NewGuid();
+        aggregate.Apply(RoundTrip(Assert.Single(aggregate.Decide(new ScheduleFollowUpCommand(Guid.NewGuid(), aggregate.AggregateVersion,
+            followUpId, "Synthetic callback", "worker-2", RecordedAtUtc.AddDays(1), "scheduled", null, RecordedAtUtc),
+            new("officer-1", CaseCapability.ManageFollowUp)))));
+        var transfer = Assert.Single(aggregate.Decide(new ChangeActionOwnerCommand(Guid.NewGuid(), aggregate.AggregateVersion,
+            ActionOwnerKind.FollowUp, followUpId, "worker-3", "coverage change", null, RecordedAtUtc),
+            new("officer-1", CaseCapability.ManageFollowUp)));
+
+        aggregate.Apply(RoundTrip(transfer));
+
+        var replayed = CaseAggregate.Replay(aggregate.Events);
+        Assert.Equal("worker-3", Assert.Single(replayed.FollowUps).AssigneeActorId);
+        Assert.IsType<ActionOwnerChanged>(replayed.Events[^1]);
+    }
+
+    [Fact]
     public void CaseEventDatabaseConstraintMatchesV1SchemaVocabulary()
     {
         var options = new DbContextOptionsBuilder<SwiftAidDbContext>()

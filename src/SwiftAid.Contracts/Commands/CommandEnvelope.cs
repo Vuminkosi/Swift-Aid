@@ -128,6 +128,24 @@ public sealed record RecordFollowUpOutcomeCommand(
     DateTimeOffset RecordedAtUtc)
     : CaseCommand(CommandId, ExpectedVersion, OccurredAtUtc, RecordedAtUtc);
 
+/// <summary>Explicitly transfers an open follow-up or assistance action to another accountable actor.</summary>
+public enum ActionOwnerKind
+{
+    FollowUp,
+    Assistance
+}
+
+public sealed record ChangeActionOwnerCommand(
+    Guid CommandId,
+    long ExpectedVersion,
+    ActionOwnerKind ActionKind,
+    Guid ActionId,
+    string NewOwnerId,
+    string Reason,
+    DateTimeOffset? OccurredAtUtc,
+    DateTimeOffset RecordedAtUtc)
+    : CaseCommand(CommandId, ExpectedVersion, OccurredAtUtc, RecordedAtUtc);
+
 /// <summary>Raises a staff-owned escalation concern on an active case. Never a clinical directive.</summary>
 public sealed record RaiseEscalationCommand(
     Guid CommandId,

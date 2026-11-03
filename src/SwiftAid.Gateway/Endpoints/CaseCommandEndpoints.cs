@@ -126,6 +126,12 @@ public static class CaseCommandEndpoints
                 RequireAssistanceStatus(request),
                 RequireAssistanceNote(request), RequireReceiptMethod(request), RequireReceiptContext(request),
                 request.OccurredAtUtc, recordedAt),
+            "ChangeActionOwner" => new ChangeActionOwnerCommand(
+                request.CommandId, request.ExpectedVersion,
+                request.ActionOwnerKind is { } kind && Enum.IsDefined(kind) ? kind : throw new ArgumentException("An action kind is required."),
+                request.ActionId is { } actionId && actionId != Guid.Empty ? actionId : throw new ArgumentException("An action identifier is required."),
+                request.ProposedOwnerId ?? throw new ArgumentException("A new action owner is required."),
+                RequireReason(request), request.OccurredAtUtc, recordedAt),
             "AcknowledgeAssignment" => new AcknowledgeAssignmentCommand(
                 request.CommandId,
                 request.ExpectedVersion,
@@ -683,7 +689,7 @@ public static class CaseCommandEndpoints
 
 /// <summary>Version-one wire request for a managed-case non-creation command.</summary>
 /// <param name="SchemaVersion">Wire schema version; only 1 is supported.</param>
-/// <param name="CommandType">One of CorrectReport, RequestProtectedAction, ReviewProtectedAction, Resolve, Reopen, RecordObservation, ScheduleFollowUp, AcknowledgeFollowUp, RecordFollowUpOutcome, RaiseEscalation, AcknowledgeEscalation, CloseEscalation.</param>
+/// <param name="CommandType">One of CorrectReport, RequestProtectedAction, ReviewProtectedAction, Resolve, Reopen, RecordObservation, ScheduleFollowUp, AcknowledgeFollowUp, RecordFollowUpOutcome, ChangeActionOwner, RaiseEscalation, AcknowledgeEscalation, CloseEscalation.</param>
 /// <param name="CommandId">Stable idempotency key for the command.</param>
 /// <param name="ExpectedVersion">Aggregate version the command applies to; at least 2.</param>
 /// <param name="OccurredAtUtc">Optional source occurrence time; the server clock is authoritative for recording.</param>
@@ -744,7 +750,9 @@ public sealed record CaseCommandApiRequest(
     string? AssistanceStatus = null,
     string? AssistanceNote = null,
     string? ReceiptMethod = null,
-    string? ReceiptContext = null);
+    string? ReceiptContext = null,
+    ActionOwnerKind? ActionOwnerKind = null,
+    Guid? ActionId = null);
 
 /// <summary>Accepted or replayed case-command receipt.</summary>
 public sealed record CaseCommandApiResponse(

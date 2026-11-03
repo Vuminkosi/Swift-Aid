@@ -409,7 +409,7 @@ public sealed partial class PostgresCaseCommandPersistence : ICaseCommandPersist
                 or CaseObservationRecorded or CaseFollowUpScheduled or CaseFollowUpAcknowledged or CaseFollowUpOutcomeRecorded
                 or CaseEscalationRaised or CaseEscalationAcknowledged or CaseEscalationClosed or CaseAssignmentAcknowledged
                 or CaseCollaboratorGranted or CaseCollaboratorRevoked
-                or AssistanceRequested or AssistanceActivityRecorded))
+                or AssistanceRequested or AssistanceActivityRecorded or ActionOwnerChanged))
             {
                 // Non-creation command processing must not create a first-report event.
                 throw InvalidJournal();
@@ -618,6 +618,16 @@ public sealed partial class PostgresCaseCommandPersistence : ICaseCommandPersist
                         throw InvalidJournal();
                     acknowledgedFollowUp.Status = FollowUpStatus.Acknowledged;
                     break;
+                case ActionOwnerChanged ownerChange when ownerChange.ActionKind == ActionOwnerKind.FollowUp:
+                    var transferredFollowUp = await _dbContext.ManagedCaseFollowUps
+                        .SingleOrDefaultAsync(item => item.FollowUpId == ownerChange.ActionId, cancellationToken)
+                        .ConfigureAwait(false) ?? throw InvalidJournal();
+                    if (transferredFollowUp.CaseId != ownerChange.CaseId ||
+                        transferredFollowUp.Status is FollowUpStatus.Completed or FollowUpStatus.Cancelled ||
+                        !string.Equals(transferredFollowUp.AssigneeActorId, ownerChange.PreviousOwnerId, StringComparison.Ordinal))
+                        throw InvalidJournal();
+                    transferredFollowUp.AssigneeActorId = ownerChange.NewOwnerId;
+                    break;
                 case CaseFollowUpOutcomeRecorded outcome:
                     var followUp = await _dbContext.ManagedCaseFollowUps
                         .SingleOrDefaultAsync(item => item.FollowUpId == outcome.FollowUpId, cancellationToken)
@@ -699,6 +709,17 @@ public sealed partial class PostgresCaseCommandPersistence : ICaseCommandPersist
                         assistance.ReceiptMethod = activity.ReceiptMethod;
                         assistance.ReceiptContext = activity.ReceiptContext;
                     }
+                    break;
+                case ActionOwnerChanged assistanceOwnerChange when assistanceOwnerChange.ActionKind == ActionOwnerKind.Assistance:
+                    var transferredAssistance = await _dbContext.ManagedCaseAssistance
+                        .SingleOrDefaultAsync(item => item.AssistanceId == assistanceOwnerChange.ActionId, cancellationToken)
+                        .ConfigureAwait(false) ?? throw InvalidJournal();
+                    if (transferredAssistance.CaseId != assistanceOwnerChange.CaseId ||
+                        transferredAssistance.Status is AssistanceStatus.ReceiptConfirmed or AssistanceStatus.Unfulfilled or AssistanceStatus.Cancelled ||
+                        !string.Equals(transferredAssistance.ResponsibleActorId, assistanceOwnerChange.PreviousOwnerId, StringComparison.Ordinal))
+                        throw InvalidJournal();
+                    transferredAssistance.ResponsibleActorId = assistanceOwnerChange.NewOwnerId;
+                    transferredAssistance.LastEventVersion = assistanceOwnerChange.AggregateVersion;
                     break;
                 default:
                     break;

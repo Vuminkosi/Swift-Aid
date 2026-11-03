@@ -48,6 +48,8 @@ public sealed class CaseEventSerializer
                 new CaseFollowUpAcknowledgedPayload(acknowledgement.FollowUpId)),
             CaseFollowUpOutcomeRecorded outcome => Serialize(outcome, CaseEventType.CaseFollowUpOutcomeRecorded,
                 MapFollowUpOutcome(outcome)),
+            ActionOwnerChanged ownerChange => Serialize(ownerChange, CaseEventType.ActionOwnerChanged,
+                new ActionOwnerChangedPayload(ownerChange.ActionKind, ownerChange.ActionId, ownerChange.PreviousOwnerId, ownerChange.NewOwnerId, ownerChange.Reason)),
             CaseEscalationRaised raised => Serialize(raised, CaseEventType.CaseEscalationRaised,
                 new CaseEscalationRaisedPayload(raised.EscalationId, raised.Reason, Array.AsReadOnly(raised.EvidenceEventIds.ToArray()), raised.RecipientRoute)),
             CaseEscalationAcknowledged acknowledged => Serialize(acknowledged, CaseEventType.CaseEscalationAcknowledged,
@@ -68,7 +70,7 @@ public sealed class CaseEventSerializer
             CaseReported or CaseAssigned or CaseAssignmentAcknowledged or CaseReportCorrected or CaseActionRequested or CaseActionRequestReviewed or CaseResolved or CaseReopened
             or CaseObservationRecorded or CaseFollowUpScheduled or CaseFollowUpAcknowledged or CaseFollowUpOutcomeRecorded
             or CaseEscalationRaised or CaseEscalationAcknowledged or CaseEscalationClosed
-            or CaseCollaboratorGranted or CaseCollaboratorRevoked or AssistanceRequested or AssistanceActivityRecorded => 1,
+            or CaseCollaboratorGranted or CaseCollaboratorRevoked or AssistanceRequested or AssistanceActivityRecorded or ActionOwnerChanged => 1,
             _ => throw new NotSupportedException($"Event type {@event.GetType().Name} is not supported by the case-event wire contract.")
         };
     }

@@ -198,6 +198,7 @@ public sealed class CaseTimelineQuery(
         "CaseFollowUpScheduled" => "Follow-up scheduled",
         "CaseFollowUpAcknowledged" => "Follow-up acknowledged",
         "CaseFollowUpOutcomeRecorded" => "Follow-up outcome recorded",
+        "ActionOwnerChanged" => "Action owner changed",
         "AssistanceRequested" => "Assistance requested",
         "AssistanceAccepted" => "Assistance responsibility accepted",
         "AssistanceProgressRecorded" => "Assistance progress recorded",

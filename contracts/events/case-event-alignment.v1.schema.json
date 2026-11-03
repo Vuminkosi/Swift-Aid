@@ -32,7 +32,7 @@
     "workflow": { "type": "object", "additionalProperties": false, "required": ["workflow"], "properties": { "workflow": { "enum": ["Reported", "UnderReview", "Active", "AwaitingFollowUp", "Resolved"] } } },
     "assistanceProgress": { "type": "object", "additionalProperties": false, "required": ["assistanceId", "state"], "properties": { "assistanceId": { "type": "string", "minLength": 1 }, "state": { "enum": ["Requested", "Accepted", "InProgress", "Provided", "ReceiptConfirmed", "Unfulfilled", "Cancelled"] } } },
     "actionCancellation": { "type": "object", "additionalProperties": false, "required": ["actionId", "reason"], "properties": { "actionId": { "type": "string", "minLength": 1 }, "reason": { "type": "string", "minLength": 1 } } },
-    "ownerChange": { "type": "object", "additionalProperties": false, "required": ["actionId", "previousOwnerId", "newOwnerId", "reason"], "properties": { "actionId": { "type": "string", "minLength": 1 }, "previousOwnerId": { "type": "string", "minLength": 1 }, "newOwnerId": { "type": "string", "minLength": 1 }, "reason": { "type": "string", "minLength": 1 } } },
+    "ownerChange": { "type": "object", "additionalProperties": false, "required": ["actionKind", "actionId", "previousOwnerId", "newOwnerId", "reason"], "properties": { "actionKind": { "enum": ["FollowUp", "Assistance"] }, "actionId": { "type": "string", "format": "uuid" }, "previousOwnerId": { "type": "string", "minLength": 1 }, "newOwnerId": { "type": "string", "minLength": 1 }, "reason": { "type": "string", "minLength": 1 } } },
     "actionRequest": { "$ref": "case-event.v1.schema.json#/$defs/actionRequest" },
     "actionReview": { "$ref": "case-event.v1.schema.json#/$defs/actionReview" }
   }

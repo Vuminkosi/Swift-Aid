@@ -8,7 +8,7 @@
   "properties": {
     "schemaVersion": { "const": 1 },
     "eventId": { "type": "string", "format": "uuid" },
-    "eventType": { "enum": ["CaseReported", "CaseAssigned", "CaseReportCorrected", "CaseActionRequested", "CaseActionRequestReviewed", "CaseResolved", "CaseReopened", "CaseObservationRecorded", "CaseFollowUpScheduled", "CaseFollowUpAcknowledged", "CaseFollowUpOutcomeRecorded", "CaseEscalationRaised", "CaseEscalationAcknowledged", "CaseEscalationClosed", "CaseAssignmentAcknowledged", "CaseCollaboratorGranted", "CaseCollaboratorRevoked", "AssistanceRequested", "AssistanceAccepted", "AssistanceProgressRecorded", "AssistanceProvided", "AssistanceReceiptConfirmed", "AssistanceUnfulfilled", "AssistanceCancelled"] },
+    "eventType": { "enum": ["CaseReported", "CaseAssigned", "CaseReportCorrected", "CaseActionRequested", "CaseActionRequestReviewed", "CaseResolved", "CaseReopened", "CaseObservationRecorded", "CaseFollowUpScheduled", "CaseFollowUpAcknowledged", "CaseFollowUpOutcomeRecorded", "CaseEscalationRaised", "CaseEscalationAcknowledged", "CaseEscalationClosed", "CaseAssignmentAcknowledged", "CaseCollaboratorGranted", "CaseCollaboratorRevoked", "AssistanceRequested", "AssistanceAccepted", "AssistanceProgressRecorded", "AssistanceProvided", "AssistanceReceiptConfirmed", "AssistanceUnfulfilled", "AssistanceCancelled", "ActionOwnerChanged"] },
     "caseId": { "type": "string", "format": "uuid" },
     "aggregateVersion": { "type": "integer", "minimum": 1 },
     "reportRevision": { "type": "integer", "minimum": 1 },
@@ -37,7 +37,8 @@
         { "$ref": "#/$defs/collaboratorRevoked" },
         { "$ref": "#/$defs/assistanceRequested" },
         { "$ref": "#/$defs/assistanceActivity" },
-        { "$ref": "#/$defs/assistanceReceipt" }
+        { "$ref": "#/$defs/assistanceReceipt" },
+        { "$ref": "#/$defs/actionOwnerChanged" }
       ]
     }
   },
@@ -53,6 +54,7 @@
     { "if": { "properties": { "eventType": { "const": "CaseFollowUpScheduled" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/followUpScheduled" } } } },
     { "if": { "properties": { "eventType": { "const": "CaseFollowUpAcknowledged" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/followUpAcknowledged" } } } },
     { "if": { "properties": { "eventType": { "const": "CaseFollowUpOutcomeRecorded" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/followUpOutcomeRecorded" } } } },
+    { "if": { "properties": { "eventType": { "const": "ActionOwnerChanged" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/actionOwnerChanged" } } } },
     { "if": { "properties": { "eventType": { "const": "CaseEscalationRaised" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/escalationRaised" } } } },
     { "if": { "properties": { "eventType": { "const": "CaseEscalationAcknowledged" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/escalationAcknowledged" } } } },
     { "if": { "properties": { "eventType": { "const": "CaseEscalationClosed" } }, "required": ["eventType"] }, "then": { "properties": { "payload": { "$ref": "#/$defs/escalationClosed" } } } },
@@ -174,6 +176,17 @@
         "purpose": { "type": "string", "minLength": 1 },
         "assigneeActorId": { "type": "string", "minLength": 1 },
         "dueAtUtc": { "type": "string", "format": "date-time" }
+      }
+    },
+    "actionOwnerChanged": {
+      "type": "object", "additionalProperties": false,
+      "required": ["actionKind", "actionId", "previousOwnerId", "newOwnerId", "reason"],
+      "properties": {
+        "actionKind": { "enum": ["FollowUp", "Assistance"] },
+        "actionId": { "type": "string", "format": "uuid" },
+        "previousOwnerId": { "type": "string", "minLength": 1 },
+        "newOwnerId": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 }
       }
     },
     "followUpAcknowledged": {

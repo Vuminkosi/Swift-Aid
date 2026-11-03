@@ -70,7 +70,9 @@ public sealed record CaseCommandInput(
     AssistanceStatus? AssistanceStatus = null,
     string? AssistanceNote = null,
     string? ReceiptMethod = null,
-    string? ReceiptContext = null);
+    string? ReceiptContext = null,
+    ActionOwnerKind? ActionOwnerKind = null,
+    Guid? ActionId = null);
 
 /// <summary>Staff case-command outcome. Denial and absence share one value for privacy.</summary>
 public enum CaseCommandStatus

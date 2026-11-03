@@ -71,6 +71,30 @@ public sealed class CaseCommandProcessorTests
     }
 
     [Fact]
+    public async Task Follow_up_owner_transfer_locks_and_checks_eligible_new_owner()
+    {
+        var aggregate = CreateAggregate();
+        var followUpId = Guid.NewGuid();
+        var scheduled = Assert.Single(aggregate.Decide(new ScheduleFollowUpCommand(Guid.NewGuid(), 2,
+            followUpId, "Synthetic callback", "worker-old", DatabaseNow.AddDays(1), "scheduled", null, DatabaseNow),
+            new ActorCapabilities("staff-actor", CaseCapability.ManageFollowUp)));
+        aggregate.Apply(scheduled);
+        var command = new ChangeActionOwnerCommand(CommandId, aggregate.AggregateVersion, ActionOwnerKind.FollowUp,
+            followUpId, "worker-new", "coverage transfer", null, CallerRecordedAt);
+        var scenario = CreateScenario(command, aggregate.AggregateVersion, aggregate);
+        scenario.UnitOfWork.LockAdditionalHints = true;
+        scenario.AccessPolicy.Decisions.Enqueue(Allowed());
+        scenario.AccessPolicy.Decisions.Enqueue(Allowed());
+
+        var result = await scenario.Processor.ProcessAsync(scenario.Actor, CaseId, 1, command, CancellationToken.None);
+
+        Assert.Equal(CaseCommandProcessingStatus.Accepted, result.Status);
+        Assert.Contains("worker-new", scenario.UnitOfWork.BeginHints[1]);
+        Assert.Equal("worker-new", Assert.Single(scenario.Persistence.FollowUpAssigneeChecks));
+        Assert.IsType<ActionOwnerChanged>(Assert.Single(Assert.Single(scenario.Persistence.Appends).Events));
+    }
+
+    [Fact]
     public async Task Collaborator_revocation_uses_dedicated_permission_and_server_timestamp()
     {
         var aggregate = CreateAggregate();

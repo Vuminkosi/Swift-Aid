@@ -273,6 +273,25 @@ public sealed class CaseCommandProcessor : ICaseCommandProcessor
             }
         }
 
+        var ownerChange = eventSnapshot.OfType<ActionOwnerChanged>().SingleOrDefault();
+        if (ownerChange is not null)
+        {
+            var newOwnerId = ownerChange.NewOwnerId;
+            if (!lease.LockedActorIds.Contains(newOwnerId, StringComparer.Ordinal))
+                throw new CaseLeaseDiscoveryChangedException(caseId, actorHints.Add(newOwnerId));
+            var eligible = ownerChange.ActionKind switch
+            {
+                ActionOwnerKind.FollowUp => await _persistence.IsEligibleFollowUpAssigneeAsync(
+                    lease, newOwnerId, header, cancellationToken).ConfigureAwait(false),
+                ActionOwnerKind.Assistance => await _persistence.IsEligibleAssignmentTargetAsync(
+                    lease, newOwnerId, header, cancellationToken).ConfigureAwait(false),
+                _ => false
+            };
+            if (!eligible)
+                return await DenyAndCommitAuditAsync(lease, actor, caseId, commandId,
+                    AccessDecisionCode.OperationNotGranted, cancellationToken).ConfigureAwait(false);
+        }
+
         if (commandForDecision is RequestAssistanceCommand assistanceRequest)
         {
             var responsibleActorId = assistanceRequest.ResponsibleActorId;
@@ -431,6 +450,8 @@ public sealed class CaseCommandProcessor : ICaseCommandProcessor
         AcknowledgeAssignmentCommand => CaseOperation.AcknowledgeAssignment,
         GrantCaseCollaboratorCommand or RevokeCaseCollaboratorCommand => CaseOperation.ManageCollaborators,
         RequestAssistanceCommand or UpdateAssistanceCommand => CaseOperation.ManageAssistance,
+        ChangeActionOwnerCommand { ActionKind: ActionOwnerKind.FollowUp } => CaseOperation.ManageFollowUp,
+        ChangeActionOwnerCommand { ActionKind: ActionOwnerKind.Assistance } => CaseOperation.ManageAssistance,
         CorrectReportCommand => CaseOperation.CorrectReport,
         RequestCaseActionCommand => CaseOperation.RequestProtectedAction,
         ReviewCaseActionRequestCommand => CaseOperation.ReviewProtectedAction,
@@ -473,6 +494,7 @@ public sealed class CaseCommandProcessor : ICaseCommandProcessor
         ScheduleFollowUpCommand schedule => schedule with { RecordedAtUtc = databaseNow },
         AcknowledgeFollowUpCommand acknowledge => acknowledge with { RecordedAtUtc = databaseNow },
         RecordFollowUpOutcomeCommand outcome => outcome with { RecordedAtUtc = databaseNow },
+        ChangeActionOwnerCommand ownerChange => ownerChange with { RecordedAtUtc = databaseNow },
         RaiseEscalationCommand escalation => escalation with { RecordedAtUtc = databaseNow },
         AcknowledgeEscalationCommand acknowledge => acknowledge with { RecordedAtUtc = databaseNow },
         CloseEscalationCommand close => close with { RecordedAtUtc = databaseNow },

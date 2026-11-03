@@ -27,7 +27,8 @@ public enum CaseEventType
     AssistanceReceiptConfirmed,
     AssistanceUnfulfilled,
     AssistanceCancelled,
-    CaseFollowUpAcknowledged
+    CaseFollowUpAcknowledged,
+    ActionOwnerChanged
 }
 
 public abstract record CaseEventPayload;
@@ -88,6 +89,9 @@ public sealed record CaseFollowUpOutcomeRecordedPayload(
     DateTimeOffset PreviousDueAtUtc,
     DateTimeOffset? NewDueAtUtc,
     string Reason) : CaseEventPayload;
+
+public sealed record ActionOwnerChangedPayload(ActionOwnerKind ActionKind, Guid ActionId,
+    string PreviousOwnerId, string NewOwnerId, string Reason) : CaseEventPayload;
 
 public sealed record CaseEscalationRaisedPayload(
     Guid EscalationId,
