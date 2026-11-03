@@ -612,6 +612,39 @@ public sealed class EllaiLiveQueueReadTests
     }
 
     [Fact]
+    public async Task EmptyRetainedSearchPreservesIncompleteAndUnknownLocationStatus()
+    {
+        var topics = new EllaiTopicService();
+        var memory = new EllaiCaseResultMemory(topics, new FakeQueue());
+        var context = Context with { Actor = TestActor() };
+        await memory.RememberAsync(context, [], default, searchIncomplete: true, unknownLocations: true);
+
+        var recalled = await memory.RecallAsync(context, default);
+        Assert.True(recalled.Allowed);
+        Assert.Contains("original search or result was incomplete", recalled.ResultSummary);
+        Assert.Contains("unknown or incomplete locations", recalled.ResultSummary);
+        Assert.Contains("result set was empty", recalled.ResultSummary);
+    }
+
+    [Theory]
+    [InlineData("case-results/1", true)]
+    [InlineData("case-results/2", false)]
+    public async Task MissingCompletenessMetadataIsUnknownForLegacyAndRejectedForNewSnapshots(string version, bool allowed)
+    {
+        var topics = new EllaiTopicService();
+        var context = Context with { Actor = TestActor() };
+        var snapshot = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            ActorId = context.Actor!.ActorId, context.ScopeEpoch,
+            ExpiresAtUtc = DateTimeOffset.UtcNow.AddHours(1), Cases = Array.Empty<object>()
+        });
+        await topics.TrackAsync(context.SessionId, EllaiCaseResultMemory.TopicTitle, ["case-results"], snapshot, version);
+        var result = await new EllaiCaseResultMemory(topics, new FakeQueue()).RecallAsync(context, default);
+        Assert.Equal(allowed, result.Allowed);
+        if (allowed) Assert.Contains("completeness was not recorded", result.ResultSummary);
+    }
+
+    [Fact]
     public async Task ResultRecallRejectsAnIncompleteAuthorizationPage()
     {
         var topics = new EllaiTopicService();

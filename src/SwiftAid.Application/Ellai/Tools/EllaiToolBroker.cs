@@ -707,7 +707,8 @@ public sealed class EllaiToolBroker
             {
                 try
                 {
-                    await new EllaiCaseResultMemory(_topics, queue, _referenceIndex).RememberAsync(context, foundItems, ct).ConfigureAwait(false);
+                    await new EllaiCaseResultMemory(_topics, queue, _referenceIndex).RememberAsync(context, foundItems, ct,
+                        searchIncomplete: found.Truncated, unknownLocations: found.UnknownLocations).ConfigureAwait(false);
                     placeRecallNotice = " Result references retained for this session; recall with ellai_evidence(ref=case-results).";
                 }
                 catch (Exception error) when (error is not OperationCanceledException and not OutOfMemoryException)
@@ -764,7 +765,8 @@ public sealed class EllaiToolBroker
         {
             try
             {
-                await new EllaiCaseResultMemory(_topics, queue, _referenceIndex).RememberAsync(context, items, ct).ConfigureAwait(false);
+                await new EllaiCaseResultMemory(_topics, queue, _referenceIndex).RememberAsync(context, items, ct,
+                    searchIncomplete: result.NextCursor is not null || result.Items.Count > limit).ConfigureAwait(false);
                 recallNotice = " Result references retained for this session; recall with ellai_topic(ref=case-results).";
             }
             catch (Exception error) when (error is not OperationCanceledException)

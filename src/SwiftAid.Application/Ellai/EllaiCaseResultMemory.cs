@@ -13,23 +13,24 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
     public const string Reference = "case-results";
     public const string TopicTitle = "Ellai latest case result references";
     private sealed record Snapshot(string ActorId, string ScopeEpoch, DateTimeOffset ExpiresAtUtc,
-        IReadOnlyList<CaseReference> Cases);
+        IReadOnlyList<CaseReference> Cases, bool? SearchIncomplete = null, bool? UnknownLocations = null);
     private sealed record CaseReference(Guid Id, long Version);
 
     public async Task RememberAsync(EllaiToolContext context, IReadOnlyList<CaseQueueItem> items,
-        CancellationToken ct)
+        CancellationToken ct, bool searchIncomplete = false, bool unknownLocations = false)
     {
         ct.ThrowIfCancellationRequested();
         if (context.Actor is null) return;
         if (items.Any(item => item.CaseId == Guid.Empty) || items.Select(item => item.CaseId).Distinct().Count() != items.Count)
             throw new ArgumentException("Case result references must be distinct and nonempty.", nameof(items));
         var snapshot = new Snapshot(context.Actor.ActorId, context.ScopeEpoch, DateTimeOffset.UtcNow.AddHours(24),
-            items.Take(20).Select(item => new CaseReference(item.CaseId, item.AggregateVersion)).ToArray());
+            items.Take(20).Select(item => new CaseReference(item.CaseId, item.AggregateVersion)).ToArray(),
+            searchIncomplete, unknownLocations);
         var serialized = JsonSerializer.Serialize(snapshot);
         var stored = await topics.TrackAsync(context.SessionId, TopicTitle, [Reference],
-            serialized, "case-results/1", cancellationToken: ct).ConfigureAwait(false);
+            serialized, "case-results/2", cancellationToken: ct).ConfigureAwait(false);
         ct.ThrowIfCancellationRequested();
-        if (stored.Title != TopicTitle || stored.EntityVersion != "case-results/1" || stored.EntityRef != serialized)
+        if (stored.Title != TopicTitle || stored.EntityVersion != "case-results/2" || stored.EntityRef != serialized)
             throw new InvalidOperationException("The case result references were not retained.");
     }
 
@@ -72,17 +73,23 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
         Snapshot? snapshot;
         try
         {
-            snapshot = topic?.EntityVersion == "case-results/1" && topic.EntityRef is { Length: <= 16000 } json
+            snapshot = topic?.EntityVersion is "case-results/1" or "case-results/2" && topic.EntityRef is { Length: <= 16000 } json
                 ? JsonSerializer.Deserialize<Snapshot>(json) : null;
         }
         catch (JsonException) { return Unavailable(); }
-        if (snapshot is null || snapshot.ActorId != context.Actor.ActorId || snapshot.ScopeEpoch != context.ScopeEpoch
+        if (snapshot is null || topic?.EntityVersion == "case-results/2" && (snapshot.SearchIncomplete is null || snapshot.UnknownLocations is null)
+            || snapshot.ActorId != context.Actor.ActorId || snapshot.ScopeEpoch != context.ScopeEpoch
             || snapshot.ExpiresAtUtc <= DateTimeOffset.UtcNow || snapshot.Cases is null || snapshot.Cases.Count > 20
             || snapshot.Cases.Any(item => item is null || item.Id == Guid.Empty)
             || snapshot.Cases.Select(item => item.Id).Distinct().Count() != snapshot.Cases.Count)
             return Unavailable();
+        var completeness = snapshot.SearchIncomplete is null || snapshot.UnknownLocations is null
+            ? "The original search completeness was not recorded. "
+            : (snapshot.SearchIncomplete.Value ? "The original search or result was incomplete. " : "") +
+              (snapshot.UnknownLocations.Value ? "Some readable cases had unknown or incomplete locations. " : "");
         if (snapshot.Cases.Count == 0)
-            return new EllaiToolResult(EllaiToolNames.Topic, true, null, [], "The last retained case result set was empty.", 0, false)
+            return new EllaiToolResult(EllaiToolNames.Topic, true, null, [],
+                completeness + "The last retained case result set was empty.", 0, false)
                 { HistoryValidUntilUtc = snapshot.ExpiresAtUtc };
 
         var current = await queue.GetMineAsync(context.Actor, 20,
@@ -98,7 +105,7 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
         var scopedEvidence = field is null
             ? evidence
             : evidence.Select(item => item with { FieldPath = field }).ToArray();
-        var text = "Previously retrieved cases, checked against current access; this is not a new search. " +
+        var text = completeness + "Previously retrieved cases, checked against current access; this is not a new search. " +
             "Unavailable records are omitted.\n" + string.Join("\n", rows.Select(pair =>
             {
                 var selectedValue = field switch
