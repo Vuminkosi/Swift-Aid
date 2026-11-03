@@ -26,6 +26,12 @@ public static class PublicSessionEndpoints
         ArgumentNullException.ThrowIfNull(endpoints);
 
         var routes = endpoints.MapGroup("/public/v1/sessions");
+        routes.AddEndpointFilter(async (context, next) =>
+        {
+            // Session status and public destinations can change on cancellation or revision.
+            context.HttpContext.Response.Headers.CacheControl = "no-store";
+            return await next(context);
+        });
         routes.MapGet("/", ListAsync)
             .AllowAnonymous()
             .WithName("ListPublicSessions")
@@ -87,7 +93,6 @@ public static class PublicSessionEndpoints
         try
         {
             var page = await service.QueryPublicAsync(query, cancellationToken).ConfigureAwait(false);
-            context.Response.Headers.CacheControl = "no-store";
             context.Response.Headers[PublicSessionQueryFeatures.HeaderName] = PublicSessionQueryFeatures.StatusFilter;
             return Results.Json(page, options: JsonOptions);
         }
@@ -152,7 +157,6 @@ public static class PublicSessionEndpoints
         try
         {
             var sessions = await service.ListPublicAsync(limit, cancellationToken).ConfigureAwait(false);
-            context.Response.Headers.CacheControl = "public, max-age=60";
             return Results.Json(sessions, options: JsonOptions, statusCode: StatusCodes.Status200OK);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -186,7 +190,6 @@ public static class PublicSessionEndpoints
                 return MapMissing();
             }
 
-            context.Response.Headers.CacheControl = "public, max-age=60";
             return Results.Json(session, options: JsonOptions, statusCode: StatusCodes.Status200OK);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

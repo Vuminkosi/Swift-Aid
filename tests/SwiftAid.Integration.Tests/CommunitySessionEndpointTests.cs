@@ -31,6 +31,38 @@ public sealed class CommunitySessionEndpointTests
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly Guid KnownSessionId = Guid.Parse("d0c00001-2222-4a44-9aa9-123456789abc");
 
+    [Theory]
+    [InlineData("/public/v1/sessions/", HttpStatusCode.OK)]
+    [InlineData("/public/v1/sessions/search", HttpStatusCode.OK)]
+    [InlineData("/public/v1/sessions/d0c00001-2222-4a44-9aa9-123456789abc", HttpStatusCode.OK)]
+    [InlineData("/public/v1/sessions/d0c00001-2222-4a44-9aa9-123456789abc/calendar", HttpStatusCode.OK)]
+    [InlineData("/public/v1/sessions/d0c00001-2222-4a44-9aa9-123456789abc/invitation", HttpStatusCode.OK)]
+    [InlineData("/public/v1/sessions/00000000-0000-0000-0000-000000000001", HttpStatusCode.NotFound)]
+    public async Task PublicSessionResponsesAreNotStoredByHttpCaches(string path, HttpStatusCode expected)
+    {
+        await using var host = await TestSessionHost.StartAsync(withPublished: true);
+        using var response = await host.Client.GetAsync(path);
+
+        Assert.Equal(expected, response.StatusCode);
+        Assert.True(response.Headers.CacheControl?.NoStore);
+        Assert.False(response.Headers.CacheControl?.Public ?? false);
+    }
+
+    [Fact]
+    public async Task PublicDetailRechecksVisibilityAfterPublicationChanges()
+    {
+        await using var host = await TestSessionHost.StartAsync(withPublished: true);
+        var path = $"/public/v1/sessions/{KnownSessionId:D}";
+        using var first = await host.Client.GetAsync(path);
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.True(first.Headers.CacheControl?.NoStore);
+
+        host.Service.WithPublished = false;
+        using var next = await host.Client.GetAsync(path);
+        Assert.Equal(HttpStatusCode.NotFound, next.StatusCode);
+        Assert.True(next.Headers.CacheControl?.NoStore);
+    }
+
     [Fact]
     public void OfficerRoutesRequireAuthenticationAndScopedCapabilityMetadata()
     {
