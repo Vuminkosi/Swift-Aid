@@ -754,10 +754,13 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
         if (!changeCatalogue) EllaiReportGuidanceDescriptors.RegisterAll(registry);
         var uiObservations = new InMemoryEllaiUiObservationStore();
         await uiObservations.RecordAsync(new(session.SessionId, "view-1", "context-1", "web", ["report.entry"],
-            DateTimeOffset.UtcNow, [new("report.entry", UiObservationState.Ready)]), CancellationToken.None);
+            DateTimeOffset.UtcNow.AddSeconds(-2), [new("report.entry", UiObservationState.Ready)]), CancellationToken.None);
         if (changeObservationBeforeAnswer)
             model.BeforeAnswer = () => uiObservations.RecordAsync(new(session.SessionId, "view-2", "context-2", "web", [],
                 DateTimeOffset.UtcNow), CancellationToken.None);
+        else if (toolName == EllaiToolNames.UiObserve)
+            model.BeforeAnswer = () => uiObservations.RecordAsync(new(session.SessionId, "view-1", "context-1", "web", ["report.entry"],
+                DateTimeOffset.UtcNow, [new("report.entry", UiObservationState.Ready)]), CancellationToken.None);
         var registrations = new ServiceCollection()
             .AddSingleton<IEllaiSessionStore>(store).AddSingleton<IEllaiUtteranceOutboxStore>(store)
             .AddSingleton(responses).AddSingleton(consent).AddSingleton<EllaiUsageLedger>()

@@ -3431,3 +3431,21 @@ tests\SwiftAid.Integration.Tests\SwiftAid.Integration.Tests.csproj --no-restore
 ended in `TerminalFailure` without publishing or storing the synthetic answer;
 the unchanged-report case continued to pass. This uses an in-memory store and
 synthetic model, not a deployed client or independent security review.
+
+### UI observation heartbeat compatibility — 2026-11-03
+
+The client reports its current UI every 10 seconds, or every second during a
+generated tour. Including the server receipt timestamp in the observation
+fingerprint caused an identical fresh report to invalidate an in-flight answer.
+The fingerprint now excludes that timestamp while retaining the view and
+context fingerprints, platform, observed states, evidence and validation
+flags. Freshness remains part of the rechecked states and flags: a report that
+ages into `Stale`, or an actual state or view change, does not match. Existing
+traces made with the prior fingerprint fail closed and are omitted from replay.
+
+The unchanged-refresh regression failed before the fix. PASS: the focused
+application UI, framework and authorization filter passed 180/180. PASS: the
+framework worker filter passed 9/9 with a synthetic model and in-memory stores;
+it now refreshes the identical report before the answer and separately changes
+the report before an answer. A deployed browser and independent security review
+remain NOT VERIFIED.

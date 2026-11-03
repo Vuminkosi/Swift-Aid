@@ -1089,9 +1089,11 @@ public sealed class EllaiToolBroker
         // client report contents. A fresh call must resolve the same report.
         if (string.Equals(report.ViewInstanceId, view.Trim(), StringComparison.Ordinal) && goalTags.All(knownGoals.Contains))
         {
+            // The receipt time changes on every heartbeat. Freshness is already
+            // reflected in the observed states and validation flags in lines.
             var content = JsonSerializer.SerializeToUtf8Bytes(new
             {
-                report.ViewInstanceId, report.ContextStamp, report.Platform, report.ReceivedAtUtc,
+                report.ViewInstanceId, report.ContextStamp, report.Platform,
                 Lines = lines.ToArray(), Evidence = evidence
             });
             var replay = new EllaiUiObservationReplayScope(feature, string.Join(",", requested),

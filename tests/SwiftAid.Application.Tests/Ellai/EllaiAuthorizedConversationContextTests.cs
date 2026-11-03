@@ -296,7 +296,7 @@ public sealed class EllaiAuthorizedConversationContextTests
         var registry = new EllaiUiRegistry();
         EllaiReportGuidanceDescriptors.RegisterAll(registry);
         var reports = new InMemoryEllaiUiObservationStore();
-        var receivedAt = DateTimeOffset.UtcNow;
+        var receivedAt = DateTimeOffset.UtcNow.AddSeconds(-2);
         await reports.RecordAsync(new("session", "view-1", "context-1", "web", ["report.entry"],
             receivedAt, [new("report.entry", UiObservationState.Ready)]), default);
         var broker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService(),
@@ -317,6 +317,9 @@ public sealed class EllaiAuthorizedConversationContextTests
         var turns = new[] { Turn("prior", 1, "show report", "control ready", trace), Turn("current", 2, "next", null, null) };
         async Task<bool> Retained() => (await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), null, default,
             toolContext: context, invokeTool: broker.InvokeAsync)).Messages.Any(message => message.Content == "control ready");
+        Assert.True(await Retained());
+        await reports.RecordAsync(new("session", "view-1", "context-1", "web", ["report.entry"],
+            DateTimeOffset.UtcNow, [new("report.entry", UiObservationState.Ready)]), default);
         Assert.True(await Retained());
         var withoutTool = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor(), null, default,
             toolContext: context with { AllowedTools = new HashSet<string>() }, invokeTool: broker.InvokeAsync);
