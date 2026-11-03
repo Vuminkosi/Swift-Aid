@@ -71,6 +71,27 @@ async function main() {
         await page.waitForFunction(text => document.querySelector(".ellai-composer__response")?.textContent?.trim() === text, turn.assistantText);
         assert.equal(await page.evaluate(() => localStorage.getItem("swiftaid.ellai.session")), originalSession);
         assert.deepEqual(errors, []);
+        if (process.env.SWIFTAID_SECOND_PROMPT) {
+            const priorUtteranceId = turn.clientUtteranceId;
+            latestPage = null;
+            await input.fill(process.env.SWIFTAID_SECOND_PROMPT);
+            await page.getByRole("button", { name: "Send to Ellai", exact: true }).click();
+            const followupDeadline = Date.now() + 120000;
+            let followup;
+            while (Date.now() < followupDeadline) {
+                followup = latestPage?.conversation?.find(item => item.clientUtteranceId !== priorUtteranceId && item.completedAtUtc);
+                if (followup) break;
+                await page.waitForTimeout(200);
+            }
+            assert.equal(followup?.outcome, "Completed", `Follow-up outcome: ${followup?.outcome ?? "missing"}`);
+            if (process.env.SWIFTAID_EXPECT_SECOND_TEXT)
+                assert.ok(followup.assistantText?.toLowerCase().includes(process.env.SWIFTAID_EXPECT_SECOND_TEXT.toLowerCase()),
+                    "Follow-up did not recall the expected synthetic detail.");
+            await page.waitForFunction(text => document.querySelector(".ellai-composer__response")?.textContent?.trim() === text, followup.assistantText);
+            assert.deepEqual(errors, []);
+            console.log(JSON.stringify({ followupOutcome: followup.outcome,
+                syntheticDetailRecalled: process.env.SWIFTAID_EXPECT_SECOND_TEXT ? true : null }));
+        }
         console.log(JSON.stringify({ result: "PASS", sessionId: originalSession,
             firstChunkMs: firstChunkAt ? firstChunkAt - started : null, completedMs,
             outcome: turn.outcome, restoredAfterRefresh: true, thinkingAnimation: true,
