@@ -48,6 +48,47 @@ public sealed class EllaiLiveQueueReadTests
         public int? LastLimit { get; private set; }
     }
 
+    private sealed class OccurrenceLocation : ICaseOccurrenceLocationQuery
+    {
+        public string RegionId { get; set; } = "region-1";
+        public Task<CaseOccurrenceLocationResult> GetLocationAsync(ActorContext actor, Guid caseId, CancellationToken ct) =>
+            Task.FromResult(new CaseOccurrenceLocationResult(CaseOccurrenceLocationAccess.Allowed, 1,
+                new("US", "Synthetic", "Area", "Locality", RegionId, "area-1", "locality-1")));
+    }
+
+    [Fact]
+    public async Task PlaceSearchUsesOccurrenceLocationAndRevalidatesTheSameScope()
+    {
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [Row("01", 7)]) };
+        var locations = new OccurrenceLocation();
+        var consent = new EllaiConsentService();
+        consent.Grant("session-1", EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue, occurrenceLocations: locations);
+        var context = Context with { Actor = TestActor() };
+        var request = new EllaiToolRequest(EllaiToolNames.State, Args(("projection", "queue"), ("limit", "5"),
+            ("country", "US"), ("sort", "latest-reported"), ("place_id", "region-1")));
+        var result = await broker.InvokeAsync(context, request, default);
+        Assert.True(result.Allowed);
+        Assert.False(result.Truncated);
+        Assert.Equal(Row("01", 7).CaseId.ToString("D"), Assert.Single(result.Evidence).ResourceId);
+        var observed = EllaiObservedToolResult.From(request, result);
+        Assert.Equal("region-1", observed.CaseListQuery?.PlaceId);
+        var trace = EllaiToolTrace.SerializeFlattened([observed], false, []);
+        var turns = new[]
+        {
+            new EllaiConversationTurn("session-1", "previous", 1, "list", "one case", "Completed", 1, DateTimeOffset.UtcNow) { ToolTraceJson = trace },
+            new EllaiConversationTurn("session-1", "current", 2, "next", null, "Queued", 1, null)
+        };
+        var valid = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", context.Actor!, queue, default,
+            toolContext: context, invokeTool: broker.InvokeAsync);
+        Assert.Contains(valid.Messages, message => message.Content == "one case");
+        locations.RegionId = "other";
+        var moved = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", context.Actor!, queue, default,
+            toolContext: context, invokeTool: broker.InvokeAsync);
+        Assert.DoesNotContain(moved.Messages, message => message.Content == "one case");
+    }
+
     private sealed class FakeIndex(EllaiExactMemoryReference? hit, bool fail = false) : IEllaiExactReferenceIndex
     {
         public int Reads { get; private set; }

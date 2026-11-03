@@ -145,6 +145,29 @@ public static class EllaiAuthorizedConversationContext
                     var query = observation.CaseListQuery;
                     if (queue is null || query is null || !query.IsValid())
                         return decisions[turn.ClientUtteranceId] = false;
+                    if (query.PlaceId is not null)
+                    {
+                        if (toolContext is null || invokeTool is null || toolContext.SessionId != turn.SessionId ||
+                            toolContext.Actor is null || toolContext.Actor.ActorId != actor.ActorId ||
+                            toolContext.Actor.AccessEpoch != actor.AccessEpoch)
+                            return decisions[turn.ClientUtteranceId] = false;
+                        try
+                        {
+                            var request = new EllaiToolRequest(EllaiToolNames.State, new Dictionary<string, string>
+                            {
+                                ["projection"] = "queue", ["limit"] = query.Limit.ToString(CultureInfo.InvariantCulture),
+                                ["country"] = query.Country!, ["sort"] = "latest-reported", ["place_id"] = query.PlaceId
+                            });
+                            var current = await invokeTool(toolContext, request, ct).ConfigureAwait(false);
+                            ct.ThrowIfCancellationRequested();
+                            if (!current.Allowed || current.Truncated || current.ReasonCode != EllaiToolReasonCodes.Ok ||
+                                current.ItemCount != observation.Evidence.Count || !current.Evidence.SequenceEqual(observation.Evidence))
+                                return decisions[turn.ClientUtteranceId] = false;
+                        }
+                        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                        catch (Exception error) when (error is not OutOfMemoryException) { return decisions[turn.ClientUtteranceId] = false; }
+                        continue;
+                    }
                     try
                     {
                         var current = query.Country is null && query.Workflow is null && query.Sort is null

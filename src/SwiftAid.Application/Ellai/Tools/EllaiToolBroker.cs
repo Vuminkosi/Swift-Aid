@@ -184,7 +184,7 @@ public sealed class EllaiToolBroker
     /// consent applies only to explicitly consent-scoped processing lanes.</summary>
     private static readonly string[] ToolDescriptions =
     {
-        $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, country?, workflow?, sort?) — permitted feature or owned-case queue. country is an uppercase two-letter code (Zimbabwe=ZW, Eswatini=SZ); workflow is Reported, UnderReview, Active, AwaitingFollowUp or Resolved; sort=latest-reported or latest-updated. Reported is a recorded workflow, not proof that no human reviewed a case. Classification review status is not supplied; clarify ambiguous unreviewed requests.",
+        $"{EllaiToolNames.State}(projection=[feature|queue], limit=1..20, country?, workflow?, sort?, place_id?) — permitted feature or owned-case queue. country is an uppercase two-letter code (Zimbabwe=ZW, Eswatini=SZ); workflow is Reported, UnderReview, Active, AwaitingFollowUp or Resolved; sort=latest-reported or latest-updated. For an occurrence-place search, select an exact registry ID using ellai_locations and supply country, place_id and sort=latest-reported; workflow is not supported with place_id. Unknown locations and incomplete scans cannot establish a complete list. Reported is a recorded workflow, not proof that no human reviewed a case. Classification review status is not supplied; clarify ambiguous unreviewed requests.",
         $"{EllaiToolNames.Evidence}(ref=case-results, field=[country|workflow]?) — re-read retained case queue references under current access.",
         $"{EllaiToolNames.Topic}(ref) — session topic candidates with checkpoints. Use ref=case-results to recall the last retained case list with fresh authorization; never invent a remembered result set.",
         $"{EllaiToolNames.Capabilities}(feature?) — capability readiness, no credentials.",
@@ -233,6 +233,7 @@ public sealed class EllaiToolBroker
     private readonly EllaiConsentService _consent;
     private readonly EllaiTechnicalDocs? _docs;
     private readonly ICaseQueueQuery? _queue;
+    private readonly ICaseOccurrenceLocationQuery? _occurrenceLocations;
     private readonly IEllaiApprovalStore? _receipts;
     private readonly EllaiTopicService? _topics;
     private readonly IEllaiExactReferenceIndex? _referenceIndex;
@@ -268,12 +269,13 @@ public sealed class EllaiToolBroker
         SwiftAid.Application.Classification.ICaseClassificationQuery? classification = null,
         SwiftAid.Application.Surveillance.ISignalReviewService? signals = null,
         EllaiUiAuthorityResolver? uiAuthority = null, IEllaiExactReferenceIndex? referenceIndex = null,
-        IDashboardAggregateQuery? dashboard = null)
+        IDashboardAggregateQuery? dashboard = null, ICaseOccurrenceLocationQuery? occurrenceLocations = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _consent = consent ?? throw new ArgumentNullException(nameof(consent));
         _docs = docs;
         _queue = queue;
+        _occurrenceLocations = occurrenceLocations;
         _receipts = receipts;
         _topics = topics;
         _referenceIndex = referenceIndex;
@@ -674,18 +676,40 @@ public sealed class EllaiToolBroker
                 EllaiToolReasonCodes.InvalidArguments);
         }
 
-        if (request.Arguments.Keys.Any(key => key is not ("projection" or "limit" or "country" or "workflow" or "sort")))
+        if (request.Arguments.Keys.Any(key => key is not ("projection" or "limit" or "country" or "workflow" or "sort" or "place_id")))
             return Deny(request.ToolName, "This queue supports country, workflow and sort filters only.",
                 EllaiToolReasonCodes.InvalidArguments);
 
         request.Arguments.TryGetValue("country", out var country);
         request.Arguments.TryGetValue("workflow", out var workflow);
         request.Arguments.TryGetValue("sort", out var sort);
+        request.Arguments.TryGetValue("place_id", out var placeId);
         if ((country is not null && (country.Length != 2 || country.Any(c => c is < 'A' or > 'Z')))
             || (workflow is not null && workflow is not ("Reported" or "UnderReview" or "Active" or "AwaitingFollowUp" or "Resolved"))
             || (sort is not null && sort is not ("latest-reported" or "latest-updated")))
             return Deny(request.ToolName, "Use a two-letter country, a recorded workflow and latest-reported or latest-updated sort.",
                 EllaiToolReasonCodes.InvalidArguments);
+
+        if (placeId is not null)
+        {
+            if (country is null || workflow is not null || sort != "latest-reported" ||
+                string.IsNullOrWhiteSpace(placeId) || placeId != placeId.Trim())
+                return Deny(request.ToolName, "A place search requires a country and latest-reported sort; workflow filters are not supported.", EllaiToolReasonCodes.InvalidArguments);
+            if (_occurrenceLocations is null)
+                return Deny(request.ToolName, "Occurrence location search is unavailable.", EllaiToolReasonCodes.Unavailable);
+            var found = await new CaseOccurrenceSearch(queue, _occurrenceLocations).SearchAsync(context.Actor, country, placeId, limit, ct).ConfigureAwait(false);
+            if (found.Access != CaseQueueAccess.Allowed)
+                return Deny(request.ToolName, "Occurrence location search is unavailable.", EllaiToolReasonCodes.Unavailable);
+            var foundItems = found.Items.Select(item => item.Case).ToArray();
+            var foundEvidence = foundItems.Select(item => new EvidenceRef("CaseQueue", item.CaseId.ToString("D"),
+                item.AggregateVersion.ToString(System.Globalization.CultureInfo.InvariantCulture), null, item.CaseId.ToString("D"))).ToArray();
+            var foundLines = foundItems.Select(item => $"case {item.CaseId:D}; workflow {item.Workflow}; country {item.CountryCode}; v{item.AggregateVersion}");
+            return new(request.ToolName, true, null, foundEvidence,
+                "Owned readable cases matching the recorded occurrence place. " +
+                (found.UnknownLocations ? "Some readable cases have unknown or incomplete locations. " : "") +
+                (found.Truncated ? "The scan or result is incomplete. " : "") + string.Join("\n", foundLines),
+                foundItems.Length, found.Truncated || found.UnknownLocations);
+        }
 
         CaseQueueResult result;
         try
