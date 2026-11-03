@@ -49,9 +49,9 @@ public sealed class InMemoryEllaiUsageStore : IEllaiUsageStore
             var rows = _samples.Where(s => s.SessionId == sessionId).ToList();
             return Task.FromResult(new EllaiUsageTotals(
                 sessionId,
-                rows.Sum(s => s.PromptTokens),
-                rows.Sum(s => s.CompletionTokens),
-                rows.Sum(s => s.PromptTokens + s.CompletionTokens),
+                (int)Math.Min(int.MaxValue, rows.Sum(s => (long)s.PromptTokens)),
+                (int)Math.Min(int.MaxValue, rows.Sum(s => (long)s.CompletionTokens)),
+                (int)Math.Min(int.MaxValue, rows.Sum(s => (long)s.PromptTokens + s.CompletionTokens)),
                 rows.Count));
         }
     }

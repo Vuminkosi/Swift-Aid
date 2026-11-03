@@ -59,6 +59,24 @@ public sealed class FrameworkPostgresRedisDownFactAttribute : FactAttribute
 public sealed class EllaiPostgresTests : IAsyncLifetime
 {
     [FrameworkPostgresFact]
+    public async Task FrameworkUsageHydrationSaturatesLargePostgresTotals()
+    {
+        var id = $"framework-usage-overflow-{Guid.NewGuid():N}";
+        _frameworkSessionIds.Add(id);
+        await using (var db = CreateFrameworkDbContext())
+        {
+            var store = new PostgresEllaiUsageStore(db);
+            await store.RecordAsync(new StoredUsageSample(id, int.MaxValue, int.MaxValue, 0, DateTimeOffset.UtcNow), default);
+            await store.RecordAsync(new StoredUsageSample(id, 1, 1, 0, DateTimeOffset.UtcNow), default);
+        }
+        await using var restoredDb = CreateFrameworkDbContext();
+        var ledger = new EllaiUsageLedger();
+        await ledger.HydrateAsync(id, new PostgresEllaiUsageStore(restoredDb), default);
+        Assert.Equal(int.MaxValue, ledger.TotalsFor(id).TotalTokens);
+        Assert.False(ledger.TryReserve(id, 1));
+    }
+
+    [FrameworkPostgresFact]
     public Task FrameworkWorkerRehydratesOwnedConversationAfterWorkerRestart() => VerifyFrameworkRecoveryAsync(null);
 
     [FrameworkPostgresRedisDownFact]

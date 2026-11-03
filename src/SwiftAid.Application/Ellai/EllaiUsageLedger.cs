@@ -87,7 +87,7 @@ public sealed class EllaiUsageLedger(
         lock (_gate)
         {
             var used = _totals.TryGetValue(sessionId, out var current) ? current.TotalTokens : 0;
-            if (used + estimatedTokens > SessionTokenBudget)
+            if ((long)used + estimatedTokens > SessionTokenBudget)
             {
                 return false;
             }
@@ -118,10 +118,10 @@ public sealed class EllaiUsageLedger(
             _totals.TryGetValue(sample.SessionId, out var current);
             var next = new EllaiUsageTotals(
                 sample.SessionId,
-                (current?.PromptTokens ?? 0) + sample.PromptTokens,
-                (current?.CompletionTokens ?? 0) + sample.CompletionTokens,
-                (current?.TotalTokens ?? 0) + sample.PromptTokens + sample.CompletionTokens,
-                (current?.Calls ?? 0) + 1);
+                SaturatingAdd(current?.PromptTokens ?? 0, sample.PromptTokens),
+                SaturatingAdd(current?.CompletionTokens ?? 0, sample.CompletionTokens),
+                SaturatingAdd(current?.TotalTokens ?? 0, sample.PromptTokens, sample.CompletionTokens),
+                SaturatingAdd(current?.Calls ?? 0, 1));
             _totals[sample.SessionId] = next;
             if (Prices.IsPriced)
             {
@@ -131,6 +131,9 @@ public sealed class EllaiUsageLedger(
             return next;
         }
     }
+
+    private static int SaturatingAdd(int first, int second, int third = 0) =>
+        (int)Math.Min(int.MaxValue, (long)first + second + third);
 
     /// <summary>Records billable audio minutes (ASR/TTS) against both caps.</summary>
     public void RecordAudio(string sessionId, decimal minutes)

@@ -31,6 +31,27 @@ public sealed class EllaiUsageLedgerTests
     }
 
     [Fact]
+    public async Task LargeUsageAndEstimatesNeverWrapAndBypassBudgetAfterHydration()
+    {
+        var ledger = new EllaiUsageLedger();
+        var store = new InMemoryEllaiUsageStore();
+        ledger.Record(new EllaiUsageSample("s-1", 1, 0));
+        Assert.False(ledger.TryReserve("s-1", int.MaxValue));
+
+        var sample = new EllaiUsageSample("s-1", int.MaxValue, int.MaxValue);
+        var totals = ledger.Record(sample);
+        Assert.Equal(int.MaxValue, totals.PromptTokens);
+        Assert.Equal(int.MaxValue, totals.TotalTokens);
+        Assert.False(ledger.TryReserve("s-1", 1));
+
+        await store.RecordAsync(new StoredUsageSample("s-1", sample.PromptTokens, sample.CompletionTokens, 0, DateTimeOffset.UtcNow), default);
+        var restored = new EllaiUsageLedger();
+        await restored.HydrateAsync("s-1", store, default);
+        Assert.Equal(int.MaxValue, restored.TotalsFor("s-1").TotalTokens);
+        Assert.False(restored.TryReserve("s-1", 1));
+    }
+
+    [Fact]
     public void TotalsAccumulatePerSessionInIsolation()
     {
         var ledger = new EllaiUsageLedger();

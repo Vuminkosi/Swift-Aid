@@ -358,8 +358,17 @@ is available through the explicit Gateway selection: durable framework sessions
 and end-to-end Gateway acceptance still require verification. The executor emits pending-tool events,
 maps known authorization and budget denials to safe blocked codes, and
 sanitizes model-provider exceptions while preserving worker retry behavior.
-Focused tests cover denial and synthetic provider failures. Framework tool
-execution now requests cancellation after 30 seconds and rejects results
+Focused tests cover denial and synthetic provider failures.
+The shared token ledger now performs reservation arithmetic in 64 bits and
+saturates its existing 32-bit totals rather than wrapping for very large
+provider usage. Both in-memory and PostgreSQL hydration saturate the same
+way. Focused ledger/framework tests passed 45/45, and a disposable PostgreSQL
+fixture verified large persisted samples remain over budget after hydration.
+This fixes overflow only: the existing `TryReserve` is a budget check, not a
+durable cross-instance reservation, and simultaneous dispatches can still
+race against the same budget.
+
+Framework tool execution now requests cancellation after 30 seconds and rejects results
 that arrive after that deadline as unavailable. This new bound addresses the
 migration's timeout acceptance requirement; the prior loop had no general
 tool deadline. It is cooperative: an implementation that ignores cancellation

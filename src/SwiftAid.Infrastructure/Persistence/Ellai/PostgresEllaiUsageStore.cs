@@ -32,9 +32,9 @@ public sealed class PostgresEllaiUsageStore(SwiftAidDbContext dbContext) : IElla
             .ConfigureAwait(false);
         return new EllaiUsageTotals(
             sessionId,
-            rows.Sum(e => e.PromptTokens),
-            rows.Sum(e => e.CompletionTokens),
-            rows.Sum(e => e.PromptTokens + e.CompletionTokens),
+            (int)Math.Min(int.MaxValue, rows.Sum(e => (long)e.PromptTokens)),
+            (int)Math.Min(int.MaxValue, rows.Sum(e => (long)e.CompletionTokens)),
+            (int)Math.Min(int.MaxValue, rows.Sum(e => (long)e.PromptTokens + e.CompletionTokens)),
             rows.Count);
     }
 
