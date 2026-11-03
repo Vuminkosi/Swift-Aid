@@ -18,7 +18,8 @@ public sealed record StoredUiObservationReport(
 
 public interface IEllaiUiObservationStore
 {
-    Task RecordAsync(StoredUiObservationReport report, CancellationToken ct);
+    /// <summary>Returns false if a newer server-stamped report was already stored.</summary>
+    Task<bool> RecordAsync(StoredUiObservationReport report, CancellationToken ct);
 
     /// <summary>Latest report for the session, or null when the client has
     /// not posted one. Sessions never see each other's reports.</summary>
@@ -35,7 +36,7 @@ public sealed class InMemoryEllaiUiObservationStore : IEllaiUiObservationStore
     private readonly object _gate = new();
     private readonly Dictionary<string, StoredUiObservationReport> _latest = new(StringComparer.Ordinal);
 
-    public Task RecordAsync(StoredUiObservationReport report, CancellationToken ct)
+    public Task<bool> RecordAsync(StoredUiObservationReport report, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(report);
         ArgumentException.ThrowIfNullOrWhiteSpace(report.SessionId);
@@ -55,7 +56,7 @@ public sealed class InMemoryEllaiUiObservationStore : IEllaiUiObservationStore
             // Concurrent requests can reach this lock out of order. An older
             // server-stamped observation must not replace newer UI evidence.
             if (_latest.TryGetValue(report.SessionId, out var current) && current.ReceivedAtUtc > report.ReceivedAtUtc)
-                return Task.CompletedTask;
+                return Task.FromResult(false);
             if (!_latest.ContainsKey(report.SessionId) && _latest.Count >= 4096)
                 _latest.Remove(_latest.MinBy(entry => entry.Value.ReceivedAtUtc).Key);
             _latest[report.SessionId] = report with
@@ -67,7 +68,7 @@ public sealed class InMemoryEllaiUiObservationStore : IEllaiUiObservationStore
             };
         }
 
-        return Task.CompletedTask;
+        return Task.FromResult(true);
     }
 
     public Task<StoredUiObservationReport?> LatestAsync(string sessionId, CancellationToken ct)

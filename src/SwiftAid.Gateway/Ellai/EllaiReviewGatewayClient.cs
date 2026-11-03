@@ -746,14 +746,13 @@ public sealed class EllaiReviewGatewayClient(
                 return false;
             }
 
-            await observations.RecordAsync(new StoredUiObservationReport(
+            return await observations.RecordAsync(new StoredUiObservationReport(
                 sessionId, report.ViewInstanceId.Trim(), report.ContextStamp.Trim(),
                 report.Platform.Trim(), report.MountedControlIds
                     .Where(id => !string.IsNullOrWhiteSpace(id))
                     .Select(id => id.Trim())
                     .ToList(),
                 DateTimeOffset.UtcNow, report.ControlStates, report.CurrentNavigationId, report.CompletedControlIds, report.ValidationInputIds), cancellationToken).ConfigureAwait(false);
-            return true;
         }
         catch (OperationCanceledException)
         {

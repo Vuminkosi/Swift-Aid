@@ -1068,6 +1068,24 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
     }
 
     [Fact]
+    public async Task SupersededUiObservationIsRejectedForHttpAndInProcessClients()
+    {
+        await using var app = await StartApplicationAsync();
+        using var http = app.GetTestClient();
+        var httpClient = new EllaiReviewHttpClient(http);
+        var inProcess = new EllaiReviewGatewayClient(new FixedAuthenticationStateProvider(TestPrincipal()), app.Services);
+        var store = app.Services.GetRequiredService<IEllaiUiObservationStore>();
+        Assert.True(await store.RecordAsync(new("session-1", "new-view", "new-context", "web", ["report.entry"],
+            DateTimeOffset.UtcNow.AddMinutes(1), [new("report.entry", UiObservationState.Ready)]), default));
+        var old = new UiObservationReport("old-view", "old-context", "web", ["report.entry"],
+            [new("report.entry", UiObservationState.Ready)]);
+
+        Assert.False(await httpClient.ReportUiObservationAsync("session-1", old, default));
+        Assert.False(await inProcess.ReportUiObservationAsync("session-1", old, default));
+        Assert.Equal("new-context", (await store.LatestAsync("session-1", default))!.ContextStamp);
+    }
+
+    [Fact]
     public async Task ForeignOwnerCannotSubmitUtteranceOrMutateSession()
     {
         await using var app = await StartApplicationAsync(sessionOwnerId: "another-owner");

@@ -653,14 +653,16 @@ public static class EllaiEndpoints
         string sessionId, ReportUiObservationApiRequest request,
         IEllaiUiObservationStore observations, CancellationToken cancellationToken)
     {
-        await observations.RecordAsync(new StoredUiObservationReport(
+        var accepted = await observations.RecordAsync(new StoredUiObservationReport(
             sessionId, request.ViewInstanceId.Trim(), request.ContextStamp.Trim(),
             request.Platform.Trim(), request.MountedControlIds
                 .Where(id => !string.IsNullOrWhiteSpace(id))
                 .Select(id => id.Trim())
                 .ToList(),
             DateTimeOffset.UtcNow, request.ControlStates, request.CurrentNavigationId, request.CompletedControlIds, request.ValidationInputIds), cancellationToken);
-        return Results.Json(true, statusCode: StatusCodes.Status200OK);
+        return accepted
+            ? Results.Json(true, statusCode: StatusCodes.Status200OK)
+            : Results.Conflict();
     }
 
     private static async Task<IResult> GrantConsentAsync(
