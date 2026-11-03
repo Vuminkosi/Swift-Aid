@@ -900,7 +900,7 @@ public sealed class EllaiAgentFrameworkContractTests
                     "2 managed case(s) in scope.", 1, false) { CountReplayScope = CountScope });
             }, new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default,
             (_, _) => ValueTask.CompletedTask);
-        Assert.Equal(2, calls);
+        Assert.Equal(3, calls);
         Assert.Equal("2 managed case(s) in scope.", decision?.DisplayText);
         Assert.False(agent.LastRepairUsed);
     }
@@ -925,6 +925,37 @@ public sealed class EllaiAgentFrameworkContractTests
         Assert.Equal(authorized, result.SpokenText);
         Assert.Equal(authorized, string.Concat(chunks));
         Assert.Contains(reference, Assert.Single(result.Claims).Evidence);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task CountPublicationRechecksMembershipAfterEveryChunk(int revokeAfterChunk)
+    {
+        using var client = new CountStreamingClient();
+        var agent = new EllaiFrameworkAgent(client);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string> { EllaiToolNames.OwnedCaseCount });
+        var authorized = true;
+        var published = new List<string>();
+        var evidence = new EvidenceRef("DashboardAggregate", "owned-cases", "v1", null, "proof");
+        var result = await agent.RunAsync(context, "policy", [new ChatMessage(ChatRole.User, "Count")], 100,
+            _ => Task.FromResult(true), (_, request, _) => Task.FromResult(authorized
+                ? new EllaiToolResult(request.ToolName, true, null, [evidence],
+                    "2 managed case(s) in scope. Unit: managed case records.", 1, false) { CountReplayScope = CountScope }
+                : new EllaiToolResult(request.ToolName, false, null, [], "", 0, false, EllaiToolReasonCodes.DeniedByPolicy)),
+            new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None,
+            onTextDelta: (text, _) =>
+            {
+                published.Add(text);
+                if (published.Count == revokeAfterChunk) authorized = false;
+                return ValueTask.CompletedTask;
+            });
+
+        Assert.Equal(revokeAfterChunk == 0 ? 2 : revokeAfterChunk, published.Count);
+        if (revokeAfterChunk == 0) Assert.NotNull(result);
+        else Assert.Null(result);
     }
 
     [Fact]
@@ -1011,7 +1042,7 @@ public sealed class EllaiAgentFrameworkContractTests
                     "2 managed case(s) in scope.", 1, false) { CountReplayScope = CountScope });
             });
         Assert.True(outcome.Completed);
-        Assert.Equal(2, calls);
+        Assert.Equal(3, calls);
         Assert.Equal(1, outcome.IterationsUsed);
         Assert.Equal(1, outcome.ToolCallsUsed);
         Assert.Single(events, item => item.Kind == EllaiActivityKind.ToolStarted);

@@ -289,12 +289,27 @@ public sealed class EllaiFrameworkAgent
                 LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
                 return null;
             }
-            if (onTextDelta is not null && !await PublishValidatedTextAsync(decision.DisplayText, onTextDelta, Current, ct).ConfigureAwait(false))
+            var firstCountChunk = true;
+            async Task<bool> CountPublicationCurrent(CancellationToken token)
+            {
+                if (!await Current(token).ConfigureAwait(false)) return false;
+                if (firstCountChunk)
+                {
+                    firstCountChunk = false;
+                    return true;
+                }
+                var currentCount = await (revalidateTool ?? invoke)(context, countRequest, token).ConfigureAwait(false);
+                return currentCount.Allowed && HasCountEvidence(currentCount) &&
+                    currentCount.CountReplayScope == originalScope &&
+                    TryCount(currentCount.ResultSummary, out var value) && value == freshCount &&
+                    await Current(token).ConfigureAwait(false);
+            }
+            if (onTextDelta is not null && !await PublishValidatedTextAsync(decision.DisplayText, onTextDelta, CountPublicationCurrent, ct).ConfigureAwait(false))
             {
                 LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
                 return null;
             }
-            if (!await Current(ct).ConfigureAwait(false))
+            if (!(onTextDelta is null ? await Current(ct).ConfigureAwait(false) : await CountPublicationCurrent(ct).ConfigureAwait(false)))
             {
                 LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
                 return null;
