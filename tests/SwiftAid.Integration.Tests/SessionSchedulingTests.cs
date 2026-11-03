@@ -14,6 +14,44 @@ namespace SwiftAid.Integration.Tests;
 public sealed class SessionSchedulingTests
 {
     [IntakePostgresFact]
+    public async Task CompletedPublishedSessionsRemainInPublicQueriesButInternalSessionsStayPrivate()
+    {
+        var ids = new[] { Guid.NewGuid(), Guid.NewGuid() };
+        var marker = $"completed-{Guid.NewGuid():N}";
+        var start = DateTimeOffset.UtcNow.AddDays(5);
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var service = new CommunitySessionService(new PostgresCommunitySessionStore(db), new FixtureMaterialEligibility());
+        try
+        {
+            for (var index = 0; index < ids.Length; index++)
+            {
+                var draft = CreateDraft(ids[index], "officer-1") with
+                {
+                    Title = marker,
+                    StartUtc = start,
+                    Visibility = index == 0 ? SessionVisibility.Public : SessionVisibility.Internal
+                };
+                await service.ExecuteAsync(draft, "officer-1", CancellationToken.None);
+                await service.ExecuteAsync(new ReviewSessionCommand(ids[index], 1, false, "review", DateTimeOffset.UtcNow), "officer-2", CancellationToken.None);
+                await service.ExecuteAsync(new ScheduleSessionCommand(ids[index], 2, "publish", DateTimeOffset.UtcNow), "officer-2", CancellationToken.None);
+                await service.ExecuteAsync(new CompleteSessionCommand(ids[index], 3, "complete", start.AddHours(1)), "officer-2", CancellationToken.None);
+            }
+
+            var page = await service.QueryPublicAsync(new PublicSessionQuery(Search: marker), CancellationToken.None);
+            var result = Assert.Single(page.Items);
+            Assert.Equal(ids[0], result.SessionId);
+            Assert.Equal("Completed", result.Status);
+            var listed = await service.ListPublicAsync(100, CancellationToken.None);
+            Assert.Contains(listed, item => item.SessionId == ids[0] && item.Status == "Completed");
+            Assert.DoesNotContain(listed, item => item.SessionId == ids[1]);
+        }
+        finally
+        {
+            await CleanupAsync(ids);
+        }
+    }
+
+    [IntakePostgresFact]
     public async Task Public_query_filters_local_dates_before_paging_across_midnight()
     {
         var ids = new[] { Guid.NewGuid(), Guid.NewGuid() };

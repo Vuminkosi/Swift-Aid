@@ -95,6 +95,27 @@ public sealed class CommunitySessionServiceTests
     }
 
     [Fact]
+    public async Task CompletedPublishedSessionsRemainDiscoverableButInternalSessionsDoNot()
+    {
+        var services = CreateServices();
+        var publicId = Guid.NewGuid();
+        var internalId = Guid.NewGuid();
+        await PublishAsync(services.Service, publicId, SessionVisibility.Public);
+        await PublishAsync(services.Service, internalId, SessionVisibility.Internal);
+        await services.Service.ExecuteAsync(new CompleteSessionCommand(publicId, 3, "completed", Start.AddHours(1)), "officer-2", CancellationToken.None);
+        await services.Service.ExecuteAsync(new CompleteSessionCommand(internalId, 3, "completed", Start.AddHours(1)), "officer-2", CancellationToken.None);
+
+        var detail = await services.Service.GetPublicAsync(publicId, CancellationToken.None);
+        var list = await services.Service.ListPublicAsync(null, CancellationToken.None);
+        var query = await services.Service.QueryPublicAsync(new PublicSessionQuery(), CancellationToken.None);
+        Assert.Equal("Completed", detail!.Status);
+        Assert.Contains(list, item => item.SessionId == publicId && item.Status == "Completed");
+        Assert.Contains(query.Items, item => item.SessionId == publicId && item.Status == "Completed");
+        Assert.DoesNotContain(list, item => item.SessionId == internalId);
+        Assert.DoesNotContain(query.Items, item => item.SessionId == internalId);
+    }
+
+    [Fact]
     public async Task Update_on_draft_does_not_touch_reminders()
     {
         var services = CreateServices();
@@ -560,7 +581,7 @@ public sealed class CommunitySessionServiceTests
         public Task<IReadOnlyList<DomainSessions.CommunitySession>> QueryPublicAsync(PublicSessionQuery query, int take, CancellationToken ct)
         {
             var results = _sessions.Values.Where(item => item.Visibility == DomainSessions.SessionVisibility.Public &&
-                (item.Status == DomainSessions.CommunitySessionStatus.Scheduled || item.Status == DomainSessions.CommunitySessionStatus.Cancelled));
+                (item.Status == DomainSessions.CommunitySessionStatus.Scheduled || item.Status == DomainSessions.CommunitySessionStatus.Cancelled || item.Status == DomainSessions.CommunitySessionStatus.Completed));
             if (query.AfterStartUtc is { } after && query.AfterSessionId is { } afterId)
                 results = results.Where(item => item.StartUtc > after || item.StartUtc == after && item.SessionId.CompareTo(afterId) > 0);
             return Task.FromResult<IReadOnlyList<DomainSessions.CommunitySession>>(results

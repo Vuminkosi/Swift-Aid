@@ -87,7 +87,8 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
             .Where(item => item.Visibility == nameof(DomainSessionVisibility.Public) &&
                 item.PublishedVersion > 0 && item.ScheduledAtUtc != null &&
                 (item.Status == nameof(CommunitySessionStatus.Scheduled) ||
-                 item.Status == nameof(CommunitySessionStatus.Cancelled)))
+                 item.Status == nameof(CommunitySessionStatus.Cancelled) ||
+                 item.Status == nameof(CommunitySessionStatus.Completed)))
             .OrderBy(item => item.StartUtc)
             .ThenBy(item => item.SessionId)
             .Take(Math.Max(1, take))
@@ -103,7 +104,8 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
             .Where(item => item.Visibility == nameof(DomainSessionVisibility.Public) &&
                 item.PublishedVersion > 0 && item.ScheduledAtUtc != null &&
                 (item.Status == nameof(CommunitySessionStatus.Scheduled) ||
-                 item.Status == nameof(CommunitySessionStatus.Cancelled)));
+                 item.Status == nameof(CommunitySessionStatus.Cancelled) ||
+                 item.Status == nameof(CommunitySessionStatus.Completed)));
 
         if (query.Search is { } search)
         {

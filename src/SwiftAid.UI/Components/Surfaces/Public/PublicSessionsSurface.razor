@@ -294,7 +294,7 @@
         </MudTabPanel>
 
         <MudTabPanel Text="Reminders">
-        @if (!string.Equals(selected.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
+        @if (string.Equals(selected.Status, "Scheduled", StringComparison.OrdinalIgnoreCase))
         {
         <MudPaper Class="public-session-subscription" Elevation="0" Outlined="true" aria-labelledby="public-session-subscription-title">
             <MudText id="public-session-subscription-title" Typo="Typo.subtitle1" HtmlTag="h2">Session reminders</MudText>
@@ -387,7 +387,7 @@
         else
         {
             <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
-                Reminders are not available for cancelled sessions.
+                Reminders are not available for this session.
             </MudAlert>
         }
         </MudTabPanel>

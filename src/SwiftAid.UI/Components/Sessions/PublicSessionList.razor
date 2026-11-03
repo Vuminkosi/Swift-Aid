@@ -37,6 +37,10 @@
                                     {
                                         <MudText Typo="Typo.caption" Color="Color.Error">Cancelled</MudText>
                                     }
+                                    else if (IsCompleted(session))
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">Completed</MudText>
+                                    }
                                 </div>
 
                                 <div class="session-public-list__mobile-facts">
@@ -61,7 +65,7 @@
                                         <MudIcon Icon="@Icons.Material.Filled.Info" aria-hidden="true" />
                                         View details
                                     </a>
-                                    @if (!IsCancelled(session) && !string.IsNullOrWhiteSpace(session.ChannelLink))
+                                    @if (IsScheduled(session) && !string.IsNullOrWhiteSpace(session.ChannelLink))
                                     {
                                         <a class="session-public-list__mobile-action session-public-list__mobile-action--destination"
                                            href="@session.ChannelLink" target="_blank" rel="noopener noreferrer">
@@ -69,14 +73,14 @@
                                             @ChannelLabel(session.ChannelType)
                                         </a>
                                     }
-                                    @if (!IsCancelled(session) && ShareTextAsync is not null && LoadInvitationTextAsync is not null)
+                                    @if (IsScheduled(session) && ShareTextAsync is not null && LoadInvitationTextAsync is not null)
                                     {
                                         <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Share"
                                                    OnClick="() => ShareInvitationAsync(session)" aria-label="@($"Share invitation for {session.Title}")">
                                             Share
                                         </MudButton>
                                     }
-                                    @if (!IsCancelled(session) && LoadInvitationTextAsync is not null)
+                                    @if (IsScheduled(session) && LoadInvitationTextAsync is not null)
                                     {
                                         <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.ContentCopy"
                                                    OnClick="() => CopyInvitationAsync(session)" aria-label="@($"Copy invitation for {session.Title}")">
@@ -114,6 +118,10 @@
                             {
                                 <MudChip T="string" Size="Size.Small" Color="Color.Error">Cancelled</MudChip>
                             }
+                            else if (IsCompleted(session))
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Default">Completed</MudChip>
+                            }
                             else
                             {
                                 <MudChip T="string" Size="Size.Small" Color="Color.Success">Scheduled</MudChip>
@@ -142,7 +150,7 @@
                             </MudAlert>
                         }
 
-                        @if (!IsCancelled(session) && !string.IsNullOrWhiteSpace(session.ChannelLink))
+                        @if (IsScheduled(session) && !string.IsNullOrWhiteSpace(session.ChannelLink))
                         {
                             <MudText Typo="Typo.body2" Class="mt-2">
                                 Join here: <MudLink Href="@session.ChannelLink" Target="_blank" rel="noopener">@session.ChannelLink</MudLink>
@@ -162,7 +170,7 @@
                                     <span class="mud-button-label">@(IsCancelled(session) ? "Download cancellation" : "Download calendar file")</span>
                                 </a>
                             }
-                            @if (!IsCancelled(session))
+                            @if (IsScheduled(session))
                             {
                                 @if (LoadInvitationTextAsync is not null)
                                 {
@@ -252,6 +260,12 @@
 
     private static bool IsCancelled(PublicSessionView session) =>
         string.Equals(session.Status, "Cancelled", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsCompleted(PublicSessionView session) =>
+        string.Equals(session.Status, "Completed", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsScheduled(PublicSessionView session) =>
+        string.Equals(session.Status, "Scheduled", StringComparison.OrdinalIgnoreCase);
 
     private static string FormatWhen(PublicSessionView session)
     {

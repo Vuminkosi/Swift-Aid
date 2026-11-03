@@ -14,6 +14,34 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed class PublicSessionQueryStateTests
 {
+    [Fact]
+    public async Task CompletedSessionIsLabeledAndDoesNotOfferNewInvitations()
+    {
+        var session = Session(Guid.NewGuid()) with { Status = "Completed", ChannelType = SessionChannelType.Other, ChannelLink = "https://example.test/join" };
+        var registrations = new ServiceCollection();
+        registrations.AddLogging();
+        registrations.AddMudServices();
+        registrations.AddSingleton<IJSRuntime>(new UnavailableClipboard());
+        registrations.AddSingleton<NavigationManager>(new TestNavigationManager());
+        await using var services = registrations.BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        var markup = await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var component = await renderer.RenderComponentAsync<PublicSessionsSurface>(ParameterView.FromDictionary(
+                new Dictionary<string, object?>
+                {
+                    [nameof(PublicSessionsSurface.Sessions)] = new[] { session },
+                    [nameof(PublicSessionsSurface.InitialSessionId)] = session.SessionId,
+                    [nameof(PublicSessionsSurface.LoadInvitationTextAsync)] = (Func<Guid, Task<string?>>)(_ => Task.FromResult<string?>("invitation"))
+                }));
+            return component.ToHtmlString();
+        });
+
+        Assert.Contains("Completed", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Copy invitation", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("https://example.test/join", markup, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("/notifications", true)]
     [InlineData(null, false)]
