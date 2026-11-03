@@ -162,7 +162,7 @@
         }
     }
 
-    private async Task<bool> RefreshStaffIdentityAsync()
+    private async Task<bool> RefreshStaffIdentityAsync(bool preserveCurrentStaffLoad = false)
     {
         var generation = Interlocked.Increment(ref _accessGeneration);
         var previousActorId = _actorId;
@@ -184,7 +184,7 @@
                 {
                     _managementCapabilities = SessionManagementPresentation.Unavailable();
                     _canManageSessions = false;
-                    ClearEditorState();
+                    ClearEditorStateCore(invalidateStaffLoad: !preserveCurrentStaffLoad);
                 }
                 return true;
             }
@@ -364,7 +364,7 @@
     {
         var generation = Interlocked.Increment(ref _staffLoadGeneration);
         var identityEpoch = Volatile.Read(ref _identityEpoch);
-        var identityAvailable = sessionId != Guid.Empty && await RefreshStaffIdentityAsync();
+        var identityAvailable = sessionId != Guid.Empty && await RefreshStaffIdentityAsync(preserveCurrentStaffLoad: true);
         if (!IsCurrentIdentityEpoch(identityEpoch)) return;
         if (!identityAvailable || string.IsNullOrWhiteSpace(_actorId))
         {
@@ -461,10 +461,13 @@
     }
 
     private void ClearEditorState()
+        => ClearEditorStateCore(invalidateStaffLoad: true);
+
+    private void ClearEditorStateCore(bool invalidateStaffLoad)
     {
         _conflictProposal = null;
         _sessionEditor = null;
-        Interlocked.Increment(ref _staffLoadGeneration);
+        if (invalidateStaffLoad) Interlocked.Increment(ref _staffLoadGeneration);
         _canManageSessions = false;
         _managementCapabilities = SessionManagementPresentation.Unavailable();
         _editingSessionId = null;

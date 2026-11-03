@@ -14,6 +14,36 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed class SessionConflictReviewTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task IdentityOutageRecoveryRestoresProposalOnlyToOriginalActor(bool sameActor)
+    {
+        var id = Guid.NewGuid();
+        var start = DateTimeOffset.UtcNow.AddDays(1);
+        var current = new CommunitySessionView(id, 3, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
+        var input = new UpdateSessionInput("Proposal", "Summary", "Community", [], "Presenter", "en", start, 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
+        var proposal = new SessionUpdateSubmission(id, 3, input, "reason");
+        var page = new SwiftAid.Gateway.Components.Pages.Sessions();
+        var type = page.GetType();
+        var client = new StaffClient(current, true) { IdentityUnavailable = true };
+        type.GetProperty("StaffSessionEditor", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, client);
+        type.GetField("_actorId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, "officer");
+
+        await (Task)type.GetMethod("RecoverConflictAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page, [proposal, "officer", true])!;
+        Assert.Null(type.GetField("_actorId", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
+        Assert.Same(proposal, type.GetField("_deferredProposal", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
+
+        client.IdentityUnavailable = false;
+        client.ActorId = sameActor ? "officer" : "another-officer";
+        await (Task)type.GetMethod("RetryDeferredProposalAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page, null)!;
+
+        var restored = type.GetField("_conflictProposal", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page);
+        if (sameActor) Assert.Same(proposal, restored);
+        else Assert.Null(restored);
+        Assert.Null(type.GetField("_deferredProposal", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
+    }
+
     [Fact]
     public async Task OldAccountUpdateResponseCannotRestoreProposalAfterIdentityChanges()
     {
@@ -243,12 +273,14 @@ public sealed class SessionConflictReviewTests
     private sealed class StaffClient(CommunitySessionView current, bool canEdit) : IStaffSessionEditorClient
     {
         public bool ReadUnavailable { get; set; }
+        public bool IdentityUnavailable { get; set; }
         public string ActorId { get; set; } = "officer";
         public TaskCompletionSource<UiCapabilityResult<SessionCommandResult>>? Execution { get; set; }
         private static UiCapabilityResult<T> Success<T>(T value) => new(UiCapabilityResultCode.Success, value,
             new UiCapabilityMetadata("editor", "1", UiCapabilityProvenance.LiveService, DateTimeOffset.UtcNow, true));
 
-        public Task<UiCapabilityResult<string>> GetCurrentActorIdAsync(CancellationToken cancellationToken = default) => Task.FromResult(Success(ActorId));
+        public Task<UiCapabilityResult<string>> GetCurrentActorIdAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(IdentityUnavailable ? UiCapabilityResults.Unavailable<string>("editor") : Success(ActorId));
         public Task<UiCapabilityResult<CommunitySessionView>> GetStaffAsync(Guid sessionId, CancellationToken cancellationToken = default) =>
             Task.FromResult(ReadUnavailable ? UiCapabilityResults.Unavailable<CommunitySessionView>("editor") : Success(current));
         public Task<UiCapabilityResult<StaffSessionManagementCapabilities>> GetManagementCapabilitiesAsync(Guid? sessionId, long? expectedVersion, CancellationToken cancellationToken = default) =>
