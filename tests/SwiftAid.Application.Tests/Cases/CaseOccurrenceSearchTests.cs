@@ -1,0 +1,97 @@
+using System.Security.Claims;
+using SwiftAid.Application.Authorization;
+using SwiftAid.Application.Cases;
+using SwiftAid.Contracts.Cases;
+
+namespace SwiftAid.Application.Tests.Cases;
+
+public sealed class CaseOccurrenceSearchTests
+{
+    private static ActorContext Actor() => ActorContext.FromValidatedPrincipal(new ClaimsPrincipal(new ClaimsIdentity(
+        [new Claim(ClaimTypes.NameIdentifier, "officer"), new Claim(ActorContext.AccessEpochClaimType, "1")], "test")));
+    private static CaseQueueItem Row(int id) => new(new Guid(id, 0, 0, new byte[8]), "Reported", "SZ", "officer", 1, DateTimeOffset.UtcNow);
+
+    private sealed class Queue : ICaseQueueQuery
+    {
+        public Queue(params CaseQueueResult[] pages) => Pages = new(pages);
+        public Queue<CaseQueueResult> Pages { get; }
+        public List<string?> Cursors { get; } = [];
+        public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CancellationToken ct) => throw new NotSupportedException();
+        public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CaseQueueFilter filter, string? cursor, CancellationToken ct)
+        {
+            Assert.Equal("SZ", filter.CountryCode);
+            Assert.True(filter.NewestReportedFirst);
+            Cursors.Add(cursor);
+            return Task.FromResult(Pages.Dequeue());
+        }
+    }
+
+    private sealed class Locations : ICaseOccurrenceLocationQuery
+    {
+        public Dictionary<Guid, CaseOccurrenceLocationResult> Results { get; } = [];
+        public Task<CaseOccurrenceLocationResult> GetLocationAsync(ActorContext actor, Guid caseId, CancellationToken ct) => Task.FromResult(Results[caseId]);
+    }
+
+    [Fact]
+    public async Task ReadsAcrossPagesAndReportsUnknownAndExtraMatches()
+    {
+        var first = Row(1); var second = Row(2); var third = Row(3); var fourth = Row(4);
+        var queue = new Queue(new(CaseQueueAccess.Allowed, [first, second], "next"), new(CaseQueueAccess.Allowed, [third, fourth]));
+        var locations = new Locations();
+        locations.Results[first.CaseId] = new(CaseOccurrenceLocationAccess.Allowed, 1, null);
+        locations.Results[second.CaseId] = new(CaseOccurrenceLocationAccess.Allowed, 2, new("SZ", "Manzini", null, null, "region-1", null, null));
+        locations.Results[third.CaseId] = new(CaseOccurrenceLocationAccess.NotFoundOrNotAuthorized, null, null);
+        locations.Results[fourth.CaseId] = new(CaseOccurrenceLocationAccess.Allowed, 4, new("SZ", "Manzini", null, null, "region-1", null, null));
+
+        var result = await new CaseOccurrenceSearch(queue, locations).SearchAsync(Actor(), "SZ", "region-1", 1, default);
+        Assert.Equal(CaseQueueAccess.Allowed, result.Access);
+        Assert.Equal(second.CaseId, Assert.Single(result.Items).Case.CaseId);
+        Assert.Equal(2, result.Items[0].ReportRevision);
+        Assert.True(result.Truncated);
+        Assert.True(result.UnknownLocations);
+        Assert.Equal(new string?[] { null, "next" }, queue.Cursors);
+    }
+
+    [Fact]
+    public async Task UnavailableLocationCannotBecomeAnEmptySuccessfulSearch()
+    {
+        var row = Row(1);
+        var locations = new Locations();
+        locations.Results[row.CaseId] = new(CaseOccurrenceLocationAccess.Unavailable, null, null);
+        var result = await new CaseOccurrenceSearch(new Queue(new CaseQueueResult(CaseQueueAccess.Allowed, [row])), locations)
+            .SearchAsync(Actor(), "SZ", "region-1", 5, default);
+        Assert.Equal(CaseQueueAccess.Unavailable, result.Access);
+        Assert.Empty(result.Items);
+    }
+
+    [Fact]
+    public async Task RepeatedPageCursorCannotProduceAnApparentlyCompleteResult()
+    {
+        var first = Row(1); var second = Row(2);
+        var locations = new Locations();
+        locations.Results[first.CaseId] = new(CaseOccurrenceLocationAccess.Allowed, 1, null);
+        locations.Results[second.CaseId] = new(CaseOccurrenceLocationAccess.Allowed, 1, null);
+        var queue = new Queue(new(CaseQueueAccess.Allowed, [first], "same"), new(CaseQueueAccess.Allowed, [second], "same"));
+        var result = await new CaseOccurrenceSearch(queue, locations).SearchAsync(Actor(), "SZ", "region-1", 5, default);
+        Assert.Equal(CaseQueueAccess.Unavailable, result.Access);
+        Assert.Empty(result.Items);
+    }
+
+    [Fact]
+    public async Task ScanLimitIsReportedAsIncomplete()
+    {
+        var pages = new List<CaseQueueResult>();
+        var locations = new Locations();
+        for (var page = 0; page < 4; page++)
+        {
+            var rows = Enumerable.Range(page * 50 + 1, 50).Select(Row).ToArray();
+            foreach (var row in rows) locations.Results[row.CaseId] = new(CaseOccurrenceLocationAccess.Allowed, 1, null);
+            pages.Add(new(CaseQueueAccess.Allowed, rows, $"page-{page}"));
+        }
+        var result = await new CaseOccurrenceSearch(new Queue(pages.ToArray()), locations).SearchAsync(Actor(), "SZ", "region-1", 5, default);
+        Assert.Equal(CaseQueueAccess.Allowed, result.Access);
+        Assert.True(result.Truncated);
+        Assert.True(result.UnknownLocations);
+        Assert.Empty(result.Items);
+    }
+}
