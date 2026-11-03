@@ -75,6 +75,16 @@ public sealed class FrameworkPostgresLiveMuseFactAttribute : FactAttribute
 public sealed class EllaiPostgresTests : IAsyncLifetime
 {
     [FrameworkPostgresFact]
+    public async Task ConcurrentFrameworkFixtureMigrationsCompleteWithoutRacing()
+    {
+        await using var first = CreateFrameworkDbContext();
+        await using var second = CreateFrameworkDbContext();
+        await Task.WhenAll(CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(first),
+            CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(second));
+        Assert.Empty(await first.Database.GetPendingMigrationsAsync());
+    }
+
+    [FrameworkPostgresFact]
     public Task FrameworkHistoryRetainsTwelveShortOwnedTurns() => VerifyLongFrameworkHistoryAsync(false);
 
     [FrameworkPostgresLiveMuseFact]
@@ -90,7 +100,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
             EllaiMode.Ask, 1, "cycle-current", Actor, true, "consent/0", EllaiProcessingClassification.UserProvidedNonSensitive,
             EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string>(), EllaiConsentPurposes.PublicProductHelp, "current");
         await using var db = CreateFrameworkDbContext();
-        await db.Database.MigrateAsync();
+        await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(db);
         var store = new PostgresEllaiSessionStore(db);
         await store.CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1, 12, 12,
             Actor.ActorId, "scope-test", null, null, now), default);
@@ -143,7 +153,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         var id = $"framework-cycle-threshold-{Guid.NewGuid():N}";
         _frameworkSessionIds.Add(id);
         await using var db = CreateFrameworkDbContext();
-        await db.Database.MigrateAsync();
+        await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(db);
         var store = new PostgresEllaiSessionStore(db);
         var session = new EllaiSessionRecord(id, EllaiMode.Ask, "Active", 1, 1, 1, 1, 12, 12,
             Actor.ActorId, "scope-test", null, null, DateTimeOffset.UtcNow);
@@ -180,7 +190,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
             EllaiMode.Ask, 1, "cycle-current", Actor, true, "consent/0", EllaiProcessingClassification.UserProvidedNonSensitive,
             EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string>(), EllaiConsentPurposes.PublicProductHelp, "current");
         await using var db = CreateFrameworkDbContext();
-        await db.Database.MigrateAsync();
+        await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(db);
         var store = new PostgresEllaiSessionStore(db);
         await store.CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1, 105, 12,
             Actor.ActorId, "scope-test", null, null, now), default);
@@ -227,7 +237,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         _frameworkSessionIds.Add(id);
         var now = DateTimeOffset.UtcNow;
         await using var db = CreateFrameworkDbContext();
-        await db.Database.MigrateAsync();
+        await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(db);
         var store = new PostgresEllaiSessionStore(db);
         await store.CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1, 0, 12,
             Actor.ActorId, "scope-test", null, null, now), default);
@@ -270,7 +280,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
             EllaiMode.Ask, 1, "cycle-current", Actor, true, "consent/0", EllaiProcessingClassification.UserProvidedNonSensitive,
             EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string>(), EllaiConsentPurposes.PublicProductHelp, "current");
         await using var db = CreateFrameworkDbContext();
-        await db.Database.MigrateAsync();
+        await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(db);
         var store = new PostgresEllaiSessionStore(db);
         await store.CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1, 0, 200,
             Actor.ActorId, "scope-test", null, null, now), default);
@@ -335,7 +345,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         var id = $"framework-receipt-history-{Guid.NewGuid():N}";
         var now = DateTimeOffset.UtcNow;
         await using var db = CreateFrameworkDbContext();
-        await db.Database.MigrateAsync();
+        await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(db);
         _frameworkSessionIds.Add(id);
         await new PostgresEllaiSessionStore(db).CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
             0, 12, Actor.ActorId, "scope-test", null, null, now), default);
@@ -393,7 +403,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
             EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string>(), EllaiConsentPurposes.PublicProductHelp, "turn");
         await using (var db = CreateFrameworkDbContext())
         {
-            await db.Database.MigrateAsync();
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(db);
             _frameworkSessionIds.Add(id);
             var store = new PostgresEllaiSessionStore(db);
             await store.CreateAsync(session, default);
@@ -482,7 +492,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
             EllaiConsentPurposes.PublicProductHelp, "turn");
         await using (var setup = CreateFrameworkDbContext())
         {
-            await setup.Database.MigrateAsync();
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(setup);
             var store = new PostgresEllaiSessionStore(setup);
             var session = new EllaiSessionRecord(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
                 0, 12, Actor.ActorId, "scope-test", null, null, now);
@@ -549,7 +559,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
             EllaiConsentPurposes.PublicProductHelp, "turn");
         await using (var setup = CreateFrameworkDbContext())
         {
-            await setup.Database.MigrateAsync();
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(setup);
             var store = new PostgresEllaiSessionStore(setup);
             var session = new EllaiSessionRecord(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
                 0, 12, Actor.ActorId, "scope-test", null, null, now);
@@ -597,7 +607,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
             EllaiConsentPurposes.PublicProductHelp, "turn");
         await using (var setup = CreateFrameworkDbContext())
         {
-            await setup.Database.MigrateAsync();
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(setup);
             var store = new PostgresEllaiSessionStore(setup);
             var session = new EllaiSessionRecord(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
                 0, 12, Actor.ActorId, "scope-test", null, null, now);
@@ -653,7 +663,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         var now = DateTimeOffset.UtcNow;
         await using (var setup = CreateFrameworkDbContext())
         {
-            await setup.Database.MigrateAsync();
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(setup);
             var store = new PostgresEllaiSessionStore(setup);
             await store.CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
                 0, 12, Actor.ActorId, "scope-test", null, null, now), default);
@@ -708,7 +718,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         var now = DateTimeOffset.UtcNow;
         await using (var setup = CreateFrameworkDbContext())
         {
-            await setup.Database.MigrateAsync();
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(setup);
             var store = new PostgresEllaiSessionStore(setup);
             await store.CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
                 0, 12, Actor.ActorId, "scope-test", null, null, now), default);
@@ -778,7 +788,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         var now = DateTimeOffset.UtcNow;
         await using (var setup = CreateFrameworkDbContext())
         {
-            await setup.Database.MigrateAsync();
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(setup);
             await new PostgresEllaiSessionStore(setup).CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
                 0, 12, Actor.ActorId, "scope-test", null, null, now), default);
             setup.Set<EllaiUtteranceEntity>().Add(new()
@@ -814,7 +824,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         var now = DateTimeOffset.UtcNow;
         await using (var setup = CreateFrameworkDbContext())
         {
-            await setup.Database.MigrateAsync();
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(setup);
             await new PostgresEllaiSessionStore(setup).CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
                 0, 12, Actor.ActorId, "scope-test", null, null, now), default);
             setup.Set<EllaiUtteranceEntity>().Add(new()
@@ -857,7 +867,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         var now = DateTimeOffset.UtcNow;
         await using (var db = CreateFrameworkDbContext())
         {
-            await db.Database.MigrateAsync();
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(db);
             _frameworkSessionIds.Add(id);
             await new PostgresEllaiSessionStore(db).CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
                 0, 12, Actor.ActorId, "scope-test", null, null, now), default);
@@ -892,7 +902,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         var now = DateTimeOffset.UtcNow;
         await using (var setup = CreateFrameworkDbContext())
         {
-            await setup.Database.MigrateAsync();
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(setup);
             var store = new PostgresEllaiSessionStore(setup);
             await store.CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
                 0, 12, Actor.ActorId, "scope-test", null, null, now), default);
@@ -950,7 +960,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         var now = DateTimeOffset.UtcNow;
         await using (var db = CreateFrameworkDbContext())
         {
-            await db.Database.MigrateAsync();
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(db);
             _frameworkSessionIds.Add(id);
             await new PostgresEllaiSessionStore(db).CreateAsync(new(id, EllaiMode.Ask, "Active", 1, 1, 1, 1,
                 0, 12, Actor.ActorId, "scope-test", null, null, now), default);
@@ -1055,7 +1065,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
             EllaiConsentPurposes.PublicProductHelp, "turn-1");
         await using (var db = CreateFrameworkDbContext())
         {
-            await db.Database.MigrateAsync();
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(db);
             var store = new PostgresEllaiSessionStore(db);
             await store.CreateAsync(session, default);
             Assert.NotNull(await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 }, 1,
@@ -1225,7 +1235,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
             EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string>(), EllaiConsentPurposes.PublicProductHelp, "turn-1");
         await using (var db = CreateFrameworkDbContext())
         {
-            await db.Database.MigrateAsync();
+            await CaseAuthorityPostgresFixture.MigrateFrameworkDatabaseAsync(db);
             var store = new PostgresEllaiSessionStore(db);
             await store.CreateAsync(session, default);
             Assert.NotNull(await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 }, 1,

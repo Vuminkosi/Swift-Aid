@@ -77,6 +77,24 @@ Both stores contained zero Ellai sessions or test collections after cleanup.
 The individual successes do not explain the combined failures or establish
 reliable live-provider behavior, deployed Gateway routes or real-record access.
 
+A subsequent fresh-database reproduction captured the combined failures:
+the count fixture hit duplicate `__EFMigrationsHistory` entries, the synthetic
+recall fixture hit an already-existing `workspaces.lock_token` column, and the
+live recall follow-up ended in `TerminalFailure`. The first two resulted from
+test classes migrating the same fresh database concurrently. The shared
+framework test fixtures now acquire a PostgreSQL advisory lock around
+migration, including the direct Ellai PostgreSQL fixture paths. This changes
+test setup only, not production migration behavior.
+
+PASS: two independent `dotnet test` processes concurrently ran
+`ConcurrentFrameworkFixtureMigrationsCompleteWithoutRacing`, each starting
+two migration attempts on one fresh disposable PostgreSQL database; both
+passed 1/1. On another fresh database, the combined synthetic recall and
+membership-change count filter passed 2/2 with disposable Qdrant. The live
+follow-up failure remains unexplained; a separate individual live run passed,
+which does not establish that the intermittent provider decision failure is
+resolved. The captured TRX contained synthetic fixture output only.
+
 ## Provider observations and open checks
 
 `EllaiReasoningRouter` selects Meta, Ollama or an explicitly enabled serverless
