@@ -1,7 +1,6 @@
 # Ellai multi-agent preflight
 
-Status: **IN PROGRESS — NO-GO for multi-agent implementation**. This report records
-evidence, not acceptance of the complete migration or the multi-agent feature.
+Status: **IN PROGRESS - user authorized implementation to continue without the migration acceptance report on 2026-11-04**. This exception does not establish deployment acceptance or close the outstanding checks below.
 
 - Branch: `ellai-multi-agent-implementation`.
 - Starting revision: `20e6d09f0c3436cf288123b15cdfee05dd41ce57`.
