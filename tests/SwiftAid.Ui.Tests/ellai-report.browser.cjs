@@ -83,6 +83,11 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             await page.getByRole('button', { name: 'Save draft', exact: true }).waitFor();
             assert(!(await collect()).completedControlIds?.includes('report.save'));
             await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+            await page.getByRole('button', { name: 'Finish without storage confirmation', exact: true }).click();
+            await page.getByText('We could not confirm whether your draft was saved. Your entries remain on this screen. Check saved reports before trying again.', { exact: true }).waitFor();
+            assert(!(await collect()).completedControlIds?.includes('report.save'));
+            assert((await page.getByLabel('Describe what happened').inputValue()).includes('SYNTHETIC-PRIVATE'));
+            await page.getByRole('button', { name: 'Save draft', exact: true }).click();
             await page.getByRole('button', { name: 'Finish fixture storage', exact: true }).click();
             await accepted('report.save');
             assert((await page.evaluate(() => localStorage.getItem('swiftaid.synthetic-draft-fixture')))?.includes('SYNTHETIC-PRIVATE'));

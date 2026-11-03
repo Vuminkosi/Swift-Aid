@@ -442,7 +442,11 @@
             }
             else if (_saveState == DraftSaveState.Failed)
             {
-                <span>Your draft could not be saved. Your entries remain on this screen.</span>
+                <span>The save action failed. Your entries remain on this screen. Check saved reports before trying again.</span>
+            }
+            else if (_saveState == DraftSaveState.Unconfirmed)
+            {
+                <span>We could not confirm whether your draft was saved. Your entries remain on this screen. Check saved reports before trying again.</span>
             }
             else if (!DraftSavingAvailable)
             {
@@ -1334,17 +1338,16 @@
                 || IsSaveRefreshIdentity(savedId, CurrentDraftId) && DraftMatches(Draft, _savingSnapshot);
             var unchanged = ReferenceEquals(Draft, sourceDraft)
                 ? DraftMatches(Draft, sourceSnapshot) : DraftMatches(Draft, _savingSnapshot);
-            if (sameReport)
+            if (sameReport && _activeSaveRequest.PersistedDraftId is not null)
                 _pendingDraftRefresh = new PendingDraftRefresh(savedId, _savingSnapshot, sourceSnapshot, sourceDraft, savedStep);
-            if (sameReport && unchanged)
+            if (sameReport && unchanged && _activeSaveRequest.PersistedDraftId is not null)
             {
                 _saveState = DraftSaveState.Saved;
-                if (_activeSaveRequest.PersistedDraftId is not null)
-                    _confirmedDraftSave = _pendingDraftRefresh;
+                _confirmedDraftSave = _pendingDraftRefresh;
             }
             else
             {
-                _saveState = DraftSaveState.Unsaved;
+                _saveState = sameReport && unchanged ? DraftSaveState.Unconfirmed : DraftSaveState.Unsaved;
             }
         }
         catch
@@ -1457,6 +1460,7 @@
         Unsaved,
         Saving,
         Saved,
+        Unconfirmed,
         Failed
     }
 

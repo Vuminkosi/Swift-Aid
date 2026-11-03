@@ -367,6 +367,7 @@ public sealed partial class GuidedReportDraftPersistenceTests
             request =>
             {
                 savedSubmission = request.Submission;
+                request.ConfirmPersisted(request.PreviousDraftId!.Value);
                 return Task.CompletedTask;
             },
             currentDraftId: Guid.NewGuid());

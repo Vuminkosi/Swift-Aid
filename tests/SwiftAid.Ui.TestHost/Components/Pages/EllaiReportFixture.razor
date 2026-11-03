@@ -30,6 +30,7 @@
     @if (_pendingSave is not null)
     {
         <button @onclick="CompleteSave">Finish fixture storage</button>
+        <button @onclick="CompleteSaveWithoutConfirmation">Finish without storage confirmation</button>
         <button @onclick="FailSave">Fail fixture storage</button>
     }
     @if (_receipt is not null) { <PublicReportReceipt Receipt="_receipt" /> }
@@ -48,7 +49,7 @@
         ["report.narrative"] = EllaiReportUiManifest.AnchorFor("report.narrative")
     };
     private Guid? _draftId;
-    private TaskCompletionSource? _pendingSave;
+    private TaskCompletionSource<bool>? _pendingSave;
     private int _submissions;
     private IntakeReceipt? _receipt;
     private readonly PublicReportDraft _draft = new() { SubjectScope = IntakeSubjectScope.Human,
@@ -92,7 +93,7 @@
         _pendingSave = new(TaskCreationOptions.RunContinuationsAsynchronously);
         try
         {
-            await _pendingSave.Task;
+            if (!await _pendingSave.Task) return;
             var id = Guid.NewGuid();
             await JS.InvokeVoidAsync("localStorage.setItem", "swiftaid.synthetic-draft-fixture",
                 System.Text.Json.JsonSerializer.Serialize(request.Submission));
@@ -101,7 +102,8 @@
         }
         finally { _pendingSave = null; }
     }
-    private void CompleteSave() => _pendingSave?.TrySetResult();
+    private void CompleteSave() => _pendingSave?.TrySetResult(true);
+    private void CompleteSaveWithoutConfirmation() => _pendingSave?.TrySetResult(false);
     private void FailSave() => _pendingSave?.TrySetException(new IOException("Synthetic storage failure."));
     protected override void OnAfterRender(bool firstRender)
     {
