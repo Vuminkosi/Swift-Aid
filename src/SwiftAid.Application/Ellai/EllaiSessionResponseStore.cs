@@ -17,6 +17,47 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null,
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private readonly Dictionary<string, SessionResponses> _sessions = new(StringComparer.Ordinal);
 
+    /// <summary>Capture the current ephemeral feed generation before starting work.</summary>
+    public Guid CaptureGeneration(string sessionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        lock (_gate)
+        {
+            PruneExpired();
+            if (!_sessions.TryGetValue(sessionId, out var session))
+            {
+                session = new SessionResponses(_timeProvider.GetUtcNow());
+                _sessions.Add(sessionId, session);
+            }
+            return session.Generation;
+        }
+    }
+
+    /// <summary>Publish a committed result only while its captured feed remains current.</summary>
+    public bool PublishCommitted(string sessionId, Guid generation, string utteranceId,
+        EllaiUtteranceResolution resolution, IReadOnlyList<string> chunks, string language = "eng", string? englishVoiceId = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(utteranceId);
+        ArgumentNullException.ThrowIfNull(resolution);
+        ArgumentNullException.ThrowIfNull(chunks);
+        resolution.Validate();
+        if (chunks.Count > 0 && (resolution.Outcome != "Completed" || chunks.Any(string.IsNullOrWhiteSpace) ||
+            !string.Equals(string.Join(" ", chunks.Select(chunk => chunk.Trim())),
+                resolution.AssistantText?.Trim(), StringComparison.Ordinal)))
+            throw new ArgumentException("Response chunks must match the committed answer.", nameof(chunks));
+        lock (_gate)
+        {
+            PruneExpired();
+            if (!_sessions.TryGetValue(sessionId, out var session) || session.Generation != generation)
+                return false;
+            for (var index = 0; index < chunks.Count; index++)
+                PublishChunk(sessionId, utteranceId, index + 1, chunks[index], englishVoiceId);
+            Reconcile(sessionId, utteranceId, resolution, language, englishVoiceId);
+            return true;
+        }
+    }
+
     public EllaiSessionResponseDto? PublishProgress(
         string sessionId, string utteranceId, string text, EllaiInteractionProgressDto progress, string? englishVoiceId = null)
     {
@@ -164,8 +205,61 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null,
             var oldest = session.Items.First!.Value.Sequence;
             foreach (var key in session.Chunks.Where(item => item.Value.Sequence < oldest).Select(item => item.Key).ToArray())
                 session.Chunks.Remove(key);
+            foreach (var key in session.ProvisionalFences.Keys.Where(sequence => sequence < oldest).ToArray())
+                session.ProvisionalFences.Remove(key);
             audioPreparation?.Published(response);
             return response;
+        }
+    }
+
+    /// <summary>Publish a validated segment only for the captured feed generation and first active attempt.</summary>
+    public bool PublishProvisional(string sessionId, Guid generation, string utteranceId, int attempt,
+        string scopeEpoch, long interactionEpoch, int chunkIndex, string text, string? englishVoiceId = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(utteranceId);
+        if (attempt < 1) throw new ArgumentOutOfRangeException(nameof(attempt));
+        lock (_gate)
+        {
+            PruneExpired();
+            if (!_sessions.TryGetValue(sessionId, out var session) || session.Generation != generation)
+                return false;
+            if (session.StreamAttempts.TryGetValue(utteranceId, out var previous) && previous != attempt)
+                return false;
+            session.StreamAttempts[utteranceId] = attempt;
+            var response = PublishChunk(sessionId, utteranceId, chunkIndex, text, englishVoiceId);
+            if (response is null) return false;
+            session.ProvisionalFences[response.Sequence] = (attempt, scopeEpoch, interactionEpoch);
+            return true;
+        }
+    }
+
+    /// <summary>Checks a provisional chunk against the current durable attempt and session epoch.</summary>
+    public bool TryGetProvisionalState(string sessionId, long sequence, out bool provisional)
+    {
+        lock (_gate)
+        {
+            provisional = false;
+            if (!_sessions.TryGetValue(sessionId, out var session) || !session.Items.Any(item => item.Sequence == sequence))
+                return false;
+            provisional = session.ProvisionalFences.ContainsKey(sequence);
+            return true;
+        }
+    }
+
+    public bool CanDeliver(string sessionId, EllaiSessionResponseDto response, string scopeEpoch, long interactionEpoch,
+        IReadOnlyList<EllaiConversationTurn> conversation, DateTimeOffset now)
+    {
+        lock (_gate)
+        {
+            if (!_sessions.TryGetValue(sessionId, out var session)) return false;
+            if (!session.Items.Any(item => item.Sequence == response.Sequence)) return false;
+            if (!session.ProvisionalFences.TryGetValue(response.Sequence, out var fence)) return true;
+            if (fence.Epoch != interactionEpoch || fence.ScopeEpoch != scopeEpoch) return false;
+            var turn = conversation.FirstOrDefault(item => item.ClientUtteranceId == response.ClientUtteranceId);
+            return turn is not null && turn.AttemptCount == fence.Attempt &&
+                (turn.Outcome == "Completed" && turn.CompletedAtUtc is not null ||
+                 turn.Outcome == "Processing" && turn.CompletedAtUtc is null && turn.LeaseExpiresAtUtc > now);
         }
     }
 
@@ -287,10 +381,13 @@ public sealed class EllaiSessionResponseStore(TimeProvider? timeProvider = null,
 
     private sealed class SessionResponses(DateTimeOffset createdAtUtc)
     {
+        public Guid Generation { get; } = Guid.NewGuid();
         public long Sequence { get; set; }
         public string? LastClientUtteranceId { get; set; }
         public DateTimeOffset LastUpdatedAtUtc { get; set; } = createdAtUtc;
         public LinkedList<EllaiSessionResponseDto> Items { get; } = new();
         public Dictionary<string, EllaiSessionResponseDto> Chunks { get; } = new(StringComparer.Ordinal);
+        public Dictionary<string, int> StreamAttempts { get; } = new(StringComparer.Ordinal);
+        public Dictionary<long, (int Attempt, string ScopeEpoch, long Epoch)> ProvisionalFences { get; } = new();
     }
 }

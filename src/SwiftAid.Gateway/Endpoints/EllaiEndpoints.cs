@@ -123,6 +123,7 @@ public static class EllaiEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
         group.MapGet("/sessions/{sessionId}/responses/{sequence:long}/audio",
                 EllaiGuestEndpoints.StreamResponseAudioAsync)
+            .AddEndpointFilter(EllaiGuestEndpoints.RequireUncancelledAudioSession)
             .WithName("StreamEllaiResponseAudio")
             .Produces(StatusCodes.Status200OK, contentType: "application/vnd.swiftaid.pcm")
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)

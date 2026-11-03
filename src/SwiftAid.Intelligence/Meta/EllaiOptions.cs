@@ -56,8 +56,7 @@ public sealed class EllaiOptions
     /// when endpoint/model/key are all present.</summary>
     public bool ServerlessEnabled { get; init; }
 
-    /// <summary>Operator-funded dollar budget for everything ($70).
-    /// Global kill switch and per-envelope bound in the usage ledger.</summary>
+    /// <summary>Operator-configured dollar threshold for Ellai usage warnings.</summary>
     public decimal SpendingCapDollars { get; init; } = 70.00m;
 
     /// <summary>Rate per 1,000 input tokens in dollars. Zero means unpriced:

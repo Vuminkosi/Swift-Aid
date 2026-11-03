@@ -12,7 +12,7 @@ namespace SwiftAid.Integration.Tests;
 public sealed class EllaiPostgresCycleLimitTests
 {
     [EllaiPostgresFact]
-    public async Task ExhaustedSessionDoesNotAdvanceOrClaimUtterance()
+    public async Task SessionAdvancesBeyondCycleThreshold()
     {
         var sessionId = $"pg-cycle-limit-{Guid.NewGuid():N}";
         var ownerActorId = $"actor-{Guid.NewGuid():N}";
@@ -42,7 +42,7 @@ public sealed class EllaiPostgresCycleLimitTests
                         UpdatedAtUtc: DateTimeOffset.UtcNow),
                     CancellationToken.None);
 
-                var rejected = await store.TryAcceptUtteranceAsync(
+                var accepted = await store.TryAcceptUtteranceAsync(
                     new EllaiSessionRecord(
                         sessionId,
                         EllaiMode.Ask,
@@ -62,17 +62,17 @@ public sealed class EllaiPostgresCycleLimitTests
                     "exhausted-cycle-utterance",
                     CancellationToken.None);
 
-                Assert.Null(rejected);
+                Assert.NotNull(accepted);
             }
 
             await using var verifyDb = CreateDbContext();
             var verificationStore = new PostgresEllaiSessionStore(verifyDb);
             var session = await verificationStore.GetAsync(sessionId, CancellationToken.None);
             Assert.NotNull(session);
-            Assert.Equal(expectedVersion, session.SessionVersion);
-            Assert.Equal(cycleLimit, session.CyclesUsed);
+            Assert.Equal(expectedVersion + 1, session.SessionVersion);
+            Assert.Equal(cycleLimit + 1, session.CyclesUsed);
             Assert.Equal(cycleLimit, session.CyclesAllowed);
-            Assert.False(await verifyDb.Set<EllaiUtteranceEntity>()
+            Assert.True(await verifyDb.Set<EllaiUtteranceEntity>()
                 .AnyAsync(entity => entity.SessionId == sessionId));
         }
         finally

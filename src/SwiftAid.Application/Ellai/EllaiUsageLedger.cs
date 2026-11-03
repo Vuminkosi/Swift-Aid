@@ -34,19 +34,16 @@ public sealed record EllaiUsageTotals(
     int TotalTokens,
     int Calls);
 
-/// <summary>Per-session usage ledger with a hard token budget and a hard
-/// dollar budget (EL-MODEL-06, EL-LOOP-04). The operator funds $70 for
-/// everything: <see cref="DefaultTotalSpendCap"/> is the global kill
-/// switch and <see cref="DefaultEnvelopeSpendCap"/> bounds one session
-/// envelope. Dollar caps engage once real rates are configured; until
-/// then the token cap is the active guard. Reservation failures deny
-/// further model calls instead of silently overspending. Thread-safe;
-/// sessions are isolated by session id.</summary>
+/// <summary>Thread-safe, session-scoped usage accounting with configurable
+/// token and spend thresholds. Callers can enforce them or continue after
+/// emitting threshold warnings; the Gateway uses advisory thresholds.</summary>
 public sealed class EllaiUsageLedger(
     int sessionTokenBudget = EllaiUsageLedger.DefaultSessionTokenBudget,
     decimal envelopeSpendCap = EllaiUsageLedger.DefaultEnvelopeSpendCap,
     decimal totalSpendCap = EllaiUsageLedger.DefaultTotalSpendCap,
-    EllaiPriceTable? prices = null)
+    EllaiPriceTable? prices = null,
+    bool enforceLimits = true,
+    Action<string>? thresholdWarning = null)
 {
     public const int DefaultSessionTokenBudget = 2_000_000;
 
@@ -57,10 +54,12 @@ public sealed class EllaiUsageLedger(
     private readonly object _gate = new();
     private readonly Dictionary<string, EllaiUsageTotals> _totals = new(StringComparer.Ordinal);
     private readonly Dictionary<string, decimal> _spend = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, decimal> _budgetSpend = new(StringComparer.Ordinal);
     private readonly Dictionary<string, long> _pendingTokens = new(StringComparer.Ordinal);
     private readonly Dictionary<string, decimal> _pendingSpend = new(StringComparer.Ordinal);
     private decimal _totalPendingSpend;
     private decimal _totalSpend;
+    private decimal _totalBudgetSpend;
 
     public int SessionTokenBudget { get; } = sessionTokenBudget <= 0
         ? throw new ArgumentOutOfRangeException(nameof(sessionTokenBudget))
@@ -76,9 +75,10 @@ public sealed class EllaiUsageLedger(
 
     public EllaiPriceTable Prices { get; } = prices ?? EllaiPriceTable.Unpriced;
 
-    /// <summary>Reserves estimated tokens before a model call; false means
-    /// a budget is exhausted and the call must not be made. When priced,
-    /// the estimate also reserves its dollar cost against both caps.</summary>
+    public bool EnforcesLimits => enforceLimits;
+
+    /// <summary>Checks estimated tokens and priced spend against thresholds.
+    /// Returns false only when enforcement is enabled and a threshold is exceeded.</summary>
     public bool TryReserve(string sessionId, int estimatedTokens)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -93,7 +93,8 @@ public sealed class EllaiUsageLedger(
             _pendingTokens.TryGetValue(sessionId, out var pendingTokens);
             if ((long)used + pendingTokens + estimatedTokens > SessionTokenBudget)
             {
-                return false;
+                if (enforceLimits) return false;
+                thresholdWarning?.Invoke("session_tokens");
             }
 
             if (!Prices.IsPriced)
@@ -102,10 +103,12 @@ public sealed class EllaiUsageLedger(
             }
 
             var estimate = Prices.CostFor(estimatedTokens, 0);
-            var sessionSpend = _spend.TryGetValue(sessionId, out var spent) ? spent : 0;
+            var sessionSpend = _budgetSpend.TryGetValue(sessionId, out var spent) ? spent : 0;
             _pendingSpend.TryGetValue(sessionId, out var pendingSpend);
-            return sessionSpend + pendingSpend + estimate <= EnvelopeSpendCap
-                && _totalSpend + _totalPendingSpend + estimate <= TotalSpendCap;
+            var withinThreshold = sessionSpend + pendingSpend + estimate <= EnvelopeSpendCap
+                && _totalBudgetSpend + _totalPendingSpend + estimate <= TotalSpendCap;
+            if (!withinThreshold && !enforceLimits) thresholdWarning?.Invoke("spend");
+            return withinThreshold || !enforceLimits;
         }
     }
 
@@ -120,14 +123,20 @@ public sealed class EllaiUsageLedger(
             _totals.TryGetValue(sessionId, out var current);
             _pendingTokens.TryGetValue(sessionId, out var pendingTokens);
             if ((long)(current?.TotalTokens ?? 0) + pendingTokens + estimatedTokens > SessionTokenBudget)
-                return null;
+            {
+                if (enforceLimits) return null;
+                thresholdWarning?.Invoke("session_tokens");
+            }
             var estimatedSpend = Prices.IsPriced
                 ? Math.Max(Prices.CostFor(estimatedTokens, 0), Prices.CostFor(0, estimatedTokens)) : 0;
-            _spend.TryGetValue(sessionId, out var spent);
+            _budgetSpend.TryGetValue(sessionId, out var spent);
             _pendingSpend.TryGetValue(sessionId, out var pendingSpend);
             if (Prices.IsPriced && (spent + pendingSpend + estimatedSpend > EnvelopeSpendCap ||
-                _totalSpend + _totalPendingSpend + estimatedSpend > TotalSpendCap))
-                return null;
+                _totalBudgetSpend + _totalPendingSpend + estimatedSpend > TotalSpendCap))
+            {
+                if (enforceLimits) return null;
+                thresholdWarning?.Invoke("spend");
+            }
             _pendingTokens[sessionId] = pendingTokens + estimatedTokens;
             _pendingSpend[sessionId] = pendingSpend + estimatedSpend;
             _totalPendingSpend += estimatedSpend;
@@ -154,11 +163,11 @@ public sealed class EllaiUsageLedger(
         }
     }
 
-    public EllaiUsageTotals Record(EllaiUsageSample sample)
+    public EllaiUsageTotals Record(EllaiUsageSample sample, int estimatedPromptTokens = 0, int estimatedCompletionTokens = 0)
     {
         ArgumentNullException.ThrowIfNull(sample);
         ArgumentException.ThrowIfNullOrWhiteSpace(sample.SessionId);
-        if (sample.PromptTokens < 0 || sample.CompletionTokens < 0)
+        if (sample.PromptTokens < 0 || sample.CompletionTokens < 0 || estimatedPromptTokens < 0 || estimatedCompletionTokens < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(sample));
         }
@@ -170,12 +179,16 @@ public sealed class EllaiUsageLedger(
                 sample.SessionId,
                 SaturatingAdd(current?.PromptTokens ?? 0, sample.PromptTokens),
                 SaturatingAdd(current?.CompletionTokens ?? 0, sample.CompletionTokens),
-                SaturatingAdd(current?.TotalTokens ?? 0, sample.PromptTokens, sample.CompletionTokens),
+                SaturatingAdd(SaturatingAdd(current?.TotalTokens ?? 0, sample.PromptTokens, sample.CompletionTokens),
+                    estimatedPromptTokens, estimatedCompletionTokens),
                 SaturatingAdd(current?.Calls ?? 0, 1));
             _totals[sample.SessionId] = next;
+            if (!enforceLimits && (current?.TotalTokens ?? 0) <= SessionTokenBudget && next.TotalTokens > SessionTokenBudget)
+                thresholdWarning?.Invoke("session_tokens");
             if (Prices.IsPriced)
             {
-                AccrueLocked(sample.SessionId, Prices.CostFor(sample.PromptTokens, sample.CompletionTokens));
+                AccrueAndWarnLocked(sample.SessionId, Prices.CostFor(sample.PromptTokens, sample.CompletionTokens),
+                    Prices.CostFor(estimatedPromptTokens, estimatedCompletionTokens));
             }
 
             return next;
@@ -198,7 +211,7 @@ public sealed class EllaiUsageLedger(
         {
             if (Prices.IsPriced)
             {
-                AccrueLocked(sessionId, Prices.CostForAudio(minutes));
+                AccrueAndWarnLocked(sessionId, Prices.CostForAudio(minutes));
             }
         }
     }
@@ -222,6 +235,8 @@ public sealed class EllaiUsageLedger(
         var totals = await store.TotalsAsync(sessionId, ct).ConfigureAwait(false);
         var sessionSpend = await store.SpendForAsync(sessionId, ct).ConfigureAwait(false);
         var globalSpend = await store.TotalSpendAsync(ct).ConfigureAwait(false);
+        var sessionBudgetSpend = await store.BudgetSpendForAsync(sessionId, ct).ConfigureAwait(false);
+        var globalBudgetSpend = await store.TotalBudgetSpendAsync(ct).ConfigureAwait(false);
         lock (_gate)
         {
             _totals.TryGetValue(sessionId, out var current);
@@ -234,6 +249,9 @@ public sealed class EllaiUsageLedger(
             _spend.TryGetValue(sessionId, out var spent);
             _spend[sessionId] = Math.Max(spent, sessionSpend);
             _totalSpend = Math.Max(_totalSpend, globalSpend);
+            _budgetSpend.TryGetValue(sessionId, out var budgetSpent);
+            _budgetSpend[sessionId] = Math.Max(budgetSpent, sessionBudgetSpend);
+            _totalBudgetSpend = Math.Max(_totalBudgetSpend, globalBudgetSpend);
         }
     }
 
@@ -257,10 +275,23 @@ public sealed class EllaiUsageLedger(
         }
     }
 
-    private void AccrueLocked(string sessionId, decimal amount)
+    private void AccrueLocked(string sessionId, decimal amount, decimal estimate = 0)
     {
         _spend[sessionId] = (_spend.TryGetValue(sessionId, out var spent) ? spent : 0) + amount;
         _totalSpend += amount;
+        _budgetSpend[sessionId] = (_budgetSpend.TryGetValue(sessionId, out var budget) ? budget : 0) + amount + estimate;
+        _totalBudgetSpend += amount + estimate;
+    }
+
+    private void AccrueAndWarnLocked(string sessionId, decimal amount, decimal estimate = 0)
+    {
+        _budgetSpend.TryGetValue(sessionId, out var previousSessionSpend);
+        var previousTotalSpend = _totalBudgetSpend;
+        AccrueLocked(sessionId, amount, estimate);
+        if (!enforceLimits &&
+            ((previousSessionSpend <= EnvelopeSpendCap && _budgetSpend[sessionId] > EnvelopeSpendCap) ||
+             (previousTotalSpend <= TotalSpendCap && _totalBudgetSpend > TotalSpendCap)))
+            thresholdWarning?.Invoke("spend");
     }
 
     public EllaiUsageTotals TotalsFor(string sessionId)

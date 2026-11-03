@@ -10,6 +10,71 @@ namespace SwiftAid.Application.Tests.Ellai;
 [Trait("Task", "ELL-T06")]
 public sealed class EllaiUtteranceRunnerTests
 {
+    [Fact]
+    public async Task CancelledAuthorityReadCannotEnterTextPublication()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var consent = new EllaiConsentService();
+        consent.Grant("session-1", EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
+        var store = new CancellingPublicationStore(cancellation);
+        var published = false;
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => EllaiUtteranceRunner.RunOneAsync(Work(),
+            new(new PublicationExecutor(), null, null, consent, Sessions: store,
+                OnTextDelta: (_, _) => { published = true; return ValueTask.CompletedTask; }), 256, cancellation.Token));
+
+        Assert.False(published);
+        Assert.Equal(2, store.Reads);
+    }
+
+    [Fact]
+    public async Task CancelledFinalAuthorityReadCannotCompleteTurn()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var consent = new EllaiConsentService();
+        consent.Grant("session-1", EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
+        var store = new CancellingPublicationStore(cancellation);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => EllaiUtteranceRunner.RunOneAsync(Work(),
+            new(new PublicationExecutor(complete: true), null, null, consent, Sessions: store), 256, cancellation.Token));
+
+        Assert.Equal(2, store.Reads);
+    }
+
+    private sealed class CancellingPublicationStore(CancellationTokenSource cancellation) : IEllaiSessionStore
+    {
+        public int Reads { get; private set; }
+        public Task<EllaiSessionRecord?> GetAsync(string sessionId, CancellationToken ct)
+        {
+            if (++Reads == 2) cancellation.Cancel();
+            return Task.FromResult<EllaiSessionRecord?>(new("session-1", EllaiMode.Ask, "Active", 1, 0, 1, 0, 1, 12,
+                "officer-1", "epoch-1", null, null, DateTimeOffset.UtcNow));
+        }
+        public Task<IReadOnlyList<EllaiSessionRecord>> ListOwnedAsync(string ownerActorId, int offset, int take, CancellationToken ct) => throw new NotSupportedException();
+        public Task<EllaiSessionRecord> CreateAsync(EllaiSessionRecord record, CancellationToken ct) => throw new NotSupportedException();
+        public Task<EllaiSessionRecord?> TryUpdateAsync(EllaiSessionRecord record, long expectedVersion, CancellationToken ct) => throw new NotSupportedException();
+        public Task<EllaiUtteranceStoreResult?> TryAcceptUtteranceAsync(EllaiSessionRecord record, long expectedVersion, string clientUtteranceId, CancellationToken ct, string? outboxPayloadJson = null) => throw new NotSupportedException();
+        public Task SaveCheckpointAsync(EllaiCheckpoint checkpoint, CancellationToken ct) => throw new NotSupportedException();
+    }
+
+    private sealed class PublicationExecutor(bool complete = false) : IEllaiReasoningExecutor
+    {
+        public async Task<EllaiCycleOutcome> RunAsync(EllaiLoopRequest request, CancellationToken ct,
+            Func<int, CancellationToken, Task<bool>>? reauthorizeAsync = null,
+            EllaiActivityStatusCoordinator? activity = null, EllaiSessionEventJournal? journal = null,
+            Func<CancellationToken, Task<bool>>? isExecutionCurrentAsync = null,
+            Func<string, CancellationToken, ValueTask>? onTextDelta = null, Action<SwiftAid.Application.Ellai.EllaiActivityEvent>? onActivity = null,
+            Func<EllaiToolContext, EllaiToolRequest, CancellationToken, Task<EllaiToolResult>>? invokeToolAsync = null)
+        {
+            if (onTextDelta is not null) await onTextDelta("Synthetic text.", ct);
+            return complete
+                ? new(true, EllaiModelTurnParser.Parse(DecisionTurn).Turn!.FinalDecision, null, 0, 0, false)
+                : new(false, null, "fixture", 0, 0, false);
+        }
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

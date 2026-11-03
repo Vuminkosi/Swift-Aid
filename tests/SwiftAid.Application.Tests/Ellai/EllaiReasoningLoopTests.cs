@@ -53,16 +53,32 @@ public sealed class EllaiReasoningLoopTests
         """;
 
     [Fact]
+    public void AdvisoryUsageThresholdIsNotPresentedAsRemainingTokenLimit()
+    {
+        var ledger = new EllaiUsageLedger(sessionTokenBudget: 10, enforceLimits: false);
+        ledger.Record(new EllaiUsageSample("session-1", 10, 1));
+        var prompt = new EllaiExecutionPromptBuilder(new EllaiPromptBuilder("Policy text.", "v-test"), ledger)
+            .Build(Request());
+
+        Assert.DoesNotContain("session tokens left", prompt, StringComparison.Ordinal);
+        var enforced = new EllaiExecutionPromptBuilder(new EllaiPromptBuilder("Policy text.", "v-test"),
+            new EllaiUsageLedger(sessionTokenBudget: 10)).Build(Request());
+        Assert.Contains("10 session tokens left", enforced, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void FrameworkPromptRetainsPolicyAndGuidanceButUsesNativeToolProtocol()
     {
         var prompt = new EllaiExecutionPromptBuilder(new EllaiPromptBuilder("Policy text.", "v-test"))
-            .Build(Request(), frameworkNative: true);
+            .Build(Request());
         Assert.Contains("Policy text.", prompt);
         Assert.Contains("## Interactive guidance", prompt);
         Assert.Contains("Use the registered function tools", prompt);
         Assert.Contains("## Final decision JSON schema", prompt);
         Assert.DoesNotContain(EllaiReasoningLoop.TurnProtocol, prompt);
         Assert.Contains("Claims must cite exact evidence", prompt);
+        Assert.Contains("Never infer a case count from a partial list", prompt);
+        Assert.Contains("ellai_owned_case_count", prompt);
     }
 
     [Fact]
@@ -141,13 +157,12 @@ public sealed class EllaiReasoningLoopTests
     [Theory]
     [InlineData("not-json")]
     [InlineData("{\"final_decision\":{\"schemaVersion\":999}}")]
-    public async Task RejectedDecisionsCannotBypassTheSharedRepairBudget(string rejected)
+    public async Task RejectedDecisionsCanBeRepairedBeyondThePreviousLimit(string rejected)
     {
         var completions = new ScriptedCompletions(rejected, rejected, rejected, DecisionTurn);
         var outcome = await Loop(completions).RunAsync(Request(), CancellationToken.None);
-        Assert.False(outcome.Completed);
-        Assert.Equal(EllaiCycleRunner.MaxRepairAttempts + 1, completions.Calls);
-        Assert.Equal("InvalidDecision", outcome.FailureCode);
+        Assert.True(outcome.Completed);
+        Assert.Equal(4, completions.Calls);
         Assert.True(outcome.RepairUsed);
     }
 

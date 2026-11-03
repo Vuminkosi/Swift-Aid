@@ -29,18 +29,37 @@ public sealed class EllaiFrameworkUsage(string sessionId, EllaiUsageLedger ledge
             foreach (var tool in options.Tools.OfType<AIFunctionDeclaration>())
                 bytes += Encoding.UTF8.GetByteCount(tool.Name) + Encoding.UTF8.GetByteCount(tool.Description ?? string.Empty)
                     + Encoding.UTF8.GetByteCount(tool.JsonSchema.GetRawText());
-        var estimate = (int)Math.Min(int.MaxValue, (bytes + 1) / 2 + (options?.MaxOutputTokens ?? 0));
+        var estimate = (int)Math.Min(int.MaxValue, bytes + (options?.MaxOutputTokens ?? 0));
         return estimate;
     }
 
-    public async Task RecordAsync(ChatResponse response, CancellationToken ct)
+    public async Task RecordAsync(ChatResponse response, IReadOnlyList<ChatMessage> messages, ChatOptions? options, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(response);
         var input = (int)Math.Clamp(response.Usage?.InputTokenCount ?? 0, 0, int.MaxValue);
         var output = (int)Math.Clamp(response.Usage?.OutputTokenCount ?? 0, 0, int.MaxValue);
+        // A zero count cannot account for a dispatched prompt or guarantee an
+        // unobserved/empty completion was free. Retain a separate estimate.
+        var outputEstimate = response.Usage?.OutputTokenCount is null or <= 0 ? options?.MaxOutputTokens ?? 0 : 0;
+        var totalEstimate = Estimate(messages, options);
+        var inputEstimate = response.Usage?.InputTokenCount is null or <= 0
+            ? Math.Max(0, totalEstimate - (options?.MaxOutputTokens ?? 0)) : 0;
         var sample = new EllaiUsageSample(_sessionId, input, output);
-        _ledger.Record(sample);
-        await _store.RecordAsync(new StoredUsageSample(_sessionId, input, output,
-            _ledger.DollarsFor(sample), DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
+        _ledger.Record(sample, inputEstimate, outputEstimate);
+        try
+        {
+            await _store.RecordAsync(new StoredUsageSample(_sessionId, input, output,
+                _ledger.DollarsFor(sample), DateTimeOffset.UtcNow)
+            {
+                EstimatedPromptTokens = inputEstimate,
+                EstimatedCompletionTokens = outputEstimate,
+                EstimatedDollars = _ledger.DollarsFor(new EllaiUsageSample(_sessionId, inputEstimate, outputEstimate))
+            }, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            throw new EllaiFrameworkFailureException("UsageUnavailable");
+        }
     }
 }

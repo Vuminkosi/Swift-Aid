@@ -500,9 +500,17 @@ public sealed class EllaiReviewGatewayClient(
         await using var responseScope = _serviceProvider.CreateAsyncScope();
         var outbox = responseScope.ServiceProvider.GetRequiredService<IEllaiUtteranceOutboxStore>();
         var conversation = await outbox.ReadConversationAsync(sessionId, actor.ActorId, cancellationToken).ConfigureAwait(false);
-        return store.ReadSince(sessionId, Math.Max(0, cursor)) with
+        var current = await responseScope.ServiceProvider.GetRequiredService<IEllaiSessionStore>()
+            .GetAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (current is null || current.OwnerActorId != actor.ActorId) return null;
+        var page = current.Status == "Cancelled"
+            ? new EllaiSessionResponsePageDto([], Math.Max(0, cursor))
+            : store.ReadSince(sessionId, Math.Max(0, cursor));
+        return page with
         {
             StreamId = store.StreamId,
+            Responses = page.Responses.Where(response => store.CanDeliver(sessionId, response, current.ScopeEpoch,
+                current.InteractionEpoch, conversation, DateTimeOffset.UtcNow)).ToArray(),
             Conversation = conversation.Select(EllaiConversationProjection.ToClient).ToArray(),
         };
     }

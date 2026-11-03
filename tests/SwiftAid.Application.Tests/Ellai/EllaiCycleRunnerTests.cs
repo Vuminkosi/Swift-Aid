@@ -99,9 +99,8 @@ public sealed class EllaiCycleRunnerTests
     }
 
     [Fact]
-    public async Task GenerousCeilingsStillTerminateRunawayTurns()
+    public async Task InvestigationCanExceedThePreviousToolCallCeiling()
     {
-        Assert.Equal(4_000, EllaiCycleRunner.MaxToolCalls);
         var broker = GrantedBroker();
         var runner = new EllaiCycleRunner(broker);
         var calls = 0;
@@ -111,6 +110,7 @@ public sealed class EllaiCycleRunnerTests
             iteration =>
             {
                 calls++;
+                if (iteration == 6) return Task.FromResult(new EllaiModelTurn([], ValidDecision()));
                 return Task.FromResult(new EllaiModelTurn(
                     Enumerable.Range(0, 1_000).Select(_ =>
                         new EllaiToolRequest(EllaiToolNames.Now, new Dictionary<string, string>())).ToArray(),
@@ -119,11 +119,10 @@ public sealed class EllaiCycleRunnerTests
             d => EllaiDecisionValidator.Validate(d),
             CancellationToken.None);
 
-        Assert.False(outcome.Completed);
-        Assert.Contains("budget exhausted", outcome.StopReason ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(EllaiCycleRunner.MaxToolCalls, outcome.ToolCallsUsed);
-        Assert.Equal(5, outcome.IterationsUsed);
-        Assert.Equal(5, calls);
+        Assert.True(outcome.Completed);
+        Assert.Equal(5_000, outcome.ToolCallsUsed);
+        Assert.Equal(6, outcome.IterationsUsed);
+        Assert.Equal(6, calls);
     }
 
     [Fact]
@@ -206,7 +205,7 @@ public sealed class EllaiCycleRunnerTests
     }
 
     [Fact]
-    public async Task ExhaustedReadsStopAsUnreviewed()
+    public async Task RepeatedReadsContinueBeyondPreviousIterationLimit()
     {
         var broker = GrantedBroker();
         var runner = new EllaiCycleRunner(broker);
@@ -214,42 +213,39 @@ public sealed class EllaiCycleRunnerTests
 
         var outcome = await runner.RunAsync(
             Context,
-            _ => Task.FromResult(new EllaiModelTurn(
-                new[] { new EllaiToolRequest(EllaiToolNames.State, new Dictionary<string, string>()) }, null)),
+            iteration => Task.FromResult(iteration == 14
+                ? new EllaiModelTurn([], ValidDecision())
+                : new EllaiModelTurn(new[] { new EllaiToolRequest(EllaiToolNames.State, new Dictionary<string, string>()) }, null)),
             d => EllaiDecisionValidator.Validate(d),
             CancellationToken.None,
             activity: activity,
             cycleId: "cycle-9",
             controllerEpoch: 1);
 
-        Assert.False(outcome.Completed);
-        Assert.Equal(EllaiCycleRunner.MaxIterations, outcome.IterationsUsed);
-        Assert.Equal(EllaiCycleRunner.MaxIterations, outcome.ToolCallsUsed);
+        Assert.True(outcome.Completed);
+        Assert.Equal(14, outcome.IterationsUsed);
+        Assert.Equal(13, outcome.ToolCallsUsed);
         var status = activity.CurrentStatus("session-1", 1);
         Assert.NotNull(status);
-        Assert.Equal(
-            "I found information, but need another authorized step to finish reviewing it.",
-            status.Text);
+        Assert.Equal("Done — the result is verified.", status.Text);
     }
 
     [Fact]
-    public async Task ExhaustedReasoningIterationsDoNotClaimTheTokenBudgetWasUsed()
+    public async Task CancellationStopsReasoningWithoutAnIterationCeiling()
     {
         var runner = new EllaiCycleRunner(GrantedBroker());
-        var activity = new EllaiActivityStatusCoordinator();
-
-        var outcome = await runner.RunAsync(
+        using var cancellation = new CancellationTokenSource();
+        var calls = 0;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runner.RunAsync(
             Context,
-            _ => Task.FromResult(new EllaiModelTurn(Array.Empty<EllaiToolRequest>(), null)),
+            _ =>
+            {
+                if (++calls == 15) cancellation.Cancel();
+                return Task.FromResult(new EllaiModelTurn(Array.Empty<EllaiToolRequest>(), null));
+            },
             EllaiDecisionValidator.Validate,
-            CancellationToken.None,
-            activity: activity,
-            controllerEpoch: 1);
-
-        Assert.False(outcome.Completed);
-        Assert.Contains("iteration limit", outcome.StopReason ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal("Ellai reached this request's reasoning limit before it could finish. Try a narrower question.",
-            activity.CurrentStatus("session-1", 1)?.Text);
+            cancellation.Token));
+        Assert.Equal(15, calls);
     }
 
     [Fact]

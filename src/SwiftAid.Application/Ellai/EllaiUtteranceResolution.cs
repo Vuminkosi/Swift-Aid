@@ -45,4 +45,5 @@ public sealed record EllaiConversationTurn(
 {
     public string? UiProposalsJson { get; init; }
     public string? ToolTraceJson { get; init; }
+    public DateTimeOffset? LeaseExpiresAtUtc { get; init; }
 }

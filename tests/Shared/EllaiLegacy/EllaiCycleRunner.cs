@@ -2,33 +2,6 @@ using SwiftAid.Contracts.Ellai;
 
 namespace SwiftAid.Application.Ellai;
 
-/// <summary>Outcome of one bounded Ellai cycle.</summary>
-public sealed record EllaiCycleOutcome(
-    bool Completed,
-    EllaiDecision? Decision,
-    string? StopReason,
-    int IterationsUsed,
-    int ToolCallsUsed,
-    bool RepairUsed,
-    string? FailureCode = null)
-{
-    /// <summary>Server-observed tool results for this execution. Null means no
-    /// complete observation trace is available; it is never authorization.</summary>
-    public IReadOnlyList<EllaiObservedToolResult>? ObservedTools { get; init; }
-}
-
-/// <summary>Bounded tool provenance, excluding arguments and result text.</summary>
-public sealed record EllaiObservedToolResult(
-    string ToolName, bool Allowed, string ReasonCode, IReadOnlyList<EvidenceRef> Evidence, bool Truncated);
-
-/// <summary>Model-turn delegate: one bounded reasoning step returning either
-/// tool requests or a final decision draft.</summary>
-public sealed record EllaiModelTurn(
-    IReadOnlyList<EllaiToolRequest> ToolRequests,
-    EllaiDecision? FinalDecision,
-    bool RequiresRepair = false,
-    string? RejectionDiagnostic = null);
-
 /// <summary>Per-iteration run gate. A refused gate stops the run with the
 /// given safe blocked detail: "budget" for exhausted token/dollar budgets,
 /// "denied" for revoked scope or consent.</summary>
@@ -44,11 +17,11 @@ public sealed record EllaiReauthorization(bool Permitted, string BlockedDetail);
 /// a quota).</summary>
 public sealed class EllaiCycleRunner(EllaiToolBroker broker)
 {
-    public const int MaxIterations = 12;
+    public const int MaxIterations = EllaiExecutionLimits.MaxIterations;
 
-    public const int MaxToolCalls = 4_000;
+    public const int MaxToolCalls = EllaiExecutionLimits.MaxToolCalls;
 
-    public const int MaxRepairAttempts = 2;
+    public const int MaxRepairAttempts = EllaiExecutionLimits.MaxRepairAttempts;
 
     private int _activeRequests;
 

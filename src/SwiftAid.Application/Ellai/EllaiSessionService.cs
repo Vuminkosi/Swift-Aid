@@ -85,6 +85,11 @@ public interface IEllaiUtteranceOutboxStore
     Task<IReadOnlyList<EllaiConversationTurn>> ReadConversationAsync(
         string sessionId, string ownerActorId, CancellationToken ct);
 
+    /// <summary>Completed history ending at the accepted turn being executed, plus that turn itself.</summary>
+    Task<IReadOnlyList<EllaiConversationTurn>> ReadConversationForExecutionAsync(
+        string sessionId, string ownerActorId, string clientUtteranceId, CancellationToken ct) =>
+        ReadConversationAsync(sessionId, ownerActorId, ct);
+
     Task<EllaiUtteranceOutboxItem?> ClaimNextAsync(
         DateTimeOffset nowUtc, DateTimeOffset leaseExpiresAtUtc, CancellationToken ct);
 
@@ -97,10 +102,24 @@ public interface IEllaiUtteranceOutboxStore
         DateTimeOffset retryAtUtc, bool terminal, CancellationToken ct);
 }
 
+/// <summary>Renews only an unexpired, still-owned outbox attempt.</summary>
+public interface IEllaiUtteranceLeaseRenewal
+{
+    Task<bool> RenewLeaseAsync(string sessionId, string clientUtteranceId, int attemptCount,
+        DateTimeOffset nowUtc, DateTimeOffset leaseExpiresAtUtc, CancellationToken ct);
+}
+
+/// <summary>Runs a short publication while session and attempt ownership remain locked.</summary>
+public interface IEllaiProvisionalPublicationFence
+{
+    Task<bool> PublishIfCurrentAsync(string sessionId, string utteranceId, int attempt, string actorId,
+        string scopeEpoch, long interactionEpoch, Func<bool> publish, CancellationToken ct);
+}
+
 /// <summary>Thread-safe in-memory store for tests and local development.
 /// Production persistence (PostgreSQL, ELL-T04) must implement the same
 /// interface with transactional outbox writes.</summary>
-public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUtteranceOutboxStore
+public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUtteranceOutboxStore, IEllaiUtteranceLeaseRenewal, IEllaiProvisionalPublicationFence
 {
     private readonly object _gate = new();
     private readonly Dictionary<string, EllaiSessionRecord> _sessions = new(StringComparer.Ordinal);
@@ -176,7 +195,6 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
             }
 
             if (current.SessionVersion != expectedVersion
-                || current.CyclesUsed >= current.CyclesAllowed
                 || !string.Equals(current.OwnerActorId, nextRecord.OwnerActorId, StringComparison.Ordinal))
             {
                 return Task.FromResult<EllaiUtteranceStoreResult?>(null);
@@ -245,6 +263,42 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
         }
     }
 
+    public Task<bool> RenewLeaseAsync(string sessionId, string clientUtteranceId, int attemptCount,
+        DateTimeOffset nowUtc, DateTimeOffset leaseExpiresAtUtc, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (leaseExpiresAtUtc <= nowUtc) throw new ArgumentOutOfRangeException(nameof(leaseExpiresAtUtc));
+        lock (_gate)
+        {
+            var key = (sessionId, clientUtteranceId);
+            if (!_utterances.TryGetValue(key, out var entry) || entry.AttemptCount != attemptCount ||
+                entry.CompletedAtUtc is not null || entry.Outcome != "Processing" || entry.PayloadJson is null ||
+                entry.LeaseExpiresAtUtc is null || entry.LeaseExpiresAtUtc <= nowUtc)
+                return Task.FromResult(false);
+            if (leaseExpiresAtUtc > entry.LeaseExpiresAtUtc)
+                _utterances[key] = entry with { LeaseExpiresAtUtc = leaseExpiresAtUtc };
+            return Task.FromResult(true);
+        }
+    }
+
+    public Task<bool> PublishIfCurrentAsync(string sessionId, string utteranceId, int attempt, string actorId,
+        string scopeEpoch, long interactionEpoch, Func<bool> publish, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(publish);
+        ct.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            if (!_sessions.TryGetValue(sessionId, out var session) || session.Status != "Active" ||
+                session.OwnerActorId != actorId || session.ScopeEpoch != scopeEpoch || session.InteractionEpoch != interactionEpoch ||
+                !_utterances.TryGetValue((sessionId, utteranceId), out var entry) || entry.AttemptCount != attempt ||
+                entry.Outcome != "Processing" || entry.CompletedAtUtc is not null || entry.PayloadJson is null ||
+                entry.LeaseExpiresAtUtc is null || entry.LeaseExpiresAtUtc <= DateTimeOffset.UtcNow)
+                return Task.FromResult(false);
+            ct.ThrowIfCancellationRequested();
+            return Task.FromResult(publish());
+        }
+    }
+
     public Task<IReadOnlyList<EllaiConversationTurn>> ReadConversationAsync(
         string sessionId, string ownerActorId, CancellationToken ct)
     {
@@ -257,7 +311,27 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
                 .OrderByDescending(pair => pair.Value.Sequence).Take(100).Reverse()
                 .Select(pair => new EllaiConversationTurn(sessionId, pair.Key.ClientUtteranceId,
                     pair.Value.Sequence, pair.Value.UserText, pair.Value.AssistantText,
-                    pair.Value.Outcome, pair.Value.AttemptCount, pair.Value.CompletedAtUtc) { UiProposalsJson = pair.Value.UiProposalsJson, ToolTraceJson = pair.Value.ToolTraceJson }).ToArray());
+                    pair.Value.Outcome, pair.Value.AttemptCount, pair.Value.CompletedAtUtc) { UiProposalsJson = pair.Value.UiProposalsJson, ToolTraceJson = pair.Value.ToolTraceJson, LeaseExpiresAtUtc = pair.Value.LeaseExpiresAtUtc }).ToArray());
+        }
+    }
+
+    public Task<IReadOnlyList<EllaiConversationTurn>> ReadConversationForExecutionAsync(
+        string sessionId, string ownerActorId, string clientUtteranceId, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            if (!_sessions.TryGetValue(sessionId, out var session) || session.OwnerActorId != ownerActorId ||
+                !_utterances.TryGetValue((sessionId, clientUtteranceId), out var current))
+                return Task.FromResult<IReadOnlyList<EllaiConversationTurn>>(Array.Empty<EllaiConversationTurn>());
+            return Task.FromResult<IReadOnlyList<EllaiConversationTurn>>(_utterances
+                .Where(pair => pair.Key.SessionId == sessionId && pair.Value.Sequence <= current.Sequence &&
+                    (pair.Key.ClientUtteranceId == clientUtteranceId || pair.Value.Outcome == "Completed"))
+                .OrderByDescending(pair => pair.Value.Sequence).Reverse()
+                .Select(pair => new EllaiConversationTurn(sessionId, pair.Key.ClientUtteranceId,
+                    pair.Value.Sequence, pair.Value.UserText, pair.Value.AssistantText,
+                    pair.Value.Outcome, pair.Value.AttemptCount, pair.Value.CompletedAtUtc)
+                { UiProposalsJson = pair.Value.UiProposalsJson, ToolTraceJson = pair.Value.ToolTraceJson }).ToArray());
         }
     }
 
@@ -369,8 +443,7 @@ public sealed class InMemoryEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
 /// restart creates a new session/epoch. (ELL-T04 groundwork.)</summary>
 public sealed class EllaiSessionService(IEllaiSessionStore store, EllaiConsentService? consent = null)
 {
-    /// <summary>Signed-in session cycle ceiling. Anonymous guest sessions do
-    /// not have an arbitrary turn-count ceiling.</summary>
+    /// <summary>Legacy session cycle threshold, retained in the session contract.</summary>
     public const int DefaultCyclesAllowed = 12;
     public const int GuestCyclesAllowed = int.MaxValue;
 

@@ -9,10 +9,11 @@ namespace SwiftAid.Application.Ellai;
 /// <summary>Builds the pinned policy and server context for an Ellai execution.</summary>
 public sealed class EllaiExecutionPromptBuilder(EllaiPromptBuilder prompts, EllaiUsageLedger? ledger = null)
 {
-    private const string FrameworkTurnProtocol =
+    internal const string FrameworkTurnProtocol =
         "Use the registered function tools for reads. Do not output tool calls as JSON text. " +
         "When finished, reply with exactly one JSON object: {\"final_decision\":{<EllaiDecision schema v2>}}. " +
-        "Pure small talk answers directly through final_decision with no tool calls.";
+        "Pure small talk answers directly through final_decision with no tool calls. " +
+        "Clock readings in prior conversation are historical; use ellai_now for the current time.";
     private readonly EllaiPromptBuilder _prompts = prompts ?? throw new ArgumentNullException(nameof(prompts));
     private readonly EllaiUsageLedger? _ledger = ledger;
     private static readonly JsonSerializerOptions ContractJson = new(JsonSerializerDefaults.Web)
@@ -23,13 +24,11 @@ public sealed class EllaiExecutionPromptBuilder(EllaiPromptBuilder prompts, Ella
     private static readonly string DecisionSchema = JsonSchemaExporter
         .GetJsonSchemaAsNode(ContractJson, typeof(EllaiDecision)).ToJsonString();
 
-    public string Build(EllaiLoopRequest request, bool frameworkNative = false)
+    public string Build(EllaiLoopRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var limits = $"cycle {request.CycleId}: {EllaiCycleRunner.MaxIterations} iterations, " +
-            $"{EllaiCycleRunner.MaxToolCalls} model-visible tool calls" +
-            (frameworkNative ? string.Empty : $", {EllaiCycleRunner.MaxRepairAttempts} model-only repairs") +
-            (_ledger is null
+        var limits = $"cycle {request.CycleId}" +
+            (_ledger is null || !_ledger.EnforcesLimits
                 ? string.Empty
                 : $", {Math.Max(0, _ledger.RemainingFor(request.Context.SessionId))} session tokens left");
         var system = _prompts.Build(request.Role, request.CapabilitySummary, limits) +
@@ -39,11 +38,15 @@ public sealed class EllaiExecutionPromptBuilder(EllaiPromptBuilder prompts, Ella
             "\n" + EllaiInteractionContext.Describe(request.InteractionMode) +
             "\nStored guidance state: " + (request.GuidanceState is "Ready" or "Paused" or "Cancelled" or "Completed" or "Generating" or "Failed"
                 ? request.GuidanceState : "Unavailable") + ". This is server state, not proof that an overlay is visible." +
-            "\n## Turn protocol\n" + (frameworkNative ? FrameworkTurnProtocol : EllaiReasoningLoop.TurnProtocol) +
+            "\n## Turn protocol\n" + FrameworkTurnProtocol +
             "\n## Final decision JSON schema\n" + DecisionSchema +
             "\nThe schema describes data shape, not permission. Claims must cite exact evidence objects returned by permitted tools. " +
             "Do not invent evidence references, UI bindings or action authority. Use empty arrays/null for nonapplicable fields." +
             "\n## Tool catalogue\n" + EllaiToolBroker.DescribeCatalogue(request.Context.AllowedTools);
+        system += "\n## Aggregate questions\nNever infer a case count from a partial list, prior conversation, or model knowledge. " +
+            "For a current count of the user's own readable managed cases, use ellai_owned_case_count with the requested time window when available. " +
+            "If the window is unclear, ask for it. If that tool is unavailable or the requested aggregate is outside its scope, explain the limitation without inventing a number. " +
+            "The count covers cases, not animals, diagnoses, incidence, or a whole population.";
         if (request.Context.AllowedTools is null || request.Context.AllowedTools.Contains(EllaiToolNames.UiCatalogue))
         {
             system += "\n## Interactive guidance\nFor requests to show, explain, or guide through application controls, " +

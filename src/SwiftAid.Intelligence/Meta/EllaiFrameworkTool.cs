@@ -49,7 +49,12 @@ public sealed class EllaiFrameworkTool : AIFunction
         if (!EllaiToolContractCatalog.TryValidateArguments(Name, converted, out _))
             throw new ArgumentException("Invalid tool arguments.", nameof(arguments));
 
-        var result = await _invoke(new EllaiToolRequest(Name, converted), cancellationToken).ConfigureAwait(false);
-        return JsonSerializer.Serialize(result, ResultJson);
+        var callId = FunctionInvokingChatClient.CurrentContext?.CallContent?.CallId;
+        cancellationToken.ThrowIfCancellationRequested();
+        var result = await _invoke(new EllaiToolRequest(Name, converted, callId), cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        var serialized = JsonSerializer.Serialize(EllaiToolBroker.ApplyBounds(result), ResultJson);
+        cancellationToken.ThrowIfCancellationRequested();
+        return serialized;
     }
 }

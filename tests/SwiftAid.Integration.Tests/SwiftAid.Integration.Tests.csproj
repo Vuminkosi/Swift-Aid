@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Compile Include="../Shared/EllaiLegacy/*.cs" Link="EllaiLegacy/%(Filename)%(Extension)" />
     <Compile Include="../../src/SwiftAid.Mobile/Platforms/Android/AndroidSileroSpeechDetectorFactory.cs" Link="NativeSilero/AndroidSileroSpeechDetectorFactory.cs" />
     <EmbeddedResource Include="../../src/SwiftAid.UI/wwwroot/vendor/vad/silero_vad_v5.onnx" LogicalName="SwiftAid.Mobile.silero_vad_v5.onnx" />
   </ItemGroup>

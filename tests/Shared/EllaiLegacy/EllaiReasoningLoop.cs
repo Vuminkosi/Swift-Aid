@@ -6,76 +6,6 @@ using SwiftAid.Contracts.Ellai;
 
 namespace SwiftAid.Application.Ellai;
 
-/// <summary>One chat message in a reasoning thread. Roles are provider
-/// primitives (system/user/assistant/tool); content is prompt text, never
-/// credentials or record payloads beyond the tool-result summaries.</summary>
-public sealed record EllaiChatMessage(
-    string Role,
-    string Content,
-    IReadOnlyList<EllaiToolRequest>? ToolCalls = null,
-    string? ToolCallId = null);
-
-/// <summary>Text completion for one reasoning turn with provider-reported
-/// token usage for the ledger. The loop parses <see cref="Text"/> through
-/// <see cref="EllaiModelTurnParser"/>; free prose is never a tool call.</summary>
-public sealed record EllaiTurnCompletion(string Text, int PromptTokens, int CompletionTokens)
-{
-    public string? FinishReason { get; init; }
-}
-
-/// <summary>Text-completion lane for one reasoning turn. Implemented in
-/// Intelligence over the routed provider (Meta/Ollama/serverless); the loop
-/// never sees credentials or transport. Throws on transport failure so the
-/// run stops instead of reasoning on invented turns.</summary>
-public interface IEllaiTurnCompletionClient
-{
-    Task<EllaiTurnCompletion> CompleteAsync(
-        IReadOnlyList<EllaiChatMessage> messages, int maxTokens, CancellationToken ct);
-
-    async Task<EllaiTurnCompletion> CompleteStreamingAsync(
-        IReadOnlyList<EllaiChatMessage> messages,
-        int maxTokens,
-        Func<string, CancellationToken, ValueTask> onText,
-        CancellationToken ct)
-    {
-        ArgumentNullException.ThrowIfNull(onText);
-        var completion = await CompleteAsync(messages, maxTokens, ct).ConfigureAwait(false);
-        if (!string.IsNullOrEmpty(completion.Text))
-        {
-            await onText(completion.Text, ct).ConfigureAwait(false);
-        }
-        return completion;
-    }
-}
-
-/// <summary>One utterance bound for multi-turn reasoning.</summary>
-public sealed record EllaiLoopRequest(
-    EllaiToolContext Context,
-    string Utterance,
-    EllaiRoleOverlay Role,
-    string CapabilitySummary,
-    int MaxTokensPerTurn,
-    string CycleId,
-    long ControllerEpoch,
-    IReadOnlyList<EllaiChatMessage>? Conversation = null,
-    string? ActivePage = null,
-    string InteractionMode = "typed",
-    string? GuidanceState = null);
-
-/// <summary>Execution boundary for a single authorized utterance.</summary>
-public interface IEllaiReasoningExecutor
-{
-    Task<EllaiCycleOutcome> RunAsync(
-        EllaiLoopRequest request, CancellationToken ct,
-        Func<int, CancellationToken, Task<bool>>? reauthorizeAsync = null,
-        EllaiActivityStatusCoordinator? activity = null,
-        EllaiSessionEventJournal? journal = null,
-        Func<CancellationToken, Task<bool>>? isExecutionCurrentAsync = null,
-        Func<string, CancellationToken, ValueTask>? onTextDelta = null,
-        Action<EllaiActivityEvent>? onActivity = null,
-        Func<EllaiToolContext, EllaiToolRequest, CancellationToken, Task<EllaiToolResult>>? invokeToolAsync = null);
-}
-
 /// <summary>Multi-turn reasoning loop (Task 6): drives the bounded cycle
 /// runner with a routed text provider. Each model text turn parses to typed
 /// tool calls or a validated final decision; accepted tool results re-enter
@@ -142,7 +72,8 @@ public sealed class EllaiReasoningLoop(
             throw new ArgumentOutOfRangeException(nameof(request));
         }
 
-        var system = new EllaiExecutionPromptBuilder(_prompts, _ledger).Build(request);
+        var system = new EllaiExecutionPromptBuilder(_prompts, _ledger).Build(request)
+            .Replace(EllaiExecutionPromptBuilder.FrameworkTurnProtocol, TurnProtocol, StringComparison.Ordinal);
         var thread = new List<EllaiChatMessage>(request.Conversation ?? []);
         thread.Add(new("user", request.Utterance));
         var provisionalAnswerRejected = false;

@@ -16,7 +16,7 @@ public sealed class EllaiFrameworkToolGuard
     public EllaiFrameworkToolGuard(int maximumCalls, Func<CancellationToken, Task<bool>> isCurrent,
         Func<EllaiToolContext, EllaiToolRequest, CancellationToken, Task<EllaiToolResult>> invoke)
     {
-        if (maximumCalls is < 1 or > EllaiCycleRunner.MaxToolCalls)
+        if (maximumCalls is < 1 or > EllaiExecutionLimits.MaxToolCalls)
             throw new ArgumentOutOfRangeException(nameof(maximumCalls));
         _isCurrent = isCurrent ?? throw new ArgumentNullException(nameof(isCurrent));
         _invoke = invoke ?? throw new ArgumentNullException(nameof(invoke));
@@ -32,22 +32,48 @@ public sealed class EllaiFrameworkToolGuard
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            ct.ThrowIfCancellationRequested();
             if (FailureCode is { } prior)
                 return Denied(request.ToolName, prior);
             if (_remaining <= 0 || context.RemainingCalls <= 0)
                 return Block(request.ToolName, EllaiToolReasonCodes.BudgetExceeded);
-            if (!await _isCurrent(ct).ConfigureAwait(false))
+            var current = await _isCurrent(ct).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            if (!current)
                 return Block(request.ToolName, EllaiToolReasonCodes.DeniedByPolicy);
 
+            ct.ThrowIfCancellationRequested();
             _remaining = Math.Min(_remaining, context.RemainingCalls);
             var remaining = _remaining--;
             var result = await _invoke(context with { RemainingCalls = remaining }, request, ct).ConfigureAwait(false);
             ct.ThrowIfCancellationRequested();
-            if (!await _isCurrent(ct).ConfigureAwait(false))
+            current = await _isCurrent(ct).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            if (!current)
                 return Block(request.ToolName, EllaiToolReasonCodes.DeniedByPolicy);
+            ct.ThrowIfCancellationRequested();
+            // Reuse the broker's envelope bound so delegated results cannot bypass
+            // minimization or leave the run successful after an oversized result.
+            result = EllaiToolBroker.ApplyBounds(result);
             if (!result.Allowed && result.ReasonCode != EllaiToolReasonCodes.InvalidArguments)
-                Volatile.Write(ref _failureCode, result.ReasonCode);
+            {
+                var reason = string.IsNullOrWhiteSpace(result.ReasonCode) || result.ReasonCode == EllaiToolReasonCodes.Ok
+                    ? EllaiToolReasonCodes.Unavailable
+                    : result.ReasonCode;
+                Volatile.Write(ref _failureCode, reason);
+            }
+            ct.ThrowIfCancellationRequested();
             return result;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            Volatile.Write(ref _failureCode, EllaiToolReasonCodes.Unavailable);
+            throw;
+        }
+        catch (Exception error) when (ct.IsCancellationRequested && error is not OutOfMemoryException)
+        {
+            Volatile.Write(ref _failureCode, EllaiToolReasonCodes.Unavailable);
+            throw new OperationCanceledException(ct);
         }
         catch
         {

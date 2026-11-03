@@ -8,16 +8,22 @@ namespace SwiftAid.Gateway.Ellai;
 /// and the store serializes claims within a session.</summary>
 public sealed class EllaiUtteranceWorker(
     IServiceProvider services,
-    ILogger<EllaiUtteranceWorker> logger) : BackgroundService
+    ILogger<EllaiUtteranceWorker> logger,
+    TimeSpan? leaseRenewalInterval = null) : BackgroundService
 {
     public const int MaxTokensPerTurn = 2048;
     private static readonly TimeSpan ClaimLease = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan IdlePollDelay = TimeSpan.FromSeconds(1);
+    private static readonly EllaiIsolatedToolCalls ToolCalls = new();
+    private static readonly EllaiIsolatedToolCalls ReferenceCalls = new();
 
     private readonly IServiceProvider _services =
         services ?? throw new ArgumentNullException(nameof(services));
     private readonly ILogger<EllaiUtteranceWorker> _logger =
         logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly TimeSpan _leaseRenewalInterval = leaseRenewalInterval is null ? TimeSpan.FromMinutes(2)
+        : leaseRenewalInterval > TimeSpan.Zero && leaseRenewalInterval < ClaimLease
+            ? leaseRenewalInterval.Value : throw new ArgumentOutOfRangeException(nameof(leaseRenewalInterval));
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -91,10 +97,13 @@ public sealed class EllaiUtteranceWorker(
             return;
         }
 
+        var responseStore = scopedServices.GetRequiredService<EllaiSessionResponseStore>();
+        var responseGeneration = responseStore.CaptureGeneration(work.SessionId);
         var progress = new EllaiToolProgressPublisher(
-            scopedServices.GetRequiredService<EllaiSessionResponseStore>(), work.SessionId,
+            responseStore, work.SessionId,
             item.ClientUtteranceId, work.ControllerEpoch, item.AttemptCount,
             englishVoiceId: work.Languages?.EnglishVoiceId);
+        var answerChunks = new List<string>();
         try
         {
             var sessions = scopedServices.GetRequiredService<IEllaiSessionStore>();
@@ -112,36 +121,68 @@ public sealed class EllaiUtteranceWorker(
                 return;
             }
 
+            if (session.CyclesUsed > session.CyclesAllowed)
+                _logger.LogWarning("Ellai session {SessionId} exceeded its {CycleThreshold} turn threshold; execution will continue.",
+                    work.SessionId, session.CyclesAllowed);
+
             var started = System.Diagnostics.Stopwatch.StartNew();
-            var outcome = await RunWorkAsync(work, scopedServices, stoppingToken, progress).ConfigureAwait(false);
-            if (!outcome.Completed)
+            var (committed, providerElapsed) = await RunWithLeaseAsync(item, outbox, stoppingToken, async token =>
             {
-                _logger.LogWarning("Ellai turn {SessionId}/{UtteranceId} stopped with {FailureCode}.",
-                    work.SessionId, item.ClientUtteranceId, outcome.FailureCode ?? "AdmissionDenied");
-                if (outcome.FailureCode == "InvalidDecision")
-                    _logger.LogWarning("Ellai decision shape rejected: {Diagnostic}", outcome.StopReason);
-            }
-            var resolution = outcome.Completed && !string.IsNullOrWhiteSpace(outcome.DisplayText)
-                && EllaiResponsePublicationPolicy.CanPublish(work)
-                ? EllaiUtteranceResolution.Completed(outcome.DisplayText, work.ControllerEpoch) with
+                var runOutcome = await RunWorkAsync(work, item, scopedServices, responseStore, responseGeneration,
+                    token, progress, answerChunks).ConfigureAwait(false);
+                token.ThrowIfCancellationRequested();
+                if (!runOutcome.Completed)
                 {
-                    UiProposalsJson = EllaiUiProposalPayload.Serialize(outcome.Decision?.UiIntents ?? []),
-                    ToolTraceJson = EllaiToolTrace.Serialize(outcome.ObservedTools, outcome.HistoryIncluded)
+                    _logger.LogWarning("Ellai turn {SessionId}/{UtteranceId} stopped with {FailureCode}.",
+                        work.SessionId, item.ClientUtteranceId, runOutcome.FailureCode ?? "AdmissionDenied");
+                    if (runOutcome.FailureCode == "InvalidDecision")
+                        _logger.LogWarning("Ellai decision shape rejected: {Diagnostic}", runOutcome.StopReason);
                 }
-                : EllaiUtteranceResolution.Failed with { ExpectedInteractionEpoch = work.ControllerEpoch };
-            var providerElapsed = started.Elapsed.TotalMilliseconds;
-            var committed = await outbox.CompleteAsync(item.SessionId, item.ClientUtteranceId, item.AttemptCount,
-                DateTimeOffset.UtcNow, stoppingToken, resolution).ConfigureAwait(false);
+                var resolution = runOutcome.Completed && !string.IsNullOrWhiteSpace(runOutcome.DisplayText)
+                    && EllaiResponsePublicationPolicy.CanPublish(work)
+                    ? EllaiUtteranceResolution.Completed(runOutcome.DisplayText, work.ControllerEpoch) with
+                    {
+                        UiProposalsJson = EllaiUiProposalPayload.Serialize(runOutcome.Decision?.UiIntents ?? []),
+                        ToolTraceJson = runOutcome.InheritedObservations is null
+                            ? EllaiToolTrace.Serialize(runOutcome.ObservedTools, runOutcome.HistoryIncluded, runOutcome.HistoryTurnIds)
+                            : EllaiToolTrace.SerializeFlattened(runOutcome.ObservedTools, runOutcome.HistoryIncluded, runOutcome.InheritedObservations)
+                    }
+                    : EllaiUtteranceResolution.Failed with { ExpectedInteractionEpoch = work.ControllerEpoch };
+                var elapsed = started.Elapsed.TotalMilliseconds;
+                token.ThrowIfCancellationRequested();
+                var persisted = await outbox.CompleteAsync(item.SessionId, item.ClientUtteranceId, item.AttemptCount,
+                    DateTimeOffset.UtcNow, token, resolution).ConfigureAwait(false);
+                return (persisted, elapsed);
+            }).ConfigureAwait(false);
             EllaiPipelineMetrics.Record("outcome_commit", started.Elapsed.TotalMilliseconds - providerElapsed);
             if (committed is not null)
             {
-                using var publication = EllaiPipelineMetrics.Measure("publication");
-                // Transient delivery is only a hint; the owner can recover the committed outcome
-                // from PostgreSQL even when this process exits before this publication.
-                scopedServices.GetService<EllaiSessionResponseStore>()?.Reconcile(
-                    work.SessionId, item.ClientUtteranceId, committed, work.Languages?.OutputLanguage ?? "eng",
-                    work.Languages?.EnglishVoiceId);
-                progress.Finish(committed.Outcome);
+                try
+                {
+                    using var publication = EllaiPipelineMetrics.Measure("publication");
+                    // Transient delivery is only a hint; the owner can recover the committed outcome
+                    // from PostgreSQL even when this process exits before this publication.
+                    // A cancellation on a different Gateway does not clear this process's
+                    // in-memory feed. Re-read the durable session before publishing.
+                    var current = await sessions.GetAsync(work.SessionId, stoppingToken).ConfigureAwait(false);
+                    if (committed.Outcome == "Completed" &&
+                        (current is null || current.Status != "Active" || current.InteractionEpoch != work.ControllerEpoch ||
+                         current.OwnerActorId != work.Actor.ActorId || current.ScopeEpoch != work.ScopeEpoch))
+                    {
+                        _logger.LogInformation("Skipping stale Ellai publication for session {SessionId}.", work.SessionId);
+                        return;
+                    }
+                    var chunks = committed.Outcome == "Completed" && answerChunks.Count > 0 &&
+                        string.Equals(string.Join(" ", answerChunks.Select(chunk => chunk.Trim())), committed.AssistantText?.Trim(), StringComparison.Ordinal)
+                        ? answerChunks : [];
+                    if (responseStore.PublishCommitted(work.SessionId, responseGeneration, item.ClientUtteranceId,
+                        committed, chunks, work.Languages?.OutputLanguage ?? "eng", work.Languages?.EnglishVoiceId))
+                        progress.Finish(committed.Outcome);
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    _logger.LogWarning(ex, "Ellai outcome was committed but transient publication failed for session {SessionId}.", work.SessionId);
+                }
             }
             _logger.LogInformation(
                 "Ellai turn {SessionId}/{UtteranceId} attempt {Attempt} outcome {Outcome}; processing {ProcessingMs}ms, commit {CommitMs}ms.",
@@ -183,10 +224,54 @@ public sealed class EllaiUtteranceWorker(
         }
     }
 
-    private static async Task<EllaiUtteranceOutcome> RunWorkAsync(
-        EllaiUtteranceWork work,
-        IServiceProvider scopedServices,
-        CancellationToken stoppingToken, EllaiToolProgressPublisher progress)
+    private async Task<T> RunWithLeaseAsync<T>(EllaiUtteranceOutboxItem item, IEllaiUtteranceOutboxStore outbox,
+        CancellationToken stoppingToken, Func<CancellationToken, Task<T>> run)
+    {
+        if (outbox is not IEllaiUtteranceLeaseRenewal)
+            return await run(stoppingToken).ConfigureAwait(false);
+
+        using var execution = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var renewal = RenewLeaseLoopAsync(item, execution);
+        try
+        {
+            return await run(execution.Token).ConfigureAwait(false);
+        }
+        finally
+        {
+            await execution.CancelAsync().ConfigureAwait(false);
+            await renewal.ConfigureAwait(false);
+        }
+    }
+
+    private async Task RenewLeaseLoopAsync(EllaiUtteranceOutboxItem item, CancellationTokenSource execution)
+    {
+        try
+        {
+            while (true)
+            {
+                await Task.Delay(_leaseRenewalInterval, execution.Token).ConfigureAwait(false);
+                await using var scope = _services.CreateAsyncScope();
+                var store = scope.ServiceProvider.GetRequiredService<IEllaiUtteranceOutboxStore>();
+                if (store is not IEllaiUtteranceLeaseRenewal renewal)
+                    throw new InvalidOperationException("Ellai lease renewal is unavailable in a new scope.");
+                var now = DateTimeOffset.UtcNow;
+                if (!await renewal.RenewLeaseAsync(item.SessionId, item.ClientUtteranceId, item.AttemptCount,
+                    now, now.Add(ClaimLease), execution.Token).ConfigureAwait(false))
+                    throw new InvalidOperationException("Ellai outbox claim is no longer renewable.");
+            }
+        }
+        catch (OperationCanceledException) when (execution.IsCancellationRequested) { }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogWarning(ex, "Ellai lease renewal failed for session {SessionId}; stopping this attempt.", item.SessionId);
+            await execution.CancelAsync().ConfigureAwait(false);
+        }
+    }
+
+    private async Task<EllaiUtteranceOutcome> RunWorkAsync(
+        EllaiUtteranceWork work, EllaiUtteranceOutboxItem item,
+        IServiceProvider scopedServices, EllaiSessionResponseStore responseStore, Guid responseGeneration,
+        CancellationToken stoppingToken, EllaiToolProgressPublisher progress, List<string> answerChunks)
     {
         var consent = scopedServices.GetRequiredService<EllaiConsentService>();
         var consentStore = scopedServices.GetService<IEllaiConsentStore>();
@@ -202,6 +287,11 @@ public sealed class EllaiUtteranceWorker(
             await ledger.HydrateAsync(work.SessionId, usageStore, stoppingToken).ConfigureAwait(false);
         }
 
+        var scopedBroker = scopedServices.GetService<EllaiToolBroker>();
+        var registeredQueue = scopedServices.GetService<SwiftAid.Application.Cases.ICaseQueueQuery>();
+        var authorizationQueue = scopedBroker?.UsesStateQueue(registeredQueue) == true
+            ? new EllaiIsolatedCaseQueueQuery(_services, ToolCalls)
+            : scopedBroker?.StateQueue;
         var dependencies = new EllaiUtteranceServices(
             scopedServices.GetRequiredService<IEllaiReasoningExecutor>(),
             scopedServices.GetService<EllaiActivityStatusCoordinator>(),
@@ -209,39 +299,84 @@ public sealed class EllaiUtteranceWorker(
             consent,
             scopedServices.GetRequiredService<IEllaiSessionStore>(),
             consentStore,
-            CreateTextDeltaPublisher(work, scopedServices.GetRequiredService<EllaiSessionResponseStore>()),
+            EllaiResponsePublicationPolicy.CanPublish(work)
+                ? (text, ct) => { ct.ThrowIfCancellationRequested(); answerChunks.Add(text); return ValueTask.CompletedTask; }
+                : null,
             scopedServices.GetRequiredService<IEllaiUtteranceOutboxStore>(), progress.Observe,
-            scopedServices.GetService<EllaiToolBroker>() is null ? null : async (context, request, ct) =>
+            scopedBroker is null ? null : (context, request, ct) =>
             {
-                // Independent reads must not share the worker's EF DbContext.
-                await using var toolScope = scopedServices.CreateAsyncScope();
-                var toolServices = toolScope.ServiceProvider;
-                var current = await toolServices.GetRequiredService<IEllaiSessionStore>()
-                    .GetAsync(work.SessionId, ct).ConfigureAwait(false);
-                if (current is null || current.Status != "Active" || current.InteractionEpoch != work.ControllerEpoch
-                    || current.OwnerActorId != work.Actor.ActorId || current.ScopeEpoch != work.ScopeEpoch)
-                    return new EllaiToolResult(request.ToolName, false, "This request is no longer current.", [],
-                        string.Empty, 0, false, EllaiToolReasonCodes.DeniedByPolicy);
-                return await toolServices.GetRequiredService<EllaiToolBroker>()
-                    .InvokeAsync(context, request, ct).ConfigureAwait(false);
-            }, scopedServices.GetService<IEllaiLanguageClient>());
+                async Task<EllaiToolResult> InvokeInScopeAsync(CancellationToken toolCt)
+                {
+                    // Independent reads must not share the worker's EF DbContext.
+                    await using var toolScope = _services.CreateAsyncScope();
+                    var toolServices = toolScope.ServiceProvider;
+                    var current = await toolServices.GetRequiredService<IEllaiSessionStore>()
+                        .GetAsync(work.SessionId, toolCt).ConfigureAwait(false);
+                    toolCt.ThrowIfCancellationRequested();
+                    if (current is null || current.Status != "Active" || current.InteractionEpoch != work.ControllerEpoch
+                        || current.OwnerActorId != work.Actor.ActorId || current.ScopeEpoch != work.ScopeEpoch)
+                        return new EllaiToolResult(request.ToolName, false, "This request is no longer current.", [],
+                            string.Empty, 0, false, EllaiToolReasonCodes.DeniedByPolicy);
+                    var broker = toolServices.GetRequiredService<EllaiToolBroker>();
+                    var queue = request.ToolName == EllaiToolNames.State && broker.UsesStateQueue(
+                        toolServices.GetService<SwiftAid.Application.Cases.ICaseQueueQuery>())
+                        ? new EllaiIsolatedCaseQueueQuery(_services, ToolCalls) : null;
+                    var index = request.ToolName is EllaiToolNames.Topic or EllaiToolNames.Evidence &&
+                        broker.UsesReferenceIndex(toolServices.GetService<IEllaiExactReferenceIndex>())
+                        ? new EllaiIsolatedExactReferenceIndex(_services, ReferenceCalls) : null;
+                    return await broker.InvokeAsync(context, request, toolCt, queue, index).ConfigureAwait(false);
+                }
+
+                // State queries can persist case-result references. Never detach a
+                // potentially mutating or unclassified tool after cancellation.
+                return CanDetachReadOnlyTool(request.ToolName)
+                    ? ToolCalls.RunAsync(InvokeInScopeAsync, ct)
+                    : InvokeInScopeAsync(ct);
+            }, scopedServices.GetService<IEllaiLanguageClient>(),
+            authorizationQueue,
+            scopedServices.GetService<EllaiTechnicalDocs>(),
+            scopedServices.GetService<SwiftAid.Application.Intake.Imports.ICaseImportStore>(),
+            scopedServices.GetService<SwiftAid.Application.Intake.Imports.ICaseImportWorkspaceReader>(),
+            scopedServices.GetService<SwiftAid.Application.Cases.IDashboardAggregateQuery>(),
+            CreateTextDeltaCollector(work, item, responseStore, responseGeneration, answerChunks));
         return await EllaiUtteranceRunner.RunOneAsync(
             work, dependencies, MaxTokensPerTurn, stoppingToken).ConfigureAwait(false);
     }
 
-    private static Func<string, CancellationToken, ValueTask>? CreateTextDeltaPublisher(
-        EllaiUtteranceWork work, EllaiSessionResponseStore? responses)
+    internal static bool CanDetachReadOnlyTool(string name) => name is
+        EllaiToolNames.Topic or EllaiToolNames.Evidence or EllaiToolNames.ClassificationEvidence or
+        EllaiToolNames.OwnedCaseCount or EllaiToolNames.Receipts or EllaiToolNames.ImportDestinations or
+        EllaiToolNames.Imports or EllaiToolNames.ImportStatus or
+        EllaiToolNames.UiCatalogue or EllaiToolNames.UiObserve or
+        EllaiToolNames.Now or EllaiToolNames.Capabilities or
+        EllaiToolNames.ProductFacts or EllaiToolNames.DocsSearch or EllaiToolNames.DocsGet or
+        EllaiToolNames.IngestionSchema or EllaiToolNames.ValidateObservations;
+
+    private Func<string, CancellationToken, ValueTask>? CreateTextDeltaCollector(
+        EllaiUtteranceWork work, EllaiUtteranceOutboxItem item, EllaiSessionResponseStore responseStore,
+        Guid responseGeneration, List<string> answerChunks)
     {
-        if (responses is null || !EllaiResponsePublicationPolicy.CanPublish(work))
+        if (!EllaiResponsePublicationPolicy.CanPublish(work))
         {
             return null;
         }
 
-        var chunkIndex = 0;
-        return (text, _) =>
+        return async (text, ct) =>
         {
-            responses.PublishChunk(work.SessionId, work.ClientUtteranceId, ++chunkIndex, text, work.Languages?.EnglishVoiceId);
-            return ValueTask.CompletedTask;
+            ct.ThrowIfCancellationRequested();
+            answerChunks.Add(text);
+            await using var scope = _services.CreateAsyncScope();
+            var outbox = scope.ServiceProvider.GetRequiredService<IEllaiUtteranceOutboxStore>();
+            if (outbox is not IEllaiUtteranceLeaseRenewal lease) return;
+            var now = DateTimeOffset.UtcNow;
+            if (!await lease.RenewLeaseAsync(item.SessionId, item.ClientUtteranceId, item.AttemptCount,
+                    now, now.Add(ClaimLease), ct).ConfigureAwait(false)) return;
+            ct.ThrowIfCancellationRequested();
+            if (outbox is not IEllaiProvisionalPublicationFence fence) return;
+            await fence.PublishIfCurrentAsync(item.SessionId, item.ClientUtteranceId, item.AttemptCount,
+                work.Actor.ActorId, work.ScopeEpoch, work.ControllerEpoch,
+                () => responseStore.PublishProvisional(work.SessionId, responseGeneration, item.ClientUtteranceId,
+                    item.AttemptCount, work.ScopeEpoch, work.ControllerEpoch, answerChunks.Count, text, work.Languages?.EnglishVoiceId), ct).ConfigureAwait(false);
         };
     }
 }

@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Compile Include="../Shared/EllaiLegacy/*.cs" Link="EllaiLegacy/%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

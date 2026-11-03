@@ -8,6 +8,32 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiUtteranceOutboxTests
 {
     [Fact]
+    public async Task ExecutionHistoryIsAnchoredAndOwnerScopedInMemory()
+    {
+        var store = new InMemoryEllaiSessionStore();
+        var session = new EllaiSessionRecord("history-session", EllaiMode.Ask, "Active", 1, 1, 1, 1,
+            0, 200, "history-owner", "scope", null, null, DateTimeOffset.UtcNow);
+        await store.CreateAsync(session, default);
+        for (var index = 0; index < 107; index++)
+        {
+            var next = session with { SessionVersion = session.SessionVersion + 1, CyclesUsed = session.CyclesUsed + 1 };
+            Assert.NotNull(await store.TryAcceptUtteranceAsync(next, session.SessionVersion, $"turn-{index}", default));
+            session = next;
+        }
+
+        Assert.DoesNotContain(await store.ReadConversationAsync(session.SessionId, "history-owner", default),
+            turn => turn.ClientUtteranceId == "turn-1");
+        var anchored = await store.ReadConversationForExecutionAsync(session.SessionId, "history-owner", "turn-1", default);
+        Assert.Equal(new[] { "turn-1" }, anchored.Select(turn => turn.ClientUtteranceId));
+        Assert.Empty(await store.ReadConversationForExecutionAsync(session.SessionId, "another-owner", "turn-1", default));
+        Assert.Empty(await store.ReadConversationForExecutionAsync(session.SessionId, "history-owner", "missing", default));
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            store.ReadConversationForExecutionAsync(session.SessionId, "history-owner", "turn-1", cancelled.Token));
+    }
+
+    [Fact]
     public async Task ConversationRetainsMessagesAndFencesLateCompletion()
     {
         var store = await CreateStoreAsync();

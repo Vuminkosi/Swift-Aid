@@ -170,7 +170,7 @@ public sealed class EllaiSessionServiceTests
     }
 
     [Fact]
-    public async Task ThirteenthCycleIsDenied()
+    public async Task SessionContinuesBeyondCycleThreshold()
     {
         var service = new EllaiSessionService(new InMemoryEllaiSessionStore());
         var view = await service.StartAsync(
@@ -194,7 +194,8 @@ public sealed class EllaiSessionServiceTests
                 "one more", null, "typed", 99),
             Actor, CancellationToken.None);
 
-        Assert.Null(over);
+        Assert.NotNull(over);
+        Assert.Equal(EllaiSessionService.DefaultCyclesAllowed + 1, over.View.CyclesUsed);
     }
 
     [Fact]

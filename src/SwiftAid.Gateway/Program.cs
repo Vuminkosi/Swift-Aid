@@ -141,7 +141,6 @@ builder.Services.AddScoped<SwiftAid.Application.Ellai.IEllaiUiDiscoveryService, 
 builder.Services.AddScoped<SwiftAid.Application.Ellai.IEllaiGuidancePlanner, SwiftAid.Application.Ellai.EllaiGuidancePlanner>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiGuidanceSessionCoordinator>();
 builder.Services.AddScoped<SwiftAid.UI.Ellai.Guidance.IEllaiGuidanceControl, SwiftAid.Gateway.Ellai.EllaiGuidanceControlAdapter>();
-builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiCycleRunner>();
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiApprovedActionService>();
 
 builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiApprovalService>();
@@ -191,7 +190,7 @@ builder.Services.AddScoped<SwiftAid.Application.Ellai.EllaiTrainingVerifier>();
     builder.Services.AddHttpClient<SwiftAid.Intelligence.Meta.OllamaEllaiReasoningProvider>();
     builder.Services.AddHttpClient<SwiftAid.Intelligence.Meta.ServerlessEllaiReasoningProvider>();
     builder.Services.AddScoped<SwiftAid.Intelligence.Meta.EllaiReasoningRouter>();
-    builder.Services.AddSingleton<SwiftAid.Application.Ellai.EllaiUsageLedger>();
+    SwiftAid.Gateway.Ellai.EllaiReasoningRegistration.AddEllaiUsageAccounting(builder.Services, ellai);
     builder.Services.AddScoped<SwiftAid.Application.Ellai.IEllaiTurnCompletionClient, SwiftAid.Intelligence.Meta.EllaiProviderTurnClient>();
     if (ellai.Enabled)
     {

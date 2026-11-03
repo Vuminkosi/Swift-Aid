@@ -7,6 +7,35 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiUsageLedgerTests
 {
     [Fact]
+    public void ActualUsageAndAudioWarnWhenTheyCrossAdvisoryThresholds()
+    {
+        var warnings = new List<string>();
+        var ledger = new EllaiUsageLedger(sessionTokenBudget: 10, envelopeSpendCap: 1m, totalSpendCap: 10m,
+            prices: new EllaiPriceTable(1m, 1m, 1m), enforceLimits: false, thresholdWarning: warnings.Add);
+
+        ledger.Record(new EllaiUsageSample("session", 7, 4));
+        Assert.Contains("session_tokens", warnings);
+        Assert.DoesNotContain("spend", warnings);
+        ledger.RecordAudio("session", 1m);
+        Assert.Contains("spend", warnings);
+        Assert.Equal(11, ledger.TotalsFor("session").TotalTokens);
+    }
+
+    [Fact]
+    public void AdvisoryThresholdsWarnWithoutBlockingAndKeepUsage()
+    {
+        var warnings = new List<string>();
+        var ledger = new EllaiUsageLedger(sessionTokenBudget: 10, envelopeSpendCap: 0, totalSpendCap: 0,
+            prices: new EllaiPriceTable(1, 1, 0), enforceLimits: false, thresholdWarning: warnings.Add);
+        using var reservation = ledger.TryBeginModelCall("session", 20);
+        Assert.NotNull(reservation);
+        Assert.Contains("session_tokens", warnings);
+        Assert.Contains("spend", warnings);
+        ledger.Record(new EllaiUsageSample("session", 12, 3));
+        Assert.Equal(15, ledger.TotalsFor("session").TotalTokens);
+    }
+
+    [Fact]
     public void DefaultSessionAllowsTwoMillionTokensAndStillStopsAtTheBoundary()
     {
         var ledger = new EllaiUsageLedger();

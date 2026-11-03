@@ -6,6 +6,25 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiSessionResponseStoreTests
 {
     [Fact]
+    public void ProvisionalDeliveryRequiresCurrentAttemptLeaseAndEpoch()
+    {
+        var store = new EllaiSessionResponseStore();
+        var generation = store.CaptureGeneration("session");
+        Assert.True(store.PublishProvisional("session", generation, "turn", 1, "scope", 7, 1, "Segment."));
+        var response = Assert.Single(store.ReadSince("session", 0).Responses);
+        var now = DateTimeOffset.UtcNow;
+        var current = new EllaiConversationTurn("session", "turn", 1, "question", null, "Processing", 1, null)
+            { LeaseExpiresAtUtc = now.AddMinutes(1) };
+        Assert.True(store.CanDeliver("session", response, "scope", 7, [current], now));
+        Assert.False(store.CanDeliver("session", response, "other", 7, [current], now));
+        Assert.False(store.CanDeliver("session", response, "scope", 8, [current], now));
+        Assert.False(store.CanDeliver("session", response, "scope", 7, [current with { AttemptCount = 2 }], now));
+        Assert.False(store.CanDeliver("session", response, "scope", 7, [current with { LeaseExpiresAtUtc = now.AddSeconds(-1) }], now));
+        Assert.False(store.CanDeliver("session", response, "scope", 7, [current with { Outcome = "TerminalFailure" }], now));
+        Assert.True(store.CanDeliver("session", response, "scope", 7, [current with { Outcome = "Completed", CompletedAtUtc = now, LeaseExpiresAtUtc = null }], now));
+    }
+
+    [Fact]
     public void ResponsesAreSessionScopedBoundedAndCleared()
     {
         var store = new EllaiSessionResponseStore();
@@ -93,5 +112,31 @@ public sealed class EllaiSessionResponseStoreTests
         Assert.True(replay.Sequence > first.Sequence);
         Assert.Equal(EllaiSessionResponseStore.MaximumResponsesPerSession,
             store.ReadSince("session-1", 0, EllaiSessionResponseStore.MaximumResponsesPerSession).Responses.Count);
+    }
+
+    [Fact]
+    public void ClearedSessionRejectsPublicationFromOldGeneration()
+    {
+        var store = new EllaiSessionResponseStore();
+        var oldGeneration = store.CaptureGeneration("session-1");
+        store.Clear("session-1");
+        var currentGeneration = store.CaptureGeneration("session-1");
+        var completed = EllaiUtteranceResolution.Completed("Synthetic answer.", 1);
+
+        Assert.False(store.PublishCommitted("session-1", oldGeneration, "old-turn", completed, ["Synthetic answer."]));
+        Assert.Empty(store.ReadSince("session-1", 0).Responses);
+        Assert.True(store.PublishCommitted("session-1", currentGeneration, "new-turn", completed, ["Synthetic answer."]));
+        Assert.Equal(2, store.ReadSince("session-1", 0).Responses.Count);
+    }
+
+    [Fact]
+    public void CommittedPublicationRejectsMismatchedChunksBeforePublishing()
+    {
+        var store = new EllaiSessionResponseStore();
+        var generation = store.CaptureGeneration("session-1");
+
+        Assert.Throws<ArgumentException>(() => store.PublishCommitted("session-1", generation, "turn",
+            EllaiUtteranceResolution.Completed("Committed answer.", 1), ["Different answer."]));
+        Assert.Empty(store.ReadSince("session-1", 0).Responses);
     }
 }

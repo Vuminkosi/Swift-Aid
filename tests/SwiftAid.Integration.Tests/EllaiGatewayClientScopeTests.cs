@@ -5,11 +5,35 @@ using Microsoft.Extensions.DependencyInjection;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Ellai;
 using SwiftAid.Gateway.Ellai;
+using SwiftAid.Contracts.Ellai;
 
 namespace SwiftAid.Integration.Tests;
 
 public sealed class EllaiGatewayClientScopeTests
 {
+    [Fact]
+    public async Task InProcessClientHidesAReclaimedProvisionalAttempt()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var store = new InMemoryEllaiSessionStore();
+        var session = new EllaiSessionRecord("scope-session", EllaiMode.Ask, "Active", 1, 1, 1, 1,
+            0, 12, "ellai-scope-test", "scope", null, null, now);
+        await store.CreateAsync(session, default);
+        await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2 }, 1, "turn", default, "{}");
+        Assert.NotNull(await store.ClaimNextAsync(now, now.AddMinutes(1), default));
+        var responses = new EllaiSessionResponseStore();
+        var generation = responses.CaptureGeneration(session.SessionId);
+        Assert.True(responses.PublishProvisional(session.SessionId, generation, "turn", 1, "scope", 1, 1, "private segment"));
+        await using var services = new ServiceCollection().AddSingleton<IEllaiSessionStore>(store)
+            .AddSingleton<IEllaiUtteranceOutboxStore>(store).AddSingleton(responses).BuildServiceProvider();
+        var client = new EllaiReviewGatewayClient(new SignedIn(), services);
+        Assert.Contains((await client.PollResponsesAsync(session.SessionId, 0, default))!.Responses,
+            item => item.Text == "private segment");
+        Assert.NotNull(await store.ClaimNextAsync(now.AddMinutes(2), now.AddMinutes(3), default));
+        Assert.DoesNotContain((await client.PollResponsesAsync(session.SessionId, 0, default))!.Responses,
+            item => item.Text == "private segment");
+    }
+
     [Fact]
     public async Task OverlappingHistoryReadsHaveIndependentDisposedStoreScopes()
     {

@@ -12,6 +12,7 @@ public sealed class PostgresEllaiUsageStore(SwiftAidDbContext dbContext) : IElla
     public async Task RecordAsync(StoredUsageSample sample, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(sample);
+        sample.Validate();
         _dbContext.Set<EllaiUsageSampleEntity>().Add(new EllaiUsageSampleEntity
         {
             SampleId = $"usg-{Guid.NewGuid():N}",
@@ -20,6 +21,9 @@ public sealed class PostgresEllaiUsageStore(SwiftAidDbContext dbContext) : IElla
             CompletionTokens = sample.CompletionTokens,
             Dollars = sample.Dollars,
             AtUtc = sample.AtUtc,
+            EstimatedPromptTokens = sample.EstimatedPromptTokens,
+            EstimatedCompletionTokens = sample.EstimatedCompletionTokens,
+            EstimatedDollars = sample.EstimatedDollars,
         });
         await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
     }
@@ -34,7 +38,7 @@ public sealed class PostgresEllaiUsageStore(SwiftAidDbContext dbContext) : IElla
             sessionId,
             (int)Math.Min(int.MaxValue, rows.Sum(e => (long)e.PromptTokens)),
             (int)Math.Min(int.MaxValue, rows.Sum(e => (long)e.CompletionTokens)),
-            (int)Math.Min(int.MaxValue, rows.Sum(e => (long)e.PromptTokens + e.CompletionTokens)),
+            (int)Math.Min(int.MaxValue, rows.Sum(e => (long)e.PromptTokens + e.CompletionTokens + e.EstimatedPromptTokens + e.EstimatedCompletionTokens)),
             rows.Count);
     }
 
@@ -48,4 +52,13 @@ public sealed class PostgresEllaiUsageStore(SwiftAidDbContext dbContext) : IElla
         await _dbContext.Set<EllaiUsageSampleEntity>().AsNoTracking()
             .SumAsync(e => e.Dollars, ct)
             .ConfigureAwait(false);
+
+    public async Task<decimal> BudgetSpendForAsync(string sessionId, CancellationToken ct) =>
+        await _dbContext.Set<EllaiUsageSampleEntity>().AsNoTracking()
+            .Where(e => e.SessionId == sessionId)
+            .SumAsync(e => e.Dollars + e.EstimatedDollars, ct).ConfigureAwait(false);
+
+    public async Task<decimal> TotalBudgetSpendAsync(CancellationToken ct) =>
+        await _dbContext.Set<EllaiUsageSampleEntity>().AsNoTracking()
+            .SumAsync(e => e.Dollars + e.EstimatedDollars, ct).ConfigureAwait(false);
 }

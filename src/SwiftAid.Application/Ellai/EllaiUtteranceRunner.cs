@@ -15,6 +15,8 @@ public sealed record EllaiUtteranceOutcome(
     /// <summary>Internal tool trace; absence does not imply a public-only answer.</summary>
     public IReadOnlyList<EllaiObservedToolResult>? ObservedTools { get; init; }
     public bool HistoryIncluded { get; init; }
+    public IReadOnlyList<string>? HistoryTurnIds { get; init; }
+    public IReadOnlyList<EllaiObservedToolResult>? InheritedObservations { get; init; }
 }
 
 /// <summary>Dependencies for one background run, resolved per scope by the
@@ -30,7 +32,13 @@ public sealed record EllaiUtteranceServices(
     IEllaiUtteranceOutboxStore? Outbox = null,
     Action<EllaiActivityEvent>? OnActivity = null,
     Func<EllaiToolContext, EllaiToolRequest, CancellationToken, Task<EllaiToolResult>>? InvokeToolAsync = null,
-    IEllaiLanguageClient? Languages = null);
+    IEllaiLanguageClient? Languages = null,
+    SwiftAid.Application.Cases.ICaseQueueQuery? CaseQueue = null,
+    EllaiTechnicalDocs? TechnicalDocs = null,
+    SwiftAid.Application.Intake.Imports.ICaseImportStore? Imports = null,
+    SwiftAid.Application.Intake.Imports.ICaseImportWorkspaceReader? ImportWorkspaces = null,
+    SwiftAid.Application.Cases.IDashboardAggregateQuery? Dashboard = null,
+    Func<string, CancellationToken, ValueTask>? OnVerifiedStreamSegment = null);
 
 /// <summary>Background execution of one accepted utterance with ledger,
 /// activity and journal wiring. Ordinary typed messages need no separate
@@ -83,10 +91,14 @@ public static class EllaiUtteranceRunner
 
         var context = new EllaiToolContext(
             work.SessionId, work.ScopeEpoch, work.FeatureId, work.ResourceId,
-            EllaiCycleRunner.MaxToolCalls, work.ContributorEligible,
+            EllaiExecutionLimits.MaxToolCalls, work.ContributorEligible,
             work.ConsentVersion, work.DataClassification, work.Actor, work.AllowedTools, work.ConsentPurpose);
-        var conversation = services.Outbox is null ? [] : await services.Outbox.ReadConversationAsync(
-            work.SessionId, work.Actor.ActorId, ct).ConfigureAwait(false);
+        var conversation = services.Outbox is null ? [] : (await services.Outbox.ReadConversationForExecutionAsync(
+            work.SessionId, work.Actor.ActorId, work.ClientUtteranceId, ct).ConfigureAwait(false))
+            .Where(turn => string.Equals(turn.SessionId, work.SessionId, StringComparison.Ordinal)).ToArray();
+        if (services.Outbox is not null && !conversation.Any(turn =>
+                string.Equals(turn.ClientUtteranceId, work.ClientUtteranceId, StringComparison.Ordinal)))
+            return new(false, false, "The current conversation is unavailable.", FailureCode: "HistoryUnavailable");
         var languages = work.Languages ?? new();
         if (!languages.IsValid()) return new(false, false, "Unsupported language selection.", FailureCode: "InvalidLanguage");
         var reasoningText = work.Utterance;
@@ -114,7 +126,11 @@ public static class EllaiUtteranceRunner
                     guidanceState = checkpoint.Status;
             }
         }
-        var history = EllaiConversationContext.Build(conversation, work.ClientUtteranceId);
+        var authorizedHistory = services.Loop is IEllaiHistoryAuthorizationRequired
+            ? await EllaiAuthorizedConversationContext.BuildAsync(conversation, work.ClientUtteranceId,
+                work.Actor, services.CaseQueue, ct, services.TechnicalDocs, services.Imports, services.ImportWorkspaces,
+                services.Dashboard, context, services.InvokeToolAsync).ConfigureAwait(false) : null;
+        var history = authorizedHistory?.Messages ?? EllaiConversationContext.Build(conversation, work.ClientUtteranceId);
         var request = new EllaiLoopRequest(
             context, reasoningText, ForMode(work.Mode),
             EllaiToolBroker.DescribeCatalogue(work.AllowedTools), maxTokensPerTurn,
@@ -123,6 +139,20 @@ public static class EllaiUtteranceRunner
 
         async Task<bool> IsExecutionCurrentAsync(CancellationToken fenceCt)
         {
+            fenceCt.ThrowIfCancellationRequested();
+            // The model thread contains the selected history for the entire run,
+            // including later tool and repair calls. Recheck that every included
+            // turn is still authorized immediately before those boundaries.
+            if (authorizedHistory is { RetainedTurnIds.Count: > 0 })
+            {
+                var currentHistory = await EllaiAuthorizedConversationContext.BuildAsync(conversation, work.ClientUtteranceId,
+                    work.Actor, services.CaseQueue, fenceCt, services.TechnicalDocs, services.Imports, services.ImportWorkspaces,
+                    services.Dashboard, context, services.InvokeToolAsync).ConfigureAwait(false);
+                fenceCt.ThrowIfCancellationRequested();
+                var currentlyAuthorizedIds = currentHistory.RetainedTurnIds.ToHashSet(StringComparer.Ordinal);
+                if (authorizedHistory.RetainedTurnIds.Any(id => !currentlyAuthorizedIds.Contains(id)))
+                    return false;
+            }
             if (services.Sessions is null)
             {
                 return true;
@@ -132,9 +162,11 @@ public static class EllaiUtteranceRunner
             {
                 await services.Consent.HydrateAsync(work.SessionId, services.ConsentStore, fenceCt)
                     .ConfigureAwait(false);
+                fenceCt.ThrowIfCancellationRequested();
             }
 
             var current = await services.Sessions.GetAsync(work.SessionId, fenceCt).ConfigureAwait(false);
+            fenceCt.ThrowIfCancellationRequested();
             return current is not null
                 && string.Equals(current.Status, "Active", StringComparison.Ordinal)
                 && current.InteractionEpoch == work.ControllerEpoch
@@ -148,21 +180,46 @@ public static class EllaiUtteranceRunner
                     DateTimeOffset.UtcNow));
         }
 
+        if (services.OnVerifiedStreamSegment is not null)
+            request = request with { RevalidateStreamObservations = async (observations, segmentCt) =>
+            {
+                var trace = EllaiToolTrace.SerializeFlattened(observations, false, []);
+                if (trace is null) return false;
+                var previous = new EllaiConversationTurn(work.SessionId, "stream-evidence", 1,
+                    "Evidence", "Evidence", "Completed", 1, DateTimeOffset.UtcNow) { ToolTraceJson = trace };
+                var currentTurn = new EllaiConversationTurn(work.SessionId, "stream-current", 2,
+                    "Current", null, "Processing", 1, null);
+                var checkedEvidence = await EllaiAuthorizedConversationContext.BuildAsync([previous, currentTurn],
+                    currentTurn.ClientUtteranceId, work.Actor, services.CaseQueue, segmentCt, services.TechnicalDocs,
+                    services.Imports, services.ImportWorkspaces, services.Dashboard, context, services.InvokeToolAsync).ConfigureAwait(false);
+                return checkedEvidence.RetainedTurnIds.Contains(previous.ClientUtteranceId, StringComparer.Ordinal);
+            }, OnVerifiedStreamSegment = languages.OutputLanguage != "eng" ? null : async (text, segmentCt) =>
+            {
+                if (await IsExecutionCurrentAsync(segmentCt).ConfigureAwait(false))
+                    await services.OnVerifiedStreamSegment(text, segmentCt).ConfigureAwait(false);
+            }};
+
         Task<bool> ReauthorizeAsync(int _, CancellationToken fenceCt) =>
             IsExecutionCurrentAsync(fenceCt);
 
         var outcome = await services.Loop.RunAsync(
             request,
             ct,
-            reauthorizeAsync: services.Sessions is null ? null : ReauthorizeAsync,
+            // The framework executor invokes both callbacks at the same fence.
+            // Its current-execution callback already performs the identical
+            // session, consent and retained-history checks.
+            reauthorizeAsync: services.Loop is IEllaiHistoryAuthorizationRequired || services.Sessions is null && authorizedHistory is null
+                ? null : ReauthorizeAsync,
             activity: services.Activity,
             journal: services.Journal,
-            isExecutionCurrentAsync: services.Sessions is null ? null : IsExecutionCurrentAsync,
+            isExecutionCurrentAsync: services.Sessions is null && authorizedHistory is null ? null : IsExecutionCurrentAsync,
             onTextDelta: services.OnTextDelta is null || languages.OutputLanguage != "eng"
                 ? null
                 : async (text, deltaCt) =>
                 {
-                    if (await IsExecutionCurrentAsync(deltaCt).ConfigureAwait(false))
+                    var current = await IsExecutionCurrentAsync(deltaCt).ConfigureAwait(false);
+                    deltaCt.ThrowIfCancellationRequested();
+                    if (current)
                     {
                         await services.OnTextDelta(text, deltaCt).ConfigureAwait(false);
                     }
@@ -170,6 +227,7 @@ public static class EllaiUtteranceRunner
             onActivity: services.OnActivity,
             invokeToolAsync: services.InvokeToolAsync)
             .ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
         var answer = outcome.Completed ? outcome.Decision?.DisplayText : null;
         if (!string.IsNullOrWhiteSpace(answer) && languages.OutputLanguage != "eng")
         {
@@ -189,6 +247,11 @@ public static class EllaiUtteranceRunner
                 return new(true, false, "The reply could not be translated.", FailureCode: "TranslationUnavailable");
             }
         }
+        // In particular, the legacy loop can finish after an in-flight provider
+        // request without another iteration gate. Do not persist its answer if
+        // the session or retained history lost authority while it was running.
+        if (outcome.Completed && !await IsExecutionCurrentAsync(ct).ConfigureAwait(false))
+            return new(true, false, "The session or its permissions changed.", FailureCode: EllaiToolReasonCodes.DeniedByPolicy);
         return new EllaiUtteranceOutcome(
             true,
             outcome.Completed,
@@ -198,7 +261,9 @@ public static class EllaiUtteranceRunner
         {
             Decision = outcome.Completed ? outcome.Decision : null,
             ObservedTools = outcome.Completed ? outcome.ObservedTools : null,
-            HistoryIncluded = history.Count > 0
+            HistoryIncluded = history.Count > 0,
+            HistoryTurnIds = authorizedHistory?.RetainedTurnIds,
+            InheritedObservations = authorizedHistory?.InheritedObservations
         };
     }
 

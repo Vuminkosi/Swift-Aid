@@ -2044,6 +2044,24 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasColumnType("numeric")
                         .HasColumnName("dollars");
 
+                    b.Property<int>("EstimatedCompletionTokens")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("estimated_completion_tokens");
+
+                    b.Property<decimal>("EstimatedDollars")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("numeric")
+                        .HasDefaultValue(0m)
+                        .HasColumnName("estimated_dollars");
+
+                    b.Property<int>("EstimatedPromptTokens")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("estimated_prompt_tokens");
+
                     b.Property<int>("PromptTokens")
                         .HasColumnType("integer")
                         .HasColumnName("prompt_tokens");
@@ -2061,6 +2079,8 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
 
                     b.ToTable("ellai_usage_samples", null, t =>
                         {
+                            t.HasCheckConstraint("ck_ellai_usage_estimates_nonnegative", "estimated_prompt_tokens >= 0 AND estimated_completion_tokens >= 0 AND estimated_dollars >= 0");
+
                             t.HasCheckConstraint("ck_ellai_usage_samples_nonnegative", "prompt_tokens >= 0 AND completion_tokens >= 0 AND dollars >= 0");
                         });
                 });

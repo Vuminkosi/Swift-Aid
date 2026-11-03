@@ -106,6 +106,40 @@ public sealed class EllaiResponseSpeechCoordinatorTests
         Assert.Equal(EllaiVoiceTurnState.Interrupted, turnCoordinator.GetSnapshot(sessionId).State);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SessionFenceStopsAlreadyOpenAudioAndItsPreparation(bool authorityUnavailable)
+    {
+        const string sessionId = "session-fenced";
+        var speechStream = new BlockingReadStream();
+        var speech = new BlockingSpeechSynthesisClient(speechStream);
+        using var prepared = new EllaiPreparedResponseAudio(speech, NullLogger<EllaiPreparedResponseAudio>.Instance);
+        await prepared.StartAsync(CancellationToken.None);
+        try
+        {
+            var responses = new EllaiSessionResponseStore(audioPreparation: prepared);
+            var response = responses.Publish(sessionId, "turn", "A response")!;
+            var http = new DefaultHttpContext();
+            using var output = new MemoryStream();
+            http.Response.Body = output;
+            var checks = 0;
+            http.Items[EllaiGuestEndpoints.AudioSessionFenceKey] =
+                (Func<CancellationToken, Task<bool>>)(_ => Interlocked.Increment(ref checks) == 1
+                    ? Task.FromResult(true)
+                    : authorityUnavailable ? Task.FromException<bool>(new InvalidOperationException("synthetic outage")) : Task.FromResult(false));
+            var result = await EllaiGuestEndpoints.StreamResponseAudioAsync(sessionId, response.Sequence,
+                http, responses, prepared, new(), new(), Guid.NewGuid());
+
+            var execution = result.ExecuteAsync(http);
+            await speechStream.ReadStarted.WaitAsync(TimeSpan.FromSeconds(2));
+            await execution.WaitAsync(TimeSpan.FromSeconds(4));
+            Assert.True(speech.SynthesisToken.IsCancellationRequested);
+            Assert.Equal(0, output.Length);
+        }
+        finally { await prepared.StopAsync(CancellationToken.None); }
+    }
+
     [Fact]
     public async Task ResponseAudioSynthesizesSentenceChunksSequentiallyIntoOnePcmStream()
     {

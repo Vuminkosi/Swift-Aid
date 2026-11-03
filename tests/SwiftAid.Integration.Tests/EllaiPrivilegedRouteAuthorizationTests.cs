@@ -29,8 +29,54 @@ using SwiftAid.Infrastructure.Persistence.Ellai;
 
 namespace SwiftAid.Integration.Tests;
 
+[Collection("Ellai framework PostgreSQL worker")]
 public sealed class EllaiPrivilegedRouteAuthorizationTests
 {
+    private sealed class HeldFixtureSpeech : IEllaiSpeechSynthesisClient
+    {
+        public bool IsConfigured => true;
+        public HeldFixtureAudio Stream { get; } = new();
+        public TaskCompletionSource Cancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task<HttpResponseMessage> SynthesizeAsync(string requestId, string text, CancellationToken ct)
+        {
+            ct.Register(() => Cancelled.TrySetResult());
+            var content = new StreamContent(Stream);
+            content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/vnd.swiftaid.pcm");
+            var response = new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = content };
+            response.Headers.Add("X-SwiftAid-Voice-Id", "synthetic-voice");
+            response.Headers.Add("X-SwiftAid-Sample-Rate", "16000");
+            return Task.FromResult(response);
+        }
+    }
+
+    private sealed class HeldFixtureAudio : Stream
+    {
+        private int _reads;
+        public TaskCompletionSource ReadStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() => throw new NotSupportedException();
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _reads) == 1)
+            {
+                buffer.Span[0] = 0;
+                buffer.Span[1] = 0;
+                return 2;
+            }
+            ReadStarted.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+    }
+
     private sealed class LiveFrameworkHttpFactAttribute : FactAttribute
     {
         public LiveFrameworkHttpFactAttribute()
@@ -48,7 +94,8 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
         string? sessionId = null;
         try
         {
-            await using var host = await StartApplicationAsync(frameworkWorker: true, frameworkFixture: fixture, liveModel: true);
+            await using var host = await StartApplicationAsync(frameworkWorker: true, frameworkFixture: fixture, liveModel: true,
+                advisoryThresholds: true);
             using var http = host.GetTestClient();
             var cookies = new Dictionary<string, string>(StringComparer.Ordinal);
             void Merge(HttpResponseMessage response)
@@ -101,7 +148,9 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             var first = await SendTurnAsync("live-turn-1", "Remember the word cobalt for our conversation. Reply briefly.", session, 1);
             var second = await SendTurnAsync("live-turn-2", "What word did I ask you to remember?", first.Session, 2);
             Assert.Contains("cobalt", second.Answer, StringComparison.OrdinalIgnoreCase);
-            await SendTurnAsync("live-turn-3", "Use the ellai_product_facts tool with topic receipt, then explain what an intake receipt means.", second.Session, 3);
+            var third = await SendTurnAsync("live-turn-3", "Use the ellai_productfacts tool with topic receipt, then explain what an intake receipt means.", second.Session, 3);
+            var fourth = await SendTurnAsync("live-turn-4", "What kind of receipt did you explain in your previous answer?", third.Session, 4);
+            Assert.Contains("receipt", fourth.Answer, StringComparison.OrdinalIgnoreCase);
             using var feedRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/ellai/guest/sessions/{sessionId}/responses?cursor=0&includeProgress=true");
             feedRequest.Headers.TryAddWithoutValidation("Cookie", string.Join("; ", cookies.Select(item => $"{item.Key}={item.Value}")));
             using var feed = await http.SendAsync(feedRequest);
@@ -111,6 +160,12 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             Assert.Contains(page.Responses, item => item.ClientUtteranceId == "live-turn-3" &&
                 item.Progress is { State: "Acknowledgement", Operation: "Checking SwiftAid information" });
             await using var verify = fixture.CreateDbContext();
+            var savedSession = (await new PostgresEllaiSessionStore(verify).GetAsync(sessionId, default))!;
+            var savedTurns = await new PostgresEllaiSessionStore(verify).ReadConversationAsync(sessionId, savedSession.OwnerActorId!, default);
+            var fourthTrace = savedTurns.Single(item => item.ClientUtteranceId == "live-turn-4").ToolTraceJson;
+            Assert.True(EllaiToolTrace.TryRead(fourthTrace!, out var trace));
+            Assert.True(trace!.HistoryIncluded);
+            Assert.Contains(trace.Observations, item => item.ToolName == EllaiToolNames.ProductFacts);
             var usage = await new PostgresEllaiUsageStore(verify).TotalsAsync(sessionId, default);
             Assert.True(usage.Calls >= 4);
             Assert.True(usage.TotalTokens > 0);
@@ -131,6 +186,137 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
     [FrameworkPostgresFact]
     public Task GuestHttpConversationRecoversAfterTestHostRestartWithPostgres() =>
         RunGuestHttpConversationRecoveryAsync(liveModel: false);
+
+    [FrameworkPostgresFact]
+    public Task GuestCancellationOnAnotherHostHidesLocalResponseAndAudio() =>
+        RunCrossHostProvisionalInvalidationAsync(reclaim: false);
+
+    [FrameworkPostgresFact]
+    public Task ReclaimedAttemptOnAnotherHostStopsProvisionalAudio() =>
+        RunCrossHostProvisionalInvalidationAsync(reclaim: true);
+
+    private async Task RunCrossHostProvisionalInvalidationAsync(bool reclaim)
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
+        var protection = new EphemeralDataProtectionProvider();
+        var speech = new HeldFixtureSpeech();
+        string? sessionId = null;
+        try
+        {
+            await using var first = await StartApplicationAsync(frameworkFixture: fixture, protection: protection, fixtureSpeech: speech);
+            await using var second = await StartApplicationAsync(frameworkFixture: fixture, protection: protection);
+            var preparation = first.Services.GetRequiredService<EllaiPreparedResponseAudio>();
+            await preparation.StartAsync(default);
+            using var firstClient = first.GetTestClient();
+            using var secondClient = second.GetTestClient();
+            var cookies = new Dictionary<string, string>(StringComparer.Ordinal);
+            void Merge(HttpResponseMessage response)
+            {
+                if (!response.Headers.TryGetValues("Set-Cookie", out var values)) return;
+                foreach (var value in values)
+                {
+                    var pair = value.Split(';', 2)[0];
+                    var index = pair.IndexOf('=');
+                    if (index > 0) cookies[pair[..index]] = pair[(index + 1)..];
+                }
+            }
+            string CookieHeader() => string.Join("; ", cookies.Select(item => $"{item.Key}={item.Value}"));
+            using var antiforgery = await firstClient.GetAsync("/api/v1/ellai/guest/antiforgery");
+            Merge(antiforgery);
+            var token = (await antiforgery.Content.ReadFromJsonAsync<EllaiGuestAntiforgeryToken>())!.RequestToken;
+            using var startRequest = new HttpRequestMessage(HttpMethod.Post, "/api/v1/ellai/guest/sessions")
+            {
+                Content = JsonContent.Create(new StartSessionRequest(EllaiMode.Ask, Guid.NewGuid().ToString("N"), null, null, null, null))
+            };
+            startRequest.Headers.TryAddWithoutValidation("Cookie", CookieHeader());
+            startRequest.Headers.TryAddWithoutValidation("X-CSRF-TOKEN", token);
+            using var started = await firstClient.SendAsync(startRequest);
+            Assert.Equal(System.Net.HttpStatusCode.OK, started.StatusCode);
+            Merge(started);
+            var session = (await started.Content.ReadFromJsonAsync<EllaiSessionView>())!;
+            sessionId = session.SessionId;
+            var local = first.Services.GetRequiredService<EllaiSessionResponseStore>();
+            long interactionEpoch;
+            string scopeEpoch;
+            await using (var db = fixture.CreateDbContext())
+            {
+                var persisted = await db.Set<EllaiSessionEntity>().SingleAsync(item => item.SessionId == sessionId);
+                interactionEpoch = persisted.InteractionEpoch;
+                scopeEpoch = persisted.ScopeEpoch;
+                db.Set<EllaiUtteranceEntity>().Add(new EllaiUtteranceEntity
+                {
+                    SessionId = sessionId, ClientUtteranceId = "synthetic-turn", Sequence = 1,
+                    UserText = "synthetic", Outcome = "Processing", AttemptCount = 1,
+                    AcceptedAtUtc = DateTimeOffset.UtcNow, LeaseExpiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(5),
+                    WorkPayloadJson = "{}"
+                });
+                await db.SaveChangesAsync();
+            }
+            var generation = local.CaptureGeneration(sessionId);
+            Assert.True(local.PublishProvisional(sessionId, generation, "synthetic-turn", 1, scopeEpoch, interactionEpoch, 1, "Synthetic stale response."));
+            var stale = Assert.Single(local.ReadSince(sessionId, 0).Responses);
+            Assert.NotNull(stale);
+
+            using var openRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/ellai/guest/sessions/{sessionId}/responses/{stale.Sequence}/audio");
+            openRequest.Headers.TryAddWithoutValidation("Cookie", CookieHeader());
+            using var openAudio = await firstClient.SendAsync(openRequest, HttpCompletionOption.ResponseHeadersRead);
+            Assert.Equal(System.Net.HttpStatusCode.OK, openAudio.StatusCode);
+            await speech.Stream.ReadStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await using var audioBody = await openAudio.Content.ReadAsStreamAsync();
+            var audioBytes = new byte[16];
+            Assert.Equal(2, await audioBody.ReadAsync(audioBytes).AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+
+            if (reclaim)
+            {
+                await using (var db = fixture.CreateDbContext())
+                    await db.Set<EllaiUtteranceEntity>().Where(item => item.SessionId == sessionId && item.ClientUtteranceId == "synthetic-turn")
+                        .ExecuteUpdateAsync(update => update.SetProperty(item => item.AttemptCount, 2));
+                await speech.Cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                try { Assert.Equal(0, await audioBody.ReadAsync(audioBytes).AsTask().WaitAsync(TimeSpan.FromSeconds(5))); }
+                catch (IOException) { }
+                using var staleFeedRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/ellai/guest/sessions/{sessionId}/responses?cursor=0");
+                staleFeedRequest.Headers.TryAddWithoutValidation("Cookie", CookieHeader());
+                using var staleFeed = await firstClient.SendAsync(staleFeedRequest);
+                Assert.Empty((await staleFeed.Content.ReadFromJsonAsync<EllaiSessionResponsePageDto>())!.Responses);
+                return;
+            }
+
+            using var cancelRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/ellai/guest/sessions/{sessionId}/cancel")
+            {
+                Content = JsonContent.Create(new { expectedSessionVersion = session.SessionVersion })
+            };
+            cancelRequest.Headers.TryAddWithoutValidation("Cookie", CookieHeader());
+            cancelRequest.Headers.TryAddWithoutValidation("X-CSRF-TOKEN", token);
+            using var cancelled = await secondClient.SendAsync(cancelRequest);
+            Assert.Equal(System.Net.HttpStatusCode.OK, cancelled.StatusCode);
+            await speech.Cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            try
+            {
+                Assert.Equal(0, await audioBody.ReadAsync(audioBytes).AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+            }
+            catch (IOException) { /* Aborted streaming responses may surface as an I/O error. */ }
+            Assert.Single(local.ReadSince(sessionId, 0).Responses);
+
+            using var feedRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/ellai/guest/sessions/{sessionId}/responses?cursor=0");
+            feedRequest.Headers.TryAddWithoutValidation("Cookie", CookieHeader());
+            using var feed = await firstClient.SendAsync(feedRequest);
+            Assert.Equal(System.Net.HttpStatusCode.OK, feed.StatusCode);
+            Assert.Empty((await feed.Content.ReadFromJsonAsync<EllaiSessionResponsePageDto>())!.Responses);
+            using var audioRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/ellai/guest/sessions/{sessionId}/responses/{stale.Sequence}/audio");
+            audioRequest.Headers.TryAddWithoutValidation("Cookie", CookieHeader());
+            using var audio = await firstClient.SendAsync(audioRequest);
+            Assert.Equal(System.Net.HttpStatusCode.NotFound, audio.StatusCode);
+        }
+        finally
+        {
+            if (sessionId is not null)
+            {
+                await using var db = fixture.CreateDbContext();
+                await db.Set<EllaiConsentGrantEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+                await db.Set<EllaiSessionEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+            }
+        }
+    }
 
     [LiveFrameworkHttpFact]
     public Task GuestHttpLiveMuseRecoversConversationAfterTestHostRestart() =>
@@ -249,10 +435,12 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             }
         }
     }
-    [Fact]
-    public async Task GuestHttpTurnsReachFrameworkWorkerAndRetainConversation()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GuestHttpTurnsReachFrameworkWorkerAndRetainConversation(bool advisoryThresholds)
     {
-        await using var app = await StartApplicationAsync(frameworkWorker: true);
+        await using var app = await StartApplicationAsync(frameworkWorker: true, advisoryThresholds: advisoryThresholds);
         using var client = app.GetTestClient();
         var cookies = new Dictionary<string, string>(StringComparer.Ordinal);
         void Merge(HttpResponseMessage response)
@@ -383,6 +571,56 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
             (await app.GetTestClient().GetAsync("/api/v1/ellai/sessions/session-1/responses?cursor=0")).StatusCode);
         Assert.Equal(System.Net.HttpStatusCode.NotFound,
             (await app.GetTestClient().GetAsync("/api/v1/ellai/sessions/session-1")).StatusCode);
+    }
+
+    [Fact]
+    public async Task CancelledSessionDoesNotServeStaleLocalResponseOrAudio()
+    {
+        await using var app = await StartApplicationAsync(sessionStatus: "Cancelled");
+        var responses = app.Services.GetRequiredService<EllaiSessionResponseStore>();
+        var stale = responses.PublishChunk("session-1", "turn", 1, "Stale synthetic answer.");
+        Assert.NotNull(stale);
+        using var http = app.GetTestClient();
+
+        using var feed = await http.GetAsync("/api/v1/ellai/sessions/session-1/responses?cursor=0");
+        Assert.Equal(System.Net.HttpStatusCode.OK, feed.StatusCode);
+        Assert.Empty((await feed.Content.ReadFromJsonAsync<EllaiSessionResponsePageDto>())!.Responses);
+        using var audio = await http.GetAsync($"/api/v1/ellai/sessions/session-1/responses/{stale.Sequence}/audio");
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, audio.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("Active")]
+    [InlineData("Completed")]
+    public async Task UncancelledSessionKeepsItsTransientResponses(string status)
+    {
+        await using var app = await StartApplicationAsync(sessionStatus: status);
+        var chunk = app.Services.GetRequiredService<EllaiSessionResponseStore>()
+            .PublishChunk("session-1", "turn", 1, "Synthetic answer.");
+        Assert.NotNull(chunk);
+
+        using var feed = await app.GetTestClient().GetAsync("/api/v1/ellai/sessions/session-1/responses?cursor=0");
+        Assert.Equal(System.Net.HttpStatusCode.OK, feed.StatusCode);
+        Assert.Single((await feed.Content.ReadFromJsonAsync<EllaiSessionResponsePageDto>())!.Responses);
+        using var audio = await app.GetTestClient().GetAsync($"/api/v1/ellai/sessions/session-1/responses/{chunk.Sequence}/audio");
+        // The fixture has no prepared audio, but the session state must not reject the request as missing.
+        Assert.Equal(System.Net.HttpStatusCode.ServiceUnavailable, audio.StatusCode);
+    }
+
+    [Fact]
+    public async Task AudioRejectsOwnerChangeAfterInitialRouteAuthorization()
+    {
+        await using var app = await StartApplicationAsync();
+        var chunk = app.Services.GetRequiredService<EllaiSessionResponseStore>()
+            .PublishChunk("session-1", "turn", 1, "Synthetic answer.");
+        Assert.NotNull(chunk);
+        var reads = 0;
+        app.Services.GetRequiredService<CountingEllaiSessionStore>().ReadProjection = session =>
+            ++reads == 2 && session is not null ? session with { OwnerActorId = "different-owner" } : session;
+
+        using var audio = await app.GetTestClient().GetAsync($"/api/v1/ellai/sessions/session-1/responses/{chunk.Sequence}/audio");
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, audio.StatusCode);
+        Assert.Equal(2, reads);
     }
 
     [Fact]
@@ -894,7 +1132,8 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
         string sessionOwnerId = "test-owner", string sessionStatus = "Active",
         bool hasCurrentScope = false, bool frameworkWorker = false,
         CaseAuthorityPostgresFixture? frameworkFixture = null, IDataProtectionProvider? protection = null,
-        bool liveModel = false)
+        bool liveModel = false, IEllaiSpeechSynthesisClient? fixtureSpeech = null,
+        bool advisoryThresholds = false)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
@@ -975,11 +1214,20 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
         builder.Services.AddHttpClient<EllaiSpeechSynthesisClient>();
         builder.Services.AddTransient<IEllaiSpeechSynthesisClient>(services =>
             services.GetRequiredService<EllaiSpeechSynthesisClient>());
+        builder.Services.AddSingleton<EllaiPreparedResponseAudio>();
+        if (fixtureSpeech is not null)
+        {
+            builder.Services.AddSingleton(fixtureSpeech);
+            builder.Services.AddSingleton(sp => new EllaiSessionResponseStore(audioPreparation: sp.GetRequiredService<EllaiPreparedResponseAudio>()));
+        }
         builder.Services.AddSingleton<IEllaiApprovalStore, EllaiReceiptStore>();
         if (frameworkWorker)
         {
             builder.Services.AddSingleton<FrameworkHttpClient>();
-            builder.Services.AddSingleton<EllaiUsageLedger>();
+            if (advisoryThresholds)
+                builder.Services.AddEllaiUsageAccounting(new EllaiOptions { SpendingCapDollars = 0m, PricingInputPer1KTokens = 1m });
+            else
+                builder.Services.AddSingleton<EllaiUsageLedger>();
             if (frameworkFixture is null) builder.Services.AddSingleton<IEllaiUsageStore, InMemoryEllaiUsageStore>();
             else builder.Services.AddScoped<IEllaiUsageStore, PostgresEllaiUsageStore>();
             builder.Services.AddScoped(_ => new EllaiPromptBuilder("Synthetic test policy", "fixture"));
@@ -1047,9 +1295,13 @@ public sealed class CountingEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
 
     private readonly InMemoryEllaiSessionStore _inner = new();
     public int CreatedCount { get; private set; }
+    public Func<EllaiSessionRecord?, EllaiSessionRecord?>? ReadProjection { get; set; }
 
-    public Task<EllaiSessionRecord?> GetAsync(string sessionId, CancellationToken ct) =>
-        _inner.GetAsync(sessionId, ct);
+    public async Task<EllaiSessionRecord?> GetAsync(string sessionId, CancellationToken ct)
+    {
+        var session = await _inner.GetAsync(sessionId, ct);
+        return ReadProjection is null ? session : ReadProjection(session);
+    }
 
     public Task<EllaiSessionRecord> CreateAsync(EllaiSessionRecord record, CancellationToken ct)
     {
@@ -1082,6 +1334,10 @@ public sealed class CountingEllaiSessionStore : IEllaiSessionStore, IEllaiUttera
 
     public Task<IReadOnlyList<EllaiConversationTurn>> ReadConversationAsync(string sessionId, string ownerActorId, CancellationToken ct) =>
         _inner.ReadConversationAsync(sessionId, ownerActorId, ct);
+
+    public Task<IReadOnlyList<EllaiConversationTurn>> ReadConversationForExecutionAsync(string sessionId, string ownerActorId,
+        string clientUtteranceId, CancellationToken ct) =>
+        _inner.ReadConversationForExecutionAsync(sessionId, ownerActorId, clientUtteranceId, ct);
 
     public Task FailAsync(
         string sessionId, string clientUtteranceId, int attemptCount,

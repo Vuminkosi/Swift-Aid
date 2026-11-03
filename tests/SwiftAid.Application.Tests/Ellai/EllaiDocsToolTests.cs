@@ -149,6 +149,7 @@ public sealed class EllaiDocsToolTests : IDisposable
         Assert.True(search.Allowed);
         Assert.Equal(EllaiToolReasonCodes.Ok, search.ReasonCode);
         Assert.Contains("1-tool-broker-catalogue", search.ResultSummary, StringComparison.Ordinal);
+        Assert.Contains(search.Evidence, item => item.SourceKind == "Documentation" && item.ResourceId == "1-tool-broker-catalogue");
         Assert.True(EllaiToolBroker.MeasureEnvelopeBytes(search) <= EllaiToolBroker.MaxResultBytes);
 
         var get = await broker.InvokeAsync(
@@ -156,6 +157,7 @@ public sealed class EllaiDocsToolTests : IDisposable
             CancellationToken.None);
         Assert.True(get.Allowed);
         Assert.Contains("Spending caps", get.ResultSummary, StringComparison.Ordinal);
+        Assert.Equal(new EllaiTechnicalDocs(_path).Revision(), Assert.Single(get.Evidence).Version);
 
         var unknown = await broker.InvokeAsync(
             Context, new EllaiToolRequest(EllaiToolNames.DocsGet, Args(("section", "9-missing"))),

@@ -11,7 +11,7 @@ namespace SwiftAid.Infrastructure.Persistence.Ellai;
 /// version yields null instead of overwriting newer state. Checkpoints are
 /// idempotent by checkpoint ID. Provider calls never run inside these
 /// transactions; callers keep them short.</summary>
-public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext) : IEllaiSessionStore, IEllaiUtteranceOutboxStore
+public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext) : IEllaiSessionStore, IEllaiUtteranceOutboxStore, IEllaiUtteranceLeaseRenewal, IEllaiProvisionalPublicationFence
 {
     private readonly SwiftAidDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
 
@@ -160,7 +160,6 @@ public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext) : IEl
         }
 
         if (currentEntity.Status is "Cancelled" or "Completed"
-            || currentEntity.CyclesUsed >= currentEntity.CyclesAllowed
             || nextRecord.CyclesUsed != currentEntity.CyclesUsed + 1
             || nextRecord.CyclesAllowed != currentEntity.CyclesAllowed
             || currentEntity.OwnerActorId is null
@@ -362,6 +361,44 @@ public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext) : IEl
             candidate.AcceptedAtUtc);
     }
 
+    public async Task<bool> RenewLeaseAsync(string sessionId, string clientUtteranceId, int attemptCount,
+        DateTimeOffset nowUtc, DateTimeOffset leaseExpiresAtUtc, CancellationToken ct)
+    {
+        if (leaseExpiresAtUtc <= nowUtc) throw new ArgumentOutOfRangeException(nameof(leaseExpiresAtUtc));
+        var changed = await _dbContext.Set<EllaiUtteranceEntity>()
+            .Where(turn => turn.SessionId == sessionId && turn.ClientUtteranceId == clientUtteranceId &&
+                turn.AttemptCount == attemptCount && turn.CompletedAtUtc == null && turn.Outcome == "Processing" &&
+                turn.WorkPayloadJson != null && turn.LeaseExpiresAtUtc > nowUtc)
+            .ExecuteUpdateAsync(update => update.SetProperty(turn => turn.LeaseExpiresAtUtc,
+                turn => turn.LeaseExpiresAtUtc > leaseExpiresAtUtc ? turn.LeaseExpiresAtUtc : leaseExpiresAtUtc), ct)
+            .ConfigureAwait(false);
+        return changed == 1;
+    }
+
+    public async Task<bool> PublishIfCurrentAsync(string sessionId, string utteranceId, int attempt, string actorId,
+        string scopeEpoch, long interactionEpoch, Func<bool> publish, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(publish);
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
+        var sessions = await _dbContext.Set<EllaiSessionEntity>().FromSqlInterpolated($"""
+            SELECT * FROM ellai_sessions WHERE session_id = {sessionId} FOR UPDATE
+            """).AsNoTracking().ToListAsync(ct).ConfigureAwait(false);
+        var session = sessions.SingleOrDefault();
+        if (session is null || session.Status != "Active" || session.OwnerActorId != actorId ||
+            session.ScopeEpoch != scopeEpoch || session.InteractionEpoch != interactionEpoch) return false;
+        var rows = await _dbContext.Set<EllaiUtteranceEntity>().FromSqlInterpolated($"""
+            SELECT * FROM ellai_utterances WHERE session_id = {sessionId} AND client_utterance_id = {utteranceId} FOR UPDATE
+            """).AsNoTracking().ToListAsync(ct).ConfigureAwait(false);
+        var row = rows.SingleOrDefault();
+        if (row is null || row.AttemptCount != attempt || row.Outcome != "Processing" || row.CompletedAtUtc is not null ||
+            row.WorkPayloadJson is null || row.LeaseExpiresAtUtc is null || row.LeaseExpiresAtUtc <= DateTimeOffset.UtcNow)
+            return false;
+        ct.ThrowIfCancellationRequested();
+        var result = publish();
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
+        return result;
+    }
+
     public Task<EllaiConversationTurn?> ReadLatestGuidanceTurnAsync(string sessionId, string ownerActorId, CancellationToken ct) =>
         _dbContext.Set<EllaiUtteranceEntity>().AsNoTracking()
             .Where(turn => turn.SessionId == sessionId && turn.Outcome == "Completed" && turn.UiProposalsJson != null &&
@@ -371,7 +408,7 @@ public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext) : IEl
             .OrderByDescending(turn => turn.Sequence).ThenByDescending(turn => turn.ClientUtteranceId)
             .Select(turn => new EllaiConversationTurn(turn.SessionId, turn.ClientUtteranceId,
                 turn.Sequence, turn.UserText, turn.AssistantText, turn.Outcome,
-                turn.AttemptCount, turn.CompletedAtUtc) { UiProposalsJson = turn.UiProposalsJson, ToolTraceJson = turn.ToolTraceJson })
+                turn.AttemptCount, turn.CompletedAtUtc) { UiProposalsJson = turn.UiProposalsJson, ToolTraceJson = turn.ToolTraceJson, LeaseExpiresAtUtc = turn.LeaseExpiresAtUtc })
             .FirstOrDefaultAsync(ct);
 
     public async Task<IReadOnlyList<EllaiConversationTurn>> ReadConversationAsync(
@@ -384,6 +421,26 @@ public sealed class PostgresEllaiSessionStore(SwiftAidDbContext dbContext) : IEl
                     session.SessionId == turn.SessionId && session.OwnerActorId == ownerActorId))
             .OrderByDescending(turn => turn.Sequence).ThenByDescending(turn => turn.ClientUtteranceId)
             .Take(100)
+            .Select(turn => new EllaiConversationTurn(turn.SessionId, turn.ClientUtteranceId,
+                turn.Sequence, turn.UserText, turn.AssistantText, turn.Outcome,
+                turn.AttemptCount, turn.CompletedAtUtc) { UiProposalsJson = turn.UiProposalsJson, ToolTraceJson = turn.ToolTraceJson, LeaseExpiresAtUtc = turn.LeaseExpiresAtUtc })
+            .ToListAsync(ct).ConfigureAwait(false);
+        rows.Reverse();
+        return rows;
+    }
+
+    public async Task<IReadOnlyList<EllaiConversationTurn>> ReadConversationForExecutionAsync(
+        string sessionId, string ownerActorId, string clientUtteranceId, CancellationToken ct)
+    {
+        var owned = _dbContext.Set<EllaiUtteranceEntity>().AsNoTracking()
+            .Where(turn => turn.SessionId == sessionId &&
+                _dbContext.Set<EllaiSessionEntity>().Any(session =>
+                    session.SessionId == turn.SessionId && session.OwnerActorId == ownerActorId));
+        var currentSequence = owned.Where(turn => turn.ClientUtteranceId == clientUtteranceId)
+            .Select(turn => (long?)turn.Sequence);
+        var rows = await owned.Where(turn => (long?)turn.Sequence <= currentSequence.FirstOrDefault() &&
+                (turn.ClientUtteranceId == clientUtteranceId || turn.Outcome == "Completed"))
+            .OrderByDescending(turn => turn.Sequence).ThenByDescending(turn => turn.ClientUtteranceId)
             .Select(turn => new EllaiConversationTurn(turn.SessionId, turn.ClientUtteranceId,
                 turn.Sequence, turn.UserText, turn.AssistantText, turn.Outcome,
                 turn.AttemptCount, turn.CompletedAtUtc) { UiProposalsJson = turn.UiProposalsJson, ToolTraceJson = turn.ToolTraceJson })

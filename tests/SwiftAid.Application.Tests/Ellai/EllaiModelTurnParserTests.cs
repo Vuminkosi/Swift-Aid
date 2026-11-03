@@ -27,7 +27,7 @@ public sealed class EllaiModelTurnParserTests
         """;
 
     [Fact]
-    public void ToolCallCountUsesTheFourThousandHardLimit()
+    public void ToolCallCountCanExceedThePreviousHardLimit()
     {
         var calls = Enumerable.Range(0, 4_001).Select(index =>
             new { id = $"call-{index}", name = "ellai_now", args = new Dictionary<string, string>() }).ToArray();
@@ -35,8 +35,9 @@ public sealed class EllaiModelTurnParserTests
             new { tool_calls = calls.Take(4_000) }));
         Assert.Null(accepted.Error);
         Assert.Equal(4_000, accepted.Turn!.ToolRequests.Count);
-        var rejected = EllaiModelTurnParser.Parse(System.Text.Json.JsonSerializer.Serialize(new { tool_calls = calls }));
-        Assert.NotNull(rejected.Error);
+        var beyondPreviousLimit = EllaiModelTurnParser.Parse(System.Text.Json.JsonSerializer.Serialize(new { tool_calls = calls }));
+        Assert.Null(beyondPreviousLimit.Error);
+        Assert.Equal(4_001, beyondPreviousLimit.Turn!.ToolRequests.Count);
     }
 
     [Fact]

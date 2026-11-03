@@ -150,10 +150,10 @@ public static class EllaiModelTurnParser
             requests.Add(new EllaiToolRequest(canonical, arguments, id));
         }
 
-        if (requests.Count == 0 || requests.Count > EllaiCycleRunner.MaxToolCalls)
+        if (requests.Count == 0 || requests.Count > EllaiExecutionLimits.MaxToolCalls)
         {
             return new ParsedModelTurn(null,
-                $"tool_calls must name 1..{EllaiCycleRunner.MaxToolCalls} calls.");
+                $"tool_calls must name 1..{EllaiExecutionLimits.MaxToolCalls} calls.");
         }
 
         return new ParsedModelTurn(new EllaiModelTurn(requests, null), null);

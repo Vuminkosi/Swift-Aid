@@ -17,6 +17,7 @@ public static class EllaiGuestEndpoints
 {
     public const string AuthenticationScheme = "SwiftAid.EllaiGuest";
     public const string GuestClaim = "swiftaid_ellai_guest";
+    internal static readonly object AudioSessionFenceKey = new();
     private const string GuestActorPrefix = "ellai-guest-";
 
     public static IResult ReadVoiceTurnState(
@@ -196,6 +197,7 @@ public static class EllaiGuestEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
         group.MapGet("/sessions/{sessionId}/responses/{sequence:long}/audio", StreamResponseAudioAsync)
+            .AddEndpointFilter(RequireUncancelledAudioSession)
             .WithName("StreamEllaiGuestResponseAudio")
             .Produces(StatusCodes.Status200OK, contentType: "application/vnd.swiftaid.pcm")
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
@@ -222,6 +224,29 @@ public static class EllaiGuestEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict);
+    }
+
+    internal static async ValueTask<object?> RequireUncancelledAudioSession(
+        EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+    {
+        var http = context.HttpContext;
+        var sessionId = http.Request.RouteValues["sessionId"]?.ToString();
+        if (string.IsNullOrWhiteSpace(sessionId)) return Results.NotFound();
+        ActorContext actor;
+        try { actor = ActorContext.FromValidatedPrincipal(http.User); }
+        catch (UnauthorizedAccessException) { return Results.Unauthorized(); }
+        var sessions = http.RequestServices.GetRequiredService<IEllaiSessionStore>();
+        var session = await sessions.GetAsync(sessionId, http.RequestAborted).ConfigureAwait(false);
+        if (session is null || session.Status == "Cancelled" || session.OwnerActorId != actor.ActorId)
+            return Results.NotFound();
+        http.Items[AudioSessionFenceKey] = (Func<CancellationToken, Task<bool>>)(async ct =>
+        {
+            var current = await sessions.GetAsync(sessionId, ct).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            return current is not null && current.Status != "Cancelled" && current.OwnerActorId == actor.ActorId &&
+                current.InteractionEpoch == session.InteractionEpoch && current.ScopeEpoch == session.ScopeEpoch;
+        });
+        return await next(context).ConfigureAwait(false);
     }
 
     private static EllaiGuestAntiforgeryToken GetAntiforgeryToken(
@@ -451,6 +476,29 @@ public static class EllaiGuestEndpoints
             return Results.NotFound();
         }
 
+        if (!responses.TryGetProvisionalState(sessionId, sequence, out var provisional)) return Results.NotFound();
+        if (provisional)
+        {
+            var actor = ActorContext.FromValidatedPrincipal(http.User);
+            var sessions = http.RequestServices.GetRequiredService<IEllaiSessionStore>();
+            var outbox = http.RequestServices.GetRequiredService<IEllaiUtteranceOutboxStore>();
+            var current = await sessions.GetAsync(sessionId, http.RequestAborted).ConfigureAwait(false);
+            if (current is null || current.Status != "Active" || current.OwnerActorId != actor.ActorId)
+                return Results.NotFound();
+            var conversation = await outbox.ReadConversationAsync(sessionId, actor.ActorId, http.RequestAborted).ConfigureAwait(false);
+            if (!responses.CanDeliver(sessionId, response, current.ScopeEpoch, current.InteractionEpoch, conversation, DateTimeOffset.UtcNow))
+                return Results.NotFound();
+            var sessionFence = http.Items[AudioSessionFenceKey] as Func<CancellationToken, Task<bool>>;
+            http.Items[AudioSessionFenceKey] = (Func<CancellationToken, Task<bool>>)(async ct =>
+            {
+                if (sessionFence is not null && !await sessionFence(ct).ConfigureAwait(false)) return false;
+                var latest = await sessions.GetAsync(sessionId, ct).ConfigureAwait(false);
+                if (latest is null || latest.Status != "Active" || latest.OwnerActorId != actor.ActorId) return false;
+                var turns = await outbox.ReadConversationAsync(sessionId, actor.ActorId, ct).ConfigureAwait(false);
+                return responses.CanDeliver(sessionId, response, latest.ScopeEpoch, latest.InteractionEpoch, turns, DateTimeOffset.UtcNow);
+            });
+        }
+
         if (response.Language is not ("eng" or "sna" or "nya" or "tso"))
         {
             return Results.Problem(
@@ -580,7 +628,7 @@ public static class EllaiGuestEndpoints
         }
 
         return new EllaiResponseAudioStreamResult(
-            audioStream, upstream, playback, turnCoordinator, sessionId, sequence, playbackId);
+            audioStream, upstream, playback, turnCoordinator, preparedAudio, sessionId, sequence, playbackId);
     }
 
     public static IResult InterruptResponseAudioAsync(
@@ -756,6 +804,7 @@ internal sealed class EllaiResponseAudioStreamResult(
     HttpResponseMessage upstream,
     EllaiResponseSpeechCoordinator.PlaybackLease? playback,
     EllaiVoiceTurnCoordinator turnCoordinator,
+    EllaiPreparedResponseAudio preparedAudio,
     string sessionId,
     long sequence,
     Guid? playbackId) : IResult
@@ -772,6 +821,40 @@ internal sealed class EllaiResponseAudioStreamResult(
                 ? CancellationTokenSource.CreateLinkedTokenSource(httpContext.RequestAborted)
                 : CancellationTokenSource.CreateLinkedTokenSource(httpContext.RequestAborted, playback.Token))
             {
+                var fence = httpContext.Items[EllaiGuestEndpoints.AudioSessionFenceKey] as Func<CancellationToken, Task<bool>>;
+                var invalidated = 0;
+                if (fence is not null)
+                {
+                    try
+                    {
+                        if (!await fence(cancellation.Token).ConfigureAwait(false)) invalidated = 1;
+                    }
+                    catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { return; }
+                    catch (Exception error) when (error is not OutOfMemoryException) { invalidated = 1; }
+                    if (invalidated != 0)
+                    {
+                        preparedAudio.Interrupt(sessionId, sequence);
+                        httpContext.Abort();
+                        return;
+                    }
+                }
+                async Task MonitorSessionAsync()
+                {
+                    try
+                    {
+                        while (true)
+                        {
+                            await Task.Delay(TimeSpan.FromSeconds(1), cancellation.Token).ConfigureAwait(false);
+                            if (!await fence!(cancellation.Token).ConfigureAwait(false)) break;
+                        }
+                    }
+                    catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { return; }
+                    catch (Exception error) when (error is not OutOfMemoryException) { }
+                    Interlocked.Exchange(ref invalidated, 1);
+                    preparedAudio.Interrupt(sessionId, sequence);
+                    await cancellation.CancelAsync().ConfigureAwait(false);
+                }
+                var monitor = fence is null ? Task.CompletedTask : MonitorSessionAsync();
                 try
                 {
                     await audioStream.CopyToAsync(httpContext.Response.Body, cancellation.Token).ConfigureAwait(false);
@@ -784,6 +867,12 @@ internal sealed class EllaiResponseAudioStreamResult(
                 {
                     // Do not turn a truncated/invalidated prepared response into a successful PCM EOF.
                     httpContext.Abort();
+                }
+                finally
+                {
+                    await cancellation.CancelAsync().ConfigureAwait(false);
+                    await monitor.ConfigureAwait(false);
+                    if (Volatile.Read(ref invalidated) != 0) httpContext.Abort();
                 }
             }
         }

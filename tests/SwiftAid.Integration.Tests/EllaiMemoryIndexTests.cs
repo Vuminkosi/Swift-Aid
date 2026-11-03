@@ -21,8 +21,121 @@ namespace SwiftAid.Integration.Tests;
 
 [Trait("Feature", "Ellai")]
 [Trait("Task", "ELL-T09")]
+[Collection("Ellai framework PostgreSQL worker")]
 public sealed class EllaiMemoryIndexTests
 {
+    private sealed class FrameworkPostgresFactAttribute : FactAttribute
+    {
+        public FrameworkPostgresFactAttribute()
+        {
+            if (Environment.GetEnvironmentVariable("SWIFTAID_RUN_FRAMEWORK_POSTGRES_FIXTURES") != "1")
+                Skip = "Requires the dedicated disposable framework PostgreSQL fixture.";
+        }
+    }
+
+    [FrameworkPostgresFact]
+    public async Task FrameworkWorkerRecoversProviderOutageAfterWorkerRestartWithPostgres()
+    {
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
+        var sessionId = "framework-retry-" + Guid.NewGuid().ToString("N");
+        var actor = fixture.CreateActor();
+        await using (var db = fixture.CreateDbContext())
+        {
+            var store = new PostgresEllaiSessionStore(db);
+            var session = new EllaiSessionRecord(sessionId, EllaiMode.Ask, "Active", 1, 1, 1, 1, 0, 12,
+                actor.ActorId, "scope-1", null, null, DateTimeOffset.UtcNow);
+            await store.CreateAsync(session, default);
+            var work = new EllaiUtteranceWork(sessionId, "scope-1", "Synthetic question", "public.product-help", null,
+                EllaiMode.Ask, 1, "cycle-1", actor, true, "consent/0", EllaiProcessingClassification.UserProvidedNonSensitive,
+                EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string>(), EllaiConsentPurposes.PublicProductHelp, "turn-1");
+            Assert.NotNull(await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 }, 1,
+                work.ClientUtteranceId, default, EllaiUtteranceWorkEnvelope.Serialize(work, work.ClientUtteranceId)));
+        }
+
+        using var model = new RecoveringProviderClient();
+        var services = new ServiceCollection();
+        services.AddScoped(_ => fixture.CreateDbContext());
+        services.AddScoped<PostgresEllaiSessionStore>();
+        services.AddScoped<IEllaiSessionStore>(sp => sp.GetRequiredService<PostgresEllaiSessionStore>());
+        services.AddScoped<IEllaiUtteranceOutboxStore>(sp => sp.GetRequiredService<PostgresEllaiSessionStore>());
+        services.AddScoped<IEllaiUsageStore, PostgresEllaiUsageStore>();
+        services.AddSingleton<EllaiConsentService>().AddSingleton<EllaiUsageLedger>().AddSingleton<EllaiSessionResponseStore>();
+        services.AddScoped(sp => new EllaiToolBroker(new EllaiPolicyService(), sp.GetRequiredService<EllaiConsentService>()));
+        services.AddScoped<IEllaiReasoningExecutor>(sp => new EllaiFrameworkExecutor(model,
+            new EllaiPromptBuilder("Synthetic policy", "fixture"), sp.GetRequiredService<EllaiToolBroker>(),
+            sp.GetRequiredService<EllaiUsageLedger>(), sp.GetRequiredService<IEllaiUsageStore>()));
+        await using var provider = services.BuildServiceProvider();
+        await using var restartedProvider = services.BuildServiceProvider();
+        Assert.NotSame(provider.GetRequiredService<EllaiUsageLedger>(), restartedProvider.GetRequiredService<EllaiUsageLedger>());
+        using var loggerFactory = LoggerFactory.Create(_ => { });
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        async Task<EllaiConversationTurn> ReadTurnAsync()
+        {
+            await using var db = fixture.CreateDbContext();
+            return Assert.Single(await new PostgresEllaiSessionStore(db).ReadConversationAsync(sessionId, actor.ActorId, timeout.Token));
+        }
+        try
+        {
+            using (var first = new EllaiUtteranceWorker(provider, loggerFactory.CreateLogger<EllaiUtteranceWorker>()))
+            {
+                await first.StartAsync(default);
+                try
+                {
+                    EllaiConversationTurn failed;
+                    do { await Task.Delay(25, timeout.Token); failed = await ReadTurnAsync(); }
+                    while (failed.Outcome != "RetryableFailure");
+                    Assert.Null(failed.AssistantText);
+                }
+                finally { await first.StopAsync(CancellationToken.None); }
+            }
+            using (var restarted = new EllaiUtteranceWorker(restartedProvider, loggerFactory.CreateLogger<EllaiUtteranceWorker>()))
+            {
+                await restarted.StartAsync(default);
+                try
+                {
+                    EllaiConversationTurn recovered;
+                    do { await Task.Delay(25, timeout.Token); recovered = await ReadTurnAsync(); }
+                    while (recovered.CompletedAtUtc is null);
+                    Assert.Equal("Completed", recovered.Outcome);
+                    Assert.Equal("Recovered.", recovered.AssistantText);
+                    Assert.Equal(2, recovered.AttemptCount);
+                    Assert.Equal(2, model.Calls);
+                    await using var db = fixture.CreateDbContext();
+                    var persisted = await new PostgresEllaiUsageStore(db).TotalsAsync(sessionId, timeout.Token);
+                    Assert.Equal(2, persisted.Calls);
+                    Assert.Equal(persisted.TotalTokens, restartedProvider.GetRequiredService<EllaiUsageLedger>().TotalsFor(sessionId).TotalTokens);
+                }
+                finally { await restarted.StopAsync(CancellationToken.None); }
+            }
+        }
+        finally
+        {
+            await using var db = fixture.CreateDbContext();
+            await db.Set<EllaiUsageSampleEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+            await db.Set<EllaiUtteranceEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+            await db.Set<EllaiCheckpointEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+            await db.Set<EllaiSessionEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+        }
+    }
+
+    private sealed class RecoveringProviderClient : IChatClient
+    {
+        public int Calls { get; private set; }
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            cancellationToken.ThrowIfCancellationRequested();
+            if (++Calls == 1) throw new HttpRequestException("Synthetic provider outage");
+            yield return new ChatResponseUpdate(ChatRole.Assistant,
+                """{"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Recovered.","spokenText":"Recovered.","claims":[],"questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}""");
+        }
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
     private sealed class CaptureHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {
         public readonly List<(string Method, string Url, string Body, bool HasKey)> Seen = new();
@@ -178,15 +291,20 @@ public sealed class EllaiMemoryIndexTests
             services.AddScoped<IEllaiSessionStore>(sp => sp.GetRequiredService<PostgresEllaiSessionStore>());
             services.AddScoped<IEllaiUtteranceOutboxStore>(sp => sp.GetRequiredService<PostgresEllaiSessionStore>());
             services.AddScoped<IEllaiUsageStore, PostgresEllaiUsageStore>();
+            services.AddSingleton<IEllaiExactReferenceIndex>(index);
             services.AddSingleton(consent).AddSingleton<EllaiUsageLedger>().AddSingleton<EllaiSessionResponseStore>();
-            services.AddScoped(sp =>
+            services.AddScoped<ICaseQueueQuery>(sp =>
             {
                 var db = sp.GetRequiredService<SwiftAid.Infrastructure.Persistence.SwiftAidDbContext>();
                 var unit = new PostgresCaseCommandUnitOfWork(db);
-                var query = new CaseQueueQuery(new PostgresCaseQueueStore(db),
+                return new CaseQueueQuery(new PostgresCaseQueueStore(db),
                     new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(db, unit), new PostgresCaseAccessDescriptorStore(db, unit)), unit);
-                return new EllaiToolBroker(new EllaiPolicyService(), consent, queue: query,
-                    topics: new EllaiTopicService(new PostgresEllaiTopicStore(db)), referenceIndex: index);
+            });
+            services.AddScoped(sp =>
+            {
+                var db = sp.GetRequiredService<SwiftAid.Infrastructure.Persistence.SwiftAidDbContext>();
+                return new EllaiToolBroker(new EllaiPolicyService(), consent, queue: sp.GetRequiredService<ICaseQueueQuery>(),
+                    topics: new EllaiTopicService(new PostgresEllaiTopicStore(db)), referenceIndex: sp.GetRequiredService<IEllaiExactReferenceIndex>());
             });
             services.AddScoped(_ => new EllaiPromptBuilder("Synthetic policy", "fixture"));
             var modelOptions = liveModel ? EllaiOptions.Bind(Environment.GetEnvironmentVariable) : new EllaiOptions
@@ -204,7 +322,7 @@ public sealed class EllaiMemoryIndexTests
             await worker.StartAsync(default);
             try
             {
-                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(liveModel ? 180 : 15));
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(liveModel ? 180 : 30));
                 EllaiConversationTurn turn;
                 do
                 {
@@ -222,10 +340,11 @@ public sealed class EllaiMemoryIndexTests
                 if (liveModel) Assert.Contains(fixture.CaseId.ToString("D"), turn.AssistantText!, StringComparison.OrdinalIgnoreCase);
                 else Assert.Contains(fixture.CaseId.ToString("D"), model.Observation);
                 transport.Unavailable = true;
-                async Task RunFollowupAsync(string turnId)
+                async Task RunFollowupAsync(string turnId, bool removeTopicTool = false, bool expectDenied = false)
                 {
                     var priorRecallRequests = transport.RecallRequests;
                     model.Reset();
+                    model.SkipTool = removeTopicTool;
                     await using (var db = fixture.CreateDbContext())
                     {
                         var store = new PostgresEllaiSessionStore(db);
@@ -234,7 +353,7 @@ public sealed class EllaiMemoryIndexTests
                             ? "Use ellai_topic with ref case-results again. State the case identifiers currently returned by the tool."
                             : "Recall again", "cases", null,
                             EllaiMode.Ask, 1, "cycle-" + turnId, actor, true, "consent/0", EllaiProcessingClassification.UserProvidedNonSensitive,
-                            EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string> { EllaiToolNames.Topic },
+                            EllaiProcessingClassification.UserProvidedNonSensitive, removeTopicTool ? new HashSet<string>() : new HashSet<string> { EllaiToolNames.Topic },
                             EllaiConsentPurposes.PublicProductHelp, turnId);
                         Assert.NotNull(await store.TryAcceptUtteranceAsync(current with
                             { SessionVersion = current.SessionVersion + 1, CyclesUsed = current.CyclesUsed + 1 }, current.SessionVersion,
@@ -247,11 +366,18 @@ public sealed class EllaiMemoryIndexTests
                         turn = (await new PostgresEllaiSessionStore(db).ReadConversationAsync(sessionId, actor.ActorId, timeout.Token))
                             .Single(item => item.ClientUtteranceId == turnId);
                     } while (turn.CompletedAtUtc is null);
+                    if (expectDenied)
+                    {
+                        Assert.NotEqual("Completed", turn.Outcome);
+                        Assert.Null(turn.AssistantText);
+                        return;
+                    }
                     Assert.Equal("Completed", turn.Outcome);
-                    Assert.True(transport.RecallRequests > priorRecallRequests);
+                    if (removeTopicTool) Assert.Equal(priorRecallRequests, transport.RecallRequests);
+                    else Assert.True(transport.RecallRequests > priorRecallRequests);
                     var followupTrace = System.Text.Json.JsonSerializer.Deserialize<EllaiToolTrace>(turn.ToolTraceJson!);
                     Assert.True(followupTrace!.HistoryIncluded);
-                    if (!liveModel) Assert.Contains("\"allowed\":true", model.Observation);
+                    if (!liveModel && !removeTopicTool) Assert.Contains("\"allowed\":true", model.Observation);
                 }
                 await RunFollowupAsync("turn-2");
                 Assert.True(transport.FailedRequests > 0);
@@ -261,6 +387,48 @@ public sealed class EllaiMemoryIndexTests
                     Assert.Contains(fixture.CaseId.ToString("D"), model.Observation);
                     Assert.Contains("Recall my cases", model.FirstMessages);
                     Assert.Contains(model.FirstMessages, text => text.Contains("Done.", StringComparison.Ordinal));
+                    model.BeforeFinal = () => fixture.SetGrantExpiryAsync(DateTimeOffset.UtcNow.AddMinutes(-1));
+                    await RunFollowupAsync("turn-revoked-before-final", expectDenied: true);
+                    Assert.Contains(fixture.CaseId.ToString("D"), model.Observation);
+                    model.BeforeFinal = null;
+                    await fixture.SetGrantExpiryAsync(DateTimeOffset.UtcNow.AddHours(1));
+                    model.StreamCaseSegment = true;
+                    var streamingTurn = RunFollowupAsync("turn-stream-revoked", expectDenied: true);
+                    await model.SegmentSent.Task.WaitAsync(timeout.Token);
+                    var published = provider.GetRequiredService<EllaiSessionResponseStore>().ReadSince(sessionId, 0, take: 64).Responses;
+                    Assert.Contains(published, response => response.ClientUtteranceId == "turn-stream-revoked" &&
+                        !response.IsFinal && response.Text.Contains(fixture.CaseId.ToString("D"), StringComparison.OrdinalIgnoreCase));
+                    await fixture.SetGrantExpiryAsync(DateTimeOffset.UtcNow.AddMinutes(-1));
+                    model.ReleaseSegment.TrySetResult();
+                    await streamingTurn;
+                    model.StreamCaseSegment = false;
+                    await fixture.SetGrantExpiryAsync(DateTimeOffset.UtcNow.AddHours(1));
+                    await RunFollowupAsync("turn-tool-removed", removeTopicTool: true);
+                    Assert.DoesNotContain(model.FirstMessages, text => text.Contains(fixture.CaseId.ToString("D"), StringComparison.OrdinalIgnoreCase));
+                    Assert.Contains(model.FirstMessages, text => text.Contains("could not be verified", StringComparison.Ordinal));
+
+                    // Start with an available index so history reauthorization succeeds,
+                    // then lose it only after the framework asks to invoke the tool.
+                    transport.Unavailable = false;
+                    var priorFailures = transport.FailedRequests;
+                    model.BeforeToolCall = () => transport.Unavailable = true;
+                    await RunFollowupAsync("turn-outage-during-execution");
+                    model.BeforeToolCall = null;
+                    Assert.True(transport.FailedRequests > priorFailures);
+                    Assert.Contains(fixture.CaseId.ToString("D"), model.Observation);
+
+                    // The derived request ignores cancellation; PostgreSQL recall
+                    // must finish before that request is released.
+                    transport.Hold = true;
+                    await RunFollowupAsync("turn-held-index");
+                    Assert.True(transport.HeldStarted.Task.IsCompleted);
+                    Assert.False(transport.HeldRelease.Task.IsCompleted);
+                    Assert.Contains(fixture.CaseId.ToString("D"), model.Observation);
+                    transport.Hold = false;
+                    transport.HeldRelease.TrySetResult();
+                    using var drain = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    while (Volatile.Read(ref transport.HeldActive) > 0)
+                        await Task.Delay(10, drain.Token);
                 }
                 await fixture.SetGrantExpiryAsync(DateTimeOffset.UtcNow.AddMinutes(-1));
                 await RunFollowupAsync("turn-3");
@@ -268,15 +436,15 @@ public sealed class EllaiMemoryIndexTests
                 else
                 {
                     Assert.DoesNotContain(fixture.CaseId.ToString("D"), model.Observation);
-                    // Current behavior: the earlier assistant answer remains in the
-                    // next model request even after the underlying grant expires.
-                    Assert.Contains(model.FirstMessages, text => text.Contains(fixture.CaseId.ToString("D"), StringComparison.OrdinalIgnoreCase));
+                    Assert.DoesNotContain(model.FirstMessages, text => text.Contains(fixture.CaseId.ToString("D"), StringComparison.OrdinalIgnoreCase));
+                    Assert.Contains(model.FirstMessages, text => text.Contains("could not be verified", StringComparison.Ordinal));
                 }
             }
-            finally { await worker.StopAsync(CancellationToken.None); }
+            finally { transport.HeldRelease.TrySetResult(); await worker.StopAsync(CancellationToken.None); }
         }
         finally
         {
+            transport.HeldRelease.TrySetResult();
             transport.Unavailable = false;
             await using var db = fixture.CreateDbContext();
             await db.Set<EllaiUsageSampleEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
@@ -296,6 +464,12 @@ public sealed class EllaiMemoryIndexTests
         private int _calls;
         public string Observation { get; private set; } = "";
         public IReadOnlyList<string> FirstMessages { get; private set; } = [];
+        public bool SkipTool { get; set; }
+        public Action? BeforeToolCall { get; set; }
+        public Func<Task>? BeforeFinal { get; set; }
+        public bool StreamCaseSegment { get; set; }
+        public TaskCompletionSource SegmentSent { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseSegment { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public void Reset() { _calls = 0; Observation = ""; }
         public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
@@ -307,12 +481,37 @@ public sealed class EllaiMemoryIndexTests
             {
                 FirstMessages = messages.Where(message => message.Role == ChatRole.User || message.Role == ChatRole.Assistant)
                     .Select(message => message.Text).ToArray();
-                yield return new ChatResponseUpdate(ChatRole.Assistant, [new FunctionCallContent("call", EllaiToolNames.Topic,
-                    new Dictionary<string, object?> { ["ref"] = "case-results" })]);
+                if (SkipTool)
+                    yield return new ChatResponseUpdate(ChatRole.Assistant,
+                        """{"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Done.","spokenText":"Done.","claims":[],"questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}""");
+                else
+                {
+                    BeforeToolCall?.Invoke();
+                    yield return new ChatResponseUpdate(ChatRole.Assistant, [new FunctionCallContent("call", EllaiToolNames.Topic,
+                        new Dictionary<string, object?> { ["ref"] = "case-results" })]);
+                }
             }
             else
             {
                 Observation = string.Join(" ", messages.SelectMany(message => message.Contents).OfType<FunctionResultContent>().Select(content => content.Result?.ToString()));
+                if (BeforeFinal is not null) await BeforeFinal();
+                if (StreamCaseSegment)
+                {
+                    using var payload = System.Text.Json.JsonDocument.Parse(Observation);
+                    var summary = payload.RootElement.GetProperty("resultSummary").GetString()!;
+                    var segment = summary.Split('\n').Single(line => line.Contains(syntheticCaseId.ToString("D"), StringComparison.OrdinalIgnoreCase));
+                    var quoted = System.Text.Json.JsonSerializer.Serialize(segment);
+                    var reference = payload.RootElement.GetProperty("evidence")[0].GetRawText();
+                    yield return new ChatResponseUpdate(ChatRole.Assistant,
+                        "{\"stream_segments\":[{\"text\":" + quoted + ",\"claims\":[{\"claimId\":\"case\",\"text\":" + quoted +
+                        ",\"kind\":\"Observed\",\"evidence\":[" + reference + "]}]}]");
+                    SegmentSent.TrySetResult();
+                    await ReleaseSegment.Task.WaitAsync(cancellationToken);
+                    yield return new ChatResponseUpdate(ChatRole.Assistant,
+                        ",\"final_decision\":{\"schemaVersion\":2,\"kind\":\"Answer\",\"displayText\":" + quoted +
+                        ",\"spokenText\":" + quoted + ",\"claims\":[],\"questions\":[],\"uiIntents\":[],\"planProposal\":null,\"topicRefs\":[],\"resumeSuggestion\":null,\"stopReason\":null}}");
+                    yield break;
+                }
                 var answer = Observation.Contains(syntheticCaseId.ToString("D"), StringComparison.OrdinalIgnoreCase)
                     ? "Done. " + syntheticCaseId.ToString("D") : "Done.";
                 yield return new ChatResponseUpdate(ChatRole.Assistant,
@@ -328,15 +527,34 @@ public sealed class EllaiMemoryIndexTests
     private sealed class SwitchableQdrantHandler() : DelegatingHandler(new HttpClientHandler())
     {
         public volatile bool Unavailable;
+        public volatile bool Hold;
+        public TaskCompletionSource HeldStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource HeldRelease { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int HeldActive;
         public int FailedRequests;
         public int RecallRequests;
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             if (request.RequestUri?.AbsolutePath.EndsWith("/points/scroll", StringComparison.Ordinal) == true)
+            {
                 Interlocked.Increment(ref RecallRequests);
+                if (Hold) return HoldAsync();
+            }
             if (!Unavailable) return base.SendAsync(request, cancellationToken);
             Interlocked.Increment(ref FailedRequests);
             return Task.FromException<HttpResponseMessage>(new HttpRequestException("Synthetic Qdrant outage."));
+        }
+
+        private async Task<HttpResponseMessage> HoldAsync()
+        {
+            Interlocked.Increment(ref HeldActive);
+            HeldStarted.TrySetResult();
+            try
+            {
+                await HeldRelease.Task;
+                return new HttpResponseMessage(System.Net.HttpStatusCode.ServiceUnavailable);
+            }
+            finally { Interlocked.Decrement(ref HeldActive); }
         }
     }
 

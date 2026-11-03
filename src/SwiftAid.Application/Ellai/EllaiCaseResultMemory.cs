@@ -19,6 +19,7 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
     public async Task RememberAsync(EllaiToolContext context, IReadOnlyList<CaseQueueItem> items,
         CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         if (context.Actor is null) return;
         var snapshot = new Snapshot(context.Actor.ActorId, context.ScopeEpoch, DateTimeOffset.UtcNow.AddHours(24),
             items.Take(20).Select(item => new CaseReference(item.CaseId, item.AggregateVersion)).ToArray());
@@ -29,6 +30,7 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
     public async Task<EllaiToolResult> RecallAsync(
         EllaiToolContext context, CancellationToken ct, string? field = null)
     {
+        ct.ThrowIfCancellationRequested();
         if (field is not null && field is not ("country" or "workflow"))
             return new(EllaiToolNames.Topic, false, "Unsupported case-result field selector.", [], "", 0, false,
                 EllaiToolReasonCodes.InvalidArguments);
@@ -41,6 +43,10 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
             try
             {
                 var hit = await index.FindExactAsync(Reference, context.SessionId, context.ScopeEpoch, timeout.Token).ConfigureAwait(false);
+                // An index implementation can return after its cancellation token
+                // was signalled. In that case resolve through the authoritative
+                // topic store instead of accepting the overdue derived lookup.
+                timeout.Token.ThrowIfCancellationRequested();
                 if (hit is not null && hit.Id == Reference && hit.SessionId == context.SessionId &&
                     hit.ScopeEpoch == context.ScopeEpoch && hit.ExpiresAtUtc > DateTimeOffset.UtcNow)
                 {
@@ -56,6 +62,7 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
                 indexedTopic.EntityVersion, indexedTopic.CoverageState, indexedTopic.CheckpointId)
             : (await topics.ResolveAsync(context.SessionId, Reference, ct).ConfigureAwait(false)).Matches
                 .SingleOrDefault(item => item.Title == TopicTitle);
+        ct.ThrowIfCancellationRequested();
         Snapshot? snapshot;
         try
         {
@@ -68,10 +75,12 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
             || snapshot.Cases.Any(item => item is null || item.Id == Guid.Empty))
             return Unavailable();
         if (snapshot.Cases.Count == 0)
-            return new(EllaiToolNames.Topic, true, null, [], "The last retained case result set was empty.", 0, false);
+            return new EllaiToolResult(EllaiToolNames.Topic, true, null, [], "The last retained case result set was empty.", 0, false)
+                { HistoryValidUntilUtc = snapshot.ExpiresAtUtc };
 
         var current = await queue.GetMineAsync(context.Actor, 20,
             new CaseQueueFilter(CaseIds: snapshot.Cases.Select(item => item.Id).ToArray()), ct).ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
         if (current.Access != CaseQueueAccess.Allowed) return Unavailable();
         var rows = snapshot.Cases.Join(current.Items, old => old.Id, row => row.CaseId,
             (old, row) => (old, row)).ToArray();
@@ -92,7 +101,8 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
                 return $"case {pair.row.CaseId:D}; {selectedValue}; v{pair.row.AggregateVersion}" +
                     (pair.old.Version != pair.row.AggregateVersion ? " (changed since retrieval)" : "");
             }));
-        return new(EllaiToolNames.Topic, true, null, scopedEvidence, text, rows.Length, false);
+        return new EllaiToolResult(EllaiToolNames.Topic, true, null, scopedEvidence, text, rows.Length, false)
+            { HistoryValidUntilUtc = snapshot.ExpiresAtUtc };
     }
 
     public static string SourceVersion(string snapshot) => Convert.ToHexString(

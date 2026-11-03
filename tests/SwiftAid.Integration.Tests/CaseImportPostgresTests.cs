@@ -3,23 +3,719 @@ using System.Text;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using OpenIddict.EntityFrameworkCore;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases.Registration;
+using SwiftAid.Application.Cases;
+using SwiftAid.Application.Ellai;
 using SwiftAid.Application.Intake;
 using SwiftAid.Application.Intake.Imports;
 using SwiftAid.Contracts.Intake;
+using SwiftAid.Contracts.Cases;
+using SwiftAid.Contracts.Ellai;
 using SwiftAid.Domain.Intake;
 using SwiftAid.Infrastructure.Authorization;
 using SwiftAid.Infrastructure.Persistence;
 using SwiftAid.Infrastructure.Persistence.IntakeImports;
+using SwiftAid.Infrastructure.Persistence.Ellai;
 using SwiftAid.Infrastructure.Persistence.Protection;
 using SwiftAid.Infrastructure.Persistence.Registration;
+using SwiftAid.Infrastructure.Persistence.Repositories.Cases;
+using SwiftAid.Infrastructure.Persistence.Transactions;
+using SwiftAid.Infrastructure.Memory;
+using SwiftAid.Intelligence.Meta;
+using SwiftAid.Gateway.Ellai;
+using System.Runtime.CompilerServices;
 
 namespace SwiftAid.Integration.Tests;
 
 [Collection(IntakePostgresCollection.Name)]
 public sealed class CaseImportPostgresTests
 {
+    [IntakePostgresFact]
+    public Task ConcurrentFrameworkWorkersKeepDifferentActorsDurableSessionHistoryIsolated() => RunConcurrentFrameworkWorkersAsync(false);
+
+    [LiveImportHistoryFact]
+    public Task LiveMuseConcurrentFrameworkWorkersKeepDifferentActorsDurableSessionHistoryIsolated() => RunConcurrentFrameworkWorkersAsync(true);
+
+    private static async Task RunConcurrentFrameworkWorkersAsync(bool liveModel)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var ids = new[] { "parallel-a-" + Guid.NewGuid().ToString("N"), "parallel-b-" + Guid.NewGuid().ToString("N") };
+        var markers = new[] { "history-a-" + Guid.NewGuid().ToString("N"), "history-b-" + Guid.NewGuid().ToString("N") };
+        var actors = new[] { Actor, CaseRegistrationBackendTests.CreateOfficer("parallel-owner-" + Guid.NewGuid().ToString("N")) };
+        var sessions = new PostgresEllaiSessionStore(fixture.Db);
+        for (var i = 0; i < ids.Length; i++)
+        {
+            var session = new EllaiSessionRecord(ids[i], EllaiMode.Ask, "Active", 1, 1, 1, 1, 0, 12,
+                actors[i].ActorId, "access-epoch-7", null, null, DateTimeOffset.UtcNow);
+            await sessions.CreateAsync(session, default);
+            fixture.Db.Set<EllaiUtteranceEntity>().Add(new EllaiUtteranceEntity
+            {
+                SessionId = ids[i], ClientUtteranceId = "prior", Sequence = 1,
+                AcceptedAtUtc = DateTimeOffset.UtcNow, CompletedAtUtc = DateTimeOffset.UtcNow,
+                Outcome = "Completed", UserText = markers[i], AssistantText = "Synthetic previous answer.",
+                ToolTraceJson = EllaiToolTrace.SerializeFlattened([], false, [])
+            });
+            await fixture.Db.SaveChangesAsync();
+            var work = new EllaiUtteranceWork(ids[i], session.ScopeEpoch, "Synthetic follow-up", "public.product-help", null,
+                EllaiMode.Ask, 1, "cycle-" + i, actors[i], true, "consent/0", EllaiProcessingClassification.UserProvidedNonSensitive,
+                EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string>(), EllaiConsentPurposes.PublicProductHelp, "current");
+            Assert.NotNull(await sessions.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 }, 1,
+                "current", default, EllaiUtteranceWorkEnvelope.Serialize(work, "current")));
+        }
+        var options = liveModel ? EllaiOptions.Bind(Environment.GetEnvironmentVariable) :
+            new EllaiOptions { Enabled = true, ApiKey = "synthetic", ApiUrl = "https://fixture.invalid", ReasoningModel = "fixture" };
+        using var model = new ConcurrentHistoryClient(liveModel ? EllaiMuseChatClientFactory.Create(options) : null);
+        var services = new ServiceCollection();
+        var connection = fixture.Db.Database.GetConnectionString();
+        services.AddScoped(_ => new SwiftAidDbContext(new DbContextOptionsBuilder<SwiftAidDbContext>().UseNpgsql(connection).UseOpenIddict().Options));
+        services.AddScoped<PostgresEllaiSessionStore>();
+        services.AddScoped<IEllaiSessionStore>(sp => sp.GetRequiredService<PostgresEllaiSessionStore>());
+        services.AddScoped<IEllaiUtteranceOutboxStore>(sp => sp.GetRequiredService<PostgresEllaiSessionStore>());
+        services.AddScoped<IEllaiUsageStore, PostgresEllaiUsageStore>();
+        var consent = new EllaiConsentService();
+        services.AddSingleton(consent).AddSingleton<EllaiUsageLedger>().AddSingleton<EllaiSessionResponseStore>();
+        services.AddScoped(_ => new EllaiPromptBuilder("Synthetic policy", "fixture"));
+        services.AddScoped(_ => new EllaiToolBroker(new EllaiPolicyService(), consent));
+        services.AddEllaiReasoningExecutor(options, "framework");
+        services.AddKeyedSingleton<IChatClient>(EllaiReasoningRegistration.FrameworkClientKey, model);
+        await using var provider = services.BuildServiceProvider();
+        using var firstWorker = new EllaiUtteranceWorker(provider, NullLogger<EllaiUtteranceWorker>.Instance);
+        using var secondWorker = new EllaiUtteranceWorker(provider, NullLogger<EllaiUtteranceWorker>.Instance);
+        try
+        {
+            await firstWorker.StartAsync(default);
+            await secondWorker.StartAsync(default);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(liveModel ? 120 : 20));
+            await model.BothStarted.Task.WaitAsync(timeout.Token);
+            while (true)
+            {
+                await using var db = new SwiftAidDbContext(new DbContextOptionsBuilder<SwiftAidDbContext>().UseNpgsql(connection).UseOpenIddict().Options);
+                if (await db.Set<EllaiUtteranceEntity>().CountAsync(turn => ids.Contains(turn.SessionId) && turn.ClientUtteranceId == "current" && turn.Outcome == "Completed", timeout.Token) == 2) break;
+                await Task.Delay(50, timeout.Token);
+            }
+            var histories = model.Histories.ToArray();
+            Assert.True(histories.Length >= 2);
+            Assert.Contains(histories, history => history.Contains(markers[0]));
+            Assert.Contains(histories, history => history.Contains(markers[1]));
+            Assert.All(histories, history => Assert.True(history.Contains(markers[0]) ^ history.Contains(markers[1])));
+            for (var i = 0; i < ids.Length; i++)
+            {
+                Assert.Equal(2, (await sessions.ReadConversationAsync(ids[i], actors[i].ActorId, timeout.Token)).Count);
+                Assert.Empty(await sessions.ReadConversationAsync(ids[i], actors[1 - i].ActorId, timeout.Token));
+            }
+        }
+        finally
+        {
+            await firstWorker.StopAsync(default);
+            await secondWorker.StopAsync(default);
+            await fixture.Db.Set<EllaiUsageSampleEntity>().Where(item => ids.Contains(item.SessionId)).ExecuteDeleteAsync();
+            await fixture.Db.Set<EllaiSessionEntity>().Where(item => ids.Contains(item.SessionId)).ExecuteDeleteAsync();
+        }
+    }
+
+    private sealed class ConcurrentHistoryClient(IChatClient? inner = null) : IChatClient
+    {
+        public System.Collections.Concurrent.ConcurrentBag<string[]> Histories { get; } = [];
+        public TaskCompletionSource BothStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            var snapshot = messages.ToArray();
+            Histories.Add(snapshot.Select(message => message.Text).ToArray());
+            return inner?.GetResponseAsync(snapshot, options, cancellationToken) ?? throw new NotSupportedException();
+        }
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var snapshot = messages.ToArray();
+            Histories.Add(snapshot.Select(message => message.Text).ToArray());
+            if (Histories.Count == 2) BothStarted.TrySetResult();
+            await BothStarted.Task.WaitAsync(cancellationToken);
+            if (inner is not null)
+            {
+                await foreach (var update in inner.GetStreamingResponseAsync(snapshot, options, cancellationToken).WithCancellation(cancellationToken))
+                    yield return update;
+                yield break;
+            }
+            yield return new ChatResponseUpdate(ChatRole.Assistant, """{"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Synthetic answer.","spokenText":"Synthetic answer.","claims":[],"questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}""");
+        }
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() => inner?.Dispose();
+    }
+
+    private sealed class LiveImportHistoryFactAttribute : FactAttribute
+    {
+        public LiveImportHistoryFactAttribute()
+        {
+            if (Environment.GetEnvironmentVariable("ELLAI_LIVE") != "1" ||
+                Environment.GetEnvironmentVariable("SWIFTAID_RUN_INTAKE_POSTGRES_FIXTURES") != "1")
+                Skip = "Requires configured live Muse and a dedicated disposable PostgreSQL fixture.";
+        }
+    }
+
+    private sealed class QdrantDownFactAttribute : FactAttribute
+    {
+        public QdrantDownFactAttribute()
+        {
+            if (Environment.GetEnvironmentVariable("SWIFTAID_RUN_INTAKE_POSTGRES_FIXTURES") != "1" ||
+                string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("QDRANT_TEST_DOWN_ENDPOINT")))
+                Skip = "Requires disposable PostgreSQL and a stopped loopback Qdrant endpoint.";
+        }
+    }
+
+    [QdrantDownFact]
+    public Task FrameworkWorkerFallsBackToPostgresWhenQdrantIsStopped() => RunImportWorkerHistoryAsync(false, qdrantOutage: true);
+
+    private sealed class LiveQdrantDownFactAttribute : FactAttribute
+    {
+        public LiveQdrantDownFactAttribute()
+        {
+            if (Environment.GetEnvironmentVariable("ELLAI_LIVE") != "1" ||
+                Environment.GetEnvironmentVariable("SWIFTAID_RUN_INTAKE_POSTGRES_FIXTURES") != "1" ||
+                string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("QDRANT_TEST_DOWN_ENDPOINT")))
+                Skip = "Requires live Muse, disposable PostgreSQL and a stopped loopback Qdrant endpoint.";
+        }
+    }
+
+    [LiveQdrantDownFact]
+    public Task LiveMuseFrameworkWorkerFallsBackToPostgresWhenQdrantIsStopped() => RunImportWorkerHistoryAsync(true, qdrantOutage: true);
+
+    [IntakePostgresFact]
+    public Task FrameworkWorkerRechecksDurableImportHistoryAfterGrantExpiry() => RunImportWorkerHistoryAsync(false);
+
+    [IntakePostgresFact]
+    public Task FrameworkWorkerRechecksImportHistoryBeyondThePostgresReadWindow() => RunImportWorkerHistoryAsync(false, longHistory: true);
+
+    [IntakePostgresFact]
+    public Task FrameworkWorkerStopsWhenGrantExpiresAfterHistorySelection() => RunImportWorkerHistoryAsync(false, raceGrant: true);
+
+    [IntakePostgresFact]
+    public Task FrameworkWorkerWithholdsAnswerWhenGrantExpiresDuringModelCall() => RunImportWorkerHistoryAsync(false, inFlightGrant: true);
+
+    [IntakePostgresFact]
+    public Task FrameworkWorkerDoesNotPublishAfterSessionCancellationDuringModelCall() => RunImportWorkerHistoryAsync(false, cancelSession: true);
+
+    [IntakePostgresFact]
+    public Task FrameworkWorkerRechecksRecentImportListAfterItChanges() => RunImportWorkerHistoryAsync(false, listHistory: true);
+
+    [IntakePostgresFact]
+    public Task FrameworkWorkerRechecksCaseListAfterItChanges() => RunImportWorkerHistoryAsync(false, caseHistory: true);
+
+    [LiveImportHistoryFact]
+    public Task LiveMuseWorkerRechecksDurableImportHistoryAfterGrantExpiry() => RunImportWorkerHistoryAsync(true);
+
+    [LiveImportHistoryFact]
+    public Task LiveMuseWorkerRechecksRecentImportListAfterItChanges() => RunImportWorkerHistoryAsync(true, listHistory: true);
+
+    [LiveImportHistoryFact]
+    public Task LiveMuseWorkerRechecksCaseListAfterItChanges() => RunImportWorkerHistoryAsync(true, caseHistory: true);
+
+    private static async Task RunImportWorkerHistoryAsync(bool liveModel, bool longHistory = false,
+        bool raceGrant = false, bool inFlightGrant = false, bool listHistory = false, bool caseHistory = false, bool cancelSession = false, bool qdrantOutage = false)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var scope = listHistory || caseHistory || qdrantOutage ? await fixture.CreateIsolatedWorkspaceAsync() : Context;
+        var listScope = listHistory ? new EllaiImportListScope(scope.WorkspaceId,
+            Assert.Single(await fixture.Store.GetWorkspacesAsync(Actor, default), item => item.WorkspaceId == scope.WorkspaceId).OrganizationId, "ZW") : null;
+        var importId = Guid.NewGuid();
+        var completed = await fixture.Service.ProcessAsync(Actor, importId, scope, 1, true,
+            new StringReader(Csv(Guid.NewGuid())), default);
+        Assert.Equal("Completed", completed.Summary!.State);
+        var observedId = caseHistory || qdrantOutage ? Assert.Single(completed.Rows).CaseId!.Value : importId;
+        var observedTool = qdrantOutage ? EllaiToolNames.Topic : caseHistory ? EllaiToolNames.State : listHistory ? EllaiToolNames.Imports : EllaiToolNames.ImportStatus;
+        var sessions = new PostgresEllaiSessionStore(fixture.Db);
+        var session = new EllaiSessionRecord("import-worker-" + Guid.NewGuid().ToString("N"), EllaiMode.Ask, "Active",
+            1, 1, 1, 1, 0, 12, Actor.ActorId, "access-epoch-7", null, null, DateTimeOffset.UtcNow);
+        await sessions.CreateAsync(session, default);
+        using var qdrantHandler = new CountQdrantScrolls();
+        using var qdrantHttp = new HttpClient(qdrantHandler) { Timeout = TimeSpan.FromSeconds(2) };
+        EllaiMemoryIndex? downIndex = null;
+        if (qdrantOutage)
+        {
+            var endpoint = new Uri(Environment.GetEnvironmentVariable("QDRANT_TEST_DOWN_ENDPOINT")!);
+            Assert.True(endpoint.IsLoopback);
+            var outage = await Record.ExceptionAsync(() => qdrantHttp.GetAsync(endpoint));
+            Assert.True(outage is HttpRequestException or TaskCanceledException, "The disposable Qdrant endpoint must be unavailable.");
+            downIndex = new EllaiMemoryIndex(qdrantHttp, endpoint.ToString(), "", "fixture-outage");
+            var unit = new PostgresCaseCommandUnitOfWork(fixture.Db);
+            var queue = new CaseQueueQuery(new PostgresCaseQueueStore(fixture.Db),
+                new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(fixture.Db, unit), new PostgresCaseAccessDescriptorStore(fixture.Db, unit)), unit);
+            var context = new EllaiToolContext(session.SessionId, session.ScopeEpoch, "cases", null, 4, true,
+                Actor: Actor, AllowedTools: new HashSet<string> { EllaiToolNames.Topic });
+            var row = Assert.Single((await queue.GetMineAsync(Actor, 20,
+                new CaseQueueFilter(CaseIds: [observedId]), default)).Items);
+            Assert.Equal(observedId, row.CaseId);
+            await new EllaiCaseResultMemory(new EllaiTopicService(new PostgresEllaiTopicStore(fixture.Db)), queue)
+                .RememberAsync(context, [row], default);
+        }
+        var consent = new EllaiConsentService();
+        var modelOptions = liveModel ? EllaiOptions.Bind(Environment.GetEnvironmentVariable) : new EllaiOptions
+        {
+            Enabled = true, ApiKey = "synthetic", ApiUrl = "https://fixture.invalid", ReasoningModel = "fixture"
+        };
+        var modelGate = new ImportReadGate();
+        using var model = new RecordingImportModel(liveModel ? EllaiMuseChatClientFactory.Create(modelOptions) : new ImportHistoryModel(observedId, listScope, caseHistory, qdrantOutage), modelGate);
+        var grantGate = new ImportReadGate();
+        IReadOnlyList<string> ModelMessages() => model.Messages;
+        var services = new ServiceCollection();
+        var connection = fixture.Db.Database.GetConnectionString();
+        services.AddScoped(_ => new SwiftAidDbContext(new DbContextOptionsBuilder<SwiftAidDbContext>()
+            .UseNpgsql(connection).UseOpenIddict().Options));
+        services.AddScoped<PostgresEllaiSessionStore>();
+        services.AddScoped<IEllaiSessionStore>(sp => sp.GetRequiredService<PostgresEllaiSessionStore>());
+        services.AddScoped<IEllaiUtteranceOutboxStore>(sp => sp.GetRequiredService<PostgresEllaiSessionStore>());
+        services.AddScoped<IEllaiUsageStore, PostgresEllaiUsageStore>();
+        services.AddScoped(sp => new PostgresCaseImportStore(
+            sp.GetRequiredService<SwiftAidDbContext>(), fixture.Protection, TimeProvider.System));
+        services.AddScoped<ICaseImportStore>(sp => raceGrant
+            ? new GatedImportStore(sp.GetRequiredService<PostgresCaseImportStore>(), grantGate)
+            : sp.GetRequiredService<PostgresCaseImportStore>());
+        services.AddScoped<ICaseImportWorkspaceReader>(sp => sp.GetRequiredService<PostgresCaseImportStore>());
+        services.AddScoped<ICaseQueueQuery>(sp =>
+        {
+            var db = sp.GetRequiredService<SwiftAidDbContext>();
+            var unit = new PostgresCaseCommandUnitOfWork(db);
+            return new CaseQueueQuery(new PostgresCaseQueueStore(db),
+                new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(db, unit), new PostgresCaseAccessDescriptorStore(db, unit)), unit);
+        });
+        services.AddSingleton(consent).AddSingleton<EllaiUsageLedger>().AddSingleton<EllaiSessionResponseStore>();
+        services.AddScoped(_ => new EllaiPromptBuilder("Synthetic policy", "fixture"));
+        services.AddScoped(sp => new EllaiToolBroker(new EllaiPolicyService(), consent,
+            queue: sp.GetRequiredService<ICaseQueueQuery>(), imports: sp.GetRequiredService<ICaseImportStore>(), importWorkspaces: sp.GetRequiredService<ICaseImportWorkspaceReader>(),
+            topics: qdrantOutage ? new EllaiTopicService(new PostgresEllaiTopicStore(sp.GetRequiredService<SwiftAidDbContext>())) : null,
+            referenceIndex: downIndex));
+        services.AddEllaiReasoningExecutor(modelOptions, "framework");
+        services.AddKeyedSingleton<IChatClient>(EllaiReasoningRegistration.FrameworkClientKey, model);
+        await using var provider = services.BuildServiceProvider();
+        using var worker = new EllaiUtteranceWorker(provider, NullLogger<EllaiUtteranceWorker>.Instance);
+        try
+        {
+            EllaiUtteranceWork Work(string id) => new(session.SessionId, session.ScopeEpoch, qdrantOutage && id == "outage-revoked"
+                ? "Use ellai_topic with ref case-results and report only currently permitted cases."
+                : id == "prior"
+                ? qdrantOutage ? $"Use ellai_topic with ref case-results to recall {observedId:D}." : caseHistory ? $"Use ellai_state with projection queue and limit 20. List cases including {observedId:D}." : listHistory ? $"Use ellai_imports with workspace_id {listScope!.WorkspaceId}, organization_id {listScope.OrganizationId}, country {listScope.CountryCode}. List the imports and include identifier {importId:D} in your answer." : $"Use ellai_import_status with import_id {importId:D} to check this import. Include its identifier and status in your answer."
+                : "What did we discuss? Reply briefly.",
+                "public.product-help", null, EllaiMode.Ask, 1, "cycle-" + id, Actor, true, "consent/0",
+                EllaiProcessingClassification.UserProvidedNonSensitive, EllaiProcessingClassification.UserProvidedNonSensitive,
+                new HashSet<string> { observedTool },
+                EllaiConsentPurposes.PublicProductHelp, id);
+            await worker.StartAsync(default);
+            async Task<EllaiConversationTurn> RunTurn(string id, string expectedOutcome = "Completed")
+            {
+                model.Reset();
+                var current = (await sessions.GetAsync(session.SessionId, default))!;
+                var work = Work(id);
+                Assert.NotNull(await sessions.TryAcceptUtteranceAsync(current with
+                    { SessionVersion = current.SessionVersion + 1, CyclesUsed = current.CyclesUsed + 1 },
+                    current.SessionVersion, id, default, EllaiUtteranceWorkEnvelope.Serialize(work, id)));
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(liveModel ? 90 : 15));
+                while (true)
+                {
+                    await Task.Delay(50, timeout.Token);
+                    var turn = (await sessions.ReadConversationAsync(session.SessionId, Actor.ActorId, timeout.Token))
+                        .Single(item => item.ClientUtteranceId == id);
+                    if (turn.CompletedAtUtc is null) continue;
+                    Assert.Equal(expectedOutcome, turn.Outcome);
+                    return turn;
+                }
+            }
+            var prior = await RunTurn("prior");
+            Assert.True(EllaiToolTrace.TryRead(prior.ToolTraceJson!, out var priorTrace));
+            Assert.Contains(priorTrace!.Observations, item => item.ToolName == observedTool &&
+                item.Allowed && item.Evidence.Any(reference => reference.ResourceId == observedId.ToString("D")));
+            if (listHistory) Assert.Equal(listScope, Assert.Single(priorTrace.Observations).ImportListScope);
+            if (caseHistory) Assert.Equal(new EllaiCaseListQuery(20, null, null, null), Assert.Single(priorTrace.Observations).CaseListQuery);
+            Assert.Contains(observedId.ToString("D"), prior.AssistantText!, StringComparison.OrdinalIgnoreCase);
+            if (qdrantOutage)
+            {
+                Assert.True(Assert.Single(priorTrace.Observations).CaseSnapshotExpiresAtUtc > DateTimeOffset.UtcNow);
+                Assert.True(qdrantHandler.Scrolls > 0, "The worker must attempt the unavailable Qdrant index.");
+                var previousScrolls = qdrantHandler.Scrolls;
+                await fixture.Db.AccessGrantGroups.Where(group => group.ActorId == Actor.ActorId && group.WorkspaceId == scope.WorkspaceId)
+                    .ExecuteUpdateAsync(update => update.SetProperty(group => group.ExpiresAtUtc, DateTimeOffset.UtcNow.AddMinutes(-1)));
+                var outageRevoked = await RunTurn("outage-revoked");
+                Assert.True(qdrantHandler.Scrolls > previousScrolls);
+                Assert.DoesNotContain(ModelMessages(), text => text.Contains(observedId.ToString("D"), StringComparison.OrdinalIgnoreCase));
+                Assert.DoesNotContain(observedId.ToString("D"), outageRevoked.AssistantText!, StringComparison.OrdinalIgnoreCase);
+                Assert.True(EllaiToolTrace.TryRead(outageRevoked.ToolTraceJson!, out var outageRevokedTrace));
+                Assert.DoesNotContain(outageRevokedTrace!.Observations.SelectMany(item => item.Evidence), reference => reference.ResourceId == observedId.ToString("D"));
+                return;
+            }
+            if (cancelSession)
+            {
+                modelGate.Arm();
+                var pending = RunTurn("cancelled", "Cancelled");
+                try
+                {
+                    await modelGate.ReadCompleted.Task.WaitAsync(TimeSpan.FromSeconds(15));
+                    Assert.Contains(ModelMessages(), text => text.Contains(observedId.ToString("D"), StringComparison.OrdinalIgnoreCase));
+                    var changed = await fixture.Db.Set<EllaiSessionEntity>().Where(item => item.SessionId == session.SessionId)
+                        .ExecuteUpdateAsync(update => update.SetProperty(item => item.Status, "Cancelled")
+                            .SetProperty(item => item.Version, item => item.Version + 1));
+                    Assert.Equal(1, changed);
+                }
+                finally { modelGate.Release.TrySetResult(); }
+                var cancelled = await pending;
+                Assert.Null(cancelled.AssistantText);
+                Assert.Null(cancelled.ToolTraceJson);
+                Assert.DoesNotContain(provider.GetRequiredService<EllaiSessionResponseStore>().ReadSince(session.SessionId, 0).Responses,
+                    response => response.ClientUtteranceId == "cancelled" && !response.IsFinal);
+                return;
+            }
+            if (inFlightGrant)
+            {
+                modelGate.Arm();
+                var pending = RunTurn("in-flight", "TerminalFailure");
+                try
+                {
+                    await modelGate.ReadCompleted.Task.WaitAsync(TimeSpan.FromSeconds(15));
+                    Assert.Contains(ModelMessages(), text => text.Contains(importId.ToString("D"), StringComparison.OrdinalIgnoreCase));
+                    await fixture.Db.AccessGrantGroups.Where(group => group.ActorId == Actor.ActorId && group.WorkspaceId == Context.WorkspaceId)
+                        .ExecuteUpdateAsync(update => update.SetProperty(group => group.ExpiresAtUtc, DateTimeOffset.UtcNow.AddMinutes(-1)));
+                }
+                finally { modelGate.Release.TrySetResult(); }
+                var stopped = await pending;
+                Assert.Null(stopped.AssistantText);
+                return;
+            }
+            if (raceGrant)
+            {
+                grantGate.Arm();
+                var pending = RunTurn("race", "TerminalFailure");
+                try
+                {
+                    await grantGate.ReadCompleted.Task.WaitAsync(TimeSpan.FromSeconds(15));
+                    await fixture.Db.AccessGrantGroups.Where(group => group.ActorId == Actor.ActorId && group.WorkspaceId == Context.WorkspaceId)
+                        .ExecuteUpdateAsync(update => update.SetProperty(group => group.ExpiresAtUtc, DateTimeOffset.UtcNow.AddMinutes(-1)));
+                }
+                finally { grantGate.Release.TrySetResult(); }
+                var stopped = await pending;
+                Assert.Null(stopped.AssistantText);
+                Assert.Empty(ModelMessages());
+                return;
+            }
+            var allowed = await RunTurn("allowed");
+            Assert.Contains(ModelMessages(), text => text.Contains(observedId.ToString("D"), StringComparison.OrdinalIgnoreCase));
+            Assert.True(EllaiToolTrace.TryRead(allowed.ToolTraceJson!, out var allowedTrace));
+            Assert.Equal(3, allowedTrace!.Version);
+            Assert.Contains(allowedTrace.Observations, item => item.ToolName == observedTool &&
+                item.Evidence.Any(reference => reference.ResourceId == observedId.ToString("D")));
+            if (listHistory || caseHistory)
+            {
+                var second = await fixture.Service.ProcessAsync(Actor, Guid.NewGuid(), scope, 1, true,
+                    new StringReader(Csv(Guid.NewGuid())), default);
+                Assert.Equal("Completed", second.Summary!.State);
+                await RunTurn("changed-list");
+                Assert.DoesNotContain(ModelMessages(), text => text.Contains(observedId.ToString("D"), StringComparison.OrdinalIgnoreCase));
+                Assert.Contains(ModelMessages(), text => text.Contains("could not be verified", StringComparison.Ordinal));
+                return;
+            }
+            if (longHistory)
+            {
+                // Insert synthetic completed exchanges carrying the provenance the
+                // real worker just persisted; this places its source turn outside
+                // the store's 100-row read without 100 provider calls.
+                var before = (await sessions.GetAsync(session.SessionId, default))!;
+                const int seededTurns = 101;
+                var now = DateTimeOffset.UtcNow;
+                fixture.Db.Set<EllaiUtteranceEntity>().AddRange(Enumerable.Range(1, seededTurns).Select(index => new EllaiUtteranceEntity
+                {
+                    SessionId = session.SessionId, ClientUtteranceId = $"seed-{index}",
+                    Sequence = before.SessionVersion + index, AcceptedAtUtc = now, CompletedAtUtc = now,
+                    Outcome = "Completed", UserText = $"Synthetic follow-up {index}",
+                    AssistantText = $"Synthetic import {importId:D}", ToolTraceJson = allowed.ToolTraceJson
+                }));
+                await fixture.Db.SaveChangesAsync();
+                Assert.NotNull(await sessions.TryUpdateAsync(before with { SessionVersion = before.SessionVersion + seededTurns }, before.SessionVersion, default));
+                var window = await sessions.ReadConversationAsync(session.SessionId, Actor.ActorId, default);
+                Assert.Equal(100, window.Count);
+                Assert.DoesNotContain(window, turn => turn.ClientUtteranceId == "prior");
+                await RunTurn("long-allowed");
+                Assert.Contains(ModelMessages(), text => text.Contains(importId.ToString("D"), StringComparison.OrdinalIgnoreCase));
+            }
+            await fixture.Db.AccessGrantGroups.Where(group => group.ActorId == Actor.ActorId && group.WorkspaceId == Context.WorkspaceId)
+                .ExecuteUpdateAsync(update => update.SetProperty(group => group.ExpiresAtUtc, DateTimeOffset.UtcNow.AddMinutes(-1)));
+            var revoked = await RunTurn("revoked");
+            Assert.DoesNotContain(ModelMessages(), text => text.Contains(importId.ToString("D"), StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(ModelMessages(), text => text.Contains("could not be verified", StringComparison.Ordinal));
+            Assert.True(EllaiToolTrace.TryRead(revoked.ToolTraceJson!, out var revokedTrace));
+            Assert.DoesNotContain(revokedTrace!.Observations, item => item.Evidence.Any(reference => reference.ResourceId == importId.ToString("D")));
+        }
+        finally
+        {
+            await worker.StopAsync(default);
+            await fixture.Db.Set<EllaiUsageSampleEntity>().Where(item => item.SessionId == session.SessionId).ExecuteDeleteAsync();
+            await fixture.Db.Set<EllaiSessionEntity>().Where(item => item.SessionId == session.SessionId).ExecuteDeleteAsync();
+        }
+    }
+
+    private sealed class ImportReadGate
+    {
+        private int _armed;
+        public TaskCompletionSource ReadCompleted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public void Arm() => Interlocked.Exchange(ref _armed, 1);
+        public bool Take() => Interlocked.Exchange(ref _armed, 0) == 1;
+    }
+
+    private sealed class CountQdrantScrolls() : DelegatingHandler(new HttpClientHandler())
+    {
+        private int _scrolls;
+        public int Scrolls => Volatile.Read(ref _scrolls);
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri?.AbsolutePath.EndsWith("/points/scroll", StringComparison.Ordinal) == true)
+                Interlocked.Increment(ref _scrolls);
+            return base.SendAsync(request, cancellationToken);
+        }
+    }
+
+    private sealed class GatedImportStore(ICaseImportStore inner, ImportReadGate gate) : ICaseImportStore
+    {
+        public async Task<CaseImportSummary?> GetAsync(ActorContext actor, Guid importId, CancellationToken ct)
+        {
+            var result = await inner.GetAsync(actor, importId, ct);
+            if (gate.Take())
+            {
+                gate.ReadCompleted.TrySetResult();
+                await gate.Release.Task.WaitAsync(ct);
+            }
+            return result;
+        }
+        public Task<CaseImportLease> OpenAsync(ActorContext actor, Guid importId, CaseImportContext context, long startRow, CancellationToken ct) => inner.OpenAsync(actor, importId, context, startRow, ct);
+        public Task<int> BeginRowAsync(CaseImportLease lease, long row, Guid? commandId, byte[] sourceHash, byte[] sourceBytes, CancellationToken ct) => inner.BeginRowAsync(lease, row, commandId, sourceHash, sourceBytes, ct);
+        public Task CompleteRowAsync(CaseImportLease lease, CaseImportRowOutcome result, CancellationToken ct) => inner.CompleteRowAsync(lease, result, ct);
+        public Task CloseAsync(CaseImportLease lease, string state, string? errorCode, CancellationToken ct) => inner.CloseAsync(lease, state, errorCode, ct);
+    }
+
+    private sealed class RecordingImportModel(IChatClient inner, ImportReadGate gate) : DelegatingChatClient(inner)
+    {
+        private readonly List<string> _messages = [];
+        public IReadOnlyList<string> Messages { get { lock (_messages) return _messages.ToArray(); } }
+        public void Reset() { lock (_messages) _messages.Clear(); }
+        private void Capture(IEnumerable<ChatMessage> messages)
+        {
+            lock (_messages) _messages.AddRange(messages.Select(message => message.Text));
+        }
+        public override Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            var snapshot = messages.ToArray();
+            Capture(snapshot);
+            return base.GetResponseAsync(snapshot, options, cancellationToken);
+        }
+        public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var snapshot = messages.ToArray();
+            Capture(snapshot);
+            if (gate.Take()) { gate.ReadCompleted.TrySetResult(); await gate.Release.Task.WaitAsync(cancellationToken); }
+            await foreach (var update in base.GetStreamingResponseAsync(snapshot, options, cancellationToken).WithCancellation(cancellationToken))
+                yield return update;
+        }
+    }
+
+    [IntakePostgresFact]
+    public async Task CaseListHistoryRequiresTheSameAuthorizedPostgresQueryResult()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var scope = await fixture.CreateIsolatedWorkspaceAsync();
+        var first = await fixture.Service.ProcessAsync(Actor, Guid.NewGuid(), scope, 1, true,
+            new StringReader(Csv(Guid.NewGuid())), default);
+        Assert.Equal("Completed", first.Summary!.State);
+        var unit = new PostgresCaseCommandUnitOfWork(fixture.Db);
+        var queue = new CaseQueueQuery(new PostgresCaseQueueStore(fixture.Db),
+            new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(fixture.Db, unit), new PostgresCaseAccessDescriptorStore(fixture.Db, unit)), unit);
+        var before = await queue.GetMineAsync(Actor, 20, default);
+        Assert.Equal(CaseQueueAccess.Allowed, before.Access);
+        Assert.NotEmpty(before.Items);
+        Assert.True(before.Items.Count < 20);
+        var evidence = before.Items.Select(item => new EvidenceRef("CaseQueue", item.CaseId.ToString("D"),
+            item.AggregateVersion.ToString(System.Globalization.CultureInfo.InvariantCulture), null, item.CaseId.ToString("D"))).ToArray();
+        var trace = EllaiToolTrace.SerializeFlattened([new(EllaiToolNames.State, true, "Ok", evidence, false,
+            CaseListQuery: new EllaiCaseListQuery(20, null, null, null))], false, []);
+        var turns = new[] { new EllaiConversationTurn("session", "prior", 1, "list cases", "Prior case list.", "Completed", 1, DateTimeOffset.UtcNow) { ToolTraceJson = trace },
+            new EllaiConversationTurn("session", "current", 2, "what now?", null, "Queued", 0, null) };
+        var unchanged = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor, queue, default);
+        Assert.Contains(unchanged.Messages, item => item.Content == "Prior case list.");
+        var second = await fixture.Service.ProcessAsync(Actor, Guid.NewGuid(), scope, 1, true,
+            new StringReader(Csv(Guid.NewGuid())), default);
+        Assert.Equal("Completed", second.Summary!.State);
+        var after = await queue.GetMineAsync(Actor, 20, default);
+        Assert.True(after.Items.Count > before.Items.Count);
+        var changed = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor, queue, default);
+        Assert.DoesNotContain(changed.Messages, item => item.Content == "Prior case list.");
+    }
+
+    [IntakePostgresFact]
+    public async Task RecentImportHistoryRequiresTheSameAuthorizedCompleteList()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var scope = await fixture.CreateIsolatedWorkspaceAsync();
+        var firstId = Guid.NewGuid();
+        var first = await fixture.Service.ProcessAsync(Actor, firstId, scope, 1, true,
+            new StringReader(Csv(Guid.NewGuid())), default);
+        Assert.Equal("Completed", first.Summary!.State);
+        var before = await fixture.Store.GetRecentAsync(Actor, scope.WorkspaceId, "ZW", default);
+        Assert.Single(before);
+        var evidence = new EvidenceRef("ImportJob", firstId.ToString("D"), first.Summary.UpdatedAtUtc.ToString("O"), "status", firstId.ToString("D"));
+        var destination = Assert.Single(await fixture.Store.GetWorkspacesAsync(Actor, default), item => item.WorkspaceId == scope.WorkspaceId);
+        var scopeEvidence = new EllaiImportListScope(scope.WorkspaceId, destination.OrganizationId, "ZW");
+        var trace = EllaiToolTrace.SerializeFlattened([new(EllaiToolNames.Imports, true, "Ok", [evidence], false, scopeEvidence)], false, []);
+        Assert.NotNull(trace);
+        var turns = new[]
+        {
+            new EllaiConversationTurn("session", "prior", 1, "recent imports", "One synthetic import was listed.", "Completed", 1, DateTimeOffset.UtcNow) { ToolTraceJson = trace },
+            new EllaiConversationTurn("session", "current", 2, "what about now?", null, "Queued", 0, null)
+        };
+        var unchanged = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor, null, default,
+            imports: fixture.Store, importWorkspaces: fixture.Store);
+        Assert.Contains(unchanged.Messages, message => message.Content == "One synthetic import was listed.");
+        var oldTrace = EllaiToolTrace.SerializeFlattened([new(EllaiToolNames.Imports, true, "Ok", [evidence], false)], false, []);
+        var oldTurns = new[] { turns[0] with { ToolTraceJson = oldTrace }, turns[1] };
+        var unknownScope = await EllaiAuthorizedConversationContext.BuildAsync(oldTurns, "current", Actor, null, default,
+            imports: fixture.Store, importWorkspaces: fixture.Store);
+        Assert.DoesNotContain(unknownScope.Messages, message => message.Content == "One synthetic import was listed.");
+        var otherActor = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current",
+            CaseRegistrationBackendTests.CreateOfficer("another-actor"), null, default,
+            imports: fixture.Store, importWorkspaces: fixture.Store);
+        Assert.DoesNotContain(otherActor.Messages, message => message.Content == "One synthetic import was listed.");
+        var secondId = Guid.NewGuid();
+        var second = await fixture.Service.ProcessAsync(Actor, secondId, scope, 1, true,
+            new StringReader(Csv(Guid.NewGuid())), default);
+        Assert.Equal("Completed", second.Summary!.State);
+        var after = await fixture.Store.GetRecentAsync(Actor, scope.WorkspaceId, "ZW", default);
+        Assert.Equal(2, after.Count);
+        var replay = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", Actor, null, default,
+            imports: fixture.Store, importWorkspaces: fixture.Store);
+        Assert.DoesNotContain(replay.Messages, message => message.Content == "One synthetic import was listed.");
+    }
+
+    [IntakePostgresFact]
+    public async Task FrameworkImportHistoryRequiresCurrentPostgresOwnerScopeAndVersion()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var importId = Guid.NewGuid();
+        var completed = await fixture.Service.ProcessAsync(Actor, importId, Context, 1, true,
+            new StringReader(Csv(Guid.NewGuid())), default);
+        Assert.Equal("Completed", completed.Summary!.State);
+        var version = completed.Summary.UpdatedAtUtc;
+        var reference = new EvidenceRef("ImportJob", importId.ToString("D"), version.ToString("O"), "status", importId.ToString("D"));
+        var trace = EllaiToolTrace.Serialize([new(EllaiToolNames.ImportStatus, true, "Ok", [reference], false)], false, []);
+        var turns = new[]
+        {
+            new EllaiConversationTurn("session", "prior", 1, "import question", "synthetic import answer", "Completed", 1, DateTimeOffset.UtcNow)
+                { ToolTraceJson = trace },
+            new EllaiConversationTurn("session", "current", 2, "follow up", null, "Queued", 0, null)
+        };
+        async Task<bool> Replayed(ActorContext actor)
+        {
+            var history = await EllaiAuthorizedConversationContext.BuildAsync(turns, "current", actor, null, default, imports: fixture.Store);
+            return history.Messages.Any(message => message.Content == "synthetic import answer");
+        }
+
+        Assert.True(await Replayed(Actor));
+        Assert.False(await Replayed(CaseRegistrationBackendTests.CreateOfficer("another-actor")));
+
+        var sessions = new PostgresEllaiSessionStore(fixture.Db);
+        var session = new EllaiSessionRecord("import-history-" + Guid.NewGuid().ToString("N"), EllaiMode.Ask, "Active", 1, 1, 1, 1,
+            0, 12, Actor.ActorId, "access-epoch-7", null, null, DateTimeOffset.UtcNow);
+        await sessions.CreateAsync(session, default);
+        try
+        {
+            EllaiUtteranceWork Work(string id, string question) => new(session.SessionId, session.ScopeEpoch, question,
+                "public.product-help", null, EllaiMode.Ask, 1, "cycle-" + id, Actor, true, "consent/0",
+                EllaiProcessingClassification.UserProvidedNonSensitive, EllaiProcessingClassification.UserProvidedNonSensitive,
+                new HashSet<string>(), EllaiConsentPurposes.PublicProductHelp, id);
+            var prior = Work("prior", "import question");
+            var afterPrior = session with { SessionVersion = 2, CyclesUsed = 1 };
+            Assert.NotNull(await sessions.TryAcceptUtteranceAsync(afterPrior, 1, "prior", default,
+                EllaiUtteranceWorkEnvelope.Serialize(prior, "prior")));
+            var claim = (await sessions.ClaimNextAsync(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(1), default))!;
+            Assert.NotNull(await sessions.CompleteAsync(session.SessionId, "prior", claim.AttemptCount, DateTimeOffset.UtcNow,
+                default, EllaiUtteranceResolution.Completed("synthetic import answer", 1) with { ToolTraceJson = trace }));
+            var savedPrior = Assert.Single(await sessions.ReadConversationAsync(session.SessionId, Actor.ActorId, default));
+            Assert.True(EllaiToolTrace.TryRead(savedPrior.ToolTraceJson!, out var savedTrace));
+            Assert.Contains(savedTrace!.Observations, item => item.Evidence.Any(referenceItem => referenceItem.ResourceId == importId.ToString("D")));
+            var current = Work("current", "follow up");
+            Assert.NotNull(await sessions.TryAcceptUtteranceAsync(afterPrior with { SessionVersion = 3, CyclesUsed = 2 }, 2,
+                "current", default, EllaiUtteranceWorkEnvelope.Serialize(current, "current")));
+            var options = new DbContextOptionsBuilder<SwiftAidDbContext>()
+                .UseNpgsql(fixture.Db.Database.GetConnectionString()).UseOpenIddict().Options;
+            await using var reconnected = new SwiftAidDbContext(options);
+            var restoredSessions = new PostgresEllaiSessionStore(reconnected);
+            var restoredImports = new PostgresCaseImportStore(reconnected, fixture.Protection, TimeProvider.System);
+            using var model = new ImportHistoryModel();
+            var consent = new EllaiConsentService();
+            var executor = new EllaiFrameworkExecutor(model, new EllaiPromptBuilder("Synthetic policy", "fixture"),
+                new EllaiToolBroker(new EllaiPolicyService(), consent), new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
+            var services = new EllaiUtteranceServices(executor, null, null, consent, Sessions: restoredSessions,
+                Outbox: restoredSessions, Imports: restoredImports);
+            var before = await EllaiUtteranceRunner.RunOneAsync(current, services, 200, default);
+            Assert.True(before.Completed);
+            Assert.Contains("synthetic import answer", model.Messages);
+
+            await fixture.Db.Set<CaseImportEntity>().Where(row => row.ImportId == importId)
+                .ExecuteUpdateAsync(update => update.SetProperty(row => row.UpdatedAtUtc, version.AddMinutes(1)));
+            Assert.False(await Replayed(Actor));
+            await fixture.Db.Set<CaseImportEntity>().Where(row => row.ImportId == importId)
+                .ExecuteUpdateAsync(update => update.SetProperty(row => row.UpdatedAtUtc, version));
+            await fixture.Db.AccessGrantGroups.Where(group => group.ActorId == Actor.ActorId && group.WorkspaceId == Context.WorkspaceId)
+                .ExecuteUpdateAsync(update => update.SetProperty(group => group.ExpiresAtUtc, DateTimeOffset.UtcNow.AddMinutes(-1)));
+            Assert.False(await Replayed(Actor));
+            var after = await EllaiUtteranceRunner.RunOneAsync(current, services, 200, default);
+            Assert.True(after.Completed);
+            Assert.DoesNotContain("synthetic import answer", model.Messages);
+            Assert.Contains(model.Messages, text => text.Contains("could not be verified", StringComparison.Ordinal));
+        }
+        finally
+        {
+            await fixture.Db.Set<EllaiSessionEntity>().Where(item => item.SessionId == session.SessionId).ExecuteDeleteAsync();
+        }
+    }
+
+    private sealed class ImportHistoryModel(Guid? importId = null, EllaiImportListScope? listScope = null, bool caseHistory = false, bool qdrantOutage = false) : IChatClient
+    {
+        public IReadOnlyList<string> Messages { get; private set; } = [];
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            Messages = messages.Select(message => message.Text).ToArray();
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                """{"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Synthetic reply.","spokenText":"Synthetic reply.","claims":[],"questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}""")));
+        }
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            cancellationToken.ThrowIfCancellationRequested();
+            var snapshot = messages.ToArray();
+            Messages = snapshot.Select(message => message.Text).ToArray();
+            var toolName = qdrantOutage ? EllaiToolNames.Topic : caseHistory ? EllaiToolNames.State : listScope is null ? EllaiToolNames.ImportStatus : EllaiToolNames.Imports;
+            if (importId is not null && !snapshot.SelectMany(message => message.Contents).OfType<FunctionResultContent>().Any() &&
+                snapshot.LastOrDefault(message => message.Role == ChatRole.User)?.Text.Contains(toolName, StringComparison.Ordinal) == true)
+            {
+                var arguments = qdrantOutage ? new Dictionary<string, object?> { ["ref"] = "case-results" } : caseHistory ? new Dictionary<string, object?> { ["projection"] = "queue", ["limit"] = "20" } : listScope is null ? new Dictionary<string, object?> { ["import_id"] = importId.Value.ToString("D") } :
+                    new Dictionary<string, object?> { ["workspace_id"] = listScope.WorkspaceId, ["organization_id"] = listScope.OrganizationId, ["country"] = listScope.CountryCode };
+                yield return new ChatResponseUpdate(ChatRole.Assistant,
+                    [new FunctionCallContent("import-call", toolName, arguments)]);
+                yield break;
+            }
+            var results = snapshot.SelectMany(message => message.Contents).OfType<FunctionResultContent>().ToArray();
+            var containsCase = importId is not null && results.Any(result => result.Result?.ToString()?.Contains(importId.Value.ToString("D"), StringComparison.OrdinalIgnoreCase) == true);
+            var response = importId is not null && results.Length > 0 && (!qdrantOutage || containsCase)
+                ? "Synthetic import " + importId.Value.ToString("D") : "Synthetic reply.";
+            yield return new ChatResponseUpdate(ChatRole.Assistant,
+                """{"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Synthetic reply.","spokenText":"Synthetic reply.","claims":[],"questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}"""
+                    .Replace("Synthetic reply.", response, StringComparison.Ordinal));
+        }
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
     [IntakePostgresFact]
     public async Task Imported_case_projection_matches_initial_journal_and_legacy_zero_is_repaired()
     {

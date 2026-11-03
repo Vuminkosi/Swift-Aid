@@ -6,8 +6,30 @@ namespace SwiftAid.Intelligence.Meta;
 /// <summary>Connects the application utterance boundary to one framework agent run.</summary>
 public sealed class EllaiFrameworkExecutor(
     IChatClient client, EllaiPromptBuilder prompts, EllaiToolBroker broker,
-    EllaiUsageLedger ledger, IEllaiUsageStore usageStore, TimeSpan? toolTimeout = null) : IEllaiReasoningExecutor
+    EllaiUsageLedger ledger, IEllaiUsageStore usageStore, TimeSpan? toolTimeout = null,
+    IEllaiFrameworkAgentFactory? agentFactory = null) : IEllaiReasoningExecutor, IEllaiHistoryAuthorizationRequired
 {
+    private static readonly System.Text.Json.JsonSerializerOptions CompactTraceJson = new()
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+    };
+
+    private static EllaiObservedToolResult? PackCaseObservation(EllaiObservedToolResult previous, EllaiObservedToolResult next)
+    {
+        if (previous.ToolName is not (EllaiToolNames.Topic or EllaiToolNames.Evidence) ||
+            !previous.Allowed || !next.Allowed || previous.Truncated || next.Truncated ||
+            previous.CaseSnapshotExpiresAtUtc is null || next.CaseSnapshotExpiresAtUtc is null ||
+            previous.Evidence.Count == 0 || next.Evidence.Count == 0 ||
+            previous.Evidence.Count + next.Evidence.Count > 20 ||
+            previous.Evidence.Concat(next.Evidence).Any(item => item.SourceKind != "CaseQueue"))
+            return null;
+
+        var previousMetadata = System.Text.Json.JsonSerializer.Serialize(previous with { Evidence = [] }, CompactTraceJson);
+        var nextMetadata = System.Text.Json.JsonSerializer.Serialize(next with { Evidence = [] }, CompactTraceJson);
+        return string.Equals(previousMetadata, nextMetadata, StringComparison.Ordinal)
+            ? previous with { Evidence = previous.Evidence.Concat(next.Evidence).ToArray() }
+            : null;
+    }
     private int _active;
     private readonly TimeSpan _toolTimeout = toolTimeout is null ? TimeSpan.FromSeconds(30)
         : toolTimeout > TimeSpan.Zero && toolTimeout <= TimeSpan.FromMinutes(5)
@@ -30,6 +52,8 @@ public sealed class EllaiFrameworkExecutor(
             var calls = 0;
             var accepted = false;
             var observations = new List<EllaiObservedToolResult>();
+            var observationKeys = new HashSet<string>(StringComparer.Ordinal);
+            var observationBytes = 0;
             var observationTraceComplete = true;
             void Trace(EllaiActivityKind kind, string detail = "", string? toolName = null)
             {
@@ -56,29 +80,52 @@ public sealed class EllaiFrameworkExecutor(
                     Trace(EllaiActivityKind.ToolStarted, "read", tool.ToolName);
                     calls++;
                 }
+                // This deadline is cooperative: broker/dependency code must observe the token.
+                // A noncooperative operation can continue running and keep this await pending.
                 using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
                 deadline.CancelAfter(_toolTimeout);
                 var invocation = (invokeToolAsync ?? broker.InvokeAsync)(context, tool, deadline.Token);
-                using var pending = CancellationTokenSource.CreateLinkedTokenSource(token);
+                using var pending = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
                 try
                 {
                     for (var update = 0; update < 2 && !invocation.IsCompleted; update++)
                     {
                         var delay = Task.Delay(TimeSpan.FromSeconds(update == 0 ? 8 : 20), pending.Token);
                         if (await Task.WhenAny(invocation, delay).ConfigureAwait(false) == invocation
-                            || invocation.IsCompleted || token.IsCancellationRequested) break;
+                            || invocation.IsCompleted || deadline.IsCancellationRequested) break;
                         if (!revalidation) Trace(EllaiActivityKind.ToolPending, "read", tool.ToolName);
                     }
                     var result = await invocation.ConfigureAwait(false);
+                    token.ThrowIfCancellationRequested();
                     if (deadline.IsCancellationRequested && !token.IsCancellationRequested)
                         return new(tool.ToolName, false, "Tool execution timed out.", [], string.Empty, 0, false, EllaiToolReasonCodes.Unavailable);
                     if (!revalidation)
                     {
-                        if (observations.Count >= 256 || result.Evidence.Count > 20)
+                        if (result.Evidence.Count > 20)
                             observationTraceComplete = false;
-                        else
-                            observations.Add(new(tool.ToolName, result.Allowed, result.ReasonCode,
-                                result.Evidence.ToArray(), result.Truncated));
+                        else if (observationTraceComplete)
+                        {
+                            var observation = EllaiObservedToolResult.From(tool, result);
+                            // Reserve space for the enclosing trace; full serialization
+                            // performs the final byte check including inherited history.
+                            var key = System.Text.Json.JsonSerializer.Serialize(observation, CompactTraceJson);
+                            if (!observationKeys.Contains(key))
+                            {
+                                var previous = observations.Count == 0 ? null : observations[^1];
+                                var packed = previous is null ? null : PackCaseObservation(previous, observation);
+                                var bytes = packed is null ? System.Text.Encoding.UTF8.GetByteCount(key) + 1
+                                    : System.Text.Encoding.UTF8.GetByteCount(System.Text.Json.JsonSerializer.Serialize(packed, CompactTraceJson))
+                                        - System.Text.Encoding.UTF8.GetByteCount(System.Text.Json.JsonSerializer.Serialize(previous, CompactTraceJson));
+                                if (bytes > EllaiToolTrace.MaximumBytes - 512 - observationBytes) observationTraceComplete = false;
+                                else
+                                {
+                                    observationKeys.Add(key);
+                                    if (packed is null) observations.Add(observation);
+                                    else observations[^1] = packed;
+                                    observationBytes += bytes;
+                                }
+                            }
+                        }
                     }
                     if (!revalidation && result.Allowed) Trace(EllaiActivityKind.ToolObservationAccepted);
                     return result;
@@ -95,20 +142,43 @@ public sealed class EllaiFrameworkExecutor(
             Task<EllaiToolResult> Revalidate(EllaiToolContext context, EllaiToolRequest tool, CancellationToken token) =>
                 InvokeCore(context, tool, token, revalidation: true);
 
-            var messages = (request.Conversation ?? []).Where(message => message.Role is "user" or "assistant")
-                .Select(message => new ChatMessage(message.Role == "user" ? ChatRole.User : ChatRole.Assistant, message.Content))
-                .ToList();
+            var messages = new List<ChatMessage>();
+            foreach (var message in request.Conversation ?? [])
+            {
+                if (message.Role == "user")
+                {
+                    messages.Add(new ChatMessage(ChatRole.User, message.Content));
+                }
+                else if (message.Role == "assistant")
+                {
+                    var contents = (message.ToolCalls ?? []).Select(call => (AIContent)new FunctionCallContent(
+                        call.CallId ?? string.Empty, call.ToolName,
+                        call.Arguments.ToDictionary(argument => argument.Key, argument => (object?)argument.Value,
+                            StringComparer.Ordinal))).ToList();
+                    if (!string.IsNullOrEmpty(message.Content)) contents.Insert(0, new TextContent(message.Content));
+                    messages.Add(new ChatMessage(ChatRole.Assistant, contents));
+                }
+                else if (message.Role == "tool" && !string.IsNullOrWhiteSpace(message.ToolCallId))
+                {
+                    messages.Add(new ChatMessage(ChatRole.Tool,
+                        [new FunctionResultContent(message.ToolCallId, message.Content)]));
+                }
+            }
             messages.Add(new ChatMessage(ChatRole.User, request.Utterance));
-            var agent = new EllaiFrameworkAgent(client);
+            var agent = new EllaiFrameworkAgent(client, agentFactory);
             SwiftAid.Contracts.Ellai.EllaiDecision? result;
             try
             {
                 result = await agent.RunAsync(request.Context,
-                    new EllaiExecutionPromptBuilder(prompts, ledger).Build(request, frameworkNative: true),
+                    new EllaiExecutionPromptBuilder(prompts, ledger).Build(request),
                     messages, request.MaxTokensPerTurn, Current, Invoke,
-                    new EllaiFrameworkUsage(request.Context.SessionId, ledger, usageStore), ct, onTextDelta, Revalidate).ConfigureAwait(false);
+                    new EllaiFrameworkUsage(request.Context.SessionId, ledger, usageStore), ct, onTextDelta, Revalidate,
+                    request.OnVerifiedStreamSegment,
+                    request.RevalidateStreamObservations is null ? null :
+                        async token => observationTraceComplete &&
+                            await request.RevalidateStreamObservations(observations.ToArray(), token).ConfigureAwait(false)).ConfigureAwait(false);
             }
-            catch (EllaiFrameworkFailureException failure) when (failure.Code != "ProviderUnavailable")
+            catch (EllaiFrameworkFailureException failure) when (failure.Code is not ("ProviderUnavailable" or "UsageUnavailable"))
             {
                 Trace(EllaiActivityKind.CycleBlocked, BlockedDetail(failure.Code));
                 return new(false, null, "The assistant could not complete this request.", agent.LastModelCallCount, calls, agent.LastRepairUsed, failure.Code);

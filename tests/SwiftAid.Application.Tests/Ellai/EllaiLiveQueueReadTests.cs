@@ -59,6 +59,123 @@ public sealed class EllaiLiveQueueReadTests
         }
     }
 
+    private sealed class LateIndex(EllaiExactMemoryReference hit) : IEllaiExactReferenceIndex
+    {
+        public async Task<EllaiExactMemoryReference?> FindExactAsync(string id, string session, string epoch, CancellationToken ct)
+        {
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, ct); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+            return hit;
+        }
+    }
+
+    private sealed class CountingTopicStore : IEllaiTopicStore
+    {
+        private readonly InMemoryEllaiTopicStore _inner = new();
+        public int DirectReads { get; private set; }
+        public Task<EllaiTopicEntry> RecordAsync(string sessionId, string title, IReadOnlyList<string> aliases,
+            string? entityRef, string? entityVersion, string? checkpointId, DateTimeOffset now, CancellationToken ct) =>
+            _inner.RecordAsync(sessionId, title, aliases, entityRef, entityVersion, checkpointId, now, ct);
+        public Task<IReadOnlyList<EllaiTopicEntry>> ListAsync(string sessionId, CancellationToken ct) => _inner.ListAsync(sessionId, ct);
+        public async Task<EllaiTopicEntry?> GetAsync(string sessionId, string topicId, CancellationToken ct)
+        {
+            DirectReads++;
+            return (await _inner.ListAsync(sessionId, ct)).SingleOrDefault(item => item.TopicId == topicId);
+        }
+    }
+
+    private sealed class LateTopicStore : IEllaiTopicStore
+    {
+        private readonly InMemoryEllaiTopicStore _inner = new();
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task<EllaiTopicEntry> RecordAsync(string sessionId, string title, IReadOnlyList<string> aliases,
+            string? entityRef, string? entityVersion, string? checkpointId, DateTimeOffset now, CancellationToken ct) =>
+            _inner.RecordAsync(sessionId, title, aliases, entityRef, entityVersion, checkpointId, now, ct);
+        public async Task<IReadOnlyList<EllaiTopicEntry>> ListAsync(string sessionId, CancellationToken ct)
+        {
+            Started.TrySetResult();
+            await Release.Task;
+            return await _inner.ListAsync(sessionId, ct);
+        }
+    }
+
+    [Fact]
+    public async Task CancelledQueueReadDoesNotWriteCaseRecallWhenDependencyReturnsLate()
+    {
+        var queue = new LateQueue();
+        var topicsStore = new InMemoryEllaiTopicStore();
+        var topics = new EllaiTopicService(topicsStore);
+        var consent = new EllaiConsentService();
+        consent.Grant(Context.SessionId, EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue, topics: topics);
+        var context = Context with { Actor = TestActor(), AllowedTools = new HashSet<string> { EllaiToolNames.State } };
+        using var cancellation = new CancellationTokenSource();
+        var run = broker.InvokeAsync(context, new EllaiToolRequest(EllaiToolNames.State,
+            new Dictionary<string, string> { ["projection"] = "queue" }), cancellation.Token);
+        await queue.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+        queue.Complete.TrySetResult(new CaseQueueResult(CaseQueueAccess.Allowed, [Row("01", 7)]));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Empty(await topicsStore.ListAsync(context.SessionId, default));
+    }
+
+    private sealed class LateQueue : ICaseQueueQuery
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Cancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<CaseQueueResult> Complete { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CancellationToken ct)
+        {
+            ct.Register(() => Cancelled.TrySetResult());
+            Started.TrySetResult();
+            return Complete.Task;
+        }
+        public Task<CaseQueueResult> GetMineAsync(ActorContext actor, int? limit, CaseQueueFilter filter, CancellationToken ct) =>
+            GetMineAsync(actor, limit, ct);
+    }
+
+    [Fact]
+    public async Task FrameworkDeadlinePreventsLateQueueResultFromWritingRecall()
+    {
+        var queue = new LateQueue();
+        var topicsStore = new InMemoryEllaiTopicStore();
+        var consent = new EllaiConsentService();
+        consent.Grant(Context.SessionId, EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue,
+            topics: new EllaiTopicService(topicsStore));
+        using var client = new QueueCallClient();
+        var executor = new EllaiFrameworkExecutor(client, new EllaiPromptBuilder("policy", "test"), broker,
+            new EllaiUsageLedger(), new InMemoryEllaiUsageStore(), TimeSpan.FromMilliseconds(100));
+        var context = Context with { Actor = TestActor(), AllowedTools = new HashSet<string> { EllaiToolNames.State } };
+        var run = executor.RunAsync(new EllaiLoopRequest(context, "show queue", new EllaiRoleOverlay("ask", "help"),
+            "queue", 100, "cycle", 1), default);
+        await queue.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await queue.Cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        queue.Complete.TrySetResult(new CaseQueueResult(CaseQueueAccess.Allowed, [Row("01", 7)]));
+        var outcome = await run.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(outcome.Completed);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, outcome.FailureCode);
+        Assert.Empty(await topicsStore.ListAsync(context.SessionId, default));
+    }
+
+    private sealed class QueueCallClient : IChatClient
+    {
+        private int _calls;
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default) => Task.FromResult(++_calls == 1
+                ? new ChatResponse(new ChatMessage(ChatRole.Assistant, [new FunctionCallContent("call", EllaiToolNames.State,
+                    new Dictionary<string, object?> { ["projection"] = "queue" })]))
+                : new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                    """{"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Done.","spokenText":"Done.","claims":[],"questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}""")));
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
     [Theory]
     [InlineData(false, false, false)]
     [InlineData(true, false, false)]
@@ -214,6 +331,10 @@ public sealed class EllaiLiveQueueReadTests
         var recalled = await GrantedBroker(queue, topics).InvokeAsync(context,
             new(EllaiToolNames.Topic, Args(("ref", "case-results"))), CancellationToken.None);
         Assert.True(recalled.Allowed);
+        Assert.True(recalled.HistoryValidUntilUtc > DateTimeOffset.UtcNow);
+        Assert.DoesNotContain("HistoryValidUntilUtc", System.Text.Json.JsonSerializer.Serialize(recalled), StringComparison.OrdinalIgnoreCase);
+        var observed = EllaiObservedToolResult.From(new EllaiToolRequest(EllaiToolNames.Topic, Args(("ref", "case-results"))), recalled);
+        Assert.Equal(recalled.HistoryValidUntilUtc, observed.CaseSnapshotExpiresAtUtc);
         Assert.Equal(1, recalled.ItemCount);
         Assert.Equal("9", Assert.Single(recalled.Evidence).Version);
         Assert.Contains("changed since retrieval", recalled.ResultSummary);
@@ -338,6 +459,58 @@ public sealed class EllaiLiveQueueReadTests
     }
 
     [Fact]
+    public async Task OverdueIndexHitFallsBackToAuthoritativeTopicLookup()
+    {
+        var store = new CountingTopicStore();
+        var topics = new EllaiTopicService(store);
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [Row("01", 7)]) };
+        var context = Context with { Actor = TestActor() };
+        await new EllaiCaseResultMemory(topics, queue).RememberAsync(context, queue.Result.Items, default);
+        var entry = Assert.Single(await store.ListAsync(context.SessionId, default));
+        var hit = new EllaiExactMemoryReference("case-results", context.SessionId, context.ScopeEpoch,
+            entry.TopicId, EllaiCaseResultMemory.SourceVersion(entry.EntityRef!), DateTimeOffset.UtcNow.AddHours(1));
+
+        var recalled = await new EllaiCaseResultMemory(topics, queue, new LateIndex(hit)).RecallAsync(context, default);
+
+        Assert.True(recalled.Allowed);
+        Assert.Equal(0, store.DirectReads);
+        Assert.Equal(Row("01", 7).CaseId.ToString("D"), Assert.Single(recalled.Evidence).ResourceId);
+    }
+
+    [Fact]
+    public async Task CancelledRecallRejectsLateQueueResult()
+    {
+        var topics = new EllaiTopicService();
+        var queue = new LateQueue();
+        var context = Context with { Actor = TestActor() };
+        var memory = new EllaiCaseResultMemory(topics, queue);
+        await memory.RememberAsync(context, [Row("01", 7)], default);
+        using var cancellation = new CancellationTokenSource();
+        var recall = memory.RecallAsync(context, cancellation.Token);
+        await queue.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+        queue.Complete.TrySetResult(new CaseQueueResult(CaseQueueAccess.Allowed, [Row("01", 7)]));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => recall.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
+    public async Task CancelledRecallRejectsLateEmptyTopicResult()
+    {
+        var store = new LateTopicStore();
+        var memory = new EllaiCaseResultMemory(new EllaiTopicService(store), new FakeQueue());
+        var context = Context with { Actor = TestActor() };
+        await memory.RememberAsync(context, [], default);
+        using var cancellation = new CancellationTokenSource();
+        var recall = memory.RecallAsync(context, cancellation.Token);
+        await store.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+        store.Release.TrySetResult();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => recall.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
     public async Task EmptySearchReplacesPreviousResultSet()
     {
         var topics = new EllaiTopicService();
@@ -450,5 +623,20 @@ public sealed class EllaiLiveQueueReadTests
             CancellationToken.None);
         Assert.True(feature.Allowed);
         Assert.Equal("Current permitted feature projection.", feature.ResultSummary);
+        var observation = EllaiObservedToolResult.From(new EllaiToolRequest(EllaiToolNames.State, Args()), feature);
+        Assert.Equal(EllaiObservedToolResult.CurrentStaticFeatureVersion, observation.StaticFeatureVersion);
+        var trace = EllaiToolTrace.SerializeFlattened([observation], false, []);
+        var history = new[]
+        {
+            new EllaiConversationTurn("session-1", "previous", 1, "question", "The feature projection was checked.", "Completed", 1, DateTimeOffset.UtcNow) { ToolTraceJson = trace },
+            new EllaiConversationTurn("session-1", "current", 2, "follow-up", null, "Queued", 0, null)
+        };
+        var replay = await EllaiAuthorizedConversationContext.BuildAsync(history, "current", TestActor(), null, CancellationToken.None);
+        Assert.Contains(replay.Messages, item => item.Content == "The feature projection was checked.");
+        var unmarkedObservation = observation with { StaticFeatureVersion = null };
+        var oldTrace = EllaiToolTrace.SerializeFlattened([unmarkedObservation], false, []);
+        var omitted = await EllaiAuthorizedConversationContext.BuildAsync([history[0] with { ToolTraceJson = oldTrace }, history[1]],
+            "current", TestActor(), null, CancellationToken.None);
+        Assert.DoesNotContain(omitted.Messages, item => item.Content == "The feature projection was checked.");
     }
 }
