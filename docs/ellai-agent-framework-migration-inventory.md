@@ -145,6 +145,19 @@ worker restart within one test process; a Gateway process restart, live Muse,
 serialized `AgentSession` restoration and real multi-instance behavior remain
 **NOT VERIFIED**.
 
+`FrameworkWorkerRecoversPostgresConversationWhileRedisIsUnavailable` passed
+alongside the normal recovery fixture (2/2, zero skips) against a disposable
+PostgreSQL database and a deliberately stopped disposable Redis container.
+The existing Redis adapter reported read failure before and after the worker
+restart; two framework worker scopes completed turns and recovered the prior
+owner-filtered conversation and PostgreSQL usage. The Redis adapter was
+registered in the fixture, but Ellai has no Redis session consumer. The model
+was synthetic and the worker restarted within one test process; this does not
+prove a deployed Gateway restart or production Redis behavior. The opt-in test
+uses `SWIFTAID_RUN_FRAMEWORK_POSTGRES_FIXTURES=1`, the dedicated PostgreSQL
+connection, and `SWIFTAID_TEST_REDIS_DOWN_CONNECTION` for the stopped loopback
+endpoint.
+
 **Disposable Qdrant framework evidence:** `FrameworkRecallUsesLiveExactIndexAndRechecksCurrentCaseAccess`
 passed 1/1 against a task-owned loopback Qdrant container using a uniquely
 named exact collection. The framework invoked the existing broker with a

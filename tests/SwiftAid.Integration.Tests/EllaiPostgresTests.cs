@@ -12,6 +12,13 @@ using Microsoft.Extensions.AI;
 using SwiftAid.Gateway.Ellai;
 using SwiftAid.Intelligence.Meta;
 using System.Runtime.CompilerServices;
+using Microsoft.Extensions.Caching.StackExchangeRedis;
+using Microsoft.Extensions.Options;
+using SwiftAid.Application.Abstractions;
+using SwiftAid.Infrastructure.Caching;
+using SwiftAid.Infrastructure.Configuration;
+using StackExchange.Redis;
+using System.Net;
 
 namespace SwiftAid.Integration.Tests;
 
@@ -36,13 +43,49 @@ public sealed class FrameworkPostgresFactAttribute : FactAttribute
     }
 }
 
+public sealed class FrameworkPostgresRedisDownFactAttribute : FactAttribute
+{
+    public FrameworkPostgresRedisDownFactAttribute()
+    {
+        if (Environment.GetEnvironmentVariable("SWIFTAID_RUN_FRAMEWORK_POSTGRES_FIXTURES") != "1" ||
+            string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SWIFTAID_TEST_REDIS_DOWN_CONNECTION")))
+            Skip = "Requires the dedicated PostgreSQL fixture and a stopped disposable Redis endpoint.";
+    }
+}
+
 /// <summary>Live PostgreSQL gate for the Ellai session store (ELL-T04).
 /// Same approved disposable loopback target as the authority fixtures.
 /// Cleans up its own rows; never touches other data.</summary>
 public sealed class EllaiPostgresTests : IAsyncLifetime
 {
     [FrameworkPostgresFact]
-    public async Task FrameworkWorkerRehydratesOwnedConversationAfterWorkerRestart()
+    public Task FrameworkWorkerRehydratesOwnedConversationAfterWorkerRestart() => VerifyFrameworkRecoveryAsync(null);
+
+    [FrameworkPostgresRedisDownFact]
+    public async Task FrameworkWorkerRecoversPostgresConversationWhileRedisIsUnavailable()
+    {
+        var connection = Environment.GetEnvironmentVariable("SWIFTAID_TEST_REDIS_DOWN_CONNECTION")!;
+        var parsed = ConfigurationOptions.Parse(connection);
+        var safeEndpoint = parsed.EndPoints.Count == 1 && (parsed.EndPoints[0] switch
+        {
+            IPEndPoint ip => IPAddress.IsLoopback(ip.Address) && ip.Port is >= 1024 and <= 65535,
+            DnsEndPoint dns => dns.Host == "localhost" && dns.Port is >= 1024 and <= 65535,
+            _ => false
+        });
+        if (!safeEndpoint)
+            throw new InvalidOperationException("Redis outage fixture requires one disposable loopback endpoint.");
+        using var cache = new RedisCache(Options.Create(new RedisCacheOptions
+        {
+            Configuration = connection, InstanceName = "swiftaid:framework-recovery-fixture:"
+        }));
+        var store = new RedisCacheStore(cache, Options.Create(new RedisOptions { MaximumTtlSeconds = 60 }),
+            NullLogger<RedisCacheStore>.Instance);
+        Assert.Equal(CacheReadStatus.Failed, (await store.GetAsync("fixture", default)).Status);
+        await VerifyFrameworkRecoveryAsync(store);
+        Assert.Equal(CacheReadStatus.Failed, (await store.GetAsync("fixture", default)).Status);
+    }
+
+    private async Task VerifyFrameworkRecoveryAsync(ICacheStore? cache)
     {
         var id = $"framework-recovery-{Guid.NewGuid():N}";
         _frameworkSessionIds.Add(id);
@@ -60,7 +103,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         }
 
         using var model = new RecoveryClient();
-        await RunFrameworkWorkerAsync(id, "turn-1", model);
+        await RunFrameworkWorkerAsync(id, "turn-1", model, cache);
         var second = first with { Utterance = "Second synthetic question", ClientUtteranceId = "turn-2", CycleId = "cycle-2" };
         await using (var db = CreateFrameworkDbContext())
         {
@@ -70,7 +113,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
                 { SessionVersion = current.SessionVersion + 1, CyclesUsed = current.CyclesUsed + 1 }, current.SessionVersion,
                 second.ClientUtteranceId, default, EllaiUtteranceWorkEnvelope.Serialize(second, second.ClientUtteranceId)));
         }
-        await RunFrameworkWorkerAsync(id, "turn-2", model);
+        await RunFrameworkWorkerAsync(id, "turn-2", model, cache);
 
         await using var verifyDb = CreateFrameworkDbContext();
         var verified = new PostgresEllaiSessionStore(verifyDb);
@@ -84,7 +127,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         Assert.Equal(2, (await new PostgresEllaiUsageStore(verifyDb).TotalsAsync(id, default)).Calls);
     }
 
-    private static async Task RunFrameworkWorkerAsync(string sessionId, string turnId, RecoveryClient model)
+    private static async Task RunFrameworkWorkerAsync(string sessionId, string turnId, RecoveryClient model, ICacheStore? cache)
     {
         var consent = new EllaiConsentService();
         var services = new ServiceCollection();
@@ -94,6 +137,7 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         services.AddScoped<IEllaiUtteranceOutboxStore>(sp => sp.GetRequiredService<PostgresEllaiSessionStore>());
         services.AddScoped<IEllaiUsageStore, PostgresEllaiUsageStore>();
         services.AddSingleton(consent);
+        if (cache is not null) services.AddSingleton(cache);
         services.AddSingleton<EllaiUsageLedger>();
         services.AddSingleton(new EllaiSessionResponseStore());
         services.AddScoped(_ => new EllaiToolBroker(new EllaiPolicyService(), consent));
