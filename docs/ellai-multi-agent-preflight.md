@@ -29,6 +29,7 @@ evidence, not acceptance of the complete migration or the multi-agent feature.
 
 | Check | Result and limits |
 |---|---|
+| Local Gateway container metadata | OBSERVED: `docker inspect gateway` on 2026-11-03 identified image `swiftaid/ellai-migration-candidate:locked`, image ID `sha256:7069d4675b8dba01eacc62bb2706cb5d6ff618c655028ea0529a8cef019b0bdb`, started `2026-11-03T19:07:15Z`. `docker image inspect` showed no source revision label. This identifies a local candidate, not an accepted deployment or a mapping to the current commit. No service was restarted. |
 | Application suite, `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj --no-restore -m:1 -nr:false --logger 'console;verbosity=minimal'` | PASS: 1,184 passed, 17 live-provider tests skipped. Ran before the additional live checkpoint probe was added. |
 | Authorization, framework-session, outbox and guidance focused tests | PASS: 137 tests in the latest focused application run. Includes denied-history checkpoint exclusion, owner/scope isolation and stale or expired in-memory claim rejection. |
 | Gateway worker, registration and guidance HTTP filters | PASS: 53 integration tests using test fixtures. These are not deployed-provider acceptance. |
