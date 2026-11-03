@@ -3289,6 +3289,21 @@ the runner's outbox dependency and failed its history assertion; the corrected
 fixture passed. This does not establish an independently restarted Gateway,
 live model behavior or deployed key-ring configuration.
 
+On 2026-11-04 a Release-published local Gateway at revision `fcfcb93` ran on
+loopback against disposable migrated PostgreSQL and NATS, with the configured
+live Muse route. PASS: `node tests/SwiftAid.Ui.Tests/ellai-conversation.browser.cjs`
+with `SWIFTAID_RUN_LIVE_ELLAI=1`, the local Playwright package and Gateway URL,
+a synthetic Rusape location prompt and a follow-up asking for the prior place.
+Headless Chromium observed two completed turns, the follow-up recalled the
+place, refresh restored the conversation, and the session was cancelled after
+the test. The first response completed in 18,650 ms with zero page errors.
+A read-only PostgreSQL query showed `ellai_locations` and a protected replay
+scope in both completed turn traces; neither trace contained the plaintext
+place name. This is one local live-provider run, not reliability across prompts,
+a restarted Gateway, physical-device or deployed-cluster verification. The
+fixture's notification change consumer reported `NatsJSApiException`, outside
+the exercised Ellai path. The existing running Gateway was not restarted.
+
 ### Grounded audio timing probe — 2026-11-03
 
 PASS: `SWIFTAID_RUN_LIVE_ELLAI=1 SWIFTAID_REQUIRE_AUDIO_BEFORE_COMPLETION=1

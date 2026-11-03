@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { chromium } = require("playwright");
+const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || "playwright");
 
 // Opt-in: uses the configured local Gateway/provider with synthetic text only.
 // This is a real browser/API/persistence check, not a provider mock or hardware voice test.
