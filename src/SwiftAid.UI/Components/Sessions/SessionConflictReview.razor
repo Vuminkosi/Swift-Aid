@@ -1,0 +1,48 @@
+@using SwiftAid.Contracts.Sessions
+
+<MudPaper Class="pa-4 mb-4" Outlined="true" Elevation="0" aria-labelledby="session-conflict-heading">
+    <MudText Typo="Typo.h6" HtmlTag="h2" id="session-conflict-heading">Review the update conflict</MudText>
+    <MudText Typo="Typo.body2">Your update was not saved. Compare your submitted proposal with the current server version, then make the changes you still want in the editor below.</MudText>
+    <MudText Typo="Typo.caption">Your version: @Proposal.ExpectedVersion · Current version: @Current.Version</MudText>
+    <div class="session-conflict-table">
+        <table class="mud-table-root" aria-label="Proposed and current session details">
+            <thead><tr><th scope="col">Field</th><th scope="col">Your proposal</th><th scope="col">Current session</th></tr></thead>
+            <tbody>
+                @foreach (var row in Rows)
+                {
+                    <tr><th scope="row">@row.Label</th><td>@row.Proposed</td><td>@row.Current</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="OnDismiss">Dismiss comparison</MudButton>
+</MudPaper>
+
+@code {
+    [Parameter, EditorRequired] public SessionUpdateSubmission Proposal { get; set; } = default!;
+    [Parameter, EditorRequired] public CommunitySessionView Current { get; set; } = default!;
+    [Parameter] public EventCallback OnDismiss { get; set; }
+
+    private IEnumerable<(string Label, string Proposed, string Current)> Rows
+    {
+        get
+        {
+            var value = Proposal.Input;
+            yield return ("Title", value.Title, Current.Title);
+            yield return ("Summary", value.Summary, Current.Summary);
+            yield return ("Audience", value.AudienceDescription, Current.AudienceDescription);
+            yield return ("Topics", string.Join(", ", value.TopicTags), string.Join(", ", Current.TopicTags));
+            yield return ("Presenter", value.Presenter, Current.Presenter);
+            yield return ("Language", value.Language, Current.Language);
+            yield return ("Start (UTC)", value.StartUtc.ToUniversalTime().ToString("u"), Current.StartUtc.ToUniversalTime().ToString("u"));
+            yield return ("Duration (minutes)", value.DurationMinutes.ToString(), Current.DurationMinutes.ToString());
+            yield return ("Capacity", value.Capacity?.ToString() ?? "Not set", Current.Capacity?.ToString() ?? "Not set");
+            yield return ("Materials", string.Join(", ", value.Materials.Select(item => $"{item.MaterialId} ({item.SourceVersion})")), string.Join(", ", Current.Materials.Select(item => $"{item.MaterialId} ({item.SourceVersion})")));
+            yield return ("Visibility", value.Visibility.ToString(), Current.Visibility.ToString());
+            yield return ("Channel", value.ChannelType.ToString(), Current.ChannelType.ToString());
+            yield return ("Channel link", value.ChannelLink ?? "Not set", Current.ChannelLink ?? "Not set");
+            yield return ("Reminder lead hours", string.Join(", ", value.ReminderLeadHours), string.Join(", ", Current.ReminderLeadHours));
+            yield return ("Reason for change", Proposal.Reason, "Not part of the current session");
+        }
+    }
+}

@@ -38,6 +38,10 @@
             @if (CanRenderEditor(capability))
             {
                 var editorGeneration = _editorGeneration;
+                @if (_conflictProposal is { } proposal && _staffView is { } current)
+                {
+                    <SessionConflictReview Proposal="proposal" Current="current" OnDismiss="DismissConflictProposal" />
+                }
                 <SessionEditor @key="(_editorGeneration, _editingVersion)"
                            ManagementCapabilities="capability"
                            SessionId="_editingSessionId"
@@ -77,6 +81,7 @@
     private string? _editingStatus;
     private string? _editingCreatedBy;
     private CommunitySessionView? _staffView;
+    private SessionUpdateSubmission? _conflictProposal;
     private Guid? _loadedRequestId;
     private bool _pageInitialized;
     private long _listGeneration;
@@ -280,6 +285,7 @@
 
     private async Task ManageSessionAsync(Guid? sessionId)
     {
+        _conflictProposal = null;
         if (sessionId is null)
         {
             if (!await RefreshStaffAccessAsync())
@@ -396,6 +402,7 @@
 
     private void ClearEditorState()
     {
+        _conflictProposal = null;
         Interlocked.Increment(ref _staffLoadGeneration);
         _canManageSessions = false;
         _managementCapabilities = SessionManagementPresentation.Unavailable();
@@ -657,7 +664,7 @@
         submission.ExpectedVersion <= 0 || submission.ExpectedVersion != _editingVersion
             ? Task.CompletedTask
             : RunCommandAsync(submission.Input.ToCommand(
-                submission.SessionId, submission.ExpectedVersion, submission.Reason, DateTimeOffset.UtcNow));
+                submission.SessionId, submission.ExpectedVersion, submission.Reason, DateTimeOffset.UtcNow), submission);
 
     private Task HandleReviewAsync(SessionReviewSubmission submission, long generation)
     {
@@ -711,14 +718,33 @@
             _editingSessionId.Value, _editingVersion, reason, DateTimeOffset.UtcNow));
     }
 
-    private async Task RunCommandAsync(SessionCommand command)
+    private void DismissConflictProposal() => _conflictProposal = null;
+
+    private async Task RecoverConflictAsync(SessionUpdateSubmission proposal, string? originalActorId)
+    {
+        if (string.IsNullOrWhiteSpace(originalActorId) || !string.Equals(_actorId, originalActorId, StringComparison.Ordinal))
+            return;
+
+        await LoadStaffSessionAsync(proposal.SessionId);
+        if (string.Equals(_actorId, originalActorId, StringComparison.Ordinal) &&
+            _editingSessionId == proposal.SessionId && _editingVersion != proposal.ExpectedVersion &&
+            _staffView is not null && _managementCapabilities.CanEdit && CanRenderEditor(_managementCapabilities))
+        {
+            _conflictProposal = proposal;
+            _serverError = "The session changed before your update was saved. Compare your proposal with the current version below.";
+        }
+    }
+
+    private async Task RunCommandAsync(SessionCommand command, SessionUpdateSubmission? proposal = null)
     {
         var isCreate = command is CreateSessionDraftCommand;
+        var originalActorId = _actorId;
         if (!await RefreshStaffAccessAsync(isCreate ? null : command.SessionId,
                 isCreate ? null : command.ExpectedVersion) || !CanPerformCommand(command))
         {
             ClearEditorState();
             _serverError ??= "Session management is unavailable for this account.";
+            if (proposal is not null) await RecoverConflictAsync(proposal, originalActorId);
             return;
         }
 
@@ -729,11 +755,17 @@
             var outcome = await StaffSessionEditor.ExecuteAsync(command);
             if (outcome.Code == UiCapabilityResultCode.Success && outcome.Metadata.IsAvailable && outcome.Value is { } result)
             {
+                _conflictProposal = null;
                 await LoadStaffSessionAsync(result.SessionId);
                 await LoadListAsync();
             }
             else
             {
+                if (outcome.Code == UiCapabilityResultCode.Conflict && proposal is not null)
+                {
+                    await RecoverConflictAsync(proposal, originalActorId);
+                    return;
+                }
                 _serverError = outcome.Message ?? (outcome.Code == UiCapabilityResultCode.Conflict
                     ? "The session changed. Reload it and try again."
                     : "The change could not be recorded. Please try again.");

@@ -1,0 +1,88 @@
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.JSInterop;
+using Microsoft.JSInterop.Infrastructure;
+using MudBlazor.Services;
+using System.Reflection;
+using SwiftAid.Client.Presentation;
+using SwiftAid.Contracts.Sessions;
+using SwiftAid.UI.Components.Sessions;
+
+namespace SwiftAid.Ui.Tests;
+
+public sealed class SessionConflictReviewTests
+{
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ConflictProposalIsRestoredOnlyAfterCurrentSessionAccessIsConfirmed(bool canEdit)
+    {
+        var id = Guid.NewGuid();
+        var start = new DateTimeOffset(2026, 11, 1, 5, 30, 0, TimeSpan.Zero);
+        var current = new CommunitySessionView(id, 4, "Current", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
+        var input = new UpdateSessionInput("Proposal", "Summary", "Community", [], "Presenter", "en", start, 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
+        var proposal = new SessionUpdateSubmission(id, 3, input, "reason");
+        var page = new SwiftAid.Gateway.Components.Pages.Sessions();
+        var type = page.GetType();
+        type.GetProperty("StaffSessionEditor", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, new StaffClient(current, canEdit));
+        type.GetField("_actorId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, "officer");
+        var task = (Task)type.GetMethod("RecoverConflictAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page, [proposal, "officer"])!;
+        await task;
+        var retained = type.GetField("_conflictProposal", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page);
+        Assert.Equal(canEdit, retained is not null);
+    }
+
+    [Fact]
+    public async Task DisplaysBothVersionsAndEscapesUserContent()
+    {
+        var id = Guid.NewGuid();
+        var start = new DateTimeOffset(2026, 11, 1, 5, 30, 0, TimeSpan.Zero);
+        var current = new CommunitySessionView(id, 4, "Current", "Current summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Scheduled", "creator", "reviewer", false, 1, null);
+        var input = new UpdateSessionInput("<Proposal>", "Proposed summary", "Community", [], "Presenter", "en", start.AddDays(1), 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
+        var proposal = new SessionUpdateSubmission(id, 3, input, "Schedule changed");
+        var registrations = new ServiceCollection();
+        registrations.AddLogging();
+        registrations.AddMudServices();
+        registrations.AddSingleton<IJSRuntime>(new NoOpJsRuntime());
+        registrations.AddSingleton<NavigationManager>(new TestNavigationManager());
+        await using var services = registrations.BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        var markup = await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var component = await renderer.RenderComponentAsync<SessionConflictReview>(ParameterView.FromDictionary(
+                new Dictionary<string, object?> { [nameof(SessionConflictReview.Proposal)] = proposal, [nameof(SessionConflictReview.Current)] = current }));
+            return component.ToHtmlString();
+        });
+
+        Assert.Contains("Your update was not saved", markup, StringComparison.Ordinal);
+        Assert.Contains("&lt;Proposal&gt;", markup, StringComparison.Ordinal);
+        Assert.Contains("Current summary", markup, StringComparison.Ordinal);
+        Assert.Contains("Schedule changed", markup, StringComparison.Ordinal);
+        Assert.Contains("Current version: 4", markup, StringComparison.Ordinal);
+    }
+
+    private sealed class TestNavigationManager : NavigationManager
+    {
+        public TestNavigationManager() => Initialize("http://localhost/", "http://localhost/");
+    }
+
+    private sealed class StaffClient(CommunitySessionView current, bool canEdit) : IStaffSessionEditorClient
+    {
+        private static UiCapabilityResult<T> Success<T>(T value) => new(UiCapabilityResultCode.Success, value,
+            new UiCapabilityMetadata("editor", "1", UiCapabilityProvenance.LiveService, DateTimeOffset.UtcNow, true));
+
+        public Task<UiCapabilityResult<string>> GetCurrentActorIdAsync(CancellationToken cancellationToken = default) => Task.FromResult(Success("officer"));
+        public Task<UiCapabilityResult<CommunitySessionView>> GetStaffAsync(Guid sessionId, CancellationToken cancellationToken = default) => Task.FromResult(Success(current));
+        public Task<UiCapabilityResult<StaffSessionManagementCapabilities>> GetManagementCapabilitiesAsync(Guid? sessionId, long? expectedVersion, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Success(new StaffSessionManagementCapabilities(false, canEdit, false, false, false, false, current.SessionId, current.Version, current.Status, true)));
+        public Task<UiCapabilityResult<SessionCommandResult>> ExecuteAsync(SessionCommand command, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private sealed class NoOpJsRuntime : JSRuntime
+    {
+        protected override void BeginInvokeJS(long taskId, string identifier, string? argsJson, JSCallResultType resultType, long targetInstanceId) { }
+        protected override void EndInvokeDotNet(DotNetInvocationInfo callInfo, in DotNetInvocationResult result) { }
+    }
+}
