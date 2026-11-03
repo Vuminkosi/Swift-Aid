@@ -97,6 +97,7 @@ public static class EllaiUtteranceRunner
             using var translationTiming = EllaiPipelineMetrics.Measure("input_translation");
             var translated = await services.Languages.TranslateAsync(new(
                 work.CycleId + "-input", work.Utterance, languages.InputLanguage, "eng"), ct).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
             reasoningText = translated.Text;
         }
         if (languages.OutputLanguage != "eng" && services.Languages?.IsConfigured != true)
@@ -180,6 +181,7 @@ public static class EllaiUtteranceRunner
                 using var translationTiming = EllaiPipelineMetrics.Measure("output_translation");
                 var translated = await services.Languages!.TranslateAsync(new(
                     work.CycleId + "-output", answer, "eng", languages.OutputLanguage), ct).ConfigureAwait(false);
+                ct.ThrowIfCancellationRequested();
                 answer = translated.Text;
             }
             catch (Exception error) when (error is EllaiLanguageProviderException or InvalidDataException or ArgumentException)

@@ -1,6 +1,8 @@
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Ellai;
 using SwiftAid.Contracts.Ellai;
+using Microsoft.Extensions.AI;
+using SwiftAid.Intelligence.Meta;
 
 namespace SwiftAid.Application.Tests.Ellai;
 
@@ -8,6 +10,69 @@ namespace SwiftAid.Application.Tests.Ellai;
 [Trait("Task", "ELL-T06")]
 public sealed class EllaiUtteranceRunnerTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CancelledTranslationCannotStartReasoningOrReturnAReply(bool inputTranslation)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var completions = new ScriptedCompletions(DecisionTurn);
+        var (consent, loop) = Services(completions, grant: true);
+        var languages = new CancellingTranslationFixture(cancellation);
+        var work = Work() with { Languages = inputTranslation ? new("sna", "eng") : new("eng", "sna") };
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => EllaiUtteranceRunner.RunOneAsync(work,
+            new(loop, null, null, consent, Languages: languages), 256, cancellation.Token));
+        Assert.Equal(inputTranslation ? 0 : 1, completions.Threads.Count);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task FrameworkTurnStopsWhenTranslationReturnsAfterCancellation(bool inputTranslation)
+    {
+        using var cancellation = new CancellationTokenSource();
+        using var model = new TranslationCancellationModel();
+        var consent = new EllaiConsentService();
+        consent.Grant("session-1", EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
+        var executor = new EllaiFrameworkExecutor(model, new EllaiPromptBuilder("Synthetic policy", "fixture"),
+            new EllaiToolBroker(new EllaiPolicyService(), consent), new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
+        var work = Work() with { Languages = inputTranslation ? new("sna", "eng") : new("eng", "sna") };
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => EllaiUtteranceRunner.RunOneAsync(work,
+            new(executor, null, null, consent, Languages: new CancellingTranslationFixture(cancellation)), 256, cancellation.Token));
+        Assert.Equal(inputTranslation ? 0 : 1, model.Calls);
+    }
+
+    private sealed class TranslationCancellationModel : IChatClient
+    {
+        public int Calls { get; private set; }
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, DecisionTurn)));
+        }
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    private sealed class CancellingTranslationFixture(CancellationTokenSource cancellation) : IEllaiLanguageClient
+    {
+        public bool IsConfigured => true;
+        public Task<EllaiTranslationResult> TranslateAsync(EllaiTranslationRequest request, CancellationToken ct)
+        {
+            cancellation.Cancel();
+            return Task.FromResult(new EllaiTranslationResult(request.RequestId, "Synthetic translation",
+                request.SourceLanguage, request.TargetLanguage, "fixture", "fixture", 4, 1, "unreviewed"));
+        }
+        public Task<EllaiNativeTranscriptionResult> TranscribeAsync(EllaiNativeTranscriptionRequest request, CancellationToken ct) =>
+            throw new NotSupportedException();
+    }
+
     [Theory]
     [InlineData("epoch-1", "Paused")]
     [InlineData("old-scope", "Unavailable")]
