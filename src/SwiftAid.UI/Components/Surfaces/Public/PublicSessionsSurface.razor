@@ -10,6 +10,15 @@
 
 <div class="community-sessions-theme">
 <MudContainer Fixed="true" Class="public-resource-surface" data-ellai-control="community-sessions.browse" data-bonboarding-anchor="ellai-community-browse">
+    @if (_confirmingEditorSwitch)
+    {
+        <MudPaper Class="pa-4 mb-4" Elevation="0" role="alertdialog" aria-modal="true" aria-label="Unsaved session changes">
+            <MudText Typo="Typo.subtitle1">Open another session without saving?</MudText>
+            <MudText Typo="Typo.body2">Your unsaved entries will be lost.</MudText>
+            <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="StayOnCurrentEditor">Keep editing</MudButton>
+            <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="ConfirmEditorSwitchAsync">Discard and continue</MudButton>
+        </MudPaper>
+    }
     @if (InitialSessionId is not null)
     {
         <MudButton Href="/sessions" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.ArrowBack">All sessions</MudButton>
@@ -484,6 +493,7 @@
     [Parameter] public bool InitialRemindersView { get; set; }
     [Parameter] public Func<Guid?, long?, Task<SessionManagementPresentation>>? LoadManagementCapabilitiesAsync { get; set; }
     [Parameter] public EventCallback<Guid?> OnManageSession { get; set; }
+    [Parameter] public Func<bool>? HasPendingEditorInput { get; set; }
     [Parameter] public RenderFragment<SessionManagementPresentation>? StaffSessionEditorContent { get; set; }
     [Parameter] public SessionManagementPresentation? StaffEditorCapabilities { get; set; }
 
@@ -511,6 +521,8 @@
     private Guid? _subscriptionBusySessionId;
     private long _subscriptionBusyGeneration;
     private int _activeTabIndex;
+    private bool _confirmingEditorSwitch;
+    private Guid? _pendingEditorSessionId;
     private SessionManagementPresentation? _createCapabilities;
     private SessionManagementPresentation? _selectedCapabilities;
     private SessionManagementPresentation? _editorCapabilities;
@@ -748,10 +760,41 @@
             return;
         }
 
+        if (HasPendingEditorInput?.Invoke() == true)
+        {
+            _pendingEditorSessionId = sessionId;
+            _confirmingEditorSwitch = true;
+            return;
+        }
+
+        await OpenEditorAsync(sessionId, capabilities);
+    }
+
+    private async Task OpenEditorAsync(Guid? sessionId, SessionManagementPresentation capabilities)
+    {
+
         _editorCapabilities = capabilities;
         _editorRequested = true;
         await OnManageSession.InvokeAsync(sessionId);
         _activeTabIndex = SelectedSession is null ? 0 : 2;
+    }
+
+    private void StayOnCurrentEditor()
+    {
+        _confirmingEditorSwitch = false;
+        _pendingEditorSessionId = null;
+    }
+
+    private async Task ConfirmEditorSwitchAsync()
+    {
+        if (!_confirmingEditorSwitch) return;
+        var sessionId = _pendingEditorSessionId;
+        StayOnCurrentEditor();
+        var capabilities = sessionId is null ? _createCapabilities : _selectedCapabilities;
+        var allowed = sessionId is null ? CanCreateSession :
+            SelectedSession is { } selected && selected.SessionId == sessionId && CanOpenSelectedSession;
+        if (allowed && capabilities is not null && CanOpenForSnapshot(capabilities))
+            await OpenEditorAsync(sessionId, capabilities);
     }
 
     private async Task SearchChangedAsync(string? value)

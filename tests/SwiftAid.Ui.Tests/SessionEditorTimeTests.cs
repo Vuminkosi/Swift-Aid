@@ -39,7 +39,7 @@ public sealed class SessionEditorTimeTests
     {
         var editor = new SessionEditor();
         Invoke(editor, "OnParametersSet");
-        var pending = typeof(SessionEditor).GetProperty("HasPendingInput", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var pending = typeof(SessionEditor).GetProperty("HasPendingInput", BindingFlags.Public | BindingFlags.Instance)!;
         Assert.False((bool)pending.GetValue(editor)!);
 
         Set(editor, "_title", "Draft in progress");

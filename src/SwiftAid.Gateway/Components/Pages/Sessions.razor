@@ -33,6 +33,7 @@
                            InitialRemindersView="InitialRemindersView"
                            LoadManagementCapabilitiesAsync="LoadManagementCapabilitiesAsync"
                            OnManageSession="ManageSessionAsync"
+                           HasPendingEditorInput="HasPendingEditorInput"
                            StaffEditorCapabilities="_managementCapabilities">
         <StaffSessionEditorContent Context="capability">
             @if (CanRenderEditor(capability))
@@ -42,7 +43,7 @@
                 {
                     <SessionConflictReview Proposal="proposal" Current="current" OnDismiss="DismissConflictProposal" />
                 }
-                <SessionEditor @key="(_editorGeneration, _editingVersion)"
+                <SessionEditor @ref="_sessionEditor" @key="(_editorGeneration, _editingVersion)"
                            ManagementCapabilities="capability"
                            SessionId="_editingSessionId"
                            ExpectedVersion="_editingVersion"
@@ -82,6 +83,8 @@
     private string? _editingCreatedBy;
     private CommunitySessionView? _staffView;
     private SessionUpdateSubmission? _conflictProposal;
+    private SessionEditor? _sessionEditor;
+    private bool HasPendingEditorInput() => _sessionEditor?.HasPendingInput == true;
     private Guid? _loadedRequestId;
     private bool _pageInitialized;
     private long _listGeneration;
@@ -306,6 +309,7 @@
             _editingStatus = null;
             _editingCreatedBy = _actorId;
             _staffView = null;
+            Interlocked.Increment(ref _editorGeneration);
             return;
         }
 
@@ -403,6 +407,7 @@
     private void ClearEditorState()
     {
         _conflictProposal = null;
+        _sessionEditor = null;
         Interlocked.Increment(ref _staffLoadGeneration);
         _canManageSessions = false;
         _managementCapabilities = SessionManagementPresentation.Unavailable();

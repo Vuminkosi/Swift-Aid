@@ -15,6 +15,40 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed class PublicSessionQueryStateTests
 {
+    [Fact]
+    public async Task OpeningAnotherEditorRequiresDiscardConfirmation()
+    {
+        var component = new PublicSessionsSurface();
+        var type = typeof(PublicSessionsSurface);
+        var calls = 0;
+        type.GetProperty(nameof(component.LoadManagementCapabilitiesAsync))!.SetValue(component,
+            (Func<Guid?, long?, Task<SessionManagementPresentation>>)((_, _) => Task.FromResult(SessionManagementPresentation.Unavailable())));
+        type.GetProperty(nameof(component.StaffSessionEditorContent))!.SetValue(component,
+            (RenderFragment<SessionManagementPresentation>)(capability => builder => { }));
+        type.GetProperty(nameof(component.HasPendingEditorInput))!.SetValue(component, (Func<bool>)(() => true));
+        type.GetProperty(nameof(component.OnManageSession))!.SetValue(component,
+            EventCallback.Factory.Create<Guid?>(new object(), _ => calls++));
+        type.GetField("_createCapabilities", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(component,
+            new SessionManagementPresentation(true, true, null, null, null, true, false, false, false, false, false));
+        type.GetField("_createCapabilitiesLoaded", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(component, true);
+
+        await (Task)type.GetMethod("ManageSessionAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(component, [null])!;
+        Assert.Equal(0, calls);
+        Assert.True(Field<bool>(component, "_confirmingEditorSwitch"));
+        type.GetMethod("StayOnCurrentEditor", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(component, null);
+        Assert.Equal(0, calls);
+        await (Task)type.GetMethod("ManageSessionAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(component, [null])!;
+        type.GetField("_createCapabilities", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(component,
+            SessionManagementPresentation.Unavailable());
+        await InvokeAsync(component, "ConfirmEditorSwitchAsync");
+        Assert.Equal(0, calls);
+        type.GetField("_createCapabilities", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(component,
+            new SessionManagementPresentation(true, true, null, null, null, true, false, false, false, false, false));
+        await (Task)type.GetMethod("ManageSessionAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(component, [null])!;
+        await InvokeAsync(component, "ConfirmEditorSwitchAsync");
+        Assert.Equal(1, calls);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

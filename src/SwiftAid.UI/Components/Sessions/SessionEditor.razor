@@ -313,7 +313,7 @@
     private bool IsScheduled => string.Equals(Status, "Scheduled", StringComparison.OrdinalIgnoreCase);
     private bool IsDraft => string.Equals(Status, "Draft", StringComparison.OrdinalIgnoreCase);
     private bool HasUnsavedChanges => _savedFields is not null && !CaptureFields().SequenceEqual(_savedFields);
-    private bool HasPendingInput => HasUnsavedChanges || !string.IsNullOrWhiteSpace(_reason) ||
+    public bool HasPendingInput => HasUnsavedChanges || !string.IsNullOrWhiteSpace(_reason) ||
         !string.IsNullOrWhiteSpace(_cancellationReason) || _acknowledgeSelfReview;
     private bool HasCurrentCapabilities => ManagementCapabilities is { } capabilities &&
         capabilities.Matches(SessionId, IsNew ? null : ExpectedVersion, Status);
