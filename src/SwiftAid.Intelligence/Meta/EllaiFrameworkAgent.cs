@@ -33,7 +33,7 @@ public sealed class EllaiFrameworkAgent
         Func<EllaiToolContext, EllaiToolRequest, CancellationToken, Task<EllaiToolResult>>? revalidateTool = null,
         Func<string, CancellationToken, ValueTask>? onVerifiedStreamSegment = null,
         Func<CancellationToken, Task<bool>>? revalidateStreamObservations = null,
-        string? frameworkSessionJson = null)
+        string? frameworkSessionJson = null, int maxModelCalls = int.MaxValue)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(instructions);
@@ -43,7 +43,7 @@ public sealed class EllaiFrameworkAgent
         ArgumentNullException.ThrowIfNull(usage);
         if (!string.Equals(context.SessionId, usage.SessionId, StringComparison.Ordinal))
             throw new ArgumentException("Usage must belong to the current session.", nameof(usage));
-        if (messages.Count == 0 || maxOutputTokens is < 1 or > 16384)
+        if (messages.Count == 0 || maxOutputTokens is < 1 or > 16384 || maxModelCalls < 1)
             throw new ArgumentException("Messages and a bounded token limit are required.");
         LastFailureCode = null;
         LastFrameworkSessionJson = null;
@@ -117,7 +117,7 @@ public sealed class EllaiFrameworkAgent
             return result;
         }
         var tools = EllaiFrameworkToolCatalog.Create(context, InvokeGuardedTool);
-        var guardedClient = new ModelCallGuard(_client, Current, usage);
+        var guardedClient = new ModelCallGuard(_client, Current, usage, maxModelCalls);
         var functionClient = new FunctionInvokingChatClient(guardedClient)
         {
             MaximumIterationsPerRequest = EllaiExecutionLimits.MaxIterations
@@ -369,7 +369,7 @@ public sealed class EllaiFrameworkAgent
         result.Evidence[0] is { SourceKind: "DashboardAggregate", ResourceId: "owned-cases" };
 
     private sealed class ModelCallGuard(IChatClient inner, Func<CancellationToken, Task<bool>> isCurrent,
-        EllaiFrameworkUsage usage) : DelegatingChatClient(inner)
+        EllaiFrameworkUsage usage, int maxModelCalls) : DelegatingChatClient(inner)
     {
         public int CallSequence { get; private set; }
         public bool RepairMode { get; set; }
@@ -391,6 +391,8 @@ public sealed class EllaiFrameworkAgent
                 var current = await isCurrent(cancellationToken).ConfigureAwait(false);
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!current) throw new EllaiFrameworkFailureException(EllaiToolReasonCodes.DeniedByPolicy);
+                if (CallSequence >= maxModelCalls)
+                    throw new EllaiFrameworkFailureException(EllaiToolReasonCodes.BudgetExceeded);
                 using var reservation = usage.TryBeginModelCall(boundedMessages, options);
                 if (reservation is null)
                     throw new EllaiFrameworkFailureException(EllaiToolReasonCodes.BudgetExceeded);
@@ -438,6 +440,8 @@ public sealed class EllaiFrameworkAgent
             cancellationToken.ThrowIfCancellationRequested();
             if (!current) throw new EllaiFrameworkFailureException(EllaiToolReasonCodes.DeniedByPolicy);
             var boundedMessages = messages.ToArray();
+            if (CallSequence >= maxModelCalls)
+                throw new EllaiFrameworkFailureException(EllaiToolReasonCodes.BudgetExceeded);
             using var reservation = usage.TryBeginModelCall(boundedMessages, options);
             if (reservation is null)
                 throw new EllaiFrameworkFailureException(EllaiToolReasonCodes.BudgetExceeded);

@@ -62,6 +62,18 @@ public sealed class EllaiKnowledgeSpecialistTests
     }
 
     [Fact]
+    public async Task InvalidModelResponsesStopAtSpecialistModelBudget()
+    {
+        using var model = new InvalidClient();
+        var specialist = new EllaiKnowledgeSpecialist(model);
+        var error = await Assert.ThrowsAsync<EllaiFrameworkFailureException>(() =>
+            specialist.RunAsync("question", "policy", true, Context(), Usage(),
+                _ => Task.FromResult(true), (_, _, _) => throw new InvalidOperationException(), default));
+        Assert.Equal(EllaiToolReasonCodes.BudgetExceeded, error.Code);
+        Assert.Equal(3, model.Calls);
+    }
+
+    [Fact]
     public async Task NonDocumentationEvidenceCannotProduceKnowledgeResult()
     {
         using var model = new DocumentationClient("CaseQueue");
@@ -102,6 +114,21 @@ public sealed class EllaiKnowledgeSpecialistTests
         AllowedTools: new HashSet<string> { EllaiToolNames.DocsGet, EllaiToolNames.State });
 
     private static EllaiFrameworkUsage Usage() => new("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
+
+    private sealed class InvalidClient : IChatClient
+    {
+        public int Calls { get; private set; }
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, "invalid")));
+        }
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
 
     private sealed class DocumentationClient(string sourceKind = "Documentation", string section = "safe",
         string version = "v1", string evidenceId = "proof-1") : IChatClient
