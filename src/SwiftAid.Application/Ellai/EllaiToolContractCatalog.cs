@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace SwiftAid.Application.Ellai;
 
@@ -48,26 +49,26 @@ public static class EllaiToolContractCatalog
     private static readonly IReadOnlyDictionary<string, ToolContract> Contracts =
         new ReadOnlyDictionary<string, ToolContract>(new Dictionary<string, ToolContract>(StringComparer.Ordinal)
         {
-            [EllaiToolNames.State] = Contract(
+            [EllaiToolNames.State] = Contract(EllaiToolNames.State,
                 ("projection", false), ("limit", false),
                 ("country", false), ("workflow", false), ("sort", false)),
-            [EllaiToolNames.Evidence] = Contract(("ref", true), ("field", false)),
-            [EllaiToolNames.Topic] = Contract(("ref", true)),
-            [EllaiToolNames.Capabilities] = Contract(("feature", false)),
-            [EllaiToolNames.Receipts] = Contract(("receipt", false)),
-            [EllaiToolNames.ProductFacts] = Contract(("topic", false)),
-            [EllaiToolNames.Now] = Contract(),
-            [EllaiToolNames.DocsSearch] = Contract(("q", true), ("limit", false)),
-            [EllaiToolNames.DocsGet] = Contract(("section", true)),
-            [EllaiToolNames.UiCatalogue] = Contract(("feature", false), ("goal", false), ("limit", false)),
-            [EllaiToolNames.UiObserve] = Contract(("controls", true), ("view", true), ("context", false), ("feature", false)),
-            [EllaiToolNames.IngestionSchema] = Contract(),
-            [EllaiToolNames.ValidateObservations] = Contract(("observations_json", true)),
-            [EllaiToolNames.Locations] = Contract(("q", true), ("country", false), ("limit", false)),
-            [EllaiToolNames.ImportDestinations] = Contract(),
-            [EllaiToolNames.Imports] = Contract(("workspace_id", true), ("organization_id", true), ("country", true)),
-            [EllaiToolNames.ImportStatus] = Contract(("import_id", true)),
-            [EllaiToolNames.ClassificationEvidence] = Contract(("case_id", true)),
+            [EllaiToolNames.Evidence] = Contract(EllaiToolNames.Evidence, ("ref", true), ("field", false)),
+            [EllaiToolNames.Topic] = Contract(EllaiToolNames.Topic, ("ref", true)),
+            [EllaiToolNames.Capabilities] = Contract(EllaiToolNames.Capabilities, ("feature", false)),
+            [EllaiToolNames.Receipts] = Contract(EllaiToolNames.Receipts, ("receipt", false)),
+            [EllaiToolNames.ProductFacts] = Contract(EllaiToolNames.ProductFacts, ("topic", false)),
+            [EllaiToolNames.Now] = Contract(EllaiToolNames.Now),
+            [EllaiToolNames.DocsSearch] = Contract(EllaiToolNames.DocsSearch, ("q", true), ("limit", false)),
+            [EllaiToolNames.DocsGet] = Contract(EllaiToolNames.DocsGet, ("section", true)),
+            [EllaiToolNames.UiCatalogue] = Contract(EllaiToolNames.UiCatalogue, ("feature", false), ("goal", false), ("limit", false)),
+            [EllaiToolNames.UiObserve] = Contract(EllaiToolNames.UiObserve, ("controls", true), ("view", true), ("context", false), ("feature", false)),
+            [EllaiToolNames.IngestionSchema] = Contract(EllaiToolNames.IngestionSchema),
+            [EllaiToolNames.ValidateObservations] = Contract(EllaiToolNames.ValidateObservations, ("observations_json", true)),
+            [EllaiToolNames.Locations] = Contract(EllaiToolNames.Locations, ("q", true), ("country", false), ("limit", false)),
+            [EllaiToolNames.ImportDestinations] = Contract(EllaiToolNames.ImportDestinations),
+            [EllaiToolNames.Imports] = Contract(EllaiToolNames.Imports, ("workspace_id", true), ("organization_id", true), ("country", true)),
+            [EllaiToolNames.ImportStatus] = Contract(EllaiToolNames.ImportStatus, ("import_id", true)),
+            [EllaiToolNames.ClassificationEvidence] = Contract(EllaiToolNames.ClassificationEvidence, ("case_id", true)),
         });
 
     /// <summary>Read-only contracts indexed by canonical advertised tool name.</summary>
@@ -114,6 +115,13 @@ public static class EllaiToolContractCatalog
                 return false;
             }
 
+            if (value.Length < argument.MinimumLength
+                || argument.Pattern is not null && !Regex.IsMatch(value, argument.Pattern, RegexOptions.CultureInvariant))
+            {
+                error = $"Argument '{name}' does not match its declared string format.";
+                return false;
+            }
+
             if (argument.AllowedValues is { Count: > 0 } values && !values.Contains(value, StringComparer.Ordinal))
             {
                 error = $"Argument '{name}' has an unsupported value.";
@@ -145,9 +153,12 @@ public static class EllaiToolContractCatalog
                 var property = new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
                     ["type"] = "string",
+                    ["minLength"] = argument.MinimumLength,
                     ["maxLength"] = argument.MaxLength,
                     ["description"] = argument.Description
                 };
+                if (argument.Pattern is not null)
+                    property["pattern"] = argument.Pattern;
                 if (argument.AllowedValues is { Count: > 0 })
                     property["enum"] = argument.AllowedValues;
                 else if (toolName == EllaiToolNames.Evidence && argument.Name == "ref")
@@ -223,16 +234,38 @@ public static class EllaiToolContractCatalog
         return JsonSerializer.Serialize(schema);
     }
 
-    private static ToolContract Contract(params (string Name, bool Required)[] arguments) =>
+    private static ToolContract Contract(string toolName, params (string Name, bool Required)[] arguments) =>
         new(new ReadOnlyDictionary<string, ToolArgumentContract>(arguments.ToDictionary(
             argument => argument.Name,
             argument => new ToolArgumentContract(argument.Name, argument.Required,
                 argument.Name == "observations_json" ? ObservationJsonLength : ReferenceLength,
-                ArgumentDescriptions[argument.Name], AllowedValues.GetValueOrDefault(argument.Name)),
+                ArgumentDescriptions[argument.Name], GetAllowedValues(toolName, argument.Name),
+                MinimumLength: 1, Pattern: GetPattern(toolName, argument.Name)),
             StringComparer.Ordinal)));
+
+    private static IReadOnlyList<string>? GetAllowedValues(string toolName, string argumentName) =>
+        (toolName, argumentName) switch
+        {
+            (EllaiToolNames.State, "projection") => Array.AsReadOnly(new[] { "feature", "queue" }),
+            (EllaiToolNames.State, "workflow") => Array.AsReadOnly(new[] { "Reported", "UnderReview", "Active", "AwaitingFollowUp", "Resolved" }),
+            (EllaiToolNames.State, "sort") => Array.AsReadOnly(new[] { "latest-reported", "latest-updated" }),
+            _ => AllowedValues.GetValueOrDefault(argumentName)
+        };
+
+    private static string? GetPattern(string toolName, string argumentName) =>
+        (toolName, argumentName) switch
+        {
+            (EllaiToolNames.State, "projection") => "^(feature|queue)$",
+            (EllaiToolNames.State, "country") or (EllaiToolNames.Locations, "country") or (EllaiToolNames.Imports, "country") => "^[A-Z]{2}$",
+            (EllaiToolNames.State, "limit") or (EllaiToolNames.UiCatalogue, "limit") => "^([1-9]|1[0-9]|20)$",
+            (EllaiToolNames.DocsSearch, "limit") => "^([1-9]|1[0-9]|20)$",
+            (EllaiToolNames.Locations, "limit") => "^([1-9]|10)$",
+            _ => null
+        };
 }
 
 public sealed record ToolContract(IReadOnlyDictionary<string, ToolArgumentContract> Arguments);
 
 public sealed record ToolArgumentContract(
-    string Name, bool Required, int MaxLength, string Description, IReadOnlyList<string>? AllowedValues = null);
+    string Name, bool Required, int MaxLength, string Description,
+    IReadOnlyList<string>? AllowedValues = null, int MinimumLength = 0, string? Pattern = null);

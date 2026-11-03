@@ -78,6 +78,44 @@ public sealed class EllaiToolContractCatalogTests
     }
 
     [Fact]
+    public void SchemasDescribeTheHandlerEnumCountryAndLimitBoundaries()
+    {
+        using var schema = JsonDocument.Parse(EllaiToolContractCatalog.ToJsonSchema(EllaiToolNames.State));
+        var properties = schema.RootElement.GetProperty("properties");
+
+        Assert.Equal(new[] { "feature", "queue" },
+            properties.GetProperty("projection").GetProperty("enum").EnumerateArray()
+                .Select(value => value.GetString()).ToArray());
+        Assert.Equal(new[] { "Reported", "UnderReview", "Active", "AwaitingFollowUp", "Resolved" },
+            properties.GetProperty("workflow").GetProperty("enum").EnumerateArray()
+                .Select(value => value.GetString()).ToArray());
+        Assert.Equal("^[A-Z]{2}$", properties.GetProperty("country").GetProperty("pattern").GetString());
+        Assert.Equal("^([1-9]|1[0-9]|20)$", properties.GetProperty("limit").GetProperty("pattern").GetString());
+        Assert.Equal(1, properties.GetProperty("projection").GetProperty("minLength").GetInt32());
+    }
+
+    [Theory]
+    [InlineData("workflow", "Unknown", EllaiToolNames.State)]
+    [InlineData("sort", "oldest", EllaiToolNames.State)]
+    [InlineData("country", "sz", EllaiToolNames.State)]
+    [InlineData("limit", "0", EllaiToolNames.State)]
+    [InlineData("limit", "21", EllaiToolNames.UiCatalogue)]
+    [InlineData("limit", "11", EllaiToolNames.Locations)]
+    public void HandlerConstraintsAreEnforcedAtTheSharedContractBoundary(
+        string argumentName, string value, string toolName)
+    {
+        Assert.False(EllaiToolContractCatalog.TryValidateArguments(
+            toolName, new Dictionary<string, string> { [argumentName] = value }, out _));
+    }
+
+    [Fact]
+    public void RequiredStringArgumentsCannotBeEmpty()
+    {
+        Assert.False(EllaiToolContractCatalog.TryValidateArguments(
+            EllaiToolNames.DocsSearch, new Dictionary<string, string> { ["q"] = string.Empty }, out _));
+    }
+
+    [Fact]
     public void ParserRejectsArgumentsOutsideTheRegisteredSchema()
     {
         var parsed = EllaiModelTurnParser.Parse(
@@ -85,6 +123,11 @@ public sealed class EllaiToolContractCatalogTests
 
         Assert.Null(parsed.Turn);
         Assert.Contains("not declared", parsed.Error, StringComparison.Ordinal);
+
+        var invalidEnum = EllaiModelTurnParser.Parse(
+            """{"tool_calls":[{"id":"c2","name":"ellai_state","args":{"projection":"unknown"}}]}""");
+        Assert.Null(invalidEnum.Turn);
+        Assert.Contains("declared string format", invalidEnum.Error, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -92,6 +92,20 @@ public sealed class EllaiBrokerBoundsTests
     }
 
     [Fact]
+    public async Task BrokerRejectsToolArgumentsOutsideDeclaredHandlerConstraints()
+    {
+        var broker = GrantedBroker();
+        var invalid = await broker.InvokeAsync(
+            Context,
+            new EllaiToolRequest(EllaiToolNames.State,
+                new Dictionary<string, string> { ["projection"] = "private" }),
+            CancellationToken.None);
+
+        Assert.False(invalid.Allowed);
+        Assert.Equal(EllaiToolReasonCodes.InvalidArguments, invalid.ReasonCode);
+    }
+
+    [Fact]
     public async Task SessionToolAllowlistHidesAndDeniesUnlistedTools()
     {
         var broker = GrantedBroker();
