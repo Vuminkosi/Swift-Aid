@@ -431,6 +431,14 @@ without counting it as another model tool call or publishing a second tool
 start/observation event. A focused framework test verifies two broker reads,
 one model-visible call and one set of progress events; the framework contract
 suite passed 27/27 and the application suite passed 1001 with 10 skips.
+Additional executor tests verify that a cooperative timeout during the second
+read returns unavailable without publishing and that caller cancellation
+propagates without publishing. They also check the model-visible tool count
+and progress remain unchanged. The framework contract suite passed 29/29 via
+`dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj
+--no-restore -m:1 -nr:false --filter FullyQualifiedName~EllaiAgentFrameworkContractTests
+--verbosity quiet`. Non-cooperative dependencies can still hold their scope
+open, and this synthetic check is not a live service-outage test.
 
 An opt-in Gateway execution selection has been added; its default remains the
 existing loop. Invalid selection and unconfigured or unsupported framework

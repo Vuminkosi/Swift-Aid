@@ -39,6 +39,70 @@ public sealed class EllaiAgentFrameworkContractTests
     }
 
     [Fact]
+    public async Task CountRevalidationTimeoutWithholdsAnswerAndKeepsToolAccounting()
+    {
+        using var client = new CountStreamingClient();
+        var executor = new EllaiFrameworkExecutor(client, new EllaiPromptBuilder("Policy", "test"),
+            new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService()), new EllaiUsageLedger(),
+            new InMemoryEllaiUsageStore(), TimeSpan.FromMilliseconds(100));
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.OwnedCaseCount });
+        var calls = 0;
+        var chunks = new List<string>();
+        var events = new List<EllaiActivityEvent>();
+        var outcome = await executor.RunAsync(new EllaiLoopRequest(context, "Count", new EllaiRoleOverlay("ask", "help"),
+            "count", 100, "cycle", 1), default, onActivity: events.Add,
+            onTextDelta: (text, _) => { chunks.Add(text); return ValueTask.CompletedTask; },
+            invokeToolAsync: async (_, request, token) =>
+            {
+                if (++calls == 2) await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                return new EllaiToolResult(request.ToolName, true, null,
+                    [new EvidenceRef("DashboardAggregate", "owned-cases", "v1", null, "proof")],
+                    "2 managed case(s) in scope.", 1, false);
+            }).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(outcome.Completed);
+        Assert.Null(outcome.Decision);
+        Assert.Equal(EllaiToolReasonCodes.Unavailable, outcome.FailureCode);
+        Assert.Equal(2, calls);
+        Assert.Equal(1, outcome.ToolCallsUsed);
+        Assert.Empty(chunks);
+        Assert.Single(events, item => item.Kind == EllaiActivityKind.ToolStarted);
+    }
+
+    [Fact]
+    public async Task CancellingCountRevalidationPropagatesWithoutPublishing()
+    {
+        using var client = new CountStreamingClient();
+        var executor = new EllaiFrameworkExecutor(client, new EllaiPromptBuilder("Policy", "test"),
+            new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService()), new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.OwnedCaseCount });
+        using var cancellation = new CancellationTokenSource();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var chunks = new List<string>();
+        var calls = 0;
+        var run = executor.RunAsync(new EllaiLoopRequest(context, "Count", new EllaiRoleOverlay("ask", "help"),
+            "count", 100, "cycle", 1), cancellation.Token,
+            onTextDelta: (text, _) => { chunks.Add(text); return ValueTask.CompletedTask; },
+            invokeToolAsync: async (_, request, token) =>
+            {
+                if (++calls == 2)
+                {
+                    started.TrySetResult();
+                    await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                }
+                return new EllaiToolResult(request.ToolName, true, null,
+                    [new EvidenceRef("DashboardAggregate", "owned-cases", "v1", null, "proof")],
+                    "2 managed case(s) in scope.", 1, false);
+            });
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Empty(chunks);
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
     public async Task CountRevalidationDoesNotConsumeModelToolBudgetOrDuplicateProgress()
     {
         using var client = new CountStreamingClient();
