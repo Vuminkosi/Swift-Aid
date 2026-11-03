@@ -10,6 +10,30 @@ namespace SwiftAid.Client.Tests;
 public sealed class GuestDraftAudioRetakePersistenceTests
 {
     [Fact]
+    public async Task EditableRevisionCanAddAudioWithoutDroppingExistingAttachment()
+    {
+        using var root = new TemporaryRoot();
+        var keys = new TestInstallKeyStore();
+        var persistence = new EncryptedGuestSubmissionStore(root.Path, keys);
+        var audio = new EncryptedGuestAudioStore(root.Path, keys, persistence);
+        var drafts = new GuestDraftStore(persistence, audioStore: audio);
+        var first = Guid.NewGuid();
+        var second = Guid.NewGuid();
+        var original = CreateSubmission(first);
+        var created = await drafts.CreateDraftAsync(original);
+        await audio.SaveOriginalAsync(created.ClientSubmissionId, first, "audio/wav", 900,
+            new MemoryStream([0x52, 0x49, 0x46, 0x46, 0x01, 0x02]));
+        var snapshot = new GuestDraftFormSnapshot(1, "{\"occurrenceTime\":\"unfinished\"}");
+
+        var revised = await drafts.CreateEditableRevisionAsync(created.ClientSubmissionId,
+            original with { OriginalAudioAttachmentIds = [second] }, snapshot);
+        var record = (await persistence.GetAsync(revised.ClientSubmissionId, default))!;
+        Assert.Equal(new[] { first, second }, record.Submission.OriginalAudioAttachmentIds);
+        Assert.Contains(record.AudioAssets!, item => item.AttachmentId == first);
+        Assert.Equal(snapshot, (await drafts.GetEditableDraftAsync(revised.ClientSubmissionId))!.FormSnapshot);
+    }
+
+    [Fact]
     public async Task EditableRevisionAndCompletionPreserveExistingOriginalAudio()
     {
         using var root = new TemporaryRoot();

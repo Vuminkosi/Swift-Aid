@@ -87,13 +87,17 @@ public sealed class GuestDraftStore(
             if (allowEditable && snapshot is null && previous.FormSnapshot is null)
                 throw new InvalidOperationException("This report does not contain an editable snapshot.");
 
-            // Editable form snapshots do not own audio changes. Preserve the existing
-            // attachment binding; replacing a recording uses the explicit retake path.
+            // Preserve existing recordings while allowing an explicitly added attachment.
+            // Removing or replacing a recording uses the explicit retake path.
             if (allowEditable)
+            {
+                ArgumentNullException.ThrowIfNull(revisedSubmission.OriginalAudioAttachmentIds);
                 revisedSubmission = revisedSubmission with
                 {
-                    OriginalAudioAttachmentIds = previous.Submission.OriginalAudioAttachmentIds.ToArray()
+                    OriginalAudioAttachmentIds = previous.Submission.OriginalAudioAttachmentIds
+                        .Union(revisedSubmission.OriginalAudioAttachmentIds).ToArray()
                 };
+            }
 
             var replacement = CreateRecord(revisedSubmission, _timeProvider.GetUtcNow()) with
             {

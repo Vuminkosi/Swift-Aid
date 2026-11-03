@@ -159,6 +159,7 @@
                              CurrentDraftId="_activeDraftId"
                              Draft="_reportDraft"
                              OnSaveDraft="SaveDraftAsync"
+                             EditableDraftSnapshotsSupported="true"
                              OnSendReport="SendNewReportAsync"
                              Feedback="@ReportFeedback"
                              FeedbackIsError="false"
@@ -187,6 +188,7 @@
     private IReadOnlyList<GuestSubmissionSummary> _history = [];
     private Guid? _activeDraftId;
     private IntakeSubmission? _activeSubmission;
+    private GuestDraftFormSnapshot? _activeFormSnapshot;
     private bool _loading = true;
     private bool _storageAvailable;
     private bool _refreshingReceipts;
@@ -455,18 +457,22 @@
     {
         try
         {
-            var draft = await SubmissionStore.GetDraftAsync(clientSubmissionId);
-            if (draft is null)
+            var editable = await SubmissionStore.GetEditableDraftAsync(clientSubmissionId);
+            var draft = editable is null ? await SubmissionStore.GetDraftAsync(clientSubmissionId) : null;
+            if (draft is null && editable is null)
             {
                 _pageMessage = "This draft is no longer available to edit. Refresh your saved reports and try again.";
                 await ReloadSavedReportsAsync();
                 return;
             }
 
-            _activeDraftId = draft.ClientSubmissionId;
-            _activeSubmission = draft.Submission;
-            _reportDraft = PublicReportDraft.FromSubmission(draft.Submission);
-            await RefreshSavedVoiceAsync(draft.ClientSubmissionId, draft.Submission);
+            var restored = editable is null ? PublicReportDraft.FromSubmission(draft!.Submission) : PublicReportDraft.FromFormSnapshot(editable.FormSnapshot);
+            var submission = editable?.Submission ?? draft!.Submission;
+            _activeDraftId = clientSubmissionId;
+            _activeSubmission = submission;
+            _activeFormSnapshot = editable?.FormSnapshot;
+            _reportDraft = restored;
+            await RefreshSavedVoiceAsync(clientSubmissionId, submission);
             RememberDraftSnapshot();
             _pageMessage = "Draft opened. Changes remain on this device until you save them.";
             if (IsTrackingView)
@@ -485,15 +491,33 @@
         var sourceDraft = _reportDraft;
         var sourceSnapshot = DraftSnapshot();
         var sourceDraftId = _activeDraftId;
-        var saved = request.PreviousDraftId is { } previousDraftId
-            ? await SubmissionStore.CreateRevisionAsync(previousDraftId, request.Submission)
-            : await SubmissionStore.CreateDraftAsync(request.Submission);
+        var editable = request.PreviousDraftId is { } previousId
+            ? await SubmissionStore.GetEditableDraftAsync(previousId) : null;
+        var previous = request.PreviousDraftId is { } existingId && editable is null
+            ? await SubmissionStore.GetDraftAsync(existingId) : null;
+        if (request.PreviousDraftId is not null && editable is null && previous is null)
+            throw new InvalidOperationException("The saved draft is no longer editable.");
+        var previousSubmission = editable?.Submission ?? previous?.Submission;
+        var submission = previousSubmission is null ? request.Submission : request.Submission with
+        {
+            OriginalAudioAttachmentIds = previousSubmission.OriginalAudioAttachmentIds.ToArray()
+        };
+        var saved = request.FormSnapshot is { } snapshot
+            ? request.PreviousDraftId is { } editableId
+                ? await SubmissionStore.CreateEditableRevisionAsync(editableId, submission, snapshot)
+                : await SubmissionStore.CreateEditableDraftAsync(submission, snapshot)
+            : request.PreviousDraftId is { } draftId
+                ? editable is not null
+                    ? await SubmissionStore.CompleteEditableDraftAsync(draftId, submission)
+                    : await SubmissionStore.CreateRevisionAsync(draftId, submission)
+                : await SubmissionStore.CreateDraftAsync(submission);
 
-        request.ConfirmPersisted(saved.ClientSubmissionId);
+        request.ConfirmPersisted(saved.ClientSubmissionId, request.FormSnapshot is not null);
         if (ReferenceEquals(_reportDraft, sourceDraft) && _activeDraftId == sourceDraftId)
         {
             _activeDraftId = saved.ClientSubmissionId;
-            _activeSubmission = request.Submission with { ClientSubmissionId = saved.ClientSubmissionId };
+            _activeSubmission = submission with { ClientSubmissionId = saved.ClientSubmissionId };
+            _activeFormSnapshot = request.FormSnapshot;
             _savedDraftSnapshot = sourceSnapshot;
             _pageMessage = "Your draft was saved on this device. Save again to include any newer edits. It has not been sent.";
         }
@@ -558,11 +582,16 @@
         _sending = true;
         try
         {
+            var editable = _activeDraftId is { } previousId
+                ? await SubmissionStore.GetEditableDraftAsync(previousId) : null;
             var saved = _activeDraftId is { } draftId
-                ? await SubmissionStore.CreateRevisionAsync(draftId, submission)
+                ? editable is not null
+                    ? await SubmissionStore.CompleteEditableDraftAsync(draftId, submission)
+                    : await SubmissionStore.CreateRevisionAsync(draftId, submission)
                 : await SubmissionStore.CreateDraftAsync(submission);
             _activeDraftId = saved.ClientSubmissionId;
             _activeSubmission = submission with { ClientSubmissionId = saved.ClientSubmissionId };
+            _activeFormSnapshot = null;
             _reportDraft = PublicReportDraft.FromSubmission(_activeSubmission);
             RememberDraftSnapshot();
             await SubmissionStore.QueueAsync(saved.ClientSubmissionId);
@@ -670,6 +699,7 @@
 #endif
         _activeDraftId = null;
         _activeSubmission = null;
+        _activeFormSnapshot = null;
         _reportDraft = new PublicReportDraft { CapturedAt = DateTimeOffset.Now };
         _pendingAudioAttachmentId = null;
         _voiceSaved = false;
@@ -756,24 +786,27 @@
         _pendingAudioAttachmentId ??= Guid.NewGuid();
         try
         {
-            var current = await SubmissionStore.GetDraftAsync(currentDraftId);
-            if (current is null)
+            var editable = await SubmissionStore.GetEditableDraftAsync(currentDraftId);
+            var current = editable is null ? await SubmissionStore.GetDraftAsync(currentDraftId) : null;
+            if (current is null && editable is null)
             {
                 _audioMessage = "This draft is no longer editable. Open a saved draft and try again.";
                 return;
             }
 
-            var attachmentIds = current.Submission.OriginalAudioAttachmentIds;
+            var currentSubmission = editable?.Submission ?? current!.Submission;
+            var attachmentIds = currentSubmission.OriginalAudioAttachmentIds;
             if (!attachmentIds.Contains(_pendingAudioAttachmentId.Value))
             {
-                var revisedSubmission = current.Submission with
+                var revisedSubmission = currentSubmission with
                 {
                     OriginalAudioAttachmentIds = attachmentIds.Append(_pendingAudioAttachmentId.Value).ToArray()
                 };
-                var revision = await SubmissionStore.CreateRevisionAsync(currentDraftId, revisedSubmission);
+                var revision = editable is null
+                    ? await SubmissionStore.CreateRevisionAsync(currentDraftId, revisedSubmission)
+                    : await SubmissionStore.CreateEditableRevisionAsync(currentDraftId, revisedSubmission, editable.FormSnapshot);
                 _activeDraftId = revision.ClientSubmissionId;
                 _activeSubmission = revisedSubmission with { ClientSubmissionId = revision.ClientSubmissionId };
-                _reportDraft = PublicReportDraft.FromSubmission(_activeSubmission);
             }
 
             var result = await AudioCapture.SaveToDraftAsync(_activeDraftId.Value, _pendingAudioAttachmentId.Value);
@@ -831,6 +864,12 @@
         {
             foreach (var report in reports.Where(report => report.State is GuestSubmissionLocalState.Draft or GuestSubmissionLocalState.NeedsAttention))
             {
+                if (report.RequiresEditing)
+                {
+                    _historySendEligibility[report.ClientSubmissionId] = new(false,
+                        "Open this draft and finish its details before sending.");
+                    continue;
+                }
                 var draft = await SubmissionStore.GetDraftAsync(report.ClientSubmissionId);
                 if (draft is null)
                 {
@@ -1040,12 +1079,24 @@
             (_audioState.Status is AudioCaptureStatus.Recording or AudioCaptureStatus.ReadyToSave);
         try
         {
-            var submission = _reportDraft.ToSubmission(
-                _countryCatalogueVersion,
-                _processingPolicyReference,
-                _processingPolicyVersion,
-                _countries,
-                _countryCatalogueIsCurrent);
+            IntakeSubmission submission;
+            GuestDraftFormSnapshot? formSnapshot = null;
+            try
+            {
+                submission = _reportDraft.ToSubmission(
+                    _countryCatalogueVersion,
+                    _processingPolicyReference,
+                    _processingPolicyVersion,
+                    _countries,
+                    _countryCatalogueIsCurrent,
+                    allowUnverifiedCountryForDraft: true);
+            }
+            catch (InvalidOperationException)
+            {
+                formSnapshot = _reportDraft.ToFormSnapshot();
+                submission = new PublicReportDraft { SubjectScope = _reportDraft.SubjectScope }
+                    .ToSubmission(null, null, null, [], false);
+            }
             if (_activeDraftId.HasValue && _activeSubmission is not null)
             {
                 submission = submission with
@@ -1054,7 +1105,7 @@
                 };
             }
 
-            await SaveDraftAsync(new PublicReportSaveRequest(_activeDraftId, submission));
+            await SaveDraftAsync(new PublicReportSaveRequest(_activeDraftId, submission, formSnapshot));
             draftSaved = true;
 
             if (_audioState.Status == AudioCaptureStatus.Recording)
@@ -1141,9 +1192,11 @@
             _audioState = await androidAudio.CancelCaptureAsync();
         }
 #endif
-        _reportDraft = _activeSubmission is null
-            ? new PublicReportDraft { CapturedAt = DateTimeOffset.Now }
-            : PublicReportDraft.FromSubmission(_activeSubmission);
+        _reportDraft = _activeFormSnapshot is not null
+            ? PublicReportDraft.FromFormSnapshot(_activeFormSnapshot)
+            : _activeSubmission is null
+                ? new PublicReportDraft { CapturedAt = DateTimeOffset.Now }
+                : PublicReportDraft.FromSubmission(_activeSubmission);
         _pendingAudioAttachmentId = null;
         _audioMessage = null;
         if (_activeDraftId is { } draftId && _activeSubmission is not null)
