@@ -427,6 +427,8 @@ services:
       CLASSIFICATION_HEALTH_FILE: /tmp/classification-ready
       HF_HOME: /models
       HF_HUB_DISABLE_TELEMETRY: "1"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
     network_mode: "service:gateway"
     volumes:
       - classification-model-data:/models
