@@ -113,6 +113,11 @@ public sealed class EllaiGuidanceAdmissionHttpTests
         builder.Services.AddScoped<EllaiGuidancePlanValidator>();
         builder.Services.AddScoped<IEllaiUiDiscoveryService, EllaiUiDiscoveryService>();
         builder.Services.AddSingleton<EllaiUsageLedger>();
+        var speech = new SyntheticSpeech();
+        builder.Services.AddSingleton<IEllaiSpeechSynthesisClient>(speech);
+        builder.Services.AddSingleton<EllaiPreparedResponseAudio>();
+        builder.Services.AddSingleton<IEllaiResponseAudioPreparation>(services => services.GetRequiredService<EllaiPreparedResponseAudio>());
+        builder.Services.AddHostedService(services => services.GetRequiredService<EllaiPreparedResponseAudio>());
         builder.Services.AddSingleton<EllaiSessionResponseStore>();
         builder.Services.AddSingleton<IEllaiUsageStore, InMemoryEllaiUsageStore>();
         await using var app = builder.Build();
@@ -166,9 +171,28 @@ public sealed class EllaiGuidanceAdmissionHttpTests
                 Assert.Equal(HttpStatusCode.OK, validationResponse.StatusCode);
                 var validation = (await validationResponse.Content.ReadFromJsonAsync<EllaiSessionResponseDto>())!;
                 Assert.Equal(EllaiReportValidationGuidance.Find("report.original-statement")!.Message, validation.Text);
+                var prepared = app.Services.GetRequiredService<EllaiPreparedResponseAudio>();
+                using (var firstAudio = await prepared.OpenAsync("owned", validation.Sequence, default).WaitAsync(TimeSpan.FromSeconds(5)))
+                    Assert.NotEmpty(await firstAudio.Content.ReadAsByteArrayAsync());
+                Assert.Contains(speech.Requests, item => item.RequestId.StartsWith($"owned-{validation.Sequence}-", StringComparison.Ordinal) &&
+                    item.Text.Contains("Describe what happened", StringComparison.Ordinal) && item.VoiceId == "af_heart");
                 using var wrongIssue = await client.PostAsJsonAsync("/sessions/owned/guidance/narration",
                     validationRequest with { ValidationInputId = "report.occurrence-date" });
                 Assert.Equal(HttpStatusCode.NotFound, wrongIssue.StatusCode);
+                var nextObservation = observed with { ContextStamp = "validation-next", ValidationInputIds = ["report.occurrence-date"] };
+                using var nextObservationResponse = await client.PostAsJsonAsync("/sessions/owned/ui-observations", nextObservation);
+                Assert.Equal(HttpStatusCode.OK, nextObservationResponse.StatusCode);
+                using var staleIssue = await client.PostAsJsonAsync("/sessions/owned/guidance/narration", validationRequest);
+                Assert.Equal(HttpStatusCode.NotFound, staleIssue.StatusCode);
+                using var nextIssue = await client.PostAsJsonAsync("/sessions/owned/guidance/narration", validationRequest with
+                    { ValidationInputId = "report.occurrence-date", ObservationContextStamp = "validation-next", EnglishVoiceId = "am_michael" });
+                Assert.Equal(HttpStatusCode.OK, nextIssue.StatusCode);
+                var nextValidation = (await nextIssue.Content.ReadFromJsonAsync<EllaiSessionResponseDto>())!;
+                Assert.Equal(EllaiReportValidationGuidance.Find("report.occurrence-date")!.Message, nextValidation.Text);
+                using (var nextAudio = await prepared.OpenAsync("owned", nextValidation.Sequence, default).WaitAsync(TimeSpan.FromSeconds(5)))
+                    Assert.NotEmpty(await nextAudio.Content.ReadAsByteArrayAsync());
+                Assert.Contains(speech.Requests, item => item.RequestId.StartsWith($"owned-{nextValidation.Sequence}-", StringComparison.Ordinal) &&
+                    item.Text.Contains("reported date", StringComparison.Ordinal) && item.VoiceId == "am_michael");
             }
             await observations.RecordAsync(new("owned", "refreshed-view", "refreshed-context", "web", [control], DateTimeOffset.UtcNow,
                 [new(control, UiObservationState.Ready)]), default);
@@ -269,6 +293,24 @@ public sealed class EllaiGuidanceAdmissionHttpTests
             Assert.Equal(HttpStatusCode.NotFound, deniedProgress.StatusCode);
         }
         finally { await app.StopAsync(); }
+    }
+
+    private sealed class SyntheticSpeech : IEllaiSpeechSynthesisClient
+    {
+        public bool IsConfigured => true;
+        public System.Collections.Concurrent.ConcurrentQueue<(string RequestId, string Text, string? VoiceId)> Requests { get; } = new();
+        public Task<HttpResponseMessage> SynthesizeAsync(string requestId, string text, CancellationToken ct) =>
+            SynthesizeAsync(requestId, text, "eng", "af_heart", ct);
+        public Task<HttpResponseMessage> SynthesizeAsync(string requestId, string text, string language, string? voiceId, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            Requests.Enqueue((requestId, text, voiceId));
+            var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3, 4]) };
+            response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/vnd.swiftaid.pcm");
+            response.Headers.Add("X-SwiftAid-Voice-Id", voiceId ?? "test");
+            response.Headers.Add("X-SwiftAid-Sample-Rate", "16000");
+            return Task.FromResult(response);
+        }
     }
 
     private sealed class CurrentScopes : IScopeService

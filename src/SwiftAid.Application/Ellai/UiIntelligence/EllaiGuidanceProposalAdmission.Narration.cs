@@ -49,10 +49,7 @@ public sealed partial class EllaiGuidanceProposalAdmission
                 latest.ValidationInputIds?.Select(EllaiReportValidationGuidance.Find)
                     .FirstOrDefault(item => item is not null)?.InputId != request.ValidationInputId) return null;
         }
-        var existing = responses.ReadSince(sessionId, 0, EllaiSessionResponseStore.MaximumResponsesPerSession)
-            .Responses.SingleOrDefault(item => item.Progress?.EventId == request.EventId);
-        if (existing is not null) return existing;
-        return responses.PublishProgress(sessionId, turn.ClientUtteranceId, narration,
+        return responses.PublishOrGetProgress(sessionId, turn.ClientUtteranceId, narration,
             new(request.EventId, "Guidance", "Guidance", true, session.InteractionEpoch,
                 (clock ?? TimeProvider.System).GetUtcNow().AddMinutes(5)), request.EnglishVoiceId);
     }
