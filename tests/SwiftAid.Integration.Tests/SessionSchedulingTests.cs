@@ -507,6 +507,64 @@ public sealed class SessionSchedulingTests
     }
 
     [IntakePostgresFact]
+    public async Task Subscription_write_rejects_a_session_that_started_after_request_time()
+    {
+        var sessionId = Guid.NewGuid();
+        const string accountId = "subscription-session-started";
+        await using var db = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var setup = CreateService(db);
+        var now = DateTimeOffset.UtcNow;
+        try
+        {
+            await CreateActiveActorAsync(db, accountId);
+            await PublishAsync(setup, sessionId, SessionVisibility.Public);
+            await db.CommunitySessions.Where(item => item.SessionId == sessionId)
+                .ExecuteUpdateAsync(update => update.SetProperty(item => item.StartUtc, now.AddMinutes(-1)));
+
+            var store = new PostgresEventSubscriptionStore(db);
+            await Assert.ThrowsAsync<SessionSubscriptionConflictException>(() => store.SubscribeAsync(
+                sessionId, accountId, 3, 0, "Email", "previously-read-consent", now.AddMinutes(-2), CancellationToken.None));
+            Assert.Null(await store.GetAsync(sessionId, accountId, CancellationToken.None));
+        }
+        finally
+        {
+            await CleanupAsync(sessionId);
+            await CleanupActorAsync(accountId);
+        }
+    }
+
+    [IntakePostgresFact]
+    public async Task Subscription_waiting_on_session_lock_rechecks_start_time_after_wait()
+    {
+        var sessionId = Guid.NewGuid();
+        const string accountId = "subscription-started-during-lock";
+        await using var writerDb = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        await using var subscriberDb = await IntakeDecisionStoreTests.CreateMigratedIntakeContextAsync();
+        var setup = CreateService(writerDb);
+        try
+        {
+            await CreateActiveActorAsync(writerDb, accountId);
+            await PublishAsync(setup, sessionId, SessionVisibility.Public);
+            await using var transaction = await writerDb.Database.BeginTransactionAsync();
+            await writerDb.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE community_sessions SET start_utc = clock_timestamp() + interval '2 seconds' WHERE session_id = {sessionId}
+                """);
+            var pending = new PostgresEventSubscriptionStore(subscriberDb).SubscribeAsync(
+                sessionId, accountId, 3, 0, "Email", "previously-read-consent", DateTimeOffset.UtcNow, CancellationToken.None);
+            await Task.Delay(TimeSpan.FromSeconds(3));
+            await transaction.CommitAsync();
+
+            await Assert.ThrowsAsync<SessionSubscriptionConflictException>(() => pending);
+            Assert.Null(await new PostgresEventSubscriptionStore(subscriberDb).GetAsync(sessionId, accountId, CancellationToken.None));
+        }
+        finally
+        {
+            await CleanupAsync(sessionId);
+            await CleanupActorAsync(accountId);
+        }
+    }
+
+    [IntakePostgresFact]
     public async Task Subscription_waits_for_concurrent_cancellation_and_rejects_stale_version()
     {
         var sessionId = Guid.NewGuid();

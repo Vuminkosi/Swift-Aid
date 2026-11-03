@@ -48,16 +48,19 @@ public sealed class PostgresEventSubscriptionStore(SwiftAidDbContext dbContext) 
         CancellationToken cancellationToken)
     {
         var affected = await _dbContext.Database.ExecuteSqlInterpolatedAsync($"""
-            WITH eligible_session AS (
-                SELECT session_id FROM community_sessions
-                WHERE session_id = {sessionId} AND version = {expectedSessionVersion}
+            WITH locked_session AS MATERIALIZED (
+                SELECT session_id, version, visibility, status, published_version, scheduled_at_utc, start_utc
+                FROM community_sessions WHERE session_id = {sessionId}
+                FOR UPDATE
+            ), eligible_session AS (
+                SELECT session_id FROM locked_session
+                WHERE version = {expectedSessionVersion}
                   AND visibility = 'Public' AND status = 'Scheduled'
                   AND published_version > 0 AND scheduled_at_utc IS NOT NULL
-                  AND start_utc > {recordedAtUtc}
+                  AND start_utc > clock_timestamp()
                   AND ({expectedSubscriptionVersion} = 0 OR EXISTS (
                       SELECT 1 FROM community_session_subscriptions
                       WHERE session_id = {sessionId} AND account_id = {accountId}))
-                FOR UPDATE
             )
             INSERT INTO community_session_subscriptions
                 (session_id, account_id, channel, consent_reference, status, version, updated_at_utc)
