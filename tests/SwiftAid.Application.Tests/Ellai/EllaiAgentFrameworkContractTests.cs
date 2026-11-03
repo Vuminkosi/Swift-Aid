@@ -10,6 +10,11 @@ namespace SwiftAid.Application.Tests.Ellai;
 
 public sealed class EllaiAgentFrameworkContractTests
 {
+    private const string StreamClaim = "{\"claimId\":\"claim\",\"text\":\"Done.\",\"kind\":\"Observed\",\"evidence\":[{\"sourceKind\":\"CaseQueue\",\"resourceId\":\"case\",\"version\":\"1\",\"fieldPath\":null,\"evidenceId\":\"case\"}]}";
+    private static string GroundedStreamPrefix => "{\"stream_segments\":[{\"text\":\"Done.\",\"claims\":[" + StreamClaim + "]}]";
+    private static string GroundedDecision => ValidDecision.Replace("\"claims\":[]", "\"claims\":[" + StreamClaim + "]", StringComparison.Ordinal);
+    private static EvidenceRef StreamEvidence => new("CaseQueue", "case", "1", null, "case");
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -1677,36 +1682,44 @@ public sealed class EllaiAgentFrameworkContractTests
         Assert.Equal(2, totals.CompletionTokens);
     }
 
-    [Fact]
-    public async Task VerifiedSegmentArrivesBeforeProviderCompletes()
+    [Theory]
+    [InlineData("Done.")]
+    [InlineData("Unsupported case detail.")]
+    public async Task EvidenceFreeSegmentIsBufferedUntilFinalDecision(string provisionalText)
     {
-        using var client = new VerifiedSegmentStreamingClient();
+        using var client = new VerifiedSegmentStreamingClient(provisionalText);
         var agent = new EllaiFrameworkAgent(client);
         var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
             AllowedTools: new HashSet<string>(StringComparer.Ordinal));
-        var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var received = new List<string>();
         var run = agent.RunAsync(context, "Test instructions", [new ChatMessage(ChatRole.User, "test")], 100,
             _ => Task.FromResult(true), (_, _, _) => throw new InvalidOperationException(),
             new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None,
-            onVerifiedStreamSegment: (text, _) => { received.TrySetResult(text); return ValueTask.CompletedTask; });
+            onTextDelta: (text, _) => { received.Add(text); return ValueTask.CompletedTask; },
+            onVerifiedStreamSegment: (text, _) => { received.Add(text); return ValueTask.CompletedTask; });
         try
         {
-            Assert.Equal("Done.", await received.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+            await client.FirstPart.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Empty(received);
             Assert.False(run.IsCompleted);
         }
         finally { client.Release.TrySetResult(); }
         Assert.Equal("Done.", (await run)?.DisplayText);
+        Assert.Equal("Done.", string.Concat(received));
     }
 
-    private sealed class VerifiedSegmentStreamingClient : IChatClient
+    private sealed class VerifiedSegmentStreamingClient(string provisionalText) : IChatClient
     {
+        public TaskCompletionSource FirstPart { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
             CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
             ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            yield return new ChatResponseUpdate(ChatRole.Assistant, "{\"stream_segments\":[{\"text\":\"Done.\",\"claims\":[]}]");
+            yield return new ChatResponseUpdate(ChatRole.Assistant, "{\"stream_segments\":[{\"text\":" +
+                System.Text.Json.JsonSerializer.Serialize(provisionalText) + ",\"claims\":[]}]");
+            FirstPart.TrySetResult();
             await Release.Task.WaitAsync(cancellationToken);
             yield return new ChatResponseUpdate(ChatRole.Assistant, "," + ValidDecision.TrimStart()[1..]);
         }
@@ -1719,7 +1732,7 @@ public sealed class EllaiAgentFrameworkContractTests
     [InlineData(false)]
     public async Task PrivateToolSegmentRequiresFreshAuthorization(bool authorized)
     {
-        using var client = new PrivateSegmentStreamingClient();
+        using var client = new PrivateSegmentStreamingClient(segmentPrefix: GroundedStreamPrefix, finalDecision: GroundedDecision);
         var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
             AllowedTools: new HashSet<string> { EllaiToolNames.State });
         var published = new List<string>();
@@ -1727,7 +1740,7 @@ public sealed class EllaiAgentFrameworkContractTests
         var agent = new EllaiFrameworkAgent(client);
         var run = agent.RunAsync(context, "Test instructions", [new ChatMessage(ChatRole.User, "test")], 100,
             _ => Task.FromResult(true), (_, request, _) => Task.FromResult(new EllaiToolResult(request.ToolName,
-                true, null, [], "fixture", 1, false)),
+                true, null, [StreamEvidence], "Done.", 1, false)),
             new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None,
             onVerifiedStreamSegment: (text, _) => { published.Add(text); return ValueTask.CompletedTask; },
             revalidateStreamObservations: _ => { checks++; return Task.FromResult(authorized); });
@@ -1853,14 +1866,14 @@ public sealed class EllaiAgentFrameworkContractTests
     [Fact]
     public async Task RevocationBeforeFinalDecisionStopsCompletion()
     {
-        using var client = new PrivateSegmentStreamingClient();
+        using var client = new PrivateSegmentStreamingClient(segmentPrefix: GroundedStreamPrefix, finalDecision: GroundedDecision);
         var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
             AllowedTools: new HashSet<string> { EllaiToolNames.State });
         var checks = 0;
         var agent = new EllaiFrameworkAgent(client);
         var run = agent.RunAsync(context, "Test instructions", [new ChatMessage(ChatRole.User, "test")], 100,
             _ => Task.FromResult(true), (_, request, _) => Task.FromResult(new EllaiToolResult(request.ToolName,
-                true, null, [], "fixture", 1, false)),
+                true, null, [StreamEvidence], "Done.", 1, false)),
             new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None,
             onVerifiedStreamSegment: (_, _) => ValueTask.CompletedTask,
             revalidateStreamObservations: _ => Task.FromResult(++checks == 1));

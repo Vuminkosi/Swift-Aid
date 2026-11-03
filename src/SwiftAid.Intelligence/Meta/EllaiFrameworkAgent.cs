@@ -169,6 +169,14 @@ public sealed class EllaiFrameworkAgent
                         // Owned-case counts use a server-built decision after a
                         // fresh aggregate read, so model text is not publishable.
                         if (onVerifiedStreamSegment is null || countResult is not null || streamingSuppressed) continue;
+                        // A structurally valid sentence without observed evidence can
+                        // still contain unsupported or unsafe model output. Wait for
+                        // the complete decision and its normal publication checks.
+                        if (evidence.Count == 0)
+                        {
+                            streamingSuppressed = true;
+                            continue;
+                        }
                         // Evidence-backed prose may be released early only when
                         // it matches a complete line of every cited observation.
                         // Paraphrases still flow through the committed answer.

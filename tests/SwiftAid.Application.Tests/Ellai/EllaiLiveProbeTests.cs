@@ -38,7 +38,7 @@ public sealed class EllaiLiveProbeTests
     }
 
     [LiveFact]
-    public async Task LiveMuseEmitsVerifiedSegmentBeforeCompletion()
+    public async Task LiveMuseBuffersEvidenceFreeSegmentsUntilDecisionCompletes()
     {
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
         using var client = EllaiMuseChatClientFactory.Create(LiveOptions(), http);
@@ -54,12 +54,12 @@ public sealed class EllaiLiveProbeTests
             [new ChatMessage(ChatRole.User, "Say hello and ask how you can help.")], 2048,
             _ => Task.FromResult(true), (_, _, _) => throw new InvalidOperationException(),
             new EllaiFrameworkUsage(context.SessionId, new EllaiUsageLedger(), new InMemoryEllaiUsageStore()),
-            CancellationToken.None, onVerifiedStreamSegment: (segment, _) =>
+            CancellationToken.None, onTextDelta: (segment, _) =>
             {
-                Assert.False(capture.Completed);
+                Assert.True(capture.Completed);
                 segments.Add(segment);
                 return ValueTask.CompletedTask;
-            });
+            }, onVerifiedStreamSegment: (_, _) => throw new InvalidOperationException("An evidence-free segment was published early."));
         Assert.NotEmpty(segments);
         Assert.Equal(result?.DisplayText, string.Join(" ", segments));
     }

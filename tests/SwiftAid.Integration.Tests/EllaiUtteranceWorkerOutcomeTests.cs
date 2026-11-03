@@ -465,7 +465,7 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
     }
 
     [Fact]
-    public async Task FrameworkWorkerPublishesVerifiedSegmentBeforeModelFinishes()
+    public async Task FrameworkWorkerBuffersEvidenceFreeSegmentUntilModelFinishes()
     {
         var store = new InMemoryEllaiSessionStore();
         var responses = new EllaiSessionResponseStore();
@@ -492,8 +492,8 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
         {
             await model.FirstPart.Task.WaitAsync(TimeSpan.FromSeconds(5));
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            while (!responses.ReadSince(session.SessionId, 0).Responses.Any(item => item.Text == "Synthetic answer." && !item.IsFinal))
-                await Task.Delay(10, timeout.Token);
+            Assert.DoesNotContain(responses.ReadSince(session.SessionId, 0).Responses,
+                item => item.Text == "Synthetic answer.");
             Assert.Equal("Processing", Assert.Single(await store.ReadConversationAsync(session.SessionId, actor.ActorId, timeout.Token)).Outcome);
             model.Release.TrySetResult();
             EllaiConversationTurn turn;
