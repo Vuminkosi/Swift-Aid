@@ -69,6 +69,7 @@ services:
       ConnectionStrings__SwiftAid: "Host=postgres;Port=5432;Database=${POSTGRES_DB:?Set POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
 
       # Qdrant
+      Qdrant__Enabled: "true"
       Qdrant__Endpoint: "http://qdrant:6333"
       Qdrant__ApiKey: "${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}"
 

@@ -3205,3 +3205,16 @@ calling and checked the resulting evidence. The executor test also checked a
 follow-up with the same date window and omission of prior context after grant
 expiry. This proves the tested owned-case count; arbitrary aggregations and
 deployed Gateway behavior remain NOT VERIFIED.
+
+### Qdrant registration enablement — 2026-11-03
+
+The Gateway previously registered the Ellai Qdrant index and projection worker
+whenever an endpoint was present, even with `Qdrant:Enabled=false`. Because the
+provider validator skips endpoint and credential checks while disabled, this
+could also initiate connections using configuration that had not passed those
+checks. Gateway registration now follows the enable flag, after infrastructure
+option validation. The local Compose file explicitly sets the flag to preserve
+its intended Qdrant integration. Other deployments that want this integration
+must set `Qdrant:Enabled=true` and provide valid endpoint and credentials.
+
+PASS: `dotnet test tests\SwiftAid.Integration.Tests\SwiftAid.Integration.Tests.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter 'FullyQualifiedName~EllaiMemoryRegistrationTests|FullyQualifiedName~ProviderConfigurationTests' --logger 'console;verbosity=minimal'` passed 25/25. The focused cases check enabled and disabled registration and reject invalid enabled configuration; they do not launch the deployed Gateway. Deployment and production transport remain NOT VERIFIED.
