@@ -17,10 +17,11 @@
 <PageTitle>Community sessions | SwiftAid</PageTitle>
 
 <div class="community-sessions-page">
-    <PublicSessionsSurface Sessions="_sessions"
+    <PublicSessionsSurface @key="RequestedSessionId" Sessions="_sessions"
                            Loading="_loadingList"
                            ErrorMessage="@ListError"
                            OnRetry="LoadListAsync"
+                           QuerySessionsAsync="@(RequestedSessionId is null ? QuerySessionsAsync : null)"
                            LoadInvitationTextAsync="InvitationLoader"
                            LoadSubscriptionStateAsync="LoadSubscriptionStateAsync"
                            ExecuteSubscriptionActionAsync="ExecuteSubscriptionActionAsync"
@@ -33,7 +34,7 @@
             @if (CanRenderEditor(capability))
             {
                 var editorGeneration = _editorGeneration;
-                <SessionEditor @key="_editorGeneration"
+                <SessionEditor @key="(_editorGeneration, _editingVersion)"
                            ManagementCapabilities="capability"
                            SessionId="_editingSessionId"
                            ExpectedVersion="_editingVersion"
@@ -72,16 +73,35 @@
     private string? _editingStatus;
     private string? _editingCreatedBy;
     private CommunitySessionView? _staffView;
+    private Guid? _loadedRequestId;
+    private bool _pageInitialized;
+    private long _listGeneration;
     [SupplyParameterFromQuery(Name = "sessionId")] public Guid? RequestedSessionId { get; set; }
     private Func<Guid, Task<string?>> InvitationLoader => LoadInvitationAsync;
+    private async Task<PublicSessionPage?> QuerySessionsAsync(PublicSessionQuery query)
+    {
+        var result = await PublicSessionClient.QueryPublicAsync(query);
+        return result.Succeeded ? result.Value : null;
+    }
     protected override async Task OnInitializedAsync()
     {
         AuthenticationState.AuthenticationStateChanged += OnAuthenticationStateChanged;
         await RefreshStaffAccessAsync();
+        _loadedRequestId = RequestedSessionId;
         await LoadListAsync();
+        _pageInitialized = true;
         if (RequestedSessionId is { } sessionId && sessionId != Guid.Empty && _canManageSessions)
         {
             await LoadStaffSessionAsync(sessionId);
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_pageInitialized && _loadedRequestId != RequestedSessionId)
+        {
+            _loadedRequestId = RequestedSessionId;
+            await LoadListAsync();
         }
     }
 
@@ -397,11 +417,24 @@
 
     private async Task LoadListAsync()
     {
+        var generation = ++_listGeneration;
         _loadingList = true;
         ListError = null;
         try
         {
+            if (RequestedSessionId is { } sessionId)
+            {
+                var detail = await PublicSessionClient.GetPublicAsync(sessionId);
+                if (generation != _listGeneration) return;
+                _sessions = detail.Succeeded && detail.Value is { } session ? [session] : [];
+                if (!detail.Succeeded)
+                    ListError = "This session is temporarily unavailable. Try again.";
+                else if (detail.Value is null)
+                    ListError = "This session is not available.";
+                return;
+            }
             var result = await PublicSessionClient.ListPublicAsync(null);
+            if (generation != _listGeneration) return;
             if (result.Code == UiCapabilityResultCode.Success && result.Value is not null)
             {
                 _sessions = result.Value;
@@ -419,12 +452,13 @@
         }
         catch (Exception)
         {
+            if (generation != _listGeneration) return;
             _sessions = Array.Empty<PublicSessionView>();
             ListError = "Published sessions are temporarily unavailable. Check your connection and try again.";
         }
         finally
         {
-            _loadingList = false;
+            if (generation == _listGeneration) _loadingList = false;
         }
     }
 

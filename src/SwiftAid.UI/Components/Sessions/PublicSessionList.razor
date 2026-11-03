@@ -56,6 +56,11 @@
                                 }
 
                                 <div class="session-public-list__mobile-actions">
+                                    <a class="session-public-list__mobile-action" href="@DetailHref(session.SessionId)"
+                                       aria-label="@($"View details for {session.Title}")">
+                                        <MudIcon Icon="@Icons.Material.Filled.Info" aria-hidden="true" />
+                                        View details
+                                    </a>
                                     @if (!IsCancelled(session) && !string.IsNullOrWhiteSpace(session.ChannelLink))
                                     {
                                         <a class="session-public-list__mobile-action session-public-list__mobile-action--destination"
@@ -71,12 +76,19 @@
                                             Share
                                         </MudButton>
                                     }
-                                    @if (!IsCancelled(session))
+                                    @if (!IsCancelled(session) && LoadInvitationTextAsync is not null)
+                                    {
+                                        <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.ContentCopy"
+                                                   OnClick="() => CopyInvitationAsync(session)" aria-label="@($"Copy invitation for {session.Title}")">
+                                            @(_copiedSessionId == session.SessionId ? "Copied" : "Copy invitation")
+                                        </MudButton>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(PublicBasePath))
                                     {
                                         <a class="session-public-list__mobile-action" href="@CalendarHref(session.SessionId)"
                                            download="@($"session-{session.SessionId:D}.ics")">
                                             <MudIcon Icon="@Icons.Material.Filled.CalendarMonth" aria-hidden="true" />
-                                            Add to calendar
+                                            @(IsCancelled(session) ? "Download cancellation" : "Add to calendar")
                                         </a>
                                     }
                                 </div>
@@ -138,13 +150,20 @@
                         }
 
                         <div class="session-public-list__actions">
-                            @if (!IsCancelled(session))
+                            <a class="mud-button-root mud-button mud-button-text mud-button-text-primary mud-button-text-size-medium mud-ripple"
+                               href="@DetailHref(session.SessionId)" aria-label="@($"View details for {session.Title}")">
+                                <span class="mud-button-label">View details</span>
+                            </a>
+                            @if (!string.IsNullOrWhiteSpace(PublicBasePath))
                             {
                                 <a class="mud-button-root mud-button mud-button-text mud-button-text-default mud-button-text-size-medium mud-ripple"
                                    href="@CalendarHref(session.SessionId)"
                                    download="@($"session-{session.SessionId:D}.ics")">
-                                    <span class="mud-button-label">Download calendar file</span>
+                                    <span class="mud-button-label">@(IsCancelled(session) ? "Download cancellation" : "Download calendar file")</span>
                                 </a>
+                            }
+                            @if (!IsCancelled(session))
+                            {
                                 @if (LoadInvitationTextAsync is not null)
                                 {
                                     <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ContentCopy" Color="Color.Primary" OnClick="() => CopyInvitationAsync(session)" aria-label="@($"Copy invitation for {session.Title}")">
@@ -177,7 +196,7 @@
             }
         </MudStack>
         <MudText Typo="Typo.caption" Color="Color.Secondary" Class="session-public-list__notice">
-            Dates and times stay correct even if the schedule changes: an updated calendar file replaces the earlier one.
+            If the schedule changes, download an updated calendar file and check the event in your calendar app.
             Copying an invitation never marks it delivered.
         </MudText>
     }
@@ -199,14 +218,16 @@
     [Parameter] public Func<string, Task>? ShareTextAsync { get; set; }
 
     /// <summary>Base path of the public session endpoints.</summary>
-    [Parameter] public string PublicBasePath { get; set; } = "/public/v1/sessions";
+    [Parameter] public string? PublicBasePath { get; set; } = "/public/v1/sessions";
 
     private Guid? _openInvitationId;
     private string? _openInvitationText;
     private string? _invitationError;
     private Guid? _copiedSessionId;
 
-    private string CalendarHref(Guid sessionId) => $"{PublicBasePath.TrimEnd('/')}/{sessionId:D}/calendar";
+    private string CalendarHref(Guid sessionId) => $"{PublicBasePath?.TrimEnd('/')}/{sessionId:D}/calendar";
+
+    private static string DetailHref(Guid sessionId) => $"/sessions?sessionId={sessionId:D}";
 
     private static string FormatLocation(PublicSessionView session)
     {
@@ -253,12 +274,17 @@
             var zone = TimeZoneInfo.FindSystemTimeZoneById(session.TimeZoneId);
             var localStart = TimeZoneInfo.ConvertTime(session.StartUtc, zone);
             var localEnd = TimeZoneInfo.ConvertTime(session.StartUtc.AddMinutes(session.DurationMinutes), zone);
-            return $"{localStart:d MMM yyyy}, {localStart:HH:mm}–{localEnd:HH:mm} · {session.TimeZoneId}";
+            var end = localStart.Date == localEnd.Date
+                ? $"{localEnd:HH:mm zzz}"
+                : $"{localEnd:d MMM yyyy, HH:mm zzz}";
+            return $"{localStart:d MMM yyyy, HH:mm zzz}–{end} · {session.TimeZoneId}";
         }
         catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException or ArgumentException)
         {
             var startUtc = session.StartUtc.UtcDateTime;
-            return $"{startUtc:d MMM yyyy}, {startUtc:HH:mm}–{startUtc.AddMinutes(session.DurationMinutes):HH:mm} UTC";
+            var endUtc = startUtc.AddMinutes(session.DurationMinutes);
+            var end = startUtc.Date == endUtc.Date ? $"{endUtc:HH:mm}" : $"{endUtc:d MMM yyyy, HH:mm}";
+            return $"{startUtc:d MMM yyyy, HH:mm}–{end} UTC";
         }
     }
 

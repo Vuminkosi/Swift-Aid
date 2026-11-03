@@ -6,14 +6,17 @@
 @inject IPublicCommunitySessionClient SessionClient
 @inject ISubscriptionClient SubscriptionClient
 @inject NavigationManager Navigation
+@inject IHttpClientFactory HttpClientFactory
 
 <PageTitle>Community sessions | SwiftAid</PageTitle>
 
-<PublicSessionsSurface Sessions="_sessions"
+<PublicSessionsSurface @key="RequestedSessionId" Sessions="_sessions"
                        InitialSessionId="RequestedSessionId"
                        Loading="_loading"
                        ErrorMessage="@_listError"
                        OnRetry="LoadAsync"
+                       PublicSessionBasePath="@CalendarBasePath"
+                       QuerySessionsAsync="@(RequestedSessionId is null ? QuerySessionsAsync : null)"
                        LoadInvitationTextAsync="LoadInvitationAsync"
                        ShareTextAsync="ShareAsync"
                        LoadSubscriptionStateAsync="LoadSubscriptionStateAsync"
@@ -27,16 +30,54 @@
     private IReadOnlyList<PublicSessionView> _sessions = Array.Empty<PublicSessionView>();
     private bool _loading = true;
     private string? _listError;
+    private bool _requestLoaded;
+    private Guid? _loadedRequestId;
+    private long _listGeneration;
+    private string? CalendarBasePath { get; set; }
 
-    protected override Task OnInitializedAsync() => LoadAsync();
+    protected override void OnInitialized()
+    {
+        using var client = HttpClientFactory.CreateClient("SwiftAid.NotificationApi");
+        CalendarBasePath = client.BaseAddress is { } baseAddress
+            ? new Uri(baseAddress, "public/v1/sessions").AbsoluteUri
+            : null;
+    }
+
+    private async Task<PublicSessionPage?> QuerySessionsAsync(PublicSessionQuery query)
+    {
+        var result = await SessionClient.QueryPublicAsync(query);
+        return result.Succeeded ? result.Value : null;
+    }
+
+    protected override Task OnParametersSetAsync()
+    {
+        if (_requestLoaded && _loadedRequestId == RequestedSessionId)
+            return Task.CompletedTask;
+        _requestLoaded = true;
+        _loadedRequestId = RequestedSessionId;
+        return LoadAsync();
+    }
 
     private async Task LoadAsync()
     {
+        var generation = ++_listGeneration;
         _loading = true;
         _listError = null;
         try
         {
+            if (RequestedSessionId is { } sessionId)
+            {
+                var detail = await SessionClient.GetPublicAsync(sessionId);
+                if (generation != _listGeneration) return;
+                _sessions = detail.Succeeded && detail.Value is { } session ? [session] : [];
+                if (!detail.Succeeded)
+                    _listError = "This session is temporarily unavailable. Try again.";
+                else if (detail.Value is null)
+                    _listError = "This session is not available.";
+                return;
+            }
             var result = await SessionClient.ListPublicAsync();
+            if (generation != _listGeneration) return;
             if (result.Succeeded && result.Value is { } sessions)
             {
                 _sessions = sessions;
@@ -50,17 +91,19 @@
         }
         catch (OperationCanceledException)
         {
+            if (generation != _listGeneration) return;
             _sessions = Array.Empty<PublicSessionView>();
             _listError = "Loading sessions was cancelled.";
         }
         catch (Exception)
         {
+            if (generation != _listGeneration) return;
             _sessions = Array.Empty<PublicSessionView>();
             _listError = "Published sessions are temporarily unavailable. Check your connection and try again.";
         }
         finally
         {
-            _loading = false;
+            if (generation == _listGeneration) _loading = false;
         }
     }
 

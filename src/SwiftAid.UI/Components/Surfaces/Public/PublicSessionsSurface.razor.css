@@ -1,7 +1,8 @@
-.public-resource-surface {
+.community-sessions-theme ::deep .public-resource-surface {
     display: grid;
-    gap: 0.75rem;
-    padding-block: 0.75rem;
+    gap: 1rem;
+    padding-block: 1rem;
+    color: var(--ais-text-primary);
 }
 
 .public-sessions-management {
@@ -11,8 +12,96 @@
     gap: 0.75rem;
     padding: 0.625rem 0.75rem;
     border: 1px solid var(--sa-border);
-    border-radius: 0.75rem;
-    background: var(--sa-surface);
+    border-radius: var(--ais-radius-panel);
+    background: var(--ais-bg-surface);
+}
+
+.community-session-view-switch,
+.community-session-calendar__header,
+.community-session-calendar__navigation {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.community-session-view-switch button,
+.community-session-calendar button {
+    min-height: 2.75rem;
+    min-width: 2.75rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--ais-border-control);
+    border-radius: var(--ais-radius-control);
+    color: var(--ais-text-primary);
+    background: var(--ais-bg-surface);
+    font: inherit;
+    cursor: pointer;
+}
+
+.community-session-view-switch button[aria-pressed="true"],
+.community-session-calendar button[aria-pressed="true"] {
+    border-color: var(--ais-action-primary);
+    color: var(--ais-action-on-primary);
+    background: var(--ais-action-primary);
+}
+
+.community-session-view-switch button:focus-visible,
+.community-session-calendar button:focus-visible {
+    outline: 2px solid var(--ais-focus);
+    outline-offset: 2px;
+}
+
+.community-session-calendar {
+    display: grid;
+    gap: 0.75rem;
+    max-width: 36rem;
+    padding: 1rem;
+    border: 1px solid var(--ais-border-default);
+    border-radius: var(--ais-radius-panel);
+    background: var(--ais-bg-surface);
+}
+
+.community-session-calendar__header,
+.community-session-calendar__navigation {
+    justify-content: space-between;
+}
+
+.community-session-calendar h2,
+.community-session-calendar p {
+    margin: 0;
+}
+
+.community-session-calendar h2 {
+    font-size: 1.25rem;
+    line-height: 1.4;
+    font-weight: 600;
+}
+
+.community-session-calendar p {
+    color: var(--ais-text-secondary);
+    font-size: 0.875rem;
+}
+
+.community-session-calendar__grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(2.75rem, 1fr));
+    gap: 0.125rem;
+    overflow-x: auto;
+}
+
+.community-session-calendar__grid button {
+    min-width: 0;
+    padding: 0.25rem;
+}
+
+.community-session-calendar__grid button.outside-month:not([aria-pressed="true"]),
+.community-session-calendar__weekday {
+    color: var(--ais-text-secondary);
+}
+
+.community-session-calendar__weekday {
+    text-align: center;
+    font-size: 0.75rem;
+    font-weight: 600;
 }
 
 .public-sessions-mobile-header,
@@ -21,19 +110,19 @@
 }
 
 .public-sessions-filters,
-.public-session-details,
-.public-session-subscription {
+.community-sessions-theme ::deep .public-session-details,
+.community-sessions-theme ::deep .public-session-subscription {
     display: grid;
     gap: 0.625rem;
     padding: 0.75rem;
     border: 1px solid var(--sa-border);
-    border-radius: 1rem;
-    background: var(--sa-surface);
+    border-radius: var(--ais-radius-panel);
+    background: var(--ais-bg-surface);
 }
 
 .public-sessions-hint {
     margin-top: -0.25rem;
-    color: var(--mud-palette-text-secondary);
+    color: var(--ais-text-secondary);
     font-size: 0.8rem;
 }
 
@@ -48,17 +137,23 @@
     justify-content: space-between;
     gap: 0.75rem;
     min-height: 2.75rem;
-    color: var(--mud-palette-primary);
+    color: var(--ais-action-primary);
     font-weight: 600;
     cursor: pointer;
 }
 
 .public-sessions-filters__advanced > summary::marker {
-    color: var(--mud-palette-primary);
+    color: var(--ais-action-primary);
+}
+
+.public-sessions-filters__advanced > summary:focus-visible {
+    outline: 2px solid var(--ais-focus);
+    outline-offset: 2px;
+    border-radius: var(--ais-radius-control);
 }
 
 .public-sessions-filters__count {
-    color: var(--mud-palette-text-secondary);
+    color: var(--ais-text-secondary);
     font-size: 0.8rem;
     font-weight: 400;
 }
@@ -79,6 +174,10 @@
 .public-sessions-workspace > * {
     min-width: 0;
     width: 100%;
+}
+
+.public-sessions-workspace--detail-active ::deep .public-session-tabs {
+    order: -1;
 }
 
 .public-sessions-workspace ::deep .session-public-list > .mud-stack {
@@ -121,11 +220,11 @@
     min-width: 0;
     padding: 0.625rem;
     border: 1px solid var(--sa-border);
-    border-radius: 0.75rem;
+    border-radius: var(--ais-radius-control);
 }
 
 .public-session-details__facts dt {
-    color: var(--mud-palette-text-secondary);
+    color: var(--ais-text-secondary);
     font-size: 0.8rem;
 }
 
@@ -160,24 +259,24 @@
     max-width: 44rem;
 }
 
-.public-session-subscription ::deep .mud-input-control {
+.community-sessions-theme ::deep .public-session-subscription .mud-input-control {
     max-width: 28rem;
 }
 
-.public-session-subscription ::deep .mud-button-root {
+.community-sessions-theme ::deep .public-session-subscription .mud-button-root {
     min-height: 2.75rem;
 }
 
-.public-session-tabs {
+.community-sessions-theme ::deep .public-session-tabs {
     min-width: 0;
     width: 100%;
 }
 
-.public-session-tabs ::deep .mud-tabs-tabbar {
+.community-sessions-theme ::deep .public-session-tabs .mud-tabs-tabbar {
     border-bottom: 1px solid var(--sa-border);
 }
 
-.public-session-tabs ::deep .mud-tab {
+.community-sessions-theme ::deep .public-session-tabs .mud-tab {
     min-width: 7rem;
     min-height: 2.75rem;
     text-transform: none;
@@ -196,9 +295,9 @@
     .public-sessions-mobile-header ::deep h1 {
         min-width: 0;
         margin: 0;
-        font-size: 1.125rem;
-        line-height: 1.25;
-        font-weight: 700;
+        font-size: 1.5rem;
+        line-height: 1.333;
+        font-weight: 600;
     }
 
     .public-sessions-mobile-header ::deep .mud-button-root {
@@ -209,8 +308,21 @@
     }
 
     .public-sessions-mobile-header ::deep .mud-button-filled-primary {
-        background-color: var(--sa-action-active);
-        color: var(--sa-action-foreground);
+        background-color: var(--ais-action-primary);
+        color: var(--ais-action-on-primary);
+    }
+
+    .public-sessions-mobile-header ::deep .mud-button-filled-primary:hover:not(:disabled) {
+        background-color: var(--ais-action-hover);
+    }
+
+    .public-sessions-mobile-header ::deep .mud-button-filled-primary:active:not(:disabled) {
+        background-color: var(--ais-action-pressed);
+    }
+
+    .public-sessions-mobile-header ::deep .mud-button-filled-primary:disabled {
+        background-color: var(--ais-bg-disabled);
+        color: var(--ais-text-disabled);
     }
 
     .public-sessions-mobile-tabs {
@@ -233,7 +345,7 @@
     }
 
     .public-sessions-mobile-tabs__tab.is-active {
-        border-bottom-color: var(--sa-brand-blue);
+        border-bottom-color: var(--ais-action-primary);
         color: var(--sa-text-primary);
     }
 
@@ -258,7 +370,7 @@
         grid-template-columns: minmax(0, 1fr);
     }
 
-    .public-sessions-workspace--editor-active > .public-session-tabs {
+    .public-sessions-workspace--editor-active ::deep .public-session-tabs {
         order: -1;
     }
 
@@ -267,8 +379,8 @@
     }
 
     .public-sessions-filters,
-    .public-session-details,
-    .public-session-subscription {
+    .community-sessions-theme ::deep .public-session-details,
+    .community-sessions-theme ::deep .public-session-subscription {
         padding: 0.75rem;
     }
 
@@ -305,7 +417,7 @@
         grid-template-columns: minmax(0, 1fr);
     }
 
-    .public-sessions-workspace--editor-active > .public-session-tabs {
+    .public-sessions-workspace--editor-active ::deep .public-session-tabs {
         order: -1;
     }
 
@@ -313,4 +425,4 @@
         order: 1;
     }
 }
-@media (max-width: 767px) { .public-resource-surface { padding-inline: 0.5rem; } }
+@media (max-width: 767px) { .community-sessions-theme ::deep .public-resource-surface { padding-inline: 1rem; } }

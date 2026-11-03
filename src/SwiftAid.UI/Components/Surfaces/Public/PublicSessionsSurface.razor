@@ -5,9 +5,15 @@
 @using SwiftAid.UI.Components
 @using SwiftAid.UI.Components.Sessions
 @using SwiftAid.UI.Components.Theme
+@using System.Globalization
 @inject NavigationManager Navigation
 
+<div class="community-sessions-theme">
 <MudContainer Fixed="true" Class="public-resource-surface" data-ellai-control="community-sessions.browse" data-bonboarding-anchor="ellai-community-browse">
+    @if (InitialSessionId is not null)
+    {
+        <MudButton Href="/sessions" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.ArrowBack">All sessions</MudButton>
+    }
     <MudHidden Breakpoint="Breakpoint.SmAndDown">
         <SwiftAidPageHeading Eyebrow="Public community" Title="Community sessions" Description="Browse published sessions. Calendar downloads, copied invitations and shared text never mark attendance or send automatically." HeadingId="public-sessions-heading" />
     </MudHidden>
@@ -61,20 +67,79 @@
         </MudHidden>
     }
 
-    @if (!Loading && ErrorMessage is null && Sessions.Count > 0)
+    @if (QuerySessionsAsync is not null)
     {
-        <MudHidden Breakpoint="Breakpoint.SmAndDown">
+        <div class="community-session-view-switch" role="group" aria-label="Community session view">
+            <button type="button" aria-pressed="@(!_calendarVisible)" @onclick="ShowLibraryAsync">Session library</button>
+            <button type="button" aria-pressed="@_calendarVisible" @onclick="ShowCalendarAsync">Calendar</button>
+        </div>
+        @if (_calendarVisible)
+        {
+            <section class="community-session-calendar" aria-labelledby="community-session-calendar-heading">
+                <div class="community-session-calendar__header">
+                    <h2 id="community-session-calendar-heading">Community calendar</h2>
+                    <button type="button" @onclick="SelectTodayAsync">Today (UTC)</button>
+                </div>
+                <p>Choose a day to see sessions scheduled for that local date. Times below show each session's time zone.</p>
+                <div class="community-session-calendar__navigation">
+                    <button type="button" aria-label="Previous month" @onclick="() => ChangeCalendarMonth(-1)">‹</button>
+                    <strong aria-live="polite">@_calendarMonth.ToString("MMMM yyyy", CultureInfo.CurrentCulture)</strong>
+                    <button type="button" aria-label="Next month" @onclick="() => ChangeCalendarMonth(1)">›</button>
+                </div>
+                <div class="community-session-calendar__grid" role="group" aria-label="Choose a calendar date">
+                    @foreach (var weekday in CalendarWeekdays)
+                    {
+                        <span class="community-session-calendar__weekday" aria-hidden="true">@weekday</span>
+                    }
+                    @foreach (var day in CalendarDays)
+                    {
+                        var hasSessions = day.Month == _calendarMonth.Month && _monthDates.Contains(DateOnly.FromDateTime(day));
+                        <button type="button" class="@(day.Month == _calendarMonth.Month ? "" : "outside-month")"
+                                aria-label="@(day.ToString("D", CultureInfo.CurrentCulture) + (hasSessions ? ", sessions available" : ""))"
+                                aria-pressed="@(_calendarSelectedDate == day.Date)"
+                                @onclick="() => SelectCalendarDayAsync(day)">@day.Day@if (hasSessions) { <span aria-hidden="true"> •</span> }</button>
+                    }
+                </div>
+                @if (_monthLoading)
+                {
+                    <p role="status">Loading dates with sessions…</p>
+                }
+                else if (_monthError is not null)
+                {
+                    <p role="alert">@_monthError</p>
+                    <button type="button" @onclick="RefreshCalendarMonthAsync">Retry month overview</button>
+                }
+                else if (_monthNext is not null)
+                {
+                    <p role="status">More sessions may appear on these dates. Load more to complete the month overview.</p>
+                    <button type="button" @onclick="LoadMoreCalendarMonthAsync">Load more month dates</button>
+                }
+                else
+                {
+                    <p>Dots mark dates with published sessions matching the search, category and language filters.</p>
+                }
+                <p role="status">@(_calendarSelectedDate is { } selectedDay ? $"Agenda for {selectedDay.ToString("D", CultureInfo.CurrentCulture)}" : "Choose a date to see its agenda.")</p>
+            </section>
+        }
+    }
+
+    @if (!Loading && ErrorMessage is null && (QuerySessionsAsync is not null || Sessions.Count > 0))
+    {
             <section class="public-sessions-filters" aria-label="Filter community sessions">
                 <MudTextField T="string" Label="Search sessions" data-ellai-control="community-sessions.search" data-bonboarding-anchor="ellai-community-search" Value="@_searchText"
                               ValueChanged="SearchChangedAsync" Variant="Variant.Outlined"
-                              Immediate="true" DebounceInterval="250" Clearable="true"
+                              Immediate="true" DebounceInterval="250" Clearable="true" MaxLength="120"
                               Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
                               aria-describedby="sessions-search-help" />
-                <span id="sessions-search-help" class="public-sessions-hint">Search session title, summary, presenter, topic, language, or region.</span>
+                <span id="sessions-search-help" class="public-sessions-hint">@(QuerySessionsAsync is null ? "Search the loaded sessions. Additional published sessions may not be included." : "Search published sessions by title, summary, presenter, language, region, or exact topic.")</span>
 
             <details class="public-sessions-filters__advanced">
-                <summary data-ellai-control="community-sessions.more-filters" data-bonboarding-anchor="ellai-community-more-filters">More filters <span class="public-sessions-filters__count">@FilteredSessions.Count of @Sessions.Count sessions</span></summary>
+                <summary data-ellai-control="community-sessions.more-filters" data-bonboarding-anchor="ellai-community-more-filters">More filters <span class="public-sessions-filters__count">@ActiveFilterCount active</span></summary>
                 <div class="public-sessions-filters__controls">
+            @if (QuerySessionsAsync is not null)
+            {
+                <span class="public-sessions-hint">Enter a sector or an exact, case-sensitive topic, and a language. Dates use each session's time zone.</span>
+            }
             <div class="public-sessions-filters__row">
                 <MudSelect T="SessionPeriodFilter" Label="When" data-ellai-control="community-sessions.period" data-bonboarding-anchor="ellai-community-period" Value="@_periodFilter" ValueChanged="PeriodChangedAsync"
                            Variant="Variant.Outlined" Dense="true">
@@ -83,6 +148,13 @@
                     <MudSelectItem T="SessionPeriodFilter" Value="@SessionPeriodFilter.CustomDates">Choose dates</MudSelectItem>
                     <MudSelectItem T="SessionPeriodFilter" Value="@SessionPeriodFilter.All">All dates</MudSelectItem>
                 </MudSelect>
+                @if (QuerySessionsAsync is not null)
+                {
+                    <MudTextField T="string" Label="Sector or exact topic" data-ellai-control="community-sessions.category" data-bonboarding-anchor="ellai-community-category" Value="@_categoryFilter" ValueChanged="CategoryChangedAsync" Variant="Variant.Outlined" Immediate="true" DebounceInterval="400" Clearable="true" MaxLength="120" />
+                    <MudTextField T="string" Label="Language" data-ellai-control="community-sessions.language" data-bonboarding-anchor="ellai-community-language" Value="@_languageFilter" ValueChanged="LanguageChangedAsync" Variant="Variant.Outlined" Immediate="true" DebounceInterval="400" Clearable="true" MaxLength="120" />
+                }
+                else
+                {
                 <MudSelect T="string" Label="Category" data-ellai-control="community-sessions.category" data-bonboarding-anchor="ellai-community-category" Value="@_categoryFilter" ValueChanged="CategoryChangedAsync"
                            Variant="Variant.Outlined" Dense="true" Clearable="true">
                     @foreach (var category in Categories)
@@ -97,6 +169,7 @@
                         <MudSelectItem T="string" Value="@language">@language</MudSelectItem>
                     }
                 </MudSelect>
+                }
             </div>
 
             @if (_periodFilter == SessionPeriodFilter.CustomDates)
@@ -116,25 +189,38 @@
                 </div>
             </details>
             </section>
-        </MudHidden>
     }
 
     <div class="@WorkspaceClass">
-    @if (!Loading && ErrorMessage is null && Sessions.Count > 0 && FilteredSessions.Count == 0)
+    <div class="public-sessions-results">
+    @if (!IsLoading && DisplayError is null && FilteredSessions.Count == 0 && (QuerySessionsAsync is not null || VisibleSessions.Count > 0 || HasActiveFilters || _nextPage is not null))
     {
-        <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="No matching sessions" Description="Try changing the date, category, language, or search filters." />
+        <SwiftAidStatePanel State="SwiftAidViewState.Empty" Title="@EmptyResultsTitle" Description="@EmptyResultsDescription" />
     }
     else
     {
         <PublicSessionList Sessions="FilteredSessions"
-                           Loading="Loading"
-                           ErrorMessage="@ErrorMessage"
-                           OnRetry="OnRetry"
+                           Loading="IsLoading"
+                           ErrorMessage="@DisplayError"
+                           OnRetry="RetryAsync"
+                           PublicBasePath="@PublicSessionBasePath"
                            LoadInvitationTextAsync="LoadInvitationTextAsync"
                            ShareTextAsync="ShareTextAsync" />
     }
 
-    @if (!Loading && ErrorMessage is null && (SelectedSession is not null || HasStaffEditor))
+    @if (!IsLoading && DisplayError is null && _nextPage is not null)
+    {
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="LoadMoreAsync" Disabled="@_loadingMore">
+            @(_loadingMore ? "Loading more sessions…" : "Load more sessions")
+        </MudButton>
+        @if (_moreError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" role="alert">@_moreError</MudAlert>
+        }
+    }
+    </div>
+
+    @if (!IsLoading && DisplayError is null && (SelectedSession is not null || HasStaffEditor))
     {
         <MudTabs Class="public-session-tabs" Rounded="true" KeepPanelsAlive="true"
                  @bind-ActivePanelIndex="_activeTabIndex">
@@ -145,7 +231,8 @@
             <div class="public-session-details__heading">
                 <div>
                     <MudText id="public-session-details-title" data-ellai-control="community-sessions.details" data-bonboarding-anchor="ellai-community-details" Typo="Typo.subtitle1" HtmlTag="h2">Session details</MudText>
-                    <MudText Typo="Typo.body2" Color="Color.Secondary">@selected.Title</MudText>
+                    <MudText Typo="Typo.h6" HtmlTag="h3">@selected.Title</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">@selected.Status</MudText>
                 </div>
                 <MudSelect T="Guid" Label="Selected session" Value="@_selectedSessionId" ValueChanged="SessionSelectedAsync"
                            Variant="Variant.Outlined" Dense="true">
@@ -161,6 +248,11 @@
                         @(CanEditSelectedSession ? "Edit selected session" : "Open session actions")
                     </MudButton>
                 }
+            </div>
+
+            <div class="public-session-details__overview">
+                <MudText Typo="Typo.subtitle2" HtmlTag="h3">About this session</MudText>
+                <MudText Typo="Typo.body2">@selected.Summary</MudText>
             </div>
 
             <dl class="public-session-details__facts">
@@ -179,22 +271,7 @@
 
             <div class="public-session-details__materials">
                 <MudText Typo="Typo.subtitle2" HtmlTag="h3">Linked materials</MudText>
-                @if (selected.Materials.Count == 0)
-                {
-                    <MudText Typo="Typo.body2" Color="Color.Secondary">No materials are linked to this session.</MudText>
-                }
-                else
-                {
-                    <MudText Typo="Typo.body2" Color="Color.Secondary">
-                        @selected.Materials.Count material reference(s) are linked. Their titles and content are not available in this session view.
-                    </MudText>
-                    <ul>
-                        @for (var index = 0; index < selected.Materials.Count; index++)
-                        {
-                            <li>Material version @selected.Materials[index].SourceVersion</li>
-                        }
-                    </ul>
-                }
+                <MudText Typo="Typo.body2" Color="Color.Secondary">Approved materials are not available in this view.</MudText>
             </div>
         </MudPaper>
         </MudTabPanel>
@@ -317,26 +394,29 @@
     }
     </div>
 </MudContainer>
+</div>
 
 @code {
     public string ComponentId => EllaiCommunityUiManifest.Definition.ComponentId;
     public EllaiUiManifest Describe() => EllaiCommunityUiManifest.Definition;
-    public EllaiUiState GetState() => new(ComponentId, Loading, ErrorMessage is not null,
+    public EllaiUiState GetState() => new(ComponentId, IsLoading, DisplayError is not null,
         EllaiCommunityUiManifest.Controls.Select(control => new UiControlState(control.ControlId,
             IsSemanticControlRendered(control.ControlId) ? UiObservationState.Ready : UiObservationState.Unmounted)).ToArray());
 
     private bool IsSemanticControlRendered(string id) => id switch
     {
         "community-sessions.browse" or "community-sessions.mobile-period" => true,
-        "community-sessions.details" => !Loading && ErrorMessage is null && SelectedSession is not null,
-        "community-sessions.from" or "community-sessions.to" => !Loading && ErrorMessage is null && Sessions.Count > 0 && _periodFilter == SessionPeriodFilter.CustomDates,
-        _ => !Loading && ErrorMessage is null && Sessions.Count > 0,
+        "community-sessions.details" => !IsLoading && DisplayError is null && SelectedSession is not null,
+        "community-sessions.from" or "community-sessions.to" => !Loading && ErrorMessage is null && (QuerySessionsAsync is not null || Sessions.Count > 0) && _periodFilter == SessionPeriodFilter.CustomDates,
+        _ => !Loading && ErrorMessage is null && (QuerySessionsAsync is not null || Sessions.Count > 0),
     };
 
     [Parameter, EditorRequired] public IReadOnlyList<PublicSessionView> Sessions { get; set; } = Array.Empty<PublicSessionView>();
     [Parameter] public bool Loading { get; set; }
     [Parameter] public string? ErrorMessage { get; set; }
     [Parameter] public EventCallback OnRetry { get; set; }
+    [Parameter] public string? PublicSessionBasePath { get; set; } = "/public/v1/sessions";
+    [Parameter] public Func<PublicSessionQuery, Task<PublicSessionPage?>>? QuerySessionsAsync { get; set; }
     [Parameter] public Func<Guid, Task<string?>>? LoadInvitationTextAsync { get; set; }
     [Parameter] public Func<string, Task>? ShareTextAsync { get; set; }
     [Parameter] public Func<Guid, Task<SessionSubscriptionPanelState?>>? LoadSubscriptionStateAsync { get; set; }
@@ -374,10 +454,50 @@
     private Guid? _capabilitySessionId;
     private long? _capabilityVersion;
     private long _managementRequestGeneration;
+    private IReadOnlyList<PublicSessionView> _querySessions = Array.Empty<PublicSessionView>();
+    private PublicSessionPosition? _nextPage;
+    private PublicSessionQuery? _currentQuery;
+    private bool _queryInitialized;
+    private bool _queryLoading;
+    private bool _loadingMore;
+    private string? _queryError;
+    private string? _moreError;
+    private long _queryGeneration;
+    private bool _calendarVisible;
+    private DateTime _calendarMonth = new(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
+    private DateTime? _calendarSelectedDate;
+    private readonly HashSet<DateOnly> _monthDates = [];
+    private PublicSessionQuery? _monthQuery;
+    private PublicSessionPosition? _monthNext;
+    private bool _monthLoading;
+    private string? _monthError;
+    private long _monthGeneration;
+
+    private static IReadOnlyList<string> CalendarWeekdays => Enumerable.Range(0, 7)
+        .Select(day => CultureInfo.CurrentCulture.DateTimeFormat.GetAbbreviatedDayName((DayOfWeek)day)).ToArray();
+
+    private IEnumerable<DateTime> CalendarDays
+    {
+        get
+        {
+            var first = _calendarMonth.AddDays(-(int)_calendarMonth.DayOfWeek);
+            return Enumerable.Range(0, 42).Select(day => first.AddDays(day));
+        }
+    }
+
+    private bool IsLoading => Loading || _queryLoading;
+    private string? DisplayError => ErrorMessage ?? DateRangeError ?? _queryError;
+    private string? DateRangeError => _periodFilter == SessionPeriodFilter.CustomDates &&
+        _dateFrom is { } from && _dateTo is { } to && from > to
+        ? "The end date must be on or after the start date."
+        : null;
+    private IReadOnlyList<PublicSessionView> VisibleSessions => QuerySessionsAsync is null ? Sessions : _querySessions;
 
     private string WorkspaceClass => IsEditorTabActive
         ? "public-sessions-workspace public-sessions-workspace--editor-active"
-        : "public-sessions-workspace";
+        : InitialSessionId is not null
+            ? "public-sessions-workspace public-sessions-workspace--detail-active"
+            : "public-sessions-workspace";
 
     private bool IsEditorTabActive => _editorRequested && HasStaffEditor &&
         _activeTabIndex == (SelectedSession is null ? 0 : 2);
@@ -437,14 +557,14 @@
 
     private bool IsSubscriptionBusy => _subscriptionBusySessionId == _selectedSessionId;
 
-    private IReadOnlyList<string> Categories => Sessions
+    private IReadOnlyList<string> Categories => VisibleSessions
         .SelectMany(session => new[] { session.Sector }.Concat(session.TopicTags))
         .Where(value => !string.IsNullOrWhiteSpace(value))
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .Order(StringComparer.OrdinalIgnoreCase)
         .ToArray();
 
-    private IReadOnlyList<string> Languages => Sessions
+    private IReadOnlyList<string> Languages => VisibleSessions
         .Select(session => session.Language)
         .Where(value => !string.IsNullOrWhiteSpace(value))
         .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -457,12 +577,12 @@
         {
             var now = DateTimeOffset.UtcNow;
             var search = _searchText.Trim();
-            return Sessions
+            return VisibleSessions
                 .Where(session => MatchesPeriod(session, now))
-                .Where(MatchesCategory)
-                .Where(session => string.IsNullOrWhiteSpace(_languageFilter) ||
+                .Where(session => QuerySessionsAsync is not null || MatchesCategory(session))
+                .Where(session => QuerySessionsAsync is not null || string.IsNullOrWhiteSpace(_languageFilter) ||
                     string.Equals(session.Language, _languageFilter, StringComparison.OrdinalIgnoreCase))
-                .Where(session => MatchesSearch(session, search))
+                .Where(session => QuerySessionsAsync is not null || MatchesSearch(session, search))
                 .ToArray();
         }
     }
@@ -474,14 +594,37 @@
     private bool HasActiveFilters => !string.IsNullOrWhiteSpace(_searchText) ||
         !string.IsNullOrWhiteSpace(_categoryFilter) ||
         !string.IsNullOrWhiteSpace(_languageFilter) ||
-        _periodFilter != SessionPeriodFilter.Upcoming ||
-        _dateFrom.HasValue || _dateTo.HasValue;
+        _periodFilter != SessionPeriodFilter.Upcoming;
+
+    private int ActiveFilterCount =>
+        (string.IsNullOrWhiteSpace(_searchText) ? 0 : 1) +
+        (string.IsNullOrWhiteSpace(_categoryFilter) ? 0 : 1) +
+        (string.IsNullOrWhiteSpace(_languageFilter) ? 0 : 1) +
+        (_periodFilter == SessionPeriodFilter.Upcoming ? 0 : 1);
+
+    private string EmptyResultsTitle => _nextPage is not null
+        ? "No matches in this batch"
+        : QuerySessionsAsync is not null && !HasActiveFilters
+            ? "No upcoming sessions found"
+            : "No sessions match these filters";
+
+    private string EmptyResultsDescription => _nextPage is not null
+        ? "Load more sessions to continue searching."
+        : QuerySessionsAsync is null
+            ? "Try changing your filters. Other published sessions may not be included in this list."
+            : "Try changing your search or filters.";
 
     protected override async Task OnParametersSetAsync()
     {
         if (StaffEditorCapabilities is not null && StaffEditorCapabilities != _editorCapabilities)
         {
             _editorCapabilities = StaffEditorCapabilities;
+        }
+
+        if (QuerySessionsAsync is not null && !_queryInitialized && !Loading && ErrorMessage is null)
+        {
+            _queryInitialized = true;
+            await RefreshQueryAsync();
         }
 
         EnsureSelectedSession();
@@ -520,6 +663,9 @@
     private async Task SearchChangedAsync(string? value)
     {
         _searchText = value ?? string.Empty;
+        var monthTask = _calendarVisible ? RefreshCalendarMonthAsync() : Task.CompletedTask;
+        await RefreshQueryAsync();
+        await monthTask;
         EnsureSelectedSession();
         await EnsureSubscriptionForSelectionAsync();
     }
@@ -527,6 +673,9 @@
     private async Task CategoryChangedAsync(string? value)
     {
         _categoryFilter = value;
+        var monthTask = _calendarVisible ? RefreshCalendarMonthAsync() : Task.CompletedTask;
+        await RefreshQueryAsync();
+        await monthTask;
         EnsureSelectedSession();
         await EnsureSubscriptionForSelectionAsync();
     }
@@ -534,6 +683,9 @@
     private async Task LanguageChangedAsync(string? value)
     {
         _languageFilter = value;
+        var monthTask = _calendarVisible ? RefreshCalendarMonthAsync() : Task.CompletedTask;
+        await RefreshQueryAsync();
+        await monthTask;
         EnsureSelectedSession();
         await EnsureSubscriptionForSelectionAsync();
     }
@@ -541,6 +693,11 @@
     private async Task PeriodChangedAsync(SessionPeriodFilter value)
     {
         _periodFilter = value;
+        if (value != SessionPeriodFilter.CustomDates)
+            _calendarSelectedDate = null;
+        var monthTask = _calendarVisible ? RefreshCalendarMonthAsync() : Task.CompletedTask;
+        await RefreshQueryAsync();
+        await monthTask;
         EnsureSelectedSession();
         await EnsureSubscriptionForSelectionAsync();
     }
@@ -548,6 +705,8 @@
     private async Task DateFromChangedAsync(DateTime? value)
     {
         _dateFrom = value?.Date;
+        _calendarSelectedDate = null;
+        await RefreshQueryAsync();
         EnsureSelectedSession();
         await EnsureSubscriptionForSelectionAsync();
     }
@@ -555,6 +714,8 @@
     private async Task DateToChangedAsync(DateTime? value)
     {
         _dateTo = value?.Date;
+        _calendarSelectedDate = null;
+        await RefreshQueryAsync();
         EnsureSelectedSession();
         await EnsureSubscriptionForSelectionAsync();
     }
@@ -567,8 +728,203 @@
         _periodFilter = SessionPeriodFilter.Upcoming;
         _dateFrom = null;
         _dateTo = null;
+        _calendarSelectedDate = null;
+        var monthTask = _calendarVisible ? RefreshCalendarMonthAsync() : Task.CompletedTask;
+        await RefreshQueryAsync();
+        await monthTask;
         EnsureSelectedSession();
         await EnsureSubscriptionForSelectionAsync();
+    }
+
+    private Task ShowLibraryAsync()
+    {
+        _calendarVisible = false;
+        return Task.CompletedTask;
+    }
+
+    private async Task ShowCalendarAsync()
+    {
+        _calendarVisible = true;
+        if (_calendarSelectedDate is null)
+            await SelectTodayAsync();
+        else
+            await RefreshCalendarMonthAsync();
+    }
+
+    private Task SelectTodayAsync() => SelectCalendarDayAsync(DateTime.UtcNow.Date);
+
+    private Task ChangeCalendarMonth(int months) => SelectCalendarDayAsync(_calendarMonth.AddMonths(months));
+
+    private async Task SelectCalendarDayAsync(DateTime date)
+    {
+        var selected = date.Date;
+        var monthChanged = selected.Year != _calendarMonth.Year || selected.Month != _calendarMonth.Month;
+        _calendarMonth = new DateTime(selected.Year, selected.Month, 1);
+        _calendarSelectedDate = selected;
+        _periodFilter = SessionPeriodFilter.CustomDates;
+        _dateFrom = selected;
+        _dateTo = selected;
+        var monthTask = _calendarVisible && (monthChanged || _monthQuery is null)
+            ? RefreshCalendarMonthAsync() : Task.CompletedTask;
+        await RefreshQueryAsync();
+        await monthTask;
+        EnsureSelectedSession();
+        await EnsureSubscriptionForSelectionAsync();
+    }
+
+    private async Task RefreshCalendarMonthAsync()
+    {
+        if (QuerySessionsAsync is null) return;
+        var generation = ++_monthGeneration;
+        _monthDates.Clear();
+        _monthNext = null;
+        _monthError = null;
+        _monthQuery = new PublicSessionQuery(Search: _searchText, Category: _categoryFilter, Language: _languageFilter,
+            LocalDateFrom: DateOnly.FromDateTime(_calendarMonth),
+            LocalDateTo: DateOnly.FromDateTime(_calendarMonth.AddMonths(1).AddDays(-1)),
+            StartFromUtc: _periodFilter == SessionPeriodFilter.Upcoming ? DateTimeOffset.UtcNow : null,
+            StartBeforeUtc: _periodFilter == SessionPeriodFilter.Past ? DateTimeOffset.UtcNow : null,
+            Limit: 100);
+        await FetchCalendarMonthPageAsync(_monthQuery, generation);
+    }
+
+    private Task LoadMoreCalendarMonthAsync() => _monthQuery is not null && _monthNext is { } position && !_monthLoading
+        ? FetchCalendarMonthPageAsync(_monthQuery with { AfterStartUtc = position.StartUtc, AfterSessionId = position.SessionId }, _monthGeneration)
+        : Task.CompletedTask;
+
+    private async Task FetchCalendarMonthPageAsync(PublicSessionQuery query, long generation)
+    {
+        if (QuerySessionsAsync is null) return;
+        _monthLoading = true;
+        _monthError = null;
+        try
+        {
+            var page = await QuerySessionsAsync(query);
+            if (generation != _monthGeneration) return;
+            if (page is null)
+            {
+                _monthError = "The month overview is unavailable. Try again.";
+                return;
+            }
+            foreach (var session in page.Items)
+                _monthDates.Add(DateOnly.FromDateTime(SessionLocalDate(session)));
+            _monthNext = page.Next;
+        }
+        catch (Exception)
+        {
+            if (generation == _monthGeneration) _monthError = "The month overview is unavailable. Try again.";
+        }
+        finally
+        {
+            if (generation == _monthGeneration) _monthLoading = false;
+        }
+    }
+
+    private async Task RefreshQueryAsync()
+    {
+        if (QuerySessionsAsync is null)
+            return;
+
+        var generation = ++_queryGeneration;
+        if (DateRangeError is not null)
+        {
+            _queryLoading = false;
+            _loadingMore = false;
+            _querySessions = Array.Empty<PublicSessionView>();
+            _nextPage = null;
+            return;
+        }
+        var now = DateTimeOffset.UtcNow;
+        var query = new PublicSessionQuery(
+            Search: _searchText,
+            Category: _categoryFilter,
+            Language: _languageFilter,
+            LocalDateFrom: _periodFilter == SessionPeriodFilter.CustomDates && _dateFrom is { } from ? DateOnly.FromDateTime(from) : null,
+            LocalDateTo: _periodFilter == SessionPeriodFilter.CustomDates && _dateTo is { } to ? DateOnly.FromDateTime(to) : null,
+            StartFromUtc: _periodFilter == SessionPeriodFilter.Upcoming ? now : null,
+            StartBeforeUtc: _periodFilter == SessionPeriodFilter.Past ? now : null);
+        _currentQuery = query;
+        _queryLoading = true;
+        _loadingMore = false;
+        _queryError = null;
+        _moreError = null;
+        _nextPage = null;
+        try
+        {
+            var page = await QuerySessionsAsync(query);
+            if (generation != _queryGeneration)
+                return;
+            if (page is null)
+            {
+                _querySessions = Array.Empty<PublicSessionView>();
+                _queryError = "Published sessions are temporarily unavailable. Try again.";
+                return;
+            }
+            _querySessions = page.Items;
+            _nextPage = page.Next;
+        }
+        catch (Exception)
+        {
+            if (generation == _queryGeneration)
+            {
+                _querySessions = Array.Empty<PublicSessionView>();
+                _queryError = "Published sessions are temporarily unavailable. Try again.";
+            }
+        }
+        finally
+        {
+            if (generation == _queryGeneration)
+                _queryLoading = false;
+        }
+    }
+
+    private async Task LoadMoreAsync()
+    {
+        if (QuerySessionsAsync is null || _currentQuery is null || _nextPage is null || _loadingMore)
+            return;
+
+        var generation = _queryGeneration;
+        var position = _nextPage;
+        _loadingMore = true;
+        _moreError = null;
+        try
+        {
+            var page = await QuerySessionsAsync(_currentQuery with
+            {
+                AfterStartUtc = position.StartUtc,
+                AfterSessionId = position.SessionId
+            });
+            if (generation != _queryGeneration)
+                return;
+            if (page is null)
+            {
+                _moreError = "More sessions could not be loaded. Try again.";
+                return;
+            }
+            _querySessions = _querySessions.Concat(page.Items)
+                .DistinctBy(session => session.SessionId).ToArray();
+            _nextPage = page.Next;
+            EnsureSelectedSession();
+            await EnsureSubscriptionForSelectionAsync();
+        }
+        catch (Exception)
+        {
+            if (generation == _queryGeneration)
+                _moreError = "More sessions could not be loaded. Try again.";
+        }
+        finally
+        {
+            if (generation == _queryGeneration)
+                _loadingMore = false;
+        }
+    }
+
+    private async Task RetryAsync()
+    {
+        if (ErrorMessage is not null || QuerySessionsAsync is null)
+            await OnRetry.InvokeAsync();
+        else
+            await RefreshQueryAsync();
     }
 
     private bool MatchesPeriod(PublicSessionView session, DateTimeOffset now)
@@ -669,7 +1025,7 @@
         var visible = FilteredSessions;
         if (!_initialSelectionApplied && InitialSessionId is { } initialSessionId)
         {
-            var requested = Sessions.FirstOrDefault(session => session.SessionId == initialSessionId);
+            var requested = VisibleSessions.FirstOrDefault(session => session.SessionId == initialSessionId);
             if (requested is not null)
             {
                 if (!visible.Any(session => session.SessionId == initialSessionId))
@@ -683,7 +1039,7 @@
                 return;
             }
 
-            if (Sessions.Count > 0)
+            if (VisibleSessions.Count > 0)
             {
                 _initialSelectionApplied = true;
             }
