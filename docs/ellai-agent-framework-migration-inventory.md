@@ -174,8 +174,12 @@ Run the preceding command with the filter changed to this test name and set
 the actual outbox worker, scoped broker, PostgreSQL session/topic stores and
 case authorization, plus a disposable Qdrant exact collection. With a
 synthetic streaming model and synthetic case, an initial turn observed the
-authorized case; a follow-up after persisted grant expiry observed an allowed
-empty result without the case. Both turns completed in the same worker process.
+authorized case; a follow-up with a simulated Qdrant transport outage fell
+back to PostgreSQL and retained the case, and another after persisted grant
+expiry observed an allowed empty result without the case. The second request
+included the prior user and assistant messages. All three turns completed in
+the same worker process; the outage was injected in the HTTP transport, not
+by stopping the Qdrant service.
 The first fixture attempt timed out because the synthetic processing label
 was ineligible for response publication and the fixture model implemented
 streaming only; the rerun uses the existing typed-turn publication contract.
