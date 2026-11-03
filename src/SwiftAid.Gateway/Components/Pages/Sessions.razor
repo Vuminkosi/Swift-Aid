@@ -1,4 +1,5 @@
 @page "/sessions"
+@page "/sessions/calendar"
 @implements IDisposable
 @using SwiftAid.Contracts.Sessions
 @using SwiftAid.Client.Presentation
@@ -17,11 +18,12 @@
 <PageTitle>Community sessions | SwiftAid</PageTitle>
 
 <div class="community-sessions-page">
-    <PublicSessionsSurface @key="RequestedSessionId" Sessions="_sessions"
+    <PublicSessionsSurface @key="(RequestedSessionId, IsCalendarRoute)" Sessions="_sessions"
                            Loading="_loadingList"
                            ErrorMessage="@ListError"
                            OnRetry="LoadListAsync"
                            QuerySessionsAsync="@(RequestedSessionId is null ? QuerySessionsAsync : null)"
+                           InitialCalendarView="@(IsCalendarRoute && RequestedSessionId is null)"
                            LoadInvitationTextAsync="InvitationLoader"
                            LoadSubscriptionStateAsync="LoadSubscriptionStateAsync"
                            ExecuteSubscriptionActionAsync="ExecuteSubscriptionActionAsync"
@@ -77,6 +79,8 @@
     private bool _pageInitialized;
     private long _listGeneration;
     [SupplyParameterFromQuery(Name = "sessionId")] public Guid? RequestedSessionId { get; set; }
+    private bool IsCalendarRoute => string.Equals(Navigation.ToAbsoluteUri(Navigation.Uri).AbsolutePath.TrimEnd('/'),
+        "/sessions/calendar", StringComparison.OrdinalIgnoreCase);
     private Func<Guid, Task<string?>> InvitationLoader => LoadInvitationAsync;
     private async Task<PublicSessionPage?> QuerySessionsAsync(PublicSessionQuery query)
     {

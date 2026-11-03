@@ -417,6 +417,7 @@
     [Parameter] public EventCallback OnRetry { get; set; }
     [Parameter] public string? PublicSessionBasePath { get; set; } = "/public/v1/sessions";
     [Parameter] public Func<PublicSessionQuery, Task<PublicSessionPage?>>? QuerySessionsAsync { get; set; }
+    [Parameter] public bool InitialCalendarView { get; set; }
     [Parameter] public Func<Guid, Task<string?>>? LoadInvitationTextAsync { get; set; }
     [Parameter] public Func<string, Task>? ShareTextAsync { get; set; }
     [Parameter] public Func<Guid, Task<SessionSubscriptionPanelState?>>? LoadSubscriptionStateAsync { get; set; }
@@ -624,7 +625,10 @@
         if (QuerySessionsAsync is not null && !_queryInitialized && !Loading && ErrorMessage is null)
         {
             _queryInitialized = true;
-            await RefreshQueryAsync();
+            if (InitialCalendarView)
+                await ShowCalendarAsync();
+            else
+                await RefreshQueryAsync();
         }
 
         EnsureSelectedSession();

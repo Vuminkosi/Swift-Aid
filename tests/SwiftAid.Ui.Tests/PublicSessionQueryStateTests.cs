@@ -1,6 +1,7 @@
 using System.Reflection;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.JSInterop;
@@ -13,6 +14,50 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed class PublicSessionQueryStateTests
 {
+    [Fact]
+    public void AnonymousCalendarRouteUsesTheGuestEntry()
+    {
+        var app = new SwiftAid.Gateway.Components.App();
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/sessions/calendar";
+        typeof(SwiftAid.Gateway.Components.App).GetProperty("HttpContextAccessor", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(app, new HttpContextAccessor { HttpContext = context });
+
+        Assert.True(Property<bool>(app, "IsGuestEntry"));
+    }
+
+    [Fact]
+    public async Task CalendarEntryRendersTheCalendarAndQueriesTheSelectedDay()
+    {
+        var requests = new List<PublicSessionQuery>();
+        var registrations = new ServiceCollection();
+        registrations.AddLogging();
+        registrations.AddMudServices();
+        registrations.AddSingleton<IJSRuntime>(new UnavailableClipboard());
+        registrations.AddSingleton<NavigationManager>(new TestNavigationManager());
+        await using var services = registrations.BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
+
+        var markup = await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var component = await renderer.RenderComponentAsync<PublicSessionsSurface>(ParameterView.FromDictionary(
+                new Dictionary<string, object?>
+                {
+                    [nameof(PublicSessionsSurface.InitialCalendarView)] = true,
+                    [nameof(PublicSessionsSurface.QuerySessionsAsync)] = (Func<PublicSessionQuery, Task<PublicSessionPage?>>)(query =>
+                    {
+                        requests.Add(query);
+                        return Task.FromResult<PublicSessionPage?>(new PublicSessionPage([], null));
+                    })
+                }));
+            return component.ToHtmlString();
+        });
+
+        Assert.Contains("Community calendar", markup, StringComparison.Ordinal);
+        Assert.Contains(requests, query => query.LocalDateFrom is not null && query.LocalDateFrom == query.LocalDateTo);
+        Assert.Contains(requests, query => query.LocalDateFrom is not null && query.LocalDateTo > query.LocalDateFrom);
+    }
+
     [Fact]
     public async Task DetailRendersThePublicTitleSummaryAndStatus()
     {
@@ -287,6 +332,9 @@ public sealed class PublicSessionQueryStateTests
 
     private static T Property<T>(PublicSessionsSurface component, string name) =>
         (T)typeof(PublicSessionsSurface).GetProperty(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(component)!;
+
+    private static T Property<T>(object component, string name) =>
+        (T)component.GetType().GetProperty(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(component)!;
 
     private static PublicSessionView Session(Guid id) => new(
         id, 3, "Session", "Summary", "Community", [], "SZ", "Region", "Education", "Presenter", "en",

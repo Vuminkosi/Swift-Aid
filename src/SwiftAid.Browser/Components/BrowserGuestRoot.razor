@@ -51,8 +51,9 @@ else if (_isSessions)
 {
     <PublicWebsiteShell>
         <ChildContent>
-            <PublicSessionsSurface @key="_requestedSessionId" Sessions="_publicSessions"
+            <PublicSessionsSurface @key="(_requestedSessionId, _isCalendarRoute)" Sessions="_publicSessions"
                                    InitialSessionId="_requestedSessionId"
+                                   InitialCalendarView="@(_isCalendarRoute && !_hasSessionParameter)"
                                    Loading="_publicSessionsLoading"
                                    ErrorMessage="@_publicSessionsError"
                                    QuerySessionsAsync="@(_hasSessionParameter ? null : QueryPublicSessionsAsync)"
@@ -174,6 +175,7 @@ else
     private bool _publicSessionsLoading;
     private string? _publicSessionsError;
     private Guid? _requestedSessionId;
+    private bool _isCalendarRoute;
     private bool _hasSessionParameter;
     private long _publicSessionsGeneration;
     private bool IsSecureIntakeTransportAvailable =>
@@ -562,7 +564,8 @@ else
             }
         }
         _isHome = path.Length == 0;
-        _isSessions = string.Equals(path, "/sessions", StringComparison.OrdinalIgnoreCase);
+        _isCalendarRoute = string.Equals(path, "/sessions/calendar", StringComparison.OrdinalIgnoreCase);
+        _isSessions = _isCalendarRoute || string.Equals(path, "/sessions", StringComparison.OrdinalIgnoreCase);
         _isEllaiAbout = string.Equals(path, "/ellai/about", StringComparison.OrdinalIgnoreCase);
         _isTracking = string.Equals(path, "/report", StringComparison.OrdinalIgnoreCase) &&
             query.Contains("view=tracking", StringComparison.OrdinalIgnoreCase);

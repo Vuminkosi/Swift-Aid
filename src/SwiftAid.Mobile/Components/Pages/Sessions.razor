@@ -1,4 +1,5 @@
 @page "/sessions"
+@page "/sessions/calendar"
 @using SwiftAid.Client.Presentation
 @using SwiftAid.Client.Presentation.PublicWorkflows
 @using SwiftAid.Contracts.Sessions
@@ -10,8 +11,9 @@
 
 <PageTitle>Community sessions | SwiftAid</PageTitle>
 
-<PublicSessionsSurface @key="RequestedSessionId" Sessions="_sessions"
+<PublicSessionsSurface @key="(RequestedSessionId, IsCalendarRoute)" Sessions="_sessions"
                        InitialSessionId="RequestedSessionId"
+                       InitialCalendarView="@(IsCalendarRoute && RequestedSessionId is null)"
                        Loading="_loading"
                        ErrorMessage="@_listError"
                        OnRetry="LoadAsync"
@@ -26,6 +28,8 @@
 @code {
     [SupplyParameterFromQuery(Name = "sessionId")]
     private Guid? RequestedSessionId { get; set; }
+    private bool IsCalendarRoute => string.Equals(Navigation.ToAbsoluteUri(Navigation.Uri).AbsolutePath.TrimEnd('/'),
+        "/sessions/calendar", StringComparison.OrdinalIgnoreCase);
 
     private IReadOnlyList<PublicSessionView> _sessions = Array.Empty<PublicSessionView>();
     private bool _loading = true;

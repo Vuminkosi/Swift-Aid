@@ -126,6 +126,7 @@
             var isAnonymous = httpContext?.User.Identity?.IsAuthenticated != true;
             return isAnonymous && path is not null &&
                 (path.Length == 0 || string.Equals(path, "/sessions", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(path, "/sessions/calendar", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(path, "/ellai/about", StringComparison.OrdinalIgnoreCase));
         }
     }
