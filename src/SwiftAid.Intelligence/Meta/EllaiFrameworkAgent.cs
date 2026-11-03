@@ -15,7 +15,7 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
         EllaiToolContext context, string instructions, IReadOnlyList<ChatMessage> messages, int maxOutputTokens,
         Func<CancellationToken, Task<bool>> isCurrent,
         Func<EllaiToolContext, EllaiToolRequest, CancellationToken, Task<EllaiToolResult>> invoke,
-        Func<ChatResponse, CancellationToken, Task> recordUsage,
+        EllaiFrameworkUsage usage,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -23,7 +23,9 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
         ArgumentNullException.ThrowIfNull(messages);
         ArgumentNullException.ThrowIfNull(isCurrent);
         ArgumentNullException.ThrowIfNull(invoke);
-        ArgumentNullException.ThrowIfNull(recordUsage);
+        ArgumentNullException.ThrowIfNull(usage);
+        if (!string.Equals(context.SessionId, usage.SessionId, StringComparison.Ordinal))
+            throw new ArgumentException("Usage must belong to the current session.", nameof(usage));
         if (messages.Count == 0 || maxOutputTokens is < 1 or > 16384)
             throw new ArgumentException("Messages and a bounded token limit are required.");
         if (context.RemainingCalls <= 0 || !await isCurrent(ct).ConfigureAwait(false)) return null;
@@ -38,7 +40,7 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
                 return result;
             });
         var tools = EllaiFrameworkToolCatalog.Create(context, guard.InvokeAsync);
-        var guardedClient = new ModelCallGuard(_client, isCurrent, recordUsage);
+        var guardedClient = new ModelCallGuard(_client, isCurrent, usage);
         var functionClient = new FunctionInvokingChatClient(guardedClient)
         {
             MaximumIterationsPerRequest = EllaiCycleRunner.MaxIterations
@@ -61,15 +63,18 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
     }
 
     private sealed class ModelCallGuard(IChatClient inner, Func<CancellationToken, Task<bool>> isCurrent,
-        Func<ChatResponse, CancellationToken, Task> recordUsage) : DelegatingChatClient(inner)
+        EllaiFrameworkUsage usage) : DelegatingChatClient(inner)
     {
         public override async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages,
             ChatOptions? options = null, CancellationToken cancellationToken = default)
         {
             if (!await isCurrent(cancellationToken).ConfigureAwait(false))
                 throw new InvalidOperationException("The Ellai session is no longer authorized.");
-            var response = await base.GetResponseAsync(messages, options, cancellationToken).ConfigureAwait(false);
-            await recordUsage(response, cancellationToken).ConfigureAwait(false);
+            var boundedMessages = messages.ToArray();
+            if (!usage.CanDispatch(boundedMessages, options))
+                throw new InvalidOperationException("The Ellai session budget is exhausted.");
+            var response = await base.GetResponseAsync(boundedMessages, options, cancellationToken).ConfigureAwait(false);
+            await usage.RecordAsync(response, cancellationToken).ConfigureAwait(false);
             return response;
         }
 
