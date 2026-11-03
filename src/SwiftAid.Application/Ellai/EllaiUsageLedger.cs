@@ -57,6 +57,9 @@ public sealed class EllaiUsageLedger(
     private readonly object _gate = new();
     private readonly Dictionary<string, EllaiUsageTotals> _totals = new(StringComparer.Ordinal);
     private readonly Dictionary<string, decimal> _spend = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, long> _pendingTokens = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, decimal> _pendingSpend = new(StringComparer.Ordinal);
+    private decimal _totalPendingSpend;
     private decimal _totalSpend;
 
     public int SessionTokenBudget { get; } = sessionTokenBudget <= 0
@@ -87,7 +90,8 @@ public sealed class EllaiUsageLedger(
         lock (_gate)
         {
             var used = _totals.TryGetValue(sessionId, out var current) ? current.TotalTokens : 0;
-            if ((long)used + estimatedTokens > SessionTokenBudget)
+            _pendingTokens.TryGetValue(sessionId, out var pendingTokens);
+            if ((long)used + pendingTokens + estimatedTokens > SessionTokenBudget)
             {
                 return false;
             }
@@ -99,8 +103,54 @@ public sealed class EllaiUsageLedger(
 
             var estimate = Prices.CostFor(estimatedTokens, 0);
             var sessionSpend = _spend.TryGetValue(sessionId, out var spent) ? spent : 0;
-            return sessionSpend + estimate <= EnvelopeSpendCap
-                && _totalSpend + estimate <= TotalSpendCap;
+            _pendingSpend.TryGetValue(sessionId, out var pendingSpend);
+            return sessionSpend + pendingSpend + estimate <= EnvelopeSpendCap
+                && _totalSpend + _totalPendingSpend + estimate <= TotalSpendCap;
+        }
+    }
+
+    /// <summary>Reserves capacity for one in-process framework model call until disposed.
+    /// This does not coordinate reservations across Gateway processes.</summary>
+    public IDisposable? TryBeginModelCall(string sessionId, int estimatedTokens)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(estimatedTokens);
+        lock (_gate)
+        {
+            _totals.TryGetValue(sessionId, out var current);
+            _pendingTokens.TryGetValue(sessionId, out var pendingTokens);
+            if ((long)(current?.TotalTokens ?? 0) + pendingTokens + estimatedTokens > SessionTokenBudget)
+                return null;
+            var estimatedSpend = Prices.IsPriced
+                ? Math.Max(Prices.CostFor(estimatedTokens, 0), Prices.CostFor(0, estimatedTokens)) : 0;
+            _spend.TryGetValue(sessionId, out var spent);
+            _pendingSpend.TryGetValue(sessionId, out var pendingSpend);
+            if (Prices.IsPriced && (spent + pendingSpend + estimatedSpend > EnvelopeSpendCap ||
+                _totalSpend + _totalPendingSpend + estimatedSpend > TotalSpendCap))
+                return null;
+            _pendingTokens[sessionId] = pendingTokens + estimatedTokens;
+            _pendingSpend[sessionId] = pendingSpend + estimatedSpend;
+            _totalPendingSpend += estimatedSpend;
+            return new ModelCallReservation(this, sessionId, estimatedTokens, estimatedSpend);
+        }
+    }
+
+    private sealed class ModelCallReservation(EllaiUsageLedger ledger, string sessionId, int tokens, decimal spend) : IDisposable
+    {
+        private int _released;
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _released, 1) != 0) return;
+            lock (ledger._gate)
+            {
+                var remainingTokens = ledger._pendingTokens[sessionId] - tokens;
+                var remainingSpend = ledger._pendingSpend[sessionId] - spend;
+                if (remainingTokens == 0) ledger._pendingTokens.Remove(sessionId);
+                else ledger._pendingTokens[sessionId] = remainingTokens;
+                if (remainingTokens == 0) ledger._pendingSpend.Remove(sessionId);
+                else ledger._pendingSpend[sessionId] = remainingSpend;
+                ledger._totalPendingSpend -= spend;
+            }
         }
     }
 

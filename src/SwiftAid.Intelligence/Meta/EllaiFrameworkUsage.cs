@@ -15,6 +15,12 @@ public sealed class EllaiFrameworkUsage(string sessionId, EllaiUsageLedger ledge
     public string SessionId => _sessionId;
 
     public bool CanDispatch(IReadOnlyList<ChatMessage> messages, ChatOptions? options)
+        => _ledger.TryReserve(_sessionId, Estimate(messages, options));
+
+    public IDisposable? TryBeginModelCall(IReadOnlyList<ChatMessage> messages, ChatOptions? options)
+        => _ledger.TryBeginModelCall(_sessionId, Estimate(messages, options));
+
+    private static int Estimate(IReadOnlyList<ChatMessage> messages, ChatOptions? options)
     {
         long bytes = Encoding.UTF8.GetByteCount(options?.Instructions ?? string.Empty) + 32;
         foreach (var message in messages)
@@ -24,7 +30,7 @@ public sealed class EllaiFrameworkUsage(string sessionId, EllaiUsageLedger ledge
                 bytes += Encoding.UTF8.GetByteCount(tool.Name) + Encoding.UTF8.GetByteCount(tool.Description ?? string.Empty)
                     + Encoding.UTF8.GetByteCount(tool.JsonSchema.GetRawText());
         var estimate = (int)Math.Min(int.MaxValue, (bytes + 1) / 2 + (options?.MaxOutputTokens ?? 0));
-        return _ledger.TryReserve(_sessionId, estimate);
+        return estimate;
     }
 
     public async Task RecordAsync(ChatResponse response, CancellationToken ct)

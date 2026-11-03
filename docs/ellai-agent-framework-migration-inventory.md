@@ -364,9 +364,16 @@ saturates its existing 32-bit totals rather than wrapping for very large
 provider usage. Both in-memory and PostgreSQL hydration saturate the same
 way. Focused ledger/framework tests passed 45/45, and a disposable PostgreSQL
 fixture verified large persisted samples remain over budget after hydration.
-This fixes overflow only: the existing `TryReserve` is a budget check, not a
-durable cross-instance reservation, and simultaneous dispatches can still
-race against the same budget.
+Framework model calls now hold in-process token and conservative spend
+reservations until their provider call and usage recording finish, including
+on failure. Concurrent framework calls sharing one ledger therefore account
+for each other's estimated capacity. Existing `TryReserve` callers see those
+reservations but do not create reservations of their own. This is not a durable
+cross-instance reservation, and provider calls without complete usage data
+still cannot establish actual billable usage. Focused ledger/framework tests
+passed 49/49, including simultaneous reservations and release after provider
+failure. Registration, worker and guest-route tests passed 27 with three
+opt-in tests skipped.
 
 Framework tool execution now requests cancellation after 30 seconds and rejects results
 that arrive after that deadline as unavailable. This new bound addresses the

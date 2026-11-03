@@ -468,6 +468,22 @@ public sealed class EllaiAgentFrameworkContractTests
     }
 
     [Fact]
+    public async Task ProviderFailureReleasesFrameworkBudgetReservation()
+    {
+        using var client = new FailingClient();
+        var ledger = new EllaiUsageLedger(sessionTokenBudget: 100_000);
+        var agent = new EllaiFrameworkAgent(client);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal));
+        await Assert.ThrowsAsync<EllaiFrameworkFailureException>(() => agent.RunAsync(context, "policy",
+            [new ChatMessage(ChatRole.User, "hello")], 100, _ => Task.FromResult(true),
+            (_, _, _) => throw new InvalidOperationException(),
+            new EllaiFrameworkUsage("session", ledger, new InMemoryEllaiUsageStore()), default));
+        using var fullBudget = ledger.TryBeginModelCall("session", 100_000);
+        Assert.NotNull(fullBudget);
+    }
+
+    [Fact]
     public async Task FrameworkSessionRestoresOnlyProvidedConversationHistory()
     {
         using var client = new ScriptedClient(EllaiToolNames.Now, "unused", "example", ValidDecision, noArguments: true);

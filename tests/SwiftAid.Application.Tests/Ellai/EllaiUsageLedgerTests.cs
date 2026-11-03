@@ -31,6 +31,55 @@ public sealed class EllaiUsageLedgerTests
     }
 
     [Fact]
+    public void FrameworkReservationsBoundConcurrentSessionAndGlobalCapacity()
+    {
+        var prices = new EllaiPriceTable(1m, 2m, 0m);
+        var ledger = new EllaiUsageLedger(sessionTokenBudget: 100, envelopeSpendCap: 1m,
+            totalSpendCap: 0.2m, prices: prices);
+        var first = ledger.TryBeginModelCall("s-1", 60);
+        Assert.NotNull(first);
+        Assert.Null(ledger.TryBeginModelCall("s-1", 41));
+        Assert.Null(ledger.TryBeginModelCall("s-2", 41));
+        Assert.False(ledger.TryReserve("s-2", 100));
+        first.Dispose();
+        first.Dispose();
+        using var next = ledger.TryBeginModelCall("s-2", 100);
+        Assert.NotNull(next);
+    }
+
+    [Fact]
+    public async Task ConcurrentFrameworkReservationsCannotExceedSessionBudget()
+    {
+        var ledger = new EllaiUsageLedger(sessionTokenBudget: 100);
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var attempts = Enumerable.Range(0, 40).Select(async _ =>
+        {
+            await start.Task;
+            return ledger.TryBeginModelCall("s-1", 10);
+        }).ToArray();
+        start.SetResult();
+        var reservations = await Task.WhenAll(attempts);
+        Assert.Equal(10, reservations.Count(item => item is not null));
+        foreach (var reservation in reservations) reservation?.Dispose();
+        using var fullBudget = ledger.TryBeginModelCall("s-1", 100);
+        Assert.NotNull(fullBudget);
+    }
+
+    [Fact]
+    public void FrameworkReservationStaysHeldUntilUsageHasBeenRecorded()
+    {
+        var ledger = new EllaiUsageLedger(sessionTokenBudget: 100);
+        var pending = ledger.TryBeginModelCall("s-1", 80);
+        Assert.NotNull(pending);
+        ledger.Record(new EllaiUsageSample("s-1", 50, 20));
+        Assert.Null(ledger.TryBeginModelCall("s-1", 1));
+        pending.Dispose();
+        using var remaining = ledger.TryBeginModelCall("s-1", 30);
+        Assert.NotNull(remaining);
+        Assert.False(ledger.TryReserve("s-1", 1));
+    }
+
+    [Fact]
     public async Task LargeUsageAndEstimatesNeverWrapAndBypassBudgetAfterHydration()
     {
         var ledger = new EllaiUsageLedger();

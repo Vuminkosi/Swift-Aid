@@ -223,7 +223,8 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
                 options.ToolMode = ChatToolMode.None;
             }
             var boundedMessages = messages.ToArray();
-            if (!usage.CanDispatch(boundedMessages, options))
+            using var reservation = usage.TryBeginModelCall(boundedMessages, options);
+            if (reservation is null)
                 throw new EllaiFrameworkFailureException(EllaiToolReasonCodes.BudgetExceeded);
             CallSequence++;
             ChatResponse response;
@@ -245,7 +246,8 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
             if (CallSequence >= EllaiCycleRunner.MaxIterations)
                 throw new EllaiFrameworkFailureException("IterationLimit");
             var boundedMessages = messages.ToArray();
-            if (!usage.CanDispatch(boundedMessages, options))
+            using var reservation = usage.TryBeginModelCall(boundedMessages, options);
+            if (reservation is null)
                 throw new EllaiFrameworkFailureException(EllaiToolReasonCodes.BudgetExceeded);
             CallSequence++;
             _lastText.Clear();
