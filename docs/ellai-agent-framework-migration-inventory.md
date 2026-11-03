@@ -387,8 +387,18 @@ incidence, diagnosis or animal count. Framework execution against disposable
 PostgreSQL passed 1/1: the count matched the authorized query and fell to zero
 after grant expiry without exposing case IDs. Application tests passed
 996/1006, with 10 opt-in skips. The first full run failed two catalogue/document
-sync tests, corrected before the passing rerun. Live provider and Gateway
-end-to-end analytics remain **NOT VERIFIED**.
+sync tests, corrected before the passing rerun. An opt-in live
+`muse-spark-1.3-contributor` framework test invoked this query against synthetic
+PostgreSQL cases and passed with the returned count and exact evidence cited.
+After strengthening the assertion to require the count as a standalone number
+in both display text and cited claim, one quiet run failed without preserving
+the assertion detail and a subsequent run passed. This mixed result does not
+establish reliable live analytics; Gateway end-to-end analytics remains
+**NOT VERIFIED**. The live run uses `ELLAI_LIVE=1`, configured Ellai provider
+environment variables, the dedicated PostgreSQL fixture opt-in and
+`dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+FullyQualifiedName~LiveMuseUsesAuthorizedPostgresCountAndCitesObservedEvidence`.
 
 An opt-in Gateway execution selection has been added; its default remains the
 existing loop. Invalid selection and unconfigured or unsupported framework
