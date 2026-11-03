@@ -10,7 +10,12 @@
         </MudText>
     }
 
-    @if (string.Equals(Status, "Scheduled", StringComparison.OrdinalIgnoreCase))
+    @if (!IsNew)
+    {
+        <MudText Typo="Typo.caption" Color="Color.Secondary">Country, region, sector and time zone are fixed after creation.</MudText>
+    }
+
+    @if (IsScheduled)
     {
         <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status" Class="mt-2">
             You can change the start time and reminder timing. Changes to published content require a reviewed revision, which is not yet available here.
@@ -26,45 +31,45 @@
         <legend>Session details</legend>
     <MudGrid Class="mt-2">
         <MudItem xs="12" md="6">
-            <MudTextField T="string" Label="Title" @bind-Value="_title" Required="true"
+            <MudTextField T="string" Label="Title" @bind-Value="_title" Disabled="@IsScheduled" Required="true"
                          Error='@HasError("Title")' ErrorText='@FieldError("Title")' />
         </MudItem>
         <MudItem xs="12" md="6">
-            <MudTextField T="string" Label="Presenter" @bind-Value="_presenter" Required="true"
+            <MudTextField T="string" Label="Presenter" @bind-Value="_presenter" Disabled="@IsScheduled" Required="true"
                          Error='@HasError("Presenter")' ErrorText='@FieldError("Presenter")' />
         </MudItem>
         <MudItem xs="12">
-            <MudTextField T="string" Label="Public summary" Lines="3" @bind-Value="_summary" Required="true"
+            <MudTextField T="string" Label="Public summary" Lines="3" @bind-Value="_summary" Disabled="@IsScheduled" Required="true"
                          HelperText="Shown to the public. Logistics only: what the session covers, never patient details."
                          Error='@HasError("Summary")' ErrorText='@FieldError("Summary")' />
         </MudItem>
         <MudItem xs="12">
-            <MudTextField T="string" Label="Who should attend" @bind-Value="_audience" Required="true"
+            <MudTextField T="string" Label="Who should attend" @bind-Value="_audience" Disabled="@IsScheduled" Required="true"
                          HelperText="Describe the audience in general terms, for example livestock keepers near the showgrounds."
                          Error='@HasError("Audience")' ErrorText='@FieldError("Audience")' />
         </MudItem>
         <MudItem xs="12" md="4">
-            <MudTextField T="string" Label="Country code" @bind-Value="_country" Required="true"
+            <MudTextField T="string" Label="Country code" @bind-Value="_country" Disabled="@(!IsNew)" Required="true"
                          Error='@HasError("Country")' ErrorText='@FieldError("Country")' />
         </MudItem>
         <MudItem xs="12" md="4">
-            <MudTextField T="string" Label="Region" @bind-Value="_region" Required="true"
+            <MudTextField T="string" Label="Region" @bind-Value="_region" Disabled="@(!IsNew)" Required="true"
                          Error='@HasError("Region")' ErrorText='@FieldError("Region")' />
         </MudItem>
         <MudItem xs="12" md="4">
-            <MudTextField T="string" Label="Sector" @bind-Value="_sector" Required="true"
+            <MudTextField T="string" Label="Sector" @bind-Value="_sector" Disabled="@(!IsNew)" Required="true"
                          Error='@HasError("Sector")' ErrorText='@FieldError("Sector")' />
         </MudItem>
         <MudItem xs="12" md="6">
-            <MudTextField T="string" Label="Language" @bind-Value="_language" Required="true"
+            <MudTextField T="string" Label="Language" @bind-Value="_language" Disabled="@IsScheduled" Required="true"
                          Error='@HasError("Language")' ErrorText='@FieldError("Language")' />
         </MudItem>
         <MudItem xs="12" md="6">
-            <MudTextField T="string" Label="Topic tags (comma separated)" @bind-Value="_topicTagsText"
+            <MudTextField T="string" Label="Topic tags (comma separated)" @bind-Value="_topicTagsText" Disabled="@IsScheduled"
                          Error='@HasError("Tags")' ErrorText='@FieldError("Tags")' />
         </MudItem>
         <MudItem xs="12" md="6">
-            <MudTextField T="string" Label="Time zone" @bind-Value="_timeZone" @bind-Value:after="ClearAmbiguousOffset" Required="true"
+            <MudTextField T="string" Label="Time zone" @bind-Value="_timeZone" Disabled="@(!IsNew)" @bind-Value:after="ClearAmbiguousOffset" Required="true"
                          HelperText="An IANA time zone, for example Africa/Harare."
                          Error='@HasError("TimeZone")' ErrorText='@FieldError("TimeZone")' />
         </MudItem>
@@ -88,21 +93,21 @@
             </MudItem>
         }
         <MudItem xs="6" md="3">
-            <MudTextField T="string" Label="Duration (minutes)" @bind-Value="_durationText" Required="true" InputType="InputType.Number"
+            <MudTextField T="string" Label="Duration (minutes)" @bind-Value="_durationText" Disabled="@IsScheduled" Required="true" InputType="InputType.Number"
                          Error='@HasError("Duration")' ErrorText='@FieldError("Duration")' />
         </MudItem>
         <MudItem xs="6" md="3">
-            <MudTextField T="string" Label="Capacity (optional)" @bind-Value="_capacityText" InputType="InputType.Number"
+            <MudTextField T="string" Label="Capacity (optional)" @bind-Value="_capacityText" Disabled="@IsScheduled" InputType="InputType.Number"
                          Error='@HasError("Capacity")' ErrorText='@FieldError("Capacity")' />
         </MudItem>
         <MudItem xs="12" md="6">
-            <MudSelect T="string" Label="Visibility" @bind-Value="_visibility">
+            <MudSelect T="string" Label="Visibility" @bind-Value="_visibility" Disabled="@IsScheduled">
                 <MudSelectItem Value="@("Public")">Public (appears in the public list)</MudSelectItem>
                 <MudSelectItem Value="@("Internal")">Internal (never appears in the public list)</MudSelectItem>
             </MudSelect>
         </MudItem>
         <MudItem xs="12" md="6">
-            <MudSelect T="string" Label="Channel" @bind-Value="_channelType">
+            <MudSelect T="string" Label="Channel" @bind-Value="_channelType" Disabled="@IsScheduled">
                 <MudSelectItem Value="@("None")">No online channel</MudSelectItem>
                 <MudSelectItem Value="@("FacebookPage")">Facebook page</MudSelectItem>
                 <MudSelectItem Value="@("WhatsAppGroup")">WhatsApp group</MudSelectItem>
@@ -112,7 +117,7 @@
         @if (!string.Equals(_channelType, "None", StringComparison.Ordinal))
         {
             <MudItem xs="12">
-                <MudTextField T="string" Label="Channel link" @bind-Value="_channelLink" Required="true"
+                <MudTextField T="string" Label="Channel link" @bind-Value="_channelLink" Disabled="@IsScheduled" Required="true"
                              HelperText="Paste the destination link from the channel you already manage. SwiftAid never posts on your behalf."
                              Error='@HasError("ChannelLink")' ErrorText='@FieldError("ChannelLink")' />
             </MudItem>
@@ -132,10 +137,10 @@
                 var row = _materials[materialIndex];
                 var removeMaterialLabel = $"Remove material {materialIndex + 1}";
                 <div class="session-editor__material-row" @key="row.Key">
-                    <MudTextField T="string" Label="Material" @bind-Value="row.MaterialId" />
-                    <MudTextField T="string" Label="Source version" @bind-Value="row.SourceVersion" />
+                    <MudTextField T="string" Label="Material" @bind-Value="row.MaterialId" Disabled="@IsScheduled" />
+                    <MudTextField T="string" Label="Source version" @bind-Value="row.SourceVersion" Disabled="@IsScheduled" />
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error"
-                                   OnClick="() => RemoveMaterial(row)" aria-label="@removeMaterialLabel" Disabled="@(!CanEditFields || Busy)" />
+                                   OnClick="() => RemoveMaterial(row)" aria-label="@removeMaterialLabel" Disabled="@(!CanEditFields || Busy || IsScheduled)" />
                 </div>
             }
             @if (!string.IsNullOrEmpty(FieldError("Materials")))
@@ -143,7 +148,7 @@
                 <MudText Typo="Typo.caption" Color="Color.Error">@FieldError("Materials")</MudText>
             }
             <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
-                       OnClick="AddMaterial" Disabled="@(!CanEditFields || Busy)">Add material</MudButton>
+                       OnClick="AddMaterial" Disabled="@(!CanEditFields || Busy || IsScheduled)">Add material</MudButton>
         </MudItem>
     </MudGrid>
     </fieldset>
@@ -267,6 +272,7 @@
     private readonly Dictionary<string, string> _errors = new(StringComparer.Ordinal);
 
     private bool IsNew => SessionId is null;
+    private bool IsScheduled => string.Equals(Status, "Scheduled", StringComparison.OrdinalIgnoreCase);
     private bool IsDraft => string.Equals(Status, "Draft", StringComparison.OrdinalIgnoreCase);
     private bool HasCurrentCapabilities => ManagementCapabilities is { } capabilities &&
         capabilities.Matches(SessionId, IsNew ? null : ExpectedVersion, Status);
@@ -441,6 +447,17 @@
 
     private UpdateSessionInput BuildUpdateInput()
     {
+        if (IsScheduled)
+        {
+            if (InitialSession is not { } published || published.SessionId != SessionId || published.Version != ExpectedVersion)
+                throw new InvalidOperationException("The current published session must be loaded before rescheduling.");
+
+            return new UpdateSessionInput(published.Title, published.Summary, published.AudienceDescription,
+                published.TopicTags, published.Presenter, published.Language, ToStartUtc(), published.DurationMinutes,
+                published.Capacity, published.Materials.Select(item => new SessionMaterialInput(item.MaterialId, item.SourceVersion)).ToArray(),
+                published.Visibility, published.ChannelType, published.ChannelLink, ParseReminderLeads());
+        }
+
         var create = BuildCreateInput();
         return new UpdateSessionInput(
             create.Title,
