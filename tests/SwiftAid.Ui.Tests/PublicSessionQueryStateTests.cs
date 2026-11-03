@@ -16,6 +16,50 @@ namespace SwiftAid.Ui.Tests;
 public sealed class PublicSessionQueryStateTests
 {
     [Theory]
+    [InlineData("Completed")]
+    [InlineData("Cancelled")]
+    public async Task DirectLinkShowsAPastSessionRegardlessOfTheDefaultUpcomingFilter(string status)
+    {
+        var session = Session(Guid.NewGuid()) with
+        {
+            Title = "Past public session",
+            Status = status,
+            StartUtc = DateTimeOffset.UtcNow.AddDays(-7)
+        };
+        var registrations = new ServiceCollection();
+        registrations.AddLogging();
+        registrations.AddMudServices();
+        registrations.AddSingleton<IJSRuntime>(new UnavailableClipboard());
+        registrations.AddSingleton<NavigationManager>(new TestNavigationManager());
+        await using var services = registrations.BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        var markup = await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var component = await renderer.RenderComponentAsync<PublicSessionsSurface>(ParameterView.FromDictionary(
+                new Dictionary<string, object?>
+                {
+                    [nameof(PublicSessionsSurface.Sessions)] = new[] { session },
+                    [nameof(PublicSessionsSurface.InitialSessionId)] = session.SessionId
+                }));
+            return component.ToHtmlString();
+        });
+
+        Assert.Contains("Past public session", markup, StringComparison.Ordinal);
+        Assert.Contains(status, markup, StringComparison.Ordinal);
+        Assert.Contains("About this session", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DirectLinkDoesNotSubstituteADifferentSession()
+    {
+        var component = new PublicSessionsSurface();
+        typeof(PublicSessionsSurface).GetProperty(nameof(component.InitialSessionId))!.SetValue(component, Guid.NewGuid());
+        typeof(PublicSessionsSurface).GetProperty(nameof(component.Sessions))!.SetValue(component, new[] { Session(Guid.NewGuid()) });
+
+        Assert.Empty(Property<IReadOnlyList<PublicSessionView>>(component, "FilteredSessions"));
+    }
+
+    [Theory]
     [InlineData("en-US", "Sun", 11, 1)]
     [InlineData("en-GB", "Mon", 10, 26)]
     public void CalendarWeekHeadingsAndGridUseTheSameLocaleFirstDay(string cultureName, string firstHeading, int firstMonth, int firstDate)

@@ -612,7 +612,9 @@
             var now = DateTimeOffset.UtcNow;
             var search = _searchText.Trim();
             return VisibleSessions
-                .Where(session => MatchesPeriod(session, now))
+                .Where(session => InitialSessionId is { } requestedId
+                    ? session.SessionId == requestedId
+                    : MatchesPeriod(session, now))
                 .Where(session => QuerySessionsAsync is not null || MatchesCategory(session))
                 .Where(session => QuerySessionsAsync is not null || string.IsNullOrWhiteSpace(_languageFilter) ||
                     string.Equals(session.Language, _languageFilter, StringComparison.OrdinalIgnoreCase))
