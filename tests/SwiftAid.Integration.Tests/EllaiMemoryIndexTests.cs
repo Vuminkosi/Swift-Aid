@@ -170,10 +170,15 @@ public sealed class EllaiMemoryIndexTests
                 return new EllaiToolBroker(new EllaiPolicyService(), consent, queue: query,
                     topics: new EllaiTopicService(new PostgresEllaiTopicStore(db)), referenceIndex: index);
             });
-            services.AddScoped<IEllaiReasoningExecutor>(sp => new EllaiFrameworkExecutor(model,
-                new EllaiPromptBuilder("Synthetic policy", "fixture"), sp.GetRequiredService<EllaiToolBroker>(),
-                sp.GetRequiredService<EllaiUsageLedger>(), sp.GetRequiredService<IEllaiUsageStore>()));
+            services.AddScoped(_ => new EllaiPromptBuilder("Synthetic policy", "fixture"));
+            services.AddEllaiReasoningExecutor(new EllaiOptions
+            {
+                Enabled = true, ApiKey = "synthetic", ApiUrl = "https://fixture.invalid", ReasoningModel = "fixture"
+            }, "framework");
+            services.AddKeyedSingleton<IChatClient>(EllaiReasoningRegistration.FrameworkClientKey, model);
             await using var provider = services.BuildServiceProvider();
+            using (var scope = provider.CreateScope())
+                Assert.IsType<EllaiFrameworkExecutor>(scope.ServiceProvider.GetRequiredService<IEllaiReasoningExecutor>());
             using var logs = LoggerFactory.Create(builder => builder.AddConsole());
             using var worker = new EllaiUtteranceWorker(provider, logs.CreateLogger<EllaiUtteranceWorker>());
             await worker.StartAsync(default);

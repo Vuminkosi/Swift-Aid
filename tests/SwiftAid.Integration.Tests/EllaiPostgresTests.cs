@@ -97,9 +97,12 @@ public sealed class EllaiPostgresTests : IAsyncLifetime
         services.AddSingleton<EllaiUsageLedger>();
         services.AddSingleton(new EllaiSessionResponseStore());
         services.AddScoped(_ => new EllaiToolBroker(new EllaiPolicyService(), consent));
-        services.AddScoped<IEllaiReasoningExecutor>(sp => new EllaiFrameworkExecutor(model,
-            new EllaiPromptBuilder("Synthetic test policy", "fixture"), sp.GetRequiredService<EllaiToolBroker>(),
-            sp.GetRequiredService<EllaiUsageLedger>(), sp.GetRequiredService<IEllaiUsageStore>()));
+        services.AddScoped(_ => new EllaiPromptBuilder("Synthetic test policy", "fixture"));
+        services.AddEllaiReasoningExecutor(new EllaiOptions
+        {
+            Enabled = true, ApiKey = "synthetic", ApiUrl = "https://fixture.invalid", ReasoningModel = "fixture"
+        }, "framework");
+        services.AddKeyedSingleton<IChatClient>(EllaiReasoningRegistration.FrameworkClientKey, model);
         await using var provider = services.BuildServiceProvider();
         using var worker = new EllaiUtteranceWorker(provider, NullLogger<EllaiUtteranceWorker>.Instance);
         await worker.StartAsync(default);

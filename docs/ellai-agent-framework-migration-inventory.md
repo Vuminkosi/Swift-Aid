@@ -172,6 +172,15 @@ Run the preceding command with the filter changed to this test name and set
 `SWIFTAID_RUN_FRAMEWORK_POSTGRES_FIXTURES=1` and
 `SWIFTAID_FRAMEWORK_POSTGRES_CONNECTION` to the dedicated disposable database.
 
+The worker recovery and combined PostgreSQL/Qdrant recall fixtures were then
+updated to resolve their executor through `AddEllaiReasoningExecutor` with the
+framework selection and a keyed synthetic model. Both passed together (2/2,
+zero skips) against isolated PostgreSQL and Qdrant after 60 migrations using
+the integration test command above with filter
+`FullyQualifiedName~FrameworkWorkerRecallsAuthorizedCaseFromPostgresAndQdrant|FullyQualifiedName~FrameworkWorkerRehydratesOwnedConversationAfterWorkerRestart`.
+This exercises the same registration as the Gateway but not the Gateway host,
+real provider, or production configuration.
+
 `FrameworkWorkerRecallsAuthorizedCaseFromPostgresAndQdrant` passed 1/1 using
 the actual outbox worker, scoped broker, PostgreSQL session/topic stores and
 case authorization, plus a disposable Qdrant exact collection. With a
