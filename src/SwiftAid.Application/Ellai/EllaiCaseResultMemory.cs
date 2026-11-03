@@ -133,10 +133,11 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
             ? "The original search completeness was not recorded. "
             : (snapshot.SearchIncomplete.Value ? "The original search or result was incomplete. " : "") +
               (snapshot.UnknownLocations.Value ? "Some readable cases had unknown or incomplete locations. " : "");
+        var incomplete = snapshot.SearchIncomplete != false || snapshot.UnknownLocations != false;
         if (snapshot.Cases.Count == 0)
             return new EllaiToolResult(EllaiToolNames.Topic, true, null, [],
                 completeness + (classificationFilter is null ? "" : $"Filtered by recorded clinical classification: {classificationFilter}. ") +
-                (original ? "The original retained case result set was empty." : "The last retained case result set was empty."), 0, false)
+                (original ? "The original retained case result set was empty." : "The last retained case result set was empty."), 0, incomplete)
                 { HistoryValidUntilUtc = snapshot.ExpiresAtUtc };
 
         var current = await queue.GetMineAsync(context.Actor, 20,
@@ -178,7 +179,8 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
                 return $"case {pair.row.CaseId:D}; {selectedValue}; v{pair.row.AggregateVersion}" +
                     (pair.old.Version != pair.row.AggregateVersion ? " (changed since retrieval)" : "");
             }));
-        return new EllaiToolResult(EllaiToolNames.Topic, true, null, scopedEvidence, text, rows.Length, false)
+        return new EllaiToolResult(EllaiToolNames.Topic, true, null, scopedEvidence, text, rows.Length,
+            incomplete || authorizedRows.Length != snapshot.Cases.Count)
             { HistoryValidUntilUtc = snapshot.ExpiresAtUtc };
     }
 

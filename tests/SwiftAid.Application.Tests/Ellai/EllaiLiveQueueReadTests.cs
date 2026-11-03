@@ -593,6 +593,7 @@ public sealed class EllaiLiveQueueReadTests
         var observed = EllaiObservedToolResult.From(new EllaiToolRequest(EllaiToolNames.Topic, Args(("ref", "case-results"))), recalled);
         Assert.Equal(recalled.HistoryValidUntilUtc, observed.CaseSnapshotExpiresAtUtc);
         Assert.Equal(1, recalled.ItemCount);
+        Assert.True(recalled.Truncated);
         Assert.Equal("9", Assert.Single(recalled.Evidence).Version);
         Assert.Contains("changed since retrieval", recalled.ResultSummary);
         Assert.DoesNotContain(Row("02", 8).CaseId.ToString(), recalled.ResultSummary);
@@ -624,6 +625,7 @@ public sealed class EllaiLiveQueueReadTests
         var revoked = await broker.InvokeAsync(context, new(EllaiToolNames.Evidence,
             Args(("ref", "case-results-original"))), default);
         Assert.True(revoked.Allowed);
+        Assert.True(revoked.Truncated);
         Assert.Empty(revoked.Evidence);
         Assert.DoesNotContain(first.CaseId.ToString("D"), revoked.ResultSummary);
     }
@@ -785,6 +787,7 @@ public sealed class EllaiLiveQueueReadTests
 
         var recalled = await memory.RecallAsync(context, default);
         Assert.True(recalled.Allowed);
+        Assert.True(recalled.Truncated);
         Assert.Contains("original search or result was incomplete", recalled.ResultSummary);
         Assert.Contains("unknown or incomplete locations", recalled.ResultSummary);
         Assert.Contains("result set was empty", recalled.ResultSummary);
@@ -805,7 +808,30 @@ public sealed class EllaiLiveQueueReadTests
         await topics.TrackAsync(context.SessionId, EllaiCaseResultMemory.TopicTitle, ["case-results"], snapshot, version);
         var result = await new EllaiCaseResultMemory(topics, new FakeQueue()).RecallAsync(context, default);
         Assert.Equal(allowed, result.Allowed);
-        if (allowed) Assert.Contains("completeness was not recorded", result.ResultSummary);
+        if (allowed)
+        {
+            Assert.True(result.Truncated);
+            Assert.Contains("completeness was not recorded", result.ResultSummary);
+        }
+    }
+
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, true)]
+    [InlineData(false, true, true)]
+    public async Task RecalledNonemptyResultsPreserveSearchCompleteness(bool searchIncomplete, bool unknownLocations, bool expectedIncomplete)
+    {
+        var row = Row("01", 7);
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [row]) };
+        var context = Context with { Actor = TestActor() };
+        var memory = new EllaiCaseResultMemory(new EllaiTopicService(), queue);
+        await memory.RememberAsync(context, [row], default, searchIncomplete, unknownLocations);
+
+        var recalled = await memory.RecallAsync(context, default);
+
+        Assert.True(recalled.Allowed);
+        Assert.Equal(expectedIncomplete, recalled.Truncated);
+        Assert.Single(recalled.Evidence);
     }
 
     [Fact]
