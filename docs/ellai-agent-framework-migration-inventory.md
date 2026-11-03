@@ -2224,6 +2224,15 @@ does not prove the failures occur on baseline. The regression gate remains open.
 An initial rerun without `OS=Windows_NT` failed during the WebAssembly build
 because `emcc` could not be found; no tests ran in that attempt.
 
+Superseding this historical result, commit `9927a43` corrected the optional
+identity dependency in the reminder sender. On branch revision `055c572`, the
+same filter passed 21/21 with `OS=Windows_NT` using `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore
+-m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~CaseCommandProcessorDependencyInjectionTests|FullyQualifiedName~ProtectedPayloadKeyRingSecurityTests'
+--logger 'console;verbosity=quiet'`. This resolves the four recorded failures in
+that filter; it does not close the full integration and regression gate.
+
 After the response-generation fence change, a separate local Gateway process
 using the current Debug build, a freshly migrated disposable PostgreSQL
 database and live Muse passed `node tests/SwiftAid.Ui.Tests/ellai-cancel.gateway.browser.cjs`:
