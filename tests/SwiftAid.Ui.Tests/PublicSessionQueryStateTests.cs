@@ -212,6 +212,7 @@ public sealed class PublicSessionQueryStateTests
     public async Task CalendarEntryRendersTheCalendarAndQueriesTheSelectedDay()
     {
         var requests = new List<PublicSessionQuery>();
+        var cancelled = Session(Guid.NewGuid()) with { Status = "Cancelled", StartUtc = DateTimeOffset.UtcNow, TimeZoneId = "UTC" };
         var registrations = new ServiceCollection();
         registrations.AddLogging();
         registrations.AddMudServices();
@@ -229,13 +230,15 @@ public sealed class PublicSessionQueryStateTests
                     [nameof(PublicSessionsSurface.QuerySessionsAsync)] = (Func<PublicSessionQuery, Task<PublicSessionPage?>>)(query =>
                     {
                         requests.Add(query);
-                        return Task.FromResult<PublicSessionPage?>(new PublicSessionPage([], null));
+                        return Task.FromResult<PublicSessionPage?>(new PublicSessionPage([cancelled], null));
                     })
                 }));
             return component.ToHtmlString();
         });
 
         Assert.Contains("Community calendar", markup, StringComparison.Ordinal);
+        Assert.Contains("sessions listed", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("sessions available", markup, StringComparison.Ordinal);
         Assert.Contains(requests, query => query.LocalDateFrom is not null && query.LocalDateFrom == query.LocalDateTo);
         Assert.Contains(requests, query => query.LocalDateFrom is not null && query.LocalDateTo > query.LocalDateFrom);
     }

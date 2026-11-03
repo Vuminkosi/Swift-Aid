@@ -101,7 +101,7 @@
                     {
                         var hasSessions = day.Month == _calendarMonth.Month && _monthDates.Contains(DateOnly.FromDateTime(day));
                         <button type="button" class="@(day.Month == _calendarMonth.Month ? "" : "outside-month")"
-                                aria-label="@(day.ToString("D", CultureInfo.CurrentCulture) + (hasSessions ? ", sessions available" : ""))"
+                                aria-label="@(day.ToString("D", CultureInfo.CurrentCulture) + (hasSessions ? ", sessions listed" : ""))"
                                 aria-pressed="@(_calendarSelectedDate == day.Date)"
                                 @onclick="() => SelectCalendarDayAsync(day)">@day.Day@if (hasSessions) { <span aria-hidden="true"> •</span> }</button>
                     }
