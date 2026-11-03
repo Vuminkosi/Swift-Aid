@@ -3258,8 +3258,20 @@ selected after rotation, a later provider read both tokens, and revoking the
 old key made only its token unreadable. A different application discriminator
 also failed to read it. The private fixture removed its own key and revocation
 files and directories. These providers ran in one test process; deployed
-cross-process key sharing and production key-ring configuration remain
-NOT VERIFIED.
+cross-process key sharing and production key-ring configuration were not
+verified by that run.
+
+A later run of the same location replay filter passed 10, failed 0 and skipped
+2 in the parent process: the opt-in PostgreSQL case and the child-only test.
+The key-ring parent launched the child-only test in a separate `dotnet test`
+process with the private fixture directory. The child had a different process
+ID and decrypted tokens made before and after rotation. The parent verified
+the child test actually ran, then checked revocation and removed the fixture
+files. Command: `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~EllaiLocationReplayTests' --logger 'console;verbosity=minimal'`
+with `OS=Windows_NT`. This demonstrates a shared local file key ring across
+test processes, not shared key configuration or behavior in a deployed cluster.
 
 ### Grounded audio timing probe — 2026-11-03
 

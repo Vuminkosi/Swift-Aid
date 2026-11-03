@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Runtime.CompilerServices;
 using Microsoft.AspNetCore.DataProtection;
@@ -17,6 +18,16 @@ using SwiftAid.Intelligence.Meta;
 using SwiftAid.Infrastructure.Intake.Geography;
 
 namespace SwiftAid.Integration.Tests;
+
+[AttributeUsage(AttributeTargets.Method)]
+public sealed class LocationReplayChildFactAttribute : FactAttribute
+{
+    public LocationReplayChildFactAttribute()
+    {
+        if (Environment.GetEnvironmentVariable("SWIFTAID_LOCATION_REPLAY_CHILD") != "1")
+            Skip = "Executed by the isolated key-ring parent test.";
+    }
+}
 
 [Collection(IntakePostgresCollection.Name)]
 public sealed class EllaiLocationReplayTests
@@ -200,7 +211,7 @@ public sealed class EllaiLocationReplayTests
         [new Claim(ClaimTypes.NameIdentifier, id), new Claim(ActorContext.AccessEpochClaimType, "1")], "fixture")));
 
     [Fact]
-    public void ProtectedSearchSurvivesProviderRecreationAndKeyRotation()
+    public async Task ProtectedSearchSurvivesProviderRecreationAndKeyRotation()
     {
         var root = PrivateKeyRingTestDirectory.CreateRoot("swiftaid-location-replay");
         var keys = PrivateKeyRingTestDirectory.CreateKeyDirectory(root);
@@ -244,6 +255,7 @@ public sealed class EllaiLocationReplayTests
                 var protector = new EllaiLocationReplayProtector(fourth.GetRequiredService<IDataProtectionProvider>());
                 Assert.Equal(arguments["q"], protector.Unprotect(context, original)!["q"]);
                 Assert.Equal(arguments["q"], protector.Unprotect(context, rotated)!["q"]);
+                await VerifyInSeparateProcessAsync(keys, original, rotated);
                 var originalKeyId = new Guid(Convert.FromBase64String(original).AsSpan(4, 16));
                 Assert.NotEqual(rotatedKeyId, originalKeyId);
                 fourth.GetRequiredService<IKeyManager>().RevokeKey(originalKeyId, "synthetic fixture revocation");
@@ -268,6 +280,56 @@ public sealed class EllaiLocationReplayTests
             Directory.Delete(keys);
             Directory.Delete(root);
         }
+    }
+
+    private static async Task VerifyInSeparateProcessAsync(string keys, string original, string rotated)
+    {
+        var project = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "SwiftAid.Integration.Tests.csproj"));
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name
+            ?? throw new InvalidOperationException("Unable to identify the test configuration.");
+        var start = new ProcessStartInfo("dotnet") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        foreach (var argument in new[] { "test", project, "--configuration", configuration, "--no-build", "--no-restore", "-m:1", "-nr:false", "-p:WasmBuildNative=false",
+                     "--filter", "FullyQualifiedName~LocationReplayChildReadsTokens", "--logger", "console;verbosity=normal" })
+            start.ArgumentList.Add(argument);
+        start.Environment["SWIFTAID_LOCATION_REPLAY_CHILD"] = "1";
+        start.Environment["SWIFTAID_LOCATION_REPLAY_KEYS"] = keys;
+        start.Environment["SWIFTAID_LOCATION_REPLAY_ORIGINAL"] = original;
+        start.Environment["SWIFTAID_LOCATION_REPLAY_ROTATED"] = rotated;
+        start.Environment["SWIFTAID_LOCATION_REPLAY_PARENT_PID"] = Environment.ProcessId.ToString();
+        if (OperatingSystem.IsWindows()) start.Environment["OS"] = "Windows_NT";
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("Unable to start location replay test process.");
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        try { await process.WaitForExitAsync(timeout.Token); }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync();
+            }
+            throw;
+        }
+        var output = await stdout;
+        var errors = await stderr;
+        Assert.True(process.ExitCode == 0, $"Child process exited {process.ExitCode}: {output}\n{errors}");
+        Assert.Contains("Passed SwiftAid.Integration.Tests.EllaiLocationReplayTests.LocationReplayChildReadsTokens", output);
+    }
+
+    [LocationReplayChildFact]
+    public void LocationReplayChildReadsTokens()
+    {
+        Assert.NotEqual(Environment.GetEnvironmentVariable("SWIFTAID_LOCATION_REPLAY_PARENT_PID"), Environment.ProcessId.ToString());
+        var keys = Environment.GetEnvironmentVariable("SWIFTAID_LOCATION_REPLAY_KEYS")!;
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddDataProtection().SetApplicationName("location-replay-fixture").PersistKeysToFileSystem(new DirectoryInfo(keys));
+        using var provider = services.BuildServiceProvider();
+        var protector = new EllaiLocationReplayProtector(provider.GetRequiredService<IDataProtectionProvider>());
+        var context = new EllaiToolContext("protected-session", "scope", "public.product-help", null, 4, true, Actor: Actor("protected-owner"));
+        foreach (var name in new[] { "SWIFTAID_LOCATION_REPLAY_ORIGINAL", "SWIFTAID_LOCATION_REPLAY_ROTATED" })
+            Assert.Equal("synthetic private search", protector.Unprotect(context, Environment.GetEnvironmentVariable(name)!)!["q"]);
     }
 
     private sealed class Registry(bool empty, bool changed) : IGeographicRegistry
