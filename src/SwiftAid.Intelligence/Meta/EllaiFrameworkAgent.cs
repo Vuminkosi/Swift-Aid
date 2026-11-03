@@ -1,5 +1,6 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using System.Runtime.CompilerServices;
 using SwiftAid.Application.Ellai;
 using SwiftAid.Contracts.Ellai;
 
@@ -16,7 +17,7 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
         Func<CancellationToken, Task<bool>> isCurrent,
         Func<EllaiToolContext, EllaiToolRequest, CancellationToken, Task<EllaiToolResult>> invoke,
         EllaiFrameworkUsage usage,
-        CancellationToken ct)
+        CancellationToken ct, Func<string, CancellationToken, ValueTask>? onTextDelta = null)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(instructions);
@@ -52,13 +53,42 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
             ChatOptions = new ChatOptions { Instructions = instructions, Tools = tools.ToList(), MaxOutputTokens = maxOutputTokens }
         });
         var session = await agent.CreateSessionAsync(cancellationToken: ct).ConfigureAwait(false);
-        var response = await agent.RunAsync(messages, session, cancellationToken: ct).ConfigureAwait(false);
+        AgentResponse response;
+        EllaiDecisionTextStreamParser? parser = null;
+        if (onTextDelta is null)
+        {
+            response = await agent.RunAsync(messages, session, cancellationToken: ct).ConfigureAwait(false);
+        }
+        else
+        {
+            parser = new EllaiDecisionTextStreamParser();
+            var updates = new List<AgentResponseUpdate>();
+            var textLength = 0;
+            await foreach (var update in agent.RunStreamingAsync(messages, session, cancellationToken: ct).ConfigureAwait(false))
+            {
+                updates.Add(update);
+                textLength += update.Text.Length;
+                if (textLength > 512_000) throw new InvalidOperationException("Ellai response exceeded its stream limit.");
+                foreach (var sentence in parser.Append(update.Text))
+                {
+                    if (guard.FailureCode is null && await isCurrent(ct).ConfigureAwait(false))
+                        await onTextDelta(sentence, ct).ConfigureAwait(false);
+                }
+            }
+            response = updates.ToAgentResponse();
+        }
         if (guard.FailureCode is not null || !await isCurrent(ct).ConfigureAwait(false)) return null;
 
         var decision = EllaiModelTurnParser.Parse(response.Text).Turn?.FinalDecision;
         if (decision is null || EllaiDecisionValidator.Validate(decision).Count != 0) return null;
         if (decision.Claims.Any(claim => claim?.Evidence is { } refs && refs.Any(reference => reference is null || !evidence.Contains(reference))))
             return null;
+        if (parser is not null && onTextDelta is not null)
+        {
+            var remainder = parser.FlushVerified(decision.DisplayText);
+            if (remainder.Length > 0 && await isCurrent(ct).ConfigureAwait(false))
+                await onTextDelta(remainder, ct).ConfigureAwait(false);
+        }
         return decision;
     }
 
@@ -78,8 +108,31 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
             return response;
         }
 
-        public override IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
-            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException("Streaming requires equivalent authorization and usage handling.");
+        public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            if (!await isCurrent(cancellationToken).ConfigureAwait(false))
+                throw new InvalidOperationException("The Ellai session is no longer authorized.");
+            var boundedMessages = messages.ToArray();
+            if (!usage.CanDispatch(boundedMessages, options))
+                throw new InvalidOperationException("The Ellai session budget is exhausted.");
+            UsageDetails? details = null;
+            var completed = false;
+            try
+            {
+                await foreach (var update in base.GetStreamingResponseAsync(boundedMessages, options, cancellationToken).ConfigureAwait(false))
+                {
+                    details = update.Contents.OfType<UsageContent>().LastOrDefault()?.Details ?? details;
+                    yield return update;
+                }
+                completed = true;
+            }
+            finally
+            {
+                if (completed || details is not null)
+                    await usage.RecordAsync(new ChatResponse { Usage = details }, CancellationToken.None).ConfigureAwait(false);
+            }
+        }
     }
 }

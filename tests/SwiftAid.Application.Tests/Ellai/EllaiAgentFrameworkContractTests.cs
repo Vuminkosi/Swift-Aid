@@ -15,6 +15,27 @@ public sealed class EllaiAgentFrameworkContractTests
         """;
 
     [Fact]
+    public async Task FrameworkStreamingEmitsDecisionTextAndRecordsUsage()
+    {
+        using var client = new StreamingClient();
+        var agent = new EllaiFrameworkAgent(client);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal));
+        var store = new InMemoryEllaiUsageStore();
+        var fragments = new List<string>();
+        var decision = await agent.RunAsync(context, "Test instructions", [new ChatMessage(ChatRole.User, "test")], 100,
+            _ => Task.FromResult(true), (_, _, _) => throw new InvalidOperationException(),
+            new EllaiFrameworkUsage("session", new EllaiUsageLedger(), store), CancellationToken.None,
+            (text, _) => { fragments.Add(text); return ValueTask.CompletedTask; });
+
+        Assert.Equal("Done.", decision?.DisplayText);
+        Assert.Equal("Done.", string.Concat(fragments));
+        var totals = await store.TotalsAsync("session", CancellationToken.None);
+        Assert.Equal(3, totals.PromptTokens);
+        Assert.Equal(2, totals.CompletionTokens);
+    }
+
+    [Fact]
     public async Task FrameworkExecutionRejectsFinalDecisionAfterToolDenial()
     {
         using var client = new ScriptedClient(EllaiToolNames.Now, "unused", "example", ValidDecision, noArguments: true);
@@ -132,6 +153,26 @@ public sealed class EllaiAgentFrameworkContractTests
 #pragma warning disable CS0162
             yield break;
 #pragma warning restore CS0162
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    private sealed class StreamingClient : IChatClient
+    {
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            cancellationToken.ThrowIfCancellationRequested();
+            yield return new ChatResponseUpdate(ChatRole.Assistant, ValidDecision[..60]);
+            yield return new ChatResponseUpdate(ChatRole.Assistant, ValidDecision[60..]);
+            yield return new ChatResponseUpdate(ChatRole.Assistant,
+                [new UsageContent(new UsageDetails { InputTokenCount = 3, OutputTokenCount = 2 })]);
         }
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;

@@ -141,9 +141,14 @@ use `EllaiFrameworkUsage` to estimate the prompt and tool-schema budget against
 the existing ledger, then record provider usage through `IEllaiUsageStore`.
 The estimate and recording are covered by an in-memory fixture, not a live
 PostgreSQL restart or multi-instance concurrency test. The existing ledger's
-`TryReserve` is a check, not an atomic cross-instance reservation. Streaming
-through this guard is deliberately unsupported until it has equivalent
-accounting and authorization.
+`TryReserve` is a check, not an atomic cross-instance reservation. The
+isolated runner now uses framework streaming with the existing decision-text
+parser and checks currency and budget before each streamed provider call. It
+records usage from provider usage updates, including usage received before an
+interruption. If a provider ends or is interrupted without sending usage,
+actual billable usage cannot be established from that stream. A deterministic
+text-stream fixture passes; streamed native tool calls, live provider behavior,
+Gateway correlation, interruption, and voice delivery remain unverified.
 The deterministic framework fixture also invokes the real broker's admitted
 public-facts tool and observes its serialized JSON evidence. This is not a live
 provider or managed-case test. The framework and adapter focused tests passed
