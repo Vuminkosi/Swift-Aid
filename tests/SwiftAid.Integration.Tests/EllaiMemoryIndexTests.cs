@@ -6,6 +6,11 @@ using SwiftAid.Contracts.Cases;
 using SwiftAid.Intelligence.Meta;
 using Microsoft.Extensions.AI;
 using System.Security.Claims;
+using Microsoft.EntityFrameworkCore;
+using SwiftAid.Infrastructure.Authorization;
+using SwiftAid.Infrastructure.Persistence.Ellai;
+using SwiftAid.Infrastructure.Persistence.Repositories.Cases;
+using SwiftAid.Infrastructure.Persistence.Transactions;
 
 namespace SwiftAid.Integration.Tests;
 
@@ -87,6 +92,73 @@ public sealed class EllaiMemoryIndexTests
             {
                 Skip = "Set ELLAI_LIVE_QDRANT=1 with QDRANT_TEST_ENDPOINT/QDRANT_TEST_API_KEY to run the live Qdrant round-trip.";
             }
+        }
+    }
+
+    private sealed class LiveFrameworkStoresFactAttribute : FactAttribute
+    {
+        public LiveFrameworkStoresFactAttribute()
+        {
+            if (Environment.GetEnvironmentVariable("ELLAI_LIVE_QDRANT") != "1" ||
+                Environment.GetEnvironmentVariable("SWIFTAID_RUN_FRAMEWORK_POSTGRES_FIXTURES") != "1")
+                Skip = "Enable both dedicated disposable framework PostgreSQL and Qdrant fixtures.";
+        }
+    }
+
+    [LiveFrameworkStoresFact]
+    public async Task FrameworkRecallUsesPostgresAuthorityWithLiveQdrant()
+    {
+        var endpoint = Environment.GetEnvironmentVariable("QDRANT_TEST_ENDPOINT")!;
+        Assert.True(new Uri(endpoint).IsLoopback);
+        var key = Environment.GetEnvironmentVariable("QDRANT_TEST_API_KEY") ?? "";
+        var collection = "ellai-framework-authority-" + Guid.NewGuid().ToString("N");
+        var sessionId = "framework-authority-" + Guid.NewGuid().ToString("N");
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        var index = new EllaiMemoryIndex(http, endpoint, key, collection);
+        await using var fixture = await CaseAuthorityPostgresFixture.CreateAsync(frameworkFixture: true);
+        try
+        {
+            Assert.True(await index.EnsureExactCollectionAsync(CancellationToken.None));
+            await using var db = fixture.CreateDbContext();
+            var unit = new PostgresCaseCommandUnitOfWork(db);
+            var query = new CaseQueueQuery(new PostgresCaseQueueStore(db),
+                new CaseAccessPolicy(new PostgresCurrentAccessGrantStore(db, unit), new PostgresCaseAccessDescriptorStore(db, unit)), unit);
+            var topics = new EllaiTopicService(new PostgresEllaiTopicStore(db));
+            var context = new EllaiToolContext(sessionId, "scope-1", "cases", null, 4, true,
+                "consent/1", EllaiProcessingClassification.SyntheticDemo, Actor: fixture.CreateActor(),
+                AllowedTools: new HashSet<string> { EllaiToolNames.Topic });
+            var row = new CaseQueueItem(fixture.CaseId, "Reported", "SZ", fixture.ActorId, 2, DateTimeOffset.UtcNow);
+            await new EllaiCaseResultMemory(topics, query).RememberAsync(context, [row], CancellationToken.None);
+            var topic = Assert.Single(await new PostgresEllaiTopicStore(db).ListAsync(sessionId, CancellationToken.None));
+            Assert.True(await index.UpsertExactAsync(new("case-results", sessionId, context.ScopeEpoch, topic.TopicId,
+                EllaiCaseResultMemory.SourceVersion(topic.EntityRef!), DateTimeOffset.UtcNow.AddMinutes(5)), CancellationToken.None));
+            Assert.NotNull(await index.FindExactAsync("case-results", sessionId, context.ScopeEpoch, CancellationToken.None));
+            var consent = new EllaiConsentService();
+            consent.Grant(sessionId, EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+                EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
+            var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: query, topics: topics, referenceIndex: index);
+            async Task<string> RecallAsync()
+            {
+                using var client = new RecallClient();
+                var agent = new EllaiFrameworkAgent(client);
+                var decision = await agent.RunAsync(context, "Synthetic policy", [new ChatMessage(ChatRole.User, "recall")], 300,
+                    _ => Task.FromResult(true), broker.InvokeAsync,
+                    new EllaiFrameworkUsage(sessionId, new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None);
+                Assert.NotNull(decision);
+                return client.Observation;
+            }
+            Assert.Contains(fixture.CaseId.ToString("D"), await RecallAsync());
+            await fixture.SetGrantExpiryAsync(DateTimeOffset.UtcNow.AddMinutes(-1));
+            Assert.DoesNotContain(fixture.CaseId.ToString("D"), await RecallAsync());
+        }
+        finally
+        {
+            await using var cleanup = fixture.CreateDbContext();
+            await cleanup.Set<EllaiTopicEntity>().Where(item => item.SessionId == sessionId).ExecuteDeleteAsync();
+            using var delete = new HttpRequestMessage(HttpMethod.Delete, endpoint.TrimEnd('/') + "/collections/" + collection + "-exact");
+            if (!string.IsNullOrWhiteSpace(key)) delete.Headers.TryAddWithoutValidation("api-key", key);
+            using var result = await http.SendAsync(delete);
+            Assert.True(result.IsSuccessStatusCode);
         }
     }
 

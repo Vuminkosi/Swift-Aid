@@ -92,9 +92,11 @@ internal sealed class CaseAuthorityPostgresFixture : IAsyncDisposable
         string? grantWorkspaceId = null,
         DateTimeOffset? actorExpiresAtUtc = null,
         DateTimeOffset? membershipExpiresAtUtc = null,
-        DateTimeOffset? shareExpiresAtUtc = null)
+        DateTimeOffset? shareExpiresAtUtc = null,
+        bool frameworkFixture = false)
     {
-        var fixture = new CaseAuthorityPostgresFixture(GetValidatedConnectionString());
+        var fixture = new CaseAuthorityPostgresFixture(frameworkFixture
+            ? GetValidatedFrameworkConnectionString() : GetValidatedConnectionString());
         await fixture.SeedAsync(
                 makeCurrentActorOwner,
                 actorStatus,
@@ -389,6 +391,23 @@ internal sealed class CaseAuthorityPostgresFixture : IAsyncDisposable
             throw new InvalidOperationException("The PostgreSQL fixture target is not the approved disposable loopback database.");
         }
 
+        builder.Timeout = Math.Clamp(builder.Timeout, 1, 5);
+        builder.CommandTimeout = Math.Clamp(builder.CommandTimeout, 1, 10);
+        return builder.ConnectionString;
+    }
+
+    private static string GetValidatedFrameworkConnectionString()
+    {
+        if (Environment.GetEnvironmentVariable("SWIFTAID_RUN_FRAMEWORK_POSTGRES_FIXTURES") != "1")
+            throw new InvalidOperationException("The disposable framework fixture must be enabled explicitly.");
+        var value = Environment.GetEnvironmentVariable("SWIFTAID_FRAMEWORK_POSTGRES_CONNECTION");
+        if (string.IsNullOrWhiteSpace(value))
+            throw new InvalidOperationException("The disposable framework database is required.");
+        var builder = new NpgsqlConnectionStringBuilder(value);
+        if (builder.Host is not ("127.0.0.1" or "localhost" or "::1") || builder.Port is < 1024 or > 65535 ||
+            builder.Database != "swiftaid_framework_fixture" || builder.Username != "p21_migration_owner" ||
+            string.IsNullOrWhiteSpace(builder.Password))
+            throw new InvalidOperationException("The framework fixture must use its named disposable loopback database.");
         builder.Timeout = Math.Clamp(builder.Timeout, 1, 5);
         builder.CommandTimeout = Math.Clamp(builder.CommandTimeout, 1, 10);
         return builder.ConnectionString;

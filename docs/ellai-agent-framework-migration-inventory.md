@@ -158,6 +158,18 @@ endpoint, and `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration
 FullyQualifiedName~FrameworkRecallUsesLiveExactIndexAndRechecksCurrentCaseAccess
 --verbosity quiet`.
 
+`FrameworkRecallUsesPostgresAuthorityWithLiveQdrant` additionally passed 1/1
+with the same disposable Qdrant setup and a separate loopback
+`swiftaid_framework_fixture` PostgreSQL database after 60 migrations. It uses
+the real PostgreSQL topic store, case queue, case access policy and authority
+lease with synthetic records. A framework tool call recalled the indexed
+authorized case; after the persisted grant expired, a second framework run
+did not expose that case. The model and session execution are synthetic;
+this does not exercise the Gateway worker, live Muse, or real service outages.
+Run the preceding command with the filter changed to this test name and set
+`SWIFTAID_RUN_FRAMEWORK_POSTGRES_FIXTURES=1` and
+`SWIFTAID_FRAMEWORK_POSTGRES_CONNECTION` to the dedicated disposable database.
+
 **Evidence this audit:** `EllaiLiveQueueReadTests` passed 24/24, including
 four framework/broker cases for exact hit, stale reference, index outage and
 wrong epoch, with a fake index and synthetic queue. The focused integration
