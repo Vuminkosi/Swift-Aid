@@ -61,9 +61,9 @@ public partial class GuidedReportStepper
         AddIfInvalid(Draft.OccurrencePrecision == ReportedTimePrecision.Exact && !TimeOnly.TryParse(Draft.OccurrenceTime, out _),
             "report.occurrence-time");
         AddIfInvalid(Draft.OccurrencePrecision == ReportedTimePrecision.Exact && !HasValidOccurrenceOffset(), "report.utc-offset");
-        AddIfInvalid(Draft.RegionPresence == PresenceState.Known && string.IsNullOrWhiteSpace(Draft.Region), "report.region");
-        AddIfInvalid(Draft.AreaPresence == PresenceState.Known && string.IsNullOrWhiteSpace(Draft.Area), "report.area");
-        AddIfInvalid(Draft.LocalityPresence == PresenceState.Known && string.IsNullOrWhiteSpace(Draft.Locality), "report.locality");
+        AddIfInvalid(!PublicReportDraft.IsValidPlaceName(Draft.RegionPresence, Draft.Region), "report.region");
+        AddIfInvalid(!PublicReportDraft.IsValidPlaceName(Draft.AreaPresence, Draft.Area), "report.area");
+        AddIfInvalid(!PublicReportDraft.IsValidPlaceName(Draft.LocalityPresence, Draft.Locality), "report.locality");
         AddIfInvalid(!Draft.LocationUnknown && string.IsNullOrWhiteSpace(Draft.CountryCode) &&
             Draft.RegionPresence != PresenceState.Known && Draft.AreaPresence != PresenceState.Known &&
             Draft.LocalityPresence != PresenceState.Known, "report.place-search");

@@ -76,11 +76,11 @@ public sealed class PublicReportDraft : IValidatableObject
                 [nameof(OccurrenceTime), nameof(OccurrenceOffset)]);
         }
 
-        if (RegionPresence == PresenceState.Known && string.IsNullOrWhiteSpace(Region) ||
-            AreaPresence == PresenceState.Known && string.IsNullOrWhiteSpace(Area) ||
-            LocalityPresence == PresenceState.Known && string.IsNullOrWhiteSpace(Locality))
+        if (!IsValidPlaceName(RegionPresence, Region) ||
+            !IsValidPlaceName(AreaPresence, Area) ||
+            !IsValidPlaceName(LocalityPresence, Locality))
         {
-            yield return new ValidationResult("Add the place name or mark it unknown.", [nameof(Region), nameof(Area), nameof(Locality)]);
+            yield return new ValidationResult("Enter each known place name using at most 200 characters, or leave it unknown.", [nameof(Region), nameof(Area), nameof(Locality)]);
         }
     }
 
@@ -158,11 +158,11 @@ public sealed class PublicReportDraft : IValidatableObject
         if (observations.Count > 20 || observations.Any(value => value.Length > 1000))
             throw new InvalidOperationException("Use no more than 20 observations, with each under 1,000 characters.");
 
-        if ((RegionPresence == PresenceState.Known && (string.IsNullOrWhiteSpace(Region) || Region.Length > 200)) ||
-            (AreaPresence == PresenceState.Known && (string.IsNullOrWhiteSpace(Area) || Area.Length > 200)) ||
-            (LocalityPresence == PresenceState.Known && (string.IsNullOrWhiteSpace(Locality) || Locality.Length > 200)))
+        if (!IsValidPlaceName(RegionPresence, Region) ||
+            !IsValidPlaceName(AreaPresence, Area) ||
+            !IsValidPlaceName(LocalityPresence, Locality))
         {
-            throw new InvalidOperationException("Enter a place name under 200 characters, or mark it unknown.");
+            throw new InvalidOperationException("Enter a place name using at most 200 characters, or mark it unknown.");
         }
 
         if (!TryGetExactOccurrence(out var exactOccurrence) && OccurrencePrecision == ReportedTimePrecision.Exact)
@@ -331,6 +331,9 @@ public sealed class PublicReportDraft : IValidatableObject
         offset = TimeSpan.FromMinutes(totalMinutes);
         return true;
     }
+
+    internal static bool IsValidPlaceName(PresenceState presence, string? name) =>
+        presence != PresenceState.Known || (!string.IsNullOrWhiteSpace(name) && name.Length <= 200);
 
     private static OptionalPlace ToOptionalPlace(PresenceState presence, string? name, string? normalizedId = null) =>
         new(presence == PresenceState.Known ? name?.Trim() : null,

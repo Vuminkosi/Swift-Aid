@@ -1094,11 +1094,12 @@
             isValid = false;
         }
 
-        if (Draft.RegionPresence == PresenceState.Known && string.IsNullOrWhiteSpace(Draft.Region) ||
-             Draft.AreaPresence == PresenceState.Known && string.IsNullOrWhiteSpace(Draft.Area) ||
-             Draft.LocalityPresence == PresenceState.Known && string.IsNullOrWhiteSpace(Draft.Locality))
+        if (!PublicReportDraft.IsValidPlaceName(Draft.RegionPresence, Draft.Region) ||
+            !PublicReportDraft.IsValidPlaceName(Draft.AreaPresence, Draft.Area) ||
+            !PublicReportDraft.IsValidPlaceName(Draft.LocalityPresence, Draft.Locality))
         {
-            AddError(string.Empty, "Enter each place name marked as known, or leave it unknown.");
+            _showManualPlaces = true;
+            AddError(string.Empty, "Enter each known place name using at most 200 characters, or leave it unknown.");
             isValid = false;
         }
 

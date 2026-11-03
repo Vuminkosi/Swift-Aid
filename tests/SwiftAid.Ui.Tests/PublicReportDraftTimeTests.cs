@@ -80,4 +80,16 @@ public sealed class PublicReportDraftTimeTests
 
         Assert.Throws<InvalidOperationException>(() => Submit(draft));
     }
+
+    [Fact]
+    public void ToSubmission_RejectsOversizedKnownPlaceAndAcceptsBoundary()
+    {
+        var draft = Draft();
+        draft.RegionPresence = PresenceState.Known;
+        draft.Region = new string('x', 201);
+        Assert.Throws<InvalidOperationException>(() => Submit(draft));
+
+        draft.Region = new string('x', 200);
+        Assert.Equal(draft.Region, Submit(draft).Location.Region.ReportedName);
+    }
 }

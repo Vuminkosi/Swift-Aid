@@ -10,6 +10,32 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed partial class GuidedReportDraftPersistenceTests
 {
+    [Fact]
+    public async Task OversizedPlaceNamesBlockReviewAndAreIdentifiedInOrder()
+    {
+        var draft = CreateDraft();
+        draft.RegionPresence = draft.AreaPresence = draft.LocalityPresence = PresenceState.Known;
+        draft.Region = draft.Area = draft.Locality = new string('x', 201);
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+
+        await (Task)Invoke(component, "ContinueFromTypeAsync")!;
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+        Assert.Equal(new[] { "report.region", "report.area", "report.locality" },
+            component.GetState().ValidationIssues.Select(issue => issue.InputId));
+        Assert.True(GetField<bool>(component, "_showManualPlaces"));
+        Assert.Contains(draft.Validate(new System.ComponentModel.DataAnnotations.ValidationContext(draft)),
+            error => error.MemberNames.Contains(nameof(PublicReportDraft.Region)));
+
+        draft.Region = new string('x', 200);
+        Assert.Equal("report.area", component.GetState().ValidationIssues.First().InputId);
+        draft.Area = "Synthetic area";
+        Assert.Equal("report.locality", component.GetState().ValidationIssues.First().InputId);
+        draft.Locality = "Synthetic locality";
+        Assert.Empty(component.GetState().ValidationIssues);
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+        Assert.True(component.GetState().Controls.Single(control => control.ControlId == "report.narrative").CompletionAccepted);
+    }
+
     [Theory]
     [InlineData("+-1:00")]
     [InlineData("+ 2:00")]
