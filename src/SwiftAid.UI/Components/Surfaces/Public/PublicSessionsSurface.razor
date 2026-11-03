@@ -347,7 +347,7 @@
                     }
                 </MudAlert>
             }
-            else if (_subscriptionState.Status == SessionSubscriptionStatus.Active)
+            else if (_subscriptionState.Status == SessionSubscriptionStatus.Active && !_editingReminder)
             {
                 <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" role="status">
                     Reminders are enabled for this session.
@@ -356,6 +356,13 @@
                         <span>@_subscriptionState.Message</span>
                     }
                 </MudAlert>
+                @if (_subscriptionState.Options is { IsCurrent: true, Channels.Count: > 0 } changeOptions &&
+                     changeOptions.SessionId == selected.SessionId && !string.IsNullOrWhiteSpace(changeOptions.ConsentReference) &&
+                     !string.IsNullOrWhiteSpace(changeOptions.ConsentText))
+                {
+                    <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@IsSubscriptionBusy"
+                               OnClick="BeginReminderChange" StartIcon="@Icons.Material.Filled.Edit">Change reminder method</MudButton>
+                }
                 <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@IsSubscriptionBusy"
                            OnClick="UnsubscribeAsync" aria-label="Turn off reminders for this session" StartIcon="@Icons.Material.Filled.NotificationsOff">
                     @(IsSubscriptionBusy ? "Saving…" : "Turn off reminders")
@@ -380,9 +387,13 @@
                     <MudText Typo="Typo.caption" Color="Color.Secondary" role="status" aria-live="polite">@_subscriptionState.Message</MudText>
                 }
                 <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="@(!CanSubscribe(options) || IsSubscriptionBusy)"
-                           OnClick="SubscribeAsync" aria-label="Turn on reminders for this session" StartIcon="@Icons.Material.Filled.NotificationsActive">
-                    @(IsSubscriptionBusy ? "Saving…" : "Turn on reminders")
+                           OnClick="SubscribeAsync" aria-label="@(_editingReminder ? "Save reminder method" : "Turn on reminders for this session")" StartIcon="@Icons.Material.Filled.NotificationsActive">
+                    @(IsSubscriptionBusy ? "Saving…" : _editingReminder ? "Save reminder method" : "Turn on reminders")
                 </MudButton>
+                @if (_editingReminder)
+                {
+                    <MudButton Variant="Variant.Text" Disabled="@IsSubscriptionBusy" OnClick="CancelReminderChange">Cancel</MudButton>
+                }
             }
             else
             {
@@ -483,6 +494,7 @@
     private SessionSubscriptionPanelState? _subscriptionState;
     private SessionReminderChannel? _selectedReminderChannel;
     private bool _reminderConsentAccepted;
+    private bool _editingReminder;
     private bool _subscriptionLoading;
     private bool _initialSelectionApplied;
     private bool _initialRemindersApplied;
@@ -1340,6 +1352,7 @@
         _subscriptionState = null;
         _selectedReminderChannel = null;
         _reminderConsentAccepted = false;
+        _editingReminder = false;
         var requestGeneration = ++_subscriptionRequestGeneration;
         if (sessionId == Guid.Empty || LoadSubscriptionStateAsync is null)
         {
@@ -1409,6 +1422,18 @@
         return Task.CompletedTask;
     }
 
+    private void BeginReminderChange()
+    {
+        _reminderConsentAccepted = false;
+        _editingReminder = true;
+    }
+
+    private void CancelReminderChange()
+    {
+        _reminderConsentAccepted = false;
+        _editingReminder = false;
+    }
+
     private async Task SubscribeAsync()
     {
         if (_subscriptionState is not { Options: { } options } currentState ||
@@ -1435,6 +1460,11 @@
             }
 
             _subscriptionState = state;
+            _reminderConsentAccepted = false;
+            if (state is { Status: SessionSubscriptionStatus.Active, IsError: false })
+            {
+                _editingReminder = false;
+            }
             if (_subscriptionState is null)
             {
                 await LoadSubscriptionForSelectedAsync(force: true);
@@ -1452,6 +1482,7 @@
                 IsError = true,
                 Message = "The reminder choice could not be updated. Try again."
             };
+            _reminderConsentAccepted = false;
         }
         finally
         {

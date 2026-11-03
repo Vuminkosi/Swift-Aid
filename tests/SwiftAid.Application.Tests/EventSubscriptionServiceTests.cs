@@ -60,6 +60,27 @@ public sealed class EventSubscriptionServiceTests
     }
 
     [Fact]
+    public async Task ChangingChannelRequiresFreshConsentAndStopsTheOldChannel()
+    {
+        var (service, _, _) = Create();
+        var firstOptions = Assert.IsType<EventSubscriptionOptions>(await service.GetOptionsAsync(SessionId, AccountId, default));
+        var first = await service.SubscribeAsync(SessionId, AccountId, firstOptions.SessionVersion,
+            firstOptions.ConsentReference, "Email", default);
+        var nextOptions = Assert.IsType<EventSubscriptionOptions>(await service.GetOptionsAsync(SessionId, AccountId, default));
+
+        await Assert.ThrowsAsync<SessionSubscriptionConflictException>(() => service.SubscribeAsync(SessionId, AccountId,
+            firstOptions.SessionVersion, firstOptions.ConsentReference, "MobilePush", default));
+        var changed = await service.SubscribeAsync(SessionId, AccountId, nextOptions.SessionVersion,
+            nextOptions.ConsentReference, "MobilePush", default);
+
+        Assert.True(changed.Version > first.Version);
+        Assert.False(await service.CanDispatchReminderAsync(SessionId, AccountId, firstOptions.SessionVersion,
+            firstOptions.ConsentReference, "Email", default, first.Version));
+        Assert.True(await service.CanDispatchReminderAsync(SessionId, AccountId, nextOptions.SessionVersion,
+            nextOptions.ConsentReference, "MobilePush", default, changed.Version));
+    }
+
+    [Fact]
     public async Task Unpublished_or_started_sessions_cannot_offer_or_dispatch_reminders()
     {
         var (service, sessions, _) = Create();

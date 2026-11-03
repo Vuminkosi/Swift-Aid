@@ -512,7 +512,7 @@
             };
             var options = (PublicSessionsSurface.SessionSubscriptionOptions?)null;
             var message = CombineMessages(result.Message, result.Metadata.Notice);
-            if (status == PublicSessionsSurface.SessionSubscriptionStatus.Unsubscribed)
+            if (status is PublicSessionsSurface.SessionSubscriptionStatus.Unsubscribed or PublicSessionsSurface.SessionSubscriptionStatus.Active)
             {
                 var optionsResult = await SubscriptionClient.GetSubscriptionOptionsAsync(sessionId);
                 if (optionsResult.Code == UiCapabilityResultCode.Success && optionsResult.Value is { } optionValue)
@@ -526,7 +526,7 @@
                         optionValue.IsCurrent);
                     message = CombineMessages(message, CombineMessages(optionsResult.Message, optionsResult.Metadata.Notice));
                 }
-                else
+                else if (status == PublicSessionsSurface.SessionSubscriptionStatus.Unsubscribed)
                 {
                     return UnavailableSubscriptionState(
                         sessionId,
@@ -576,7 +576,7 @@
                     SubscriptionStatus.RequiresAuthentication => PublicSessionsSurface.SessionSubscriptionStatus.RequiresAuthentication,
                     _ => PublicSessionsSurface.SessionSubscriptionStatus.Unavailable
                 };
-                if (status == PublicSessionsSurface.SessionSubscriptionStatus.Unsubscribed)
+                if (status is PublicSessionsSurface.SessionSubscriptionStatus.Unsubscribed or PublicSessionsSurface.SessionSubscriptionStatus.Active)
                 {
                     var refreshed = await LoadSubscriptionStateAsync(action.SessionId);
                     return refreshed is null

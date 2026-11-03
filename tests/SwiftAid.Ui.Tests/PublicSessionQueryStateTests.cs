@@ -16,6 +16,44 @@ namespace SwiftAid.Ui.Tests;
 public sealed class PublicSessionQueryStateTests
 {
     [Fact]
+    public async Task ChangingReminderMethodRequiresFreshConsentAndSubmitsCurrentOptions()
+    {
+        var component = new PublicSessionsSurface();
+        var type = typeof(PublicSessionsSurface);
+        var id = Guid.NewGuid();
+        var options = new PublicSessionsSurface.SessionSubscriptionOptions(id, "current-consent", 7,
+            "Consent text", [PublicSessionsSurface.SessionReminderChannel.Email, PublicSessionsSurface.SessionReminderChannel.MobilePush], true);
+        var state = new PublicSessionsSurface.SessionSubscriptionPanelState(id,
+            PublicSessionsSurface.SessionSubscriptionStatus.Active, 3, options, null);
+        type.GetField("_selectedSessionId", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, id);
+        type.GetField("_subscriptionSessionId", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, id);
+        type.GetField("_subscriptionState", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, state);
+        type.GetField("_selectedReminderChannel", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(component, PublicSessionsSurface.SessionReminderChannel.MobilePush);
+        PublicSessionsSurface.SessionSubscriptionAction? captured = null;
+        type.GetProperty(nameof(component.ExecuteSubscriptionActionAsync))!.SetValue(component,
+            (Func<PublicSessionsSurface.SessionSubscriptionAction, Task<PublicSessionsSurface.SessionSubscriptionPanelState?>>)(action =>
+            {
+                captured = action;
+                return Task.FromResult<PublicSessionsSurface.SessionSubscriptionPanelState?>(state);
+            }));
+
+        type.GetMethod("BeginReminderChange", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(component, null);
+        await InvokeAsync(component, "SubscribeAsync");
+        Assert.Null(captured);
+
+        type.GetField("_reminderConsentAccepted", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(component, true);
+        await InvokeAsync(component, "SubscribeAsync");
+        Assert.NotNull(captured);
+        Assert.Equal(id, captured.SessionId);
+        Assert.Equal(7, captured.ExpectedVersion);
+        Assert.Equal("current-consent", captured.ConsentReference);
+        Assert.Equal(PublicSessionsSurface.SessionReminderChannel.MobilePush, captured.Channel);
+        Assert.False(Field<bool>(component, "_editingReminder"));
+        Assert.False(Field<bool>(component, "_reminderConsentAccepted"));
+    }
+
+    [Fact]
     public async Task CalendarNavigationRestoresLibraryDateRangeAndOtherFilters()
     {
         var component = new PublicSessionsSurface();
