@@ -31,6 +31,54 @@ public sealed class GuestSubmissionJourneyTests
     }
 
     [Fact]
+    public async Task SnapshotDraftCannotBeOpenedRevisedOrQueuedByLegacyEditor()
+    {
+        var persistence = new MemorySubmissionPersistence();
+        var store = new GuestDraftStore(persistence, transport: new ScriptedTransport());
+        var created = await store.CreateDraftAsync(ValidSubmission());
+        var record = (await persistence.GetAsync(created.ClientSubmissionId, default))!;
+        var snapshot = new GuestDraftFormSnapshot(1, "{\"occurrenceTime\":\"unfinished\"}");
+        await persistence.SaveAsync(record with { FormSnapshot = snapshot }, default);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.GetDraftAsync(created.ClientSubmissionId));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.CreateRevisionAsync(created.ClientSubmissionId, ValidSubmission()));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.QueueAsync(created.ClientSubmissionId));
+        var preserved = (await persistence.GetAsync(created.ClientSubmissionId, default))!;
+        Assert.Equal(snapshot, preserved.FormSnapshot);
+        Assert.Equal(GuestSubmissionLocalState.Draft, preserved.State);
+    }
+
+    [Fact]
+    public async Task SnapshotOnQueuedRecordNeverReachesTransport()
+    {
+        var persistence = new MemorySubmissionPersistence();
+        var transport = new ScriptedTransport();
+        var store = new GuestDraftStore(persistence, transport: transport);
+        var draft = await store.CreateDraftAsync(ValidSubmission());
+        await store.QueueAsync(draft.ClientSubmissionId);
+        var queued = (await persistence.GetAsync(draft.ClientSubmissionId, default))!;
+        await persistence.SaveAsync(queued with { FormSnapshot = new(1, "{\"occurrenceTime\":\"unfinished\"}") }, default);
+
+        var result = await new GuestSubmissionCoordinator(persistence, transport).SubmitPendingAsync();
+
+        Assert.Equal(1, result.NeedsAttention);
+        Assert.Equal(0, transport.CreateSessionCalls);
+        Assert.Equal(0, transport.SubmitCalls);
+        Assert.NotNull((await persistence.GetAsync(draft.ClientSubmissionId, default))!.FormSnapshot);
+    }
+
+    [Theory]
+    [InlineData(1, "{}", true)]
+    [InlineData(2, "{}", false)]
+    [InlineData(1, "[]", false)]
+    [InlineData(1, "{", false)]
+    public void SnapshotValidationIsBoundedAndVersioned(int version, string json, bool valid)
+    {
+        Assert.Equal(valid, new GuestDraftFormSnapshot(version, json).IsValid());
+        Assert.False(new GuestDraftFormSnapshot(1, new string('x', GuestDraftFormSnapshot.MaximumJsonCharacters + 1)).IsValid());
+    }
+
+    [Fact]
     public async Task UnverifiedCountryDraftSurvivesAndCannotQueueUntilReconfirmed()
     {
         var persistence = new MemorySubmissionPersistence();

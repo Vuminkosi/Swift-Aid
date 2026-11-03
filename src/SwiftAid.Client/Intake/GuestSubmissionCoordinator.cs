@@ -33,7 +33,7 @@ public sealed class GuestSubmissionCoordinator(
                 var item = queuedItem;
                 try
                 {
-                    if (!HasValidPayloadHash(item))
+                    if (item.FormSnapshot is not null || !HasValidPayloadHash(item))
                     {
                         var updatedRecord = item with
                         {

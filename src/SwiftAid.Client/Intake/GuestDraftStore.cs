@@ -49,6 +49,8 @@ public sealed class GuestDraftStore(
             {
                 throw new InvalidOperationException("A queued or received report cannot be changed. Create a separate report revision instead.");
             }
+            if (previous.FormSnapshot is not null)
+                throw new InvalidOperationException("Open this draft in a compatible editor before replacing it.");
 
             var replacement = CreateRecord(revisedSubmission, _timeProvider.GetUtcNow()) with
             {
@@ -134,6 +136,7 @@ public sealed class GuestDraftStore(
             var now = _timeProvider.GetUtcNow();
             var replacement = CreateRecord(revisedSubmission, now) with
             {
+                FormSnapshot = current.FormSnapshot,
                 AudioAssets = assets.Where(asset => asset.AttachmentId != attachmentId).ToArray()
             };
             var superseded = current with
@@ -351,6 +354,8 @@ public sealed class GuestDraftStore(
             {
                 throw new InvalidOperationException("This report is not ready to be queued.");
             }
+            if (current.FormSnapshot is not null)
+                throw new InvalidOperationException("Open and complete this draft before sending it.");
 
             if (transport is null)
             {
@@ -404,6 +409,11 @@ public sealed class GuestDraftStore(
         {
             return null;
         }
+
+        // Existing editors restore only Submission and would silently discard raw fields.
+        // Keep the envelope intact until an editor explicitly supports snapshots.
+        if (item.FormSnapshot is not null)
+            throw new InvalidOperationException("This draft requires a compatible editor.");
 
         return new GuestDraftDetails(
             item.ClientSubmissionId,

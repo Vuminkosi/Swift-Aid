@@ -24,6 +24,9 @@ public sealed class GuestDraftAudioRetakePersistenceTests
             new MemoryStream([0x52, 0x49, 0x46, 0x46, 0x01, 0x02]));
         var before = Assert.IsType<GuestSubmissionRecord>(
             await persistence.GetAsync(created.ClientSubmissionId, CancellationToken.None));
+        var snapshot = new GuestDraftFormSnapshot(1, "{\"occurrenceTime\":\"unfinished\"}");
+        await persistence.SaveAsync(before with { FormSnapshot = snapshot, Version = before.Version + 1 }, default);
+        before = Assert.IsType<GuestSubmissionRecord>(await persistence.GetAsync(created.ClientSubmissionId, default));
 
         var retake = await drafts.RetakeAudioAsync(
             created.ClientSubmissionId, attachmentId, before.Version);
@@ -45,6 +48,7 @@ public sealed class GuestDraftAudioRetakePersistenceTests
         Assert.Contains(oldAfter.AudioAssets!, asset => asset.AttachmentId == attachmentId);
         Assert.Equal(1, replacement.Version);
         Assert.Equal(GuestSubmissionLocalState.Draft, replacement.State);
+        Assert.Equal(snapshot, replacement.FormSnapshot);
         Assert.DoesNotContain(attachmentId, replacement.Submission.OriginalAudioAttachmentIds);
         Assert.Empty(replacement.AudioAssets!);
         Assert.Equal(HashSubmission(oldAfter.Submission), oldAfter.PayloadSha256);
@@ -58,6 +62,7 @@ public sealed class GuestDraftAudioRetakePersistenceTests
             await restartedPersistence.GetAsync(replacement.ClientSubmissionId, CancellationToken.None));
         Assert.Equal(oldAfter.Version, restoredOld.Version);
         Assert.Equal(replacement.Version, restoredReplacement.Version);
+        Assert.Equal(snapshot, restoredReplacement.FormSnapshot);
         Assert.Equal(oldAfter.Submission.OriginalAudioAttachmentIds, restoredOld.Submission.OriginalAudioAttachmentIds);
         Assert.Empty(restoredReplacement.Submission.OriginalAudioAttachmentIds);
         Assert.Empty(await new EncryptedGuestAudioCleanupJournal(root.Path, keys).GetPendingAsync());
