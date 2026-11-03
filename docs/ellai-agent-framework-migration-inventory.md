@@ -3364,3 +3364,26 @@ the observed summary and evidence. The in-process Gateway live Muse guest
 conversation with product-facts tool use passed 1/1. These runs used synthetic
 records; the stores were removed. Deployed Gateway and independent security
 review remain NOT VERIFIED.
+
+### Live UI observation revalidation — 2026-11-03
+
+The final evidence fence rejected even an unchanged authorized
+`ellai_ui_observe` result because UI observations had no replay provenance.
+The broker now records bounded registry-owned feature, control and goal
+references plus a fingerprint of the relevant client report. The final and
+history authorization check re-invokes the broker under the current actor and
+scope, and requires the same fingerprint. View IDs and context stamps are
+hashed rather than written into the trace; the internal replay scope is not
+serialized into the model-facing tool result. An unchanged missing-report
+result can also be rechecked, but becomes invalid when a report arrives.
+Changed controls or reports, expiry into a stale state, removed tool admission,
+older traces without the new scope, mismatched requested views and unrecognized
+goal text fail closed rather than being assumed current.
+
+The unchanged-report regression first failed before this change. PASS: the
+application UI, framework and authorization filter passed 180/180; the focused
+unchanged/changed/missing-report tests passed 2/2 after additional privacy and
+state-change assertions. PASS: the framework worker and guidance projection
+filter passed 9/9 with a synthetic model and in-memory stores, including a
+real `ellai_ui_observe` call and a restored follow-up. This does not verify
+a deployed browser, physical device, or independent security review.

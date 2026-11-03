@@ -32,6 +32,7 @@ public static class EllaiAuthorizedConversationContext
         var importChecks = new Dictionary<(Guid Id, string Version), bool>();
         var countChecks = new Dictionary<EllaiCountReplayScope, bool>();
         var catalogueChecks = new Dictionary<EllaiUiCatalogueReplayScope, bool>();
+        var uiObservationChecks = new Dictionary<EllaiUiObservationReplayScope, bool>();
         var receiptListChecks = new Dictionary<(string? ReceiptId, string Digest), (bool Allowed, IReadOnlyList<EvidenceRef> Evidence)>();
 
         async Task<bool> MayReplayAsync(EllaiConversationTurn turn)
@@ -127,6 +128,37 @@ public static class EllaiAuthorizedConversationContext
                             ct.ThrowIfCancellationRequested();
                             allowed = current.Allowed && !current.Truncated && current.UiCatalogueReplayScope == scope;
                             catalogueChecks[scope] = allowed;
+                        }
+                        if (!allowed) return decisions[turn.ClientUtteranceId] = false;
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (Exception error) when (error is not OutOfMemoryException)
+                    {
+                        return decisions[turn.ClientUtteranceId] = false;
+                    }
+                    continue;
+                }
+                if (observation.ToolName == EllaiToolNames.UiObserve)
+                {
+                    var scope = observation.UiObservationReplayScope;
+                    if (toolContext is null || invokeTool is null || scope is null || !scope.IsValid() ||
+                        toolContext.SessionId != turn.SessionId || toolContext.Actor is null ||
+                        toolContext.Actor.ActorId != actor.ActorId || toolContext.Actor.AccessEpoch != actor.AccessEpoch ||
+                        observation.ReasonCode != EllaiToolReasonCodes.Ok)
+                        return decisions[turn.ClientUtteranceId] = false;
+                    try
+                    {
+                        if (!uiObservationChecks.TryGetValue(scope, out var allowed))
+                        {
+                            var arguments = new Dictionary<string, string>
+                            {
+                                ["feature"] = scope.Feature, ["controls"] = scope.Controls, ["view"] = "current"
+                            };
+                            if (scope.GoalTags is not null) arguments["context"] = scope.GoalTags;
+                            var current = await invokeTool(toolContext, new EllaiToolRequest(EllaiToolNames.UiObserve, arguments), ct).ConfigureAwait(false);
+                            ct.ThrowIfCancellationRequested();
+                            allowed = current.Allowed && !current.Truncated && current.UiObservationReplayScope == scope;
+                            uiObservationChecks[scope] = allowed;
                         }
                         if (!allowed) return decisions[turn.ClientUtteranceId] = false;
                     }

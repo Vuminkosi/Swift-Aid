@@ -27,7 +27,8 @@ public sealed record EllaiObservedToolResult(
     string? StaticFeatureVersion = null, DateTimeOffset? CaseSnapshotExpiresAtUtc = null,
     string? ClockVersion = null, EllaiCountReplayScope? CountReplayScope = null,
     EllaiUiCatalogueReplayScope? UiCatalogueReplayScope = null, string? CapabilityVersion = null,
-    string? ReceiptListDigest = null, string? ReceiptLookupId = null)
+    string? ReceiptListDigest = null, string? ReceiptLookupId = null,
+    EllaiUiObservationReplayScope? UiObservationReplayScope = null)
 {
     public const string CurrentStaticFeatureVersion = "state-feature/1";
     public const string CurrentClockVersion = "server-clock/1";
@@ -86,7 +87,9 @@ public sealed record EllaiObservedToolResult(
                 result.ReasonCode == EllaiToolReasonCodes.Ok && !result.Truncated &&
                 result.ItemCount == result.Evidence.Count && result.Evidence.Count <= 20
                     ? ReceiptListFingerprint(result) : null,
-            receiptLookupId);
+            receiptLookupId,
+            request.ToolName == EllaiToolNames.UiObserve && result.Allowed && !result.Truncated
+                ? result.UiObservationReplayScope : null);
     }
 
     public static bool IsCanonicalReceiptId(string? value) => value is { Length: 37 } &&
@@ -99,6 +102,15 @@ public sealed record EllaiObservedToolResult(
         var content = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new { result.ResultSummary, result.ItemCount, result.Evidence });
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content));
     }
+}
+
+/// <summary>Registry-owned observation references and a fingerprint of the client report.</summary>
+public sealed record EllaiUiObservationReplayScope(string Feature, string Controls, string? GoalTags, string ResultDigest)
+{
+    public bool IsValid() => !string.IsNullOrWhiteSpace(Feature) && Feature.Length <= 120 &&
+        !string.IsNullOrWhiteSpace(Controls) && Controls.Length <= 120 &&
+        (GoalTags is null || !string.IsNullOrWhiteSpace(GoalTags) && GoalTags.Length <= 120) &&
+        ResultDigest is { Length: 64 } && ResultDigest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F');
 }
 
 /// <summary>Only the resolved feature, limit and fingerprint needed to recheck catalogue discovery.</summary>

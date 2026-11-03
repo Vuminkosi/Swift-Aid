@@ -131,6 +131,8 @@ public sealed record EllaiToolResult(
     /// <summary>Internal query identity for a replayable catalogue read.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public EllaiUiCatalogueReplayScope? UiCatalogueReplayScope { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public EllaiUiObservationReplayScope? UiObservationReplayScope { get; init; }
 }
 
 /// <summary>Authorized typed evidence/app-state tool broker (ELL-T07 groundwork).
@@ -1030,14 +1032,6 @@ public sealed class EllaiToolBroker
         }
 
         var report = await _uiObservations.LatestAsync(context.SessionId, ct).ConfigureAwait(false);
-        if (report is null)
-        {
-            return Allow(request.ToolName,
-                "No client UI observation has been reported for this session.", 0, false);
-        }
-
-        if (view == "current") view = report.ViewInstanceId;
-
         var goalTags = request.Arguments.TryGetValue("context", out var goalContext)
             && !string.IsNullOrWhiteSpace(goalContext)
             ? goalContext.Split(',').Select(t => t.Trim()).Where(t => t.Length > 0).ToList()
@@ -1048,6 +1042,18 @@ public sealed class EllaiToolBroker
             authority.Capabilities);
         var eligible = snapshot.Descriptors.ToDictionary(d => d.ControlId, StringComparer.Ordinal);
         var unknown = requested.Where(id => !eligible.ContainsKey(id)).ToList();
+        var knownGoals = snapshot.Descriptors.SelectMany(descriptor => descriptor.GoalTags).ToHashSet(StringComparer.Ordinal);
+        if (report is null)
+        {
+            var empty = Allow(request.ToolName, "No client UI observation has been reported for this session.", 0, false);
+            var replay = new EllaiUiObservationReplayScope(feature, string.Join(",", requested),
+                goalTags.Count == 0 ? null : string.Join(",", goalTags),
+                Convert.ToHexString(System.Security.Cryptography.SHA256.HashData("no-client-report"u8)));
+            return unknown.Count == 0 && goalTags.All(knownGoals.Contains) && replay.IsValid()
+                ? empty with { UiObservationReplayScope = replay } : empty;
+        }
+
+        if (view == "current") view = report.ViewInstanceId;
         if (unknown.Count > 0)
         {
             return Deny(request.ToolName,
@@ -1076,9 +1082,24 @@ public sealed class EllaiToolBroker
             (string.Equals(report.ViewInstanceId, view.Trim(), StringComparison.Ordinal)
                 ? string.Empty
                 : $" Requested view '{view.Trim()}' differs from the latest report.");
-        return new EllaiToolResult(request.ToolName, true, null, evidence,
+        var result = new EllaiToolResult(request.ToolName, true, null, evidence,
             header + "\n" + string.Join("\n", lines),
             ordered.Count, false, EllaiToolReasonCodes.Ok);
+        // Persist only registry-owned references, never arbitrary model text or
+        // client report contents. A fresh call must resolve the same report.
+        if (string.Equals(report.ViewInstanceId, view.Trim(), StringComparison.Ordinal) && goalTags.All(knownGoals.Contains))
+        {
+            var content = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                report.ViewInstanceId, report.ContextStamp, report.Platform, report.ReceivedAtUtc,
+                Lines = lines.ToArray(), Evidence = evidence
+            });
+            var replay = new EllaiUiObservationReplayScope(feature, string.Join(",", requested),
+                goalTags.Count == 0 ? null : string.Join(",", goalTags),
+                Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)));
+            if (replay.IsValid()) result = result with { UiObservationReplayScope = replay };
+        }
+        return result;
     }
 
     private EllaiToolResult SearchDocs(EllaiToolRequest request)

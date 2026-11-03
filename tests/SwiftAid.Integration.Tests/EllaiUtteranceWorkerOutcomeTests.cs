@@ -725,6 +725,7 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
     [InlineData(EllaiToolNames.UiCatalogue, false, false)]
     [InlineData(EllaiToolNames.UiCatalogue, true, false)]
     [InlineData(EllaiToolNames.UiCatalogue, false, true)]
+    [InlineData(EllaiToolNames.UiObserve, false, false)]
     public async Task WorkerRunsFrameworkExecutorAndPersistsAndStreamsAnswer(string? toolName, bool changeCatalogue, bool filterGoal)
     {
         var store = new InMemoryEllaiSessionStore();
@@ -749,11 +750,15 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
         using var model = new FrameworkStreamingClient(toolName, filterGoal);
         var registry = new EllaiUiRegistry();
         if (!changeCatalogue) EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        var uiObservations = new InMemoryEllaiUiObservationStore();
+        await uiObservations.RecordAsync(new(session.SessionId, "view-1", "context-1", "web", ["report.entry"],
+            DateTimeOffset.UtcNow, [new("report.entry", UiObservationState.Ready)]), CancellationToken.None);
         var registrations = new ServiceCollection()
             .AddSingleton<IEllaiSessionStore>(store).AddSingleton<IEllaiUtteranceOutboxStore>(store)
             .AddSingleton(responses).AddSingleton(consent).AddSingleton<EllaiUsageLedger>()
             .AddSingleton<IEllaiUsageStore>(usage).AddScoped(_ => new EllaiPromptBuilder("Synthetic test policy", "v-test"))
-            .AddScoped(_ => new EllaiToolBroker(new EllaiPolicyService(), consent, receipts: receipts, uiRegistry: registry));
+            .AddScoped(_ => new EllaiToolBroker(new EllaiPolicyService(), consent, receipts: receipts, uiRegistry: registry,
+                uiDiscovery: new EllaiUiDiscoveryService(), uiObservations: uiObservations));
         registrations.AddEllaiReasoningExecutor(new EllaiOptions
         {
             Enabled = true, ApiKey = "synthetic", ApiUrl = "https://fixture.invalid", ReasoningModel = "fixture"
@@ -792,6 +797,7 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
                     (toolName == EllaiToolNames.Now ? item.ClockVersion == EllaiObservedToolResult.CurrentClockVersion :
                      toolName == EllaiToolNames.Capabilities ? item.CapabilityVersion == EllaiObservedToolResult.CurrentCapabilityVersion :
                      toolName == EllaiToolNames.Receipts ? item.ReceiptListDigest is not null :
+                     toolName == EllaiToolNames.UiObserve ? item.UiObservationReplayScope is not null :
                         item.UiCatalogueReplayScope is not null && (!filterGoal || item.UiCatalogueReplayScope.GoalTag == "report-help")));
             }
             {
@@ -848,7 +854,7 @@ public sealed class EllaiUtteranceWorkerOutcomeTests
                         : toolName == EllaiToolNames.State ? new Dictionary<string, object?> { ["projection"] = "queue" }
                         : toolName == EllaiToolNames.Imports ? new Dictionary<string, object?> { ["workspace_id"] = "test", ["organization_id"] = "org", ["country"] = "SZ" }
                         : toolName == EllaiToolNames.ImportStatus ? new Dictionary<string, object?> { ["import_id"] = "b6e9999d-f6d8-4d2d-acd8-dcfd820249f2" }
-                        : toolName == EllaiToolNames.UiObserve ? new Dictionary<string, object?> { ["controls"] = "test-control", ["view"] = "current" }
+                        : toolName == EllaiToolNames.UiObserve ? new Dictionary<string, object?> { ["controls"] = "report.entry", ["view"] = "current" }
                         : new Dictionary<string, object?>())]);
             else
             {
