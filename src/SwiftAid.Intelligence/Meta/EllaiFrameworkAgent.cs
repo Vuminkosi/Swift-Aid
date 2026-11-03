@@ -224,16 +224,27 @@ public sealed class EllaiFrameworkAgent
                 !HasKnownMisattribution(decision, evidenceSources))
                 break;
             decision = null;
-            // Published speech cannot be retracted or replaced by a repaired
-            // answer. End this turn rather than generating a different one.
-            if (streamedSegments.Count != 0) { LastFailureCode = "InvalidDecision"; return null; }
+            // A repair may reuse private observations only while their authority
+            // remains current. Published segments are checked against the final
+            // display and speech text before completion below.
+            if (streamedSegments.Count != 0 && !streamSafeToolObservations &&
+                (revalidateStreamObservations is null || !await revalidateStreamObservations(ct).ConfigureAwait(false)))
+            {
+                LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy;
+                return null;
+            }
+            ct.ThrowIfCancellationRequested();
+            if (!await Current(ct).ConfigureAwait(false)) { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
             // A correction is a model-only framework run in the same session;
             // no tool or new data access is granted during output repair.
             guardedClient.RepairMode = true;
             LastRepairUsed = true;
             try
             {
-                await agent.RunAsync("The previous decision was invalid. Return only a valid final_decision JSON object using the required schema and observed evidence.",
+                var repairInstruction = streamedSegments.Count == 0
+                    ? "The previous decision was invalid. Return only a valid final_decision JSON object using the required schema and observed evidence."
+                    : "The previous decision was invalid. Return only a valid final_decision JSON object using the required schema and observed evidence. Previously emitted stream segments are immutable: displayText and spokenText must both exactly equal those segment texts joined by one space. Do not add or change any text.";
+                await agent.RunAsync(repairInstruction,
                     session, cancellationToken: ct).ConfigureAwait(false);
             }
             finally { LastModelCallCount = guardedClient.CallSequence; }

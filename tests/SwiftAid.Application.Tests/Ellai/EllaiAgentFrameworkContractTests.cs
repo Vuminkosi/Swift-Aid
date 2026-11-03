@@ -2028,6 +2028,64 @@ public sealed class EllaiAgentFrameworkContractTests
         Assert.Equal("Done.", (await run)?.DisplayText);
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task InvalidFinalAfterVerifiedSegmentRepairsOnlyWithCurrentAuthorityAndMatchingText(bool changedAnswer, bool revoke)
+    {
+        using var client = new RepairAfterSegmentClient(changedAnswer);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string> { EllaiToolNames.State });
+        var checks = 0;
+        var published = new List<string>();
+        var agent = new EllaiFrameworkAgent(client);
+        var result = await agent.RunAsync(context, "Test instructions", [new ChatMessage(ChatRole.User, "test")], 100,
+            _ => Task.FromResult(true), (_, request, _) => Task.FromResult(new EllaiToolResult(request.ToolName,
+                true, null, [StreamEvidence], "Done.", 1, false)),
+            new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None,
+            onVerifiedStreamSegment: (text, _) => { published.Add(text); return ValueTask.CompletedTask; },
+            revalidateStreamObservations: _ => Task.FromResult(++checks == 1 || !revoke));
+        Assert.Equal(new[] { "Done." }, published);
+        Assert.Equal(revoke ? 0 : 1, client.RepairCalls);
+        if (revoke)
+        {
+            Assert.Null(result);
+            Assert.Equal(EllaiToolReasonCodes.DeniedByPolicy, agent.LastFailureCode);
+        }
+        else if (changedAnswer)
+        {
+            Assert.Null(result);
+            Assert.Equal("InvalidDecision", agent.LastFailureCode);
+        }
+        else Assert.Equal("Done.", result?.DisplayText);
+    }
+
+    private sealed class RepairAfterSegmentClient(bool changedAnswer) : IChatClient
+    {
+        private int _streamCalls;
+        public int RepairCalls { get; private set; }
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            RepairCalls++;
+            Assert.Empty(options?.Tools ?? []);
+            var decision = changedAnswer ? GroundedDecision.Replace("Done.", "Changed.", StringComparison.Ordinal) : GroundedDecision;
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, decision)));
+        }
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            if (++_streamCalls == 1)
+                yield return new ChatResponseUpdate(ChatRole.Assistant,
+                    [new FunctionCallContent("private", EllaiToolNames.State, new Dictionary<string, object?> { ["projection"] = "queue" })]);
+            else yield return new ChatResponseUpdate(ChatRole.Assistant, GroundedStreamPrefix + ",\"final_decision\":{invalid");
+        }
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
     [Fact]
     public async Task RevocationBeforeFinalDecisionStopsCompletion()
     {
