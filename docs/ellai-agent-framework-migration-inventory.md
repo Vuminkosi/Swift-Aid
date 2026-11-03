@@ -400,6 +400,36 @@ denial at the broker. It uses synthetic persisted classifications, not live
 BART inference, a live model or deployed Gateway.
 The `ClassificationRegistryTests` filter also passed 10/10 against the same
 fixture using `--no-build --no-restore` and the same test-project options.
+
+Follow-up on 2026-11-04 found that the preceding executor test supplied its own
+revalidation callback: the production runner rejected classification results
+because their observations had no replay scope. Classification observations
+now retain only the case ID and a digest of the bounded result. The runner
+reinvokes the authorized broker and rejects missing, denied, changed or invalid
+results before publishing or replaying an answer. Older classification traces
+without this scope remain ineligible for replay. The PostgreSQL integration
+fixture now uses the actual runner: an unchanged result completes, while a
+changed persisted result and a simulated denied broker recheck do not publish
+an answer. The denial case substitutes a foreign actor at the broker; it is not
+an actual database grant-revocation race. These checks do not prove semantic
+support for model claims or eliminate a change after the last authority read.
+PASS: `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj
+--no-restore -m:1 -nr:false --filter
+'FullyQualifiedName~EllaiAuthorizedConversationContextTests|FullyQualifiedName~EllaiAgentFrameworkContractTests'
+--logger 'console;verbosity=minimal'` passed 164/164, including malformed and
+legacy trace rejection and changed-result checks.
+PASS: `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-build --no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~ClassificationRegistryTests|FullyQualifiedName~EllaiUtteranceWorkerOutcomeTests'
+--logger 'console;verbosity=minimal'` passed 54/54 with `OS=Windows_NT` and the
+disposable intake PostgreSQL fixture enabled.
+
+The worker-outcome fixture had an enforced 10,000-token threshold and failed
+before invoking its model. It now matches the Gateway's advisory threshold and
+uses an oversized response for the terminal-failure case; its focused filter
+passed 3/3. A repeatedly malformed model response can continue repair until
+cancellation under the requested unlimited-repair and advisory-budget policy;
+this remains an operational limitation, not a passing malformed-output test.
 The disposable PostgreSQL/Qdrant framework-worker recall test was extended to
 start a follow-up with a healthy index, then inject a Qdrant transport failure
 after the scripted framework model requested the recall tool. The worker used

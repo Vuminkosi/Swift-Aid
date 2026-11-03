@@ -6,6 +6,7 @@ using SwiftAid.Contracts.Events;
 using SwiftAid.Domain.Cases;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Ellai;
+using SwiftAid.Contracts.Ellai;
 using SwiftAid.Infrastructure.Authorization;
 using SwiftAid.Infrastructure.Persistence.Transactions;
 using SwiftAid.Infrastructure.Classification;
@@ -208,22 +209,20 @@ public sealed class ClassificationRegistryTests
         Assert.True(response.Allowed); Assert.DoesNotContain(claim.Lease.LeaseId.ToString("D"), response.ResultSummary);
         Assert.DoesNotContain("Original supplied concern", response.ResultSummary);
         using var model = new ClassificationToolClient(notice.SourceId);
-        var frameworkContext = context with { AllowedTools = new HashSet<string> { EllaiToolNames.ClassificationEvidence } };
         var executor = new EllaiFrameworkExecutor(model, new EllaiPromptBuilder("Synthetic policy", "fixture"),
             broker, new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
         var observations = new List<EllaiToolResult>();
-        var turn = await executor.RunAsync(new EllaiLoopRequest(frameworkContext, "Read the classification evidence.",
-            new EllaiRoleOverlay("ask", "Be brief."), "classification", 1024, "cycle", 1)
-            {
-                RevalidateStreamObservations = async (observed, ct) => observed.Count > 0 &&
-                    await query.GetAsync(CaseImportPostgresTests.Actor, notice.SourceId, ct) is not null
-            }, default,
-            invokeToolAsync: async (toolContext, toolRequest, ct) =>
+        var work = new EllaiUtteranceWork(context.SessionId, context.ScopeEpoch, "Read the classification evidence.",
+            context.FeatureId, null, EllaiMode.Ask, 1, "cycle", CaseImportPostgresTests.Actor, true, "consent/0",
+            EllaiProcessingClassification.UserProvidedNonSensitive, EllaiProcessingClassification.UserProvidedNonSensitive,
+            new HashSet<string> { EllaiToolNames.ClassificationEvidence }, EllaiConsentService.PublicProductHelpPurpose, "turn");
+        var turn = await EllaiUtteranceRunner.RunOneAsync(work, new EllaiUtteranceServices(executor, null, null,
+            new EllaiConsentService(), InvokeToolAsync: async (toolContext, toolRequest, ct) =>
             {
                 var observation = await broker.InvokeAsync(toolContext, toolRequest, ct);
                 observations.Add(observation);
                 return observation;
-            });
+            }), 1024, default);
         Assert.True(turn.Completed, turn.FailureCode);
         Assert.NotEmpty(observations);
         Assert.All(observations, observation => Assert.True(observation.Allowed));
@@ -231,10 +230,31 @@ public sealed class ClassificationRegistryTests
         Assert.Contains(claim.Lease.ResultId.ToString("D"), model.ToolResultText, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(claim.Lease.LeaseId.ToString("D"), model.ToolResultText);
         Assert.DoesNotContain("Original supplied concern", model.ToolResultText);
+        Assert.True(observations.Count >= 2); // The runner re-reads before publishing.
         var foreign = await SharedWorkspaceImportTests.AddOrganizationAsync(fixture.Db);
         Assert.Null(await query.GetAsync(foreign.Actor, notice.SourceId, default));
         Assert.False((await broker.InvokeAsync(context with { Actor = null }, request, default)).Allowed);
         Assert.False((await broker.InvokeAsync(context with { Actor = foreign.Actor }, request, default)).Allowed);
+        foreach (var change in new[] { "revoked", "changed" })
+        {
+            using var changedModel = new ClassificationToolClient(notice.SourceId);
+            var changedExecutor = new EllaiFrameworkExecutor(changedModel, new EllaiPromptBuilder("Synthetic policy", "fixture"),
+                broker, new EllaiUsageLedger(), new InMemoryEllaiUsageStore());
+            var invocations = 0;
+            var blocked = await EllaiUtteranceRunner.RunOneAsync(work with { CycleId = change },
+                new EllaiUtteranceServices(changedExecutor, null, null, new EllaiConsentService(),
+                    InvokeToolAsync: async (toolContext, toolRequest, ct) =>
+                    {
+                        if (++invocations == 2 && change == "changed")
+                            await fixture.Db.Set<ClassificationResultEntity>().Where(result => result.Id == claim.Lease.ResultId)
+                                .ExecuteUpdateAsync(setters => setters.SetProperty(result => result.State, "Failed"), ct);
+                        return await broker.InvokeAsync(invocations >= 2 && change == "revoked"
+                            ? toolContext with { Actor = foreign.Actor } : toolContext, toolRequest, ct);
+                    }), 1024, default);
+            Assert.False(blocked.Completed);
+            Assert.Null(blocked.DisplayText);
+            Assert.True(invocations >= 2);
+        }
         Assert.Equal(1, (await fixture.Db.Set<ClassificationResultEntity>().AsNoTracking().SingleAsync(r => r.Id == claim.Lease.ResultId)).Attempts);
     }
 

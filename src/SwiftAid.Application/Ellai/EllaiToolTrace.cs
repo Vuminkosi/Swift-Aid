@@ -68,7 +68,8 @@ public sealed record EllaiToolTrace(int Version, bool HistoryIncluded, IReadOnly
                         receipt.ResourceId == item.ReceiptLookupId && receipt.EvidenceId == item.ReceiptLookupId) &&
                     (item.CountReplayScope is null || item.ToolName == EllaiToolNames.OwnedCaseCount && item.CountReplayScope.IsValid()) &&
                     (item.UiCatalogueReplayScope is null || item.ToolName == EllaiToolNames.UiCatalogue && item.UiCatalogueReplayScope.IsValid()) &&
-                    (item.UiObservationReplayScope is null || item.ToolName == EllaiToolNames.UiObserve && item.UiObservationReplayScope.IsValid()));
+                    (item.UiObservationReplayScope is null || item.ToolName == EllaiToolNames.UiObserve && item.UiObservationReplayScope.IsValid()) &&
+                    (item.ClassificationReplayScope is null || item.ToolName == EllaiToolNames.ClassificationEvidence && item.ClassificationReplayScope.IsValid()));
             if (valid) trace = parsed;
             return valid;
         }

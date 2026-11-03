@@ -28,7 +28,8 @@ public sealed record EllaiObservedToolResult(
     string? ClockVersion = null, EllaiCountReplayScope? CountReplayScope = null,
     EllaiUiCatalogueReplayScope? UiCatalogueReplayScope = null, string? CapabilityVersion = null,
     string? ReceiptListDigest = null, string? ReceiptLookupId = null,
-    EllaiUiObservationReplayScope? UiObservationReplayScope = null)
+    EllaiUiObservationReplayScope? UiObservationReplayScope = null,
+    EllaiClassificationReplayScope? ClassificationReplayScope = null)
 {
     public const string CurrentStaticFeatureVersion = "state-feature/1";
     public const string CurrentClockVersion = "server-clock/1";
@@ -89,7 +90,13 @@ public sealed record EllaiObservedToolResult(
                     ? ReceiptListFingerprint(result) : null,
             receiptLookupId,
             request.ToolName == EllaiToolNames.UiObserve && result.Allowed && !result.Truncated
-                ? result.UiObservationReplayScope : null);
+                ? result.UiObservationReplayScope : null,
+            request.ToolName == EllaiToolNames.ClassificationEvidence && result.ToolName == request.ToolName &&
+                result.Allowed && result.DenialReason is null && result.ReasonCode == EllaiToolReasonCodes.Ok &&
+                !result.Truncated && result.Evidence.Count == 0 && result.ItemCount == 1 &&
+                request.Arguments.Count == 1 && request.Arguments.TryGetValue("case_id", out var rawCaseId) &&
+                Guid.TryParse(rawCaseId, out var caseId) && caseId != Guid.Empty
+                    ? new EllaiClassificationReplayScope(caseId, ResultFingerprint(result)) : null);
     }
 
     public static bool IsCanonicalReceiptId(string? value) => value is { Length: 37 } &&
@@ -97,11 +104,20 @@ public sealed record EllaiObservedToolResult(
         Guid.TryParseExact(value.AsSpan(5), "N", out var id) && id != Guid.Empty &&
         value == "rcpt-" + id.ToString("N");
 
-    public static string ReceiptListFingerprint(EllaiToolResult result)
+    public static string ReceiptListFingerprint(EllaiToolResult result) => ResultFingerprint(result);
+
+    public static string ResultFingerprint(EllaiToolResult result)
     {
         var content = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new { result.ResultSummary, result.ItemCount, result.Evidence });
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content));
     }
+}
+
+/// <summary>Authorized classification case and result fingerprint, without retaining result text.</summary>
+public sealed record EllaiClassificationReplayScope(Guid CaseId, string ResultDigest)
+{
+    public bool IsValid() => CaseId != Guid.Empty && ResultDigest is { Length: 64 } &&
+        ResultDigest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F');
 }
 
 /// <summary>Registry-owned observation references and a fingerprint of the client report.</summary>
