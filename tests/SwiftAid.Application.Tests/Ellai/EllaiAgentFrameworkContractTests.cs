@@ -37,10 +37,46 @@ public sealed class EllaiAgentFrameworkContractTests
             }, new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None);
 
         Assert.Equal(new[] { EllaiToolNames.Now, EllaiToolNames.DocsGet }, calls);
-        Assert.Equal(3, client.Calls);
+        Assert.Equal(citeRealEvidence ? 3 : 5, client.Calls);
         Assert.Contains("Use section safe", client.FirstObservation);
         Assert.Contains("Verified observation", client.SecondObservation);
         Assert.Equal(citeRealEvidence, decision is not null);
+    }
+
+    [Theory]
+    [InlineData(1, true, 2)]
+    [InlineData(3, false, 3)]
+    public async Task FrameworkRepairsInvalidFinalDecisionsWithoutTools(int invalidReplies, bool succeeds, int expectedCalls)
+    {
+        using var client = new RepairClient(invalidReplies);
+        var agent = new EllaiFrameworkAgent(client);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.Now });
+        var store = new InMemoryEllaiUsageStore();
+        var decision = await agent.RunAsync(context, "Test instructions", [new ChatMessage(ChatRole.User, "test")], 100,
+            _ => Task.FromResult(true), (_, _, _) => throw new InvalidOperationException(),
+            new EllaiFrameworkUsage("session", new EllaiUsageLedger(), store), CancellationToken.None);
+        Assert.Equal(succeeds, decision is not null);
+        Assert.Equal(expectedCalls, client.Calls);
+        Assert.All(client.RepairToolCounts, count => Assert.Equal(0, count));
+        Assert.Equal(expectedCalls, (await store.TotalsAsync("session", CancellationToken.None)).Calls);
+    }
+
+    [Fact]
+    public async Task RepairedDecisionDoesNotAppendToRejectedStreamedDraft()
+    {
+        using var client = new StreamingRepairClient();
+        var agent = new EllaiFrameworkAgent(client);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal));
+        var fragments = new List<string>();
+        var decision = await agent.RunAsync(context, "Test instructions", [new ChatMessage(ChatRole.User, "test")], 100,
+            _ => Task.FromResult(true), (_, _, _) => throw new InvalidOperationException(),
+            new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None,
+            (text, _) => { fragments.Add(text); return ValueTask.CompletedTask; });
+        Assert.Equal("Done.", decision?.DisplayText);
+        Assert.Equal("Wrong.", string.Concat(fragments));
+        Assert.Equal(1, client.Repairs);
     }
 
     [Fact]
@@ -394,6 +430,43 @@ public sealed class EllaiAgentFrameworkContractTests
         }
         public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
             ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    private sealed class RepairClient(int invalidReplies) : IChatClient
+    {
+        public int Calls { get; private set; }
+        public List<int> RepairToolCounts { get; } = [];
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            if (Calls > 1) RepairToolCounts.Add(options?.Tools?.Count ?? 0);
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, Calls <= invalidReplies ? "{}" : ValidDecision)));
+        }
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    private sealed class StreamingRepairClient : IChatClient
+    {
+        public int Repairs { get; private set; }
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            Repairs++;
+            Assert.Empty(options?.Tools ?? []);
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, ValidDecision)));
+        }
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            yield return new ChatResponseUpdate(ChatRole.Assistant, """{"final_decision":{"displayText":"Wrong."}}""");
+        }
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
         public void Dispose() { }
     }

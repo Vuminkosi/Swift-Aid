@@ -13,6 +13,7 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
     private readonly IChatClient _client = client ?? throw new ArgumentNullException(nameof(client));
     public int LastModelCallCount { get; private set; }
     public string? LastFailureCode { get; private set; }
+    public bool LastRepairUsed { get; private set; }
 
     public async Task<EllaiDecision?> RunAsync(
         EllaiToolContext context, string instructions, IReadOnlyList<ChatMessage> messages, int maxOutputTokens,
@@ -32,6 +33,8 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
         if (messages.Count == 0 || maxOutputTokens is < 1 or > 16384)
             throw new ArgumentException("Messages and a bounded token limit are required.");
         LastFailureCode = null;
+        LastRepairUsed = false;
+        LastModelCallCount = 0;
         if (context.RemainingCalls <= 0) { LastFailureCode = EllaiToolReasonCodes.BudgetExceeded; return null; }
         if (!await isCurrent(ct).ConfigureAwait(false)) { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
 
@@ -61,6 +64,7 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
         session.SetInMemoryChatHistory(messages.Take(messages.Count - 1).ToList());
         var currentMessage = messages[^1];
         EllaiDecisionTextStreamParser? parser = null;
+        var emittedProvisional = false;
         if (onTextDelta is null)
         {
             await agent.RunAsync(currentMessage, session, cancellationToken: ct).ConfigureAwait(false);
@@ -82,24 +86,43 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
                 foreach (var sentence in parser.Append(update.Text))
                 {
                     if (guard.FailureCode is null && await isCurrent(ct).ConfigureAwait(false))
+                    {
                         await onTextDelta(sentence, ct).ConfigureAwait(false);
+                        emittedProvisional = true;
+                    }
                 }
             }
         }
-        LastModelCallCount = guardedClient.CallSequence;
-        if (guard.FailureCode is not null) { LastFailureCode = guard.FailureCode; return null; }
-        if (!await isCurrent(ct).ConfigureAwait(false)) { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
+        EllaiDecision? decision = null;
+        for (var repair = 0; repair <= EllaiCycleRunner.MaxRepairAttempts; repair++)
+        {
+            LastModelCallCount = guardedClient.CallSequence;
+            if (guard.FailureCode is not null) { LastFailureCode = guard.FailureCode; return null; }
+            if (!await isCurrent(ct).ConfigureAwait(false)) { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
+            decision = EllaiModelTurnParser.Parse(guardedClient.LastText).Turn?.FinalDecision;
+            if (decision is not null && EllaiDecisionValidator.Validate(decision).Count == 0 &&
+                !decision.Claims.Any(claim => claim?.Evidence is { } refs && refs.Any(reference => reference is null || !evidence.Contains(reference))))
+                break;
+            decision = null;
+            if (repair == EllaiCycleRunner.MaxRepairAttempts || guardedClient.CallSequence >= EllaiCycleRunner.MaxIterations) return null;
 
-        var decision = EllaiModelTurnParser.Parse(guardedClient.LastText).Turn?.FinalDecision;
-        if (decision is null || EllaiDecisionValidator.Validate(decision).Count != 0) return null;
-        if (decision.Claims.Any(claim => claim?.Evidence is { } refs && refs.Any(reference => reference is null || !evidence.Contains(reference))))
-            return null;
+            // A correction is a model-only framework run in the same session;
+            // no tool or new data access is granted during output repair.
+            guardedClient.RepairMode = true;
+            LastRepairUsed = true;
+            await agent.RunAsync("The previous decision was invalid. Return only a valid final_decision JSON object using the required schema and observed evidence.",
+                session, cancellationToken: ct).ConfigureAwait(false);
+            parser = null;
+        }
+        if (decision is null) return null;
         if (parser is not null && onTextDelta is not null)
         {
             var remainder = parser.FlushVerified(decision.DisplayText);
             if (remainder.Length > 0 && await isCurrent(ct).ConfigureAwait(false))
                 await onTextDelta(remainder, ct).ConfigureAwait(false);
         }
+        else if (!emittedProvisional && onTextDelta is not null && await isCurrent(ct).ConfigureAwait(false))
+            await onTextDelta(decision.DisplayText, ct).ConfigureAwait(false);
         return decision;
     }
 
@@ -107,6 +130,7 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
         EllaiFrameworkUsage usage) : DelegatingChatClient(inner)
     {
         public int CallSequence { get; private set; }
+        public bool RepairMode { get; set; }
         private readonly System.Text.StringBuilder _lastText = new();
         public string LastText => _lastText.ToString();
 
@@ -115,6 +139,14 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
         {
             if (!await isCurrent(cancellationToken).ConfigureAwait(false))
                 throw new EllaiFrameworkFailureException(EllaiToolReasonCodes.DeniedByPolicy);
+            if (CallSequence >= EllaiCycleRunner.MaxIterations)
+                throw new EllaiFrameworkFailureException("IterationLimit");
+            if (RepairMode)
+            {
+                options = options?.Clone() ?? new ChatOptions();
+                options.Tools = [];
+                options.ToolMode = ChatToolMode.None;
+            }
             var boundedMessages = messages.ToArray();
             if (!usage.CanDispatch(boundedMessages, options))
                 throw new EllaiFrameworkFailureException(EllaiToolReasonCodes.BudgetExceeded);
@@ -135,6 +167,8 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
         {
             if (!await isCurrent(cancellationToken).ConfigureAwait(false))
                 throw new EllaiFrameworkFailureException(EllaiToolReasonCodes.DeniedByPolicy);
+            if (CallSequence >= EllaiCycleRunner.MaxIterations)
+                throw new EllaiFrameworkFailureException("IterationLimit");
             var boundedMessages = messages.ToArray();
             if (!usage.CanDispatch(boundedMessages, options))
                 throw new EllaiFrameworkFailureException(EllaiToolReasonCodes.BudgetExceeded);

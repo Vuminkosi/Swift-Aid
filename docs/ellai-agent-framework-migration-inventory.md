@@ -209,10 +209,12 @@ The framework model-call guard rejects named tool calls outside the advertised
 catalogue; malformed partial streaming call handling still requires additional
 provider-level verification.
 Deterministic framework tests also cover two dependent tool calls with exact
-evidence validation and concurrent session history isolation. The old loop's
-two model-only decision-repair attempts are not yet implemented in the framework
-executor; a malformed final decision currently fails closed. Multi-turn
-reasoning, recovery and repair parity remain cutover acceptance requirements.
+evidence validation and concurrent session history isolation. Invalid final
+decisions now get at most two model-only framework correction runs in the same
+session, with tool definitions suppressed and one shared model-call limit.
+Tests cover repair success, exhaustion and a rejected streamed draft without
+appending repaired text. Live Muse correction behavior, PostgreSQL recovery,
+and complete multi-turn parity remain cutover acceptance requirements.
 Its non-streaming provider calls recheck the supplied currency callback and
 use `EllaiFrameworkUsage` to estimate the prompt and tool-schema budget against
 the existing ledger, then record provider usage through `IEllaiUsageStore`.

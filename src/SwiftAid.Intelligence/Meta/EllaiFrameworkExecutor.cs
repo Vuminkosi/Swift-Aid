@@ -82,16 +82,16 @@ public sealed class EllaiFrameworkExecutor(
             catch (EllaiFrameworkFailureException failure) when (failure.Code != "ProviderUnavailable")
             {
                 Trace(EllaiActivityKind.CycleBlocked, BlockedDetail(failure.Code));
-                return new(false, null, "The assistant could not complete this request.", agent.LastModelCallCount, calls, false, failure.Code);
+                return new(false, null, "The assistant could not complete this request.", agent.LastModelCallCount, calls, agent.LastRepairUsed, failure.Code);
             }
             if (result is null)
             {
                 var code = agent.LastFailureCode ?? "InvalidDecision";
                 Trace(EllaiActivityKind.CycleBlocked, BlockedDetail(code));
-                return new(false, null, "The assistant could not produce a verified decision.", agent.LastModelCallCount, calls, false, code);
+                return new(false, null, "The assistant could not produce a verified decision.", agent.LastModelCallCount, calls, agent.LastRepairUsed, code);
             }
             if (accepted) Trace(EllaiActivityKind.CycleCompleted, "verified");
-            return new(true, result, null, agent.LastModelCallCount, calls, false);
+            return new(true, result, null, agent.LastModelCallCount, calls, agent.LastRepairUsed);
         }
         finally
         {
