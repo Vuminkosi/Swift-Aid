@@ -127,6 +127,15 @@ suppresses the result when currency is lost. Its sticky failure code must be
 checked by the future agent runner before accepting any final answer; the guard
 is not registered or wired into the Gateway. It does not itself implement
 model-call budgets, evidence validation, progress, timeout or audit handling.
+`EllaiFrameworkAgent` now constructs a framework agent with framework-managed
+function invocation and a 12-iteration limit, applies the guard, and validates
+the final Ellai decision and cited tool evidence. Its deterministic tests
+cover an allowed call and rejection after a broker denial. It is a building
+block, not the Gateway execution path: trusted full policy/context, per-model
+call usage and authorization, unknown-tool handling, durable sessions,
+streaming, timeout and audit integration remain incomplete. It currently
+creates a new framework session per invocation, so it is not yet the required
+durable conversation implementation.
 The deterministic framework fixture also invokes the real broker's admitted
 public-facts tool and observes its serialized JSON evidence. This is not a live
 provider or managed-case test. The framework and adapter focused tests passed
