@@ -15,6 +15,7 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
         EllaiToolContext context, string instructions, IReadOnlyList<ChatMessage> messages, int maxOutputTokens,
         Func<CancellationToken, Task<bool>> isCurrent,
         Func<EllaiToolContext, EllaiToolRequest, CancellationToken, Task<EllaiToolResult>> invoke,
+        Func<ChatResponse, CancellationToken, Task> recordUsage,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -22,6 +23,7 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
         ArgumentNullException.ThrowIfNull(messages);
         ArgumentNullException.ThrowIfNull(isCurrent);
         ArgumentNullException.ThrowIfNull(invoke);
+        ArgumentNullException.ThrowIfNull(recordUsage);
         if (messages.Count == 0 || maxOutputTokens is < 1 or > 16384)
             throw new ArgumentException("Messages and a bounded token limit are required.");
         if (context.RemainingCalls <= 0 || !await isCurrent(ct).ConfigureAwait(false)) return null;
@@ -36,7 +38,8 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
                 return result;
             });
         var tools = EllaiFrameworkToolCatalog.Create(context, guard.InvokeAsync);
-        var functionClient = new FunctionInvokingChatClient(_client)
+        var guardedClient = new ModelCallGuard(_client, isCurrent, recordUsage);
+        var functionClient = new FunctionInvokingChatClient(guardedClient)
         {
             MaximumIterationsPerRequest = EllaiCycleRunner.MaxIterations
         };
@@ -55,5 +58,23 @@ public sealed class EllaiFrameworkAgent(IChatClient client)
         if (decision.Claims.Any(claim => claim?.Evidence is { } refs && refs.Any(reference => reference is null || !evidence.Contains(reference))))
             return null;
         return decision;
+    }
+
+    private sealed class ModelCallGuard(IChatClient inner, Func<CancellationToken, Task<bool>> isCurrent,
+        Func<ChatResponse, CancellationToken, Task> recordUsage) : DelegatingChatClient(inner)
+    {
+        public override async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            if (!await isCurrent(cancellationToken).ConfigureAwait(false))
+                throw new InvalidOperationException("The Ellai session is no longer authorized.");
+            var response = await base.GetResponseAsync(messages, options, cancellationToken).ConfigureAwait(false);
+            await recordUsage(response, cancellationToken).ConfigureAwait(false);
+            return response;
+        }
+
+        public override IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("Streaming requires equivalent authorization and usage handling.");
     }
 }

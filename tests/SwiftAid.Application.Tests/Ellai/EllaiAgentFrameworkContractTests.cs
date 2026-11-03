@@ -23,9 +23,26 @@ public sealed class EllaiAgentFrameworkContractTests
             AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.Now });
         var result = await agent.RunAsync(context, "Test instructions", [new ChatMessage(ChatRole.User, "test")], 100,
             _ => Task.FromResult(true), (_, request, _) => Task.FromResult(new EllaiToolResult(request.ToolName,
-                false, "denied", [], "", 0, false, EllaiToolReasonCodes.ConsentMissing)), CancellationToken.None);
+                false, "denied", [], "", 0, false, EllaiToolReasonCodes.ConsentMissing)), (_, _) => Task.CompletedTask, CancellationToken.None);
         Assert.Null(result);
         Assert.Equal(2, client.Calls);
+    }
+
+    [Fact]
+    public async Task FrameworkExecutionChecksAuthorizationBeforeEveryModelCall()
+    {
+        using var client = new ScriptedClient(EllaiToolNames.Now, "unused", "example", ValidDecision, noArguments: true);
+        var agent = new EllaiFrameworkAgent(client);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.Now });
+        var checks = 0;
+        var usageRecords = 0;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => agent.RunAsync(context, "Test instructions",
+            [new ChatMessage(ChatRole.User, "test")], 100, _ => Task.FromResult(++checks < 5),
+            (_, request, _) => Task.FromResult(new EllaiToolResult(request.ToolName, true, null, [], "observation", 1, false)),
+            (_, _) => { usageRecords++; return Task.CompletedTask; }, CancellationToken.None));
+        Assert.Equal(1, client.Calls);
+        Assert.Equal(1, usageRecords);
     }
 
     [Fact]
@@ -35,11 +52,13 @@ public sealed class EllaiAgentFrameworkContractTests
         var agent = new EllaiFrameworkAgent(client);
         var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
             AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.Now });
+        var usageRecords = 0;
         var result = await agent.RunAsync(context, "Test instructions", [new ChatMessage(ChatRole.User, "test")], 100,
             _ => Task.FromResult(true), (_, request, _) => Task.FromResult(new EllaiToolResult(request.ToolName,
-                true, null, [], "observation", 1, false)), CancellationToken.None);
+                true, null, [], "observation", 1, false)), (_, _) => { usageRecords++; return Task.CompletedTask; }, CancellationToken.None);
         Assert.Equal("Done.", result?.DisplayText);
         Assert.Equal(2, client.Calls);
+        Assert.Equal(2, usageRecords);
     }
     [Fact]
     public async Task FrameworkAgentInvokesFunctionAndReturnsItsObservation()

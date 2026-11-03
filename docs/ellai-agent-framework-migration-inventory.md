@@ -132,10 +132,14 @@ function invocation and a 12-iteration limit, applies the guard, and validates
 the final Ellai decision and cited tool evidence. Its deterministic tests
 cover an allowed call and rejection after a broker denial. It is a building
 block, not the Gateway execution path: trusted full policy/context, per-model
-call usage and authorization, unknown-tool handling, durable sessions,
+call budget reservation and durable usage recording, unknown-tool handling, durable sessions,
 streaming, timeout and audit integration remain incomplete. It currently
 creates a new framework session per invocation, so it is not yet the required
 durable conversation implementation.
+Its non-streaming provider calls recheck the supplied currency callback and
+pass each response to a required usage callback. The callback is not yet wired
+to the ledger; streaming through this guard is deliberately unsupported until
+it has equivalent accounting and authorization.
 The deterministic framework fixture also invokes the real broker's admitted
 public-facts tool and observes its serialized JSON evidence. This is not a live
 provider or managed-case test. The framework and adapter focused tests passed
