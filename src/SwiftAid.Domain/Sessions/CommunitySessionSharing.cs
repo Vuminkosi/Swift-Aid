@@ -37,7 +37,7 @@ public static class CommunitySessionSharing
         AppendFolded(builder, "LOCATION", Locate(session));
         if (session.Status == CommunitySessionStatus.Scheduled && session.PublicChannelLink is { } publicLink)
         {
-            AppendFolded(builder, "URL", publicLink);
+            AppendContentLine(builder, "URL", new Uri(publicLink).AbsoluteUri);
         }
 
         AppendFolded(builder, "SEQUENCE", session.IcsSequence.ToString(System.Globalization.CultureInfo.InvariantCulture));
@@ -124,7 +124,12 @@ public static class CommunitySessionSharing
             .Replace("\n", "\\n", StringComparison.Ordinal)
             .Replace(";", "\\;", StringComparison.Ordinal)
             .Replace(",", "\\,", StringComparison.Ordinal);
-        var line = $"{name}:{escaped}";
+        AppendContentLine(builder, name, escaped);
+    }
+
+    private static void AppendContentLine(StringBuilder builder, string name, string value)
+    {
+        var line = $"{name}:{value}";
         var bytes = Encoding.UTF8.GetBytes(line);
         if (bytes.Length <= 75)
         {

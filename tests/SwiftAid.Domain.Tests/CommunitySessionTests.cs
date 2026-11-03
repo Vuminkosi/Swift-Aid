@@ -272,6 +272,25 @@ public sealed class CommunitySessionTests
     }
 
     [Fact]
+    public void IcsPreservesUriPunctuationWithoutTextEscaping()
+    {
+        var session = CreateDraft();
+        const string link = "https://example.test/meeting?topics=health,nutrition;language=en";
+        session.UpdateDetails(session.Title, session.Summary, session.AudienceDescription, [.. session.TopicTags],
+            session.Presenter, session.Language, session.StartUtc, session.DurationMinutes, session.Capacity,
+            [.. session.Materials], session.Visibility, SessionChannelType.Other, link,
+            [.. session.ReminderLeadHours], CreatedAt);
+        session.Review("officer-2", false, CreatedAt.AddHours(1));
+        session.Schedule("officer-2", CreatedAt.AddHours(2));
+
+        var ics = CommunitySessionSharing.BuildIcs(session, CreatedAt.AddHours(3));
+        var unfolded = ics.Replace("\r\n ", "", StringComparison.Ordinal);
+
+        Assert.Contains($"URL:{link}\r\n", unfolded, StringComparison.Ordinal);
+        Assert.All(ics.Split("\r\n"), line => Assert.True(System.Text.Encoding.UTF8.GetByteCount(line) <= 75));
+    }
+
+    [Fact]
     public void Ics_DraftSession_IsRejected()
     {
         Assert.Throws<InvalidOperationException>(() => CommunitySessionSharing.BuildIcs(CreateDraft(), CreatedAt));
