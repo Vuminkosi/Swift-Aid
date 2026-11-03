@@ -96,6 +96,45 @@ approval cannot be delegated to that default.
 
 ## Existing tests and migration gaps
 
+## Qdrant and Redis compatibility matrix — pre-cutover gate
+
+This matrix is based on the current source and the checks below, not on the
+requirements documents alone. No infrastructure behavior or service ownership
+is changed by the framework migration.
+
+| Area | Current integration and contract | Framework compatibility and acceptance |
+| --- | --- | --- |
+| Qdrant exact Ellai recall | When Ellai is enabled and `Qdrant:Endpoint` is nonempty, `Program.cs` registers `EllaiMemoryIndex` and `EllaiMemoryProjectionWorker`. `EllaiMemoryServiceCollectionExtensions` fixes the base collection to `ellai-memory`; the actual vectorless collection is `ellai-memory-exact`. `EllaiCaseResultMemory` uses `IEllaiExactReferenceIndex` only for the `case-results` reference; `ellai_topic` and `ellai_evidence` reach it through `EllaiToolBroker`. | Reuse those broker and index services. Framework tests must exercise authorized recall, changed owner/scope, revoked record access, expired and stale source versions, and index outage without leaking a candidate or bypassing the PostgreSQL recheck. Synthetic framework tests cover stale, outage and changed scope; live Gateway and PostgreSQL combinations remain **NOT VERIFIED**. |
+| Qdrant vector/semantic | `EllaiMemoryIndex` contains vector upsert/search methods with caller-provided vectors and session/epoch filters, but source search found no production caller of these methods or an Ellai embedding encoder. The active exact path uses no vectors. A vector adapter round trip is not proof of deployed semantic retrieval, RAG, embeddings or semantic cache. | Do not claim or enable semantic retrieval or a second pipeline. Any future encoder remains separately gated. Test existing exact behavior through the framework; verify any future semantic path independently before use. |
+| Qdrant scope and lifecycle | Exact payload contains `memory_id`, `session_id`, `scope_epoch`, `topic_id`, `source_version`, `expires_at` and `encoding=exact/1`; point IDs derive from session, epoch and ID. The index filters and rechecks identity and expiry. `EllaiCaseResultMemory` verifies PostgreSQL topic/version, actor, scope, expiry and current authorized case query; it falls back to authoritative topic resolution after a 500 ms index timeout or failure. Projection reads active PostgreSQL topics, retries failures and upserts every 30 seconds; expired/stale points are ignored rather than proven physically deleted. Qdrant is derived, not case authority. | Preserve these boundaries and 24-hour snapshot behavior. Verify stale, revoked, expiry, outage, cross-session and cross-scope cases with disposable services and actual framework execution; verify restart/reprojection and cleanup separately. Existing vector `SearchAsync` trusts the remote filter and should not be exposed as an authorized tool without independent scope and payload validation. |
+| Qdrant transport and persistence | Requests send the API key in the `api-key` header. Local Compose uses a private Qdrant service and `qdrant-data` volume; plaintext is explicitly configured for Development. Configuration validation checks enabled endpoint/key and transport policy, but the Ellai registration in `Program.cs` is conditioned on a nonempty endpoint, not directly on `Qdrant:Enabled`. | Preserve current configuration semantics; verify production transport and credentials separately. Do not expose credentials, raw case narratives or arbitrary Qdrant access to the model. The registration/enable-flag distinction requires review before cutover. |
+| Redis derived cache | `ServiceCollectionExtensions` registers `RedisCacheStore` as `ICacheStore` when enabled and `NotConfiguredCacheStore` otherwise. Source search found no application consumer of `ICacheStore` or `IDistributedCache` beyond the adapter, and no Ellai Redis session/context or result-cache path. The adapter uses caller keys under configured `InstanceName` (default `swiftaid:`), requires an absolute TTL up to the configured maximum, and exposes hit/miss/failure/cancelled states; remove is explicit. It does not itself construct tenant keys or establish authorization. | Preserve the existing adapter without inventing an Ellai cache or a new store. Prefix isolation tests are not proof of per-user/tenant authorization. If an Ellai cache consumer is introduced later, scope/version/invalidation and access checks require a separate design and tests. |
+| Redis coordination and rate limiting | The confirmed Redis consumer outside the generic cache is Facebook web login's HMAC-address bucket (`swiftaid:auth:facebook-web:rate:v2:<digest>`), atomic INCR/EXPIRE with a bounded window; failure returns `Unavailable`. No Redis Ellai session coordination or Ellai rate limiter was found. `EllaiUtteranceQueue` has a per-process gate; the active worker instead uses the PostgreSQL outbox and lease/fencing paths. | Preserve the login limiter and PostgreSQL outbox semantics. Do not claim Redis provides Ellai session recovery, cross-instance locks or rate limits. Check framework worker restart, duplicate delivery and lease fencing against disposable PostgreSQL before cutover. |
+| Redis transport and persistence | Redis configuration validates the connection and TLS except allowlisted Development hosts. Local Compose uses password authentication, loopback publication and `appendonly no` without a Redis volume. Cache misses and failures are distinct, writes require TTL, and logs report failure type rather than values. | Verify isolated cache expiry, remove and outage behavior; a Redis restart must not be presented as durable Ellai session recovery. Production transport, real multi-user cache isolation and end-to-end outage behavior remain **NOT VERIFIED**. |
+
+**Cutover acceptance:** before switching the Gateway to framework execution,
+run the framework through the actual worker and authorized case services with
+Qdrant hit, miss, stale, wrong session/scope, expiry and outage; confirm
+PostgreSQL remains authoritative, unauthorized cases do not appear, and no
+raw payload or credentials reach the model. Run Redis failure and recovery
+checks against the existing shared adapters and verify Ellai's PostgreSQL
+session/outbox recovery is independent of Redis. Exercise separate users,
+concurrent sessions, cancellation and restart on disposable infrastructure.
+Record exact results; synthetic or adapter-only checks do not satisfy the
+full live Gateway acceptance gate.
+
+**Evidence this audit:** `EllaiLiveQueueReadTests` passed 24/24, including
+four framework/broker cases for exact hit, stale reference, index outage and
+wrong epoch, with a fake index and synthetic queue. The focused integration
+run for memory index/projection, Redis configuration and Facebook exchange
+passed 42 with 4 opt-in skips. Against an isolated task-owned Qdrant 1.19.0
+container, the existing exact and vector adapter round trips passed 2/2.
+Against a separate disposable Redis 8.4.7 container, instance-prefix isolation,
+expiry/removal and the Facebook rate-limit fixture passed; after removing that
+container, the cache adapter returned explicit failure for read/write/remove.
+Both containers were removed. These tests do not establish real provider
+authorization or production persistence.
+
 Relevant existing suites include `EllaiReasoningLoopTests`,
 `EllaiCycleRunnerTests`, `EllaiBrokerBoundsTests`, `EllaiPolicyGuardrailTests`,
 `EllaiUsageDurabilityTests`, `EllaiUtteranceRunnerTests`,

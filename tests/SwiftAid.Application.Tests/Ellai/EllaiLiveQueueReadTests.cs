@@ -3,6 +3,9 @@ using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases;
 using SwiftAid.Application.Ellai;
 using SwiftAid.Contracts.Cases;
+using Microsoft.Extensions.AI;
+using SwiftAid.Intelligence.Meta;
+using System.Runtime.CompilerServices;
 
 namespace SwiftAid.Application.Tests.Ellai;
 
@@ -54,6 +57,67 @@ public sealed class EllaiLiveQueueReadTests
             if (fail) throw new InvalidOperationException("cache offline");
             return Task.FromResult(hit);
         }
+    }
+
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(false, false, true)]
+    public async Task FrameworkRecallRechecksScopeAndFallsBackOnStaleOrUnavailableIndex(bool stale, bool outage, bool wrongScope)
+    {
+        var topicsStore = new InMemoryEllaiTopicStore();
+        var topics = new EllaiTopicService(topicsStore);
+        var queue = new FakeQueue { Result = new(CaseQueueAccess.Allowed, [Row("01", 7)]) };
+        var owner = Context with { Actor = TestActor(), AllowedTools = new HashSet<string> { EllaiToolNames.Topic } };
+        await new EllaiCaseResultMemory(topics, queue).RememberAsync(owner, queue.Result.Items, CancellationToken.None);
+        var entry = Assert.Single(await topicsStore.ListAsync(owner.SessionId, CancellationToken.None));
+        var index = new FakeIndex(new("case-results", owner.SessionId, owner.ScopeEpoch, entry.TopicId,
+            stale ? "stale-version" : EllaiCaseResultMemory.SourceVersion(entry.EntityRef!), DateTimeOffset.UtcNow.AddMinutes(5)), outage);
+        var consent = new EllaiConsentService();
+        consent.Grant(owner.SessionId, EllaiConsentDimension.ReasoningText, EllaiToolBroker.ToolReadPurpose,
+            EllaiProcessingClassification.SyntheticDemo, TimeSpan.FromHours(1));
+        var broker = new EllaiToolBroker(new EllaiPolicyService(), consent, queue: queue, topics: topics, referenceIndex: index);
+        using var client = new RecallClient();
+        var agent = new EllaiFrameworkAgent(client);
+        var context = wrongScope ? owner with { ScopeEpoch = "other-epoch" } : owner;
+        var result = await agent.RunAsync(context, "Synthetic policy", [new ChatMessage(ChatRole.User, "recall")], 300,
+            _ => Task.FromResult(true), broker.InvokeAsync,
+            new EllaiFrameworkUsage(owner.SessionId, new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), CancellationToken.None);
+
+        Assert.Equal(!wrongScope, result is not null);
+        Assert.Equal(1, index.Reads);
+        if (!wrongScope) Assert.Contains(Row("01", 7).CaseId.ToString("D"), client.Observation);
+        else Assert.DoesNotContain(Row("01", 7).CaseId.ToString("D"), client.Observation);
+    }
+
+    private sealed class RecallClient : IChatClient
+    {
+        private int _calls;
+        public string Observation { get; private set; } = string.Empty;
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            _calls++;
+            if (_calls == 1)
+                return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                    [new FunctionCallContent("call", EllaiToolNames.Topic, new Dictionary<string, object?> { ["ref"] = "case-results" })])));
+            Observation = string.Join(" ", messages.SelectMany(message => message.Contents).OfType<FunctionResultContent>()
+                .Select(item => item.Result?.ToString()));
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                """{"final_decision":{"schemaVersion":2,"kind":"Answer","displayText":"Done.","spokenText":"Done.","claims":[],"questions":[],"uiIntents":[],"planProposal":null,"topicRefs":[],"resumeSuggestion":null,"stopReason":null}}""")));
+        }
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.CompletedTask;
+            throw new NotSupportedException();
+#pragma warning disable CS0162
+            yield break;
+#pragma warning restore CS0162
+        }
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
     }
 
     private static ActorContext TestActor() => ActorContext.FromValidatedPrincipal(

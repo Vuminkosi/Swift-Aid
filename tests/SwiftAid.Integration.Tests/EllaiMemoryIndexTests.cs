@@ -128,6 +128,14 @@ public sealed class EllaiMemoryIndexTests
     }
 
     [Fact]
+    public async Task ExactLookupFailsClosedWhenIndexIsUnavailable()
+    {
+        var handler = new CaptureHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.ServiceUnavailable));
+        Assert.Null(await Index(handler).FindExactAsync("case-results", "session", "epoch", CancellationToken.None));
+        Assert.True(Assert.Single(handler.Seen).HasKey);
+    }
+
+    [Fact]
     public async Task ExactLookupRejectsMismatchedRemotePayload()
     {
         var handler = new CaptureHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.OK)
