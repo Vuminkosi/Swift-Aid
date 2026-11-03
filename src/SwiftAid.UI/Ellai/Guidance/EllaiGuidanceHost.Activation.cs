@@ -402,6 +402,7 @@ public partial class EllaiGuidanceHost
         _validationTargetControlId = null;
         _validationInputId = null;
         _validationGuidanceText = null;
+        _unavailableObservedStepId = null;
         _narrateValidation = null;
         _controlGeneratedTour = null;
         if (tour is null) return;
@@ -435,6 +436,7 @@ public partial class EllaiGuidanceHost
             _guidanceProposalId is not { } proposalId || _generatedTour is not null) return;
         _preparingGuidance = true;
         _guidanceReplanRequired = false;
+        _unavailableObservedStepId = null;
         _guidanceNotice = null;
         if (_guidanceProposalIsAccepted) _guidanceProposalTurn = _lastDurableTurn?.ClientUtteranceId;
         var turnId = _guidanceProposalTurn;
@@ -587,6 +589,7 @@ public partial class EllaiGuidanceHost
                 {
                     if (admission?.Status is "NeedsNavigation" or "WaitingForControl")
                     {
+                        _unavailableObservedStepId = null;
                         _guidanceReplanRequired = true;
                         _guidanceNotice = "The current control is unavailable. Find another way to continue.";
                         await InvokeAsync(StateHasChanged);
@@ -640,6 +643,7 @@ public partial class EllaiGuidanceHost
                             rebound.Plan.Revision != plan.Revision || rebound.CurrentStepId != stepId ||
                             rebound.ContextStamp != observedContext)
                         {
+                            _unavailableObservedStepId = null;
                             _guidanceReplanRequired = rebound?.Status == "ReplanRequired";
                             _guidanceNotice = _guidanceReplanRequired
                                 ? "The page changed. Find another way to continue."

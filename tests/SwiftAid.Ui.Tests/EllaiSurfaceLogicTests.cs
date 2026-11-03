@@ -2692,6 +2692,32 @@ public sealed partial class EllaiSurfaceLogicTests
         Assert.Equal(recovery, GetField<bool>(host, "_guidanceReplanRequired"));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GuidanceRecoversWhenObservedTargetReturnsOrCompletes(bool completed)
+    {
+        using var host = await CreateHost(new FakeReviewClient(), CreateSession(1), "");
+        var tour = DispatchProxy.Create<IBonboardingTourSession, NoOpBonboardingServiceProxy>();
+        var proxy = (NoOpBonboardingServiceProxy)(object)tour;
+        proxy.TourStatus = BonboardingTourStatus.Waiting;
+        proxy.CurrentStep = new BonboardingStepDefinition { Id = "step" };
+        var step = new GuidancePlanStep("step", "report.subject", "choose-report-subject", PlanStepBehavior.GuideHuman,
+            null, null, [], [], "Choose the subject.", null);
+        SetField(host, "_generatedTour", tour);
+        SetField(host, "_generatedPlan", new ValidatedGuidancePlan("plan", 1, null, "Initial", ["step"], [], [], [step], [], "catalogue", "contract"));
+        SetField(host, "_latestGuidanceObservation", new UiObservationReport("view", "context", "web", [], []));
+        await InvokeAsync(host, "UpdateUnavailableGuidanceTarget");
+        Assert.True(GetField<bool>(host, "_guidanceReplanRequired"));
+
+        SetField(host, "_latestGuidanceObservation", completed
+            ? new UiObservationReport("view", "context", "web", [], [], CompletedControlIds: ["report.subject"])
+            : new UiObservationReport("view", "context", "web", ["report.subject"], [new("report.subject", UiObservationState.Ready)]));
+        await InvokeAsync(host, "UpdateUnavailableGuidanceTarget");
+        Assert.False(GetField<bool>(host, "_guidanceReplanRequired"));
+        Assert.Null(GetField<string?>(host, "_guidanceNotice"));
+    }
+
     [Fact]
     public async Task FindingAnotherWayReplansSameConversationWithoutCancellingItsCheckpointOrDraft()
     {

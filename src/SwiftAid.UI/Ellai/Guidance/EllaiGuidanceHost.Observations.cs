@@ -9,6 +9,7 @@ public partial class EllaiGuidanceHost
     private readonly SemaphoreSlim _uiObservationGate = new(1, 1);
     private IJSObjectReference? _uiObservationModule;
     private UiObservationReport? _latestGuidanceObservation;
+    private string? _unavailableObservedStepId;
 
     private async Task MonitorUiObservationsAsync()
     {
@@ -100,11 +101,25 @@ public partial class EllaiGuidanceHost
         if (step.ControlId is "report.submit" or "report.receipt" &&
             Services.GetService(typeof(EllaiDisplayedReceiptContext)) is EllaiDisplayedReceiptContext { Current: not null }) return;
         // Accepted input can legitimately disappear when the wizard moves forward.
-        if (observation.CompletedControlIds?.Contains(step.ControlId) == true) return;
+        var completed = observation.CompletedControlIds?.Contains(step.ControlId) == true;
         var state = observation.ControlStates?.SingleOrDefault(item => item.ControlId == step.ControlId);
-        if (state is not null && state.State == UiObservationState.Ready) return;
+        if (completed || state?.State == UiObservationState.Ready)
+        {
+            if (_unavailableObservedStepId == step.StepKey)
+            {
+                _unavailableObservedStepId = null;
+                if (_guidanceReplanRequired && _guidanceNotice == "The current control is unavailable. Find another way to continue.")
+                {
+                    _guidanceReplanRequired = false;
+                    _guidanceNotice = null;
+                    StateHasChanged();
+                }
+            }
+            return;
+        }
         if (_guidanceReplanRequired) return;
         _guidanceReplanRequired = true;
+        _unavailableObservedStepId = step.StepKey;
         _guidanceNotice = "The current control is unavailable. Find another way to continue.";
         StateHasChanged();
     }
