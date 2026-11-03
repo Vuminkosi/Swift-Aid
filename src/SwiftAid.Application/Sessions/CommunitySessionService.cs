@@ -200,10 +200,11 @@ public sealed class CommunitySessionService(ICommunitySessionStore store) : ICom
         session.Visibility == DomainVisibility.Public;
 
     private static bool IsListedPublicly(CommunitySession session) =>
-        IsPublic(session) &&
+        IsPublic(session) && session.PublishedVersion > 0 && session.ScheduledAtUtc is not null &&
         (session.Status is CommunitySessionStatus.Scheduled or CommunitySessionStatus.Cancelled);
 
     private static bool IsPublished(CommunitySession session) =>
+        session.PublishedVersion > 0 && session.ScheduledAtUtc is not null &&
         session.Status is CommunitySessionStatus.Scheduled
             or CommunitySessionStatus.Cancelled
             or CommunitySessionStatus.Completed;

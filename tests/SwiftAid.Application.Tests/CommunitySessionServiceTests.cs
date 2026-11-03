@@ -105,6 +105,21 @@ public sealed class CommunitySessionServiceTests
     }
 
     [Fact]
+    public async Task Cancelling_a_reviewed_unpublished_session_never_exposes_it_publicly()
+    {
+        var services = CreateServices();
+        var id = Guid.NewGuid();
+        await services.Service.ExecuteAsync(CreateDraft(id), "officer-1", CancellationToken.None);
+        await services.Service.ExecuteAsync(new ReviewSessionCommand(id, 1, false, "review", Now), "officer-2", CancellationToken.None);
+        await services.Service.ExecuteAsync(new CancelSessionCommand(id, 2, "cancelled", "cancel", Now), "officer-2", CancellationToken.None);
+
+        Assert.Null(await services.Service.GetPublicAsync(id, CancellationToken.None));
+        Assert.Null(await services.Service.GetIcsAsync(id, Now, CancellationToken.None));
+        Assert.Null(await services.Service.GetInvitationTextAsync(id, CancellationToken.None));
+        Assert.DoesNotContain(await services.Service.ListPublicAsync(null, CancellationToken.None), item => item.SessionId == id);
+    }
+
+    [Fact]
     public async Task Public_gating_hides_internal_and_draft_sessions()
     {
         var services = CreateServices();

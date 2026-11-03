@@ -83,6 +83,7 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
     {
         var entities = await Entities().AsNoTracking()
             .Where(item => item.Visibility == nameof(SessionVisibility.Public) &&
+                item.PublishedVersion > 0 && item.ScheduledAtUtc != null &&
                 (item.Status == nameof(CommunitySessionStatus.Scheduled) ||
                  item.Status == nameof(CommunitySessionStatus.Cancelled)))
             .OrderBy(item => item.StartUtc)
