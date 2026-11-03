@@ -39,6 +39,27 @@ public sealed class EllaiAgentFrameworkContractTests
     }
 
     [Fact]
+    public async Task CountDoesNotPublishWhenAuthorizationExpiresDuringToolCall()
+    {
+        using var client = new CountStreamingClient();
+        var agent = new EllaiFrameworkAgent(client);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string>(StringComparer.Ordinal) { EllaiToolNames.OwnedCaseCount });
+        var current = true;
+        var chunks = new List<string>();
+        var failure = await Assert.ThrowsAsync<EllaiFrameworkFailureException>(() => agent.RunAsync(context, "Test policy", [new ChatMessage(ChatRole.User, "Count")], 100,
+            _ => Task.FromResult(current), (_, request, _) =>
+            {
+                current = false;
+                return Task.FromResult(new EllaiToolResult(request.ToolName, true, null,
+                    [new EvidenceRef("DashboardAggregate", "owned-cases", "v1", null, "proof")], "2 cases.", 1, false));
+            }, new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default,
+            (text, _) => { chunks.Add(text); return ValueTask.CompletedTask; }));
+        Assert.Equal(EllaiToolReasonCodes.DeniedByPolicy, failure.Code);
+        Assert.Empty(chunks);
+    }
+
+    [Fact]
     public async Task CountMixedWithAnotherToolDoesNotPublishUnverifiedAnswer()
     {
         using var client = new CountStreamingClient(mixed: true);

@@ -410,6 +410,12 @@ analytics requests are not yet supported. The safeguard does not prove that a
 model will call the count tool for every analytics question or prevent an
 unsupported count when no such call occurs. Live Gateway, voice, revoked-access
 and multi-tool behavior remain cutover acceptance requirements.
+The focused `CountDoesNotPublishWhenAuthorizationExpiresDuringToolCall` test
+also verifies that a changed execution-currency callback blocks streaming and
+returns a policy denial. It does not prove that a database grant revocation
+changes that callback during an in-flight count. The framework contract suite
+passed 25/25; the initial test expectation was corrected to match the agent's
+safe denial exception.
 
 An opt-in Gateway execution selection has been added; its default remains the
 existing loop. Invalid selection and unconfigured or unsupported framework
