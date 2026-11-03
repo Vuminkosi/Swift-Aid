@@ -4,13 +4,22 @@
 @using SwiftAid.UI.Components.Public
 @using SwiftAid.UI.Components.Public.GuidedReportStepper
 @using SwiftAid.UI.Components.Theme
+@using Bit.Bonboarding
+@using SwiftAid.Contracts.Ellai
+@using SwiftAid.UI.Ellai.Guidance
 @inject IJSRuntime JS
+@inject IBonboardingService Bonboarding
 
 <SwiftAidThemeProvider />
 <MudPopoverProvider />
+<BonboardingRoot />
 <main data-fixture-ready="@_ready.ToString().ToLowerInvariant()">
     <h1>Report semantics synthetic fixture</h1>
-    <GuidedReportStepper Draft="_draft" Countries="_countries" CountryCatalogueVersion="fixture-v1"
+    <button @onclick="StartSubjectGuidance">Guide subject selection</button>
+    <button @onclick="AdvanceSubjectGuidance">Advance observed guidance</button>
+    <button @onclick="StartDetailsGuidance">Guide report details</button>
+    <button @onclick="RefreshValidationGuidance">Refresh validation target</button>
+    <GuidedReportStepper @ref="_stepper" Draft="_draft" Countries="_countries" CountryCatalogueVersion="fixture-v1"
         CountryCatalogueIsCurrent="true" PrivacyNoticeReference="/privacy" PrivacyNoticeIsCurrent="true"
         ProcessingPolicyReference="/policy" ProcessingPolicyVersion="fixture-v1"
         ProcessingPolicyAcknowledgementLabel="I reviewed the report-handling information."
@@ -22,9 +31,16 @@
     }
     @if (_receipt is not null) { <PublicReportReceipt Receipt="_receipt" /> }
     <output id="submission-count">@_submissions</output>
+    <output id="fixture-tour-status">@_tour?.Status</output>
 </main>
 @code {
     private bool _ready;
+    private GuidedReportStepper? _stepper;
+    private IBonboardingTourSession? _tour;
+    private readonly Dictionary<string, string> _detailsAnchors = new()
+    {
+        ["report.narrative"] = EllaiReportUiManifest.AnchorFor("report.narrative")
+    };
     private Guid? _draftId;
     private TaskCompletionSource? _pendingSave;
     private int _submissions;
@@ -32,6 +48,39 @@
     private readonly PublicReportDraft _draft = new() { SubjectScope = IntakeSubjectScope.Human,
         CountryCode = "SZ", LocationUnknown = true, OccurrencePrecision = ReportedTimePrecision.Unknown };
     private readonly PublicCountryOption[] _countries = [new("SZ", "Eswatini")];
+    private async Task StartSubjectGuidance()
+    {
+        var step = new GuidancePlanStep("subject", "report.subject", "choose-report-subject",
+            PlanStepBehavior.GuideHuman, null, null, [], [], "Choose a subject and continue.", null);
+        var plan = new ValidatedGuidancePlan("report-fixture", 1, null, "Synthetic fixture", ["subject"], [], [],
+            [step], [], "fixture", "fixture");
+        var definition = new EllaiBonboardingCompiler().Compile(plan,
+            new Dictionary<string, string> { ["report.subject"] = EllaiReportUiManifest.AnchorFor("report.subject") },
+            (_, _) => ValueTask.FromResult(_stepper?.GetState().Controls.Any(control =>
+                control.ControlId == "report.subject" && control.CompletionAccepted) == true));
+        _tour = await Bonboarding.StartAsync(definition, new BonboardingStartOptions { Resume = false });
+    }
+    private async Task AdvanceSubjectGuidance()
+    {
+        if (_tour is not null) await _tour.NextAsync();
+    }
+    private async Task StartDetailsGuidance()
+    {
+        var step = new GuidancePlanStep("details", "report.narrative", "record-observations",
+            PlanStepBehavior.GuideHuman, null, null, [], [], "Complete the report details.", null);
+        var plan = new ValidatedGuidancePlan("details-fixture", 1, null, "Synthetic fixture", ["details"], [], [],
+            [step], [], "fixture", "fixture");
+        var definition = new EllaiBonboardingCompiler().Compile(plan, _detailsAnchors,
+            (_, _) => ValueTask.FromResult(_stepper?.GetState().Controls.Any(control =>
+                control.ControlId == "report.narrative" && control.CompletionAccepted) == true));
+        _tour = await Bonboarding.StartAsync(definition, new BonboardingStartOptions { Resume = false });
+    }
+    private async Task RefreshValidationGuidance()
+    {
+        var issue = _stepper?.GetState().ValidationIssues.FirstOrDefault();
+        _detailsAnchors["report.narrative"] = issue?.Anchor ?? EllaiReportUiManifest.AnchorFor("report.narrative");
+        if (_tour is not null) await _tour.GoToAsync("details");
+    }
     private async Task SaveAsync(PublicReportSaveRequest request)
     {
         _pendingSave = new(TaskCreationOptions.RunContinuationsAsynchronously);

@@ -18,6 +18,12 @@ public partial class EllaiGuidanceHost
     private string? _lastFeatureNavigationProposalId;
     private readonly EllaiNavigationTrail _navigationTrail = new();
     private string? _guidanceNotice;
+    private bool _guidanceReplanRequired;
+    private Dictionary<string, string>? _guidanceAnchors;
+    private string? _validationTargetControlId;
+    private string? _validationInputId;
+    private string? _validationGuidanceText;
+    private Func<string?, string?, CancellationToken, Task>? _narrateValidation;
     private bool _preparingGuidance;
     private string? _queuedGuidanceProposalId;
     private IBonboardingTourSession? _generatedTour;
@@ -392,6 +398,11 @@ public partial class EllaiGuidanceHost
         var tour = _generatedTour;
         _generatedTour = null;
         _generatedPlan = null;
+        _guidanceAnchors = null;
+        _validationTargetControlId = null;
+        _validationInputId = null;
+        _validationGuidanceText = null;
+        _narrateValidation = null;
         _controlGeneratedTour = null;
         if (tour is null) return;
         if (_generatedTourChanged is not null) tour.Changed -= _generatedTourChanged;
@@ -399,6 +410,16 @@ public partial class EllaiGuidanceHost
         try { await tour.CancelAsync(CancellationToken.None); }
         catch (OperationCanceledException) { }
         catch (Microsoft.JSInterop.JSDisconnectedException) { }
+    }
+
+    private async Task ReplanGeneratedGuidanceAsync()
+    {
+        if (!_guidanceReplanRequired || _advancingValidatedInput || _preparingGuidance ||
+            _generatedTour is null || _guidanceProposalId is null) return;
+        _guidanceReplanRequired = false;
+        CancelGuidanceCountdown();
+        await CancelGeneratedGuidanceAsync();
+        await StartProposedGuidanceAsync();
     }
 
     private async Task StartProposedGuidanceAsync()
@@ -413,6 +434,7 @@ public partial class EllaiGuidanceHost
         if (_sessionView is not { Status: "Active" } session ||
             _guidanceProposalId is not { } proposalId || _generatedTour is not null) return;
         _preparingGuidance = true;
+        _guidanceReplanRequired = false;
         _guidanceNotice = null;
         if (_guidanceProposalIsAccepted) _guidanceProposalTurn = _lastDurableTurn?.ClientUtteranceId;
         var turnId = _guidanceProposalTurn;
@@ -561,7 +583,16 @@ public partial class EllaiGuidanceHost
                 if (!IsCurrent()) return false;
                 await ReportCurrentUiAsync(ct);
                 var admission = await ReviewClient.ReadGuidanceAdmissionAsync(session.SessionId, proposalId, ct);
-                if (admission?.Status != "Ready") return false;
+                if (admission?.Status != "Ready")
+                {
+                    if (admission?.Status is "NeedsNavigation" or "WaitingForControl")
+                    {
+                        _guidanceReplanRequired = true;
+                        _guidanceNotice = "The current control is unavailable. Find another way to continue.";
+                        await InvokeAsync(StateHasChanged);
+                    }
+                    return false;
+                }
                 var step = plan.Steps.SingleOrDefault(s => s.StepKey == stepId);
                 if (step?.ControlId is "report.submit" or "report.receipt" &&
                     Services.GetService(typeof(EllaiDisplayedReceiptContext)) is EllaiDisplayedReceiptContext { Current: { } receipt })
@@ -591,13 +622,34 @@ public partial class EllaiGuidanceHost
                     (step.Behavior != PlanStepBehavior.Explain && navigation is null && !validatedInput) ||
                     (navigation is null && !validatedInput && EllaiReportUiManifest.All.Any(control =>
                         control.ControlId == step.ControlId && control.ProofPolicyId != "proof-ui-observed")) ||
-                    (navigation is null && !validatedInput && observedContext != result.ContextStamp) ||
                     (navigation is not null && _latestGuidanceObservation?.CurrentNavigationId != navigation.NavigationId) ||
                     (!validatedInput && _latestGuidanceObservation?.ControlStates?.Any(state => state.ControlId == step.ControlId &&
                         state.State == UiObservationState.Ready) != true)) return false;
                 await progressGate.WaitAsync(ct);
                 try
                 {
+                    if (!IsCurrent() || _latestGuidanceObservation?.ContextStamp != observedContext) return false;
+                    if (navigation is null && !validatedInput && observedContext != result.ContextStamp)
+                    {
+                        // Rebind only the same durable plan and step. A changed or unavailable
+                        // target must be handled by normal replanning, never by advancing it here.
+                        var rebound = await ReviewClient.RevalidateGuidancePlanAsync(session.SessionId,
+                            proposalId, plan.PlanId, stepId, ct);
+                        if (!IsCurrent() || _latestGuidanceObservation?.ContextStamp != observedContext ||
+                            rebound?.Status != "Ready" || rebound.Plan?.PlanId != plan.PlanId ||
+                            rebound.Plan.Revision != plan.Revision || rebound.CurrentStepId != stepId ||
+                            rebound.ContextStamp != observedContext)
+                        {
+                            _guidanceReplanRequired = rebound?.Status == "ReplanRequired";
+                            _guidanceNotice = _guidanceReplanRequired
+                                ? "The page changed. Find another way to continue."
+                                : "Guidance could not be checked. Try again.";
+                            await InvokeAsync(StateHasChanged);
+                            return false;
+                        }
+                        progressVersion = rebound.ProgressVersion;
+                        result = rebound;
+                    }
                     var progress = await ReviewClient.CompleteGuidanceStepAsync(session.SessionId,
                         new(proposalId, plan.PlanId, progressVersion, stepId, observedContext!), ct);
                     if (!IsCurrent() || progress?.Status is not ("Ready" or "Completed") ||
@@ -617,6 +669,13 @@ public partial class EllaiGuidanceHost
                 ShowComposer = true;
                 _generatedTour = started;
                 _generatedPlan = plan;
+                _guidanceAnchors = anchors;
+                _narrateValidation = async (inputId, contextStamp, ct) =>
+                {
+                    await progressGate.WaitAsync(ct);
+                    try { await NarrateGuidanceStepAsync(started, progressVersion, inputId, contextStamp); }
+                    finally { progressGate.Release(); }
+                };
                 _controlGeneratedTour = PersistControl;
                 _generatedTourChanged = (_, _) => _ = InvokeAsync(async () =>
                 {
@@ -639,6 +698,11 @@ public partial class EllaiGuidanceHost
                             _generatedTourChanged = null;
                             _generatedTour = null;
                             _generatedPlan = null;
+                            _guidanceAnchors = null;
+                            _validationTargetControlId = null;
+                            _validationInputId = null;
+                            _validationGuidanceText = null;
+                            _narrateValidation = null;
                             _controlGeneratedTour = null;
                             _guidanceProposalId = null;
                             _guidanceProposalIsAccepted = false;

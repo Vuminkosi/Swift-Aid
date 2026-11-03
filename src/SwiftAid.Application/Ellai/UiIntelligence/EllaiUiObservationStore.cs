@@ -13,7 +13,8 @@ public sealed record StoredUiObservationReport(
     DateTimeOffset ReceivedAtUtc,
     IReadOnlyList<UiControlState>? ControlStates = null,
     string? CurrentNavigationId = null,
-    IReadOnlyList<string>? CompletedControlIds = null);
+    IReadOnlyList<string>? CompletedControlIds = null,
+    IReadOnlyList<string>? ValidationInputIds = null);
 
 public interface IEllaiUiObservationStore
 {
@@ -39,8 +40,9 @@ public sealed class InMemoryEllaiUiObservationStore : IEllaiUiObservationStore
         ArgumentNullException.ThrowIfNull(report);
         ArgumentException.ThrowIfNullOrWhiteSpace(report.SessionId);
         ct.ThrowIfCancellationRequested();
-        if (!new UiObservationReport(report.ViewInstanceId, report.ContextStamp, report.Platform,
-                report.MountedControlIds, report.ControlStates, report.CurrentNavigationId, report.CompletedControlIds).IsValid())
+        if (!(new UiObservationReport(report.ViewInstanceId, report.ContextStamp, report.Platform,
+                report.MountedControlIds, report.ControlStates, report.CurrentNavigationId, report.CompletedControlIds)
+                { ValidationInputIds = report.ValidationInputIds }).IsValid())
             throw new ArgumentException("Invalid UI observation report.", nameof(report));
         var cleaned = report.MountedControlIds
             .Where(id => !string.IsNullOrWhiteSpace(id))
@@ -50,13 +52,18 @@ public sealed class InMemoryEllaiUiObservationStore : IEllaiUiObservationStore
             .ToList();
         lock (_gate)
         {
+            // Concurrent requests can reach this lock out of order. An older
+            // server-stamped observation must not replace newer UI evidence.
+            if (_latest.TryGetValue(report.SessionId, out var current) && current.ReceivedAtUtc > report.ReceivedAtUtc)
+                return Task.CompletedTask;
             if (!_latest.ContainsKey(report.SessionId) && _latest.Count >= 4096)
                 _latest.Remove(_latest.MinBy(entry => entry.Value.ReceivedAtUtc).Key);
             _latest[report.SessionId] = report with
             {
                 MountedControlIds = cleaned.AsReadOnly(),
                 ControlStates = report.ControlStates?.ToList().AsReadOnly(),
-                CompletedControlIds = report.CompletedControlIds?.ToList().AsReadOnly()
+                CompletedControlIds = report.CompletedControlIds?.ToList().AsReadOnly(),
+                ValidationInputIds = report.ValidationInputIds?.ToList().AsReadOnly()
             };
         }
 

@@ -89,7 +89,13 @@ public sealed record UiObservationReport(
     string? CurrentNavigationId = null,
     IReadOnlyList<string>? CompletedControlIds = null)
 {
+    /// <summary>Value-free component validation identifiers for the active client presentation.</summary>
+    public IReadOnlyList<string>? ValidationInputIds { get; init; }
+
     public bool IsValid() =>
+        (ValidationInputIds is null || ValidationInputIds.Count <= 20 &&
+            ValidationInputIds.All(id => !string.IsNullOrWhiteSpace(id) && id.Length <= 120) &&
+            ValidationInputIds.Distinct(StringComparer.Ordinal).Count() == ValidationInputIds.Count) &&
         (CompletedControlIds is null || CompletedControlIds.Count <= 20 &&
             CompletedControlIds.All(id => !string.IsNullOrWhiteSpace(id) && id.Length <= 120) &&
             CompletedControlIds.Distinct(StringComparer.Ordinal).Count() == CompletedControlIds.Count) &&

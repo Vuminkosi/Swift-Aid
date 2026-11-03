@@ -306,6 +306,21 @@ public sealed class EllaiUiToolTests
     }
 
     [Fact]
+    public async Task OlderConcurrentObservationCannotReplaceNewerValidationState()
+    {
+        var store = new InMemoryEllaiUiObservationStore();
+        var now = DateTimeOffset.UtcNow;
+        await store.RecordAsync(new("session", "view", "corrected", "web", ["report.entry"], now,
+            [new("report.entry", UiObservationState.Ready)], ValidationInputIds: []), default);
+        await store.RecordAsync(new("session", "view", "old", "web", ["report.entry"], now.AddSeconds(-1),
+            [new("report.entry", UiObservationState.Ready)], ValidationInputIds: ["report.original-statement"]), default);
+
+        var latest = await store.LatestAsync("session", default);
+        Assert.Equal("corrected", latest!.ContextStamp);
+        Assert.Empty(latest.ValidationInputIds!);
+    }
+
+    [Fact]
     public async Task ObservationReportsStaySessionScoped()
     {
         var store = new InMemoryEllaiUiObservationStore();

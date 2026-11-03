@@ -62,6 +62,7 @@
             <section class="guided-report__panel" aria-labelledby="report-type-title">
                 <h2 id="report-type-title" class="mud-typography mud-typography-h6 guided-report__step-heading" tabindex="-1" @ref="_stepHeading">Who or what is the concern about?</h2>
                 <div class="guided-report__subject-selector" data-ellai-control="report.subject" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.subject")'>
+                    <div data-bonboarding-anchor="ellai-report-subject-kind">
                     <MudRadioGroup T="ReportSubjectCategory?" Value="_subjectCategory" ValueChanged="SubjectCategoryChangedAsync" Class="guided-report__subject-group" aria-label="Report subject">
                         <div class="guided-report__choices">
                             <div class="@GetSubjectChoiceClass(ReportSubjectCategory.HumanHealth)">
@@ -76,10 +77,11 @@
                             </div>
                         </div>
                     </MudRadioGroup>
+                    </div>
                 </div>
                 @if (_subjectCategory == ReportSubjectCategory.AnimalHealth)
                 {
-                    <div class="guided-report__animal-scope-group">
+                    <div class="guided-report__animal-scope-group" data-bonboarding-anchor="ellai-report-animal-scope">
                         <MudText Typo="Typo.body2" id="animal-scope-label">What is the concern about?</MudText>
                         <MudRadioGroup T="IntakeSubjectScope?" Value="Draft.SubjectScope" ValueChanged="AnimalScopeChangedAsync" aria-labelledby="animal-scope-label">
                             <div class="guided-report__animal-scope-options">
@@ -122,8 +124,10 @@
                 <h2 id="report-details-title" class="mud-typography mud-typography-h6 guided-report__step-heading" tabindex="-1" @ref="_stepHeading">What did you notice?</h2>
                 @DetailsLeadContent
                 <div data-ellai-control="report.narrative" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.narrative")'>
+                    <div data-bonboarding-anchor="ellai-report-original-statement">
                     <MudTextField T="string" Label="Describe what happened" Variant="Variant.Outlined" Lines="4" MaxLength="6000"
                                   @bind-Value="Draft.Narrative" For="@(() => Draft.Narrative)" />
+                    </div>
                 </div>
                 <div class="guided-report__observation-input">
                     <MudText Typo="Typo.subtitle2" id="reported-observations-heading">Reported observations (optional)</MudText>
@@ -194,10 +198,12 @@
                         <MudText Typo="Typo.caption" Color="Color.Error" role="alert">@_observationChoiceMessage</MudText>
                     }
                 </div>
+                <div data-bonboarding-anchor="ellai-report-other-observations">
                 <MudTextField @ref="_observationsField" T="string" Label="Add other observations (optional)"
                               HelperText="Selected choices appear here. Add other reported observations one per line."
                               Variant="Variant.Outlined" Lines="3" MaxLength="20000" @bind-Value="Draft.ObservationsText"
                               For="@(() => Draft.ObservationsText)" />
+                </div>
 
                 <MudSelect T="ReportedTimePrecision" Label="When did this happen?" Variant="Variant.Outlined" @bind-Value="Draft.OccurrencePrecision">
                     <MudSelectItem Value="ReportedTimePrecision.Unknown">Unknown</MudSelectItem>
@@ -207,20 +213,27 @@
                 </MudSelect>
                 @if (Draft.OccurrencePrecision != ReportedTimePrecision.Unknown)
                 {
-                    <MudTextField T="DateTime?" Label="Reported date" InputType="InputType.Date" Variant="Variant.Outlined"
+                    <div data-bonboarding-anchor="ellai-report-occurrence-date">
+                    <MudTextField T="DateTime?" Label="Reported date" InputType="InputType.Date" Format="yyyy-MM-dd" Variant="Variant.Outlined"
                                   @bind-Value="Draft.OccurrenceDate" For="@(() => Draft.OccurrenceDate)" />
+                    </div>
                 }
                 @if (Draft.OccurrencePrecision == ReportedTimePrecision.Exact)
                 {
                     <div class="guided-report__grid">
+                        <div data-bonboarding-anchor="ellai-report-occurrence-time">
                         <MudTextField T="string" Label="Reported time" InputType="InputType.Time" Variant="Variant.Outlined"
                                       @bind-Value="Draft.OccurrenceTime" For="@(() => Draft.OccurrenceTime)" />
+                        </div>
+                        <div data-bonboarding-anchor="ellai-report-utc-offset">
                         <MudTextField T="string" Label="Time difference from UTC" Placeholder="+02:00" HelperText="Enter the time difference that was reported."
                                       Variant="Variant.Outlined" @bind-Value="Draft.OccurrenceOffset" For="@(() => Draft.OccurrenceOffset)" />
+                        </div>
                     </div>
                 }
 
                 <div data-ellai-control="report.time-location" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.time-location")'>
+                    <div data-bonboarding-anchor="ellai-report-place">
                     <MudSelect T="string" id="guided-report-country" Label="Country where the event happened" Variant="Variant.Outlined"
                                Value="Draft.CountryCode" ValueChanged="CountryChangedAsync" Disabled="@(!HasCountryCatalogue)" Clearable="true">
                         @foreach (var country in Countries)
@@ -228,6 +241,7 @@
                             <MudSelectItem Value="@country.Code">@country.Name</MudSelectItem>
                         }
                     </MudSelect>
+                    </div>
                 </div>
                 @if (!HasCountryCatalogue)
                 {
@@ -259,12 +273,18 @@
                 {
                     <MudText Typo="Typo.subtitle2">Reported place names</MudText>
                     <div class="guided-report__grid">
+                        <div data-bonboarding-anchor="ellai-report-region">
                         <MudTextField T="string" Label="Region" Variant="Variant.Outlined" HelperText="Leave blank when unknown."
                                       Value="Draft.Region" ValueChanged="RegionChangedAsync" For="@(() => Draft.Region)" />
+                        </div>
+                        <div data-bonboarding-anchor="ellai-report-area">
                         <MudTextField T="string" Label="Area or district" Variant="Variant.Outlined" HelperText="Leave blank when unknown."
                                       Value="Draft.Area" ValueChanged="AreaChangedAsync" For="@(() => Draft.Area)" />
+                        </div>
+                        <div data-bonboarding-anchor="ellai-report-locality">
                         <MudTextField T="string" Label="Locality" Variant="Variant.Outlined" HelperText="Leave blank when unknown."
                                       Value="Draft.Locality" ValueChanged="LocalityChangedAsync" For="@(() => Draft.Locality)" />
+                        </div>
                     </div>
                 }
                 <MudText Typo="Typo.caption">Leave uncertain place names unknown. No device location is collected by this form.</MudText>
@@ -306,9 +326,13 @@
                     <div><dt>Animal type or group</dt><dd>Unknown</dd><dd class="guided-report__provenance">Not asked here; remains unknown.</dd></div>
                     <div><dt>Affected, deceased, and at-risk counts</dt><dd>Unknown</dd><dd class="guided-report__provenance">Not entered; remains unknown.</dd></div>
                 </dl>
+                <div data-bonboarding-anchor="ellai-report-review-confirmed">
                 <MudCheckBox T="bool" Label="I reviewed the original statement and the known or unknown details above." @bind-Value="Draft.ReportReviewConfirmed" Color="Color.Primary" />
+                </div>
+                <div data-bonboarding-anchor="ellai-report-country-confirmed">
                 <MudCheckBox T="bool" Label="I confirm the selected event country." @bind-Value="Draft.CountryConfirmed" Color="Color.Primary"
                              Disabled="@(!CanConfirmCountry)" />
+                </div>
                 @if (HasPrivacyNotice)
                 {
                     <MudLink Href="@PrivacyNoticeReference" Target="_blank" rel="noopener noreferrer">Read SwiftAid’s privacy notice</MudLink>
@@ -340,8 +364,10 @@
                         <MudLink Href="@ProcessingPolicyReference" Target="_blank" rel="noopener noreferrer">Read how this report is handled</MudLink>
                     }
                     <div data-ellai-control="report.confirmations" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.confirmations")'>
+                        <div data-bonboarding-anchor="ellai-report-processing-confirmed">
                         <MudCheckBox T="bool" Label="@ProcessingAcknowledgementLabel" @bind-Value="Draft.ProcessingConfirmed"
                                      Color="Color.Primary" />
+                        </div>
                     </div>
                 }
                 else
@@ -365,7 +391,9 @@
                 }
             </section>
             <div class="guided-report__actions">
+                <div data-bonboarding-anchor="ellai-report-return-details">
                 <MudButton ButtonType="ButtonType.Button" Variant="Variant.Text" OnClick="GoBack" StartIcon="@Icons.Material.Filled.ArrowBack">Back</MudButton>
+                </div>
                 @if (OnSaveDraft.HasDelegate)
                 {
                     <MudButton ButtonType="ButtonType.Button" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Save" Disabled="@(!CanSaveDraft || _saving)" OnClick="SaveDraftAsync" data-ellai-control="report.save" data-bonboarding-anchor='@EllaiReportUiManifest.AnchorFor("report.save")'>
@@ -435,6 +463,7 @@
     private bool _focusValidationSummaryAfterRender;
     private int _step;
     private string? _stepError;
+    private bool _detailsValidationAttempted;
     private bool _showManualPlaces;
     private string? _observationChoiceMessage;
     private string? _submitError;
@@ -673,6 +702,7 @@
             if (!preserveCurrentStepForSaveRefresh)
             {
                 _step = 0;
+                _detailsValidationAttempted = false;
                 _saveState = DraftSaveState.Unsaved;
             }
             _subjectCategory = GetSubjectCategory(Draft.SubjectScope);
@@ -1029,6 +1059,7 @@
 
     private bool ValidateDetails()
     {
+        _detailsValidationAttempted = true;
         var hasNarrative = !string.IsNullOrWhiteSpace(Draft.Narrative);
         var observations = Draft.GetObservations();
         var isValid = true;
@@ -1095,8 +1126,12 @@
 
     private bool HasValidExactTime()
     {
-        if (!TimeOnly.TryParse(Draft.OccurrenceTime, out _) ||
-            Draft.OccurrenceOffset is not { Length: 6 } offset ||
+        return TimeOnly.TryParse(Draft.OccurrenceTime, out _) && HasValidOccurrenceOffset();
+    }
+
+    private bool HasValidOccurrenceOffset()
+    {
+        if (Draft.OccurrenceOffset is not { Length: 6 } offset ||
             offset[0] is not ('+' or '-') || offset[3] != ':' ||
             !int.TryParse(offset.AsSpan(1, 2), out var hours) ||
             !int.TryParse(offset.AsSpan(4, 2), out var minutes) ||
@@ -1131,7 +1166,15 @@
             _messageStore.Clear(new FieldIdentifier(Draft, nameof(PublicReportDraft.ReportReviewConfirmed)));
         }
 
-        _editContext.NotifyValidationStateChanged();
+        if (_step == 1 && _detailsValidationAttempted)
+        {
+            _messageStore.Clear();
+            ValidateDetails();
+        }
+        else
+        {
+            _editContext.NotifyValidationStateChanged();
+        }
     }
 
     private bool IsObservationSelected(string observation) =>

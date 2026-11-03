@@ -40,6 +40,8 @@ public partial class EllaiGuidanceHost
         try
         {
             await ReportCurrentUiAsync(token);
+            await UpdateValidationGuidanceAsync(token);
+            UpdateUnavailableGuidanceTarget();
             await AdvanceValidatedInputAsync(token);
         }
         catch (OperationCanceledException) when (!token.IsCancellationRequested)
@@ -55,6 +57,56 @@ public partial class EllaiGuidanceHost
         {
             _latestGuidanceObservation = null;
         }
+    }
+
+    private async Task UpdateValidationGuidanceAsync(CancellationToken token)
+    {
+        if (_guidanceFeatureId != EllaiReportUiManifest.FeatureId || _generatedTour is not { } tour ||
+            CurrentGuidanceStep is not { } step || _guidanceAnchors is null ||
+            _latestGuidanceObservation is not { } observation) return;
+        var issue = observation.ValidationInputIds?.Select(EllaiReportValidationGuidance.Find)
+            .FirstOrDefault(item => item is not null);
+        var nextId = issue?.InputId;
+        if (_validationInputId == nextId && _validationTargetControlId == (issue is null ? null : step.ControlId))
+        {
+            if (issue is not null && _guidanceNarrationRetryPending && _guidanceNarrationEventId is null && _guidanceNarrationCts is null &&
+                DateTimeOffset.UtcNow >= _guidanceNarrationRetryAtUtc && _narrateValidation is { } retry)
+                await retry(issue.InputId, observation.ContextStamp, token);
+            return;
+        }
+        if (_validationTargetControlId is { } previous &&
+            EllaiReportUiManifest.All.FirstOrDefault(control => control.ControlId == previous) is { } descriptor)
+            _guidanceAnchors[previous] = descriptor.AnchorBindingKey;
+        _validationInputId = nextId;
+        _validationGuidanceText = issue?.Message;
+        _validationTargetControlId = issue is null ? null : step.ControlId;
+        if (issue is not null) _guidanceAnchors[step.ControlId] = issue.Anchor;
+        CancelGuidanceCountdown();
+        // Bit.Bonboarding 10.7 RefreshAsync measures the previously resolved target.
+        // Re-enter the same presentation step to resolve its dynamic anchor again;
+        // this does not advance the durable application checkpoint.
+        await tour.GoToAsync(step.StepKey, token);
+        StateHasChanged();
+        if (ReferenceEquals(tour, _generatedTour) && _narrateValidation is { } narrate)
+            await narrate(issue?.InputId, issue is null ? null : observation.ContextStamp, token);
+    }
+
+
+    private void UpdateUnavailableGuidanceTarget()
+    {
+        if (_generatedTour?.Status is not (Bit.Bonboarding.BonboardingTourStatus.Running or Bit.Bonboarding.BonboardingTourStatus.Waiting) ||
+            CurrentGuidanceStep is not { } step || _latestGuidanceObservation is not { } observation) return;
+        if (_validationGuidanceText is not null) return;
+        if (step.ControlId is "report.submit" or "report.receipt" &&
+            Services.GetService(typeof(EllaiDisplayedReceiptContext)) is EllaiDisplayedReceiptContext { Current: not null }) return;
+        // Accepted input can legitimately disappear when the wizard moves forward.
+        if (observation.CompletedControlIds?.Contains(step.ControlId) == true) return;
+        var state = observation.ControlStates?.SingleOrDefault(item => item.ControlId == step.ControlId);
+        if (state is not null && state.State == UiObservationState.Ready) return;
+        if (_guidanceReplanRequired) return;
+        _guidanceReplanRequired = true;
+        _guidanceNotice = "The current control is unavailable. Find another way to continue.";
+        StateHasChanged();
     }
 
     private Task ReportCurrentUiAsync(CancellationToken token) => ReportUiForFeatureAsync(_guidanceFeatureId, token);

@@ -21,7 +21,8 @@ public sealed partial class EllaiGuidanceProposalAdmission(
     public async Task<EllaiGuidancePlanningResult> PlanAsync(string sessionId, string proposalId,
         EllaiUiEntitlements authority, EllaiModelGuidancePlanner planner,
         IEllaiUiDiscoveryService discovery, EllaiGuidancePlanValidator validator,
-        EllaiUsageLedger ledger, IEllaiUsageStore usage, CancellationToken ct)
+        EllaiUsageLedger ledger, IEllaiUsageStore usage, CancellationToken ct,
+        string? existingPlanId = null, string? currentStepId = null)
     {
         var admitted = await AdmitAsync(sessionId, proposalId, authority, ct).ConfigureAwait(false);
         if (admitted.Status != "Ready" || admitted.Observation is null || admitted.Catalogue is null)
@@ -31,6 +32,12 @@ public sealed partial class EllaiGuidanceProposalAdmission(
             || session.ScopeEpoch != authority.ScopeEpoch || session.InteractionEpoch != admitted.InteractionEpoch)
             return new("Stale");
         var previous = EllaiGuidanceCheckpoint.Deserialize(session.GuidanceJson);
+        var revalidateOnly = existingPlanId is not null || currentStepId is not null;
+        if (revalidateOnly && (string.IsNullOrWhiteSpace(existingPlanId) || existingPlanId.Length > 120 ||
+            string.IsNullOrWhiteSpace(currentStepId) || currentStepId.Length > 120 ||
+            previous?.Plan?.PlanId != existingPlanId || previous.CurrentStepId != currentStepId ||
+            previous.Status != "Ready" || previous.ProposalId != proposalId))
+            return new("Stale");
         var sameProposal = previous?.ProposalId == proposalId && previous.ScopeEpoch == authority.ScopeEpoch
             && previous.InteractionEpoch <= admitted.InteractionEpoch;
         var sameContext = sameProposal && previous!.ContextStamp == admitted.Observation.ContextStamp
@@ -74,6 +81,7 @@ public sealed partial class EllaiGuidanceProposalAdmission(
                 return new(previous.Status, normalized);
             }
         }
+        if (revalidateOnly) return new("ReplanRequired");
         var attempt = sameProposal ? previous!.GenerationAttempt + 1 : 1;
         if (attempt > EllaiGuidancePlanValidator.MaxReplanDispatches) return new("ReplanLimit");
         var checkpoint = new EllaiGuidanceCheckpoint(proposalId, admitted.Observation.ContextStamp,

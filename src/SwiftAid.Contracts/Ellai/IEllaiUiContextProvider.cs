@@ -35,4 +35,10 @@ public sealed record EllaiUiState(
     string ComponentId,
     bool Loading,
     bool HasValidationErrors,
-    IReadOnlyList<UiControlState> Controls);
+    IReadOnlyList<UiControlState> Controls)
+{
+    /// <summary>Application-authored validation guidance; contains no entered field values.</summary>
+    public IReadOnlyList<EllaiUiValidationIssue> ValidationIssues { get; init; } = [];
+}
+
+public sealed record EllaiUiValidationIssue(string InputId, string Anchor, string Message);

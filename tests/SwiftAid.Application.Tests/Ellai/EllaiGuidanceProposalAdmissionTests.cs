@@ -8,6 +8,50 @@ namespace SwiftAid.Application.Tests.Ellai;
 public sealed class EllaiGuidanceProposalAdmissionTests
 {
     [Fact]
+    public async Task ChangedObservationRevalidatesSamePlanBeforeAnExplanatoryStepAdvances()
+    {
+        var (service, store, observations, id) = await Fixture();
+        var registry = new EllaiUiRegistry();
+        EllaiReportGuidanceDescriptors.RegisterAll(registry);
+        var modelCalls = 0;
+        var planner = new EllaiModelGuidancePlanner(new PlannerCompletion(() =>
+        {
+            modelCalls++;
+            return Task.CompletedTask;
+        }));
+        var authority = new EllaiUiEntitlements("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>());
+        var ledger = new EllaiUsageLedger();
+        var usage = new InMemoryEllaiUsageStore();
+        Task<EllaiGuidancePlanningResult> Prepare() => service.PlanAsync("session", id, authority, planner,
+            new EllaiUiDiscoveryService(), new EllaiGuidancePlanValidator(registry), ledger, usage, default);
+
+        await observations.RecordAsync(new("session", "view", "before", "web", ["report.entry"], DateTimeOffset.UtcNow,
+            [new("report.entry", UiObservationState.Ready)]), default);
+        var first = await Prepare();
+        Assert.Equal("Ready", first.Status);
+        var checkpoint = EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("session", default))!.GuidanceJson)!;
+        await observations.RecordAsync(new("session", "view", "hidden", "web", ["report.entry", "report.subject"], DateTimeOffset.UtcNow,
+            [new("report.entry", UiObservationState.Hidden), new("report.subject", UiObservationState.Ready)]), default);
+        var cannotRebind = await service.PlanAsync("session", id, authority, planner, new EllaiUiDiscoveryService(),
+            new EllaiGuidancePlanValidator(registry), ledger, usage, default, first.Plan!.PlanId, "entry");
+        Assert.Equal("ReplanRequired", cannotRebind.Status);
+        Assert.Equal(checkpoint.Version, EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("session", default))!.GuidanceJson)!.Version);
+        Assert.Equal(1, modelCalls);
+        await observations.RecordAsync(new("session", "view", "after", "web", ["report.entry", "report.subject"], DateTimeOffset.UtcNow,
+            [new("report.entry", UiObservationState.Ready), new("report.subject", UiObservationState.Ready)]), default);
+        var request = new EllaiGuidanceStepRequest(id, first.Plan!.PlanId, checkpoint.Version, "entry", "after");
+        Assert.Equal("Stale", (await service.CompleteStepAsync("session", request, authority, default)).Status);
+
+        var rebound = await service.PlanAsync("session", id, authority, planner, new EllaiUiDiscoveryService(),
+            new EllaiGuidancePlanValidator(registry), ledger, usage, default, first.Plan.PlanId, "entry");
+        var current = EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("session", default))!.GuidanceJson)!;
+        Assert.Equal(first.Plan.PlanId, rebound.Plan?.PlanId);
+        Assert.Equal("after", current.ContextStamp);
+        Assert.Equal(1, modelCalls);
+        Assert.Equal("Completed", (await service.CompleteStepAsync("session", request with { ExpectedVersion = current.Version }, authority, default)).Status);
+    }
+
+    [Fact]
     public async Task WizardPlanContinuesAcrossValidatedTransitionsAndRestoresWithoutAnotherModelCall()
     {
         var (service, store, observations, id) = await Fixture();
@@ -710,6 +754,32 @@ public sealed class EllaiGuidanceProposalAdmissionTests
         Assert.Equal(100, (await store.ReadConversationAsync("session", "owner", default)).Count);
         var authority = new EllaiUiEntitlements("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>());
         Assert.Equal(expected, (await service.AdmitAsync("session", id, authority, default)).Status);
+    }
+
+    [Fact]
+    public async Task ValidationNarrationUsesTheFirstObservedTrustedFieldAndRejectsStaleOrInventedIssues()
+    {
+        var (service, store, observations, id) = await Fixture();
+        var checkpoint = await SeedProgress(store, observations, id);
+        var authority = new EllaiUiEntitlements("owner", "scope", new HashSet<string> { "report" }, new HashSet<string>());
+        await observations.RecordAsync(new("session", "view", "validation", "web", ["report.entry"], DateTimeOffset.UtcNow,
+            [new("report.entry", UiObservationState.Ready)], ValidationInputIds: ["report.original-statement", "report.occurrence-date"]), default);
+        var responses = new EllaiSessionResponseStore();
+        var request = new EllaiGuidanceNarrationRequest(id, checkpoint.Plan!.PlanId, checkpoint.CurrentStepId!, checkpoint.Version)
+            { ValidationInputId = "report.original-statement", ObservationContextStamp = "validation" };
+
+        Assert.Null(await service.PrepareNarrationAsync("session", request with { ObservationContextStamp = "old" }, authority, responses, default));
+        Assert.Null(await service.PrepareNarrationAsync("session", request with { ValidationInputId = "report.occurrence-date" }, authority, responses, default));
+        Assert.Null(await service.PrepareNarrationAsync("session", request with { ValidationInputId = "malicious.input" }, authority, responses, default));
+        var response = await service.PrepareNarrationAsync("session", request, authority, responses, default);
+        Assert.Equal(EllaiReportValidationGuidance.Find("report.original-statement")!.Message, response!.Text);
+        Assert.True(response.Progress!.Speak);
+        await observations.RecordAsync(new("session", "view", "corrected", "web", ["report.entry"], DateTimeOffset.UtcNow,
+            [new("report.entry", UiObservationState.Ready)], ValidationInputIds: ["report.occurrence-date"]), default);
+        Assert.Null(await service.PrepareNarrationAsync("session", request, authority, responses, default));
+        var next = await service.PrepareNarrationAsync("session", request with
+            { ValidationInputId = "report.occurrence-date", ObservationContextStamp = "corrected" }, authority, responses, default);
+        Assert.Equal(EllaiReportValidationGuidance.Find("report.occurrence-date")!.Message, next!.Text);
     }
 
     [Fact]

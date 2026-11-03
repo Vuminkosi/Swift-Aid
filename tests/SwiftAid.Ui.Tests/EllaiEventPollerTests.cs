@@ -470,7 +470,8 @@ public sealed class EllaiEventPollerTests
 
         var reported = await client.ReportUiObservationAsync(
             "s-9",
-            new UiObservationReport("view-9", "ctx-9", "web", new[] { "cases.queue" }, CurrentNavigationId: "nav-cases", CompletedControlIds: ["report.subject"]),
+            new UiObservationReport("view-9", "ctx-9", "web", new[] { "cases.queue" }, CurrentNavigationId: "nav-cases", CompletedControlIds: ["report.subject"])
+                { ValidationInputIds = ["report.occurrence-date"] },
             CancellationToken.None);
 
         Assert.True(reported);
@@ -478,6 +479,7 @@ public sealed class EllaiEventPollerTests
         Assert.Contains("api/v1/ellai/sessions/s-9/ui-observations", handler.LastPath, StringComparison.Ordinal);
         Assert.Contains("\"currentNavigationId\":\"nav-cases\"", handler.LastBody);
         Assert.Contains("\"completedControlIds\":[\"report.subject\"]", handler.LastBody);
+        Assert.Contains("\"validationInputIds\":[\"report.occurrence-date\"]", handler.LastBody);
     }
 
     [Fact]

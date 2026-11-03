@@ -19,11 +19,20 @@
             if (_disposed) return;
             _module ??= await JS.InvokeAsync<IJSObjectReference>("import",
                 "./_content/SwiftAid.UI/js/ellai-ui-observations.js");
-            var state = Provider.GetState();
-            var manifest = Provider.Describe();
-            if (state.ComponentId != Provider.ComponentId || manifest.ComponentId != Provider.ComponentId ||
-                state.Controls.Any(control => !manifest.Controls.Any(descriptor => descriptor.ControlId == control.ControlId)))
-                throw new InvalidOperationException("Semantic state must belong to its component manifest.");
+            EllaiUiState state;
+            try
+            {
+                state = Provider.GetState();
+                var manifest = Provider.Describe();
+                if (state.ComponentId != Provider.ComponentId || manifest.ComponentId != Provider.ComponentId ||
+                    state.Controls.Any(control => !manifest.Controls.Any(descriptor => descriptor.ControlId == control.ControlId)))
+                    throw new InvalidOperationException("Semantic state must belong to its component manifest.");
+            }
+            catch
+            {
+                await _module.InvokeVoidAsync("invalidateComponent", _instanceId);
+                throw;
+            }
             await _module.InvokeAsync<bool>("updateComponent", _instanceId, state);
         }
         catch (JSDisconnectedException) { }

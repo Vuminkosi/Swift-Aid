@@ -46,12 +46,13 @@ public static class EllaiGuidanceProposalEndpoint
         if (string.IsNullOrWhiteSpace(request.ProposalId) || request.ProposalId.Length > 512) return Results.BadRequest();
         http.Response.Headers.CacheControl = "no-store, private";
         var actor = ActorContext.FromValidatedPrincipal(http.User);
-        var result = await PrepareOwnedAsync(actor, sessionId, request.ProposalId, services, ct).ConfigureAwait(false);
+        var result = await PrepareOwnedAsync(actor, sessionId, request.ProposalId, services, ct,
+            request.ExistingPlanId, request.CurrentStepId).ConfigureAwait(false);
         return result is null ? Results.NotFound() : Results.Json(result);
     }
 
     internal static async Task<EllaiGuidancePlanDto?> PrepareOwnedAsync(ActorContext actor, string sessionId, string proposalId,
-        IServiceProvider services, CancellationToken ct)
+        IServiceProvider services, CancellationToken ct, string? existingPlanId = null, string? currentStepId = null)
     {
         if (string.IsNullOrWhiteSpace(proposalId) || proposalId.Length > 512) return null;
         var sessions = services.GetRequiredService<IEllaiSessionStore>();
@@ -69,7 +70,7 @@ public static class EllaiGuidanceProposalEndpoint
             services.GetRequiredService<IEllaiUiDiscoveryService>(),
             services.GetRequiredService<EllaiGuidancePlanValidator>(),
             services.GetRequiredService<EllaiUsageLedger>(),
-            services.GetRequiredService<IEllaiUsageStore>(), ct).ConfigureAwait(false);
+            services.GetRequiredService<IEllaiUsageStore>(), ct, existingPlanId, currentStepId).ConfigureAwait(false);
         if (generated.DiagnosticCode is not null)
             services.GetRequiredService<ILoggerFactory>().CreateLogger("SwiftAid.Ellai.Guidance")
                 .LogWarning("Ellai guidance rejected for session {SessionId}: {ReasonCode}",

@@ -1,4 +1,5 @@
 using SwiftAid.Contracts.Ellai;
+using SwiftAid.Contracts.Geography;
 
 namespace SwiftAid.UI.Components.Public.GuidedReportStepper;
 
@@ -24,5 +25,48 @@ public partial class GuidedReportStepper
              _step == 2 && CanSubmit && !_submitting),
          new("report.review", _step == 2 ? UiObservationState.Ready : UiObservationState.Unmounted),
          new("report.submit", _step != 2 ? UiObservationState.Unmounted :
-             CanSubmit && !_submitting ? UiObservationState.Ready : UiObservationState.Disabled)]);
+             CanSubmit && !_submitting ? UiObservationState.Ready : UiObservationState.Disabled)])
+    {
+        ValidationIssues = GetValidationGuidance()
+    };
+
+    private IReadOnlyList<EllaiUiValidationIssue> GetValidationGuidance()
+    {
+        var issues = new List<EllaiUiValidationIssue>();
+        void AddIfInvalid(bool invalid, string inputId)
+        {
+            if (invalid && EllaiReportValidationGuidance.Find(inputId) is { } issue) issues.Add(issue);
+        }
+        if (_step == 0)
+        {
+            AddIfInvalid(_subjectCategory is null, "report.subject-kind");
+            AddIfInvalid(_subjectCategory == ReportSubjectCategory.AnimalHealth && !HasCompleteSubject, "report.animal-scope");
+            return issues;
+        }
+        if (_step == 2)
+        {
+            AddIfInvalid(!Draft.ReportReviewConfirmed, "report.review-confirmed");
+            AddIfInvalid(HasCountryCatalogue && !CanConfirmCountry, "report.country-required");
+            AddIfInvalid(CanConfirmCountry && !Draft.CountryConfirmed, "report.country-confirmed");
+            AddIfInvalid(HasProcessingPolicy && !Draft.ProcessingConfirmed, "report.processing-confirmed");
+            return issues;
+        }
+        if (_step != 1 || !_detailsValidationAttempted) return [];
+        var observations = Draft.GetObservations();
+        AddIfInvalid(string.IsNullOrWhiteSpace(Draft.Narrative) && observations.Count == 0 ||
+            (Draft.Narrative?.Length ?? 0) > 6000, "report.original-statement");
+        AddIfInvalid(observations.Count > 20 || observations.Any(value => value.Length > 1000), "report.other-observations");
+        AddIfInvalid(Draft.OccurrencePrecision != ReportedTimePrecision.Unknown && !Draft.OccurrenceDate.HasValue,
+            "report.occurrence-date");
+        AddIfInvalid(Draft.OccurrencePrecision == ReportedTimePrecision.Exact && !TimeOnly.TryParse(Draft.OccurrenceTime, out _),
+            "report.occurrence-time");
+        AddIfInvalid(Draft.OccurrencePrecision == ReportedTimePrecision.Exact && !HasValidOccurrenceOffset(), "report.utc-offset");
+        AddIfInvalid(Draft.RegionPresence == PresenceState.Known && string.IsNullOrWhiteSpace(Draft.Region), "report.region");
+        AddIfInvalid(Draft.AreaPresence == PresenceState.Known && string.IsNullOrWhiteSpace(Draft.Area), "report.area");
+        AddIfInvalid(Draft.LocalityPresence == PresenceState.Known && string.IsNullOrWhiteSpace(Draft.Locality), "report.locality");
+        AddIfInvalid(!Draft.LocationUnknown && string.IsNullOrWhiteSpace(Draft.CountryCode) &&
+            Draft.RegionPresence != PresenceState.Known && Draft.AreaPresence != PresenceState.Known &&
+            Draft.LocalityPresence != PresenceState.Known, "report.place-search");
+        return issues;
+    }
 }

@@ -35,6 +35,12 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             }, id);
             const subject = page.locator('[data-ellai-control="report.subject"]');
             assert.equal(await subject.getByRole('radio').count(), 2, 'Subject guidance must highlight the actual choices, not the heading');
+            await page.getByRole('radio', { name: 'Animal health — an animal or group of animals' }).check();
+            await page.waitForFunction(() => window.fixtureObservations.collect().validationInputIds?.join(',') === 'report.animal-scope');
+            assert.equal(await page.locator('[data-bonboarding-anchor="ellai-report-animal-scope"]').getByRole('radio').count(), 4);
+            await page.getByRole('radio', { name: 'Herd' }).check();
+            await page.waitForFunction(() => window.fixtureObservations.collect().validationInputIds?.length === 0);
+            await page.getByRole('radio', { name: 'Human health — a person or people' }).check();
             await page.getByRole('button', { name: 'Continue to details', exact: true }).click();
             await accepted('report.subject');
             assert.equal(await page.locator('[data-ellai-control="report.narrative"]').getByRole('textbox').count(), 1,
@@ -42,8 +48,34 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             await page.getByRole('button', { name: 'Review report', exact: true }).click();
             await page.getByText('Describe what happened or add an observation.', { exact: true }).first().waitFor();
             assert(!(await collect()).completedControlIds?.includes('report.narrative'));
+            await page.waitForFunction(() => window.fixtureObservations.collect().validationInputIds?.[0] === 'report.original-statement');
+            const targetedIssues = await page.evaluate(() => window.fixtureObservations.collect(['report.narrative']).validationInputIds);
+            assert.deepEqual(targetedIssues, ['report.original-statement']);
+            const unrelatedIssues = await page.evaluate(() => window.fixtureObservations.collect(['cases.filter']).validationInputIds);
+            assert.deepEqual(unrelatedIssues, []);
+            assert.equal(await page.locator('[data-bonboarding-anchor="ellai-report-original-statement"]').getByRole('textbox').count(), 1);
+            await page.getByRole('combobox', { name: 'When did this happen?' }).click();
+            await page.getByRole('option', { name: 'Date only' }).click();
+            await page.getByRole('button', { name: 'Review report', exact: true }).click();
+            await page.waitForFunction(() => window.fixtureObservations.collect().validationInputIds?.join(',') ===
+                'report.original-statement,report.occurrence-date');
 
             await page.getByLabel('Describe what happened').fill('SYNTHETIC-PRIVATE observed concern for fixture only.');
+            await page.getByLabel('Describe what happened').press('Tab');
+            await page.waitForFunction(() => window.fixtureObservations.collect().validationInputIds?.[0] === 'report.occurrence-date');
+            await page.getByLabel('Reported date').fill('2026-10-01');
+            await page.getByLabel('Reported date').press('Tab');
+            await page.waitForFunction(() => window.fixtureObservations.collect().validationInputIds?.length === 0, null, { timeout: 5000 });
+            await page.getByRole('combobox', { name: 'When did this happen?' }).click();
+            await page.getByRole('option', { name: 'Exact time' }).click();
+            await page.waitForFunction(() => window.fixtureObservations.collect().validationInputIds?.join(',') ===
+                'report.occurrence-time,report.utc-offset');
+            await page.getByLabel('Reported time').fill('07:30');
+            await page.getByLabel('Reported time').press('Tab');
+            await page.waitForFunction(() => window.fixtureObservations.collect().validationInputIds?.join(',') === 'report.utc-offset');
+            await page.getByLabel('Time difference from UTC').fill('+02:00');
+            await page.getByLabel('Time difference from UTC').press('Tab');
+            await page.waitForFunction(() => window.fixtureObservations.collect().validationInputIds?.length === 0);
             await page.getByRole('button', { name: 'Save draft', exact: true }).click();
             await page.getByRole('button', { name: 'Finish fixture storage', exact: true }).waitFor();
             assert(!(await collect()).completedControlIds?.includes('report.save'));
@@ -62,11 +94,17 @@ const { chromium } = require(process.env.SWIFTAID_PLAYWRIGHT_PACKAGE || 'playwri
             await accepted('report.time-location');
             const send = page.getByRole('button', { name: 'Send report', exact: true });
             assert(await send.isDisabled());
+            await page.waitForFunction(() => window.fixtureObservations.collect().validationInputIds?.join(',') ===
+                'report.review-confirmed,report.country-confirmed,report.processing-confirmed');
             await page.getByRole('checkbox', { name: 'I confirm the selected event country.', exact: true }).check();
+            await page.waitForFunction(() => window.fixtureObservations.collect().validationInputIds?.join(',') ===
+                'report.review-confirmed,report.processing-confirmed');
             await page.getByRole('checkbox', { name: 'I reviewed the report-handling information.', exact: true }).check();
+            await page.waitForFunction(() => window.fixtureObservations.collect().validationInputIds?.join(',') === 'report.review-confirmed');
             assert(!(await collect()).completedControlIds?.includes('report.confirmations'));
             await page.getByRole('checkbox', { name: 'I reviewed the original statement and the known or unknown details above.', exact: true }).check();
             await accepted('report.confirmations');
+            await page.waitForFunction(() => window.fixtureObservations.collect().validationInputIds?.length === 0);
             assert.equal((await collect()).controlStates.find(c => c.controlId === 'report.confirmations')?.state, 4,
                 'The visible confirmation control must be Ready, not the hidden native checkbox');
             await page.getByRole('checkbox', { name: 'I reviewed the report-handling information.', exact: true }).uncheck();

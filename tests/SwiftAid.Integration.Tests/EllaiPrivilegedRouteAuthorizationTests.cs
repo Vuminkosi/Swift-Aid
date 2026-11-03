@@ -471,6 +471,15 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
         Merge(started);
         var session = (await started.Content.ReadFromJsonAsync<EllaiSessionView>())!;
         var store = app.Services.GetRequiredService<CountingEllaiSessionStore>();
+        var observation = new ReportUiObservationApiRequest(session.SessionId, "view", "validation", "web", ["report.entry"],
+            [new("report.entry", UiObservationState.Ready)], ValidationInputIds: ["report.original-statement"]);
+        using (var observationResponse = await PostAsync($"/api/v1/ellai/guest/sessions/{session.SessionId}/ui-observations", observation, token))
+            Assert.Equal(System.Net.HttpStatusCode.OK, observationResponse.StatusCode);
+        var observed = await app.Services.GetRequiredService<IEllaiUiObservationStore>().LatestAsync(session.SessionId, default);
+        Assert.Equal("report.original-statement", Assert.Single(observed!.ValidationInputIds!));
+        using (var foreignObservation = await PostAsync("/api/v1/ellai/guest/sessions/session-1/ui-observations",
+            observation with { SessionId = "session-1" }, token))
+            Assert.Equal(System.Net.HttpStatusCode.NotFound, foreignObservation.StatusCode);
         async Task<EllaiSessionView> SendTurnAsync(string id, string text, EllaiSessionView current, int ordinal)
         {
             using var response = await PostAsync($"/api/v1/ellai/guest/sessions/{session.SessionId}/utterances",
@@ -1031,6 +1040,31 @@ public sealed class EllaiPrivilegedRouteAuthorizationTests
         using var otherOwnerClient = otherOwnerApp.GetTestClient();
         using var denied = await otherOwnerClient.GetAsync("/api/v1/ellai/sessions/session-1/voice/state");
         Assert.Equal(System.Net.HttpStatusCode.NotFound, denied.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ValidationObservationsRespectSessionOwnershipForHttpAndInProcessClients(bool foreign)
+    {
+        await using var app = await StartApplicationAsync(sessionOwnerId: foreign ? "another-owner" : "test-owner");
+        using var http = app.GetTestClient();
+        var httpClient = new EllaiReviewHttpClient(http);
+        var inProcess = new EllaiReviewGatewayClient(new FixedAuthenticationStateProvider(TestPrincipal()), app.Services);
+        var report = new UiObservationReport("view", "context", "web", ["report.entry"],
+            [new("report.entry", UiObservationState.Ready)]) { ValidationInputIds = ["report.original-statement"] };
+
+        Assert.Equal(!foreign, await httpClient.ReportUiObservationAsync("session-1", report, default));
+        var store = app.Services.GetRequiredService<IEllaiUiObservationStore>();
+        var afterHttp = await store.LatestAsync("session-1", default);
+        if (foreign) Assert.Null(afterHttp);
+        else Assert.Equal("report.original-statement", Assert.Single(afterHttp!.ValidationInputIds!));
+
+        var next = report with { ContextStamp = "next", ValidationInputIds = ["report.occurrence-date"] };
+        Assert.Equal(!foreign, await inProcess.ReportUiObservationAsync("session-1", next, default));
+        var afterInProcess = await store.LatestAsync("session-1", default);
+        if (foreign) Assert.Null(afterInProcess);
+        else Assert.Equal("report.occurrence-date", Assert.Single(afterInProcess!.ValidationInputIds!));
     }
 
     [Fact]

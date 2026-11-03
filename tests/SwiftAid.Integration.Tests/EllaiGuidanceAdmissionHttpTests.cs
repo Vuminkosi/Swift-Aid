@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
 using SwiftAid.Application.Ellai;
 using SwiftAid.Gateway.Ellai;
+using SwiftAid.Gateway.Endpoints;
 using SwiftAid.Contracts.Ellai;
 
 namespace SwiftAid.Integration.Tests;
@@ -130,6 +131,8 @@ public sealed class EllaiGuidanceAdmissionHttpTests
         app.MapPost("/sessions/{sessionId}/guidance/control", controlHandler);
         Delegate narrationHandler = (Func<HttpContext, string, EllaiGuidanceNarrationRequest, IServiceProvider, CancellationToken, Task<IResult>>)EllaiGuidanceProposalEndpoint.NarrateAsync;
         app.MapPost("/sessions/{sessionId}/guidance/narration", narrationHandler);
+        Delegate observationHandler = (Func<string, ReportUiObservationApiRequest?, IEllaiUiObservationStore, CancellationToken, Task<IResult>>)EllaiEndpoints.ReportUiObservationAsync;
+        app.MapPost("/sessions/{sessionId}/ui-observations", observationHandler);
         await app.StartAsync();
         try
         {
@@ -149,9 +152,32 @@ public sealed class EllaiGuidanceAdmissionHttpTests
             Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
             Assert.Equal(1, completion.Calls);
             var checkpoint = EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("owned", default))!.GuidanceJson)!;
+            if (feature == "report")
+            {
+                var observed = new ReportUiObservationApiRequest("owned", "view", "validation-context", "web",
+                    [control], [new(control, UiObservationState.Ready)], ValidationInputIds: ["report.original-statement", "report.occurrence-date"]);
+                using var observationResponse = await client.PostAsJsonAsync("/sessions/owned/ui-observations", observed);
+                Assert.Equal(HttpStatusCode.OK, observationResponse.StatusCode);
+                var stored = await observations.LatestAsync("owned", default);
+                Assert.Equal(observed.ValidationInputIds, stored!.ValidationInputIds);
+                var validationRequest = new EllaiGuidanceNarrationRequest(proposal.ProposalId, checkpoint.Plan!.PlanId, "entry", checkpoint.Version)
+                    { ValidationInputId = "report.original-statement", ObservationContextStamp = "validation-context" };
+                using var validationResponse = await client.PostAsJsonAsync("/sessions/owned/guidance/narration", validationRequest);
+                Assert.Equal(HttpStatusCode.OK, validationResponse.StatusCode);
+                var validation = (await validationResponse.Content.ReadFromJsonAsync<EllaiSessionResponseDto>())!;
+                Assert.Equal(EllaiReportValidationGuidance.Find("report.original-statement")!.Message, validation.Text);
+                using var wrongIssue = await client.PostAsJsonAsync("/sessions/owned/guidance/narration",
+                    validationRequest with { ValidationInputId = "report.occurrence-date" });
+                Assert.Equal(HttpStatusCode.NotFound, wrongIssue.StatusCode);
+            }
             await observations.RecordAsync(new("owned", "refreshed-view", "refreshed-context", "web", [control], DateTimeOffset.UtcNow,
                 [new(control, UiObservationState.Ready)]), default);
-            using var restoredResponse = await client.PostAsJsonAsync("/sessions/owned/guidance/plan", new EllaiGuidancePlanRequest(proposal.ProposalId));
+            using var wrongPlanResponse = await client.PostAsJsonAsync("/sessions/owned/guidance/plan", new EllaiGuidancePlanRequest(proposal.ProposalId)
+                { ExistingPlanId = "other-plan", CurrentStepId = "entry" });
+            Assert.Equal("Stale", (await wrongPlanResponse.Content.ReadFromJsonAsync<EllaiGuidancePlanDto>())!.Status);
+            Assert.Equal(checkpoint.Version, EllaiGuidanceCheckpoint.Deserialize((await store.GetAsync("owned", default))!.GuidanceJson)!.Version);
+            using var restoredResponse = await client.PostAsJsonAsync("/sessions/owned/guidance/plan", new EllaiGuidancePlanRequest(proposal.ProposalId)
+                { ExistingPlanId = checkpoint.Plan!.PlanId, CurrentStepId = "entry" });
             var restored = (await restoredResponse.Content.ReadFromJsonAsync<EllaiGuidancePlanDto>())!;
             Assert.Equal(checkpoint.Plan!.PlanId, restored.Plan!.PlanId);
             Assert.Equal("entry", restored.CurrentStepId);

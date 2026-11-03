@@ -54,6 +54,21 @@ public sealed partial class GuidedReportDraftPersistenceTests
     }
 
     [Fact]
+    public async Task ANewDraftDoesNotInheritThePreviousDraftsValidationAttempt()
+    {
+        var component = CreateStepper(CreateDraft(string.Empty), _ => Task.CompletedTask);
+        await (Task)Invoke(component, "ContinueFromTypeAsync")!;
+        await (Task)Invoke(component, "ContinueToReviewAsync")!;
+        Assert.Contains(component.GetState().ValidationIssues, issue => issue.InputId == "report.original-statement");
+
+        component.Draft = CreateDraft(string.Empty);
+        component.CurrentDraftId = Guid.NewGuid();
+        InvokeOnParametersSet(component);
+        await (Task)Invoke(component, "ContinueFromTypeAsync")!;
+        Assert.Empty(component.GetState().ValidationIssues);
+    }
+
+    [Fact]
     public async Task SemanticCompletionComesFromAcceptedValidationAndNeverIncludesEnteredValues()
     {
         var component = CreateStepper(CreateDraft(string.Empty), _ => Task.CompletedTask);
