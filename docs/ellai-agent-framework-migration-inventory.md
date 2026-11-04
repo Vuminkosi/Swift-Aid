@@ -4397,3 +4397,21 @@ URL and synthetic search/follow-up prompts. The task-owned Gateway and database
 container were stopped; the task-created local test key directory remains.
 This run does not verify deployed behavior, physical devices, provider
 reliability or privacy of registry identifiers beyond the observed scope.
+
+### Receipt-list session boundary — 2026-11-04
+
+The broker checked session identity on single-receipt lookup but trusted every
+row returned by `ListBySessionAsync`. The production PostgreSQL store already
+filters by session; a synthetic misbehaving store nevertheless demonstrated
+that a foreign row could reach the list result. The broker now rejects the
+whole list as unavailable if any row is null or belongs to another session,
+checking before the 20-item presentation limit. A framework-tool test verifies
+that a foreign receipt and recipient do not appear in the model-visible result.
+
+PASS: the receipt, framework-tool and authorized-history application filter
+passed 72/72 with `dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj
+--no-restore -m:1 -nr:false`. The two mis-scoped-list regressions failed before
+the fix, including a foreign row beyond the presentation limit. After commit
+`10ed7f7e`, the full application suite passed 1,265, failed 0 and skipped 19
+with `--no-build --no-restore -m:1 -nr:false`. The failing-store cases are
+synthetic; deployed behavior and an independent security review remain unverified.
