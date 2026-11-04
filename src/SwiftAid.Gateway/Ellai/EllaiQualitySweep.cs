@@ -26,13 +26,22 @@ public sealed class EllaiQualityScheduleOptions
     }
 }
 
+/// <summary>Non-sensitive counters for one scheduled attempt, including failed attempts.</summary>
+public sealed class EllaiQualitySweepProgress
+{
+    public Guid RunId { get; } = Guid.NewGuid();
+    public int WorkTurns { get; internal set; }
+    public int ChangesCommitted { get; internal set; }
+}
+
 /// <summary>A single bounded sweep; callers supply an isolated framework session for each turn.</summary>
 public sealed class EllaiQualitySweep(SwiftAidDbContext db, EllaiQualityWork work,
     IOptions<ClassificationOptions> classification)
 {
     public async Task<string> RunAsync(string workspaceId, EllaiQualityScheduleOptions options,
-        Func<CancellationToken, Task<AgentSession>> openTurn, CancellationToken ct)
+        Func<CancellationToken, Task<AgentSession>> openTurn, EllaiQualitySweepProgress progress, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(progress);
         if (!options.Enabled) return "disabled";
         options.Validate();
         if (!options.Workspaces.Contains(workspaceId, StringComparer.Ordinal)) return "disabled";
@@ -57,12 +66,16 @@ public sealed class EllaiQualitySweep(SwiftAidDbContext db, EllaiQualityWork wor
         try
         {
             if (!string.Equals(lease.PolicyVersion, options.PolicyVersion, StringComparison.Ordinal)) return "policy-mismatch";
-            var runId = Guid.NewGuid();
             for (var index = 0; index < options.BatchSize; index++)
             {
+                progress.WorkTurns++;
                 var session = await openTurn(ct);
                 EllaiFencedWorkOutcome outcome;
-                try { outcome = await work.RunOneAsync(lease, runId, Guid.NewGuid(), ct); }
+                try
+                {
+                    outcome = await work.RunOneAsync(lease, progress.RunId, Guid.NewGuid(), ct);
+                    if (outcome == EllaiFencedWorkOutcome.Committed) progress.ChangesCommitted++;
+                }
                 finally
                 {
                     if ((object)session is IAsyncDisposable asyncDisposable) await asyncDisposable.DisposeAsync();

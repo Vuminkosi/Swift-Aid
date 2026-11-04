@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
@@ -21,6 +22,9 @@ public sealed class EllaiQualityScheduleWorker(IServiceScopeFactory scopes,
         {
             foreach (var workspace in options.Workspaces)
             {
+                var progress = new EllaiQualitySweepProgress();
+                var startedUtc = DateTimeOffset.UtcNow;
+                var started = Stopwatch.GetTimestamp();
                 try
                 {
                     await using var scope = scopes.CreateAsyncScope();
@@ -34,13 +38,24 @@ public sealed class EllaiQualityScheduleWorker(IServiceScopeFactory scopes,
                         ChatHistoryProvider = new InMemoryChatHistoryProvider()
                     });
                     var result = await services.GetRequiredService<EllaiQualitySweep>().RunAsync(workspace, options,
-                        token => agent.CreateSessionAsync(cancellationToken: token).AsTask(), stoppingToken);
-                    logger.LogInformation("Ellai quality sweep finished: {Outcome}", result);
+                        token => agent.CreateSessionAsync(cancellationToken: token).AsTask(), progress, stoppingToken);
+                    var level = result == "not-due" ? LogLevel.Debug : LogLevel.Information;
+                    logger.Log(level, "Ellai operational run {RunId} role {Role} finished {Outcome}; turns {WorkTurns}, changes {ChangesCommitted}, model calls {ModelCalls}, started {StartedUtc}, finished {FinishedUtc}, elapsed ms {ElapsedMilliseconds}",
+                        progress.RunId, "ops.quality", result, progress.WorkTurns, progress.ChangesCommitted, 0,
+                        startedUtc, DateTimeOffset.UtcNow, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
                 }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    logger.LogInformation("Ellai operational run {RunId} role {Role} cancelled; turns {WorkTurns}, changes {ChangesCommitted}, started {StartedUtc}, finished {FinishedUtc}, elapsed ms {ElapsedMilliseconds}",
+                        progress.RunId, "ops.quality", progress.WorkTurns, progress.ChangesCommitted, startedUtc,
+                        DateTimeOffset.UtcNow, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                    return;
+                }
                 catch (Exception error) when (error is not OutOfMemoryException)
                 {
-                    logger.LogWarning("Ellai quality sweep failed: {FailureType}", error.GetType().Name);
+                    logger.LogWarning("Ellai operational run {RunId} role {Role} failed {FailureType}; turns {WorkTurns}, changes {ChangesCommitted}, started {StartedUtc}, finished {FinishedUtc}, elapsed ms {ElapsedMilliseconds}",
+                        progress.RunId, "ops.quality", error.GetType().Name, progress.WorkTurns, progress.ChangesCommitted,
+                        startedUtc, DateTimeOffset.UtcNow, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
                 }
             }
             await Task.Delay(TimeSpan.FromSeconds(options.PollSeconds), stoppingToken);

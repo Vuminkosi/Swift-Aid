@@ -52,7 +52,13 @@ policy mismatch releases the lease without changing data or the cursor and needs
 operator reconciliation. Changing a schedule policy alone does not re-run an
 unchanged quality-rules version; policy change invalidation and affected-stage
 reprocessing remain outstanding. Logs need an operator-configured retention
-policy; this worker does not create durable run-metrics records.
+policy; this worker does not create durable run-metrics records. Logs include a
+run ID shared with committed activity, role, UTC start and finish, elapsed time,
+work-turn and committed-change counts, and outcome or sanitized failure type.
+The no-op path records zero changes without creating domain history. Unclaimed
+polls are logged at debug level; log retention and visibility depend on the host
+logging configuration. No workspace, case, report, or officer identifiers are
+included in these log messages.
 
 Disposable PostgreSQL coverage exercises concurrent claims, workspace scoping,
 expiry and replacement, stale-fence refusal, renewal deadline, abandon/reclaim,
