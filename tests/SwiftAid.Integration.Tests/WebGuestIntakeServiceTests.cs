@@ -118,7 +118,85 @@ public sealed class WebGuestIntakeServiceTests
         var receipt = await service.SubmitAsync(submission);
 
         Assert.Equal(2, sessions.CreateCalls);
+        Assert.Equal(sessions.CreatedSessions[0].SessionId, sessions.CreatedSessions[1].SessionId);
+        Assert.Equal(sessions.CreatedSessions[0].Proof, sessions.CreatedSessions[1].Proof);
         Assert.Equal(submission.ClientSubmissionId, receipt.ClientSubmissionId);
+        Assert.Equal(2, intake.SubmitCalls);
+    }
+
+    [Fact]
+    public async Task AmbiguousSubmissionAndExpiredCapabilityRetryWithinOriginalSession()
+    {
+        var sessions = new FakeSessionEndpointService();
+        var attempts = 0;
+        var committed = new Dictionary<(Guid SessionId, Guid SubmissionId), IntakeReceipt>();
+        var intake = new FakeIntakeService
+        {
+            Submit = (submission, capability) =>
+            {
+                var key = (capability.SessionId, submission.ClientSubmissionId);
+                if (!committed.TryGetValue(key, out var receipt))
+                    committed[key] = receipt = new IntakeReceipt(Guid.NewGuid(), submission.ClientSubmissionId,
+                        IntakeStatus.ReceivedUnverified, IntakeRoutingStatus.NeedsRouting, DateTimeOffset.UtcNow);
+                if (++attempts == 1) throw new IOException("Synthetic lost acknowledgement");
+                return receipt;
+            }
+        };
+        var service = new WebGuestIntakeService(sessions, intake);
+        var submission = GuestSubmissionSamples.Human();
+        await Assert.ThrowsAsync<IOException>(() => service.SubmitAsync(submission));
+        sessions.FailNextResolveThenReturn(FakeSessionEndpointService.DefaultCapability());
+
+        var receipt = await service.SubmitAsync(submission);
+
+        Assert.Equal(submission.ClientSubmissionId, receipt.ClientSubmissionId);
+        Assert.Equal(2, intake.SubmitCalls);
+        Assert.Single(committed);
+        Assert.Equal(Assert.Single(committed).Value.ReceiptId, receipt.ReceiptId);
+        Assert.Equal(2, sessions.CreatedSessions.Count);
+        Assert.Equal(sessions.CreatedSessions[0].SessionId, sessions.CreatedSessions[1].SessionId);
+        Assert.Equal(sessions.CreatedSessions[0].Proof, sessions.CreatedSessions[1].Proof);
+    }
+
+    [Fact]
+    public async Task CapabilityRejectedDuringSubmissionIsRenewedForSameSession()
+    {
+        var sessions = new FakeSessionEndpointService();
+        var attempts = 0;
+        var intake = new FakeIntakeService
+        {
+            Submit = (submission, _) => ++attempts == 1
+                ? throw new IntakeSubmissionException(IntakeErrorCode.CapabilityInvalid)
+                : new IntakeReceipt(Guid.NewGuid(), submission.ClientSubmissionId, IntakeStatus.ReceivedUnverified,
+                    IntakeRoutingStatus.NeedsRouting, DateTimeOffset.UtcNow)
+        };
+        var service = new WebGuestIntakeService(sessions, intake);
+
+        await service.SubmitAsync(GuestSubmissionSamples.Human());
+
+        Assert.Equal(2, intake.SubmitCalls);
+        Assert.Equal(2, sessions.CreatedSessions.Count);
+        Assert.Equal(sessions.CreatedSessions[0].SessionId, sessions.CreatedSessions[1].SessionId);
+        Assert.Equal(sessions.CreatedSessions[0].Proof, sessions.CreatedSessions[1].Proof);
+    }
+
+    [Fact]
+    public async Task FailedCapabilityRenewalDoesNotDiscardOriginalSession()
+    {
+        var sessions = new FakeSessionEndpointService();
+        var intake = new FakeIntakeService();
+        var service = new WebGuestIntakeService(sessions, intake);
+        await service.SubmitAsync(GuestSubmissionSamples.Human());
+        sessions.FailNextResolveThenReturn(FakeSessionEndpointService.DefaultCapability());
+        sessions.Create = () => null;
+        await Assert.ThrowsAsync<IntakeSubmissionException>(() => service.SubmitAsync(GuestSubmissionSamples.Human()));
+        sessions.Create = () => new IntakeSessionResponse("renewed", DateTimeOffset.UtcNow.AddMinutes(15));
+
+        await service.SubmitAsync(GuestSubmissionSamples.Human());
+
+        Assert.Equal(3, sessions.CreatedSessions.Count);
+        Assert.All(sessions.CreatedSessions, item => Assert.Equal(sessions.CreatedSessions[0].SessionId, item.SessionId));
+        Assert.All(sessions.CreatedSessions, item => Assert.Equal(sessions.CreatedSessions[0].Proof, item.Proof));
         Assert.Equal(2, intake.SubmitCalls);
     }
 
@@ -237,6 +315,7 @@ public sealed class WebGuestIntakeServiceTests
     private sealed class FakeSessionEndpointService : IIntakeSessionEndpointService
     {
         public int CreateCalls { get; private set; }
+        public List<(Guid SessionId, byte[] Proof)> CreatedSessions { get; } = [];
 
         public int ResolveCalls { get; private set; }
 
@@ -266,6 +345,7 @@ public sealed class WebGuestIntakeServiceTests
         public Task<IntakeSessionResponse?> CreateAsync(Guid sessionId, ReadOnlyMemory<byte> proof, CancellationToken ct)
         {
             CreateCalls++;
+            CreatedSessions.Add((sessionId, proof.ToArray()));
             return Task.FromResult(Create());
         }
 
@@ -281,7 +361,8 @@ public sealed class WebGuestIntakeServiceTests
                 return Task.FromResult(ResolvedCapability);
             }
 
-            ResolvedCapability = _postFailCapability ?? Resolve();
+            var candidate = _postFailCapability ?? Resolve();
+            ResolvedCapability = candidate is null ? null : candidate with { SessionId = sessionId };
             return Task.FromResult(ResolvedCapability);
         }
 
