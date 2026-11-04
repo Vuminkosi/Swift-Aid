@@ -41,10 +41,17 @@ on `interactive-ellai` (3 November 2026).
   separate consumer, not just the primary utterance path.
 - `src/SwiftAid.Application/Ellai/EllaiSessionService.cs`, the utterance
   outbox and conversation context are existing durable session boundaries.
-  Each framework run creates an `AgentSession` from the reauthorized durable
-  conversation; framework session state itself is not serialized. The
-  PostgreSQL and test-host recovery checks below cover that adapter's tested
-  cases, not exactly-once provider execution or every restart scenario.
+  For a retained, authorized completed turn, the runner reads its owner-scoped
+  framework checkpoint from the outbox. The agent restores a compatible
+  `AgentSession` for the same session, owner and scope; a changed scope starts
+  a new session, while an invalid owner or session binding is rejected.
+  Before serialization, it clears framework chat history; subsequent turns
+  reconstruct conversation from the separately reauthorized durable journal.
+  PostgreSQL stores the checkpoint with the completed utterance under the
+  existing lease and session-epoch fences. The recovery checks below cover only
+  their tested cases, not exactly-once provider execution or every restart
+  scenario. See `EllaiUtteranceRunner`, `EllaiFrameworkAgent`,
+  `EllaiFrameworkSessionCodec` and `PostgresEllaiSessionStore`.
 
 History reconstruction now also excludes a prior tool-derived answer when the
 current session allowlist no longer admits that tool, even if the underlying
