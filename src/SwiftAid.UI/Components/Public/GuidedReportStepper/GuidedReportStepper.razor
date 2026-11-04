@@ -902,10 +902,11 @@
     private bool ReportTextIsValid => (Draft.Narrative?.Length ?? 0) <= MaximumNarrativeCharacters &&
         Draft.HasValidObservations(Draft.GetObservations(), MaximumObservations, MaximumObservationCharacters) &&
         (!string.IsNullOrWhiteSpace(Draft.Narrative) || Draft.GetObservations().Count > 0);
+    private bool ReportAgeIsValid => Draft.SubjectScope != IntakeSubjectScope.Human || Draft.HasValidAge();
 
     private bool CanSubmit => OnSubmit.HasDelegate && AttachmentSelectionCount == 0 && HasCountryCatalogue && HasPrivacyNotice && HasProcessingPolicy && ReportTextIsValid &&
         CanConfirmCountry && Draft.CountryConfirmed &&
-        Draft.ProcessingConfirmed && Draft.ReportReviewConfirmed;
+        Draft.ProcessingConfirmed && Draft.ReportReviewConfirmed && ReportAgeIsValid;
 
     private bool IsCountrySupported(string? countryCode) =>
         !string.IsNullOrWhiteSpace(countryCode) &&

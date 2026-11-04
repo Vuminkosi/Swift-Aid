@@ -11,7 +11,7 @@ public static class EllaiReportValidationGuidance
             "report.too-many-observations" or "report.observation-too-long" or "report.observations-total-too-long" or "report.age-years" => "report.narrative",
         "report.occurrence-date" or "report.invalid-exact-occurrence" or "report.occurrence-time" or "report.utc-offset" or
             "report.place-search" or "report.invalid-draft-country" or "report.region" or "report.area" or "report.locality" => "report.time-location",
-        "report.review-confirmed" or "report.text-limits-changed" or "report.server-validation-unknown" or "report.country-catalogue-unavailable" or
+        "report.review-confirmed" or "report.text-limits-changed" or "report.age-review" or "report.server-validation-unknown" or "report.country-catalogue-unavailable" or
             "report.privacy-notice-unavailable" or "report.processing-policy-unavailable" or "report.country-required" or
             "report.country-confirmed" or "report.processing-confirmed" => "report.review",
         _ => null
@@ -39,6 +39,7 @@ public static class EllaiReportValidationGuidance
         "report.locality" => new(inputId, "ellai-report-locality", "Enter the reported locality using at most 200 characters, or leave it unknown."),
         "report.review-confirmed" => new(inputId, "ellai-report-review-confirmed", "Review the original statement and details, then confirm your review."),
         "report.text-limits-changed" => new(inputId, "ellai-report-return-details", "Go back to the details and correct any missing or over-limit report text."),
+        "report.age-review" => new(inputId, "ellai-report-return-details", "Go back to the details and enter age in whole years, or leave it blank if unknown."),
         "report.server-validation-unknown" => new(inputId, "ellai-report-return-details", "The service rejected the report but did not identify a field. Go back and review the details; your entries remain here."),
         "report.country-catalogue-unavailable" => new(inputId, "ellai-report-country-confirmed", "The country choices are unavailable, so the report cannot be sent yet. Save a draft if available and try again later."),
         "report.privacy-notice-unavailable" => new(inputId, "ellai-report-privacy-unavailable", "The privacy notice is unavailable, so the report cannot be sent yet. Save a draft if available and try again later."),

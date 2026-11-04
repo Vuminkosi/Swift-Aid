@@ -104,6 +104,7 @@ public partial class GuidedReportStepper
         if (_step == 2)
         {
             AddIfInvalid(!ReportTextIsValid, "report.text-limits-changed");
+            AddIfInvalid(!ReportAgeIsValid, "report.age-review");
             AddIfInvalid(!HasCountryCatalogue, "report.country-catalogue-unavailable");
             AddIfInvalid(!HasPrivacyNotice, "report.privacy-notice-unavailable");
             AddIfInvalid(!HasProcessingPolicy, "report.processing-policy-unavailable");

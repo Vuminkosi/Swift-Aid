@@ -265,6 +265,20 @@ public sealed partial class GuidedReportDraftPersistenceTests
     }
 
     [Fact]
+    public void InvalidAgeOnReviewBlocksSubmissionAndGuidesBackToDetails()
+    {
+        var draft = CreateDraft();
+        draft.AgeYearsText = "-1";
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        SetField(component, "_step", 2);
+        var issue = Assert.Single(component.GetState().ValidationIssues, item => item.InputId == "report.age-review");
+        Assert.Equal("ellai-report-return-details", issue.Anchor);
+        Assert.False((bool)typeof(GuidedReportStepper).GetProperty("CanSubmit", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(component)!);
+        draft.AgeYearsText = "26";
+        Assert.DoesNotContain(component.GetState().ValidationIssues, item => item.InputId == "report.age-review");
+    }
+
+    [Fact]
     public void InconsistentRawAndParsedDatesFailClosedWithoutDiscardingTheSnapshot()
     {
         var draft = CreateDraft();
