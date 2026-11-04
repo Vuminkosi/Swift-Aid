@@ -79,7 +79,8 @@ public static class EllaiAuthorizedConversationContext
                 if (observation.RetainedCaseReplay is { } retainedCase)
                 {
                     if (!retainedCase.IsValid() || observation.Truncated && retainedCase.ClassificationFilter is null &&
-                        retainedCase.PlaceId is null && retainedCase.Field is not ("observations" or "submitter") ||
+                        retainedCase.PlaceId is null && retainedCase.GroupBy is null &&
+                        retainedCase.Field is not ("observations" or "submitter") ||
                         observation.CaseSnapshotExpiresAtUtc is not { } expiry || expiry <= DateTimeOffset.UtcNow ||
                         toolContext is null || invokeTool is null || toolContext.SessionId != turn.SessionId ||
                         toolContext.Actor is null || toolContext.Actor.ActorId != actor.ActorId ||
@@ -94,6 +95,7 @@ public static class EllaiAuthorizedConversationContext
                         if (retainedCase.Country is not null) arguments["country"] = retainedCase.Country;
                         if (retainedCase.PlaceId is not null) arguments["place_id"] = retainedCase.PlaceId;
                         if (retainedCase.CaseId is not null) arguments["case_id"] = retainedCase.CaseId;
+                        if (retainedCase.GroupBy is not null) arguments["group_by"] = retainedCase.GroupBy;
                         var current = await invokeTool(toolContext with { RevalidationOnly = true },
                             new EllaiToolRequest(observation.ToolName, arguments), ct).ConfigureAwait(false);
                         ct.ThrowIfCancellationRequested();

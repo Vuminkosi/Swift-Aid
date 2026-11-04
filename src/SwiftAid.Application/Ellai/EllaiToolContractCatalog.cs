@@ -9,7 +9,7 @@ namespace SwiftAid.Application.Ellai;
 /// formats and authorization after this structural validation.</summary>
 public static class EllaiToolContractCatalog
 {
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
 
     private const int ReferenceLength = 120;
     private const int ObservationJsonLength = 16_384;
@@ -24,7 +24,7 @@ public static class EllaiToolContractCatalog
             ["place_id"] = "Exact selected occurrence-place identifier from the geographic registry; provide the matching country.",
             ["workflow"] = "Recorded case workflow filter.",
             ["sort"] = "Supported queue ordering.",
-            ["group_by"] = "Optional authorized case grouping dimension.",
+            ["group_by"] = "Optional authorized case grouping dimension; for retained evidence, groups only the exact earlier result set.",
             ["reported_from"] = "Inclusive UTC calendar date for managed-case creation/report time; use with reported_before.",
             ["reported_before"] = "Exclusive UTC calendar date for managed-case creation/report time; use with reported_from.",
             ["field"] = "Optional country, workflow, verbatim reported observations or recorded submitter attribution for retained cases.",
@@ -60,7 +60,7 @@ public static class EllaiToolContractCatalog
                 ("projection", false), ("limit", false),
                 ("country", false), ("workflow", false), ("sort", false), ("place_id", false),
                 ("reported_from", false), ("reported_before", false), ("group_by", false)),
-            [EllaiToolNames.Evidence] = Contract(EllaiToolNames.Evidence, ("ref", true), ("field", false), ("classification_filter", false), ("country", false), ("place_id", false), ("case_id", false)),
+            [EllaiToolNames.Evidence] = Contract(EllaiToolNames.Evidence, ("ref", true), ("field", false), ("classification_filter", false), ("group_by", false), ("country", false), ("place_id", false), ("case_id", false)),
             [EllaiToolNames.Topic] = Contract(EllaiToolNames.Topic, ("ref", true)),
             [EllaiToolNames.Capabilities] = Contract(EllaiToolNames.Capabilities, ("feature", false)),
             [EllaiToolNames.Receipts] = Contract(EllaiToolNames.Receipts, ("receipt", false)),

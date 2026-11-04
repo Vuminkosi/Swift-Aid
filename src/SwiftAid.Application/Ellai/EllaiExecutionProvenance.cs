@@ -165,7 +165,8 @@ public sealed record EllaiUiObservationReplayScope(string Feature, IReadOnlyList
 
 /// <summary>Bounded arguments and fingerprint for revalidating a partial retained result.</summary>
 public sealed record EllaiRetainedCaseReplay(string Reference, string? Field, string Digest,
-    string? ClassificationFilter = null, string? Country = null, string? PlaceId = null, string? CaseId = null)
+    string? ClassificationFilter = null, string? Country = null, string? PlaceId = null, string? CaseId = null,
+    string? GroupBy = null)
 {
     public bool IsValid() => Reference is EllaiCaseResultMemory.Reference or EllaiCaseResultMemory.OriginalReference &&
         Field is null or "country" or "workflow" or "observations" or "submitter" &&
@@ -175,20 +176,21 @@ public sealed record EllaiRetainedCaseReplay(string Reference, string? Field, st
         (Country is null || Country.Length == 2 && Country.All(character => character is >= 'A' and <= 'Z') &&
             PlaceId is { Length: >= 1 and <= 120 } && PlaceId == PlaceId.Trim() && (Field is null or "observations")) &&
         (CaseId is null || Field == "submitter" && Guid.TryParseExact(CaseId, "D", out var caseId) &&
-            caseId != Guid.Empty && CaseId == caseId.ToString("D")) && Digest is { Length: 64 } &&
+            caseId != Guid.Empty && CaseId == caseId.ToString("D")) &&
+        (GroupBy is null or "region" && (GroupBy is null || Field is null && PlaceId is null && CaseId is null)) && Digest is { Length: 64 } &&
         Digest.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F');
 
     public static EllaiRetainedCaseReplay? Create(EllaiToolRequest request, EllaiToolResult result)
     {
         if (request.ToolName is not (EllaiToolNames.Topic or EllaiToolNames.Evidence) ||
             result.ToolName != request.ToolName || !result.Allowed ||
-            (!result.Truncated && !request.Arguments.ContainsKey("classification_filter") && !request.Arguments.ContainsKey("place_id") &&
+            (!result.Truncated && !request.Arguments.ContainsKey("classification_filter") && !request.Arguments.ContainsKey("place_id") && !request.Arguments.ContainsKey("group_by") &&
                 request.Arguments.GetValueOrDefault("field") is not ("observations" or "submitter")) || result.DenialReason is not null ||
             result.ReasonCode != EllaiToolReasonCodes.Ok || result.HistoryValidUntilUtc is null ||
             result.ItemCount != result.Evidence.Count || result.Evidence.Count > 20 ||
             !request.Arguments.TryGetValue("ref", out var reference) ||
             request.Arguments.Keys.Any(key => key != "ref" && (request.ToolName != EllaiToolNames.Evidence ||
-                key is not ("field" or "classification_filter" or "country" or "place_id" or "case_id"))))
+                key is not ("field" or "classification_filter" or "group_by" or "country" or "place_id" or "case_id"))))
             return null;
         var classificationFilter = request.Arguments.GetValueOrDefault("classification_filter");
         var field = request.Arguments.GetValueOrDefault("field");
@@ -197,11 +199,13 @@ public sealed record EllaiRetainedCaseReplay(string Reference, string? Field, st
         var country = request.Arguments.GetValueOrDefault("country");
         var placeId = request.Arguments.GetValueOrDefault("place_id");
         var caseId = request.Arguments.GetValueOrDefault("case_id");
+        var groupBy = request.Arguments.GetValueOrDefault("group_by");
         if ((country is null) != (placeId is null) || placeId is not null &&
             (country is not { Length: 2 } || country.Any(character => character is < 'A' or > 'Z') ||
                 placeId.Length is < 1 or > 120 || placeId != placeId.Trim() || field is not null and not "observations")) return null;
         if (caseId is not null && (field != "submitter" || !Guid.TryParseExact(caseId, "D", out var parsedCaseId) ||
             parsedCaseId == Guid.Empty || caseId != parsedCaseId.ToString("D"))) return null;
+        if (groupBy is not null && (groupBy != "region" || field is not null || placeId is not null || caseId is not null)) return null;
         var candidate = new EllaiRetainedCaseReplay(reference, request.Arguments.GetValueOrDefault("field"),
             field switch
             {
@@ -209,7 +213,7 @@ public sealed record EllaiRetainedCaseReplay(string Reference, string? Field, st
                 "submitter" => EllaiObservedToolResult.CaseSubmitterFingerprint(result),
                 _ => EllaiObservedToolResult.CaseListFingerprint(result)
             },
-            classificationFilter, country, placeId, caseId);
+            classificationFilter, country, placeId, caseId, groupBy);
         return candidate.IsValid() ? candidate : null;
     }
 }

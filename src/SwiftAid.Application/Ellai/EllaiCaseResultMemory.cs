@@ -70,7 +70,8 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
 
     public async Task<EllaiToolResult> RecallAsync(
         EllaiToolContext context, CancellationToken ct, string? field = null, string? classificationFilter = null,
-        bool original = false, string? country = null, string? placeId = null, Guid? caseId = null)
+        bool original = false, string? country = null, string? placeId = null, Guid? caseId = null,
+        string? groupBy = null)
     {
         ct.ThrowIfCancellationRequested();
         if (field is not null && field is not ("country" or "workflow" or "observations" or "submitter"))
@@ -87,6 +88,9 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
                 EllaiToolReasonCodes.InvalidArguments);
         if (caseId == Guid.Empty || caseId is not null && field != "submitter")
             return new(EllaiToolNames.Topic, false, "A case_id is valid only for submitter attribution on a retained case.", [], "", 0, false,
+                EllaiToolReasonCodes.InvalidArguments);
+        if (groupBy is not null && (groupBy != "region" || field is not null || placeId is not null || caseId is not null))
+            return new(EllaiToolNames.Topic, false, "group_by=region can only be used on retained cases without a field or exact-place filter.", [], "", 0, false,
                 EllaiToolReasonCodes.InvalidArguments);
         if (context.Actor is null) return Unavailable();
         EllaiTopicEntry? indexedTopic = null;
@@ -170,6 +174,7 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
             if (rows.Length == 0) return Unavailable();
         }
         var unknownLocations = false;
+        var unavailableRows = authorizedRows.Length != snapshot.Cases.Count;
         if (placeId is not null)
         {
             if (occurrenceLocations is null) return Unavailable();
@@ -192,6 +197,57 @@ public sealed class EllaiCaseResultMemory(EllaiTopicService topics, ICaseQueueQu
                     unknownLocations = true;
             }
             rows = matched.ToArray();
+        }
+        if (groupBy == "region")
+        {
+            if (occurrenceLocations is null) return Unavailable();
+            var groups = new Dictionary<string, (string Country, string? RegionId, string Label, List<(CaseReference Old, CaseQueueItem Row)> Cases)>(StringComparer.OrdinalIgnoreCase);
+            foreach (var pair in rows)
+            {
+                ct.ThrowIfCancellationRequested();
+                var location = await occurrenceLocations.GetLocationAsync(context.Actor, pair.row.CaseId, ct).ConfigureAwait(false);
+                ct.ThrowIfCancellationRequested();
+                if (location.Access == CaseOccurrenceLocationAccess.Unavailable) return Unavailable();
+                if (location.Access != CaseOccurrenceLocationAccess.Allowed || location.Location is not { } place ||
+                    string.IsNullOrWhiteSpace(place.RegionId) && string.IsNullOrWhiteSpace(place.Region))
+                {
+                    unknownLocations = true;
+                    continue;
+                }
+                var label = string.IsNullOrWhiteSpace(place.Region) ? place.RegionId!.Trim() : place.Region.Trim();
+                var regionId = string.IsNullOrWhiteSpace(place.RegionId) ? null : place.RegionId.Trim();
+                var key = place.CountryCode + ":" + (regionId is null
+                    ? "reported:" + string.Join(' ', label.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToUpperInvariant()
+                    : "registry:" + regionId);
+                if (!groups.TryGetValue(key, out var group))
+                    group = (place.CountryCode, regionId, label, []);
+                group.Cases.Add(pair);
+                groups[key] = group;
+            }
+            var orderedGroups = groups.Values.OrderByDescending(group => group.Cases.Count)
+                .ThenBy(group => group.Label, StringComparer.OrdinalIgnoreCase).ToArray();
+            var groupEvidence = orderedGroups.SelectMany(group => group.Cases.Select(pair =>
+                new EvidenceRef("CaseQueue", pair.Row.CaseId.ToString("D"),
+                    pair.Row.AggregateVersion.ToString(CultureInfo.InvariantCulture), "region", pair.Row.CaseId.ToString("D")))).ToArray();
+            var groupSummary = JsonSerializer.Serialize(new
+            {
+                groups = orderedGroups.Select(group => new
+                {
+                    country = group.Country,
+                    regionId = group.RegionId,
+                    region = group.Label,
+                    count = group.Cases.Count,
+                    cases = group.Cases.Select(pair => pair.Row.CaseId).ToArray()
+                }).ToArray(),
+                context = "Groups contain only cases from the previously retained result set that remain currently authorized. Evidence references identify the cases in each group."
+            });
+            var groupIncomplete = incomplete || unknownLocations || unavailableRows || unknownClassification;
+            return new EllaiToolResult(EllaiToolNames.Topic, true, null, groupEvidence,
+                completeness + "Grouped the previously retrieved cases by their recorded region; this is not a new search. " +
+                (unknownLocations ? "Cases with unknown or unavailable regions are omitted. " : "") +
+                (unavailableRows ? "Cases no longer available under current access are omitted. " : "") +
+                (unknownClassification ? "Cases with unknown classification are excluded. " : "") + groupSummary,
+                groupEvidence.Length, groupIncomplete) { HistoryValidUntilUtc = snapshot.ExpiresAtUtc };
         }
         if (field == "observations")
         {
