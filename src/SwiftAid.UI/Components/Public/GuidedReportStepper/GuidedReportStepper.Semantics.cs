@@ -120,11 +120,11 @@ public partial class GuidedReportStepper
         }
         if (_step != 1 || !_detailsValidationAttempted && !_saveValidationAttempted) return [];
         var observations = Draft.GetObservations();
-        AddIfInvalid(Draft.SubjectScope == SwiftAid.Contracts.Intake.IntakeSubjectScope.Human && !Draft.HasValidAge(), "report.age-years");
         if (_saveValidationAttempted)
         {
             var country = Draft.CountryCode?.Trim();
             AddIfInvalid((Draft.Narrative?.Length ?? 0) > 6000, "report.original-statement-too-long");
+            AddIfInvalid(Draft.SubjectScope == SwiftAid.Contracts.Intake.IntakeSubjectScope.Human && !Draft.HasValidAge(), "report.age-years");
             AddIfInvalid(!string.IsNullOrEmpty(country) && (country.Length != 2 || !country.All(char.IsAsciiLetter)), "report.invalid-draft-country");
             AddIfInvalid(observations.Count > 20, "report.too-many-observations");
             AddIfInvalid(observations.Any(value => value.Length > 1000), "report.observation-too-long");
@@ -141,6 +141,7 @@ public partial class GuidedReportStepper
         }
         AddIfInvalid(string.IsNullOrWhiteSpace(Draft.Narrative) && observations.Count == 0, "report.original-statement");
         AddIfInvalid((Draft.Narrative?.Length ?? 0) > MaximumNarrativeCharacters, "report.original-statement-too-long");
+        AddIfInvalid(Draft.SubjectScope == SwiftAid.Contracts.Intake.IntakeSubjectScope.Human && !Draft.HasValidAge(), "report.age-years");
         AddIfInvalid(observations.Count > MaximumObservations, "report.too-many-observations");
         AddIfInvalid(observations.Any(value => value.Length > MaximumObservationCharacters), "report.observation-too-long");
         AddIfInvalid((Draft.ObservationsText?.Length ?? 0) > 20000, "report.observations-total-too-long");
