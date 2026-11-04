@@ -259,12 +259,28 @@ public sealed class SurveillanceMapAggregateQuery(
         foreach (var country in inScope.GroupBy(row => row.CountryCode, StringComparer.OrdinalIgnoreCase)
                      .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
         {
-            areas.Add(BuildArea(
+            var countryRows = country.GroupBy(row => row.CaseId).Select(group => group.First()).ToArray();
+            var countryArea = BuildArea(
                 country.Key,
                 countryLabels.GetValueOrDefault(country.Key) ?? country.Key,
                 SurveillanceAggregatePrecision.Country,
-                country,
-                asOfUtc));
+                countryRows,
+                asOfUtc);
+            // A country total and a visible region total can otherwise reveal
+            // a suppressed region, or its complement, by subtraction.
+            if (!countryArea.IsSuppressed && HasSmallRegionalPartition(countryRows))
+            {
+                countryArea = countryArea with
+                {
+                    HumanCount = null,
+                    AnimalCount = null,
+                    Denominator = null,
+                    IsSuppressed = true,
+                    SuppressionReason = "Small counts are withheld to protect privacy."
+                };
+            }
+
+            areas.Add(countryArea);
 
             foreach (var region in country
                          .SelectMany(row => row.RegionIds.Select(regionId => (Row: row, RegionId: regionId)))
@@ -287,6 +303,29 @@ public sealed class SurveillanceMapAggregateQuery(
         }
 
         return areas;
+    }
+
+    private static bool HasSmallRegionalPartition(IReadOnlyList<MapAggregateCaseRow> rows)
+    {
+        foreach (var region in rows.SelectMany(row => row.RegionIds).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var inside = rows.Where(row => row.RegionIds.Contains(region, StringComparer.OrdinalIgnoreCase)).ToArray();
+            var outside = rows.Where(row => !row.RegionIds.Contains(region, StringComparer.OrdinalIgnoreCase)).ToArray();
+            if (HasSmallCell(inside) || HasSmallCell(outside))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasSmallCell(IReadOnlyList<MapAggregateCaseRow> rows)
+    {
+        var human = rows.Count(row => row.Sector == Sector.HumanHealth);
+        var animal = rows.Count(row => row.Sector == Sector.AnimalHealth);
+        return rows.Count is > 0 and < SuppressionThreshold ||
+               human is > 0 and < SuppressionThreshold || animal is > 0 and < SuppressionThreshold;
     }
 
     private static SurveillanceAggregateArea BuildArea(
