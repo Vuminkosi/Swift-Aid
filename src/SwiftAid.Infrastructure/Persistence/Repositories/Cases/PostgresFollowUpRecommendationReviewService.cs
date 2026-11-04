@@ -46,7 +46,10 @@ public sealed class PostgresFollowUpRecommendationReviewService(
             if (previous is not null) return FollowUpRecommendationReviewOutcome.Replayed;
             var current = await db.Database.SqlQuery<RecommendationRow>($"""
                 SELECT CASE WHEN r.recommendation_kind = 'OfficerAcknowledgementDue' THEN
-                    (f.assignee_actor_id = a.officer_actor_id AND f.status = 'Scheduled' AND f.current_schedule_version = a.aggregate_version AND e.status <> 'Closed' AND c.workflow <> 'Resolved')
+                    (f.assignee_actor_id = a.officer_actor_id AND f.status = 'Scheduled'
+                    AND f.acknowledged_version IS DISTINCT FROM 0
+                    AND (f.current_schedule_version = a.aggregate_version OR f.acknowledged_version = 1)
+                    AND e.status <> 'Closed' AND c.workflow <> 'Resolved')
                     ELSE (f.current_schedule_version = r.schedule_version AND f.current_schedule_event_id = r.source_event_id
                     AND f.due_at_utc = r.due_at_utc AND f.status IN ('Scheduled', 'Acknowledged') AND c.workflow <> 'Resolved') END AS "IsCurrent",
                     EXISTS (SELECT 1 FROM ellai_follow_up_reviews review WHERE review.recommendation_id = r.activity_id) AS "IsReviewed"

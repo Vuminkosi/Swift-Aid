@@ -604,6 +604,9 @@ public sealed partial class PostgresCaseCommandPersistence : ICaseCommandPersist
                         ScheduledVersion = scheduled.AggregateVersion,
                         CurrentScheduleVersion = scheduled.AggregateVersion,
                         CurrentScheduleEventId = scheduled.EventId,
+                        // One records a known unacknowledged task; zero marks an owner
+                        // transfer and null is reserved for pre-projection history.
+                        AcknowledgedVersion = 1,
                         OutcomeVersion = null
                     });
                     break;

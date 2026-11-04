@@ -14,6 +14,8 @@ public sealed class ManagedCaseFollowUpEntity
     public long ScheduledVersion { get; set; }
     public long CurrentScheduleVersion { get; set; }
     public Guid CurrentScheduleEventId { get; set; }
+    // Null means legacy/unknown; 0 means ownership changed; 1 means not yet
+    // acknowledged. Real acknowledgment events have an aggregate version above 1.
     public long? AcknowledgedVersion { get; set; }
     public long? OutcomeVersion { get; set; }
 }
