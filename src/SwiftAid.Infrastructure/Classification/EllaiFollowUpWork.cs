@@ -204,14 +204,16 @@ public sealed class EllaiFollowUpWork(SwiftAidDbContext db, IOptions<EllaiFollow
                     FOR SHARE OF c, f, e
                     """).ToArrayAsync(token).ConfigureAwait(false);
                 if (current.Length != 1) { retry = true; return false; }
-                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                var inserted = await db.Database.ExecuteSqlInterpolatedAsync($"""
                     INSERT INTO ellai_follow_up_recommendations
                         (activity_id, case_id, follow_up_id, source_event_id, schedule_version, due_at_utc,
                          source_case_version, policy_version, run_id, work_turn_id, recorded_at_utc, recommendation_kind, officer_assignment_id)
                     VALUES ({Guid.NewGuid()}, {acknowledgement.CaseId}, {acknowledgement.FollowUpId}, {acknowledgement.EventId},
                         {acknowledgement.ScheduleVersion}, {acknowledgement.DueAtUtc}, {current[0]}, {lease.PolicyVersion},
                         {runId}, {workTurnId}, clock_timestamp(), 'OfficerAcknowledgementDue', {acknowledgement.AssignmentId})
+                    ON CONFLICT (officer_assignment_id) WHERE recommendation_kind = 'OfficerAcknowledgementDue' DO NOTHING
                     """, token).ConfigureAwait(false);
+                if (inserted == 0) { retry = true; return false; }
                 return true;
             }
             if (item is null) return false;
@@ -236,13 +238,15 @@ public sealed class EllaiFollowUpWork(SwiftAidDbContext db, IOptions<EllaiFollow
                 """).ToArrayAsync(token).ConfigureAwait(false);
             if (currentFollowUp.Length != 1) { retry = true; return false; }
             var activity = Guid.NewGuid();
-            await db.Database.ExecuteSqlInterpolatedAsync($"""
+            var insertedFollowUp = await db.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO ellai_follow_up_recommendations
                     (activity_id, case_id, follow_up_id, source_event_id, schedule_version, due_at_utc,
                      source_case_version, policy_version, run_id, work_turn_id, recorded_at_utc)
                 VALUES ({activity}, {item.CaseId}, {item.FollowUpId}, {item.EventId}, {item.ScheduleVersion},
                     {item.DueAtUtc}, {currentFollowUp[0]}, {lease.PolicyVersion}, {runId}, {workTurnId}, clock_timestamp())
+                ON CONFLICT (follow_up_id, schedule_version) WHERE recommendation_kind = 'FollowUpDue' DO NOTHING
                 """, token).ConfigureAwait(false);
+            if (insertedFollowUp == 0) { retry = true; return false; }
             return true;
         }, ct).ConfigureAwait(false);
         return result == EllaiFencedWorkOutcome.NoChange && retry ? EllaiFencedWorkOutcome.Retry : result;
