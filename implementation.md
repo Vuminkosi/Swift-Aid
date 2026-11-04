@@ -4578,3 +4578,9 @@ When the server rejection does not identify a field, the message now says that e
 Fresh region/locality aggregates now retain up to 20 supporting case references, selected round-robin across the displayed groups. The aggregate still reports its complete bounded scan and group evidence; retained follow-up is marked incomplete when more than 20 cases, unknown locations, or a partial scan prevent full recall. Durable revalidation repeats the aggregate without rewriting memory, and its fingerprint ignores only the non-authoritative retention notice.
 
 PASS: `dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet` (zero warnings, zero errors). PASS: `git diff --check`. No tests added or run, per user instruction. NOT VERIFIED: live session-memory persistence, authorized case data, model follow-up selection, or browser/session replay.
+
+### Ellai guest navigation to public Home (2026-11-04)
+
+Guest UI authority now includes the registered navigation feature and a public-only capability. The navigation manifest requires that capability only for the Home control; Settings and all workspace destinations continue to require current authenticated authority. The guidance host permits an unauthenticated navigation only to the allowlisted `/` route and does not require a signed-in menu observation for that public route. This enables the existing conversation to return a guest to Home without granting access to account or case surfaces.
+
+PASS: Gateway build after source commit (`dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet`, 0 warnings, 0 errors). PASS: `git diff --check`. No tests added or run, per user instruction. NOT VERIFIED: live browser guest navigation, authenticated Settings navigation, or deployed behavior. No migration.
