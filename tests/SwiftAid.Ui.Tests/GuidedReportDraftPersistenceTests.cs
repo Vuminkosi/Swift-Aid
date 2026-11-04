@@ -208,12 +208,60 @@ public sealed partial class GuidedReportDraftPersistenceTests
         var current = draft.ToFormSnapshot();
         var legacyJson = System.Text.Json.Nodes.JsonNode.Parse(current.Json)!.AsObject();
         Assert.True(legacyJson.Remove(nameof(PublicReportDraft.OccurrenceDateText)));
+        Assert.True(legacyJson.Remove(nameof(PublicReportDraft.AgeYearsText)));
 
         var restored = PublicReportDraft.FromFormSnapshot(new GuestDraftFormSnapshot(1, legacyJson.ToJsonString()));
 
         Assert.Equal(new DateTime(2026, 10, 1), restored.OccurrenceDate);
         Assert.Equal("2026-10-01", restored.OccurrenceDateText);
         Assert.Equal(GuestDraftFormSnapshot.CurrentSchemaVersion, restored.ToFormSnapshot().SchemaVersion);
+    }
+
+    [Fact]
+    public void ReportedAgeSurvivesDraftAndSubmissionWhileInvalidAgeRemainsEditable()
+    {
+        var draft = CreateDraft();
+        draft.AgeYearsText = "25";
+        var restored = PublicReportDraft.FromFormSnapshot(draft.ToFormSnapshot());
+        Assert.Equal("25", restored.AgeYearsText);
+        restored.AgeYearsText = "26";
+        var submission = restored.ToSubmission(null, null, null, [], false);
+        Assert.Equal(26, submission.AgeYears);
+        Assert.Equal("26", PublicReportDraft.FromSubmission(submission).AgeYearsText);
+
+        restored.AgeYearsText = "-1";
+        Assert.False(restored.HasValidAge());
+        Assert.Throws<InvalidOperationException>(() => restored.ToSubmission(null, null, null, [], false));
+        Assert.Equal("-1", PublicReportDraft.FromFormSnapshot(restored.ToFormSnapshot()).AgeYearsText);
+        restored.AgeYearsText = null;
+        Assert.True(restored.HasValidAge());
+        Assert.Null(restored.ToSubmission(null, null, null, [], false).AgeYears);
+    }
+
+    [Fact]
+    public void VersionTwoSnapshotRestoresWithUnknownAge()
+    {
+        var current = CreateDraft().ToFormSnapshot();
+        var json = System.Text.Json.Nodes.JsonNode.Parse(current.Json)!.AsObject();
+        Assert.True(json.Remove(nameof(PublicReportDraft.AgeYearsText)));
+        var restored = PublicReportDraft.FromFormSnapshot(new GuestDraftFormSnapshot(2, json.ToJsonString()));
+        Assert.Null(restored.AgeYearsText);
+        Assert.Equal(GuestDraftFormSnapshot.CurrentSchemaVersion, restored.ToFormSnapshot().SchemaVersion);
+    }
+
+    [Fact]
+    public void InvalidAgeIsExposedForOneAtATimeGuidance()
+    {
+        var draft = CreateDraft();
+        draft.AgeYearsText = "twenty";
+        var component = CreateStepper(draft, _ => Task.CompletedTask);
+        SetField(component, "_step", 1);
+        SetField(component, "_detailsValidationAttempted", true);
+        var issue = Assert.Single(component.GetState().ValidationIssues, item => item.InputId == "report.age-years");
+        Assert.Equal("ellai-report-age-years", issue.Anchor);
+        Assert.Contains("whole years", issue.Message);
+        draft.AgeYearsText = "26";
+        Assert.DoesNotContain(component.GetState().ValidationIssues, item => item.InputId == "report.age-years");
     }
 
     [Fact]
@@ -225,6 +273,7 @@ public sealed partial class GuidedReportDraftPersistenceTests
         var snapshot = draft.ToFormSnapshot();
         var json = System.Text.Json.Nodes.JsonNode.Parse(snapshot.Json)!.AsObject();
         json[nameof(PublicReportDraft.OccurrenceDateText)] = "2026-1";
+        json.Remove(nameof(PublicReportDraft.AgeYearsText));
         var inconsistent = new GuestDraftFormSnapshot(2, json.ToJsonString());
 
         Assert.Throws<InvalidOperationException>(() => PublicReportDraft.FromFormSnapshot(inconsistent));

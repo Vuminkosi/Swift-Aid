@@ -68,6 +68,7 @@ public static class EllaiReportUiManifest
         "report.narrative" =>
         [
             new("report.original-statement", "Describe what happened", "multiline-text", false, "Details page", "Follow the current limit shown on the form; a narrative or at least one observation is required."),
+            new("report.age-years", "Age in years", "text", false, "Human health selected", "Enter a nonnegative whole number of completed years, or leave unknown."),
             new("report.observation-choices", "Reported observation choices", "multiple-selection", false, "Human or animal choices follow the selected subject", "Select only reported observations. Unselected does not mean absent."),
             new("report.other-observations", "Add other observations", "multiline-text", false, "Details page", "Follow the current count and length limits shown on the form; a narrative or observation is required.")
         ],

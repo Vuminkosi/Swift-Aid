@@ -8,7 +8,7 @@ public static class EllaiReportValidationGuidance
     {
         "report.subject-kind" or "report.animal-scope" => "report.subject",
         "report.original-statement" or "report.original-statement-too-long" or "report.other-observations" or
-            "report.too-many-observations" or "report.observation-too-long" or "report.observations-total-too-long" => "report.narrative",
+            "report.too-many-observations" or "report.observation-too-long" or "report.observations-total-too-long" or "report.age-years" => "report.narrative",
         "report.occurrence-date" or "report.invalid-exact-occurrence" or "report.occurrence-time" or "report.utc-offset" or
             "report.place-search" or "report.invalid-draft-country" or "report.region" or "report.area" or "report.locality" => "report.time-location",
         "report.review-confirmed" or "report.text-limits-changed" or "report.server-validation-unknown" or "report.country-catalogue-unavailable" or
@@ -22,6 +22,7 @@ public static class EllaiReportValidationGuidance
         "report.subject-kind" => new(inputId, "ellai-report-subject-kind", "Choose whether the concern is about human health or animal health."),
         "report.animal-scope" => new(inputId, "ellai-report-animal-scope", "Choose whether the concern is about an individual animal, herd, flock, or another group."),
         "report.original-statement" => new(inputId, "ellai-report-original-statement", "Describe what happened or add an observation."),
+        "report.age-years" => new(inputId, "ellai-report-age-years", "Enter age in whole years, or leave it blank if unknown."),
         "report.original-statement-too-long" => new(inputId, "ellai-report-original-statement", "The description is too long. Shorten it to the limit shown on the form."),
         "report.other-observations" => new(inputId, "ellai-report-other-observations", "The observations exceed the allowed length or count. Check the limits shown on the form."),
         "report.too-many-observations" => new(inputId, "ellai-report-other-observations", "There are too many observations. Remove some to meet the limit shown on the form."),

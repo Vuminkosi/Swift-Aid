@@ -48,6 +48,8 @@ public partial class GuidedReportStepper
         else if (_step == 1)
         {
             Add("report.narrative", "report.original-statement", TextState(Draft.Narrative, (Draft.Narrative?.Length ?? 0) <= MaximumNarrativeCharacters));
+            if (Draft.SubjectScope == SwiftAid.Contracts.Intake.IntakeSubjectScope.Human)
+                Add("report.narrative", "report.age-years", TextState(Draft.AgeYearsText, Draft.HasValidAge()));
             var observations = Draft.GetObservations();
             Add("report.narrative", "report.other-observations", observations.Count == 0 ? UiInputPresence.NotProvided :
                 observations.Count <= MaximumObservations && observations.All(value => value.Length <= MaximumObservationCharacters) &&
@@ -115,6 +117,7 @@ public partial class GuidedReportStepper
         }
         if (_step != 1 || !_detailsValidationAttempted && !_saveValidationAttempted) return [];
         var observations = Draft.GetObservations();
+        AddIfInvalid(Draft.SubjectScope == SwiftAid.Contracts.Intake.IntakeSubjectScope.Human && !Draft.HasValidAge(), "report.age-years");
         if (_saveValidationAttempted)
         {
             var country = Draft.CountryCode?.Trim();

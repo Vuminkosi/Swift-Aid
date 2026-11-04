@@ -90,7 +90,7 @@ public sealed class GuestSubmissionJourneyTests
     }
 
     [Theory]
-    [InlineData(3, "{}")]
+    [InlineData(4, "{}")]
     [InlineData(1, "[]")]
     [InlineData(1, "{")]
     public async Task InvalidEditableSnapshotsAreRejectedWithoutCreatingDraft(int version, string json)
@@ -141,7 +141,8 @@ public sealed class GuestSubmissionJourneyTests
     [Theory]
     [InlineData(1, "{}", true)]
     [InlineData(2, "{}", true)]
-    [InlineData(3, "{}", false)]
+    [InlineData(3, "{}", true)]
+    [InlineData(4, "{}", false)]
     [InlineData(1, "[]", false)]
     [InlineData(1, "{", false)]
     public void SnapshotValidationIsBoundedAndVersioned(int version, string json, bool valid)
