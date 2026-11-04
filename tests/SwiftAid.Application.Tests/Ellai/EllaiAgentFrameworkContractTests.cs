@@ -1677,11 +1677,13 @@ public sealed class EllaiAgentFrameworkContractTests
         Assert.Equal(2, totals.CompletionTokens);
     }
 
-    [Fact]
-    public async Task VerifiedSegmentArrivesBeforeProviderCompletes()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task VerifiedSegmentArrivesBeforeProviderCompletes(bool structured)
     {
         using var client = new VerifiedSegmentStreamingClient();
-        var agent = new EllaiFrameworkAgent(client);
+        var agent = new EllaiFrameworkAgent(client, structured ? new EllaiStructuredFrameworkAgentFactory() : null);
         var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
             AllowedTools: new HashSet<string>(StringComparer.Ordinal));
         var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1696,16 +1698,19 @@ public sealed class EllaiAgentFrameworkContractTests
         }
         finally { client.Release.TrySetResult(); }
         Assert.Equal("Done.", (await run)?.DisplayText);
+        Assert.Equal(structured, client.SawStructuredResponse);
     }
 
     private sealed class VerifiedSegmentStreamingClient : IChatClient
     {
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool SawStructuredResponse { get; private set; }
         public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
             CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
             ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            SawStructuredResponse = options?.ResponseFormat is ChatResponseFormatJson { Schema: not null };
             yield return new ChatResponseUpdate(ChatRole.Assistant, "{\"stream_segments\":[{\"text\":\"Done.\",\"claims\":[]}]");
             await Release.Task.WaitAsync(cancellationToken);
             yield return new ChatResponseUpdate(ChatRole.Assistant, "," + ValidDecision.TrimStart()[1..]);
