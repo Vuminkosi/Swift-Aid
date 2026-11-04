@@ -113,7 +113,11 @@ public sealed class SurveillanceMapAggregateQuery(
             candidates = await _store.GetOwnedCaseAreasAsync(actor.ActorId, sinceUtc, MaxCases + 1, ct)
                 .ConfigureAwait(false);
         }
-        catch (Exception)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
         {
             return new SurveillanceAggregateResult(SurveillanceAggregateAccess.Unavailable, [], now, false);
         }
@@ -217,6 +221,11 @@ public sealed class SurveillanceMapAggregateQuery(
         {
             return null;
         }
+        catch (InvalidOperationException error) when (error.Message is
+            "The case authority scope is unavailable." or "The current case authority scope is unavailable.")
+        {
+            return null;
+        }
 
         await using (lease.ConfigureAwait(false))
         {
@@ -287,8 +296,16 @@ public sealed class SurveillanceMapAggregateQuery(
         IEnumerable<MapAggregateCaseRow> rows,
         DateTimeOffset asOfUtc)
     {
-        var distinct = rows.Select(row => row.CaseId).Distinct().ToArray();
-        if (distinct.Length < SuppressionThreshold)
+        var byCase = rows
+            .GroupBy(row => row.CaseId)
+            .Select(group => group.First())
+            .ToArray();
+        var human = byCase.Count(row => row.Sector == Sector.HumanHealth);
+        var animal = byCase.Count(row => row.Sector == Sector.AnimalHealth);
+        // Suppress the whole row, including the denominator: returning a total
+        // beside a hidden sector would let callers reconstruct the small cell.
+        if (byCase.Length < SuppressionThreshold ||
+            human is > 0 and < SuppressionThreshold || animal is > 0 and < SuppressionThreshold)
         {
             return new SurveillanceAggregateArea(
                 areaCode,
@@ -301,13 +318,6 @@ public sealed class SurveillanceMapAggregateQuery(
                 "Small counts are withheld to protect privacy.",
                 asOfUtc);
         }
-
-        var byCase = rows
-            .GroupBy(row => row.CaseId)
-            .Select(group => group.First())
-            .ToArray();
-        var human = byCase.Count(row => row.Sector == Sector.HumanHealth);
-        var animal = byCase.Count(row => row.Sector == Sector.AnimalHealth);
         return new SurveillanceAggregateArea(
             areaCode,
             areaLabel,
