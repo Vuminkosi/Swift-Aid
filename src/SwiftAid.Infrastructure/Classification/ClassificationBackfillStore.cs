@@ -45,6 +45,7 @@ public sealed class ClassificationBackfillStore(SwiftAidDbContext db, IOptions<C
                 WHERE promotion.case_id = c.case_id
             ), c.created_at_utc) AS received_at_utc) report_time
             WHERE c.workspace_id = {job.WorkspaceId} AND c.organization_id = {job.OrganizationId}
+              AND report_time.received_at_utc BETWEEN {now.AddDays(-30)} AND {now}
               AND e.event_type IN ('CaseReported', 'CaseReportCorrected')
             """, ct);
         job.Pending = job.Eligible;
