@@ -2,6 +2,7 @@
 @using SwiftAid.Application.Intake
 @using SwiftAid.Contracts.Geography
 @using SwiftAid.Contracts.Intake
+@using SwiftAid.Client.Intake
 @using SwiftAid.Client.Presentation
 @using SwiftAid.Client.Presentation.PublicWorkflows
 @using SwiftAid.Gateway.Presentation
@@ -9,12 +10,31 @@
 @using SwiftAid.UI.Components.Public
 @using SwiftAid.UI.Components.Surfaces.Public
 @inject IPublicIntakeMetadataClient IntakeMetadataClient
-@inject IPublicIntakeSubmissionClient IntakeSubmissionClient
+@inject IGuestSubmissionStore SubmissionStore
+@inject IGuestSubmissionCoordinator SubmissionCoordinator
 @inject IPublicIntakeProcessingPolicyClient ProcessingPolicyClient
 @inject IGeographicRegistry GeographicRegistry
 @inject IServiceProvider ServiceProvider
 
 <PageTitle>Report a concern | SwiftAid</PageTitle>
+
+@if (_storageReady && _savedDrafts.Count > 0)
+{
+    <MudPaper Class="pa-4 mb-4" Outlined="true" aria-label="Saved reports on this device">
+        <MudText Typo="Typo.subtitle1">Saved reports on this device</MudText>
+        <MudText Typo="Typo.body2">Choose a draft to resume. It will not replace the form until you select it.</MudText>
+        <div class="d-flex flex-wrap gap-2 mt-2">
+            @foreach (var saved in _savedDrafts)
+            {
+                <MudButton @key="saved.ClientSubmissionId" Variant="Variant.Outlined" Disabled="_sending || _savingDraft"
+                           OnClick="() => RestoreDraftAsync(saved.ClientSubmissionId)">
+                    @(saved.State == GuestSubmissionLocalState.NeedsAttention ? "Review saved report" : "Resume saved report")
+                    <span class="ml-1">@saved.CreatedAtUtc.ToLocalTime().ToString("g")</span>
+                </MudButton>
+            }
+        </div>
+    </MudPaper>
+}
 
 <PublicReportSurface Countries="_countries"
                      TextLimits="_textLimits"
@@ -31,8 +51,12 @@
                      ProcessingPolicyAcknowledgementLabel="@_processingPolicyAcknowledgementLabel"
                      PrivacyNoticeIsCurrent="@(!string.IsNullOrWhiteSpace(_privacyNoticeReference) && !string.IsNullOrWhiteSpace(_privacyNoticeVersion))"
                      SubmitAvailable="@CanSubmitReport"
+                     DraftSavingAvailable="@_storageAvailable"
+                     EditableDraftSnapshotsSupported="true"
+                     CurrentDraftId="_currentDraftId"
                      Draft="_mobileDraft"
                      ServerValidationRevision="_activeServerValidationRevision"
+                     OnSaveDraft="SaveDraftAsync"
                      OnSendReport="SendReportAsync"
                      Feedback="@_sendError"
                      FeedbackIsError="@_sendErrorIsError"
@@ -40,11 +64,15 @@
 
 @code {
     private IntakeReceipt? _receipt;
-    private readonly Guid _submissionId = Guid.NewGuid();
+    private Guid? _currentDraftId;
     private long _serverValidationSequence;
     private long _activeServerValidationRevision;
     private string? _sendError { get; set; }
     private bool _sending;
+    private bool _savingDraft;
+    private bool _storageReady;
+    private bool _storageAvailable;
+    private IReadOnlyList<GuestSubmissionSummary> _savedDrafts = [];
     private IReadOnlyList<PublicCountryOption> _countries = [];
     private IReadOnlyList<GeoPlaceCountry> _geoCountries = [];
     private string? _countryCatalogueVersion;
@@ -66,7 +94,7 @@
         _metadataAvailable &&
         _processingPolicyIsLive &&
         !string.IsNullOrWhiteSpace(_processingPolicyReference) &&
-        !string.IsNullOrWhiteSpace(_processingPolicyVersion);
+        !string.IsNullOrWhiteSpace(_processingPolicyVersion) && _storageAvailable;
 
     protected override async Task OnInitializedAsync()
     {
@@ -115,6 +143,27 @@
             _metadataAvailable = false;
             _privacyNoticeReference = null;
             _privacyNoticeVersion = null;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            await ReloadDraftsAsync();
+            _storageAvailable = true;
+        }
+        catch (Exception)
+        {
+            _storageAvailable = false;
+            _sendError = "Saved report storage is unavailable in this browser. You can keep working on this page, but save and send are disabled until storage is available.";
+            _sendErrorIsError = true;
+        }
+        finally
+        {
+            _storageReady = true;
+            await InvokeAsync(StateHasChanged);
         }
     }
 
@@ -177,78 +226,155 @@
         }
     }
 
-    private async Task SendReportAsync(IntakeSubmission submission)
+    private async Task ReloadDraftsAsync()
     {
-        if (_sending)
-        {
-            return;
-        }
+        _savedDrafts = (await SubmissionStore.GetAllAsync())
+            .Where(item => item.State is GuestSubmissionLocalState.Draft or GuestSubmissionLocalState.NeedsAttention)
+            .OrderByDescending(item => item.CreatedAtUtc)
+            .ToArray();
+    }
 
-        _sending = true;
-        _activeServerValidationRevision = 0;
-        var submittedDraft = System.Text.Json.JsonSerializer.Serialize(_mobileDraft);
+    private async Task RefreshDraftsSafelyAsync()
+    {
+        try { await ReloadDraftsAsync(); }
+        catch (Exception) { _storageAvailable = false; }
+    }
+
+    private async Task RestoreDraftAsync(Guid draftId)
+    {
+        if (_sending || _savingDraft || draftId == Guid.Empty) return;
         try
         {
-            var result = await IntakeSubmissionClient.SubmitAsync(submission with { ClientSubmissionId = _submissionId });
-            if (result.Code == UiCapabilityResultCode.Success && result.Value is { } outcome)
+            var editable = await SubmissionStore.GetEditableDraftAsync(draftId);
+            if (editable is { State: GuestSubmissionLocalState.Draft or GuestSubmissionLocalState.NeedsAttention })
             {
-                if (outcome.Kind == IntakeSubmissionOutcomeKind.Received)
+                _mobileDraft = PublicReportDraft.FromFormSnapshot(editable.FormSnapshot);
+                _currentDraftId = editable.ClientSubmissionId;
+            }
+            else
+            {
+                var saved = await SubmissionStore.GetDraftAsync(draftId);
+                if (saved is null || saved.State is not (GuestSubmissionLocalState.Draft or GuestSubmissionLocalState.NeedsAttention))
                 {
-                    if (outcome.Receipt is { } receipt && receipt.ReceiptId != Guid.Empty &&
-                        receipt.ClientSubmissionId == _submissionId)
-                    {
-                        _receipt = receipt;
-                        _sendError = null;
-                        _sendErrorIsError = false;
-                        return;
-                    }
-
-                    _receipt = null;
-                    _sendError = "We could not verify a receipt for this report. Your entries remain on this screen.";
+                    _sendError = "That saved report is no longer available to resume.";
                     _sendErrorIsError = true;
+                    await RefreshDraftsSafelyAsync();
                     return;
                 }
-
-                _receipt = null;
-                _sendError = outcome.Message;
-                _sendErrorIsError = false;
-                return;
+                _mobileDraft = PublicReportDraft.FromSubmission(saved.Submission);
+                _currentDraftId = saved.ClientSubmissionId;
             }
-
             _receipt = null;
-            _sendErrorIsError = true;
-            if (result.Code == UiCapabilityResultCode.InvalidRequest &&
-                submittedDraft == System.Text.Json.JsonSerializer.Serialize(_mobileDraft))
-                _activeServerValidationRevision = ++_serverValidationSequence;
-            _sendError = result.Code switch
-            {
-                UiCapabilityResultCode.InvalidRequest => "The last report was rejected, but the service did not identify a field. Your entries remain here. Go back and review the details before trying again.",
-                UiCapabilityResultCode.Conflict => "An earlier attempt may have been received with different details. Your entries remain here; check its status before sending a changed report.",
-                UiCapabilityResultCode.Retryable => "The report service is temporarily unavailable. Your entries remain on this screen — try again shortly.",
-                UiCapabilityResultCode.Cancelled => "We could not confirm whether the report was received. Your entries remain on this screen.",
-                UiCapabilityResultCode.Denied => "Report submission is unavailable for this request. Your entries remain on this screen.",
-                UiCapabilityResultCode.Success => "We couldn’t confirm your report. Check its status before trying again.",
-                _ => "Report submission is unavailable in this environment. Your entries remain on this screen."
-            };
+            _activeServerValidationRevision = 0;
+            _sendError = "Saved report restored on this device. Review it before sending.";
+            _sendErrorIsError = false;
         }
-        catch (OperationCanceledException)
+        catch (Exception)
         {
-            _receipt = null;
-            _sendError = "The request was interrupted, so we could not confirm whether the report was received. Your entries remain on this screen.";
+            _sendError = "The saved report could not be restored. Your current entries remain on this screen.";
             _sendErrorIsError = true;
-        }
-        catch
-        {
-            _receipt = null;
-            _sendError = "We could not confirm whether the report was received. Your entries remain on this screen.";
-            _sendErrorIsError = true;
-        }
-        finally
-        {
-            _sending = false;
         }
     }
 
+    private async Task SaveDraftAsync(PublicReportSaveRequest request)
+    {
+        if (_savingDraft || _sending || !_storageAvailable)
+        {
+            _sendError = "The draft could not be saved right now. Your entries remain on this screen.";
+            _sendErrorIsError = true;
+            throw new InvalidOperationException("The report draft cannot be saved right now.");
+        }
+        _savingDraft = true;
+        try
+        {
+            var previousEditable = request.PreviousDraftId is { } previousId
+                ? await SubmissionStore.GetEditableDraftAsync(previousId) : null;
+            var previousDraft = request.PreviousDraftId is { } existingId && previousEditable is null
+                ? await SubmissionStore.GetDraftAsync(existingId) : null;
+            if (request.PreviousDraftId is not null && previousEditable is null && previousDraft is null)
+                throw new InvalidOperationException("The saved draft is no longer available.");
+
+            var summary = request.FormSnapshot is { } snapshot
+                ? request.PreviousDraftId is { } editableId
+                    ? await SubmissionStore.CreateEditableRevisionAsync(editableId, request.Submission, snapshot)
+                    : await SubmissionStore.CreateEditableDraftAsync(request.Submission, snapshot)
+                : request.PreviousDraftId is { } draftId
+                    ? previousEditable is not null
+                        ? await SubmissionStore.CompleteEditableDraftAsync(draftId, request.Submission)
+                        : await SubmissionStore.CreateRevisionAsync(draftId, request.Submission)
+                    : await SubmissionStore.CreateDraftAsync(request.Submission);
+
+            request.ConfirmPersisted(summary.ClientSubmissionId, request.FormSnapshot is not null);
+            _currentDraftId = summary.ClientSubmissionId;
+            _sendError = "Your draft was saved on this device. It has not been sent.";
+            _sendErrorIsError = false;
+            await RefreshDraftsSafelyAsync();
+        }
+        catch (Exception)
+        {
+            _sendError = "This draft could not be saved safely. Your entries remain on this page.";
+            _sendErrorIsError = true;
+            throw;
+        }
+        finally { _savingDraft = false; }
+    }
+
+    private async Task SendReportAsync(IntakeSubmission submission)
+    {
+        if (_sending || !_storageAvailable || !CanSubmitReport) return;
+        _sending = true;
+        _activeServerValidationRevision = 0;
+        _receipt = null;
+        try
+        {
+            var previousEditable = _currentDraftId is { } prior
+                ? await SubmissionStore.GetEditableDraftAsync(prior) : null;
+            var previous = _currentDraftId is { } existingId
+                ? await SubmissionStore.GetAsync(existingId) : null;
+            if (_currentDraftId is not null && previous is null)
+                throw new InvalidOperationException("The saved report is no longer available.");
+
+            var saved = _currentDraftId is { } draftId
+                ? previousEditable is not null
+                    ? await SubmissionStore.CompleteEditableDraftAsync(draftId, submission)
+                    : await SubmissionStore.CreateRevisionAsync(draftId, submission)
+                : await SubmissionStore.CreateDraftAsync(submission);
+            _currentDraftId = saved.ClientSubmissionId;
+            await SubmissionStore.QueueAsync(saved.ClientSubmissionId);
+            await SubmissionCoordinator.SubmitPendingAsync();
+            var result = await SubmissionStore.GetAsync(saved.ClientSubmissionId);
+            if (result is { State: GuestSubmissionLocalState.Received, Receipt: not null } received &&
+                received.Receipt.ReceiptId != Guid.Empty && received.Receipt.ClientSubmissionId == saved.ClientSubmissionId)
+            {
+                _receipt = received.Receipt;
+                _currentDraftId = null;
+                _mobileDraft = new PublicReportDraft { CapturedAt = DateTimeOffset.Now };
+                _sendError = "SwiftAid confirmed receiving your report. Its receipt is shown below.";
+                _sendErrorIsError = false;
+                await RefreshDraftsSafelyAsync();
+                return;
+            }
+
+            if (result?.State == GuestSubmissionLocalState.NeedsAttention)
+            {
+                _activeServerValidationRevision = ++_serverValidationSequence;
+                _sendError = "SwiftAid could not confirm this report and did not identify a specific field. Your saved entries remain on this device; return to Details to review the fields Ellai can validate.";
+                _sendErrorIsError = true;
+                await RefreshDraftsSafelyAsync();
+                return;
+            }
+
+            _sendError = "Your report is saved on this device, but SwiftAid has not confirmed receiving it yet.";
+            _sendErrorIsError = false;
+        }
+        catch (Exception)
+        {
+            _sendError = "We could not confirm whether the report was received. Your entries remain saved on this device.";
+            _sendErrorIsError = true;
+            await RefreshDraftsSafelyAsync();
+        }
+        finally { _sending = false; }
+    }
     private bool _sendErrorIsError = true;
 
 }
