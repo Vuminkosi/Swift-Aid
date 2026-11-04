@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Globalization;
 using SwiftAid.Application.Authorization;
 using SwiftAid.Application.Cases;
+using SwiftAid.Application.Cases.Spatial;
 using SwiftAid.Contracts.Cases;
 using SwiftAid.Contracts.Ellai;
 using SwiftAid.Application.Intake;
@@ -53,6 +54,7 @@ public static class EllaiToolNames
     public const string ClassificationSnapshot = "ellai_classification_snapshot";
     public const string SurveillanceSignals = "ellai_surveillance_signals";
     public const string OwnedCaseCount = "ellai_owned_case_count";
+    public const string OwnedRegionCounts = "ellai_owned_region_counts";
     public const string CaseTimeline = "ellai_case_timeline";
     public const string PublicSessions = "ellai_public_sessions";
 
@@ -60,7 +62,7 @@ public static class EllaiToolNames
     {
         State, Evidence, Topic, Capabilities, Receipts, ProductFacts, Now,
         DocsSearch, DocsGet, UiCatalogue, UiObserve, IngestionSchema, ValidateObservations, Locations,
-        ImportDestinations, Imports, ImportStatus, ClassificationEvidence, ClassificationSnapshot, SurveillanceSignals, OwnedCaseCount, CaseTimeline, PublicSessions
+        ImportDestinations, Imports, ImportStatus, ClassificationEvidence, ClassificationSnapshot, SurveillanceSignals, OwnedCaseCount, OwnedRegionCounts, CaseTimeline, PublicSessions
     };
 }
 
@@ -224,6 +226,7 @@ public sealed class EllaiToolBroker
         $"{EllaiToolNames.ImportStatus}(import_id) — the current user's durable import state and saved/rejected/retry counts; no case contents and no submission.",
         $"{EllaiToolNames.ClassificationEvidence}(case_id) — persisted semantic classification evidence for an authorized current case revision; no inference, diagnosis or clinical probability.",
         $"{EllaiToolNames.OwnedCaseCount}(window_days) — count current-actor owned, readable managed cases created within 1..365 days; rejects incomplete results. This is a case count, not a diagnosis, incidence or animal count.",
+        $"{EllaiToolNames.OwnedRegionCounts}() — rank unsuppressed administrative-region counts for the current officer's readable, owned cases created in the last 30 days. Not population incidence or a hotspot map.",
         $"{EllaiToolNames.CaseTimeline}(case_id) — read the most recent authorized case history; older entries may exist.",
     };
 
@@ -269,6 +272,7 @@ public sealed class EllaiToolBroker
     private readonly SwiftAid.Application.Classification.ICaseClassificationQuery? _classification;
     private readonly SwiftAid.Application.Surveillance.ISignalReviewService? _signals;
     private readonly IDashboardAggregateQuery? _dashboard;
+    private readonly OwnedCaseSpatialAnalysis? _spatial;
     private readonly ICaseTimelineQuery? _timeline;
     private readonly IEllaiLocationReplayProtector? _locationReplayProtector;
     private readonly ICommunitySessionService? _communitySessions;
@@ -294,7 +298,7 @@ public sealed class EllaiToolBroker
         SwiftAid.Application.Surveillance.ISignalReviewService? signals = null,
         EllaiUiAuthorityResolver? uiAuthority = null, IEllaiExactReferenceIndex? referenceIndex = null,
         IDashboardAggregateQuery? dashboard = null, ICaseTimelineQuery? timeline = null, IEllaiLocationReplayProtector? locationReplayProtector = null,
-        ICommunitySessionService? communitySessions = null)
+        ICommunitySessionService? communitySessions = null, OwnedCaseSpatialAnalysis? spatial = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _consent = consent ?? throw new ArgumentNullException(nameof(consent));
@@ -304,6 +308,7 @@ public sealed class EllaiToolBroker
         _topics = topics;
         _referenceIndex = referenceIndex;
         _dashboard = dashboard;
+        _spatial = spatial;
         _timeline = timeline;
         _locationReplayProtector = locationReplayProtector;
         _communitySessions = communitySessions;
@@ -450,6 +455,8 @@ public sealed class EllaiToolBroker
             return Bound(await ReadEvidenceAsync(context, request, referenceIndex ?? _referenceIndex, ct).ConfigureAwait(false));
         if (canonical == EllaiToolNames.OwnedCaseCount)
             return Bound(await ReadOwnedCaseCountAsync(context, request, ct).ConfigureAwait(false));
+        if (canonical == EllaiToolNames.OwnedRegionCounts)
+            return Bound(await ReadOwnedRegionCountsAsync(context, request, ct).ConfigureAwait(false));
 
         if (canonical == EllaiToolNames.CaseTimeline)
             return Bound(await ReadCaseTimelineAsync(context, request, ct).ConfigureAwait(false));
@@ -533,6 +540,28 @@ public sealed class EllaiToolBroker
             HistoryValidUntilUtc = DateTimeOffset.UtcNow.AddMinutes(5)
         };
         return output with { CaseTimelineReplayScope = EllaiCaseTimelineReplayScope.Create(id, output) };
+    }
+
+    private async Task<EllaiToolResult> ReadOwnedRegionCountsAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
+    {
+        if (context.Actor is null || _spatial is null || request.Arguments.Count != 0)
+            return Deny(request.ToolName, "Authorized regional counts are unavailable.", EllaiToolReasonCodes.Unavailable);
+        SwiftAid.Contracts.Surveillance.SpatialAnalysisResult result;
+        try { result = await _spatial.GetAsync(context.Actor, ct).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        { return Deny(request.ToolName, "Authorized regional counts are unavailable.", EllaiToolReasonCodes.Unavailable); }
+        if (result.Access != SwiftAid.Contracts.Surveillance.SpatialAnalysisAccess.Allowed || result.Regions.Count > 20 ||
+            result.Regions.Any(area => area.RegionLabel.Length > 100 || area.RegionLabel.Any(char.IsControl) ||
+                area.RegionLabel.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length > 10))
+            return Deny(request.ToolName, "A complete bounded regional count is unavailable.", EllaiToolReasonCodes.Unavailable);
+        var content = JsonSerializer.SerializeToUtf8Bytes(result.Regions);
+        var digest = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content));
+        var evidence = new EvidenceRef("SpatialAggregate", "owned-regions", "region-count/1", null, digest);
+        var areas = result.Regions.Count == 0 ? "No unsuppressed region counts are available" :
+            string.Join("; ", result.Regions.Take(5).Select(area => $"{area.RegionLabel}: {area.CaseCount} case records"));
+        var summary = $"Top {Math.Min(5, result.Regions.Count)} unsuppressed regions for readable cases owned by the current officer, created from {result.WindowStartUtc:O} to {result.WindowEndUtc:O}: {areas}. " + result.Limitations;
+        return new EllaiToolResult(request.ToolName, true, null, [evidence], summary, 1, false, EllaiToolReasonCodes.Ok);
     }
 
     private async Task<EllaiToolResult> ReadOwnedCaseCountAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)

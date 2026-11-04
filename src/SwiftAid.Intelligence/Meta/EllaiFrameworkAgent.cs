@@ -76,6 +76,8 @@ public sealed class EllaiFrameworkAgent
         var evidenceSources = new Dictionary<EvidenceRef, List<string>>();
         EllaiToolResult? countResult = null;
         EllaiToolRequest? countRequest = null;
+        EllaiToolResult? spatialResult = null;
+        EllaiToolRequest? spatialRequest = null;
         EllaiToolResult? emptyQueueResult = null;
         EllaiToolRequest? emptyQueueRequest = null;
         var toolCalls = 0;
@@ -103,6 +105,11 @@ public sealed class EllaiFrameworkAgent
                     countResult = result;
                     countRequest = request;
                 }
+                if (request.ToolName == EllaiToolNames.OwnedRegionCounts && result.Allowed)
+                {
+                    spatialResult = result;
+                    spatialRequest = request;
+                }
                 if ((enableCaseSpecialist || allowEmptyCaseQueue) && IsEmptyQueueObservation(request, result))
                 {
                     emptyQueueResult = result;
@@ -123,7 +130,7 @@ public sealed class EllaiFrameworkAgent
             var result = await guard.InvokeAsync(toolContext, request, token).ConfigureAwait(false);
             // Only stop after the guard's post-call authorization has passed.
             // The final count is constructed from a fresh authorized read below.
-            if ((request.ToolName == EllaiToolNames.OwnedCaseCount && result.Allowed ||
+            if (((request.ToolName == EllaiToolNames.OwnedCaseCount || request.ToolName == EllaiToolNames.OwnedRegionCounts) && result.Allowed ||
                  (enableCaseSpecialist || allowEmptyCaseQueue) && IsEmptyQueueObservation(request, result)) && toolCalls == 1 &&
                 FunctionInvokingChatClient.CurrentContext is { FunctionCount: 1 } invocation)
                 invocation.Terminate = true;
@@ -588,7 +595,7 @@ public sealed class EllaiFrameworkAgent
         if (Volatile.Read(ref invalidDelegation) != 0) { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
         EllaiDecision? decision = null;
         if (guard.FailureCode is not null) { LastFailureCode = guard.FailureCode; return null; }
-        while (countResult is null && emptyQueueResult is null)
+        while (countResult is null && spatialResult is null && emptyQueueResult is null)
         {
             LastModelCallCount = guardedClient.CallSequence + Volatile.Read(ref delegatedModelCalls);
             if (guard.FailureCode is not null) { LastFailureCode = guard.FailureCode; return null; }
@@ -625,6 +632,37 @@ public sealed class EllaiFrameworkAgent
                     session, cancellationToken: ct).ConfigureAwait(false);
             }
             finally { LastModelCallCount = guardedClient.CallSequence + Volatile.Read(ref delegatedModelCalls); }
+        }
+        if (spatialResult is not null)
+        {
+            if (streamedSegments.Count != 0 || toolCalls != 1 || spatialRequest is null ||
+                spatialResult.Truncated || spatialResult.Evidence.Count != 1 ||
+                spatialResult.Evidence[0] is not { SourceKind: "SpatialAggregate", ResourceId: "owned-regions", Version: "region-count/1" } original ||
+                !await Current(ct).ConfigureAwait(false))
+            { LastFailureCode = EllaiToolReasonCodes.Unavailable; return null; }
+            var fresh = await (revalidateTool ?? invoke)(context, spatialRequest, ct).ConfigureAwait(false);
+            if (!fresh.Allowed || fresh.Truncated || fresh.Evidence.Count != 1 || fresh.Evidence[0] != original ||
+                !await Current(ct).ConfigureAwait(false))
+            { LastFailureCode = EllaiToolReasonCodes.Unavailable; return null; }
+            decision = new EllaiDecision(EllaiDecision.CurrentSchemaVersion, DecisionKind.Answer,
+                fresh.ResultSummary, fresh.ResultSummary,
+                [new GroundedClaim("owned-region-counts", fresh.ResultSummary, ClaimKind.Observed, fresh.Evidence)],
+                [], [], null, [], null, null);
+            if (EllaiDecisionValidator.Validate(decision).Count != 0)
+            { LastFailureCode = EllaiToolReasonCodes.Unavailable; return null; }
+            async Task<bool> SpatialPublicationCurrent(CancellationToken token)
+            {
+                if (!await Current(token).ConfigureAwait(false)) return false;
+                var current = await (revalidateTool ?? invoke)(context, spatialRequest, token).ConfigureAwait(false);
+                return current.Allowed && !current.Truncated && current.Evidence.Count == 1 && current.Evidence[0] == original &&
+                    await Current(token).ConfigureAwait(false);
+            }
+            if (onTextDelta is not null && !await PublishValidatedTextAsync(decision.DisplayText, onTextDelta, SpatialPublicationCurrent, ct).ConfigureAwait(false))
+            { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
+            if (!await SpatialPublicationCurrent(ct).ConfigureAwait(false))
+            { LastFailureCode = EllaiToolReasonCodes.DeniedByPolicy; return null; }
+            await SaveSessionAsync().ConfigureAwait(false);
+            return decision;
         }
         if (countResult is not null)
         {

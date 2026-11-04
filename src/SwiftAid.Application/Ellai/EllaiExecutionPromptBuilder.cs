@@ -47,6 +47,8 @@ public sealed class EllaiExecutionPromptBuilder(EllaiPromptBuilder prompts, Ella
             "For a current count of the user's own readable managed cases, use ellai_owned_case_count with the requested time window when available. " +
             "If the window is unclear, ask for it. If that tool is unavailable or the requested aggregate is outside its scope, explain the limitation without inventing a number. " +
             "The count covers cases, not animals, diagnoses, incidence, or a whole population.";
+        system += " For the current officer's readable, owned cases by reported administrative region over the last 30 days, " +
+            "use ellai_owned_region_counts when available. Do not describe these counts as population incidence or hotspots.";
         if (request.Context.AllowedTools is null || request.Context.AllowedTools.Contains(EllaiToolNames.UiCatalogue))
         {
             system += "\n## Interactive guidance\nFor requests to show, explain, or guide through application controls, " +

@@ -74,6 +74,7 @@ public static class EllaiToolContractCatalog
             [EllaiToolNames.ClassificationSnapshot] = Contract(EllaiToolNames.ClassificationSnapshot, ("case_id", true)),
             [EllaiToolNames.SurveillanceSignals] = Contract(EllaiToolNames.SurveillanceSignals, ("case_id", true)),
             [EllaiToolNames.OwnedCaseCount] = Contract(EllaiToolNames.OwnedCaseCount, ("window_days", true)),
+            [EllaiToolNames.OwnedRegionCounts] = Contract(EllaiToolNames.OwnedRegionCounts),
             [EllaiToolNames.CaseTimeline] = Contract(EllaiToolNames.CaseTimeline, ("case_id", true)),
             [EllaiToolNames.PublicSessions] = Contract(EllaiToolNames.PublicSessions, ("status", false)),
         });

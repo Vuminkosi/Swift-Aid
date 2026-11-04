@@ -129,7 +129,7 @@ public sealed class SurveillanceMapAggregateQuery(
             : await AuthorizeParallelAsync(shortlisted, actor, scopeFactory, ct).ConfigureAwait(false);
 
         var labels = await LoadCountryLabelsAsync(ct).ConfigureAwait(false);
-        var areas = Aggregate(readable, regionCode, labels, now);
+        var areas = Aggregate(readable.Where(row => row.CreatedAtUtc <= now).ToArray(), regionCode, labels, now);
         return new SurveillanceAggregateResult(SurveillanceAggregateAccess.Allowed, areas, now, truncated);
     }
 

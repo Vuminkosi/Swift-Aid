@@ -395,7 +395,7 @@ public sealed class EllaiUtteranceWorker(
                 (request.Arguments.Count == 1 && request.Arguments.TryGetValue("projection", out var projection) &&
                     string.Equals(projection, "feature", StringComparison.OrdinalIgnoreCase))
             : request.ToolName is EllaiToolNames.Topic or EllaiToolNames.Evidence or EllaiToolNames.ClassificationEvidence or
-                EllaiToolNames.OwnedCaseCount or EllaiToolNames.Receipts or EllaiToolNames.ImportDestinations or
+                EllaiToolNames.OwnedCaseCount or EllaiToolNames.OwnedRegionCounts or EllaiToolNames.Receipts or EllaiToolNames.ImportDestinations or
                 EllaiToolNames.Imports or EllaiToolNames.ImportStatus or
                 EllaiToolNames.UiCatalogue or EllaiToolNames.UiObserve or
                 EllaiToolNames.Now or EllaiToolNames.Capabilities or

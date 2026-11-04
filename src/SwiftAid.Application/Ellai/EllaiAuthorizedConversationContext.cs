@@ -79,6 +79,24 @@ public static class EllaiAuthorizedConversationContext
                     observation.CapabilityVersion == EllaiObservedToolResult.CurrentCapabilityVersion &&
                     observation.ReasonCode == EllaiToolReasonCodes.Ok && observation.Evidence.Count == 0)
                     continue;
+                if (observation.ToolName == EllaiToolNames.OwnedRegionCounts)
+                {
+                    if (observation.ReasonCode != EllaiToolReasonCodes.Ok || observation.Truncated || observation.Evidence.Count != 1 ||
+                        observation.Evidence[0] is not { SourceKind: "SpatialAggregate", ResourceId: "owned-regions", Version: "region-count/1" } ||
+                        toolContext is null || invokeTool is null || toolContext.SessionId != turn.SessionId || toolContext.Actor is null ||
+                        toolContext.Actor.ActorId != actor.ActorId || toolContext.Actor.AccessEpoch != actor.AccessEpoch)
+                        return decisions[turn.ClientUtteranceId] = false;
+                    try
+                    {
+                        var current = await invokeTool(toolContext, new EllaiToolRequest(EllaiToolNames.OwnedRegionCounts,
+                            new Dictionary<string, string>()), ct).ConfigureAwait(false);
+                        if (!current.Allowed || current.Truncated || !current.Evidence.SequenceEqual(observation.Evidence))
+                            return decisions[turn.ClientUtteranceId] = false;
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (Exception error) when (error is not OutOfMemoryException) { return decisions[turn.ClientUtteranceId] = false; }
+                    continue;
+                }
                 if (observation.ToolName == EllaiToolNames.OwnedCaseCount)
                 {
                     var scope = observation.CountReplayScope;
