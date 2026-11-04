@@ -5,6 +5,7 @@ using OpenAI;
 using OpenAI.Chat;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace SwiftAid.Intelligence.Meta;
@@ -12,6 +13,18 @@ namespace SwiftAid.Intelligence.Meta;
 /// <summary>Creates the official chat-completions adapter for the configured Meta route.</summary>
 public static class EllaiMuseChatClientFactory
 {
+    internal static bool HasDuplicateArguments(ReadOnlyMemory<byte> bytes)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(bytes);
+            if (document.RootElement.ValueKind != JsonValueKind.Object) return false;
+            var keys = new HashSet<string>(StringComparer.Ordinal);
+            return document.RootElement.EnumerateObject().Any(property => !keys.Add(property.Name));
+        }
+        catch (JsonException) { return false; }
+    }
+
     public static IChatClient Create(EllaiOptions options, HttpClient? httpClient = null)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -71,6 +84,7 @@ public static class EllaiMuseChatClientFactory
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             var names = new Dictionary<int, StreamedToolName>();
+            var argumentBytes = 0;
             await foreach (var update in base.GetStreamingResponseAsync(messages, options, cancellationToken).ConfigureAwait(false))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -93,21 +107,33 @@ public static class EllaiMuseChatClientFactory
                             name.Value.Append(part.FunctionName);
                             name.Parts++;
                         }
+                        if (part.FunctionArgumentsUpdate is { } arguments)
+                        {
+                            var bytes = arguments.ToMemory();
+                            if (bytes.Length > 512_000 - argumentBytes)
+                                throw new InvalidDataException("Streamed tool arguments exceed the permitted length.");
+                            argumentBytes += bytes.Length;
+                            name.Arguments.Write(bytes.Span);
+                        }
                     }
                 }
                 for (var index = 0; index < update.Contents.Count; index++)
                 {
                     if (update.Contents[index] is not FunctionCallContent call) continue;
                     var matches = names.Values.Where(name => name.CallId is not null && name.CallId == call.CallId).ToArray();
-                    if (matches.Length > 1 || matches.Length == 0 && names.Values.Any(name => name.Parts > 1))
+                    if (matches.Length > 1 || matches.Length == 0 && names.Values.Any(name =>
+                            name.Parts > 1 || HasDuplicateArguments(name.Arguments.ToArray())))
                         throw new InvalidDataException("Ambiguous streamed tool-call identity.");
-                    if (matches is not [{ Parts: > 1 } match]) continue;
+                    if (matches is not [var match]) continue;
+                    var duplicate = HasDuplicateArguments(match.Arguments.ToArray());
+                    if (match.Parts <= 1 && !duplicate) continue;
                     var completeName = match.Value.ToString();
-                    if (call.Name == completeName) continue;
-                    if (call.Name != match.First) throw new InvalidDataException("Inconsistent streamed tool-call name.");
+                    if (match.Parts > 1 && call.Name != completeName && call.Name != match.First)
+                        throw new InvalidDataException("Inconsistent streamed tool-call name.");
+                    if (match.Parts <= 1) completeName = call.Name;
                     update.Contents[index] = new FunctionCallContent(call.CallId, completeName, call.Arguments)
                     {
-                        Exception = call.Exception,
+                        Exception = duplicate ? new ArgumentException("Duplicate tool arguments.") : call.Exception,
                         InformationalOnly = call.InformationalOnly,
                         RawRepresentation = call.RawRepresentation,
                         AdditionalProperties = call.AdditionalProperties,
@@ -123,6 +149,7 @@ public static class EllaiMuseChatClientFactory
             public string? CallId;
             public string? First;
             public StringBuilder Value { get; } = new();
+            public MemoryStream Arguments { get; } = new();
             public int Parts;
         }
     }

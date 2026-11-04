@@ -173,6 +173,49 @@ public sealed class EllaiMuseChatClientTests
             });
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FrameworkRejectsDuplicateArgumentsFromOfficialAdapter(bool streaming)
+    {
+        using var http = new HttpClient(new DuplicateArgumentHandler(streaming));
+        using var client = EllaiMuseChatClientFactory.Create(new EllaiOptions
+        {
+            Enabled = true, ApiUrl = "https://fixture.invalid/v1", ApiKey = "fixture-key", ReasoningModel = "fixture-model"
+        }, http);
+        var agent = new EllaiFrameworkAgent(client);
+        var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
+            AllowedTools: new HashSet<string> { EllaiToolNames.State });
+        var invoked = false;
+        var error = await Assert.ThrowsAsync<EllaiFrameworkFailureException>(() => agent.RunAsync(context, "policy",
+            [new ChatMessage(ChatRole.User, "test")], 100, _ => Task.FromResult(true), (_, request, _) =>
+            {
+                invoked = true;
+                return Task.FromResult(new EllaiToolResult(request.ToolName, true, null, [], "Synthetic result", 1, false));
+            }, new EllaiFrameworkUsage("session", new EllaiUsageLedger(), new InMemoryEllaiUsageStore()), default,
+            onTextDelta: streaming ? (_, _) => ValueTask.CompletedTask : null));
+        Assert.Equal(EllaiToolReasonCodes.InvalidArguments, error.Code);
+        Assert.False(invoked);
+    }
+
+    private sealed class DuplicateArgumentHandler(bool streaming) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = streaming ? new StringContent("""
+                    data: {"id":"fixture","object":"chat.completion.chunk","created":1,"model":"fixture-model","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"ellai_state","arguments":"{\"projection\":\"feature\","}}]},"finish_reason":null}]}
+
+                    data: {"id":"fixture","object":"chat.completion.chunk","created":1,"model":"fixture-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"projection\":\"queue\"}"}}]},"finish_reason":"tool_calls"}]}
+
+                    data: [DONE]
+
+                    """, Encoding.UTF8, "text/event-stream") : new StringContent("""
+                    {"id":"fixture","object":"chat.completion","created":1,"model":"fixture-model","choices":[{"index":0,"message":{"role":"assistant","tool_calls":[{"id":"call-1","type":"function","function":{"name":"ellai_state","arguments":"{\"projection\":\"feature\",\"projection\":\"queue\"}"}}]},"finish_reason":"tool_calls"}]}
+                    """, Encoding.UTF8, "application/json")
+            });
+    }
+
     [Fact]
     public async Task StreamingAdapterKeepsInterleavedToolNamesBoundToTheirCallIds()
     {

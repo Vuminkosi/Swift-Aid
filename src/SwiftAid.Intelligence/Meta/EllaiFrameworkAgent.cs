@@ -561,7 +561,9 @@ public sealed class EllaiFrameworkAgent
         private static void ValidateToolCalls(IEnumerable<AIContent> contents, ChatOptions? options)
         {
             var calls = contents.OfType<FunctionCallContent>().ToArray();
-            if (calls.Any(call => call.Exception is not null))
+            if (calls.Any(call => call.Exception is not null ||
+                call.RawRepresentation is OpenAI.Chat.ChatToolCall raw &&
+                EllaiMuseChatClientFactory.HasDuplicateArguments(raw.FunctionArguments.ToMemory())))
                 throw new EllaiFrameworkFailureException(EllaiToolReasonCodes.InvalidArguments);
             var allowed = options?.Tools?.OfType<AIFunctionDeclaration>()
                 .Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal) ?? new HashSet<string>(StringComparer.Ordinal);
