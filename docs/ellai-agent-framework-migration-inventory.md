@@ -4138,3 +4138,18 @@ integration project's `TestResults` directory. The previously intermittent
 native WebSocket test passed in this run, but the earlier failure details were
 not captured; this rerun does not establish its root cause or close the skipped
 integration and deployment gates.
+
+With a new disposable PostGIS 17 container and the framework PostgreSQL fixture
+enabled, the current `EllaiPostgresTests`, `EllaiOwnedCaseCountPostgresTests`,
+and `EllaiPrivilegedRouteAuthorizationTests` filters passed 62, failed 0 and
+skipped 29. The command was `dotnet test
+tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-build
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false --filter
+'FullyQualifiedName~EllaiPostgresTests|FullyQualifiedName~EllaiOwnedCaseCountPostgresTests|FullyQualifiedName~EllaiPrivilegedRouteAuthorizationTests'
+--logger 'trx;LogFileName=ellai-framework-postgres-current-20261104.trx'
+--logger 'console;verbosity=quiet'`. `ELLAI_LIVE=0` and SQL-authority fixtures
+were disabled; the framework fixture used its required named loopback database
+and a deliberately unavailable Redis endpoint. The TRX is retained under the
+integration project's `TestResults` directory, and the disposable database
+container was removed. The skipped tests and deployed behavior remain unverified
+by this run.
