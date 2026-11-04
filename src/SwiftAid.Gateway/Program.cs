@@ -334,6 +334,7 @@ app.MapOrganizationDecisionEndpoints();
 app.MapCaseCorrelationEndpoints();
 app.MapSpatialAnalysisEndpoints();
 app.MapHealthSourceEndpoints();
+app.MapCommunityResearchEndpoints();
 app.MapCorrelationDecisionEndpoints();
 app.MapCaseDetailEndpoints();
 app.MapCaseQueueEndpoints();
