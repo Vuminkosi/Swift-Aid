@@ -71,6 +71,7 @@ public sealed class EllaiCaseSpecialist(IChatClient client, IEllaiFrameworkAgent
                 "schemaVersion 2, kind Answer, displayText, spokenText, claims, questions, uiIntents, planProposal, " +
                 "topicRefs, resumeSuggestion and stopReason. Each factual claim has claimId, text, kind Observed and " +
                 "evidence copied exactly from the tool result: sourceKind, resourceId, version, fieldPath, evidenceId. " +
+                "Each claim text must exactly match a line from the cited case result. Set displayText and spokenText to the claim texts joined by newlines, with no other prose. " +
                 "Use empty arrays and null for unused fields.",
                 [new ChatMessage(ChatRole.User, task)], 2048, isCurrent, InvokeCaseTool, usage, ct,
                 revalidateTool: revalidate ?? invoke, revalidateStreamObservations: RevalidateObservations, maxModelCalls: profile.MaxModelCalls, allowEmptyCaseQueue: true).ConfigureAwait(false);
@@ -86,6 +87,30 @@ public sealed class EllaiCaseSpecialist(IChatClient client, IEllaiFrameworkAgent
             decision.Claims.Any(claim => claim.Kind != ClaimKind.Observed || claim.Evidence.Count == 0 ||
                 claim.Evidence.Any(reference => reference.SourceKind != "CaseQueue")))
             return new(EllaiSpecialistOutcome.Unverified, null);
+        if (!verifiedEmpty)
+        {
+            var grounded = new HashSet<(EvidenceRef Reference, string Line)>();
+            foreach (var (request, result) in observations)
+                foreach (var reference in result.Evidence)
+                    foreach (var line in result.ResultSummary.Split('\n'))
+                        if (request.ToolName == EllaiToolNames.CaseTimeline && result.Evidence.Count == 1 ||
+                            request.ToolName == EllaiToolNames.State &&
+                            (line.StartsWith($"case {reference.ResourceId};", StringComparison.Ordinal) ||
+                             line.StartsWith($"case {reference.ResourceId} ·", StringComparison.Ordinal)))
+                            grounded.Add((reference, line));
+            if (decision.Claims.Any(claim => claim.Evidence.Any(reference => !grounded.Contains((reference, claim.Text)))) ||
+                decision.DisplayText != string.Join("\n", decision.Claims.Select(claim => claim.Text)) ||
+                decision.SpokenText != decision.DisplayText)
+                return new(EllaiSpecialistOutcome.Unverified, null);
+            foreach (var (request, result) in observations.Where(observation =>
+                observation.Request.ToolName == EllaiToolNames.CaseTimeline && observation.Result.Truncated))
+            {
+                if (decision.Claims.Any(claim => claim.Evidence.Any(result.Evidence.Contains)) &&
+                    !decision.Claims.Any(claim => claim.Text == result.ResultSummary.Split('\n')[0] &&
+                        claim.Evidence.Any(result.Evidence.Contains)))
+                    return new(EllaiSpecialistOutcome.Unverified, null);
+            }
+        }
         foreach (var (request, original) in observations)
         {
             if (!await isCurrent(ct).ConfigureAwait(false)) return new(EllaiSpecialistOutcome.Denied, null);
