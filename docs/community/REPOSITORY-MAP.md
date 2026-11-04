@@ -14,6 +14,8 @@ Baseline: `community-sessions` at `20e6d09f0c3436cf288123b15cdfee05dd41ce57`. Re
 
 New session revision snapshots retain the accepted lifecycle action, creator and reviewer identifiers, review time, explicit self-review acknowledgement, and cancellation/completion times. Earlier snapshots lack some or all of these fields and must be treated as unknown rather than backfilled or inferred. The staff history read and its session-scoped authorization remain unimplemented.
 
+For new published time changes, the revision action is `Rescheduled` and its snapshot retains the previous confirmed UTC start. A draft edit or an equivalent instant with a different offset is recorded as an update. Older snapshots are not rewritten.
+
 Android now downloads a bounded `text/calendar` response into its app cache and asks the device to open the file; this does not assert that a calendar app imported it. The cached file is retained for the receiving app and remains subject to operating-system cache cleanup. Actual Android calendar-handler behavior remains NOT VERIFIED.
 
 ## Initial slice and verification (historical)

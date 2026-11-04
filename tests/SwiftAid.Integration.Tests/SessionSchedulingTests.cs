@@ -576,7 +576,14 @@ public sealed class SessionSchedulingTests
             await Assert.ThrowsAsync<InvalidOperationException>(() => service.ExecuteAsync(
                 UpdateDraft(sessionId, 3, "Unreviewed content") with { DurationMinutes = 60 }, "officer-2", CancellationToken.None));
             Assert.Equal(3, await service.StoreCountRevisionsAsync(sessionId, CancellationToken.None));
+            var previousStart = (await service.GetStaffAsync(sessionId, "officer-2", CancellationToken.None))!.StartUtc;
             await service.ExecuteAsync(UpdateDraft(sessionId, 3, "Malaria prevention talk") with { DurationMinutes = 60 }, "officer-2", CancellationToken.None);
+
+            var revision = await db.Set<CommunitySessionRevisionEntity>().AsNoTracking()
+                .SingleAsync(row => row.SessionId == sessionId && row.Version == 4);
+            using var revisionSnapshot = JsonDocument.Parse(revision.SnapshotJson);
+            Assert.Equal("Rescheduled", revisionSnapshot.RootElement.GetProperty("Action").GetString());
+            Assert.Equal(previousStart, revisionSnapshot.RootElement.GetProperty("PreviousStartUtc").GetDateTimeOffset());
 
             var secondIcs = await service.GetIcsAsync(sessionId, DateTimeOffset.UtcNow, CancellationToken.None);
             Assert.NotNull(secondIcs);

@@ -11,7 +11,8 @@ public enum SessionRevisionAction
     Scheduled,
     Updated,
     Cancelled,
-    Completed
+    Completed,
+    Rescheduled
 }
 
 /// <summary>
@@ -62,6 +63,7 @@ public interface ICommunitySessionStore
         SessionReminderSync reminderSync,
         IReadOnlyList<SessionReminderOccurrence>? occurrences,
         SessionRevisionAction action,
+        DateTimeOffset? previousStartUtc,
         CancellationToken ct);
 
     Task<IReadOnlyList<CommunitySession>> ListPublicAsync(int take, CancellationToken ct);

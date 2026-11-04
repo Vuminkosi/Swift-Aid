@@ -149,6 +149,8 @@ public sealed class CommunitySessionServiceTests
         await services.Service.ExecuteAsync(CreateDraft(id), "officer-1", CancellationToken.None);
         await services.Service.ExecuteAsync(UpdateDraft(id, 1), "officer-1", CancellationToken.None);
         Assert.Equal(SessionReminderSync.None, services.Store.LastSync);
+        Assert.Equal(SessionRevisionAction.Updated, services.Store.LastAction);
+        Assert.Null(services.Store.PreviousStartUtc);
     }
 
     [Fact]
@@ -229,6 +231,23 @@ public sealed class CommunitySessionServiceTests
         Assert.Equal(Start.AddDays(1), rescheduled!.StartUtc);
         Assert.Equal(unchanged.Title, rescheduled.Title);
         Assert.Equal(SessionReminderSync.Recompute, services.Store.LastSync);
+        Assert.Equal(SessionRevisionAction.Rescheduled, services.Store.LastAction);
+        Assert.Equal(Start, services.Store.PreviousStartUtc);
+    }
+
+    [Fact]
+    public async Task EquivalentInstantDoesNotCreateARescheduleHistoryAction()
+    {
+        var services = CreateServices();
+        var id = Guid.NewGuid();
+        await PublishAsync(services.Service, id, SessionVisibility.Public);
+        await services.Service.ExecuteAsync(UpdateDraft(id, 3) with
+        {
+            Title = "Malaria prevention talk",
+            StartUtc = Start.ToOffset(TimeSpan.FromHours(2))
+        }, "officer-1", CancellationToken.None);
+        Assert.Equal(SessionRevisionAction.Updated, services.Store.LastAction);
+        Assert.Null(services.Store.PreviousStartUtc);
     }
 
     [Fact]
@@ -610,6 +629,8 @@ public sealed class CommunitySessionServiceTests
         private readonly Dictionary<Guid, long> _versions = new();
 
         public SessionReminderSync LastSync { get; private set; } = SessionReminderSync.None;
+        public SessionRevisionAction LastAction { get; private set; }
+        public DateTimeOffset? PreviousStartUtc { get; private set; }
         public IReadOnlyList<DomainSessions.SessionReminderOccurrence> LastOccurrences { get; private set; } = [];
         public int Revisions { get; private set; }
 
@@ -633,6 +654,7 @@ public sealed class CommunitySessionServiceTests
             SessionReminderSync reminderSync,
             IReadOnlyList<DomainSessions.SessionReminderOccurrence>? occurrences,
             SessionRevisionAction action,
+            DateTimeOffset? previousStartUtc,
             CancellationToken ct)
         {
             if (!_versions.TryGetValue(session.SessionId, out var current) || current != expectedVersion)
@@ -642,6 +664,8 @@ public sealed class CommunitySessionServiceTests
 
             _versions[session.SessionId] = session.Version;
             LastSync = reminderSync;
+            LastAction = action;
+            PreviousStartUtc = previousStartUtc;
             LastOccurrences = occurrences ?? [];
             Revisions++;
             return Task.CompletedTask;

@@ -38,7 +38,7 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
     {
         ArgumentNullException.ThrowIfNull(session);
         _dbContext.Set<CommunitySessionEntity>().Add(ToEntity(session));
-        AppendRevision(session, actorId, reason, recordedAtUtc, action);
+        AppendRevision(session, actorId, reason, recordedAtUtc, action, null);
         await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
@@ -51,6 +51,7 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
         SessionReminderSync reminderSync,
         IReadOnlyList<SessionReminderOccurrence>? occurrences,
         SessionRevisionAction action,
+        DateTimeOffset? previousStartUtc,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(session);
@@ -69,7 +70,7 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
         }
 
         OverwriteEntity(session, entity);
-        AppendRevision(session, actorId, reason, recordedAtUtc, action);
+        AppendRevision(session, actorId, reason, recordedAtUtc, action, previousStartUtc);
         await SyncRemindersAsync(session, reminderSync, occurrences ?? [], recordedAtUtc, ct).ConfigureAwait(false);
 
         try
@@ -183,7 +184,8 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
         string actorId,
         string reason,
         DateTimeOffset recordedAtUtc,
-        SessionRevisionAction action)
+        SessionRevisionAction action,
+        DateTimeOffset? previousStartUtc)
     {
         _dbContext.Set<CommunitySessionRevisionEntity>().Add(new CommunitySessionRevisionEntity
         {
@@ -193,7 +195,7 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
             ActorId = actorId,
             Reason = reason,
             RecordedAtUtc = recordedAtUtc,
-            SnapshotJson = BuildSnapshot(session, action),
+            SnapshotJson = BuildSnapshot(session, action, previousStartUtc),
         });
     }
 
@@ -375,10 +377,11 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
         field.SetValue(session, value);
     }
 
-    private static string BuildSnapshot(CommunitySession session, SessionRevisionAction action) =>
+    private static string BuildSnapshot(CommunitySession session, SessionRevisionAction action, DateTimeOffset? previousStartUtc) =>
         JsonSerializer.Serialize(new
         {
             Action = action.ToString(),
+            PreviousStartUtc = previousStartUtc,
             session.SessionId,
             session.Version,
             Status = session.Status.ToString(),
