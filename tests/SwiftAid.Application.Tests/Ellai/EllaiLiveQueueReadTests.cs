@@ -216,7 +216,9 @@ public sealed class EllaiLiveQueueReadTests
             });
 
         Assert.Equal(!wrongScope, result is not null);
-        if (!wrongScope) Assert.Equal(2, index.Reads);
+        // Recall, final-decision authorization, and the final publication fence
+        // each recheck the current reference independently.
+        if (!wrongScope) Assert.Equal(3, index.Reads);
         else Assert.InRange(index.Reads, 1, 2);
         if (!wrongScope) Assert.Contains(Row("01", 7).CaseId.ToString("D"), client.Observation);
         else Assert.DoesNotContain(Row("01", 7).CaseId.ToString("D"), client.Observation);
