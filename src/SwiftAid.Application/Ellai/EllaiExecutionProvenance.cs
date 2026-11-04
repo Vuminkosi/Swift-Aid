@@ -126,6 +126,9 @@ public sealed record EllaiObservedToolResult(
         {
             ResultSummary = result.ResultSummary
                 .Replace(" Result references retained for this session; recall with ellai_evidence(ref=case-results).", "", StringComparison.Ordinal)
+                .Replace(" Supporting case references were retained for this session.", "", StringComparison.Ordinal)
+                .Replace(" A bounded subset of supporting case references was retained; later case-level follow-up may be incomplete.", "", StringComparison.Ordinal)
+                .Replace(" Supporting case references could not be retained; do not claim they were remembered.", "", StringComparison.Ordinal)
                 .Replace(" Result references could not be retained; do not claim they were remembered.", "", StringComparison.Ordinal),
             result.ItemCount, result.Evidence, result.Truncated
         });

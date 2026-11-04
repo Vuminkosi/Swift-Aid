@@ -4572,3 +4572,9 @@ Review-stage age and text-limit errors now tell the user to select Return to det
 PASS: `dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet` (zero warnings, zero errors). PASS: `git diff --check`. No tests added or run, per user instruction. NOT VERIFIED: live browser or device rendering of the review-to-detail focus transition.
 
 When the server rejection does not identify a field, the message now says that explicitly and guides the person back to review visible entries one at a time without implying a specific input was identified.
+
+### Retain bounded references for grouped Ellai searches (2026-11-04)
+
+Fresh region/locality aggregates now retain up to 20 supporting case references, selected round-robin across the displayed groups. The aggregate still reports its complete bounded scan and group evidence; retained follow-up is marked incomplete when more than 20 cases, unknown locations, or a partial scan prevent full recall. Durable revalidation repeats the aggregate without rewriting memory, and its fingerprint ignores only the non-authoritative retention notice.
+
+PASS: `dotnet build src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false --verbosity quiet` (zero warnings, zero errors). PASS: `git diff --check`. No tests added or run, per user instruction. NOT VERIFIED: live session-memory persistence, authorized case data, model follow-up selection, or browser/session replay.

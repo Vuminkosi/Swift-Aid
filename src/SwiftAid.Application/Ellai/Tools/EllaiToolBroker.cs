@@ -740,9 +740,43 @@ public sealed class EllaiToolBroker
             if (grouped.Access != CaseQueueAccess.Allowed)
                 return Deny(request.ToolName, "Location grouping is unavailable.", EllaiToolReasonCodes.Unavailable);
             var visibleCaseIds = grouped.Groups.SelectMany(group => group.CaseIds).ToHashSet();
-            var groupEvidence = grouped.Cases.Where(item => visibleCaseIds.Contains(item.CaseId))
+            var visibleCases = grouped.Cases.Where(item => visibleCaseIds.Contains(item.CaseId)).ToArray();
+            var groupEvidence = visibleCases
                 .Select(item => new EvidenceRef("CaseQueue", item.CaseId.ToString("D"),
                 item.AggregateVersion.ToString(System.Globalization.CultureInfo.InvariantCulture), null, item.CaseId.ToString("D"))).ToArray();
+            var groupRecallNotice = string.Empty;
+            var retainedItems = new List<CaseQueueItem>(20);
+            if (_topics is not null && !context.RevalidationOnly)
+            {
+                var casesById = visibleCases.ToDictionary(item => item.CaseId);
+                for (var index = 0; retainedItems.Count < 20; index++)
+                {
+                    var foundAtIndex = false;
+                    foreach (var group in grouped.Groups)
+                    {
+                        if (index >= group.CaseIds.Count) continue;
+                        foundAtIndex = true;
+                        if (casesById.TryGetValue(group.CaseIds[index], out var item)) retainedItems.Add(item);
+                        if (retainedItems.Count == 20) break;
+                    }
+                    if (!foundAtIndex) break;
+                }
+                var retentionIncomplete = grouped.Truncated || grouped.UnknownLocations || visibleCases.Length > 20;
+                try
+                {
+                    await new EllaiCaseResultMemory(_topics, queue, _referenceIndex).RememberAsync(context, retainedItems,
+                        ct, searchIncomplete: retentionIncomplete, unknownLocations: grouped.UnknownLocations).ConfigureAwait(false);
+                    groupRecallNotice = retainedItems.Count < visibleCases.Length
+                        ? " A bounded subset of supporting case references was retained; later case-level follow-up may be incomplete."
+                        : " Supporting case references were retained for this session.";
+                }
+                catch (Exception error) when (error is not OperationCanceledException and not OutOfMemoryException)
+                {
+                    groupRecallNotice = " Supporting case references could not be retained; do not claim they were remembered.";
+                }
+            }
+            else if (_topics is null && !context.RevalidationOnly)
+                groupRecallNotice = " Supporting case references could not be retained; do not claim they were remembered.";
             var summary = JsonSerializer.Serialize(new
             {
                 groupBy,
@@ -752,7 +786,9 @@ public sealed class EllaiToolBroker
                     ? (object)new { regionId = group.LocationId, reportedRegion = group.Label, caseCount = group.Count, caseIds = group.CaseIds }
                     : new { localityId = group.LocationId, reportedLocality = group.Label, caseCount = group.Count, caseIds = group.CaseIds }),
                 unknownLocations = grouped.UnknownLocations,
-                incomplete = grouped.Truncated
+                incomplete = grouped.Truncated,
+                caseReferenceRetentionIncomplete = grouped.Truncated || grouped.UnknownLocations || visibleCases.Length > 20,
+                caseReferenceNotice = groupRecallNotice
             });
             return new(request.ToolName, true, null, groupEvidence, summary, groupEvidence.Length,
                 grouped.Truncated, EllaiToolReasonCodes.Ok);
