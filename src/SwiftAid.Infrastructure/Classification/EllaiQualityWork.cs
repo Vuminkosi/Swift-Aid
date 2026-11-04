@@ -36,6 +36,10 @@ public sealed class EllaiQualityWork(SwiftAidDbContext db, PostgresProtectedCase
             var candidates = await db.Database.SqlQuery<QualityCandidate>($"""
                 SELECT c.case_id AS "CaseId", e.event_id AS "EventId", c.aggregate_version AS "CaseVersion"
                 FROM managed_cases c
+                JOIN workspaces w ON w.workspace_id = c.workspace_id AND w.status = 'Active'
+                JOIN organizations o ON o.organization_id = c.organization_id AND o.status = 'Active'
+                JOIN workspace_organizations wo ON wo.workspace_id = c.workspace_id
+                    AND wo.organization_id = c.organization_id AND wo.status = 'Active'
                 JOIN LATERAL (
                     SELECT event_id FROM case_events
                     WHERE case_id = c.case_id AND report_revision = c.report_revision
@@ -46,7 +50,7 @@ public sealed class EllaiQualityWork(SwiftAidDbContext db, PostgresProtectedCase
                     AND NOT EXISTS (
                         SELECT 1 FROM swiftaid_classification.quality_assessments q
                         WHERE q."SourceEventId" = e.event_id AND q."Version" = {ReportQualityRules.Version})
-                ORDER BY c.case_id FOR SHARE OF c LIMIT 1
+                ORDER BY c.case_id FOR SHARE OF c, w, o, wo LIMIT 1
                 """).ToArrayAsync(token).ConfigureAwait(false);
             var candidate = candidates.SingleOrDefault();
             if (candidate is null) return false;
