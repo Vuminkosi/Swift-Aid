@@ -3,6 +3,20 @@ namespace SwiftAid.Contracts.Ellai;
 /// <summary>Application-authored, value-free explanations and targets for report validation.</summary>
 public static class EllaiReportValidationGuidance
 {
+    /// <summary>The registered presentation control owning each trusted correction target.</summary>
+    public static string? ControlFor(string inputId) => inputId switch
+    {
+        "report.subject-kind" or "report.animal-scope" => "report.subject",
+        "report.original-statement" or "report.original-statement-too-long" or "report.other-observations" or
+            "report.too-many-observations" or "report.observation-too-long" or "report.observations-total-too-long" => "report.narrative",
+        "report.occurrence-date" or "report.invalid-exact-occurrence" or "report.occurrence-time" or "report.utc-offset" or
+            "report.place-search" or "report.invalid-draft-country" or "report.region" or "report.area" or "report.locality" => "report.time-location",
+        "report.review-confirmed" or "report.text-limits-changed" or "report.country-catalogue-unavailable" or
+            "report.privacy-notice-unavailable" or "report.processing-policy-unavailable" or "report.country-required" or
+            "report.country-confirmed" or "report.processing-confirmed" => "report.review",
+        _ => null
+    };
+
     public static EllaiUiValidationIssue? Find(string inputId) => inputId switch
     {
         "report.subject-kind" => new(inputId, "ellai-report-subject-kind", "Choose whether the concern is about human health or animal health."),

@@ -79,7 +79,7 @@ public sealed class EllaiReasoningLoopTests
         Assert.Contains("Claims must cite exact evidence", prompt);
         Assert.Contains("Never infer a case count from a partial list", prompt);
         Assert.Contains("ellai_owned_case_count", prompt);
-        Assert.Contains("controls=report.subject,report.narrative,report.time-location,report.confirmations", prompt);
+        Assert.Contains("controls=report.subject,report.narrative,report.time-location,report.review,report.confirmations", prompt);
         Assert.Contains("NotProvided alone does not mean a field is required", prompt);
         Assert.Contains("omitted, hidden, stale or unavailable input has unknown status", prompt);
     }
@@ -122,7 +122,8 @@ public sealed class EllaiReasoningLoopTests
         var observations = new InMemoryEllaiUiObservationStore();
         await observations.RecordAsync(new("session-1", "view", "context", "web", ["report.narrative"],
             DateTimeOffset.UtcNow, [new("report.narrative", UiObservationState.Ready)],
-            InputStates: [new("report.narrative", "report.original-statement", UiInputPresence.Entered),
+            ValidationInputIds: ["report.original-statement-too-long"],
+            InputStates: [new("report.narrative", "report.original-statement", UiInputPresence.Invalid),
                 new("report.narrative", "report.other-observations", UiInputPresence.NotProvided)]), default);
         var broker = new EllaiToolBroker(new EllaiPolicyService(), new EllaiConsentService(),
             uiRegistry: registry, uiDiscovery: new EllaiUiDiscoveryService(), uiObservations: observations);
@@ -139,8 +140,9 @@ public sealed class EllaiReasoningLoopTests
 
         Assert.True(result.Completed);
         var tool = Assert.Single(completions.Threads[1], message => message.Role == "tool");
-        Assert.Contains("report.original-statement (Describe what happened): Entered", tool.Content);
+        Assert.Contains("report.original-statement (Describe what happened): Invalid", tool.Content);
         Assert.Contains("report.other-observations (Add other observations): NotProvided", tool.Content);
+        Assert.Contains("The description is too long. Shorten it to the limit shown on the form.", tool.Content);
         Assert.Contains("omitted inputs have unknown status", tool.Content);
     }
 

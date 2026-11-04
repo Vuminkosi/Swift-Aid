@@ -1093,6 +1093,13 @@ public sealed class EllaiToolBroker
         var stale = age < TimeSpan.Zero || age > TimeSpan.FromSeconds(45) ||
             !string.Equals(report.ViewInstanceId, view.Trim(), StringComparison.Ordinal);
         var ordered = requested.Select(id => stale ? byId[id] with { State = UiObservationState.Stale } : byId[id]).ToList();
+        var issue = !stale && feature == EllaiReportUiManifest.FeatureId
+            ? report.ValidationInputIds?.Select(EllaiReportValidationGuidance.Find).FirstOrDefault(item => item is not null)
+            : null;
+        var issueControl = issue is null ? null : EllaiReportValidationGuidance.ControlFor(issue.InputId);
+        var visibleIssue = issueControl is not null && requested.Contains(issueControl) &&
+            byId.TryGetValue(issueControl, out var issueObservation) && issueObservation.State == UiObservationState.Ready
+            ? issue : null;
         var inputLines = stale ? [] : (report.InputStates ?? [])
             .Where(input => requested.Contains(input.ControlId) && byId[input.ControlId].State == UiObservationState.Ready &&
                 eligible[input.ControlId].Semantics?.Inputs.Any(descriptor => descriptor.InputId == input.InputId) == true)
@@ -1114,6 +1121,7 @@ public sealed class EllaiToolBroker
                 : $" Requested view '{view.Trim()}' differs from the latest report.");
         return new EllaiToolResult(request.ToolName, true, null, evidence,
             header + "\n" + string.Join("\n", lines) +
+            (visibleIssue is null ? string.Empty : $"\nFirst client-reported validation issue ({visibleIssue.InputId}): {visibleIssue.Message}") +
             (inputLines.Count == 0 ? string.Empty : "\nInput state is client-reported and does not prove a draft was saved or submitted. " +
                 "Only reported visible inputs on requested controls are included; omitted inputs have unknown status.\n" + string.Join("\n", inputLines)),
             ordered.Count, false, EllaiToolReasonCodes.Ok);
