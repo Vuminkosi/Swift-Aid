@@ -246,6 +246,14 @@ and one duplicate-argument call, rejected the entire batch without invoking
 either tool. The combined post-commit filter passed 7/7. Serverless converts
 its completed response to framework updates; this is not proof of native
 serverless streaming or live provider behavior.
+After the raw-argument safeguard, the live Muse authorized-count worker and
+non-streaming executor checks passed 2/2 against a fresh disposable PostGIS
+fixture using `dotnet test tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj
+--no-restore -m:1 -nr:false -p:WasmBuildNative=false` with the two live-count
+filters, provider configuration and dedicated fixture opt-ins. The worker
+exercise includes a streamed framework call; the executor covers the completed
+response path and a follow-up. This confirms those ordinary live tool calls,
+not live malformed arguments, deployment or general provider reliability.
 
 ## Provider observations and open checks
 
