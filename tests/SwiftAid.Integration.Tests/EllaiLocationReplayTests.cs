@@ -117,6 +117,34 @@ public sealed class EllaiLocationReplayTests
     }
 
     [IntakePostgresFact]
+    public async Task IsolatedPostgresLocationSearchReadsCurrentRegistry()
+    {
+        await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();
+        var services = new ServiceCollection().AddLogging().AddSingleton(TimeProvider.System);
+        services.AddDbContext<SwiftAidDbContext>(options => options.UseNpgsql(fixture.Db.Database.GetConnectionString()));
+        services.AddScoped<IGeographicRegistryImporter, GeographicRegistryImporter>();
+        services.AddScoped<IGeographicRegistry, GeographicRegistryService>();
+        await using var provider = services.BuildServiceProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var fallback = scope.ServiceProvider.GetRequiredService<IGeographicRegistry>();
+        var isolated = new EllaiIsolatedGeographicRegistry(provider, new EllaiIsolatedToolCalls(), fallback);
+        var first = await isolated.SearchAsync("Rusape", "ZW", 5, default);
+        var id = Assert.Single(first.Results).Id;
+        try
+        {
+            await fixture.Db.GeographicLocations.Where(item => item.LocationId == id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.IsActive, false));
+            var afterChange = await isolated.SearchAsync("Rusape", "ZW", 5, default);
+            Assert.DoesNotContain(afterChange.Results, item => item.Id == id);
+        }
+        finally
+        {
+            await fixture.Db.GeographicLocations.Where(item => item.LocationId == id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.IsActive, true));
+        }
+    }
+
+    [IntakePostgresFact]
     public async Task RunnerWithholdsAnswerWhenPostgresRegistryChanges()
     {
         await using var fixture = await CaseImportPostgresTests.Fixture.CreateAsync();

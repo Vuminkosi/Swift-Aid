@@ -331,6 +331,12 @@ public sealed class EllaiUtteranceWorker(
                     var index = request.ToolName is EllaiToolNames.Topic or EllaiToolNames.Evidence &&
                         broker.UsesReferenceIndex(toolServices.GetService<IEllaiExactReferenceIndex>())
                         ? new EllaiIsolatedExactReferenceIndex(_services, ReferenceCalls) : null;
+                    var registry = request.ToolName == EllaiToolNames.Locations
+                        ? toolServices.GetService<SwiftAid.Application.Intake.IGeographicRegistry>() : null;
+                    var geography = request.ToolName == EllaiToolNames.Locations &&
+                        registry is SwiftAid.Infrastructure.Intake.Geography.GeographicRegistryService &&
+                        broker.UsesGeographicRegistry(registry)
+                        ? new EllaiIsolatedGeographicRegistry(_services, ToolCalls, registry) : null;
                     var topicStore = toolServices.GetService<IEllaiTopicStore>();
                     Func<EllaiToolContext, IReadOnlyList<SwiftAid.Contracts.Cases.CaseQueueItem>, CancellationToken, Task<bool>>?
                         remember = sessionStore is IEllaiCaseResultSnapshotFence fence &&
@@ -350,7 +356,7 @@ public sealed class EllaiUtteranceWorker(
                     if (detachQueue && (queue is null || remember is null))
                         return new EllaiToolResult(request.ToolName, false, "The queue is unavailable.", [],
                             string.Empty, 0, false, EllaiToolReasonCodes.Unavailable);
-                    return await broker.InvokeAsync(context, request, toolCt, queue, index, remember).ConfigureAwait(false);
+                    return await broker.InvokeAsync(context, request, toolCt, queue, index, remember, geography).ConfigureAwait(false);
                 }
 
                 return detachQueue

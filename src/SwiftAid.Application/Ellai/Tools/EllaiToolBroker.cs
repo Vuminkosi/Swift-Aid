@@ -306,6 +306,7 @@ public sealed class EllaiToolBroker
     public bool UsesTopicStore(IEllaiTopicStore? store) => _topics?.UsesStore(store) == true;
     public ICaseQueueQuery? StateQueue => _queue;
     public bool UsesReferenceIndex(IEllaiExactReferenceIndex? index) => index is not null && ReferenceEquals(_referenceIndex, index);
+    public bool UsesGeographicRegistry(IGeographicRegistry? registry) => registry is not null && ReferenceEquals(_geography, registry);
 
     public Task<EllaiToolResult> InvokeAsync(
         EllaiToolContext context, EllaiToolRequest request, CancellationToken ct) =>
@@ -314,7 +315,8 @@ public sealed class EllaiToolBroker
     public async Task<EllaiToolResult> InvokeAsync(
         EllaiToolContext context, EllaiToolRequest request, CancellationToken ct, ICaseQueueQuery? stateQueue,
         IEllaiExactReferenceIndex? referenceIndex = null,
-        Func<EllaiToolContext, IReadOnlyList<CaseQueueItem>, CancellationToken, Task<bool>>? rememberCaseResults = null)
+        Func<EllaiToolContext, IReadOnlyList<CaseQueueItem>, CancellationToken, Task<bool>>? rememberCaseResults = null,
+        IGeographicRegistry? geographicRegistry = null)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(request);
@@ -415,7 +417,7 @@ public sealed class EllaiToolBroker
         }
 
         if (canonical == EllaiToolNames.Locations)
-            return Bound(await ReadLocationsAsync(context, request, ct).ConfigureAwait(false));
+            return Bound(await ReadLocationsAsync(context, request, geographicRegistry ?? _geography, ct).ConfigureAwait(false));
 
         if (canonical is EllaiToolNames.ImportDestinations or EllaiToolNames.Imports or EllaiToolNames.ImportStatus)
             return Bound(await ReadImportsAsync(context, request, ct).ConfigureAwait(false));
@@ -624,7 +626,8 @@ public sealed class EllaiToolBroker
         }
     }
 
-    private async Task<EllaiToolResult> ReadLocationsAsync(EllaiToolContext context, EllaiToolRequest request, CancellationToken ct)
+    private async Task<EllaiToolResult> ReadLocationsAsync(EllaiToolContext context, EllaiToolRequest request,
+        IGeographicRegistry? geography, CancellationToken ct)
     {
         if (request.Arguments.Keys.Any(key => key is not ("q" or "country" or "limit")) ||
             !request.Arguments.TryGetValue("q", out var query) || string.IsNullOrWhiteSpace(query))
@@ -635,10 +638,10 @@ public sealed class EllaiToolBroker
         request.Arguments.TryGetValue("country", out var country);
         if (country is not null && (country.Length != 2 || country.Any(character => character is < 'A' or > 'Z')))
             return Deny(request.ToolName, "Use a two-letter uppercase country code.", EllaiToolReasonCodes.InvalidArguments);
-        if (_geography is null) return Deny(request.ToolName, "Location search is unavailable.", EllaiToolReasonCodes.Unavailable);
+        if (geography is null) return Deny(request.ToolName, "Location search is unavailable.", EllaiToolReasonCodes.Unavailable);
         try
         {
-            var matches = await _geography.SearchAsync(query, country, limit, ct).ConfigureAwait(false);
+            var matches = await geography.SearchAsync(query, country, limit, ct).ConfigureAwait(false);
             var items = matches.Results.Take(limit).Select(item => new { item.Id, item.Name, item.CountryCode, item.Ancestors }).ToArray();
             var result = new EllaiToolResult(request.ToolName, true, null,
                 items.Select(item => new EvidenceRef("GeographicRegistry", item.Id, matches.RegistryVersion, "name", item.Id)).ToArray(),

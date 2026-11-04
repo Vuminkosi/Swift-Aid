@@ -1,11 +1,22 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SwiftAid.Application.Intake;
 using SwiftAid.Contracts.Geography;
 using SwiftAid.Infrastructure.Intake.Geography;
 using SwiftAid.Infrastructure.Persistence;
+using SwiftAid.Gateway.Ellai;
+using System.Data.Common;
+using System.Security.Claims;
+using System.Runtime.CompilerServices;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging.Abstractions;
+using SwiftAid.Application.Authorization;
+using SwiftAid.Application.Ellai;
+using SwiftAid.Contracts.Ellai;
+using SwiftAid.Intelligence.Meta;
 
 namespace SwiftAid.Integration.Tests;
 
@@ -125,6 +136,133 @@ public sealed class GeographicRegistryTests : IAsyncDisposable
         Assert.Equal(initialized.TotalCount, readOnly.TotalCount);
         Assert.Equal(initialized.Results.Select(item => item.Id), readOnly.Results.Select(item => item.Id));
         Assert.Equal(264, await _dbContext.GeographicLocations.CountAsync());
+    }
+
+    [Fact]
+    public async Task IsolatedSearchPreservesFirstUseSeeding()
+    {
+        var fallback = _provider.GetRequiredService<IGeographicRegistry>();
+        var isolated = new EllaiIsolatedGeographicRegistry(_provider, new EllaiIsolatedToolCalls(), fallback);
+
+        var result = await isolated.SearchAsync("mbabane", "SZ", 5, default);
+
+        Assert.Contains(result.Results, item => item.Id == "SZ:place:mbabane");
+        Assert.Equal(264, await _dbContext.GeographicLocations.CountAsync());
+    }
+
+    [Fact]
+    public async Task CancelledInitializedReadReturnsBeforeNoncooperativeDatabaseCallAndDoesNotSeed()
+    {
+        var fallback = _provider.GetRequiredService<IGeographicRegistry>();
+        await fallback.SearchAsync("mbabane", "SZ", 5, default);
+        var hold = new HeldReadInterceptor();
+        var services = new ServiceCollection().AddLogging().AddSingleton(TimeProvider.System);
+        services.AddDbContext<SwiftAidDbContext>(options => options.UseSqlite(_connection).AddInterceptors(hold));
+        services.AddScoped<IGeographicRegistryImporter, GeographicRegistryImporter>();
+        services.AddScoped<IGeographicRegistry, GeographicRegistryService>();
+        await using var provider = services.BuildServiceProvider();
+        var calls = new EllaiIsolatedToolCalls(1);
+        var isolated = new EllaiIsolatedGeographicRegistry(provider, calls, fallback);
+        using var cancellation = new CancellationTokenSource();
+        var search = isolated.SearchAsync("mbabane", "SZ", 5, cancellation.Token);
+        try
+        {
+            await hold.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => search.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.False(hold.Released.Task.IsCompleted);
+        }
+        finally
+        {
+            hold.Released.TrySetResult();
+        }
+        await calls.RunAsync(_ => Task.FromResult(true), default).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(264, await _dbContext.GeographicLocations.CountAsync());
+    }
+
+    [Fact]
+    public async Task GatewayWorkerTimesOutHeldInitializedLocationRead()
+    {
+        await _provider.GetRequiredService<IGeographicRegistry>().SearchAsync("mbabane", "SZ", 5, default);
+        var hold = new HeldReadInterceptor();
+        var store = new InMemoryEllaiSessionStore();
+        var actor = ActorContext.FromValidatedPrincipal(new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, "location-owner"), new Claim(ActorContext.AccessEpochClaimType, "1")], "fixture")));
+        var session = new EllaiSessionRecord("location-timeout", EllaiMode.Ask, "Active", 1, 1, 1, 1,
+            0, 12, actor.ActorId, "scope", null, null, DateTimeOffset.UtcNow);
+        await store.CreateAsync(session, default);
+        var work = new EllaiUtteranceWork(session.SessionId, "scope", "Find Mbabane", "public.product-help", null,
+            EllaiMode.Ask, 1, "cycle", actor, true, "consent/0", EllaiProcessingClassification.UserProvidedNonSensitive,
+            EllaiProcessingClassification.UserProvidedNonSensitive, new HashSet<string> { EllaiToolNames.Locations },
+            EllaiConsentService.PublicProductHelpPurpose, "turn");
+        await store.TryAcceptUtteranceAsync(session with { SessionVersion = 2, CyclesUsed = 1 }, 1,
+            work.ClientUtteranceId, default, EllaiUtteranceWorkEnvelope.Serialize(work, work.ClientUtteranceId));
+        var consent = new EllaiConsentService();
+        using var model = new LocationToolClient();
+        var registrations = new ServiceCollection().AddLogging().AddSingleton(TimeProvider.System);
+        registrations.AddDbContext<SwiftAidDbContext>(options => options.UseSqlite(_connection).AddInterceptors(hold));
+        registrations.AddScoped<IGeographicRegistryImporter, GeographicRegistryImporter>();
+        registrations.AddScoped<IGeographicRegistry, GeographicRegistryService>();
+        registrations.AddSingleton<IEllaiSessionStore>(store).AddSingleton<IEllaiUtteranceOutboxStore>(store);
+        registrations.AddSingleton<EllaiSessionResponseStore>().AddSingleton(consent);
+        registrations.AddSingleton<EllaiUsageLedger>().AddSingleton<IEllaiUsageStore, InMemoryEllaiUsageStore>();
+        registrations.AddScoped(sp => new EllaiToolBroker(new EllaiPolicyService(), consent,
+            geography: sp.GetRequiredService<IGeographicRegistry>()));
+        registrations.AddScoped<IEllaiReasoningExecutor>(sp => new EllaiFrameworkExecutor(model,
+            new EllaiPromptBuilder("Synthetic policy", "fixture"), sp.GetRequiredService<EllaiToolBroker>(),
+            sp.GetRequiredService<EllaiUsageLedger>(), sp.GetRequiredService<IEllaiUsageStore>(), TimeSpan.FromMilliseconds(250)));
+        await using var provider = registrations.BuildServiceProvider();
+        using var worker = new EllaiUtteranceWorker(provider, NullLogger<EllaiUtteranceWorker>.Instance);
+        await worker.StartAsync(default);
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await hold.Started.Task.WaitAsync(timeout.Token);
+            EllaiConversationTurn turn;
+            do
+            {
+                await Task.Delay(20, timeout.Token);
+                turn = Assert.Single(await store.ReadConversationAsync(session.SessionId, actor.ActorId, timeout.Token));
+            } while (turn.CompletedAtUtc is null);
+            Assert.NotEqual("Completed", turn.Outcome);
+            Assert.False(hold.Released.Task.IsCompleted);
+        }
+        finally
+        {
+            hold.Released.TrySetResult();
+            await worker.StopAsync(default);
+        }
+    }
+
+    private sealed class LocationToolClient : IChatClient
+    {
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default) => Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                [new FunctionCallContent("location", EllaiToolNames.Locations,
+                    new Dictionary<string, object?> { ["q"] = "mbabane", ["country"] = "SZ" })])));
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var response = await GetResponseAsync(messages, options, cancellationToken);
+            yield return new ChatResponseUpdate(ChatRole.Assistant, response.Messages[0].Contents);
+        }
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    private sealed class HeldReadInterceptor : DbCommandInterceptor
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Released { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            Started.TrySetResult();
+            await Released.Task;
+            return result;
+        }
     }
 
     [Fact]
