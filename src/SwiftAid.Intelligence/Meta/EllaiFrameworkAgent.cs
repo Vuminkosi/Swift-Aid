@@ -35,7 +35,7 @@ public sealed class EllaiFrameworkAgent
         Func<CancellationToken, Task<bool>>? revalidateStreamObservations = null,
         string? frameworkSessionJson = null, int maxModelCalls = int.MaxValue,
         bool enableKnowledgeSpecialist = false, bool enableCaseSpecialist = false, bool enableAnalyticsSpecialist = false,
-        bool allowEmptyCaseQueue = false)
+        bool allowEmptyCaseQueue = false, bool enableUiSpecialist = false)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(instructions);
@@ -235,6 +235,43 @@ public sealed class EllaiFrameworkAgent
             }
             tools.Add(AIFunctionFactory.Create(DelegateAnalytics, name: "ellai_delegate_analytics",
                 description: "Delegate one authorized owned-case count with an explicit 1 to 365 day window."));
+        }
+        if (enableUiSpecialist && context.AllowedTools is { } uiTools &&
+            (uiTools.Contains(EllaiToolNames.UiCatalogue) || uiTools.Contains(EllaiToolNames.UiObserve)))
+        {
+            var delegationCount = 0;
+            async Task<string> DelegateUi(string task, CancellationToken token)
+            {
+                token.ThrowIfCancellationRequested();
+                if (Interlocked.Increment(ref delegationCount) != 1) return "UI delegation limit reached.";
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+                deadline.CancelAfter(TimeSpan.FromSeconds(SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.TryGet(
+                    SwiftAid.Application.Ellai.Specialists.EllaiSpecialistRegistry.Ui, out var profile) ? profile.TimeoutSeconds : 1));
+                try
+                {
+                    var result = await new EllaiUiSpecialist(_client, _agentFactory).RunAsync(task, instructions, context,
+                        usage, Current, InvokeGuardedTool, revalidateTool ?? invoke, deadline.Token,
+                        calls => Interlocked.Add(ref delegatedModelCalls, calls)).ConfigureAwait(false);
+                    if (result.Outcome == EllaiSpecialistOutcome.Stale)
+                    {
+                        Interlocked.Exchange(ref invalidDelegation, 1);
+                        return "The UI changed while it was being checked.";
+                    }
+                    if (result.Outcome != EllaiSpecialistOutcome.Completed || result.Decision is null)
+                    {
+                        Interlocked.Exchange(ref invalidDelegation, 1);
+                        return "UI specialist could not verify an answer.";
+                    }
+                    var json = System.Text.Json.JsonSerializer.Serialize(result.Decision);
+                    return json.Length <= 12000 ? json : "UI specialist result exceeded its limit.";
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "UI specialist timed out."; }
+                catch (EllaiFrameworkFailureException)
+                { Interlocked.Exchange(ref invalidDelegation, 1); return "UI specialist could not complete the request."; }
+            }
+            tools.Add(AIFunctionFactory.Create(DelegateUi, name: "ellai_delegate_ui",
+                description: "Delegate one read-only question about entitled controls and the current screen."));
         }
         var guardedClient = new ModelCallGuard(_client, Current, usage, maxModelCalls);
         var functionClient = new FunctionInvokingChatClient(guardedClient)
@@ -657,7 +694,8 @@ public sealed class EllaiFrameworkAgent
                 cancellationToken.ThrowIfCancellationRequested();
                 CallSequence++;
                 ChatResponse? response = null;
-                try { response = await base.GetResponseAsync(boundedMessages, options, cancellationToken).ConfigureAwait(false); }
+                try { response = await EllaiProviderCallIsolation.Instance.ExecuteAsync(
+                    token => base.GetResponseAsync(boundedMessages, options, token), cancellationToken).ConfigureAwait(false); }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
                 catch (Exception error) when (cancellationToken.IsCancellationRequested && error is not OutOfMemoryException)
                 {

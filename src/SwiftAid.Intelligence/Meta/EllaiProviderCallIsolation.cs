@@ -11,6 +11,35 @@ internal sealed class EllaiProviderCallIsolation(int maximumConcurrent = 8)
         ? new SemaphoreSlim(maximumConcurrent, maximumConcurrent)
         : throw new ArgumentOutOfRangeException(nameof(maximumConcurrent));
 
+    public async Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> invoke, CancellationToken ct)
+    {
+        await _slots.WaitAsync(ct).ConfigureAwait(false);
+        var operation = Task.Run(async () =>
+        {
+            try
+            {
+                ct.ThrowIfCancellationRequested();
+                return await invoke(ct).ConfigureAwait(false);
+            }
+            finally { _slots.Release(); }
+        }, CancellationToken.None);
+        try
+        {
+            return await operation.WaitAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Allow a response already completing to report usage, without waiting
+            // indefinitely for a provider that ignores cancellation.
+            if (!operation.IsCompleted)
+                await Task.WhenAny(operation, Task.Delay(TimeSpan.FromMilliseconds(100))).ConfigureAwait(false);
+            if (operation.IsCompletedSuccessfully) return operation.Result;
+            _ = operation.ContinueWith(task => { _ = task.Exception; }, CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            throw;
+        }
+    }
+
     public async IAsyncEnumerable<T> StreamAsync<T>(Func<CancellationToken, IAsyncEnumerator<T>> create,
         [EnumeratorCancellation] CancellationToken ct)
     {

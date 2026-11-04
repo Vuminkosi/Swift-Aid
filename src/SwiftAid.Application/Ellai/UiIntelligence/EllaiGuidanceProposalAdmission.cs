@@ -1,4 +1,5 @@
 using SwiftAid.Contracts.Ellai;
+using SwiftAid.Application.Abstractions;
 
 namespace SwiftAid.Application.Ellai;
 
@@ -14,7 +15,8 @@ public sealed record EllaiGuidanceAdmission(string Status, string? Objective = n
 /// newer turns and current UI evidence before the existing model planner is invoked.</summary>
 public sealed partial class EllaiGuidanceProposalAdmission(
     IEllaiSessionStore sessions, IEllaiUtteranceOutboxStore outbox,
-    EllaiUiRegistry registry, IEllaiUiObservationStore observations, TimeProvider? clock = null)
+    EllaiUiRegistry registry, IEllaiUiObservationStore observations, TimeProvider? clock = null,
+    ICacheStore? templateCache = null)
 {
     /// <summary>Leases generation inside the existing durable session and saves only
     /// a freshly validated plan. Retries reuse an accepted plan; concurrent calls do not bill twice.</summary>
@@ -141,10 +143,6 @@ public sealed partial class EllaiGuidanceProposalAdmission(
         var admitted = await AdmitAsync(sessionId, proposalId, authority, ct).ConfigureAwait(false);
         if (admitted.Status != "Ready" || admitted.Catalogue is null || admitted.Observation is null)
             return new(admitted.Status);
-        await ledger.HydrateAsync(sessionId, usage, ct).ConfigureAwait(false);
-        var estimate = System.Text.Encoding.UTF8.GetByteCount(System.Text.Json.JsonSerializer.Serialize(admitted))
-            + EllaiModelGuidancePlanner.MaxCompletionTokens + 4096;
-        if (!ledger.TryReserve(sessionId, estimate)) return new("BudgetUnavailable");
         var observed = discovery.Observe(admitted.Catalogue,
             admitted.Observation.MountedControlIds.ToHashSet(StringComparer.Ordinal),
             admitted.Observation.ViewInstanceId, admitted.Observation.ContextStamp,
@@ -152,6 +150,35 @@ public sealed partial class EllaiGuidanceProposalAdmission(
         var planningSession = await sessions.GetAsync(sessionId, ct).ConfigureAwait(false);
         var planningCheckpoint = EllaiGuidanceCheckpoint.Deserialize(planningSession?.GuidanceJson);
         var reportAlreadyReceived = planningCheckpoint?.ProposalId == proposalId && planningCheckpoint.IntakeEvidence is not null;
+        var feature = admitted.Catalogue.Descriptors[0].FeatureId;
+        // Organization-specific report rules are not yet represented in this authority snapshot.
+        // Do not share authenticated report templates until their policy scope is available.
+        var shareable = feature != EllaiReportUiManifest.FeatureId || !authority.Features.Contains(EllaiNavigationManifest.FeatureId);
+        var cacheKey = shareable ? EllaiSharedGuidanceTemplates.Key(admitted.Objective!, admitted.Catalogue, authority, observed, reportAlreadyReceived) : null;
+        var planId = "plan-" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(new[] { sessionId, proposalId, admitted.Observation.ContextStamp })))).ToLowerInvariant();
+        if (cacheKey is not null)
+        {
+            var cached = await EllaiSharedGuidanceTemplates.ReadAsync(templateCache, cacheKey, admitted.Objective!, admitted.Catalogue, ct).ConfigureAwait(false);
+            if (cached is not null && (!reportAlreadyReceived || cached.Steps.All(step => step.ControlId != "report.submit")))
+            {
+                var refreshed = await AdmitAsync(sessionId, proposalId, authority, ct).ConfigureAwait(false);
+                if (refreshed.Status != "Ready" || refreshed.InteractionEpoch != admitted.InteractionEpoch ||
+                    refreshed.Observation?.ViewInstanceId != admitted.Observation.ViewInstanceId ||
+                    refreshed.Observation?.ContextStamp != admitted.Observation.ContextStamp) return new("Stale");
+                var freshObserved = discovery.Observe(refreshed.Catalogue!, refreshed.Observation.MountedControlIds.ToHashSet(StringComparer.Ordinal),
+                    refreshed.Observation.ViewInstanceId, refreshed.Observation.ContextStamp, refreshed.Observation.Platform,
+                    refreshed.Observation.ReceivedAtUtc, refreshed.Observation.ControlStates);
+                var cachedValidation = validator.ValidateObserved(cached, new(feature, [], 20), authority.Features, authority.Capabilities,
+                    freshObserved, refreshed.Observation.ViewInstanceId, refreshed.Observation.ContextStamp,
+                    (clock ?? TimeProvider.System).GetUtcNow(), planId);
+                if (cachedValidation.Plan is not null) return new("Ready", cachedValidation.Plan);
+            }
+        }
+        await ledger.HydrateAsync(sessionId, usage, ct).ConfigureAwait(false);
+        var estimate = System.Text.Encoding.UTF8.GetByteCount(System.Text.Json.JsonSerializer.Serialize(admitted))
+            + EllaiModelGuidancePlanner.MaxCompletionTokens + 4096;
+        if (!ledger.TryReserve(sessionId, estimate)) return new("BudgetUnavailable");
         var generated = await planner.ComposeAsync(admitted.Objective!, GuidanceMode.Navigation,
             admitted.Catalogue, observed, ct, reportAlreadyReceived).ConfigureAwait(false);
         var sample = new EllaiUsageSample(sessionId, Math.Max(0, generated.Usage.PromptTokens), Math.Max(0, generated.Usage.CompletionTokens));
@@ -171,9 +198,6 @@ public sealed partial class EllaiGuidanceProposalAdmission(
         if (generated.Draft.Status != GuidancePlanStatus.Ready) return new(generated.Draft.Status.ToString());
         if (reportAlreadyReceived && generated.Draft.Steps.Any(step => step.ControlId == "report.submit"))
             return new("InvalidPlan");
-        var feature = admitted.Catalogue.Descriptors[0].FeatureId;
-        var planId = "plan-" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
-            System.Text.Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(new[] { sessionId, proposalId, admitted.Observation.ContextStamp })))).ToLowerInvariant();
         // Inference may outlive the observation freshness window. Re-admission above
         // fences page/context changes; validate against its newly received state,
         // never retimestamp the snapshot used to prompt the model.
@@ -184,6 +208,8 @@ public sealed partial class EllaiGuidanceProposalAdmission(
         var validation = validator.ValidateObserved(generated.Draft, new(feature, [], 20), authority.Features,
             authority.Capabilities, currentObserved, current.Observation.ViewInstanceId, current.Observation.ContextStamp,
             (clock ?? TimeProvider.System).GetUtcNow(), planId);
+        if (validation.Plan is not null && cacheKey is not null)
+            await EllaiSharedGuidanceTemplates.WriteAsync(templateCache, cacheKey, generated.Draft, current.Catalogue!, ct).ConfigureAwait(false);
         return validation.Plan is null ? new("InvalidPlan")
         {
             DiagnosticCode = validation.Errors.Contains("Guidance requires a fresh, visible and enabled target in the current view.")
