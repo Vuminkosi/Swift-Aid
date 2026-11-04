@@ -15,6 +15,72 @@ namespace SwiftAid.Ui.Tests;
 public sealed class SessionConflictReviewTests
 {
     [Theory]
+    [InlineData(true, 0)]
+    [InlineData(false, 0)]
+    [InlineData(true, 1)]
+    [InlineData(false, 1)]
+    [InlineData(true, 2)]
+    [InlineData(true, 3)]
+    public async Task UnconfirmedCreateRetainsDraftUntilMatchingSessionIsVerified(bool matchingSession, int outcomeKind)
+    {
+        var id = Guid.NewGuid();
+        var start = DateTimeOffset.UtcNow.AddDays(1);
+        var current = new CommunitySessionView(matchingSession ? id : Guid.NewGuid(), 1, "Draft", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Draft", "officer", null, false, 0, null);
+        var input = new CreateSessionInput("Draft", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
+        var execution = new TaskCompletionSource<UiCapabilityResult<SessionCommandResult>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (outcomeKind == 0)
+            execution.SetResult(UiCapabilityResults.Unavailable<SessionCommandResult>("editor"));
+        else if (outcomeKind == 1)
+            execution.SetException(new InvalidOperationException("Connection lost"));
+        else if (outcomeKind == 2)
+            execution.SetResult(new UiCapabilityResult<SessionCommandResult>(UiCapabilityResultCode.Success,
+                new SessionCommandResult(Guid.NewGuid(), 1, "Draft"),
+                new UiCapabilityMetadata("editor", "1", UiCapabilityProvenance.LiveService, DateTimeOffset.UtcNow, true)));
+        else
+            execution.SetResult(new UiCapabilityResult<SessionCommandResult>(UiCapabilityResultCode.Denied, null,
+                UiCapabilityResults.UnavailableMetadata("editor", "Access changed")));
+        var page = new SwiftAid.Gateway.Components.Pages.Sessions();
+        var type = page.GetType();
+        type.GetProperty("StaffSessionEditor", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page,
+            new StaffClient(current, true) { Execution = execution });
+        type.GetField("_actorId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, "officer");
+
+        await (Task)type.GetMethod("RunCommandAsync", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(page, [input.ToCommand(id, "reason", DateTimeOffset.UtcNow), null])!;
+        Assert.True((bool)type.GetField("_deferredCreateOutcomeUnknown", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page)!);
+        Assert.NotNull(type.GetField("_deferredCreate", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
+        await (Task)type.GetMethod("ManageSessionAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page, [null])!;
+        Assert.Null(type.GetField("_recoveredCreate", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
+
+        await (Task)type.GetMethod("RetryDeferredCreateAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page, null)!;
+        var retained = type.GetField("_deferredCreate", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page);
+        if (matchingSession) Assert.Null(retained);
+        else Assert.NotNull(retained);
+    }
+
+    [Fact]
+    public async Task UnconfirmedCreateIsNotRestoredForAnotherAccount()
+    {
+        var id = Guid.NewGuid();
+        var start = DateTimeOffset.UtcNow.AddDays(1);
+        var current = new CommunitySessionView(id, 1, "Draft", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new StoredSessionMaterial("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24], "Draft", "officer", null, false, 0, null);
+        var input = new CreateSessionInput("Draft", "Summary", "Community", [], "SZ", "region", "education", "Presenter", "en", start, "UTC", 60, null, [new SessionMaterialInput("card", "1")], SessionVisibility.Public, SessionChannelType.None, null, [24]);
+        var execution = new TaskCompletionSource<UiCapabilityResult<SessionCommandResult>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        execution.SetResult(UiCapabilityResults.Unavailable<SessionCommandResult>("editor"));
+        var client = new StaffClient(current, true) { Execution = execution };
+        var page = new SwiftAid.Gateway.Components.Pages.Sessions();
+        var type = page.GetType();
+        type.GetProperty("StaffSessionEditor", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, client);
+        type.GetField("_actorId", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page, "officer");
+        await (Task)type.GetMethod("RunCommandAsync", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(page, [input.ToCommand(id, "reason", DateTimeOffset.UtcNow), null])!;
+        client.ActorId = "another-officer";
+        await (Task)type.GetMethod("RetryDeferredCreateAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page, null)!;
+        Assert.Null(type.GetField("_deferredCreate", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
+        Assert.Null(type.GetField("_commandNotice", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page));
+    }
+
+    [Theory]
     [InlineData(true)]
     [InlineData(false)]
     public async Task FailedCreatePreflightRestoresDraftOnlyForOriginalAuthorizedActor(bool sameActor)

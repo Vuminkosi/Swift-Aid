@@ -16,6 +16,8 @@ New session revision snapshots retain the accepted lifecycle action, creator and
 
 For new published time changes, the revision action is `Rescheduled` and its snapshot retains the previous confirmed UTC start. A draft edit or an equivalent instant with a different offset is recorded as an update. Older snapshots are not rewritten.
 
+The web staff editor keeps an unconfirmed create in page memory with its original session reference and blocks another create until the user checks or explicitly discards it. A successful check requires the same actor, a matching session ID and creator, and current management access. This is not durable offline storage or proof that the currently closed staff authorization gate is operational.
+
 Android now downloads a bounded `text/calendar` response into its app cache and asks the device to open the file; this does not assert that a calendar app imported it. The cached file is retained for the receiving app and remains subject to operating-system cache cleanup. Actual Android calendar-handler behavior remains NOT VERIFIED.
 
 The connected PostgreSQL/TestServer subscription journey covers anonymous public detail, calendar and invitation reads; authenticated consent and idempotent subscription; session revision with renewed consent; cancellation; and unsubscribe. It uses a test principal and a test-only material-eligibility fixture, with session commands invoked directly through the service. It does not prove production staff authorization, actual material approval, provider delivery, browser sign-in, or device behavior.

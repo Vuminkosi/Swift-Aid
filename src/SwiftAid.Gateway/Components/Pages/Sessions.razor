@@ -26,7 +26,7 @@
     }
     @if (_confirmingRetainedLeave)
     {
-        <MudPaper Class="pa-4 mb-4" Elevation="0" role="alertdialog" aria-modal="true" aria-label="Unconfirmed session update">
+        <MudPaper Class="pa-4 mb-4" Elevation="0" role="alertdialog" aria-modal="true" aria-label="Unconfirmed session changes">
             <MudText Typo="Typo.subtitle1">Leave without keeping your session changes?</MudText>
             <MudText Typo="Typo.body2">The temporary copy and any unsaved session edits will be lost.</MudText>
             <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="StayWithRetainedProposal">Stay on this page</MudButton>
@@ -36,14 +36,22 @@
     @if (_deferredCreate is not null)
     {
         <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" role="status">
-            The new session draft was not submitted. When access returns, choose Schedule session to restore it. This temporary copy lasts only while this page remains open.
+            @if (_deferredCreateOutcomeUnknown)
+            {
+                <span>The new session may have been saved, but its outcome could not be confirmed. Check the session before creating another. This temporary copy lasts only while this page remains open.</span>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="RetryDeferredCreateAsync" Disabled="_busy">Check session</MudButton>
+            }
+            else
+            {
+                <span>The new session draft was not submitted. When access returns, choose Schedule session to restore it. This temporary copy lasts only while this page remains open.</span>
+            }
             @if (!_confirmingCreateDiscard)
             {
                 <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="() => _confirmingCreateDiscard = true">Discard temporary copy…</MudButton>
             }
             else
             {
-                <MudText Typo="Typo.caption">Discard the temporary draft?</MudText>
+                <MudText Typo="Typo.caption">@(_deferredCreateOutcomeUnknown ? "Discard the temporary copy? The session may still have been saved." : "Discard the temporary draft?")</MudText>
                 <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="ClearDeferredCreate">Yes, discard copy</MudButton>
                 <MudButton Variant="Variant.Text" OnClick="() => _confirmingCreateDiscard = false">Keep copy</MudButton>
             }
@@ -147,6 +155,8 @@
     private SessionCreateSubmission? _deferredCreate;
     private SessionCreateSubmission? _recoveredCreate;
     private string? _deferredCreateActor;
+    private Guid? _deferredCreateSessionId;
+    private bool _deferredCreateOutcomeUnknown;
     private bool _confirmingCreateDiscard;
     private bool _confirmingRetainedLeave;
     private string? _retainedLeaveTarget;
@@ -370,6 +380,11 @@
         _conflictProposal = null;
         if (sessionId is null)
         {
+            if (_deferredCreateOutcomeUnknown)
+            {
+                _serverError = "Check the unconfirmed session or discard its temporary copy before creating another.";
+                return;
+            }
             if (!await RefreshStaffAccessAsync())
             {
                 ClearEditorState();
@@ -424,7 +439,7 @@
             }
 
             if (result.Code == UiCapabilityResultCode.Success && result.Metadata.IsAvailable &&
-                result.Value is { Version: > 0 } session)
+                result.Value is { Version: > 0 } session && session.SessionId == sessionId)
             {
                 var capabilityResult = await StaffSessionEditor.GetManagementCapabilitiesAsync(session.SessionId, session.Version);
                 if (!IsCurrentIdentityEpoch(identityEpoch) || generation != Volatile.Read(ref _staffLoadGeneration) ||
@@ -566,7 +581,47 @@
     {
         _deferredCreate = null;
         _deferredCreateActor = null;
+        _deferredCreateSessionId = null;
+        _deferredCreateOutcomeUnknown = false;
         _confirmingCreateDiscard = false;
+    }
+
+    private void RetainCreate(CreateSessionDraftCommand create, string actorId, bool outcomeUnknown)
+    {
+        _deferredCreate = new SessionCreateSubmission(new CreateSessionInput(
+            create.Title, create.Summary, create.AudienceDescription, create.TopicTags,
+            create.CountryCode, create.RegionId, create.Sector, create.Presenter, create.Language,
+            create.StartUtc, create.TimeZoneId, create.DurationMinutes, create.Capacity,
+            create.Materials.Select(m => new SessionMaterialInput(m.MaterialId, m.SourceVersion)).ToArray(),
+            create.Visibility, create.ChannelType, create.ChannelLink, create.ReminderLeadHours), create.Reason);
+        _deferredCreateActor = actorId;
+        _deferredCreateSessionId = create.SessionId;
+        _deferredCreateOutcomeUnknown = outcomeUnknown;
+    }
+
+    private async Task RetryDeferredCreateAsync()
+    {
+        if (_busy || !_deferredCreateOutcomeUnknown || _deferredCreateSessionId is not { } id ||
+            _deferredCreateActor is not { } actor) return;
+        var identityEpoch = Volatile.Read(ref _identityEpoch);
+        await LoadStaffSessionAsync(id);
+        if (!IsCurrentIdentityEpoch(identityEpoch)) return;
+        if (_actorId is null)
+        {
+            _commandNotice = "Access could not be checked. The session outcome is still unconfirmed.";
+            return;
+        }
+        if (!string.Equals(_actorId, actor, StringComparison.Ordinal)) return;
+        if (_staffView is { } session && session.SessionId == id &&
+            string.Equals(session.CreatedByActorId, actor, StringComparison.Ordinal) && CanRenderEditor(_managementCapabilities))
+        {
+            ClearDeferredCreate();
+            _commandNotice = $"The session was found. Its reference is {id:D}; reopen its staff details to review it.";
+        }
+        else
+        {
+            _commandNotice = "The session outcome is still unconfirmed. Do not create another until it can be checked.";
+        }
     }
 
     private void ClearDeferredProposal()
@@ -965,13 +1020,7 @@
             if (command is CreateSessionDraftCommand create && !string.IsNullOrWhiteSpace(originalActorId) &&
                 (_actorId is null || string.Equals(_actorId, originalActorId, StringComparison.Ordinal)))
             {
-                _deferredCreate = new SessionCreateSubmission(new CreateSessionInput(
-                    create.Title, create.Summary, create.AudienceDescription, create.TopicTags,
-                    create.CountryCode, create.RegionId, create.Sector, create.Presenter, create.Language,
-                    create.StartUtc, create.TimeZoneId, create.DurationMinutes, create.Capacity,
-                    create.Materials.Select(m => new SessionMaterialInput(m.MaterialId, m.SourceVersion)).ToArray(),
-                    create.Visibility, create.ChannelType, create.ChannelLink, create.ReminderLeadHours), create.Reason);
-                _deferredCreateActor = originalActorId;
+                RetainCreate(create, originalActorId, outcomeUnknown: false);
             }
             ClearEditorState();
             _serverError ??= "Session management is unavailable for this account.";
@@ -1005,6 +1054,15 @@
             }
             else
             {
+                if (command is CreateSessionDraftCommand unconfirmedCreate &&
+                    (outcome.Code is UiCapabilityResultCode.Success or UiCapabilityResultCode.Unavailable or UiCapabilityResultCode.Retryable or UiCapabilityResultCode.Cancelled or UiCapabilityResultCode.Conflict or UiCapabilityResultCode.Denied) &&
+                    !string.IsNullOrWhiteSpace(originalActorId) && string.Equals(_actorId, originalActorId, StringComparison.Ordinal))
+                {
+                    RetainCreate(unconfirmedCreate, originalActorId, outcomeUnknown: true);
+                    ClearEditorState();
+                    _serverError = "The session outcome could not be confirmed. Check it before creating another.";
+                    return;
+                }
                 if (outcome.Code == UiCapabilityResultCode.Conflict && proposal is not null)
                 {
                     await RecoverConflictAsync(proposal, originalActorId);
@@ -1036,6 +1094,9 @@
                 "The session change could not be confirmed.");
             _canManageSessions = false;
             _serverError = "The session change could not be confirmed. Reload the session before trying again.";
+            if (command is CreateSessionDraftCommand unconfirmedCreate && !string.IsNullOrWhiteSpace(originalActorId) &&
+                string.Equals(_actorId, originalActorId, StringComparison.Ordinal))
+                RetainCreate(unconfirmedCreate, originalActorId, outcomeUnknown: true);
             if (proposal is not null)
                 await RecoverConflictAsync(proposal, originalActorId, outcomeUnknown: true);
         }
