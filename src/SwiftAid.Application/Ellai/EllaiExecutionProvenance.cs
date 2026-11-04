@@ -113,7 +113,7 @@ public sealed record EllaiObservedToolResult(
                 locationScope.ResultDigest == ResultFingerprint(result) ? locationScope : null,
             request.ToolName == EllaiToolNames.PublicSessions && result.ToolName == request.ToolName &&
                 request.Arguments.Count == 0 && result.Allowed && result.DenialReason is null &&
-                result.ReasonCode == EllaiToolReasonCodes.Ok && !result.Truncated &&
+                result.ReasonCode == EllaiToolReasonCodes.Ok &&
                 result.ItemCount == result.Evidence.Count && result.Evidence.Count <= 10
                     ? ResultFingerprint(result) : null);
     }

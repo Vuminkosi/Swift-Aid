@@ -633,9 +633,11 @@ public sealed class EllaiToolBroker
             var items = page.Items;
             var evidence = items.Select(item => new EvidenceRef("PublicSession", item.SessionId.ToString("D"),
                 item.Version.ToString(CultureInfo.InvariantCulture), "public-session", item.SessionId.ToString("D"))).ToArray();
-            var lines = items.Select(item => $"session {item.SessionId:D} · title {JsonSerializer.Serialize(item.Title)} · starts {item.StartUtc:O} · status {item.Status}");
+            var continuation = page.Next is null ? string.Empty : " (more sessions may be available)";
+            var lines = items.Select(item => $"session {item.SessionId:D} · title {JsonSerializer.Serialize(item.Title)} · starts {item.StartUtc:O} · status {item.Status}{continuation}");
             return new EllaiToolResult(request.ToolName, true, null, evidence,
-                items.Count == 0 ? "No public sessions were found." : string.Join("\n", lines),
+                items.Count == 0 ? (page.Next is null ? "No public sessions were found." :
+                    "No public sessions were found in this search; more may be available.") : string.Join("\n", lines),
                 items.Count, page.Next is not null, EllaiToolReasonCodes.Ok);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }

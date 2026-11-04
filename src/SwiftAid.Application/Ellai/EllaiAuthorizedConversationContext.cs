@@ -61,7 +61,7 @@ public static class EllaiAuthorizedConversationContext
             var references = new Dictionary<Guid, long>();
             foreach (var observation in trace.Observations)
             {
-                if (!observation.Allowed || observation.Truncated ||
+                if (!observation.Allowed || (observation.Truncated && observation.ToolName != EllaiToolNames.PublicSessions) ||
                     toolContext?.AllowedTools is { } allowedTools && !allowedTools.Contains(observation.ToolName))
                     return decisions[turn.ClientUtteranceId] = false;
                 // This validator returns only a format verdict about the model's
@@ -262,7 +262,7 @@ public static class EllaiAuthorizedConversationContext
                             new Dictionary<string, string>()), ct).ConfigureAwait(false);
                         ct.ThrowIfCancellationRequested();
                         if (current.ToolName != EllaiToolNames.PublicSessions || !current.Allowed || current.DenialReason is not null ||
-                            current.ReasonCode != EllaiToolReasonCodes.Ok || current.Truncated ||
+                            current.ReasonCode != EllaiToolReasonCodes.Ok || current.Truncated != observation.Truncated ||
                             !current.Evidence.SequenceEqual(observation.Evidence) ||
                             EllaiObservedToolResult.ResultFingerprint(current) != observation.PublicSessionsDigest)
                             return decisions[turn.ClientUtteranceId] = false;

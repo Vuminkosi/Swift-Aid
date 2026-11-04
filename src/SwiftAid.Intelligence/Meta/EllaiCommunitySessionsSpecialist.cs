@@ -63,7 +63,7 @@ public sealed class EllaiCommunitySessionsSpecialist(IChatClient client, IEllaiF
             try { fresh = await revalidate(context, request, ct).ConfigureAwait(false); }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception error) when (error is not OutOfMemoryException) { return new(EllaiSpecialistOutcome.Stale, null); }
-            if (!fresh.Allowed || original.Truncated || fresh.Truncated || fresh.ToolName != original.ToolName ||
+            if (!fresh.Allowed || fresh.Truncated != original.Truncated || fresh.ToolName != original.ToolName ||
                 fresh.ItemCount != original.ItemCount || fresh.ResultSummary != original.ResultSummary ||
                 !fresh.Evidence.SequenceEqual(original.Evidence) || !await isCurrent(ct).ConfigureAwait(false))
                 return new(EllaiSpecialistOutcome.Stale, null);
