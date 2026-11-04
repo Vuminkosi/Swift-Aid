@@ -4512,3 +4512,10 @@ The report UI accepts a value-free `UpdatePublicReportDraft` intent only for reg
 Report validation focuses and highlights one invalid field at a time. It announces the first issue; after the user corrects that field, the form revalidates and focuses the next issue. Approved value-free narration names the missing or invalid item and its repair action, including invalid age, so spoken guidance does not imply unsubmitted data was saved. User-entered report values are not included in narration requests.
 
 PASS: `git diff --check`; Gateway build `dotnet build src\SwiftAid.Gateway\SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false` (0 warnings, 0 errors); Android build `dotnet build src\SwiftAid.Mobile\SwiftAid.Mobile.csproj --no-restore -f net10.0-android -m:1 -nr:false` (0 warnings, 0 errors). No tests were added or run at the user's direction. Browser interaction, audible speech, and physical Android behavior remain NOT VERIFIED.
+
+
+### Semantic registry collision and responsive target resolution (2026-11-04)
+
+The trusted UI registry now rejects duplicate control IDs instead of silently replacing an earlier descriptor. Live DOM discovery classifies targets after checking visibility: hidden responsive copies do not make one visible target ambiguous, hidden-only targets remain Hidden, and multiple visible matches remain Ambiguous. This keeps responsive presentation from blocking guidance while preserving fail-closed behavior for genuinely ambiguous controls.
+
+PASS: Gateway build `dotnet build src\SwiftAid.Gateway\SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false -p:WasmBuildNative=false` (0 warnings, 0 errors); ES module syntax check `Get-Content src\SwiftAid.UI\wwwroot\js\ellai-ui-observations.js -Raw | node --input-type=module --check`; `git diff --check`. No tests were added or run. Actual responsive browser target selection remains NOT VERIFIED.
