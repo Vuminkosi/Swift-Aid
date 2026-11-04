@@ -204,9 +204,15 @@
 
             var updatedState = await LoadSubscriptionStateAsync(action.SessionId);
             if (updatedState is null) return null;
-            return result.Succeeded
-                ? updatedState with { Message = result.Message, IsError = false }
-                : updatedState with { Message = result.Message ?? result.Metadata.Notice ?? "Reminder preference could not be updated.", IsError = true };
+            var expected = action.Kind == PublicSessionsSurface.SessionSubscriptionActionKind.Subscribe
+                ? SubscriptionStatus.Active : SubscriptionStatus.Unsubscribed;
+            var confirmed = SessionSubscriptionPresentation.IsConfirmedUpdate(result, action.SessionId, expected, action.ExpectedVersion);
+            var expectedPanelStatus = expected == SubscriptionStatus.Active
+                ? PublicSessionsSurface.SessionSubscriptionStatus.Active : PublicSessionsSurface.SessionSubscriptionStatus.Unsubscribed;
+            var feedback = SessionSubscriptionPresentation.UpdateFeedback(confirmed,
+                !updatedState.IsError && updatedState.Status == expectedPanelStatus && updatedState.Version >= result.Value?.Version,
+                result.Message, updatedState.Message);
+            return updatedState with { Message = feedback.Message, IsError = feedback.IsError };
         }
         catch (OperationCanceledException)
         {

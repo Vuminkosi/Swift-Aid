@@ -4,6 +4,35 @@ namespace SwiftAid.Ui.Tests;
 
 public sealed class SessionSubscriptionPresentationTests
 {
+    [Fact]
+    public void UpdateConfirmationRequiresCurrentLiveReceiptForTheRequestedSession()
+    {
+        var sessionId = Guid.NewGuid();
+        var metadata = new UiCapabilityMetadata("session-subscriptions", "1", UiCapabilityProvenance.LiveService, DateTimeOffset.UtcNow, true);
+        var result = new UiCapabilityResult<SubscriptionView>(UiCapabilityResultCode.Success,
+            new SubscriptionView(sessionId, SubscriptionStatus.Active, 3, false), metadata);
+        Assert.True(SessionSubscriptionPresentation.IsConfirmedUpdate(result, sessionId, SubscriptionStatus.Active, 2));
+        Assert.False(SessionSubscriptionPresentation.IsConfirmedUpdate(result, Guid.NewGuid(), SubscriptionStatus.Active, 2));
+        Assert.False(SessionSubscriptionPresentation.IsConfirmedUpdate(result, sessionId, SubscriptionStatus.Unsubscribed, 2));
+        Assert.False(SessionSubscriptionPresentation.IsConfirmedUpdate(result, sessionId, SubscriptionStatus.Active, 4));
+        Assert.False(SessionSubscriptionPresentation.IsConfirmedUpdate(result with { Value = result.Value! with { IsSynthetic = true } }, sessionId, SubscriptionStatus.Active, 2));
+        Assert.False(SessionSubscriptionPresentation.IsConfirmedUpdate(result with { Metadata = metadata with { IsAvailable = false } }, sessionId, SubscriptionStatus.Active, 2));
+    }
+
+    [Fact]
+    public void RefreshFailureRemainsVisibleAfterAConfirmedUpdate()
+    {
+        var feedback = SessionSubscriptionPresentation.UpdateFeedback(true, false, null, "Connection lost");
+        Assert.True(feedback.IsError);
+        Assert.Contains("was saved", feedback.Message, StringComparison.Ordinal);
+        Assert.Contains("could not be verified", feedback.Message, StringComparison.Ordinal);
+
+        var unknown = SessionSubscriptionPresentation.UpdateFeedback(false, false, "Saved", null);
+        Assert.True(unknown.IsError);
+        Assert.Contains("could not be confirmed", unknown.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("was saved", unknown.Message, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(SubscriptionStatus.RequiresAuthentication, SubscriptionStatus.RequiresAuthentication)]
     [InlineData(SubscriptionStatus.Active, SubscriptionStatus.Active)]

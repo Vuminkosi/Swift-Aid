@@ -747,7 +747,9 @@
                 return UnavailableSubscriptionState(action.SessionId, "Review the reminder choices before continuing.", isError: true);
             }
 
-            if (result.Code == UiCapabilityResultCode.Success && result.Value is { } value)
+            var expected = action.Kind == PublicSessionsSurface.SessionSubscriptionActionKind.Subscribe
+                ? SubscriptionStatus.Active : SubscriptionStatus.Unsubscribed;
+            if (SessionSubscriptionPresentation.IsConfirmedUpdate(result, action.SessionId, expected, action.ExpectedVersion) && result.Value is { } value)
             {
                 var status = value.Status switch
                 {
@@ -759,9 +761,12 @@
                 if (status is PublicSessionsSurface.SessionSubscriptionStatus.Unsubscribed or PublicSessionsSurface.SessionSubscriptionStatus.Active)
                 {
                     var refreshed = await LoadSubscriptionStateAsync(action.SessionId);
-                    return refreshed is null
-                        ? UnavailableSubscriptionState(action.SessionId, CombineMessages(result.Message, result.Metadata.Notice))
-                        : refreshed with { Message = CombineMessages(CombineMessages(result.Message, result.Metadata.Notice), refreshed.Message) };
+                    if (refreshed is null)
+                        return UnavailableSubscriptionState(action.SessionId, "The reminder change was saved, but its current status could not be verified. Refresh and check again.", isError: true);
+                    var feedback = SessionSubscriptionPresentation.UpdateFeedback(true,
+                        !refreshed.IsError && refreshed.Status == status && refreshed.Version >= value.Version,
+                        CombineMessages(result.Message, result.Metadata.Notice), refreshed.Message);
+                    return refreshed with { Message = feedback.Message, IsError = feedback.IsError };
                 }
 
                 return new PublicSessionsSurface.SessionSubscriptionPanelState(
@@ -774,11 +779,12 @@
 
             var current = await LoadSubscriptionStateAsync(action.SessionId);
             return current is null
-                ? UnavailableSubscriptionState(action.SessionId, result.Message ?? result.Metadata.Notice, isError: true)
+                ? UnavailableSubscriptionState(action.SessionId, "The reminder change could not be confirmed. Refresh and check the current status.", isError: true)
                 : current with
                 {
                     IsError = true,
-                    Message = CombineMessages(result.Message, result.Metadata.Notice)
+                    Message = result.Succeeded ? "The reminder change could not be confirmed. Refresh and check the current status."
+                        : CombineMessages(result.Message, result.Metadata.Notice) ?? "The reminder change could not be confirmed. Refresh and check the current status."
                 };
         }
         catch (Exception)

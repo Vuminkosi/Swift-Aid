@@ -1,8 +1,25 @@
 namespace SwiftAid.Client.Presentation;
 
+public sealed record SessionSubscriptionUpdateFeedback(bool IsError, string? Message);
+
 /// <summary>Normalizes authentication and subscription state for reminder presentation.</summary>
 public static class SessionSubscriptionPresentation
 {
+    public static bool IsConfirmedUpdate(UiCapabilityResult<SubscriptionView> result, Guid sessionId, SubscriptionStatus expectedStatus, long expectedVersion) =>
+        sessionId != Guid.Empty && expectedVersion >= 0 && result.Succeeded && result.Metadata.IsAvailable &&
+        result.Metadata.Provenance == UiCapabilityProvenance.LiveService &&
+        result.Value is { IsSynthetic: false, Version: > 0 } value &&
+        value.SessionId == sessionId && value.Status == expectedStatus && value.Version >= expectedVersion;
+
+    public static SessionSubscriptionUpdateFeedback UpdateFeedback(bool confirmed, bool refreshAvailable, string? successMessage, string? refreshMessage)
+    {
+        if (!confirmed)
+            return new(true, "The reminder change could not be confirmed. Refresh and check the current status.");
+        if (!refreshAvailable)
+            return new(true, "The reminder change was saved, but its current status could not be verified. Refresh and check again.");
+        return new(false, successMessage ?? refreshMessage);
+    }
+
     public static SubscriptionStatus? Status(UiCapabilityResult<SubscriptionView> result) => result.Code switch
     {
         UiCapabilityResultCode.Denied => SubscriptionStatus.RequiresAuthentication,
