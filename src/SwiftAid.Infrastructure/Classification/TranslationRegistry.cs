@@ -86,6 +86,9 @@ public sealed class TranslationRegistry(SwiftAidDbContext db, IDataProtectionPro
             row.State = "Failed"; row.FailureCode = "invalid-protected-source"; row.LeaseId = null; row.LeaseUntilUtc = null;
             await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return null;
         }
+        // Scope locks and source unprotection can take time. Start the lease only
+        // after those checks, so the worker receives the full inference window.
+        now = clock.GetUtcNow();
         row.State = "Leased"; row.LeaseId = Guid.NewGuid(); row.LeaseUntilUtc = now.AddMinutes(3); row.Attempts++;
         row.FailureCode = null;
         await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
