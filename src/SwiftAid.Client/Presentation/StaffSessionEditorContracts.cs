@@ -32,7 +32,8 @@ public sealed record StaffSessionManagementCapabilities(
     Guid? SessionId,
     long? Version,
     string? Status,
-    bool IsCurrent);
+    bool IsCurrent,
+    bool CanViewHistory = false);
 
 /// <summary>Fail-closed editor port when no authorized session service is configured.</summary>
 public sealed class UnavailableStaffSessionEditorClient : IStaffSessionEditorClient

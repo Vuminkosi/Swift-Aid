@@ -142,7 +142,8 @@ public sealed record MembershipSnapshot(
     string OrganizationId,
     string OrganizationStatus,
     string MembershipStatus,
-    IReadOnlyList<string> WorkspaceIds);
+    IReadOnlyList<string> WorkspaceIds,
+    bool IsOwner = false);
 
 public sealed record OrganizationOptionSnapshot(string OrganizationId, string Status);
 

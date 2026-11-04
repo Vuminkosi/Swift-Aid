@@ -18,7 +18,8 @@ public sealed record SubscriptionView(
     SubscriptionStatus Status,
     long Version,
     bool IsSynthetic,
-    SubscriptionChannel? Channel = null);
+    SubscriptionChannel? Channel = null,
+    bool HasInactiveStoredConsent = false);
 
 public sealed record SubscriptionRequest(
     Guid SessionId,

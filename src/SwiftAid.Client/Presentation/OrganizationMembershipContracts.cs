@@ -4,7 +4,8 @@ public sealed record MembershipView(
     string OrganizationId,
     string OrganizationStatus,
     string MembershipStatus,
-    IReadOnlyList<string> WorkspaceIds);
+    IReadOnlyList<string> WorkspaceIds,
+    bool IsOwner = false);
 
 public sealed record OrganizationDirectoryOption(string OrganizationId, string Status);
 

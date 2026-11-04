@@ -2,6 +2,7 @@
 @using SwiftAid.Client.Intake
 @using SwiftAid.Client.Presentation.PublicWorkflows
 @using SwiftAid.Contracts.Cases
+@using SwiftAid.Contracts.Sessions
 @using SwiftAid.Contracts.Intake
 @using MudBlazor
 @using SwiftAid.UI.Components.Public
@@ -50,9 +51,16 @@ else if (_isSessions)
 {
     <PublicWebsiteShell>
         <ChildContent>
-            <PublicSessionsSurface Sessions="_publicSessions"
+            <PublicSessionsSurface @key="(_requestedSessionId, _isCalendarRoute, _initialRemindersView)" Sessions="_publicSessions"
+                                   InitialSessionId="_requestedSessionId"
+                                   InitialRemindersView="_initialRemindersView"
+                                   InitialCalendarView="@(_isCalendarRoute && !_hasSessionParameter)"
                                    Loading="_publicSessionsLoading"
                                    ErrorMessage="@_publicSessionsError"
+                                   QuerySessionsAsync="@(_hasSessionParameter ? null : QueryPublicSessionsAsync)"
+                                   LoadInvitationTextAsync="LoadPublicInvitationAsync"
+                                   LoadSubscriptionStateAsync="GuestSubscriptionStateAsync"
+                                   OnRequestSignIn="RequestSessionSignInAsync"
                                    OnRetry="LoadPublicSessionsAsync" />
         </ChildContent>
     </PublicWebsiteShell>
@@ -167,6 +175,11 @@ else
     private IReadOnlyList<SwiftAid.Contracts.Sessions.PublicSessionView> _publicSessions = [];
     private bool _publicSessionsLoading;
     private string? _publicSessionsError;
+    private Guid? _requestedSessionId;
+    private bool _initialRemindersView;
+    private bool _isCalendarRoute;
+    private bool _hasSessionParameter;
+    private long _publicSessionsGeneration;
     private bool IsSecureIntakeTransportAvailable =>
         Uri.TryCreate(Navigation.BaseUri, UriKind.Absolute, out var baseUri) &&
         string.Equals(baseUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
@@ -199,14 +212,56 @@ else
         await ReloadHistoryAsync();
     }
 
+    private async Task<PublicSessionPage?> QueryPublicSessionsAsync(PublicSessionQuery query)
+    {
+        var result = await PublicCommunitySessions.QueryPublicAsync(query);
+        return result.Succeeded ? result.Value : null;
+    }
+
+    private async Task<string?> LoadPublicInvitationAsync(Guid sessionId, long expectedVersion)
+    {
+        var result = await PublicCommunitySessions.GetInvitationTextForVersionAsync(sessionId, expectedVersion);
+        return result.Succeeded ? result.Value : null;
+    }
+
+    private static Task<PublicSessionsSurface.SessionSubscriptionPanelState?> GuestSubscriptionStateAsync(Guid sessionId) =>
+        Task.FromResult<PublicSessionsSurface.SessionSubscriptionPanelState?>(new(
+            sessionId, PublicSessionsSurface.SessionSubscriptionStatus.RequiresAuthentication, 0, null, null, false));
+
+    private Task RequestSessionSignInAsync(Guid sessionId)
+    {
+        var returnUrl = $"/sessions?sessionId={sessionId:D}&tab=reminders";
+        Navigation.NavigateTo($"/sign-in?returnUrl={Uri.EscapeDataString(returnUrl)}", forceLoad: true);
+        return Task.CompletedTask;
+    }
+
     private async Task LoadPublicSessionsAsync()
     {
+        var generation = ++_publicSessionsGeneration;
         _publicSessionsLoading = true;
         _publicSessionsError = null;
         StateHasChanged();
         try
         {
+            if (_hasSessionParameter)
+            {
+                if (_requestedSessionId is not { } sessionId)
+                {
+                    _publicSessions = [];
+                    _publicSessionsError = "This session is not available.";
+                    return;
+                }
+                var detail = await PublicCommunitySessions.GetPublicAsync(sessionId);
+                if (generation != _publicSessionsGeneration) return;
+                _publicSessions = detail.Succeeded && detail.Value is { } session ? [session] : [];
+                if (!detail.Succeeded)
+                    _publicSessionsError = "This session is temporarily unavailable. Try again.";
+                else if (detail.Value is null)
+                    _publicSessionsError = "This session is not available.";
+                return;
+            }
             var result = await PublicCommunitySessions.ListPublicAsync();
+            if (generation != _publicSessionsGeneration) return;
             if (result.Code == UiCapabilityResultCode.Success && result.Metadata.IsAvailable && result.Value is not null)
             {
                 _publicSessions = result.Value;
@@ -218,12 +273,16 @@ else
         }
         catch (Exception)
         {
+            if (generation != _publicSessionsGeneration) return;
             _publicSessionsError = "Community sessions are unavailable right now. Please try again.";
         }
         finally
         {
-            _publicSessionsLoading = false;
-            StateHasChanged();
+            if (generation == _publicSessionsGeneration)
+            {
+                _publicSessionsLoading = false;
+                StateHasChanged();
+            }
         }
     }
 
@@ -493,8 +552,26 @@ else
         var uri = Navigation.ToAbsoluteUri(Navigation.Uri);
         var path = uri.AbsolutePath.TrimEnd('/');
         var query = Uri.UnescapeDataString(uri.Query);
+        _requestedSessionId = null;
+        _hasSessionParameter = false;
+        _initialRemindersView = false;
+        foreach (var item in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var pair = item.Split('=', 2);
+            if (!_hasSessionParameter && string.Equals(Uri.UnescapeDataString(pair[0]), "sessionId", StringComparison.OrdinalIgnoreCase))
+            {
+                _hasSessionParameter = true;
+                if (pair.Length == 2 && Guid.TryParse(Uri.UnescapeDataString(pair[1]), out var id) && id != Guid.Empty)
+                    _requestedSessionId = id;
+            }
+            else if (pair.Length == 2 && string.Equals(Uri.UnescapeDataString(pair[0]), "tab", StringComparison.OrdinalIgnoreCase) &&
+                     string.Equals(Uri.UnescapeDataString(pair[1]), "reminders", StringComparison.OrdinalIgnoreCase))
+                _initialRemindersView = true;
+        }
+        _initialRemindersView &= _requestedSessionId is not null;
         _isHome = path.Length == 0;
-        _isSessions = string.Equals(path, "/sessions", StringComparison.OrdinalIgnoreCase);
+        _isCalendarRoute = string.Equals(path, "/sessions/calendar", StringComparison.OrdinalIgnoreCase);
+        _isSessions = _isCalendarRoute || string.Equals(path, "/sessions", StringComparison.OrdinalIgnoreCase);
         _isEllaiAbout = string.Equals(path, "/ellai/about", StringComparison.OrdinalIgnoreCase);
         _isTracking = string.Equals(path, "/report", StringComparison.OrdinalIgnoreCase) &&
             query.Contains("view=tracking", StringComparison.OrdinalIgnoreCase);

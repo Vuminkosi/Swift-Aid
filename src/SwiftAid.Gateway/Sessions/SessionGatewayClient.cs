@@ -30,25 +30,28 @@ public sealed class SessionGatewayClient(
     private readonly IServiceProvider _serviceProvider =
         serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
 
-    /// <summary>Lists the published public sessions; empty when the pipeline is disabled.</summary>
+    /// <summary>Lists published public sessions; failures propagate to the presentation adapter.</summary>
     public async Task<IReadOnlyList<PublicSessionView>> ListPublicAsync(
         int? limit,
         CancellationToken cancellationToken = default)
     {
-        var service = _serviceProvider.GetService<ICommunitySessionService>();
-        if (service is null)
-        {
-            return [];
-        }
+        var service = _serviceProvider.GetService<ICommunitySessionService>()
+            ?? throw new InvalidOperationException("The community session service is unavailable.");
+        return await service.ListPublicAsync(limit, cancellationToken).ConfigureAwait(false);
+    }
 
-        try
-        {
-            return await service.ListPublicAsync(limit, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception)
-        {
-            return [];
-        }
+    public Task<PublicSessionPage> QueryPublicAsync(PublicSessionQuery query, CancellationToken cancellationToken = default)
+    {
+        var service = _serviceProvider.GetService<ICommunitySessionService>()
+            ?? throw new InvalidOperationException("The community session service is unavailable.");
+        return service.QueryPublicAsync(query, cancellationToken);
+    }
+
+    public Task<PublicSessionView?> GetPublicAsync(Guid sessionId, CancellationToken cancellationToken = default)
+    {
+        var service = _serviceProvider.GetService<ICommunitySessionService>()
+            ?? throw new InvalidOperationException("The community session service is unavailable.");
+        return service.GetPublicAsync(sessionId, cancellationToken);
     }
 
     /// <summary>Loads the plain-text invitation for a published session, if available.</summary>
@@ -65,6 +68,24 @@ public sealed class SessionGatewayClient(
         try
         {
             return await service.GetInvitationTextAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    public async Task<string?> GetInvitationTextForVersionAsync(Guid sessionId, long expectedVersion, CancellationToken cancellationToken = default)
+    {
+        var service = _serviceProvider.GetService<ICommunitySessionService>();
+        if (service is null || expectedVersion < 1) return null;
+        try
+        {
+            return await service.GetInvitationTextForVersionAsync(sessionId, expectedVersion, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception)
         {
@@ -134,7 +155,11 @@ public sealed class SessionGatewayClient(
 
         try
         {
-            var result = await service.ExecuteAsync(command, actor.ActorId, cancellationToken).ConfigureAwait(false);
+            // The editor can spend time checking access after creating a command.
+            // Stamp it again at the trusted server boundary so that lifecycle and
+            // reminder decisions do not use that earlier time.
+            var acceptedCommand = command with { RecordedAtUtc = DateTimeOffset.UtcNow };
+            var result = await service.ExecuteAsync(acceptedCommand, actor.ActorId, cancellationToken).ConfigureAwait(false);
             if (result.SessionId == Guid.Empty)
             {
                 return new SessionStaffOutcome(

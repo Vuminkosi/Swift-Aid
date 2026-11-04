@@ -1,6 +1,19 @@
 using SwiftAid.Domain.Sessions;
+using SwiftAid.Contracts.Sessions;
 
 namespace SwiftAid.Application.Sessions;
+
+/// <summary>Accepted lifecycle action recorded with a session revision.</summary>
+public enum SessionRevisionAction
+{
+    Created,
+    Reviewed,
+    Scheduled,
+    Updated,
+    Cancelled,
+    Completed,
+    Rescheduled
+}
 
 /// <summary>
 /// How the store should synchronize reminder occurrences after a session change.
@@ -9,7 +22,7 @@ namespace SwiftAid.Application.Sessions;
 /// </summary>
 public enum SessionReminderSync
 {
-    /// <summary>No reminder change (create, review, complete, read paths).</summary>
+    /// <summary>No reminder change (create, review, read paths).</summary>
     None,
 
     /// <summary>
@@ -19,7 +32,7 @@ public enum SessionReminderSync
     /// </summary>
     Recompute,
 
-    /// <summary>Mark Pending rows Suppressed. Used after cancel. Sent rows stay Sent.</summary>
+    /// <summary>Suppress pending work and mark in-progress deliveries outcome unknown after cancellation or completion. Sent rows stay Sent.</summary>
     SuppressPending,
 }
 
@@ -38,6 +51,7 @@ public interface ICommunitySessionStore
         string actorId,
         string reason,
         DateTimeOffset recordedAtUtc,
+        SessionRevisionAction action,
         CancellationToken ct);
 
     Task UpdateAsync(
@@ -48,11 +62,19 @@ public interface ICommunitySessionStore
         DateTimeOffset recordedAtUtc,
         SessionReminderSync reminderSync,
         IReadOnlyList<SessionReminderOccurrence>? occurrences,
+        SessionRevisionAction action,
+        DateTimeOffset? previousStartUtc,
         CancellationToken ct);
 
     Task<IReadOnlyList<CommunitySession>> ListPublicAsync(int take, CancellationToken ct);
 
+    /// <summary>Filters public sessions before applying the bounded continuation and limit.</summary>
+    Task<IReadOnlyList<CommunitySession>> QueryPublicAsync(PublicSessionQuery query, int take, CancellationToken ct);
+
     Task<int> CountRevisionsAsync(Guid sessionId, CancellationToken ct);
+
+    /// <summary>Reads staff-only revision metadata; callers must authorize the session first.</summary>
+    Task<IReadOnlyList<SessionHistoryEntry>> ReadHistoryAsync(Guid sessionId, long? beforeVersion, int take, CancellationToken ct);
 
     Task<int> CountPendingRemindersAsync(Guid sessionId, CancellationToken ct);
 

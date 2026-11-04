@@ -63,6 +63,86 @@ public sealed class CommunitySessionTests
     }
 
     [Fact]
+    public void EditingAReviewedDraftRequiresANewReviewBeforeScheduling()
+    {
+        var session = CreateDraft();
+        session.Review("officer-2", false, CreatedAt.AddHours(1));
+        session.UpdateDetails(
+            "Revised title", session.Summary, session.AudienceDescription, [.. session.TopicTags],
+            session.Presenter, session.Language, session.StartUtc, session.DurationMinutes, session.Capacity,
+            [.. session.Materials.Select(material => new SessionMaterialRef(material.MaterialId, material.SourceVersion))],
+            session.Visibility, session.ChannelType, session.ChannelLink, [.. session.ReminderLeadHours], CreatedAt.AddHours(2));
+
+        Assert.Equal(CommunitySessionStatus.Draft, session.Status);
+        Assert.Null(session.ReviewedByActorId);
+        Assert.Null(session.ReviewedAtUtc);
+        Assert.Throws<InvalidOperationException>(() => session.Schedule("officer-2", CreatedAt.AddHours(3)));
+        session.Review("officer-2", false, CreatedAt.AddHours(4));
+        session.Schedule("officer-2", CreatedAt.AddHours(5));
+        Assert.Equal(CommunitySessionStatus.Scheduled, session.Status);
+    }
+
+    [Fact]
+    public void InvalidEditDoesNotChangeReviewedSessionOrItsReview()
+    {
+        var session = CreateDraft();
+        session.Review("officer-2", false, CreatedAt.AddHours(1));
+        var originalTitle = session.Title;
+        var originalVersion = session.Version;
+        var originalReviewer = session.ReviewedByActorId;
+
+        Assert.Throws<ArgumentException>(() => session.UpdateDetails(
+            "Changed title", session.Summary, session.AudienceDescription, [.. session.TopicTags],
+            session.Presenter, session.Language, session.StartUtc, session.DurationMinutes, session.Capacity,
+            [new SessionMaterialRef("", "v1")], session.Visibility, session.ChannelType, session.ChannelLink,
+            [.. session.ReminderLeadHours], CreatedAt.AddHours(2)));
+
+        Assert.Equal(originalTitle, session.Title);
+        Assert.Equal(originalVersion, session.Version);
+        Assert.Equal(CommunitySessionStatus.Reviewed, session.Status);
+        Assert.Equal(originalReviewer, session.ReviewedByActorId);
+    }
+
+    [Theory]
+    [InlineData("https://user:password@example.test/session")]
+    [InlineData("https://example.test/session\r\nJoin a different event")]
+    public void PublicDestinationRejectsCredentialsAndControlCharacters(string link)
+    {
+        var session = CreateDraft();
+
+        Assert.Throws<ArgumentException>(() => session.UpdateDetails(
+            session.Title, session.Summary, session.AudienceDescription, [.. session.TopicTags],
+            session.Presenter, session.Language, session.StartUtc, session.DurationMinutes, session.Capacity,
+            [.. session.Materials], session.Visibility, SessionChannelType.Other, link,
+            [.. session.ReminderLeadHours], CreatedAt));
+    }
+
+    [Theory]
+    [InlineData("https://user:password@example.test/session")]
+    [InlineData("https://example.test/session\r\nInjected invitation text")]
+    public void LegacyUnsafeDestinationIsOmittedFromCalendarAndInvitation(string link)
+    {
+        var session = CreateDraft();
+        session.UpdateDetails(session.Title, session.Summary, session.AudienceDescription, [.. session.TopicTags],
+            session.Presenter, session.Language, session.StartUtc, session.DurationMinutes, session.Capacity,
+            [.. session.Materials], session.Visibility, SessionChannelType.Other, "https://example.test/session",
+            [.. session.ReminderLeadHours], CreatedAt);
+        session.Review("officer-2", false, CreatedAt.AddHours(1));
+        session.Schedule("officer-2", CreatedAt.AddHours(2));
+        typeof(CommunitySession).GetField("<ChannelLink>k__BackingField",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.SetValue(session, link);
+
+        var calendar = CommunitySessionSharing.BuildIcs(session, CreatedAt.AddHours(3));
+        var invitation = CommunitySessionSharing.BuildInvitationText(session);
+
+        Assert.DoesNotContain("URL:", calendar, StringComparison.Ordinal);
+        Assert.DoesNotContain("Join:", invitation, StringComparison.Ordinal);
+        Assert.DoesNotContain("password", calendar + invitation, StringComparison.Ordinal);
+        Assert.DoesNotContain("Injected invitation text", calendar + invitation, StringComparison.Ordinal);
+        Assert.Contains(session.RegionId, invitation, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Update_OnScheduledSession_BumpsIcsSequence()
     {
         var session = CreateDraft();
@@ -72,15 +152,37 @@ public sealed class CommunitySessionTests
         Assert.Equal(0, session.IcsSequence);
 
         session.UpdateDetails(
-            "Title v2", "summary", "audience", [], "presenter", "en",
-            StartAt.AddDays(1), 60, null,
-            [new SessionMaterialRef("mat-1", "v3")],
-            SessionVisibility.Public, SessionChannelType.None, null, [],
+            session.Title, session.Summary, session.AudienceDescription, [.. session.TopicTags], session.Presenter, session.Language,
+            StartAt.AddDays(1), session.DurationMinutes, session.Capacity,
+            [.. session.Materials],
+            session.Visibility, session.ChannelType, session.ChannelLink, [.. session.ReminderLeadHours],
             StartAt);
 
         Assert.Equal(publishedVersion + 1, session.Version);
         Assert.Equal(1, session.IcsSequence);
         Assert.Equal(StartAt.AddDays(1), session.StartUtc);
+    }
+
+    [Fact]
+    public void ScheduledSessionRejectsUnreviewedContentChangesWithoutMutatingThePublishedVersion()
+    {
+        var session = CreateDraft();
+        session.Review("officer-2", false, CreatedAt.AddHours(1));
+        session.Schedule("officer-2", CreatedAt.AddHours(2));
+        var version = session.Version;
+        var originalTitle = session.Title;
+        var originalStart = session.StartUtc;
+
+        Assert.Throws<InvalidOperationException>(() => session.UpdateDetails(
+            "Unreviewed title", session.Summary, session.AudienceDescription, [.. session.TopicTags],
+            session.Presenter, session.Language, session.StartUtc.AddDays(1), session.DurationMinutes,
+            session.Capacity, [.. session.Materials], session.Visibility, session.ChannelType,
+            session.ChannelLink, [.. session.ReminderLeadHours], CreatedAt.AddHours(3)));
+
+        Assert.Equal(version, session.Version);
+        Assert.Equal(originalTitle, session.Title);
+        Assert.Equal(originalStart, session.StartUtc);
+        Assert.Equal(CommunitySessionStatus.Scheduled, session.Status);
     }
 
     [Fact]
@@ -116,6 +218,7 @@ public sealed class CommunitySessionTests
         Assert.Contains("SEQUENCE:0", first);
         Assert.Contains("STATUS:CONFIRMED", first);
         Assert.DoesNotContain("attendee", first, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(session.Materials[0].MaterialId, first, StringComparison.Ordinal);
 
         session.UpdateDetails(
             session.Title, session.Summary, session.AudienceDescription,
@@ -140,6 +243,51 @@ public sealed class CommunitySessionTests
         var ics = CommunitySessionSharing.BuildIcs(session, CreatedAt.AddHours(4));
         Assert.Contains("STATUS:CANCELLED", ics);
         Assert.Contains("cancelled", ics, StringComparison.OrdinalIgnoreCase);
+        var invitation = CommunitySessionSharing.BuildInvitationText(session);
+        Assert.StartsWith("Session cancelled:", invitation, StringComparison.Ordinal);
+        Assert.DoesNotContain("venue flooded", invitation, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Ics_FoldsUnicodeWithoutCorruptionAndUsesCalendarLineEndings()
+    {
+        var session = CreateDraft();
+        var title = new string('A', 66) + "€🌍 community";
+        session.UpdateDetails(title, session.Summary, session.AudienceDescription, [.. session.TopicTags],
+            session.Presenter, session.Language, session.StartUtc, session.DurationMinutes, session.Capacity,
+            [.. session.Materials], session.Visibility, session.ChannelType, session.ChannelLink,
+            [.. session.ReminderLeadHours], CreatedAt);
+        session.Review("officer-2", false, CreatedAt.AddHours(1));
+        session.Schedule("officer-2", CreatedAt.AddHours(2));
+
+        var ics = CommunitySessionSharing.BuildIcs(session, CreatedAt.AddHours(3));
+        var unfolded = ics.Replace("\r\n ", "", StringComparison.Ordinal);
+
+        Assert.DoesNotContain('\uFFFD', ics);
+        Assert.Contains($"SUMMARY:{title}", unfolded, StringComparison.Ordinal);
+        Assert.Contains($"{session.Summary}\\nPresenter:", unfolded, StringComparison.Ordinal);
+        Assert.DoesNotContain('\n', ics.Replace("\r\n", "", StringComparison.Ordinal));
+        Assert.DoesNotContain('\r', ics.Replace("\r\n", "", StringComparison.Ordinal));
+        Assert.All(ics.Split("\r\n"), line => Assert.True(System.Text.Encoding.UTF8.GetByteCount(line) <= 75));
+    }
+
+    [Fact]
+    public void IcsPreservesUriPunctuationWithoutTextEscaping()
+    {
+        var session = CreateDraft();
+        const string link = "https://example.test/meeting?topics=health,nutrition;language=en";
+        session.UpdateDetails(session.Title, session.Summary, session.AudienceDescription, [.. session.TopicTags],
+            session.Presenter, session.Language, session.StartUtc, session.DurationMinutes, session.Capacity,
+            [.. session.Materials], session.Visibility, SessionChannelType.Other, link,
+            [.. session.ReminderLeadHours], CreatedAt);
+        session.Review("officer-2", false, CreatedAt.AddHours(1));
+        session.Schedule("officer-2", CreatedAt.AddHours(2));
+
+        var ics = CommunitySessionSharing.BuildIcs(session, CreatedAt.AddHours(3));
+        var unfolded = ics.Replace("\r\n ", "", StringComparison.Ordinal);
+
+        Assert.Contains($"URL:{link}\r\n", unfolded, StringComparison.Ordinal);
+        Assert.All(ics.Split("\r\n"), line => Assert.True(System.Text.Encoding.UTF8.GetByteCount(line) <= 75));
     }
 
     [Fact]
@@ -159,6 +307,25 @@ public sealed class CommunitySessionTests
         Assert.Contains(session.Title, text);
         Assert.Contains("Africa/Harare", text);
         Assert.Contains(session.Presenter, text);
+    }
+
+    [Fact]
+    public void InvitationsDistinguishRepeatedLocalTimesDuringDaylightSavingFallback()
+    {
+        var first = CreateDraft(startUtc: new DateTimeOffset(2026, 11, 1, 5, 30, 0, TimeSpan.Zero), timeZoneId: "America/New_York");
+        var second = CreateDraft(startUtc: new DateTimeOffset(2026, 11, 1, 6, 30, 0, TimeSpan.Zero), timeZoneId: "America/New_York");
+        foreach (var session in new[] { first, second })
+        {
+            session.Review("officer-2", false, CreatedAt.AddHours(1));
+            session.Schedule("officer-2", CreatedAt.AddHours(2));
+        }
+
+        var firstText = CommunitySessionSharing.BuildInvitationText(first);
+        var secondText = CommunitySessionSharing.BuildInvitationText(second);
+
+        Assert.Contains("America/New_York, UTC-04:00", firstText, StringComparison.Ordinal);
+        Assert.Contains("America/New_York, UTC-05:00", secondText, StringComparison.Ordinal);
+        Assert.NotEqual(firstText, secondText);
     }
 
     [Fact]

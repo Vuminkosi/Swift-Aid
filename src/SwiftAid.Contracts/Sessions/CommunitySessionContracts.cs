@@ -131,7 +131,7 @@ public sealed record CommunitySessionView(
     long IcsSequence,
     string? CancellationReason);
 
-/// <summary>Public-safe projection. No attendee data, no internal audit fields.</summary>
+/// <summary>Public-safe projection. No attendee data or internal audit fields; material references remain empty until public rights and withdrawal can be verified.</summary>
 public sealed record PublicSessionView(
     Guid SessionId,
     long Version,
@@ -161,6 +161,46 @@ public sealed record SessionCommandResult(
     long Version,
     string Status);
 
+/// <summary>A bounded public discovery query. The continuation is a position, not an authorization grant.</summary>
+public sealed record PublicSessionQuery(
+    string? Search = null,
+    string? CountryCode = null,
+    string? RegionId = null,
+    string? Sector = null,
+    string? Language = null,
+    string? Topic = null,
+    DateTimeOffset? StartFromUtc = null,
+    DateTimeOffset? StartBeforeUtc = null,
+    DateTimeOffset? AfterStartUtc = null,
+    Guid? AfterSessionId = null,
+    int Limit = 25,
+    string? Category = null,
+    DateOnly? LocalDateFrom = null,
+    DateOnly? LocalDateTo = null,
+    string? Status = null);
+
+/// <summary>Response feature marker for public query behavior introduced after the original search endpoint.</summary>
+public static class PublicSessionQueryFeatures
+{
+    public const string HeaderName = "X-SwiftAid-Session-Query-Features";
+    public const string StatusFilter = "status-v1";
+}
+
+/// <summary>Confirms that invitation text was checked against the requested session version.</summary>
+public static class PublicSessionInvitationFeatures
+{
+    public const string HeaderName = "X-SwiftAid-Invitation-Version-Checked";
+    public const string Version = "1";
+}
+
+/// <summary>Position for the next page of a public session query.</summary>
+public sealed record PublicSessionPosition(DateTimeOffset StartUtc, Guid SessionId);
+
+/// <summary>Public-safe sessions in start-time and session-id order.</summary>
+public sealed record PublicSessionPage(
+    IReadOnlyList<PublicSessionView> Items,
+    PublicSessionPosition? Next);
+
 /// <summary>Officer session service. Servers enforce staff authentication; the domain enforces review rules.</summary>
 public interface ICommunitySessionService
 {
@@ -170,9 +210,17 @@ public interface ICommunitySessionService
 
     Task<IReadOnlyList<PublicSessionView>> ListPublicAsync(int? limit, CancellationToken ct);
 
+    Task<PublicSessionPage> QueryPublicAsync(PublicSessionQuery query, CancellationToken ct);
+
     Task<PublicSessionView?> GetPublicAsync(Guid sessionId, CancellationToken ct);
 
     Task<string?> GetIcsAsync(Guid sessionId, DateTimeOffset generatedAtUtc, CancellationToken ct);
 
     Task<string?> GetInvitationTextAsync(Guid sessionId, CancellationToken ct);
+
+    Task<string?> GetInvitationTextForVersionAsync(Guid sessionId, long expectedVersion, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult<string?>(null);
+    }
 }

@@ -1,5 +1,11 @@
 # SwiftAid implementation progress
 
+## Community Sessions worktree - 3 November 2026 (PARTIAL)
+
+On `community-sessions` through `121aaa9`, the shared public web and Android surfaces have paged discovery, direct detail, calendar, manual sharing, calendar exports and account subscription controls. Published completed sessions remain discoverable; public outputs omit cancelled or completed join destinations and unverified material references. Synthetic-fixture and focused tests are documented in [community/REPOSITORY-MAP.md](community/REPOSITORY-MAP.md).
+
+Staff commands remain fail-closed without authoritative session-scoped permissions. The approved-material authority, separately reviewed published revisions, staff history, Android staff editor and full conflict/draft recovery remain incomplete. Browser and device journeys, light/dark visual acceptance, real reminder delivery, independent review and end-to-end acceptance are NOT VERIFIED. No P10 acceptance is claimed.
+
 ## Current master-checklist execution - 2 November 2026
 
 Baseline inventory recorded at canonical branch `interactive-ellai`, base commit `865964dbe9664a557fd0f0e303af03e115f22839`; the corrective slice is commit `5489f2c20ef62d8b9033d901358b943baf4de4a4`. `SW-00-001` is Passed; `SW-00-002` remains Blocked because the 16 documents claimed by the checklist are not present in the supplied attachment directory (only the two execution directives are available). `SW-00-004` is Failed/partial: Android Release, Python worker tests, Compose configuration and the post-fix Integration suite passed; the refreshed no-build solution test run passes 2,372 tests with 229 skips and zero failures; browser harness execution remains NOT VERIFIED because Playwright is absent. Full commands and counts are in `ACCEPTANCE.md` and `BASELINE-AUDIT.md`.

@@ -4,6 +4,8 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using SwiftAid.Application.Sessions;
 using SwiftAid.Domain.Sessions;
+using DomainSessionVisibility = SwiftAid.Domain.Sessions.SessionVisibility;
+using PublicSessionQuery = SwiftAid.Contracts.Sessions.PublicSessionQuery;
 
 namespace SwiftAid.Infrastructure.Persistence.Sessions;
 
@@ -31,11 +33,12 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
         string actorId,
         string reason,
         DateTimeOffset recordedAtUtc,
+        SessionRevisionAction action,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(session);
         _dbContext.Set<CommunitySessionEntity>().Add(ToEntity(session));
-        AppendRevision(session, actorId, reason, recordedAtUtc);
+        AppendRevision(session, actorId, reason, recordedAtUtc, action, null);
         await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
@@ -47,6 +50,8 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
         DateTimeOffset recordedAtUtc,
         SessionReminderSync reminderSync,
         IReadOnlyList<SessionReminderOccurrence>? occurrences,
+        SessionRevisionAction action,
+        DateTimeOffset? previousStartUtc,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(session);
@@ -65,7 +70,7 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
         }
 
         OverwriteEntity(session, entity);
-        AppendRevision(session, actorId, reason, recordedAtUtc);
+        AppendRevision(session, actorId, reason, recordedAtUtc, action, previousStartUtc);
         await SyncRemindersAsync(session, reminderSync, occurrences ?? [], recordedAtUtc, ct).ConfigureAwait(false);
 
         try
@@ -82,9 +87,11 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
     public async Task<IReadOnlyList<CommunitySession>> ListPublicAsync(int take, CancellationToken ct)
     {
         var entities = await Entities().AsNoTracking()
-            .Where(item => item.Visibility == nameof(SessionVisibility.Public) &&
+            .Where(item => item.Visibility == nameof(DomainSessionVisibility.Public) &&
+                item.PublishedVersion > 0 && item.ScheduledAtUtc != null &&
                 (item.Status == nameof(CommunitySessionStatus.Scheduled) ||
-                 item.Status == nameof(CommunitySessionStatus.Cancelled)))
+                 item.Status == nameof(CommunitySessionStatus.Cancelled) ||
+                 item.Status == nameof(CommunitySessionStatus.Completed)))
             .OrderBy(item => item.StartUtc)
             .ThenBy(item => item.SessionId)
             .Take(Math.Max(1, take))
@@ -93,8 +100,107 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
         return entities.Select(Rehydrate).ToList();
     }
 
+    public async Task<IReadOnlyList<CommunitySession>> QueryPublicAsync(PublicSessionQuery query, int take, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        var rows = Entities().AsNoTracking()
+            .Where(item => item.Visibility == nameof(DomainSessionVisibility.Public) &&
+                item.PublishedVersion > 0 && item.ScheduledAtUtc != null &&
+                (item.Status == nameof(CommunitySessionStatus.Scheduled) ||
+                 item.Status == nameof(CommunitySessionStatus.Cancelled) ||
+                 item.Status == nameof(CommunitySessionStatus.Completed)));
+
+        if (query.Search is { } search)
+        {
+            var term = search.ToLowerInvariant();
+            var exactTopic = JsonSerializer.Serialize(new[] { search });
+            rows = rows.Where(item => item.Title.ToLower().Contains(term) ||
+                item.Summary.ToLower().Contains(term) || item.Presenter.ToLower().Contains(term) ||
+                item.CountryCode.ToLower().Contains(term) || item.RegionId.ToLower().Contains(term) ||
+                item.Language.ToLower().Contains(term) || EF.Functions.JsonContains(item.TopicTagsJson, exactTopic));
+        }
+
+        if (query.CountryCode is { } country)
+            rows = rows.Where(item => item.CountryCode.ToLower() == country.ToLower());
+        if (query.RegionId is { } region)
+            rows = rows.Where(item => item.RegionId.ToLower() == region.ToLower());
+        if (query.Sector is { } sector)
+            rows = rows.Where(item => item.Sector.ToLower() == sector.ToLower());
+        if (query.Language is { } language)
+            rows = rows.Where(item => item.Language.ToLower() == language.ToLower());
+        if (query.Category is { } category)
+        {
+            var exactCategory = JsonSerializer.Serialize(new[] { category });
+            rows = rows.Where(item => item.Sector.ToLower() == category.ToLower() ||
+                EF.Functions.JsonContains(item.TopicTagsJson, exactCategory));
+        }
+        if (query.Topic is { } topic)
+        {
+            var exactTopic = JsonSerializer.Serialize(new[] { topic });
+            rows = rows.Where(item => EF.Functions.JsonContains(item.TopicTagsJson, exactTopic));
+        }
+        if (query.Status is { } status)
+            rows = rows.Where(item => item.Status == status);
+        if (query.StartFromUtc is { } from)
+            rows = rows.Where(item => item.StartUtc >= from);
+        if (query.StartBeforeUtc is { } before)
+            rows = rows.Where(item => item.StartUtc < before);
+        // Every TimeZoneInfo UTC offset is within +/-14 hours. These broad UTC
+        // bounds reduce scanning; the application applies the exact local date.
+        if (query.LocalDateFrom is { } localFrom && localFrom > DateOnly.MinValue)
+        {
+            var earliest = new DateTimeOffset(localFrom.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc)).AddHours(-14);
+            rows = rows.Where(item => item.StartUtc >= earliest);
+        }
+        if (query.LocalDateTo is { } localTo && localTo < DateOnly.MaxValue.AddDays(-1))
+        {
+            var latest = new DateTimeOffset(localTo.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc)).AddHours(14);
+            rows = rows.Where(item => item.StartUtc < latest);
+        }
+        if (query.AfterStartUtc is { } after && query.AfterSessionId is { } afterId)
+            rows = rows.Where(item => item.StartUtc > after ||
+                item.StartUtc == after && item.SessionId.CompareTo(afterId) > 0);
+
+        var entities = await rows.OrderBy(item => item.StartUtc).ThenBy(item => item.SessionId)
+            .Take(take).ToListAsync(ct).ConfigureAwait(false);
+        return entities.Select(Rehydrate).ToList();
+    }
+
     public Task<int> CountRevisionsAsync(Guid sessionId, CancellationToken ct) =>
         _dbContext.Set<CommunitySessionRevisionEntity>().CountAsync(item => item.SessionId == sessionId, ct);
+
+    public async Task<IReadOnlyList<SwiftAid.Contracts.Sessions.SessionHistoryEntry>> ReadHistoryAsync(
+        Guid sessionId, long? beforeVersion, int take, CancellationToken ct)
+    {
+        if (sessionId == Guid.Empty || beforeVersion is <= 0 || take is < 1 or > 101)
+            throw new ArgumentException("A valid session, cursor and page size are required.");
+        var query = _dbContext.Set<CommunitySessionRevisionEntity>().AsNoTracking()
+            .Where(item => item.SessionId == sessionId);
+        if (beforeVersion is { } before) query = query.Where(item => item.Version < before);
+        var rows = await query.OrderByDescending(item => item.Version).Take(take).ToListAsync(ct).ConfigureAwait(false);
+        return rows.Select(ToHistoryEntry).ToArray();
+    }
+
+    private static SwiftAid.Contracts.Sessions.SessionHistoryEntry ToHistoryEntry(CommunitySessionRevisionEntity row)
+    {
+        using var snapshot = JsonDocument.Parse(row.SnapshotJson);
+        var root = snapshot.RootElement;
+        if (root.ValueKind != JsonValueKind.Object)
+            return new(row.Version, row.ActorId, row.Reason, row.RecordedAtUtc, null, null, null, null);
+        var action = root.TryGetProperty("Action", out var actionValue) && actionValue.ValueKind == JsonValueKind.String &&
+            Enum.TryParse<SessionRevisionAction>(actionValue.GetString(), out var parsedAction) &&
+            string.Equals(parsedAction.ToString(), actionValue.GetString(), StringComparison.Ordinal) && Enum.IsDefined(parsedAction)
+                ? parsedAction.ToString() : null;
+        var status = root.TryGetProperty("Status", out var statusValue) && statusValue.ValueKind == JsonValueKind.String &&
+            Enum.TryParse<CommunitySessionStatus>(statusValue.GetString(), out var parsedStatus) &&
+            string.Equals(parsedStatus.ToString(), statusValue.GetString(), StringComparison.Ordinal) && Enum.IsDefined(parsedStatus)
+                ? parsedStatus.ToString() : null;
+        static DateTimeOffset? ReadDate(JsonElement root, string name) =>
+            root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String && value.TryGetDateTimeOffset(out var date)
+                ? date : null;
+        return new(row.Version, row.ActorId, row.Reason, row.RecordedAtUtc, action, status,
+            ReadDate(root, "StartUtc"), ReadDate(root, "PreviousStartUtc"));
+    }
 
     public Task<int> CountPendingRemindersAsync(Guid sessionId, CancellationToken ct) =>
         _dbContext.Set<SessionReminderOccurrenceEntity>()
@@ -110,7 +216,9 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
         CommunitySession session,
         string actorId,
         string reason,
-        DateTimeOffset recordedAtUtc)
+        DateTimeOffset recordedAtUtc,
+        SessionRevisionAction action,
+        DateTimeOffset? previousStartUtc)
     {
         _dbContext.Set<CommunitySessionRevisionEntity>().Add(new CommunitySessionRevisionEntity
         {
@@ -120,7 +228,7 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
             ActorId = actorId,
             Reason = reason,
             RecordedAtUtc = recordedAtUtc,
-            SnapshotJson = BuildSnapshot(session),
+            SnapshotJson = BuildSnapshot(session, action, previousStartUtc),
         });
     }
 
@@ -302,9 +410,11 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
         field.SetValue(session, value);
     }
 
-    private static string BuildSnapshot(CommunitySession session) =>
+    private static string BuildSnapshot(CommunitySession session, SessionRevisionAction action, DateTimeOffset? previousStartUtc) =>
         JsonSerializer.Serialize(new
         {
+            Action = action.ToString(),
+            PreviousStartUtc = previousStartUtc,
             session.SessionId,
             session.Version,
             Status = session.Status.ToString(),
@@ -326,9 +436,16 @@ public sealed class PostgresCommunitySessionStore(SwiftAidDbContext dbContext) :
             ChannelType = session.ChannelType.ToString(),
             session.ChannelLink,
             session.ReminderLeadHours,
+            session.CreatedByActorId,
+            session.CreatedAtUtc,
+            session.ReviewedByActorId,
+            session.ReviewedAtUtc,
+            session.SelfReviewAcknowledged,
             session.ScheduledAtUtc,
             session.PublishedVersion,
             session.CancellationReason,
+            session.CancelledAtUtc,
+            session.CompletedAtUtc,
         });
 
     private sealed record MaterialJson(string MaterialId, string SourceVersion);

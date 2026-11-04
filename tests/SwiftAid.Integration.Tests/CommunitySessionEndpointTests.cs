@@ -14,7 +14,10 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using OpenIddict.Validation.AspNetCore;
 using SwiftAid.Contracts.Sessions;
+using SwiftAid.Client.Presentation;
+using SwiftAid.Client.Sessions;
 using SwiftAid.Gateway.Endpoints;
+using SwiftAid.Gateway.Presentation;
 using SwiftAid.Gateway.Sessions;
 
 namespace SwiftAid.Integration.Tests;
@@ -27,6 +30,74 @@ public sealed class CommunitySessionEndpointTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly Guid KnownSessionId = Guid.Parse("d0c00001-2222-4a44-9aa9-123456789abc");
+
+    [Theory]
+    [InlineData("/public/v1/sessions/", HttpStatusCode.OK)]
+    [InlineData("/public/v1/sessions/search", HttpStatusCode.OK)]
+    [InlineData("/public/v1/sessions/d0c00001-2222-4a44-9aa9-123456789abc", HttpStatusCode.OK)]
+    [InlineData("/public/v1/sessions/d0c00001-2222-4a44-9aa9-123456789abc/calendar", HttpStatusCode.OK)]
+    [InlineData("/public/v1/sessions/d0c00001-2222-4a44-9aa9-123456789abc/invitation", HttpStatusCode.OK)]
+    [InlineData("/public/v1/sessions/00000000-0000-0000-0000-000000000001", HttpStatusCode.NotFound)]
+    public async Task PublicSessionResponsesAreNotStoredByHttpCaches(string path, HttpStatusCode expected)
+    {
+        await using var host = await TestSessionHost.StartAsync(withPublished: true);
+        using var response = await host.Client.GetAsync(path);
+
+        Assert.Equal(expected, response.StatusCode);
+        Assert.True(response.Headers.CacheControl?.NoStore);
+        Assert.False(response.Headers.CacheControl?.Public ?? false);
+    }
+
+    [Fact]
+    public async Task PublicDetailRechecksVisibilityAfterPublicationChanges()
+    {
+        await using var host = await TestSessionHost.StartAsync(withPublished: true);
+        var path = $"/public/v1/sessions/{KnownSessionId:D}";
+        using var first = await host.Client.GetAsync(path);
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.True(first.Headers.CacheControl?.NoStore);
+
+        host.Service.WithPublished = false;
+        using var next = await host.Client.GetAsync(path);
+        Assert.Equal(HttpStatusCode.NotFound, next.StatusCode);
+        Assert.True(next.Headers.CacheControl?.NoStore);
+    }
+
+    [Fact]
+    public async Task DestinationRequiresTheCurrentPublicScheduledVersion()
+    {
+        await using var host = await TestSessionHost.StartAsync(withPublished: true);
+        var scheduled = PublishedView() with { ChannelType = SessionChannelType.Other, ChannelLink = "https://example.test/session" };
+        host.Service.PublicOverride = scheduled;
+        var path = $"/public/v1/sessions/{KnownSessionId:D}/destination?version={scheduled.Version}";
+
+        using var first = await host.Client.GetAsync(path);
+        Assert.Equal(HttpStatusCode.Redirect, first.StatusCode);
+        Assert.Equal("https://example.test/session", first.Headers.Location?.AbsoluteUri);
+        Assert.True(first.Headers.CacheControl?.NoStore);
+
+        host.Service.PublicOverride = scheduled with { Version = scheduled.Version + 1 };
+        using var stale = await host.Client.GetAsync(path);
+        Assert.Equal(HttpStatusCode.NotFound, stale.StatusCode);
+        host.Service.PublicOverride = scheduled with { Status = "Cancelled" };
+        using var cancelled = await host.Client.GetAsync(path);
+        Assert.Equal(HttpStatusCode.NotFound, cancelled.StatusCode);
+        host.Service.PublicOverride = scheduled with { ChannelLink = "https://user:password@example.test/session" };
+        using var unsafeDestination = await host.Client.GetAsync(path);
+        Assert.Equal(HttpStatusCode.NotFound, unsafeDestination.StatusCode);
+    }
+
+    [Fact]
+    public async Task VersionedInvitationRequiresMatchingVersionAndConfirmsTheCheck()
+    {
+        await using var host = await TestSessionHost.StartAsync(withPublished: true);
+        using var current = await host.Client.GetAsync($"/public/v1/sessions/{KnownSessionId:D}/invitation?version=3");
+        Assert.Equal(HttpStatusCode.OK, current.StatusCode);
+        Assert.Contains(PublicSessionInvitationFeatures.Version, current.Headers.GetValues(PublicSessionInvitationFeatures.HeaderName));
+
+        using var stale = await host.Client.GetAsync($"/public/v1/sessions/{KnownSessionId:D}/invitation?version=2");
+        Assert.Equal(HttpStatusCode.NotFound, stale.StatusCode);
+    }
 
     [Fact]
     public void OfficerRoutesRequireAuthenticationAndScopedCapabilityMetadata()
@@ -46,7 +117,7 @@ public sealed class CommunitySessionEndpointTests
                 "/api/v1/sessions", StringComparison.Ordinal))
             .ToArray();
 
-        Assert.Equal(6, routes.Length);
+        Assert.Equal(7, routes.Length);
         foreach (var route in routes)
         {
             var authorization = Assert.Single(route.Metadata.GetOrderedMetadata<IAuthorizeData>());
@@ -70,10 +141,24 @@ public sealed class CommunitySessionEndpointTests
                 "/public/v1/sessions", StringComparison.Ordinal))
             .ToArray();
 
-        Assert.Equal(4, routes.Length);
+        Assert.Equal(6, routes.Length);
         foreach (var route in routes)
         {
             Assert.NotEmpty(route.Metadata.GetOrderedMetadata<IAllowAnonymous>());
+        }
+    }
+
+    [Fact]
+    public async Task StaffHistoryIsDeniedWithoutSessionScopedAuthorization()
+    {
+        await using var host = await TestSessionHost.StartAsync();
+        foreach (var id in new[] { KnownSessionId, Guid.NewGuid() })
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/sessions/{id:D}/history");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", TestAuthenticationHandler.BearerToken);
+            using var response = await host.Client.SendAsync(request);
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            Assert.True(response.Headers.CacheControl?.NoStore);
         }
     }
 
@@ -253,6 +338,117 @@ public sealed class CommunitySessionEndpointTests
     }
 
     [Fact]
+    public async Task ServerPublicDetail_DistinguishesUnavailableAndUnknown()
+    {
+        using var noServices = new ServiceCollection().BuildServiceProvider();
+        var unavailable = new WebPublicCommunitySessionClient(new SessionGatewayClient(
+            new CommunityFixedAuthenticationStateProvider(new ClaimsPrincipal()), noServices));
+        using var services = new ServiceCollection()
+            .AddSingleton<ICommunitySessionService>(new FakeCommunitySessionService())
+            .BuildServiceProvider();
+        var available = new WebPublicCommunitySessionClient(new SessionGatewayClient(
+            new CommunityFixedAuthenticationStateProvider(new ClaimsPrincipal()), services));
+
+        var failed = await unavailable.GetPublicAsync(KnownSessionId);
+        var missing = await available.GetPublicAsync(KnownSessionId);
+
+        Assert.Equal(UiCapabilityResultCode.Unavailable, failed.Code);
+        Assert.Equal(UiCapabilityResultCode.Success, missing.Code);
+        Assert.Null(missing.Value);
+    }
+
+    [Fact]
+    public async Task ServerPublicClient_MissingService_IsUnavailableRatherThanEmpty()
+    {
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var gateway = new SessionGatewayClient(
+            new CommunityFixedAuthenticationStateProvider(new ClaimsPrincipal()), services);
+        var client = new WebPublicCommunitySessionClient(gateway);
+
+        var result = await client.ListPublicAsync();
+
+        Assert.Equal(UiCapabilityResultCode.Unavailable, result.Code);
+        Assert.False(result.Metadata.IsAvailable);
+        Assert.Null(result.Value);
+    }
+
+    [Fact]
+    public async Task ServerPublicClient_ServiceFailure_IsUnavailableRatherThanEmpty()
+    {
+        var service = new FakeCommunitySessionService { FailList = true };
+        using var services = new ServiceCollection().AddSingleton<ICommunitySessionService>(service).BuildServiceProvider();
+        var gateway = new SessionGatewayClient(
+            new CommunityFixedAuthenticationStateProvider(new ClaimsPrincipal()), services);
+        var client = new WebPublicCommunitySessionClient(gateway);
+
+        var result = await client.ListPublicAsync();
+
+        Assert.Equal(UiCapabilityResultCode.Unavailable, result.Code);
+        Assert.Null(result.Value);
+    }
+
+    [Fact]
+    public async Task ServerPublicClient_EmptyServiceResult_IsSuccessful()
+    {
+        using var services = new ServiceCollection()
+            .AddSingleton<ICommunitySessionService>(new FakeCommunitySessionService())
+            .BuildServiceProvider();
+        var gateway = new SessionGatewayClient(
+            new CommunityFixedAuthenticationStateProvider(new ClaimsPrincipal()), services);
+        var client = new WebPublicCommunitySessionClient(gateway);
+
+        var result = await client.ListPublicAsync();
+
+        Assert.Equal(UiCapabilityResultCode.Success, result.Code);
+        Assert.Empty(Assert.IsAssignableFrom<IReadOnlyList<PublicSessionView>>(result.Value));
+    }
+
+    [Fact]
+    public async Task PublicSearch_UsesPublicProjectionAndPassesFilters()
+    {
+        await using var host = await TestSessionHost.StartAsync(withPublished: true);
+        using var response = await host.Client.GetAsync("/public/v1/sessions/search?search=water&country=ZW&category=Nutrition&language=en&status=Completed&localFrom=2026-11-01&limit=1");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains(PublicSessionQueryFeatures.StatusFilter, response.Headers.GetValues(PublicSessionQueryFeatures.HeaderName));
+        var page = JsonSerializer.Deserialize<PublicSessionPage>(await response.Content.ReadAsStringAsync(), JsonOptions);
+        Assert.NotNull(page);
+        Assert.Equal(KnownSessionId, Assert.Single(page.Items).SessionId);
+        Assert.Equal("water", host.Service.LastQuery?.Search);
+        Assert.Equal("ZW", host.Service.LastQuery?.CountryCode);
+        Assert.Equal("Nutrition", host.Service.LastQuery?.Category);
+        Assert.Equal("en", host.Service.LastQuery?.Language);
+        Assert.Equal("Completed", host.Service.LastQuery?.Status);
+        Assert.Equal(new DateOnly(2026, 11, 1), host.Service.LastQuery?.LocalDateFrom);
+        Assert.Equal(1, host.Service.LastQuery?.Limit);
+    }
+
+    [Fact]
+    public async Task PublicSearch_StatusCapabilityIsUnderstoodByTheHttpClient()
+    {
+        await using var host = await TestSessionHost.StartAsync(withPublished: true);
+        var client = new CommunitySessionHttpClient(host.Client);
+
+        var result = await client.QueryPublicResultAsync(new PublicSessionQuery(Status: "Scheduled"));
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("Scheduled", host.Service.LastQuery?.Status);
+        Assert.NotNull(result.Value);
+    }
+
+    [Theory]
+    [InlineData("afterId=not-a-guid")]
+    [InlineData("from=not-a-date")]
+    [InlineData("limit=invalid")]
+    [InlineData("localFrom=11-01-2026")]
+    public async Task PublicSearch_RejectsMalformedParameters(string query)
+    {
+        await using var host = await TestSessionHost.StartAsync();
+        using var response = await host.Client.GetAsync($"/public/v1/sessions/search?{query}");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
     public async Task DisabledPipeline_OfficerRoute_GetsNotFound()
     {
         var builder = WebApplication.CreateBuilder();
@@ -420,8 +616,10 @@ public sealed class CommunitySessionEndpointTests
         using var client = app.GetTestClient();
 
         using var response = await client.GetAsync("/public/v1/sessions");
+        using var detailResponse = await client.GetAsync($"/public/v1/sessions/{KnownSessionId:D}");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, detailResponse.StatusCode);
         await app.StopAsync();
     }
 
@@ -470,6 +668,18 @@ public sealed class CommunitySessionEndpointTests
 
         Assert.Equal(422,
             ((Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult)result).StatusCode);
+    }
+
+    [Fact]
+    public void ScheduleRequestIsStampedByTheServerMapper()
+    {
+        var before = DateTimeOffset.UtcNow;
+        var command = Assert.IsType<ScheduleSessionCommand>(CommunitySessionEndpoints.MapScheduleRequest(
+            KnownSessionId, new ScheduleSessionApiRequest(2, "schedule")));
+        var after = DateTimeOffset.UtcNow;
+
+        Assert.InRange(command.RecordedAtUtc, before, after);
+        Assert.Equal(2, command.ExpectedVersion);
     }
 
     [Fact]
@@ -596,6 +806,9 @@ public sealed class CommunitySessionEndpointTests
 
         public Func<SessionCommand, string, SessionCommandResult>? OnExecute { get; set; }
         public bool WithPublished { get; set; }
+        public PublicSessionView? PublicOverride { get; set; }
+        public bool FailList { get; set; }
+        public PublicSessionQuery? LastQuery { get; private set; }
 
         public Task<SessionCommandResult> ExecuteAsync(SessionCommand command, string actorId, CancellationToken ct)
         {
@@ -620,6 +833,11 @@ public sealed class CommunitySessionEndpointTests
 
         public Task<IReadOnlyList<PublicSessionView>> ListPublicAsync(int? limit, CancellationToken ct)
         {
+            ct.ThrowIfCancellationRequested();
+            if (FailList)
+            {
+                throw new InvalidOperationException("Test service failure.");
+            }
             ListCalls++;
             LastLimit = limit;
             IReadOnlyList<PublicSessionView> sessions =
@@ -630,8 +848,15 @@ public sealed class CommunitySessionEndpointTests
         public Task<PublicSessionView?> GetPublicAsync(Guid sessionId, CancellationToken ct) =>
             Task.FromResult<PublicSessionView?>(
                 WithPublished && sessionId == CommunitySessionEndpointTests.KnownSessionId
-                    ? CommunitySessionEndpointTests.PublishedView()
+                    ? PublicOverride ?? CommunitySessionEndpointTests.PublishedView()
                     : null);
+
+        public Task<PublicSessionPage> QueryPublicAsync(PublicSessionQuery query, CancellationToken ct)
+        {
+            LastQuery = query;
+            IReadOnlyList<PublicSessionView> items = WithPublished ? [PublishedView()] : [];
+            return Task.FromResult(new PublicSessionPage(items, null));
+        }
 
         public Task<string?> GetIcsAsync(Guid sessionId, DateTimeOffset generatedAtUtc, CancellationToken ct) =>
             Task.FromResult<string?>(
@@ -644,6 +869,9 @@ public sealed class CommunitySessionEndpointTests
                 WithPublished && sessionId == CommunitySessionEndpointTests.KnownSessionId
                     ? PublishedInvitation
                     : null);
+
+        public Task<string?> GetInvitationTextForVersionAsync(Guid sessionId, long expectedVersion, CancellationToken ct) =>
+            Task.FromResult<string?>(WithPublished && sessionId == KnownSessionId && expectedVersion == 3 ? PublishedInvitation : null);
     }
 
     private sealed class TestSessionHost : IAsyncDisposable

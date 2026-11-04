@@ -173,7 +173,8 @@
                 membership.OrganizationId,
                 membership.OrganizationStatus,
                 membership.MembershipStatus,
-                membership.WorkspaceIds)).ToList() ?? previous.Memberships,
+                membership.WorkspaceIds,
+                membership.IsOwner)).ToList() ?? previous.Memberships,
             requests.Value?.Select(request => new MembershipRequestSnapshot(
                 request.RequestId,
                 request.OrganizationId,

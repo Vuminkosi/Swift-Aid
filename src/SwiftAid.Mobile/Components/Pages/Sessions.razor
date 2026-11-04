@@ -1,4 +1,5 @@
 @page "/sessions"
+@page "/sessions/calendar"
 @using SwiftAid.Client.Presentation
 @using SwiftAid.Client.Presentation.PublicWorkflows
 @using SwiftAid.Contracts.Sessions
@@ -6,15 +7,23 @@
 @inject IPublicCommunitySessionClient SessionClient
 @inject ISubscriptionClient SubscriptionClient
 @inject NavigationManager Navigation
+@inject IHttpClientFactory HttpClientFactory
+@inject SwiftAid.Client.Sessions.CommunitySessionHttpClient CalendarClient
 
 <PageTitle>Community sessions | SwiftAid</PageTitle>
 
-<PublicSessionsSurface Sessions="_sessions"
+<PublicSessionsSurface @key="(RequestedSessionId, IsCalendarRoute, InitialRemindersView)" Sessions="_sessions"
                        InitialSessionId="RequestedSessionId"
+                       InitialRemindersView="InitialRemindersView"
+                       InitialCalendarView="@(IsCalendarRoute && RequestedSessionId is null)"
                        Loading="_loading"
                        ErrorMessage="@_listError"
+                       SubscriptionsHref="/notifications"
                        OnRetry="LoadAsync"
+                       PublicSessionBasePath="@CalendarBasePath"
+                       QuerySessionsAsync="@(RequestedSessionId is null ? QuerySessionsAsync : null)"
                        LoadInvitationTextAsync="LoadInvitationAsync"
+                       OpenCalendarAsync="OpenCalendarAsync"
                        ShareTextAsync="ShareAsync"
                        LoadSubscriptionStateAsync="LoadSubscriptionStateAsync"
                        ExecuteSubscriptionActionAsync="ExecuteSubscriptionActionAsync"
@@ -23,20 +32,64 @@
 @code {
     [SupplyParameterFromQuery(Name = "sessionId")]
     private Guid? RequestedSessionId { get; set; }
+    [SupplyParameterFromQuery(Name = "tab")]
+    private string? RequestedTab { get; set; }
+    private bool InitialRemindersView => RequestedSessionId is not null &&
+        string.Equals(RequestedTab, "reminders", StringComparison.OrdinalIgnoreCase);
+    private bool IsCalendarRoute => string.Equals(Navigation.ToAbsoluteUri(Navigation.Uri).AbsolutePath.TrimEnd('/'),
+        "/sessions/calendar", StringComparison.OrdinalIgnoreCase);
 
     private IReadOnlyList<PublicSessionView> _sessions = Array.Empty<PublicSessionView>();
     private bool _loading = true;
     private string? _listError;
+    private bool _requestLoaded;
+    private Guid? _loadedRequestId;
+    private long _listGeneration;
+    private string? CalendarBasePath { get; set; }
 
-    protected override Task OnInitializedAsync() => LoadAsync();
+    protected override void OnInitialized()
+    {
+        using var client = HttpClientFactory.CreateClient("SwiftAid.NotificationApi");
+        CalendarBasePath = client.BaseAddress is { } baseAddress
+            ? new Uri(baseAddress, "public/v1/sessions").AbsoluteUri
+            : null;
+    }
+
+    private async Task<PublicSessionPage?> QuerySessionsAsync(PublicSessionQuery query)
+    {
+        var result = await SessionClient.QueryPublicAsync(query);
+        return result.Succeeded ? result.Value : null;
+    }
+
+    protected override Task OnParametersSetAsync()
+    {
+        if (_requestLoaded && _loadedRequestId == RequestedSessionId)
+            return Task.CompletedTask;
+        _requestLoaded = true;
+        _loadedRequestId = RequestedSessionId;
+        return LoadAsync();
+    }
 
     private async Task LoadAsync()
     {
+        var generation = ++_listGeneration;
         _loading = true;
         _listError = null;
         try
         {
+            if (RequestedSessionId is { } sessionId)
+            {
+                var detail = await SessionClient.GetPublicAsync(sessionId);
+                if (generation != _listGeneration) return;
+                _sessions = detail.Succeeded && detail.Value is { } session ? [session] : [];
+                if (!detail.Succeeded)
+                    _listError = "This session is temporarily unavailable. Try again.";
+                else if (detail.Value is null)
+                    _listError = "This session is not available.";
+                return;
+            }
             var result = await SessionClient.ListPublicAsync();
+            if (generation != _listGeneration) return;
             if (result.Succeeded && result.Value is { } sessions)
             {
                 _sessions = sessions;
@@ -50,25 +103,27 @@
         }
         catch (OperationCanceledException)
         {
+            if (generation != _listGeneration) return;
             _sessions = Array.Empty<PublicSessionView>();
             _listError = "Loading sessions was cancelled.";
         }
         catch (Exception)
         {
+            if (generation != _listGeneration) return;
             _sessions = Array.Empty<PublicSessionView>();
             _listError = "Published sessions are temporarily unavailable. Check your connection and try again.";
         }
         finally
         {
-            _loading = false;
+            if (generation == _listGeneration) _loading = false;
         }
     }
 
-    private async Task<string?> LoadInvitationAsync(Guid sessionId)
+    private async Task<string?> LoadInvitationAsync(Guid sessionId, long expectedVersion)
     {
         try
         {
-            var result = await SessionClient.GetInvitationTextAsync(sessionId);
+            var result = await SessionClient.GetInvitationTextForVersionAsync(sessionId, expectedVersion);
             return result.Succeeded ? result.Value : null;
         }
         catch (Exception)
@@ -86,24 +141,29 @@
             await Task.WhenAll(subscriptionTask, optionsTask);
             var subscription = await subscriptionTask;
             var options = await optionsTask;
-            var status = subscription.Code switch
+            if (subscription.Code != UiCapabilityResultCode.Denied &&
+                !SessionSubscriptionPresentation.IsMatchingRead(subscription, sessionId))
+                return ErrorSubscriptionState(sessionId, "Reminder status could not be verified. Refresh and try again.");
+            var matchingOptions = SessionSubscriptionPresentation.IsMatchingOptions(options, sessionId);
+            var status = SessionSubscriptionPresentation.Status(subscription) switch
             {
-                UiCapabilityResultCode.Denied => PublicSessionsSurface.SessionSubscriptionStatus.RequiresAuthentication,
-                UiCapabilityResultCode.Success when subscription.Value?.Status == SubscriptionStatus.Active => PublicSessionsSurface.SessionSubscriptionStatus.Active,
-                UiCapabilityResultCode.Success => PublicSessionsSurface.SessionSubscriptionStatus.Unsubscribed,
+                SubscriptionStatus.RequiresAuthentication => PublicSessionsSurface.SessionSubscriptionStatus.RequiresAuthentication,
+                SubscriptionStatus.Active => PublicSessionsSurface.SessionSubscriptionStatus.Active,
+                SubscriptionStatus.Unsubscribed => PublicSessionsSurface.SessionSubscriptionStatus.Unsubscribed,
                 _ => PublicSessionsSurface.SessionSubscriptionStatus.Unavailable
             };
 
             return new PublicSessionsSurface.SessionSubscriptionPanelState(
                 sessionId,
                 status,
-                subscription.Value?.Version ?? options.Value?.Version ?? 0,
-                options.Succeeded && options.Value is { } value ? ToSurfaceOptions(value) : null,
+                subscription.Value?.Version ?? 0,
+                matchingOptions && options.Value is { } value ? ToSurfaceOptions(value) : null,
                 status == PublicSessionsSurface.SessionSubscriptionStatus.Unavailable
                     ? subscription.Message ?? subscription.Metadata.Notice ?? "Reminder status is unavailable."
-                    : options.Succeeded ? subscription.Message : options.Message ?? options.Metadata.Notice,
+                    : matchingOptions ? subscription.Message : options.Message ?? options.Metadata.Notice ?? "Reminder choices could not be verified.",
                 IsError: status == PublicSessionsSurface.SessionSubscriptionStatus.Unavailable ||
-                    !options.Succeeded && status != PublicSessionsSurface.SessionSubscriptionStatus.RequiresAuthentication);
+                    !matchingOptions && status != PublicSessionsSurface.SessionSubscriptionStatus.RequiresAuthentication,
+                CurrentChannel: subscription.Value?.Channel is { } currentChannel ? ToSurfaceChannel(currentChannel) : null);
         }
         catch (OperationCanceledException)
         {
@@ -148,9 +208,15 @@
 
             var updatedState = await LoadSubscriptionStateAsync(action.SessionId);
             if (updatedState is null) return null;
-            return result.Succeeded
-                ? updatedState with { Message = result.Message, IsError = false }
-                : updatedState with { Message = result.Message ?? result.Metadata.Notice ?? "Reminder preference could not be updated.", IsError = true };
+            var expected = action.Kind == PublicSessionsSurface.SessionSubscriptionActionKind.Subscribe
+                ? SubscriptionStatus.Active : SubscriptionStatus.Unsubscribed;
+            var confirmed = SessionSubscriptionPresentation.IsConfirmedUpdate(result, action.SessionId, expected, action.ExpectedVersion);
+            var expectedPanelStatus = expected == SubscriptionStatus.Active
+                ? PublicSessionsSurface.SessionSubscriptionStatus.Active : PublicSessionsSurface.SessionSubscriptionStatus.Unsubscribed;
+            var feedback = SessionSubscriptionPresentation.UpdateFeedback(confirmed,
+                !updatedState.IsError && updatedState.Status == expectedPanelStatus && updatedState.Version >= result.Value?.Version,
+                result.Message, updatedState.Message);
+            return updatedState with { Message = feedback.Message, IsError = feedback.IsError };
         }
         catch (OperationCanceledException)
         {
@@ -164,7 +230,7 @@
 
     private Task RequestSignInAsync(Guid sessionId)
     {
-        var returnUrl = $"/sessions?sessionId={sessionId:D}";
+        var returnUrl = $"/sessions?sessionId={sessionId:D}&tab=reminders";
         Navigation.NavigateTo($"/sign-in?returnUrl={Uri.EscapeDataString(returnUrl)}");
         return Task.CompletedTask;
     }
@@ -201,4 +267,16 @@
 
     private static Task ShareAsync(string text) =>
         Share.Default.RequestAsync(new ShareTextRequest(text, "Community session invitation"));
+
+    private async Task<bool> OpenCalendarAsync(Guid sessionId)
+    {
+        var calendar = await CalendarClient.GetCalendarFileAsync(sessionId);
+        if (calendar is null || calendar.Content.Length == 0 || calendar.Content.Length > 256 * 1024 ||
+            !string.Equals(calendar.ContentType, "text/calendar", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var path = Path.Combine(FileSystem.CacheDirectory, $"swiftaid-session-{sessionId:N}-{Guid.NewGuid():N}.ics");
+        await File.WriteAllBytesAsync(path, calendar.Content);
+        return await Launcher.Default.OpenAsync(new OpenFileRequest("Open community session calendar", new ReadOnlyFile(path, "text/calendar")));
+    }
 }

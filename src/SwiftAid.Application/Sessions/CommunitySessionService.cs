@@ -15,12 +15,14 @@ namespace SwiftAid.Application.Sessions;
 /// Reminder dispatch/execution is OUT of scope (P6.3 durable-reminder lane); this
 /// service only (re)computes occurrence rows and suppresses them on cancel.
 /// </summary>
-public sealed class CommunitySessionService(ICommunitySessionStore store) : ICommunitySessionService
+public sealed class CommunitySessionService(ICommunitySessionStore store, ISessionMaterialEligibility? materialEligibility = null, TimeProvider? timeProvider = null) : ICommunitySessionService
 {
     public const int DefaultPublicLimit = 50;
     public const int MaxPublicLimit = 100;
 
     private readonly ICommunitySessionStore _store = store ?? throw new ArgumentNullException(nameof(store));
+    private readonly ISessionMaterialEligibility? _materialEligibility = materialEligibility;
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     public async Task<SessionCommandResult> ExecuteAsync(SessionCommand command, string actorId, CancellationToken ct)
     {
@@ -29,6 +31,10 @@ public sealed class CommunitySessionService(ICommunitySessionStore store) : ICom
         {
             throw new ArgumentException("A staff actor id is required.", nameof(actorId));
         }
+
+        // Record acceptance and make time-dependent lifecycle decisions against
+        // the service clock, not a timestamp supplied by an internal caller.
+        command = command with { RecordedAtUtc = _timeProvider.GetUtcNow() };
 
         if (command is CreateSessionDraftCommand create)
         {
@@ -49,42 +55,53 @@ public sealed class CommunitySessionService(ICommunitySessionStore store) : ICom
         switch (command)
         {
             case ReviewSessionCommand review:
+                await RequireEligibleMaterialsAsync(session, session.Materials.Select(ToContractMaterial).ToArray(),
+                    ToContractVisibility(session.Visibility), session.Language, ct).ConfigureAwait(false);
                 session.Review(actorId, review.AcknowledgeSelfReview, review.RecordedAtUtc);
                 await _store.UpdateAsync(session, command.ExpectedVersion, actorId, command.Reason,
-                    command.RecordedAtUtc, SessionReminderSync.None, null, ct).ConfigureAwait(false);
+                    command.RecordedAtUtc, SessionReminderSync.None, null, SessionRevisionAction.Reviewed, null, ct).ConfigureAwait(false);
                 break;
             case ScheduleSessionCommand:
+                await RequireEligibleMaterialsAsync(session, session.Materials.Select(ToContractMaterial).ToArray(),
+                    ToContractVisibility(session.Visibility), session.Language, ct).ConfigureAwait(false);
                 session.Schedule(actorId, command.RecordedAtUtc);
                 await _store.UpdateAsync(session, command.ExpectedVersion, actorId, command.Reason,
                     command.RecordedAtUtc, SessionReminderSync.Recompute,
-                    session.ComputeReminderOccurrences(session.ScheduledAtUtc!.Value), ct).ConfigureAwait(false);
+                    session.ComputeReminderOccurrences(session.ScheduledAtUtc!.Value), SessionRevisionAction.Scheduled, null, ct).ConfigureAwait(false);
                 break;
             case UpdateSessionCommand update:
+                var previousStartUtc = session.Status == CommunitySessionStatus.Scheduled && session.StartUtc != update.StartUtc
+                    ? session.StartUtc : (DateTimeOffset?)null;
+                var materialSnapshot = update.Materials?.ToArray() ?? throw new ArgumentException("Materials are required.", nameof(update));
+                if (session.Status == CommunitySessionStatus.Scheduled)
+                    await RequireEligibleMaterialsAsync(session, materialSnapshot, update.Visibility, update.Language, ct).ConfigureAwait(false);
                 session.UpdateDetails(
                     update.Title, update.Summary, update.AudienceDescription,
                     update.TopicTags, update.Presenter, update.Language,
                     update.StartUtc, update.DurationMinutes, update.Capacity,
-                    update.Materials.Select(ToDomainMaterial).ToArray(),
+                    materialSnapshot.Select(ToDomainMaterial).ToArray(),
                     ToDomainVisibility(update.Visibility), ToDomainChannel(update.ChannelType),
                     update.ChannelLink, update.ReminderLeadHours, command.RecordedAtUtc);
                 var sync = session.Status == CommunitySessionStatus.Scheduled
                     ? SessionReminderSync.Recompute
                     : SessionReminderSync.None;
                 var occurrences = sync == SessionReminderSync.Recompute
-                    ? session.ComputeReminderOccurrences(session.ScheduledAtUtc!.Value)
+                    ? session.ComputeReminderOccurrences(command.RecordedAtUtc)
                     : null;
                 await _store.UpdateAsync(session, command.ExpectedVersion, actorId, command.Reason,
-                    command.RecordedAtUtc, sync, occurrences, ct).ConfigureAwait(false);
+                    command.RecordedAtUtc, sync, occurrences,
+                    previousStartUtc is null ? SessionRevisionAction.Updated : SessionRevisionAction.Rescheduled,
+                    previousStartUtc, ct).ConfigureAwait(false);
                 break;
             case CancelSessionCommand cancel:
                 session.Cancel(cancel.CancellationReason, actorId, command.RecordedAtUtc);
                 await _store.UpdateAsync(session, command.ExpectedVersion, actorId, command.Reason,
-                    command.RecordedAtUtc, SessionReminderSync.SuppressPending, null, ct).ConfigureAwait(false);
+                    command.RecordedAtUtc, SessionReminderSync.SuppressPending, null, SessionRevisionAction.Cancelled, null, ct).ConfigureAwait(false);
                 break;
             case CompleteSessionCommand:
                 session.Complete(actorId, command.RecordedAtUtc);
                 await _store.UpdateAsync(session, command.ExpectedVersion, actorId, command.Reason,
-                    command.RecordedAtUtc, SessionReminderSync.None, null, ct).ConfigureAwait(false);
+                    command.RecordedAtUtc, SessionReminderSync.SuppressPending, null, SessionRevisionAction.Completed, null, ct).ConfigureAwait(false);
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(command), "An unsupported session command was supplied.");
@@ -92,6 +109,20 @@ public sealed class CommunitySessionService(ICommunitySessionStore store) : ICom
 
         return new SessionCommandResult(session.SessionId, session.Version, session.Status.ToString());
     }
+
+    private async Task RequireEligibleMaterialsAsync(
+        CommunitySession session, IReadOnlyList<Contracts.Sessions.SessionMaterialRef> materials,
+        Contracts.Sessions.SessionVisibility visibility, string language, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var request = new SessionMaterialEligibilityRequest(session.CountryCode, session.RegionId, session.Sector,
+            language, visibility, Array.AsReadOnly(materials.ToArray()));
+        if (_materialEligibility is null || !await _materialEligibility.AreEligibleAsync(request, ct).ConfigureAwait(false))
+            throw new InvalidOperationException("Current approval and reuse rights for session materials could not be confirmed.");
+    }
+
+    private static Contracts.Sessions.SessionMaterialRef ToContractMaterial(DomainMaterial material) =>
+        new(material.MaterialId, material.SourceVersion);
 
     public async Task<CommunitySessionView?> GetStaffAsync(Guid sessionId, string actorId, CancellationToken ct)
     {
@@ -122,6 +153,98 @@ public sealed class CommunitySessionService(ICommunitySessionStore store) : ICom
             .ToList();
     }
 
+    public async Task<PublicSessionPage> QueryPublicAsync(PublicSessionQuery query, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        if (query.Limit is < 1 or > MaxPublicLimit ||
+            query.AfterStartUtc.HasValue != query.AfterSessionId.HasValue ||
+            query.AfterSessionId == Guid.Empty ||
+            query.StartFromUtc >= query.StartBeforeUtc ||
+            query.LocalDateFrom > query.LocalDateTo ||
+            new[] { query.Search, query.CountryCode, query.RegionId, query.Sector, query.Language, query.Topic, query.Category, query.Status }
+                .Any(value => value is { Length: > 120 }))
+        {
+            throw new ArgumentException("The public session query is invalid.", nameof(query));
+        }
+
+        var normalized = query with
+        {
+            Search = Normalize(query.Search),
+            CountryCode = Normalize(query.CountryCode),
+            RegionId = Normalize(query.RegionId),
+            Sector = Normalize(query.Sector),
+            Language = Normalize(query.Language),
+            Topic = Normalize(query.Topic),
+            Category = Normalize(query.Category),
+            Status = NormalizePublicStatus(query.Status),
+            StartFromUtc = query.StartFromUtc?.ToUniversalTime(),
+            StartBeforeUtc = query.StartBeforeUtc?.ToUniversalTime(),
+            AfterStartUtc = query.AfterStartUtc?.ToUniversalTime()
+        };
+
+        var items = new List<PublicSessionView>(query.Limit);
+        const int scanLimit = 1000;
+        var scanned = 0;
+        while (scanned < scanLimit)
+        {
+            var batchSize = Math.Min(101, scanLimit - scanned);
+            var candidates = await _store.QueryPublicAsync(normalized, batchSize + 1, ct).ConfigureAwait(false);
+            var hasMoreCandidates = candidates.Count > batchSize;
+            CommunitySession? lastScanned = null;
+            foreach (var candidate in candidates.Take(batchSize))
+            {
+                scanned++;
+                lastScanned = candidate;
+                if (!IsListedPublicly(candidate) || !MatchesLocalDates(candidate, query.LocalDateFrom, query.LocalDateTo))
+                    continue;
+                if (items.Count == query.Limit)
+                {
+                    var last = items[^1];
+                    return new PublicSessionPage(items, new PublicSessionPosition(last.StartUtc, last.SessionId));
+                }
+                items.Add(ToPublicView(candidate));
+            }
+
+            if (!hasMoreCandidates || lastScanned is null)
+                return new PublicSessionPage(items, null);
+            if (scanned == scanLimit)
+                return new PublicSessionPage(items, new PublicSessionPosition(lastScanned.StartUtc, lastScanned.SessionId));
+            normalized = normalized with { AfterStartUtc = lastScanned.StartUtc, AfterSessionId = lastScanned.SessionId };
+        }
+        return new PublicSessionPage(items, null);
+    }
+
+    private static bool MatchesLocalDates(CommunitySession session, DateOnly? from, DateOnly? to)
+    {
+        if (from is null && to is null)
+            return true;
+        DateOnly date;
+        try
+        {
+            var zone = TimeZoneInfo.FindSystemTimeZoneById(session.TimeZoneId);
+            date = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(session.StartUtc, zone).DateTime);
+        }
+        catch (Exception exception) when (exception is TimeZoneNotFoundException or InvalidTimeZoneException or ArgumentException)
+        {
+            // A UTC calendar date is not a substitute for an unknown local date.
+            return false;
+        }
+        return (from is null || date >= from) && (to is null || date <= to);
+    }
+
+    private static string? Normalize(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string? NormalizePublicStatus(string? value)
+    {
+        var status = Normalize(value);
+        if (status is null) return null;
+        if (string.Equals(status, "Scheduled", StringComparison.OrdinalIgnoreCase)) return "Scheduled";
+        if (string.Equals(status, "Completed", StringComparison.OrdinalIgnoreCase)) return "Completed";
+        if (string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase)) return "Cancelled";
+        throw new ArgumentException("The public session status filter is invalid.", nameof(value));
+    }
+
     public async Task<PublicSessionView?> GetPublicAsync(Guid sessionId, CancellationToken ct)
     {
         var session = await _store.LoadAsync(sessionId, ct).ConfigureAwait(false);
@@ -150,9 +273,18 @@ public sealed class CommunitySessionService(ICommunitySessionStore store) : ICom
     }
 
     public async Task<string?> GetInvitationTextAsync(Guid sessionId, CancellationToken ct)
+        => await GetInvitationTextCoreAsync(sessionId, null, ct).ConfigureAwait(false);
+
+    public async Task<string?> GetInvitationTextForVersionAsync(Guid sessionId, long expectedVersion, CancellationToken ct)
+    {
+        if (expectedVersion < 1) return null;
+        return await GetInvitationTextCoreAsync(sessionId, expectedVersion, ct).ConfigureAwait(false);
+    }
+
+    private async Task<string?> GetInvitationTextCoreAsync(Guid sessionId, long? expectedVersion, CancellationToken ct)
     {
         var session = await _store.LoadAsync(sessionId, ct).ConfigureAwait(false);
-        if (session is null || !IsListedPublicly(session))
+        if (session is null || !IsListedPublicly(session) || (expectedVersion is not null && session.Version != expectedVersion))
         {
             return null;
         }
@@ -192,7 +324,7 @@ public sealed class CommunitySessionService(ICommunitySessionStore store) : ICom
             command.Materials.Select(ToDomainMaterial).ToArray(),
             ToDomainVisibility(command.Visibility), ToDomainChannel(command.ChannelType),
             command.ChannelLink, command.ReminderLeadHours, actorId, command.RecordedAtUtc);
-        await _store.InsertAsync(session, actorId, command.Reason, command.RecordedAtUtc, ct).ConfigureAwait(false);
+        await _store.InsertAsync(session, actorId, command.Reason, command.RecordedAtUtc, SessionRevisionAction.Created, ct).ConfigureAwait(false);
         return new SessionCommandResult(session.SessionId, session.Version, session.Status.ToString());
     }
 
@@ -200,10 +332,11 @@ public sealed class CommunitySessionService(ICommunitySessionStore store) : ICom
         session.Visibility == DomainVisibility.Public;
 
     private static bool IsListedPublicly(CommunitySession session) =>
-        IsPublic(session) &&
-        (session.Status is CommunitySessionStatus.Scheduled or CommunitySessionStatus.Cancelled);
+        IsPublic(session) && session.PublishedVersion > 0 && session.ScheduledAtUtc is not null &&
+        (session.Status is CommunitySessionStatus.Scheduled or CommunitySessionStatus.Cancelled or CommunitySessionStatus.Completed);
 
     private static bool IsPublished(CommunitySession session) =>
+        session.PublishedVersion > 0 && session.ScheduledAtUtc is not null &&
         session.Status is CommunitySessionStatus.Scheduled
             or CommunitySessionStatus.Cancelled
             or CommunitySessionStatus.Completed;
@@ -224,9 +357,12 @@ public sealed class CommunitySessionService(ICommunitySessionStore store) : ICom
         session.AudienceDescription, session.TopicTags.ToArray(),
         session.CountryCode, session.RegionId, session.Sector, session.Presenter, session.Language,
         session.StartUtc, session.TimeZoneId, session.DurationMinutes, session.Capacity,
-        session.Materials.Select(ToStoredMaterial).ToArray(),
-        ToContractChannel(session.ChannelType), session.ChannelLink,
-        session.Status.ToString(), session.CancellationReason, session.IcsSequence);
+        // No authoritative public-rights and withdrawal lookup is wired here.
+        // Preserve staff references, but do not serialize unverified references publicly.
+        Array.Empty<StoredSessionMaterial>(),
+        ToContractChannel(session.ChannelType),
+        session.Status == CommunitySessionStatus.Scheduled ? session.PublicChannelLink : null,
+        session.Status.ToString(), null, session.IcsSequence);
 
     private static DomainVisibility ToDomainVisibility(Contracts.Sessions.SessionVisibility visibility) =>
         visibility switch

@@ -13,7 +13,8 @@ public sealed record EventSubscription(
     EventSubscriptionStatus Status,
     IReadOnlyList<string> Channels,
     string? ConsentReference,
-    long Version);
+    long Version,
+    bool HasInactiveStoredConsent = false);
 
 /// <summary>Current version and explicit consent choices for a public scheduled session.</summary>
 public sealed record EventSubscriptionOptions(

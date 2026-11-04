@@ -40,15 +40,32 @@ public sealed class PostgresEventSubscriptionStore(SwiftAidDbContext dbContext) 
     public async Task<EventSubscription> SubscribeAsync(
         Guid sessionId,
         string accountId,
+        long expectedSessionVersion,
+        long expectedSubscriptionVersion,
         string channel,
         string consentReference,
         DateTimeOffset recordedAtUtc,
         CancellationToken cancellationToken)
     {
-        await _dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+        var affected = await _dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+            WITH locked_session AS MATERIALIZED (
+                SELECT session_id, version, visibility, status, published_version, scheduled_at_utc, start_utc
+                FROM community_sessions WHERE session_id = {sessionId}
+                FOR UPDATE
+            ), eligible_session AS (
+                SELECT session_id FROM locked_session
+                WHERE version = {expectedSessionVersion}
+                  AND visibility = 'Public' AND status = 'Scheduled'
+                  AND published_version > 0 AND scheduled_at_utc IS NOT NULL
+                  AND start_utc > clock_timestamp()
+                  AND ({expectedSubscriptionVersion} = 0 OR EXISTS (
+                      SELECT 1 FROM community_session_subscriptions
+                      WHERE session_id = {sessionId} AND account_id = {accountId}))
+            )
             INSERT INTO community_session_subscriptions
                 (session_id, account_id, channel, consent_reference, status, version, updated_at_utc)
-            VALUES ({sessionId}, {accountId}, {channel}, {consentReference}, 'Active', 1, {recordedAtUtc})
+            SELECT session_id, {accountId}, {channel}, {consentReference}, 'Active', 1, {recordedAtUtc}
+            FROM eligible_session
             ON CONFLICT (session_id, account_id) DO UPDATE SET
                 channel = EXCLUDED.channel,
                 consent_reference = EXCLUDED.consent_reference,
@@ -67,7 +84,14 @@ public sealed class PostgresEventSubscriptionStore(SwiftAidDbContext dbContext) 
                     THEN EXCLUDED.updated_at_utc
                     ELSE community_session_subscriptions.updated_at_utc
                 END
+            WHERE community_session_subscriptions.version = {expectedSubscriptionVersion}
+               OR (community_session_subscriptions.status = 'Active'
+                   AND community_session_subscriptions.channel = EXCLUDED.channel
+                   AND community_session_subscriptions.consent_reference = EXCLUDED.consent_reference)
             """, cancellationToken).ConfigureAwait(false);
+
+        if (affected == 0)
+            throw new SessionSubscriptionConflictException(sessionId);
 
         var saved = await GetAsync(sessionId, accountId, cancellationToken).ConfigureAwait(false);
         return saved ?? throw new InvalidOperationException("The event subscription was not persisted.");

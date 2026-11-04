@@ -13,6 +13,108 @@ public sealed class CommunitySessionHttpClientTests
     private static readonly Guid KnownSessionId = Guid.Parse("d0c00001-2222-4a44-9aa9-123456789abc");
 
     [Fact]
+    public async Task TypedPublicDetail_DistinguishesMissingFromOutage()
+    {
+        var missing = await Create(new HttpResponseMessage(HttpStatusCode.NotFound)).GetPublicResultAsync(KnownSessionId);
+        var unavailable = await Create(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)).GetPublicResultAsync(KnownSessionId);
+
+        Assert.True(missing.Succeeded);
+        Assert.Null(missing.Value);
+        Assert.False(unavailable.Succeeded);
+        Assert.Null(unavailable.Value);
+    }
+
+    [Fact]
+    public async Task TypedPublicDetail_ReturnsRequestedProjection()
+    {
+        var view = PublishedView();
+        var handler = new CapturingHandler(JsonResponse(HttpStatusCode.OK, view));
+        var client = new CommunitySessionHttpClient(new HttpClient(handler) { BaseAddress = new Uri("https://gateway.test/") });
+
+        var result = await client.GetPublicResultAsync(KnownSessionId);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(KnownSessionId, result.Value!.SessionId);
+        Assert.Equal($"/public/v1/sessions/{KnownSessionId:D}", handler.LastRequest!.RequestUri!.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task PublicClientRejectsMismatchedDetailAndUnpublishedRecords()
+    {
+        var wrong = Create(JsonResponse(HttpStatusCode.OK, PublishedView() with { SessionId = Guid.NewGuid() }));
+        var mismatch = await wrong.GetPublicResultAsync(KnownSessionId);
+        Assert.False(mismatch.Succeeded);
+        Assert.Null(mismatch.Value);
+
+        var draft = PublishedView() with { Status = "Draft" };
+        var list = Create(JsonResponse(HttpStatusCode.OK, new[] { draft }));
+        Assert.False((await list.ListPublicResultAsync(null)).Succeeded);
+        var query = Create(JsonResponse(HttpStatusCode.OK, new PublicSessionPage([draft], null)));
+        Assert.False((await query.QueryPublicResultAsync(new PublicSessionQuery())).Succeeded);
+    }
+
+    [Fact]
+    public async Task NullListIsUnavailableRatherThanAnEmptyCollection()
+    {
+        var client = Create(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("null", Encoding.UTF8, "application/json")
+        });
+        var result = await client.ListPublicResultAsync(null);
+        Assert.False(result.Succeeded);
+        Assert.Null(result.Value);
+    }
+
+    [Fact]
+    public async Task QueryPublic_EncodesSearchAndReturnsContinuation()
+    {
+        var view = PublishedView();
+        var page = new PublicSessionPage([view], new PublicSessionPosition(view.StartUtc, view.SessionId));
+        var response = JsonResponse(HttpStatusCode.OK, page);
+        response.Headers.Add(PublicSessionQueryFeatures.HeaderName, PublicSessionQueryFeatures.StatusFilter);
+        var handler = new CapturingHandler(response);
+        var client = new CommunitySessionHttpClient(new HttpClient(handler) { BaseAddress = new Uri("https://gateway.test/") });
+
+        var result = await client.QueryPublicResultAsync(new PublicSessionQuery(Search: "water & health", Sector: "Human Health", Topic: "Water & food", Language: "en", Limit: 1, Category: "Food & water", LocalDateFrom: new DateOnly(2026, 11, 1), Status: "Completed"));
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(view.SessionId, Assert.Single(result.Value!.Items).SessionId);
+        Assert.Equal(view.SessionId, result.Value.Next!.SessionId);
+        Assert.Equal("/public/v1/sessions/search?search=water%20%26%20health&sector=Human%20Health&language=en&topic=Water%20%26%20food&category=Food%20%26%20water&status=Completed&localFrom=2026-11-01&limit=1", handler.LastRequest!.RequestUri!.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task StatusFilterFailsClosedWhenOlderServerDoesNotConfirmSupport()
+    {
+        var page = new PublicSessionPage([PublishedView()], null);
+        var client = Create(JsonResponse(HttpStatusCode.OK, page));
+        var result = await client.QueryPublicResultAsync(new PublicSessionQuery(Status: "Completed"));
+
+        Assert.False(result.Succeeded);
+        Assert.Null(result.Value);
+    }
+
+    [Fact]
+    public async Task QueriesWithoutStatusRemainCompatibleWithOlderServers()
+    {
+        var page = new PublicSessionPage([PublishedView()], null);
+        var client = Create(JsonResponse(HttpStatusCode.OK, page));
+        var result = await client.QueryPublicResultAsync(new PublicSessionQuery());
+
+        Assert.True(result.Succeeded);
+        Assert.Single(result.Value!.Items);
+    }
+
+    [Fact]
+    public async Task QueryPublic_ReportsServiceFailure()
+    {
+        var client = Create(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        var result = await client.QueryPublicResultAsync(new PublicSessionQuery());
+        Assert.False(result.Succeeded);
+        Assert.Null(result.Value);
+    }
+
+    [Fact]
     public async Task ListPublic_ReturnsSessions()
     {
         var view = PublishedView();
@@ -121,6 +223,25 @@ public sealed class CommunitySessionHttpClientTests
     }
 
     [Fact]
+    public async Task VersionedInvitationRequiresServerConfirmation()
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("Invitation") };
+        response.Headers.Add(PublicSessionInvitationFeatures.HeaderName, PublicSessionInvitationFeatures.Version);
+        var handler = new CapturingHandler(response);
+        var client = new CommunitySessionHttpClient(new HttpClient(handler) { BaseAddress = new Uri("https://gateway.test/") });
+
+        var current = await client.GetInvitationTextForVersionResultAsync(KnownSessionId, 3);
+        Assert.True(current.Succeeded);
+        Assert.Equal("Invitation", current.Value);
+        Assert.Equal($"/public/v1/sessions/{KnownSessionId:D}/invitation?version=3", handler.LastRequest!.RequestUri!.PathAndQuery);
+
+        var olderServer = Create(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("Unverified invitation") });
+        var unverified = await olderServer.GetInvitationTextForVersionResultAsync(KnownSessionId, 3);
+        Assert.False(unverified.Succeeded);
+        Assert.Null(unverified.Value);
+    }
+
+    [Fact]
     public async Task GetCalendarFile_ReturnsDownload()
     {
         var ics = "BEGIN:VCALENDAR\r\nUID:swiftaid-community-session-test\r\nSEQUENCE:1\r\nEND:VCALENDAR\r\n";
@@ -149,6 +270,21 @@ public sealed class CommunitySessionHttpClientTests
         var result = await client.GetCalendarFileAsync(KnownSessionId);
 
         Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetCalendarFileRejectsUnexpectedTypeAndOversizedContent()
+    {
+        var html = Create(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("<html>error</html>", Encoding.UTF8, "text/html")
+        });
+        Assert.Null(await html.GetCalendarFileAsync(KnownSessionId));
+
+        var oversized = new ByteArrayContent(new byte[256 * 1024 + 1]);
+        oversized.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/calendar");
+        var large = Create(new HttpResponseMessage(HttpStatusCode.OK) { Content = oversized });
+        Assert.Null(await large.GetCalendarFileAsync(KnownSessionId));
     }
 
     private static PublicSessionView PublishedView() => new(

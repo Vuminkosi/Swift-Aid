@@ -22,6 +22,7 @@ public static class EventSubscriptionEndpoints
             OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
         var routes = endpoints.MapGroup("/api/v1/sessions/{sessionId:guid}/subscription")
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes });
+        routes.AddEndpointFilter(NoStoreAsync);
 
         routes.MapGet("/", GetAsync)
             .WithName("GetOwnEventSubscription")
@@ -53,9 +54,16 @@ public static class EventSubscriptionEndpoints
 
         endpoints.MapGet("/api/v1/my/session-subscriptions", ListMineAsync)
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = schemes })
+            .AddEndpointFilter(NoStoreAsync)
             .WithName("ListOwnEventSubscriptions")
             .Produces<IReadOnlyList<EventSubscription>>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized);
+    }
+
+    private static ValueTask<object?> NoStoreAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+    {
+        context.HttpContext.Response.Headers.CacheControl = "no-store";
+        return next(context);
     }
 
     private static async Task<IResult> ListMineAsync(

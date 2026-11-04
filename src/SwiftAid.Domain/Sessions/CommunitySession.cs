@@ -58,6 +58,9 @@ public sealed class CommunitySession
     public SessionVisibility Visibility { get; private set; }
     public SessionChannelType ChannelType { get; private set; }
     public string? ChannelLink { get; private set; }
+    /// <summary>Safe destination for public projections, including records created before current validation.</summary>
+    public string? PublicChannelLink => ChannelType != SessionChannelType.None && IsSafeChannelLink(ChannelLink)
+        ? ChannelLink : null;
     public IReadOnlyList<int> ReminderLeadHours { get; private set; }
     public CommunitySessionStatus Status { get; private set; }
     public string CreatedByActorId { get; }
@@ -236,20 +239,44 @@ public sealed class CommunitySession
         if (durationMinutes < 1 || durationMinutes > 1440) throw new ArgumentOutOfRangeException(nameof(durationMinutes), "Duration must be between 1 and 1440 minutes.");
         if (capacity is not null && capacity < 1) throw new ArgumentOutOfRangeException(nameof(capacity), "Capacity must be positive when set.");
 
+        var checkedTags = CheckTags(topicTags);
+        var checkedMaterials = CheckMaterials(materials);
+        var checkedChannelLink = CheckChannelLink(channelType, channelLink);
+        var checkedReminderLeadHours = CheckReminderLeads(reminderLeadHours);
+
+        // A time change may be applied to a published session, but the ordinary
+        // update command cannot stand in for review of new public content.
+        if (Status == CommunitySessionStatus.Scheduled &&
+            (title != Title || summary != Summary || audienceDescription != AudienceDescription ||
+             !checkedTags.SequenceEqual(TopicTags) || presenter != Presenter || language != Language ||
+             durationMinutes != DurationMinutes || capacity != Capacity ||
+             !checkedMaterials.SequenceEqual(Materials) || visibility != Visibility ||
+             channelType != ChannelType || checkedChannelLink != ChannelLink))
+        {
+            throw new InvalidOperationException("Changes to published session content require a reviewed revision.");
+        }
+
         Title = title;
         Summary = summary;
         AudienceDescription = audienceDescription;
-        TopicTags = CheckTags(topicTags);
+        TopicTags = checkedTags;
         Presenter = presenter;
         Language = language;
         StartUtc = startUtc.ToUniversalTime();
         DurationMinutes = durationMinutes;
         Capacity = capacity;
-        Materials = CheckMaterials(materials);
+        Materials = checkedMaterials;
         Visibility = visibility;
         ChannelType = channelType;
-        ChannelLink = CheckChannelLink(channelType, channelLink);
-        ReminderLeadHours = CheckReminderLeads(reminderLeadHours);
+        ChannelLink = checkedChannelLink;
+        ReminderLeadHours = checkedReminderLeadHours;
+        if (Status == CommunitySessionStatus.Reviewed)
+        {
+            Status = CommunitySessionStatus.Draft;
+            ReviewedByActorId = null;
+            ReviewedAtUtc = null;
+            SelfReviewAcknowledged = false;
+        }
         Version++;
     }
 
@@ -354,12 +381,15 @@ public sealed class CommunitySession
         }
 
         RequireText(channelLink!, nameof(channelLink));
-        if (!Uri.TryCreate(channelLink, UriKind.Absolute, out var uri) ||
-            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        if (!IsSafeChannelLink(channelLink))
         {
-            throw new ArgumentException("A channel link must be an absolute http(s) URL.", nameof(channelLink));
+            throw new ArgumentException("A channel link must be an absolute http(s) URL without credentials or control characters.", nameof(channelLink));
         }
 
         return channelLink;
     }
+
+    private static bool IsSafeChannelLink(string? link) => !string.IsNullOrWhiteSpace(link) &&
+        !link.Any(char.IsControl) && Uri.TryCreate(link, UriKind.Absolute, out var uri) &&
+        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps) && string.IsNullOrEmpty(uri.UserInfo);
 }

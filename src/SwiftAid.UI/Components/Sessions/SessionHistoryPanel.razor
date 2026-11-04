@@ -1,0 +1,130 @@
+@using SwiftAid.Contracts.Sessions
+@implements IDisposable
+
+<section class="session-history" aria-labelledby="session-history-heading">
+    <MudText Typo="Typo.h6" HtmlTag="h2" id="session-history-heading">Session activity</MudText>
+    @if (!_opened)
+    {
+        <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="OpenAsync">View activity</MudButton>
+    }
+    else
+    {
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" role="alert">@_error</MudAlert>
+            <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="RetryAsync" Disabled="_loading">Retry</MudButton>
+        }
+        @if (_loading)
+        {
+            <MudText Typo="Typo.body2" role="status">Loading session activity…</MudText>
+        }
+        else if (_error is null && _items.Count == 0)
+        {
+            <MudText Typo="Typo.body2">No activity is available.</MudText>
+        }
+        @if (_items.Count > 0)
+        {
+            <ol>
+                @foreach (var entry in _items)
+                {
+                    <li>
+                        <strong>@(entry.Action ?? "Previous activity") · version @entry.Version</strong>
+                        <div>@entry.RecordedAtUtc.ToUniversalTime().ToString("u") · @entry.ActorId</div>
+                        @if (entry.Status is not null) { <div>Status: @entry.Status</div> }
+                        @if (entry.PreviousStartUtc is { } previous && entry.StartUtc is { } current)
+                        {
+                            <div>Previous start: @previous.ToUniversalTime().ToString("u")</div>
+                            <div>Updated start: @current.ToUniversalTime().ToString("u")</div>
+                        }
+                        <div>Reason: @entry.Reason</div>
+                    </li>
+                }
+            </ol>
+            @if (_beforeVersion is not null && _error is null)
+            {
+                <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="LoadMoreAsync" Disabled="_loading">Load more activity</MudButton>
+            }
+        }
+    }
+</section>
+
+@code {
+    [Parameter] public Guid SessionId { get; set; }
+    [Parameter] public long SessionVersion { get; set; }
+    [Parameter, EditorRequired] public Func<Guid, long?, Task<SessionHistoryPage?>>? LoadHistoryAsync { get; set; }
+
+    private readonly List<SessionHistoryEntry> _items = [];
+    private Guid _loadedSessionId;
+    private long _loadedSessionVersion;
+    private long _generation;
+    private long? _beforeVersion;
+    private long? _retryBeforeVersion;
+    private bool _opened;
+    private bool _loading;
+    private bool _disposed;
+    private string? _error;
+
+    protected override void OnParametersSet()
+    {
+        if (_loadedSessionId == SessionId && _loadedSessionVersion == SessionVersion) return;
+        _loadedSessionId = SessionId;
+        _loadedSessionVersion = SessionVersion;
+        _generation++;
+        _items.Clear();
+        _beforeVersion = null;
+        _retryBeforeVersion = null;
+        _opened = false;
+        _loading = false;
+        _error = null;
+    }
+
+    private Task OpenAsync() { _opened = true; return LoadAsync(null); }
+    private Task LoadMoreAsync() => _beforeVersion is { } before ? LoadAsync(before) : Task.CompletedTask;
+    private Task RetryAsync() => LoadAsync(_retryBeforeVersion);
+
+    private async Task LoadAsync(long? before)
+    {
+        if (_loading || SessionId == Guid.Empty || SessionVersion <= 0 || LoadHistoryAsync is null) return;
+        var generation = _generation;
+        var sessionId = SessionId;
+        var version = SessionVersion;
+        _loading = true;
+        _error = null;
+        _retryBeforeVersion = before;
+        try
+        {
+            var page = await LoadHistoryAsync(sessionId, before);
+            if (_disposed || generation != _generation) return;
+            if (page?.SessionId != sessionId || page.Items is null || page.Items.Count > 25 ||
+                page.BeforeVersion is not null && (page.Items.Count == 0 || page.BeforeVersion != page.Items[^1]?.Version))
+                throw new InvalidOperationException("Invalid history page.");
+            var previous = before;
+            foreach (var item in page.Items)
+            {
+                if (item is null || item.Version <= 0 || item.Version > version ||
+                    previous is not null && item.Version >= previous)
+                    throw new InvalidOperationException("Invalid history page.");
+                previous = item.Version;
+            }
+            if (before is null) _items.Clear();
+            _items.AddRange(page.Items);
+            _beforeVersion = page.BeforeVersion;
+        }
+        catch (Exception)
+        {
+            if (!_disposed && generation == _generation)
+            {
+                _items.Clear();
+                _beforeVersion = null;
+                _retryBeforeVersion = null;
+                _error = "Session activity could not be loaded. Check access and try again.";
+            }
+        }
+        finally
+        {
+            if (!_disposed && generation == _generation) _loading = false;
+        }
+    }
+
+    public void Dispose() { _disposed = true; _generation++; }
+}

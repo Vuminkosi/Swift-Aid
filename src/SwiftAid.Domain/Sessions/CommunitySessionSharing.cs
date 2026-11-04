@@ -24,10 +24,10 @@ public static class CommunitySessionSharing
         };
         var duration = TimeSpan.FromMinutes(session.DurationMinutes);
         var builder = new StringBuilder();
-        builder.AppendLine("BEGIN:VCALENDAR");
-        builder.AppendLine("VERSION:2.0");
-        builder.AppendLine("PRODID:-//SwiftAid//Community Session//EN");
-        builder.AppendLine("BEGIN:VEVENT");
+        builder.Append("BEGIN:VCALENDAR\r\n");
+        builder.Append("VERSION:2.0\r\n");
+        builder.Append("PRODID:-//SwiftAid//Community Session//EN\r\n");
+        builder.Append("BEGIN:VEVENT\r\n");
         AppendFolded(builder, "UID", $"swiftaid-community-session-{session.SessionId:D}");
         AppendFolded(builder, "DTSTAMP", FormatUtc(generatedAtUtc));
         AppendFolded(builder, "DTSTART", FormatUtc(session.StartUtc));
@@ -35,15 +35,15 @@ public static class CommunitySessionSharing
         AppendFolded(builder, "SUMMARY", session.Title);
         AppendFolded(builder, "DESCRIPTION", Describe(session));
         AppendFolded(builder, "LOCATION", Locate(session));
-        if (session.ChannelLink is not null)
+        if (session.Status == CommunitySessionStatus.Scheduled && session.PublicChannelLink is { } publicLink)
         {
-            AppendFolded(builder, "URL", session.ChannelLink);
+            AppendContentLine(builder, "URL", new Uri(publicLink).AbsoluteUri);
         }
 
         AppendFolded(builder, "SEQUENCE", session.IcsSequence.ToString(System.Globalization.CultureInfo.InvariantCulture));
         AppendFolded(builder, "STATUS", status);
         AppendFolded(builder, "TRANSP", "OPAQUE");
-        builder.AppendLine("END:VEVENT");
+        builder.Append("END:VEVENT\r\n");
         builder.Append("END:VCALENDAR\r\n");
         return builder.ToString();
     }
@@ -68,15 +68,17 @@ public static class CommunitySessionSharing
 
         var localStart = TimeZoneInfo.ConvertTime(session.StartUtc, zone);
         var builder = new StringBuilder();
-        builder.Append("You are invited: ").AppendLine(session.Title);
+        builder.Append(session.Status == CommunitySessionStatus.Cancelled ? "Session cancelled: " : "You are invited: ")
+            .AppendLine(session.Title);
         builder.Append("When: ").Append(localStart.ToString("f", System.Globalization.CultureInfo.InvariantCulture))
-            .Append(" (").Append(session.TimeZoneId).AppendLine(")");
+            .Append(" (").Append(session.TimeZoneId).Append(", UTC")
+            .Append(localStart.ToString("zzz", System.Globalization.CultureInfo.InvariantCulture)).AppendLine(")");
         builder.Append("Duration: ").Append(session.DurationMinutes
             .ToString(System.Globalization.CultureInfo.InvariantCulture)).AppendLine(" minutes");
         builder.Append("Presenter: ").AppendLine(session.Presenter);
-        if (session.ChannelLink is not null)
+        if (session.Status != CommunitySessionStatus.Cancelled && session.PublicChannelLink is { } publicLink)
         {
-            builder.Append("Join: ").AppendLine(session.ChannelLink);
+            builder.Append("Join: ").AppendLine(publicLink);
         }
         else
         {
@@ -86,7 +88,7 @@ public static class CommunitySessionSharing
         builder.AppendLine(session.Summary);
         if (session.Status == CommunitySessionStatus.Cancelled)
         {
-            builder.Append("Status: cancelled. Reason: ").AppendLine(session.CancellationReason ?? "not recorded");
+            builder.AppendLine("Status: cancelled.");
         }
 
         return builder.ToString();
@@ -95,24 +97,18 @@ public static class CommunitySessionSharing
     private static string Describe(CommunitySession session)
     {
         var builder = new StringBuilder(session.Summary);
-        builder.Append("\\nPresenter: ").Append(session.Presenter);
-        builder.Append("\\nLanguage: ").Append(session.Language);
-        if (session.Materials.Count > 0)
-        {
-            builder.Append("\\nMaterials: ");
-            builder.Append(string.Join(", ", session.Materials.Select(material => $"{material.MaterialId} v{material.SourceVersion}")));
-        }
-
+        builder.Append("\nPresenter: ").Append(session.Presenter);
+        builder.Append("\nLanguage: ").Append(session.Language);
         if (session.Status == CommunitySessionStatus.Cancelled)
         {
-            builder.Append("\\nStatus: cancelled. Reason: ").Append(session.CancellationReason ?? "not recorded");
+            builder.Append("\nStatus: cancelled.");
         }
 
         return builder.ToString();
     }
 
     private static string Locate(CommunitySession session) =>
-        session.ChannelLink is not null
+        session.PublicChannelLink is not null
             ? $"Online ({session.ChannelType})"
             : $"{session.RegionId}, {session.CountryCode}";
 
@@ -124,10 +120,16 @@ public static class CommunitySessionSharing
         var escaped = value
             .Replace("\\", "\\\\", StringComparison.Ordinal)
             .Replace("\r\n", "\\n", StringComparison.Ordinal)
+            .Replace("\r", "\\n", StringComparison.Ordinal)
             .Replace("\n", "\\n", StringComparison.Ordinal)
             .Replace(";", "\\;", StringComparison.Ordinal)
             .Replace(",", "\\,", StringComparison.Ordinal);
-        var line = $"{name}:{escaped}";
+        AppendContentLine(builder, name, escaped);
+    }
+
+    private static void AppendContentLine(StringBuilder builder, string name, string value)
+    {
+        var line = $"{name}:{value}";
         var bytes = Encoding.UTF8.GetBytes(line);
         if (bytes.Length <= 75)
         {
@@ -149,7 +151,7 @@ public static class CommunitySessionSharing
     private static byte[] TakeBytes(byte[] source, int max)
     {
         var length = Math.Min(max, source.Length);
-        while (length > 0 && (source[length - 1] & 0xC0) == 0x80)
+        while (length > 0 && length < source.Length && (source[length] & 0xC0) == 0x80)
         {
             length--;
         }

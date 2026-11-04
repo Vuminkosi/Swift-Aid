@@ -48,11 +48,16 @@ else
         </MudButton>
         <MudText Typo="Typo.caption">External channels follow your device settings.</MudText>
     </MudPaper>
+}
+
+@if (Snapshot.ViewState is NotificationsViewState.Ready or NotificationsViewState.Unavailable)
+{
     <MudPaper Class="pa-4 mb-4" Elevation="0">
         <MudText Typo="Typo.subtitle1">My subscriptions</MudText>
         @if (Subscriptions is null)
         {
             <MudText Typo="Typo.body2" role="status">Your session subscriptions could not be loaded. Retry to check again.</MudText>
+            <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="OnRefresh" StartIcon="@Icons.Material.Filled.Refresh">Retry</MudButton>
         }
         else if (Subscriptions.Count == 0)
         {
@@ -60,13 +65,17 @@ else
         }
         else
         {
-            <MudList T="SessionSubscriptionSummary" aria-label="My active session subscriptions">
+            <MudList T="SessionSubscriptionSummary" aria-label="My session subscriptions">
                 @foreach (var subscription in Subscriptions)
                 {
                     <MudListItem T="SessionSubscriptionSummary" Class="px-0">
                         <div class="d-flex flex-column flex-sm-row align-center justify-space-between gap-2 w-100">
                             <div>
                                 <MudText Typo="Typo.body1">@(subscription.Title ?? "Session details unavailable")</MudText>
+                                @if (subscription.Title is not null && !string.IsNullOrWhiteSpace(SessionsHref))
+                                {
+                                    <MudLink Href="@($"{SessionsHref}?sessionId={subscription.SessionId:D}")">View session</MudLink>
+                                }
                                 <MudText Typo="Typo.caption">
                                     @FormatStart(subscription)
                                     @if (!string.IsNullOrWhiteSpace(subscription.ChannelLabel))
@@ -74,6 +83,10 @@ else
                                         <span> · @subscription.ChannelLabel</span>
                                     }
                                 </MudText>
+                                @if (subscription.HasInactiveStoredConsent)
+                                {
+                                    <MudText Typo="Typo.caption">Reminders are inactive. You can remove your saved subscription.</MudText>
+                                }
                             </div>
                             <MudButton Variant="Variant.Outlined" Color="Color.Primary"
                                        Disabled="@(_unsubscribingSessionId == subscription.SessionId)"

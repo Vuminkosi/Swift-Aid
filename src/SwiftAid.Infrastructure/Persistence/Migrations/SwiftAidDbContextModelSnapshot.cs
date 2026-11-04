@@ -3649,6 +3649,10 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasDefaultValue((short)0)
                         .HasColumnName("lock_token");
 
+                    b.Property<string>("OwnerActorId")
+                        .HasColumnType("text")
+                        .HasColumnName("owner_actor_id");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("text")
@@ -3660,6 +3664,8 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
 
                     b.HasKey("OrganizationId")
                         .HasName("pk_organizations");
+
+                    b.HasIndex("OwnerActorId");
 
                     b.ToTable("organizations", null, t =>
                         {
@@ -3816,6 +3822,61 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_memberships_version", "version > 0");
 
                             t.HasCheckConstraint("ck_organization_memberships_lock_token_zero", "lock_token = 0");
+                        });
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.OrganizationOwnerEntity", b =>
+                {
+                    b.Property<Guid>("OwnerAssignmentId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("owner_assignment_id");
+
+                    b.Property<string>("ActorId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("actor_id");
+
+                    b.Property<DateTimeOffset>("AssignedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("assigned_at_utc");
+
+                    b.Property<string>("AssignedByActorId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("assigned_by_actor_id");
+
+                    b.Property<string>("OrganizationId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("organization_id");
+
+                    b.Property<DateTimeOffset?>("RevokedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("revoked_at_utc");
+
+                    b.Property<string>("RevokedByActorId")
+                        .HasColumnType("text")
+                        .HasColumnName("revoked_by_actor_id");
+
+                    b.HasKey("OwnerAssignmentId")
+                        .HasName("pk_organization_owners");
+
+                    b.HasIndex("ActorId");
+
+                    b.HasIndex("AssignedByActorId");
+
+                    b.HasIndex("RevokedByActorId");
+
+                    b.HasIndex("OrganizationId", "ActorId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_organization_owners_org_actor");
+
+                    b.ToTable("organization_owners", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_organization_owners_ids_nonempty", "length(btrim(organization_id)) > 0 AND length(btrim(actor_id)) > 0 AND length(btrim(assigned_by_actor_id)) > 0");
+
+                            t.HasCheckConstraint("ck_organization_owners_revocation", "(revoked_at_utc IS NULL AND revoked_by_actor_id IS NULL) OR (revoked_at_utc IS NOT NULL AND length(btrim(revoked_by_actor_id)) > 0)");
                         });
                 });
 
@@ -5438,6 +5499,15 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_push_devices_actor");
                 });
 
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.OrganizationEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.ActorEntity", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerActorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_organizations_owner_actor");
+                });
+
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.OrganizationInvitationEntity", b =>
                 {
                     b.HasOne("SwiftAid.Infrastructure.Persistence.OrganizationEntity", null)
@@ -5476,6 +5546,36 @@ namespace SwiftAid.Infrastructure.Persistence.Migrations
                         .HasForeignKey("RevokedByActorId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_memberships_revoker");
+                });
+
+            modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.OrganizationOwnerEntity", b =>
+                {
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.ActorEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ActorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_organization_owners_actor");
+
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.ActorEntity", null)
+                        .WithMany()
+                        .HasForeignKey("AssignedByActorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_organization_owners_assigned_by_actor");
+
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.OrganizationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_organization_owners_organization");
+
+                    b.HasOne("SwiftAid.Infrastructure.Persistence.ActorEntity", null)
+                        .WithMany()
+                        .HasForeignKey("RevokedByActorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_organization_owners_revoked_by_actor");
                 });
 
             modelBuilder.Entity("SwiftAid.Infrastructure.Persistence.Sessions.CommunitySessionRevisionEntity", b =>
