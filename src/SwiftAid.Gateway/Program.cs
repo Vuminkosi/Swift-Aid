@@ -239,14 +239,13 @@ builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.Classification
 builder.Services.Configure<SwiftAid.Infrastructure.Classification.TranslationOptions>(builder.Configuration.GetSection("ExperimentalMultilingualIntelligence"));
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.TranslationRegistry>();
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.CaseTranslationService>();
-builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.TranslationOutboxDispatcher>();
 builder.Services.AddHostedService<SwiftAid.Gateway.Ellai.EllaiTranslationWorker>();
 builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.ClassificationBackfillStore>();
-builder.Services.AddScoped<SwiftAid.Infrastructure.Classification.ClassificationOutboxDispatcher>();
 builder.Services.AddScoped<SwiftAid.Application.Classification.ICaseClassificationQuery, SwiftAid.Infrastructure.Classification.PostgresCaseClassificationQuery>();
 builder.Services.Configure<SwiftAid.Infrastructure.Surveillance.SurveillanceOptions>(builder.Configuration.GetSection("Surveillance"));
 builder.Services.AddScoped<SwiftAid.Infrastructure.Surveillance.SurveillanceProcessor>();
-builder.Services.AddScoped<SwiftAid.Infrastructure.Surveillance.SurveillanceOutboxDispatcher>();
+SwiftAid.Gateway.Ingestion.IngestionDispatcherRegistration.AddIngestionDispatchers(
+    builder.Services, builder.Configuration.GetValue<bool>("Nats:Enabled"));
 builder.Services.AddScoped<SwiftAid.Application.Surveillance.ISignalReviewService, SwiftAid.Infrastructure.Surveillance.PostgresSignalReviewService>();
 builder.Services.AddHostedService<SwiftAid.Gateway.Surveillance.SurveillanceWorker>();
 
