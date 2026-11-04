@@ -50,6 +50,15 @@ public sealed class EllaiFollowUpSweep(SwiftAidDbContext db, EllaiFollowUpWork w
         var settings = followUp.Value;
         if (!settings.Enabled) throw new InvalidOperationException("The scoped follow-up worker is disabled.");
         settings.Validate();
+        var policyBytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            options.PolicyVersion,
+            Organizations = settings.Organizations.OrderBy(id => id, StringComparer.Ordinal).ToArray(),
+            ClarificationRules = settings.ClarificationFindingCodes.OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                .Select(pair => new { Organization = pair.Key, Codes = pair.Value.OrderBy(code => code, StringComparer.Ordinal).ToArray() })
+                .ToArray()
+        });
+        var effectivePolicy = "followup-sha256:" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(policyBytes));
         var authorized = await db.WorkspaceOrganizations.AsNoTracking().AnyAsync(link =>
             link.WorkspaceId == workspaceId && link.Status == PersistentResourceStatus.Active &&
             settings.Organizations.Contains(link.OrganizationId) &&
@@ -60,19 +69,19 @@ public sealed class EllaiFollowUpSweep(SwiftAidDbContext db, EllaiFollowUpWork w
         // Stable workspace jitter spreads new schedules across the first five minutes.
         var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("ops.followup:" + workspaceId));
         var jitter = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(hash) % 300;
-        await schedule.ReconcileConfigurationAsync(workspaceId, "ops.followup", options.CadenceHours, options.PolicyVersion,
+        await schedule.ReconcileConfigurationAsync(workspaceId, "ops.followup", options.CadenceHours, effectivePolicy,
             options.ConfigurationRevision, DateTimeOffset.UtcNow.AddSeconds(jitter), ct);
         var configured = await db.Database.SqlQuery<int>($"""
             SELECT count(*)::int AS "Value" FROM ellai_operational_schedules
             WHERE workspace_id = {workspaceId} AND role_id = 'ops.followup'
-                AND cadence_hours = {options.CadenceHours} AND policy_version = {options.PolicyVersion}
+                AND cadence_hours = {options.CadenceHours} AND policy_version = {effectivePolicy}
                 AND configuration_revision = {options.ConfigurationRevision}
             """).SingleAsync(ct);
         if (configured != 1)
         {
             var samePolicy = await db.Database.SqlQuery<int>($"""
                 SELECT count(*)::int AS "Value" FROM ellai_operational_schedules
-                WHERE workspace_id = {workspaceId} AND role_id = 'ops.followup' AND policy_version = {options.PolicyVersion}
+                WHERE workspace_id = {workspaceId} AND role_id = 'ops.followup' AND policy_version = {effectivePolicy}
                 """).SingleAsync(ct);
             return samePolicy == 1 ? "configuration-mismatch" : "policy-mismatch";
         }
@@ -81,7 +90,7 @@ public sealed class EllaiFollowUpSweep(SwiftAidDbContext db, EllaiFollowUpWork w
         var finished = false;
         try
         {
-            if (!string.Equals(lease.PolicyVersion, options.PolicyVersion, StringComparison.Ordinal)) return "policy-mismatch";
+            if (!string.Equals(lease.PolicyVersion, effectivePolicy, StringComparison.Ordinal)) return "policy-mismatch";
             for (var index = 0; index < options.BatchSize; index++)
             {
                 progress.WorkTurns++;
