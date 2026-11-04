@@ -174,15 +174,28 @@ public sealed class EllaiMuseChatClientTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task FrameworkRejectsDuplicateArgumentsFromOfficialAdapter(bool streaming)
+    [InlineData("meta", false)]
+    [InlineData("meta", true)]
+    [InlineData("ollama", false)]
+    [InlineData("ollama", true)]
+    [InlineData("serverless", false)]
+    [InlineData("serverless", true)]
+    public async Task FrameworkRejectsDuplicateArgumentsFromOfficialAdapter(string provider, bool streaming)
     {
-        using var http = new HttpClient(new DuplicateArgumentHandler(streaming));
-        using var client = EllaiMuseChatClientFactory.Create(new EllaiOptions
+        using var http = new HttpClient(new DuplicateArgumentHandler(streaming && provider != "serverless"));
+        var options = new EllaiOptions
         {
-            Enabled = true, ApiUrl = "https://fixture.invalid/v1", ApiKey = "fixture-key", ReasoningModel = "fixture-model"
-        }, http);
+            Enabled = true, ApiUrl = "https://fixture.invalid/v1", ApiKey = "fixture-key", ReasoningModel = "fixture-model",
+            ReasoningBackend = provider, OllamaEndpoint = "http://127.0.0.1:11434", OllamaModel = "fixture-model",
+            ServerlessEnabled = true, ServerlessEndpoint = "https://fixture.invalid/v1", ServerlessApiKey = "fixture-key",
+            ServerlessModel = "fixture-model"
+        };
+        using var client = provider switch
+        {
+            "ollama" => EllaiMuseChatClientFactory.CreateOllama(options, http),
+            "serverless" => EllaiMuseChatClientFactory.CreateServerless(options, http),
+            _ => EllaiMuseChatClientFactory.Create(options, http)
+        };
         var agent = new EllaiFrameworkAgent(client);
         var context = new EllaiToolContext("session", "epoch", "cases", null, 4, true,
             AllowedTools: new HashSet<string> { EllaiToolNames.State });
