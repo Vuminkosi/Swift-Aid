@@ -7,6 +7,33 @@ namespace SwiftAid.Ui.Tests;
 public sealed class ReportVoiceAssistantContextTests
 {
     [Fact]
+    public async Task OneTranscriptCanAutofillMultipleDirectlyStatedFields()
+    {
+        var context = new EllaiPublicReportDraftContext();
+        var draft = new SwiftAid.UI.Components.Public.PublicReportDraft { SubjectScope = IntakeSubjectScope.Human };
+        var applied = new List<string>();
+        context.Register(new object(), _ => true, () => null, _ => true, _ => true, _ => true, draft,
+            (suggestion, transcript) =>
+            {
+                if (!SwiftAid.UI.Components.Public.ReportVoiceAutofill.CanApply(suggestion, transcript, draft, _ => false)) return false;
+                applied.Add(suggestion.Field);
+                return true;
+            });
+        context.RegisterVoiceController(new object(), _ =>
+        {
+            context.BindVoiceCapture("capture");
+            return Task.FromResult(true);
+        }, () => Task.CompletedTask);
+        await context.StartReportVoiceAsync(EllaiVoiceCaptureMode.Live);
+        var lease = context.AdmitVoiceTurn("session", "turn", "capture")!;
+        const string transcript = "The patient is 35 years old. She lives in Mbabane.";
+        context.CompleteVoiceTurn(lease.Generation, transcript, new("Ready",
+            [new("age", "35", "The patient is 35 years old"), new("locality", "Mbabane", "She lives in Mbabane")]));
+        Assert.Equal(new[] { "age", "locality" }, applied);
+        Assert.All(context.VoiceSuggestions, suggestion => Assert.Equal(transcript, suggestion.Evidence));
+    }
+
+    [Fact]
     public async Task ChangingDraftCancelsSavedRecordingAndRejectsLateTurn()
     {
         var context = new EllaiPublicReportDraftContext();
