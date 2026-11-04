@@ -49,7 +49,7 @@ public partial class EllaiGuidanceHost
                 _latestResponseAudioSequences.Clear();
                 _pendingResponseAudioSequences.Clear();
                 _validationGuidanceText = message;
-                _latestResponseText = message;
+                _latestResponseText = EllaiValidationPrompts.Resolve(EllaiValidationPrompts.CodeFor(message)) ?? message;
                 if (changed && _readResponsesAloud && _narrateValidation is not null)
                     _ = _narrateValidation(message);
             }
@@ -59,10 +59,12 @@ public partial class EllaiGuidanceHost
                 _latestResponseSequence = 0;
                 _latestResponseAudioSequences.Clear();
                 _pendingResponseAudioSequences.Clear();
-                if (_latestResponseText == _validationGuidanceText) _latestResponseText = null;
+                var previousText = EllaiValidationPrompts.Resolve(EllaiValidationPrompts.CodeFor(_validationGuidanceText)) ?? _validationGuidanceText;
+                if (_latestResponseText == previousText) _latestResponseText = null;
                 _validationGuidanceText = null;
             }
-            _guidanceNotice = message;
+            _guidanceNotice = string.IsNullOrWhiteSpace(message) ? null :
+                EllaiValidationPrompts.Resolve(EllaiValidationPrompts.CodeFor(message)) ?? message;
             StateHasChanged();
         });
     }
