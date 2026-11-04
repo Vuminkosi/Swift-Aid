@@ -27,6 +27,16 @@ case write lease and locks the selected designation scope until that transaction
 ends. It checks the exact designation ID and version against the same eligibility
 rules as the list. This recheck alone does not authorize an approver, enforce the
 feature gate, create an assignment or schedule follow-up.
+The internal escalation approval service has its own default-off
+`Ellai:Operational:OfficerDirectory:EscalationApprovalsEnabled` gate. It records
+a 15-minute approval for one raised escalation, case version, officer designation
+version, follow-up ID and acknowledgment/follow-up deadlines, after checking the
+approver's case permissions and the officer's eligibility under a write lease.
+It does not create the assignment or follow-up. A replay confirms only that the
+approval was recorded; execution must separately check expiry, current authority,
+case version and officer eligibility. The service has no public or model endpoint;
+any future entry point must establish explicit human review and bind the exact
+reviewed parameters before calling it.
 Availability, workload and category-specific policy are not currently represented,
 and must not be inferred from this lookup. Controlled designation provisioning,
 operator authorization, data stewardship and production database grants remain
