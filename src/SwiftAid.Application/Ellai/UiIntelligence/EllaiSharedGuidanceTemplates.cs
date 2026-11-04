@@ -16,8 +16,8 @@ internal static class EllaiSharedGuidanceTemplates
     {
         var material = JsonSerializer.Serialize(new
         {
-            schema = 1,
-            objective = objective.Trim().ToUpperInvariant(),
+            schema = 2,
+            objective = objective.Trim(),
             audience = authority.Features.Contains(EllaiNavigationManifest.FeatureId) ? "authorized" : "guest",
             features = authority.Features.Order(StringComparer.Ordinal).ToArray(),
             capabilities = authority.Capabilities.Order(StringComparer.Ordinal).ToArray(),
@@ -26,7 +26,7 @@ internal static class EllaiSharedGuidanceTemplates
                 .OrderBy(o => o.ControlId, StringComparer.Ordinal).ToArray(),
             reportAlreadyReceived
         });
-        return "ellai:ui-template:v1:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material)));
+        return "ellai:ui-template:v2:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material)));
     }
 
     public static async Task<EllaiGuidancePlanDraft?> ReadAsync(ICacheStore? cache, string key, string objective,
