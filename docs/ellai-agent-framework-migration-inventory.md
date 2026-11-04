@@ -4248,3 +4248,26 @@ change, two live Muse probes covering a brokered streamed decision and a
 capability follow-up passed 2/2 with `ELLAI_LIVE=1`. The latest segment-parser
 change has synthetic verification only; deployed behavior and malformed live
 provider output remain unverified.
+
+### Current rendered Gateway with provisioned JetStream — 2026-11-04
+
+At `88ea7f2e`, a current Debug Gateway started on loopback against a fresh
+disposable PostGIS database (63 migrations applied) and disposable JetStream.
+The notification stream was created before startup. The configured live Muse
+route and `node tests/SwiftAid.Ui.Tests/ellai-conversation.browser.cjs` with
+`SWIFTAID_RUN_LIVE_ELLAI=1` completed two synthetic turns, recalled the test
+word, restored the conversation after refresh, showed the mobile and reduced
+motion states, and cancelled the session with zero page errors. The first
+response completed in 24,134 ms; this timing alone does not establish useful
+model-time streaming. A JetStream consumer listing confirmed that the Gateway
+created a notification consumer on the provisioned stream. No notification
+delivery was exercised in this browser run.
+
+PASS: the current Gateway build used `dotnet build
+src/SwiftAid.Gateway/SwiftAid.Gateway.csproj --no-restore -m:1 -nr:false
+-p:WasmBuildNative=false`, with zero warnings and errors. The disposable
+database and NATS containers were removed; the task-owned Gateway process was
+stopped. The consumer was still listed immediately after process termination,
+before its disposable NATS server was removed. The reused task-created local
+test key directory remains. This is local synthetic browser evidence, not
+deployment, physical-device, notification-delivery or provider-reliability proof.
