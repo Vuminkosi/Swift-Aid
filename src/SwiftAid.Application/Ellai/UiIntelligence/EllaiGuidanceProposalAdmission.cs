@@ -175,6 +175,26 @@ public sealed partial class EllaiGuidanceProposalAdmission(
                 if (cachedValidation.Plan is not null) return new("Ready", cachedValidation.Plan);
             }
         }
+        if (feature == EllaiNavigationManifest.FeatureId &&
+            EllaiPreplannedNavigation.Create(admitted.Objective!) is { } preplanned)
+        {
+            var refreshed = await AdmitAsync(sessionId, proposalId, authority, ct).ConfigureAwait(false);
+            if (refreshed.Status != "Ready" || refreshed.InteractionEpoch != admitted.InteractionEpoch ||
+                refreshed.Observation?.ViewInstanceId != admitted.Observation.ViewInstanceId ||
+                refreshed.Observation?.ContextStamp != admitted.Observation.ContextStamp) return new("Stale");
+            var freshObserved = discovery.Observe(refreshed.Catalogue!, refreshed.Observation.MountedControlIds.ToHashSet(StringComparer.Ordinal),
+                refreshed.Observation.ViewInstanceId, refreshed.Observation.ContextStamp, refreshed.Observation.Platform,
+                refreshed.Observation.ReceivedAtUtc, refreshed.Observation.ControlStates);
+            var validated = validator.ValidateObserved(preplanned, new(feature, [], 20), authority.Features, authority.Capabilities,
+                freshObserved, refreshed.Observation.ViewInstanceId, refreshed.Observation.ContextStamp,
+                (clock ?? TimeProvider.System).GetUtcNow(), planId);
+            if (validated.Plan is not null)
+            {
+                if (cacheKey is not null)
+                    await EllaiSharedGuidanceTemplates.WriteAsync(templateCache, cacheKey, preplanned, refreshed.Catalogue!, ct).ConfigureAwait(false);
+                return new("Ready", validated.Plan);
+            }
+        }
         await ledger.HydrateAsync(sessionId, usage, ct).ConfigureAwait(false);
         var estimate = System.Text.Encoding.UTF8.GetByteCount(System.Text.Json.JsonSerializer.Serialize(admitted))
             + EllaiModelGuidancePlanner.MaxCompletionTokens + 4096;
