@@ -20,7 +20,6 @@ public partial class EllaiGuidanceHost
             ShowComposer = true;
             await StartVoiceCaptureAsync(mode, reportCapture: true);
             started = _isRecordingAudio;
-            if (started && _liveVoiceCaptureId is { } captureId) _reportVoiceContext?.BindVoiceCapture(captureId);
         });
         return started;
     }

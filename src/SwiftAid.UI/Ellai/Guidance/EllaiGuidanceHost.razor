@@ -479,6 +479,7 @@
         }
         _captureMode = mode;
         _liveVoiceCaptureId = Guid.NewGuid().ToString("N");
+        if (reportCapture) _reportVoiceContext?.BindVoiceCapture(_liveVoiceCaptureId);
         _captureEchoCancellationEnabled = false;
         _otherNativeBargeInDetector?.Dispose();
         // Preserve existing iOS behaviour; this milestone replaces the detector on web/Android only.
