@@ -4494,3 +4494,17 @@ tests/SwiftAid.Integration.Tests/SwiftAid.Integration.Tests.csproj --no-restore
 -m:1 -nr:false -p:WasmBuildNative=false --logger 'console;verbosity=quiet'`
 passed 855, failed 0 and skipped 399. The skipped cases, live deployments,
 physical devices and independent security acceptance remain NOT VERIFIED.
+
+### Live provider rerun after local main synchronization ? 2026-11-04
+
+At `64ba0a0a`, four existing synthetic live Muse checks passed in the
+verification worktree: official-client text, framework-brokered tool use,
+streaming cancellation, and restoring a serialized owned session for a second
+turn. The command used `ELLAI_LIVE=1`, the configured provider settings and
+`dotnet test tests/SwiftAid.Application.Tests/SwiftAid.Application.Tests.csproj
+--no-build --no-restore -m:1 -nr:false` filtered to those four existing tests.
+The application test assembly was built with a local community-session fixture
+compatibility edit; that edit did not change Ellai runtime source. After the
+fixture was aligned with owner review and current material eligibility, its
+existing focused checks passed 27/27. This run does not establish deployed end-to-end behavior, device
+acceptance, or non-streaming cancellation against an uncooperative provider.
